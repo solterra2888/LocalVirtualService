@@ -300,7 +300,6 @@ const MacroIndicatorsPage: React.FC = () => {
           </Col>
           <Col xs={24} sm={12} md={8} lg={6}>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
-              <Text strong>Actions:</Text>
               <Space>
                 <Button
                   type="primary"

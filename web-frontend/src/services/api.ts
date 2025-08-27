@@ -117,4 +117,40 @@ export const api = {
   },
 };
 
+// Exchanges API
+export const exchangesApi = {
+  // 获取交易所列表
+  getExchanges: () => api.get('/exchanges/'),
+  
+  // 获取ticker列表
+  getTickers: (params?: {
+    exchange?: string;
+    ticker_type?: string;
+    search?: string;
+    limit?: number;
+  }) => api.get('/exchanges/tickers', params),
+  
+  // 获取统计信息
+  getStatistics: (params?: { exchange?: string }) => 
+    api.get('/exchanges/statistics', params),
+  
+  // 获取可用类型
+  getAvailableTypes: (params?: { exchange?: string }) => 
+    api.get('/exchanges/types', params),
+  
+  // 获取可用交易所
+  getAvailableExchanges: () => api.get('/exchanges/available'),
+  
+  // 获取交易所数据
+  fetchExchangeData: (exchangeCodes: string[]) => 
+    api.post('/exchanges/fetch', { exchange_codes: exchangeCodes }),
+  
+  // 清除交易所数据
+  clearExchangeData: (exchangeCode: string) => 
+    api.delete(`/exchanges/${exchangeCode}/clear`),
+  
+  // 调试API
+  getExchangeConfigs: () => api.get('/exchanges/debug/config'),
+};
+
 export default apiClient; 

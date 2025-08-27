@@ -35,7 +35,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro';
+  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange';
   dataSourceName: string;
 }
 
@@ -85,6 +85,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 10 1 * *',
       defaultName: 'Macro Indicators Auto Fetch',
       description: 'Get macroeconomic indicator data such as inflation rate, unemployment rate, etc.'
+    },
+    eodhd_exchange: {
+      icon: <InfoCircleOutlined style={{ color: '#f5222d' }} />,
+      params: ['exchanges'],
+      defaultSchedule: '0 2 * * 0',
+      defaultName: 'Exchange Data Auto Fetch',
+      description: 'Get exchange ticker data from EODHD API for multiple exchanges'
     }
   };
 

@@ -16,7 +16,9 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   NotificationOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  FundOutlined,
+  BuildOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -77,6 +79,18 @@ const Layout: React.FC = () => {
       key: '/news',
       icon: <NotificationOutlined />,
       label: 'News',
+    },
+    {
+      key: 'fundamentals',
+      icon: <FundOutlined />,
+      label: 'Fundamentals',
+      children: [
+        {
+          key: '/fundamentals/companies',
+          icon: <BuildOutlined />,
+          label: 'Companies',
+        },
+      ],
     },
     {
       key: 'ai-agents',
@@ -203,7 +217,7 @@ const Layout: React.FC = () => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['markets']}
+          defaultOpenKeys={['markets', 'fundamentals']}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ border: 'none', height: 'calc(100vh - 84px)' }}

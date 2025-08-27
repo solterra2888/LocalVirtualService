@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'economic_events' | 'macro_indicators';
+  type: 'eodhd_news' | 'economic_events' | 'macro_indicators' | 'exchange_data';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;

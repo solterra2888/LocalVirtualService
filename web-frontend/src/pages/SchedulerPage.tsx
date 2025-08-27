@@ -65,7 +65,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'eodhd_events' | 'eodhd_macro' | 'other';
+  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -148,6 +148,24 @@ const SchedulerPage: React.FC = () => {
           description: 'Set up Cron-based periodic macro indicators fetching',
           endpoint: '/scheduler/tasks/macro-indicators',
           icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'eodhd_exchange',
+      name: 'EODHD Exchange Data',
+      type: 'eodhd_exchange',
+      description: 'Get exchange ticker data from EODHD API for fundamentals analysis',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_exchange_schedule',
+          name: 'Configure Exchange Data Fetch',
+          description: 'Set up periodic exchange ticker data fetching from multiple exchanges',
+          endpoint: '/scheduler/tasks/exchange-data',
+          params: {},
+          icon: <DatabaseOutlined />
         }
       ]
     },
