@@ -26,6 +26,8 @@ build/
 .env.test
 .env.production
 env.example
+__pycache__/
+logs/
 # Other files and folders
 .settings/
 
