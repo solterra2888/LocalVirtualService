@@ -274,6 +274,9 @@ class DatabaseManager:
             # 创建调度器相关表
             self._create_scheduler_tables(conn)
             
+            # 创建宏观指标相关表
+            self._create_macro_indicators_tables(conn)
+            
             conn.commit()
             conn.close()
             return True
@@ -358,6 +361,70 @@ class DatabaseManager:
             print("调度器相关表创建/更新完成")
         except Exception as e:
             print(f"创建调度器表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _create_macro_indicators_tables(self, conn):
+        """创建宏观指标相关表"""
+        cursor = conn.cursor()
+        
+        try:
+            # 创建宏观指标数据表
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS macro_indicators (
+                id SERIAL PRIMARY KEY,
+                country_code VARCHAR(10) NOT NULL,
+                country_name VARCHAR(100) NOT NULL,
+                indicator VARCHAR(100) NOT NULL,
+                indicator_name VARCHAR(200) NOT NULL,
+                year INTEGER NOT NULL,
+                value NUMERIC,
+                date_str VARCHAR(20),
+                fetch_timestamp TIMESTAMP WITH TIME ZONE,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(country_code, indicator, year)
+            )
+            """)
+            
+            # 创建宏观指标获取日志表
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS macro_indicators_fetch_logs (
+                id SERIAL PRIMARY KEY,
+                country_code VARCHAR(10) NOT NULL,
+                indicator VARCHAR(100) NOT NULL,
+                fetch_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                status VARCHAR(20) NOT NULL,
+                record_count INTEGER DEFAULT 0,
+                error_message TEXT,
+                duration_seconds NUMERIC DEFAULT 0
+            )
+            """)
+            
+            # 创建索引以提高查询性能
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_macro_indicators_country 
+            ON macro_indicators(country_code)
+            """)
+            
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_macro_indicators_indicator 
+            ON macro_indicators(indicator)
+            """)
+            
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_macro_indicators_year 
+            ON macro_indicators(year)
+            """)
+            
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_macro_indicators_country_indicator 
+            ON macro_indicators(country_code, indicator)
+            """)
+            
+            print("宏观指标相关表创建/更新完成")
+        except Exception as e:
+            print(f"创建宏观指标表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
     

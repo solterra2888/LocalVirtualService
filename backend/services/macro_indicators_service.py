@@ -592,8 +592,8 @@ class MacroIndicatorsService:
     
     def get_stored_data(
         self,
-        country: str = None,
-        indicator: str = None,
+        country: Union[str, List[str]] = None,
+        indicator: Union[str, List[str]] = None,
         year_from: int = None,
         year_to: int = None,
         limit: int = 1000
@@ -602,8 +602,8 @@ class MacroIndicatorsService:
         从PostgreSQL数据库获取存储的宏观经济指标数据
         
         Args:
-            country: 国家代码，为None时获取所有国家
-            indicator: 指标代码，为None时获取所有指标
+            country: 国家代码或国家代码列表，为None时获取所有国家
+            indicator: 指标代码或指标代码列表，为None时获取所有指标
             year_from: 起始年份
             year_to: 结束年份
             limit: 返回记录数限制
@@ -621,12 +621,38 @@ class MacroIndicatorsService:
             params = []
             
             if country:
-                conditions.append("country_code = %s")
-                params.append(country)
+                # 处理多选国家参数
+                if isinstance(country, str):
+                    countries = [country]
+                elif isinstance(country, list):
+                    countries = country
+                else:
+                    countries = [str(country)]
+                
+                if len(countries) == 1:
+                    conditions.append("country_code = %s")
+                    params.append(countries[0])
+                else:
+                    placeholders = ','.join(['%s'] * len(countries))
+                    conditions.append(f"country_code IN ({placeholders})")
+                    params.extend(countries)
             
             if indicator:
-                conditions.append("indicator = %s")
-                params.append(indicator)
+                # 处理多选指标参数
+                if isinstance(indicator, str):
+                    indicators = [indicator]
+                elif isinstance(indicator, list):
+                    indicators = indicator
+                else:
+                    indicators = [str(indicator)]
+                
+                if len(indicators) == 1:
+                    conditions.append("indicator = %s")
+                    params.append(indicators[0])
+                else:
+                    placeholders = ','.join(['%s'] * len(indicators))
+                    conditions.append(f"indicator IN ({placeholders})")
+                    params.extend(indicators)
             
             if year_from:
                 conditions.append("year >= %s")

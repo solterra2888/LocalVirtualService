@@ -81,8 +81,8 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
   }> = [
     {
       value: 'eodhd_news',
-      label: 'EODHD 新闻数据',
-      description: '从EODHD API获取最新的股票新闻和市场信息',
+      label: 'EODHD News Data',
+      description: 'Get latest stock news and market information from EODHD API',
       icon: <InfoCircleOutlined style={{ color: '#1890ff' }} />,
       params: ['max_results', 'symbols', 'topic', 'keywords'],
       defaultSchedule: '*/15 * * * *',
@@ -90,16 +90,16 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
     },
     {
       value: 'economic_events',
-      label: '经济事件数据',
-      description: '获取经济日历事件数据，包括GDP、CPI等重要指标',
+      label: 'Economic Events Data',
+      description: 'Get economic calendar event data including GDP, CPI and other important indicators',
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
       params: ['limit'],
       defaultSchedule: '0 9 * * 1-5'
     },
     {
       value: 'macro_indicators',
-      label: '宏观经济指标',
-      description: '获取宏观经济指标数据，如通胀率、失业率等',
+      label: 'Macroeconomic Indicators',
+      description: 'Get macroeconomic indicator data such as inflation rate, unemployment rate, etc.',
       icon: <BarChartOutlined style={{ color: '#722ed1' }} />,
       params: ['country', 'indicator'],
       defaultSchedule: '0 10 1 * *'
@@ -128,7 +128,7 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
         setTimezoneOptions(timezoneResult.data);
       }
     } catch (error) {
-      console.error('加载预设配置失败:', error);
+      console.error('Failed to load preset configuration:', error);
     }
   };
 
@@ -201,15 +201,15 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
       }
 
       if (result.success) {
-        message.success('任务创建成功！');
+        message.success('Task created successfully!');
         onSuccess(result.data?.task_id || '');
         handleCancel();
       } else {
-        message.error(result.message || '任务创建失败');
+        message.error(result.message || 'Task creation failed');
       }
     } catch (error) {
-      console.error('创建任务失败:', error);
-      message.error('创建任务失败');
+      console.error('Task creation failed:', error);
+      message.error('Task creation failed');
     } finally {
       setLoading(false);
     }
@@ -248,16 +248,16 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
     <div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={4}>
-          <RocketOutlined /> 选择任务类型
+          <RocketOutlined /> Select Task Type
         </Title>
         <Text type="secondary">
-          选择您要创建的自动化任务类型，不同类型的任务具有不同的数据源和配置选项
+          Select the type of automation task you want to create, different types of tasks have different data sources and configuration options
         </Text>
       </div>
 
       <Form.Item
         name="taskType"
-        rules={[{ required: true, message: '请选择任务类型' }]}
+        rules={[{ required: true, message: 'Please select a task type' }]}
       >
         <div>
           {taskTypeOptions.map(option => (
@@ -281,7 +281,7 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
                   <div>
                     <Space>
                       <Text strong>{option.label}</Text>
-                      {option.recommended && <Tag color="gold">推荐</Tag>}
+                      {option.recommended && <Tag color="gold">Recommended</Tag>}
                     </Space>
                     <div style={{ marginTop: 4 }}>
                       <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -292,7 +292,7 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
                 </Col>
                 <Col span={4} style={{ textAlign: 'right' }}>
                   <Text type="secondary" style={{ fontSize: '11px' }}>
-                    默认: {option.defaultSchedule}
+                    Default: {option.defaultSchedule}
                   </Text>
                 </Col>
               </Row>
@@ -302,8 +302,8 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
       </Form.Item>
 
       <Alert
-        message="任务类型说明"
-        description="选择任务类型后，向导将为您提供相应的配置选项和推荐设置。您可以在后续步骤中自定义具体参数。"
+        message="Task Type Description"
+        description="After selecting a task type, the wizard will provide you with corresponding configuration options and recommended settings. You can customize specific parameters in subsequent steps."
         type="info"
         showIcon
       />
@@ -314,46 +314,46 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
     <div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={4}>
-          <SettingOutlined /> 基本配置
+          <SettingOutlined /> Basic Configuration
         </Title>
         <Text type="secondary">
-          设置任务的基本信息，包括名称、描述和启用状态
+          Set basic information for the task, including name, description, and enabled status
         </Text>
       </div>
 
       <Form.Item
-        label="任务名称"
+        label="Task Name"
         name="name"
-        rules={[{ required: true, message: '请输入任务名称' }]}
+        rules={[{ required: true, message: 'Please enter a task name' }]}
       >
-        <Input placeholder="输入任务名称" />
+        <Input placeholder="Enter task name" />
       </Form.Item>
 
       <Form.Item
-        label="任务描述"
+        label="Task Description"
         name="description"
       >
         <Input.TextArea 
-          placeholder="输入任务描述（可选）"
+          placeholder="Enter task description (optional)"
           rows={3}
         />
       </Form.Item>
 
       <Form.Item
-        label="启用状态"
+        label="Enabled Status"
         name="enabled"
         valuePropName="checked"
-        extra="创建后是否立即启用此任务"
+        extra="Whether to enable this task immediately after creation"
       >
         <Switch 
-          checkedChildren="启用" 
-          unCheckedChildren="禁用"
+          checkedChildren="Enabled" 
+          unCheckedChildren="Disabled"
         />
       </Form.Item>
 
       {formData.taskType && (
         <Alert
-          message={`${taskTypeOptions.find(t => t.value === formData.taskType)?.label} 任务`}
+          message={`${taskTypeOptions.find(t => t.value === formData.taskType)?.label} Task`}
           description={taskTypeOptions.find(t => t.value === formData.taskType)?.description}
           type="info"
           showIcon
@@ -366,31 +366,31 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
     <div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={4}>
-          <ClockCircleOutlined /> 调度配置
+          <ClockCircleOutlined /> Schedule Configuration
         </Title>
         <Text type="secondary">
-          设置任务的执行时间和频率，支持Cron表达式和预设选项
+          Set the execution time and frequency of the task, supporting Cron expressions and preset options
         </Text>
       </div>
 
       <Form.Item
-        label="调度方式"
+        label="Schedule Type"
         name="scheduleType"
-        rules={[{ required: true, message: '请选择调度方式' }]}
+        rules={[{ required: true, message: 'Please select a schedule type' }]}
       >
-        <Select placeholder="选择调度方式">
-          <Option value="preset">使用预设模板</Option>
-          <Option value="cron">自定义Cron表达式</Option>
+        <Select placeholder="Select schedule type">
+          <Option value="preset">Use preset template</Option>
+          <Option value="cron">Custom Cron expression</Option>
         </Select>
       </Form.Item>
 
       {form.getFieldValue('scheduleType') === 'preset' && (
         <Form.Item
-          label="预设模板"
+          label="Preset Template"
           name="cronExpression"
-          rules={[{ required: true, message: '请选择预设模板' }]}
+          rules={[{ required: true, message: 'Please select a preset template' }]}
         >
-          <Select placeholder="选择预设模板">
+          <Select placeholder="Select preset template">
             {cronPresets.map(preset => (
               <Option key={preset.expression} value={preset.expression}>
                 <div>
@@ -408,10 +408,10 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
 
       {form.getFieldValue('scheduleType') === 'cron' && (
         <Form.Item
-          label="Cron表达式"
+          label="Cron Expression"
           name="cronExpression"
           rules={[
-            { required: true, message: '请输入Cron表达式' },
+            { required: true, message: 'Please enter a Cron expression' },
             {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
@@ -422,9 +422,9 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
           ]}
         >
           <Input 
-            placeholder="输入Cron表达式，如: */15 * * * *"
+            placeholder="Enter Cron expression, e.g., */15 * * * *"
             suffix={
-              <Tooltip title="格式：分 时 日 月 星期">
+              <Tooltip title="Format: Minutes Hours Day Month Week">
                 <InfoCircleOutlined />
               </Tooltip>
             }
@@ -433,11 +433,11 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
       )}
 
       <Form.Item
-        label="时区"
+        label="Timezone"
         name="timezone"
-        rules={[{ required: true, message: '请选择时区' }]}
+        rules={[{ required: true, message: 'Please select a timezone' }]}
       >
-        <Select placeholder="选择时区" showSearch>
+        <Select placeholder="Select timezone" showSearch>
           {timezoneOptions.map(tz => (
             <Option key={tz.value} value={tz.value}>
               {tz.label} ({tz.description})
@@ -448,8 +448,8 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
 
       {form.getFieldValue('cronExpression') && (
         <Alert
-          message="调度预览"
-          description={`该任务将${schedulerAPI.describeCronExpression(form.getFieldValue('cronExpression'))}`}
+          message="Schedule Preview"
+          description={`This task will execute every ${schedulerAPI.describeCronExpression(form.getFieldValue('cronExpression'))}`}
           type="success"
           showIcon
         />
@@ -465,45 +465,45 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
       <div>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Title level={4}>
-            <BulbOutlined /> 任务参数
+            <BulbOutlined /> Task Parameters
           </Title>
           <Text type="secondary">
-            配置 {taskConfig?.label} 的具体参数和选项
+            Configure specific parameters and options for {taskConfig?.label}
           </Text>
         </div>
 
         {taskType === 'eodhd_news' && (
           <>
             <Form.Item
-              label="最大结果数"
+              label="Max Results"
               name={['taskParams', 'max_results']}
-              extra="每次获取的最大新闻条数，最多1000条"
+              extra="Maximum number of news items to fetch per time, up to 1000"
             >
-              <InputNumber min={1} max={1000} placeholder="请输入最大结果数" style={{ width: '100%' }} />
+              <InputNumber min={1} max={1000} placeholder="Enter max results" style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item
-              label="股票代码"
+              label="Stock Symbols"
               name={['taskParams', 'symbols']}
-              extra="多个代码用逗号分隔，如：AAPL.US,TSLA.US"
+              extra="Separate multiple codes with commas, e.g., AAPL.US,TSLA.US"
             >
-              <Input placeholder="输入股票代码（可选）" />
+              <Input placeholder="Enter stock symbols (optional)" />
             </Form.Item>
 
             <Form.Item
-              label="主题标签"
+              label="Topic Tags"
               name={['taskParams', 'topic']}
-              extra="EODHD API主题参数，如：technology, politics"
+              extra="EODHD API topic parameter, e.g., technology, politics"
             >
-              <Input placeholder="输入主题标签（可选）" />
+              <Input placeholder="Enter topic tags (optional)" />
             </Form.Item>
 
             <Form.Item
-              label="关键词"
+              label="Keywords"
               name={['taskParams', 'keywords']}
-              extra="自定义关键词，用逗号分隔"
+              extra="Custom keywords, separated by commas"
             >
-              <Input placeholder="输入关键词（可选）" />
+              <Input placeholder="Enter keywords (optional)" />
             </Form.Item>
           </>
         )}
@@ -511,11 +511,11 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
         {taskType === 'economic_events' && (
           <>
             <Form.Item
-              label="结果限制"
+              label="Result Limit"
               name={['taskParams', 'limit']}
-              extra="每次获取的最大事件数，最多1000条"
+              extra="Maximum number of events to fetch per time, up to 1000"
             >
-              <InputNumber min={1} max={1000} placeholder="请输入结果限制数" style={{ width: '100%' }} />
+              <InputNumber min={1} max={1000} placeholder="Enter result limit" style={{ width: '100%' }} />
             </Form.Item>
           </>
         )}
@@ -523,30 +523,394 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
         {taskType === 'macro_indicators' && (
           <>
             <Form.Item
-              label="国家代码"
+              label="Country Code"
               name={['taskParams', 'country']}
-              rules={[{ required: true, message: '请选择国家' }]}
+              rules={[{ required: true, message: 'Please select a country' }]}
+              extra="Specify which countries to get macroeconomic indicators for, can be multiple"
             >
-              <Select placeholder="选择国家">
-                <Option value="USA">美国 (USA)</Option>
-                <Option value="CHN">中国 (CHN)</Option>
-                <Option value="GBR">英国 (GBR)</Option>
-                <Option value="DEU">德国 (DEU)</Option>
-                <Option value="JPN">日本 (JPN)</Option>
+              <Select 
+                placeholder="Select country" 
+                mode="multiple"
+                showSearch
+                optionLabelProp="label"
+                filterOption={(input, option) => {
+                  const label = String(option?.label || '');
+                  return label.toLowerCase().includes(input.toLowerCase());
+                }}
+              >
+                <Option value="USA" label="🇺🇸 USA">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇺🇸</span>
+                    <span>USA</span>
+                  </div>
+                </Option>
+                <Option value="CHN" label="🇨🇳 China">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇨🇳</span>
+                    <span>China</span>
+                  </div>
+                </Option>
+                <Option value="JPN" label="🇯🇵 Japan">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇯🇵</span>
+                    <span>Japan</span>
+                  </div>
+                </Option>
+                <Option value="DEU" label="🇩🇪 Germany">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇩🇪</span>
+                    <span>Germany</span>
+                  </div>
+                </Option>
+                <Option value="GBR" label="🇬🇧 UK">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇬🇧</span>
+                    <span>UK</span>
+                  </div>
+                </Option>
+                <Option value="FRA" label="🇫🇷 France">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇫🇷</span>
+                    <span>France</span>
+                  </div>
+                </Option>
+                <Option value="ITA" label="🇮🇹 Italy">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇮🇹</span>
+                    <span>Italy</span>
+                  </div>
+                </Option>
+                <Option value="BRA" label="🇧🇷 Brazil">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇧🇷</span>
+                    <span>Brazil</span>
+                  </div>
+                </Option>
+                <Option value="CAN" label="🇨🇦 Canada">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇨🇦</span>
+                    <span>Canada</span>
+                  </div>
+                </Option>
+                <Option value="RUS" label="🇷🇺 Russia">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇷🇺</span>
+                    <span>Russia</span>
+                  </div>
+                </Option>
+                <Option value="IND" label="🇮🇳 India">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇮🇳</span>
+                    <span>India</span>
+                  </div>
+                </Option>
+                <Option value="KOR" label="🇰🇷 South Korea">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇰🇷</span>
+                    <span>South Korea</span>
+                  </div>
+                </Option>
+                <Option value="ESP" label="🇪🇸 Spain">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇪🇸</span>
+                    <span>Spain</span>
+                  </div>
+                </Option>
+                <Option value="AUS" label="🇦🇺 Australia">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇦🇺</span>
+                    <span>Australia</span>
+                  </div>
+                </Option>
+                <Option value="MEX" label="🇲🇽 Mexico">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇲🇽</span>
+                    <span>Mexico</span>
+                  </div>
+                </Option>
+                <Option value="IDN" label="🇮🇩 Indonesia">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇮🇩</span>
+                    <span>Indonesia</span>
+                  </div>
+                </Option>
+                <Option value="NLD" label="🇳🇱 Netherlands">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇳🇱</span>
+                    <span>Netherlands</span>
+                  </div>
+                </Option>
+                <Option value="SAU" label="🇸🇦 Saudi Arabia">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇸🇦</span>
+                    <span>Saudi Arabia</span>
+                  </div>
+                </Option>
+                <Option value="TUR" label="🇹🇷 Turkey">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇹🇷</span>
+                    <span>Turkey</span>
+                  </div>
+                </Option>
+                <Option value="TWN" label="🇹🇼 Taiwan">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🇹🇼</span>
+                    <span>Taiwan</span>
+                  </div>
+                </Option>
               </Select>
             </Form.Item>
 
             <Form.Item
-              label="指标代码"
+              label="Indicator Code"
               name={['taskParams', 'indicator']}
-              extra="留空获取所有指标"
+              extra="Specify the type of macroeconomic indicator, can be multiple, leave empty to get all indicators"
             >
-              <Select placeholder="选择指标（可选）" allowClear>
-                <Option value="gdp_current_usd">GDP (现价美元)</Option>
-                <Option value="gdp_per_capita_usd">人均GDP</Option>
-                <Option value="gdp_growth_annual">GDP年增长率</Option>
-                <Option value="inflation_consumer_prices_annual">通胀率</Option>
-                <Option value="unemployment_total">失业率</Option>
+              <Select 
+                placeholder="Select indicator (optional)" 
+                mode="multiple"
+                allowClear
+                showSearch
+                optionLabelProp="label"
+                filterOption={(input, option) => {
+                  const label = String(option?.label || '');
+                  return label.toLowerCase().includes(input.toLowerCase());
+                }}
+              >
+                <Option value="real_interest_rate" label="📊 Real Interest Rate (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📊</span>
+                    <span>Real Interest Rate (%)</span>
+                  </div>
+                </Option>
+                <Option value="population_total" label="👥 Total Population">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👥</span>
+                    <span>Total Population</span>
+                  </div>
+                </Option>
+                <Option value="population_growth_annual" label="📈 Annual Population Growth (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📈</span>
+                    <span>Annual Population Growth (%)</span>
+                  </div>
+                </Option>
+                <Option value="inflation_consumer_prices_annual" label="💰 Annual Consumer Price Inflation (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💰</span>
+                    <span>Annual Consumer Price Inflation (%)</span>
+                  </div>
+                </Option>
+                <Option value="consumer_price_index" label="📊 Consumer Price Index (2010=100)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📊</span>
+                    <span>Consumer Price Index (2010=100)</span>
+                  </div>
+                </Option>
+                <Option value="gdp_current_usd" label="💵 GDP (Current USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💵</span>
+                    <span>GDP (Current USD)</span>
+                  </div>
+                </Option>
+                <Option value="gdp_per_capita_usd" label="👤 GDP per Capita (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👤</span>
+                    <span>GDP per Capita (USD)</span>
+                  </div>
+                </Option>
+                <Option value="gdp_growth_annual" label="📈 Annual GDP Growth (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📈</span>
+                    <span>Annual GDP Growth (%)</span>
+                  </div>
+                </Option>
+                <Option value="debt_percent_gdp" label="💳 Debt to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💳</span>
+                    <span>Debt to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="net_trades_goods_services" label="🔄 Net Trade in Goods and Services (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🔄</span>
+                    <span>Net Trade in Goods and Services (USD)</span>
+                  </div>
+                </Option>
+                <Option value="inflation_gdp_deflator_annual" label="📊 Annual GDP Deflator Inflation (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📊</span>
+                    <span>Annual GDP Deflator Inflation (%)</span>
+                  </div>
+                </Option>
+                <Option value="agriculture_value_added_percent_gdp" label="🌾 Agriculture Value Added to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🌾</span>
+                    <span>Agriculture Value Added to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="industry_value_added_percent_gdp" label="🏭 Industry Value Added to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🏭</span>
+                    <span>Industry Value Added to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="services_value_added_percent_gdp" label="💼 Services Value Added to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💼</span>
+                    <span>Services Value Added to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="exports_of_goods_services_percent_gdp" label="📤 Export of Goods and Services to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📤</span>
+                    <span>Export of Goods and Services to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="imports_of_goods_services_percent_gdp" label="📥 Import of Goods and Services to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📥</span>
+                    <span>Import of Goods and Services to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="gross_capital_formation_percent_gdp" label="🏗️ Gross Capital Formation to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🏗️</span>
+                    <span>Gross Capital Formation to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="net_migration" label="🚶 Net Migration">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🚶</span>
+                    <span>Net Migration</span>
+                  </div>
+                </Option>
+                <Option value="gni_usd" label="💵 Gross National Income (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💵</span>
+                    <span>Gross National Income (USD)</span>
+                  </div>
+                </Option>
+                <Option value="gni_per_capita_usd" label="👤 GNI per Capita (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👤</span>
+                    <span>GNI per Capita (USD)</span>
+                  </div>
+                </Option>
+                <Option value="gni_ppp_usd" label="💱 GNI at Purchasing Power Parity (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💱</span>
+                    <span>GNI at Purchasing Power Parity (USD)</span>
+                  </div>
+                </Option>
+                <Option value="gni_per_capita_ppp_usd" label="👤 GNI per Capita at Purchasing Power Parity (USD)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👤</span>
+                    <span>GNI per Capita at Purchasing Power Parity (USD)</span>
+                  </div>
+                </Option>
+                <Option value="income_share_lowest_twenty" label="📊 Income Share of Lowest 20% (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📊</span>
+                    <span>Income Share of Lowest 20% (%)</span>
+                  </div>
+                </Option>
+                <Option value="life_expectancy" label="👴 Life Expectancy (Years)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👴</span>
+                    <span>Life Expectancy (Years)</span>
+                  </div>
+                </Option>
+                <Option value="fertility_rate" label="👶 Fertility Rate (Births per Woman)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👶</span>
+                    <span>Fertility Rate (Births per Woman)</span>
+                  </div>
+                </Option>
+                <Option value="prevalence_hiv_total" label="🩺 HIV Prevalence (15-49 Years %)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🩺</span>
+                    <span>HIV Prevalence (15-49 Years %)</span>
+                  </div>
+                </Option>
+                <Option value="co2_emissions_tons_per_capita" label="🌍 CO2 Emissions per Capita (Tons)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🌍</span>
+                    <span>CO2 Emissions per Capita (Tons)</span>
+                  </div>
+                </Option>
+                <Option value="surface_area_km" label="🗺️ Surface Area (Square Kilometers)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🗺️</span>
+                    <span>Surface Area (Square Kilometers)</span>
+                  </div>
+                </Option>
+                <Option value="poverty_poverty_lines_percent_population" label="🏚️ Poverty Line Population Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🏚️</span>
+                    <span>Poverty Line Population Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="revenue_excluding_grants_percent_gdp" label="💰 Revenue to GDP Ratio (Excluding Grants %)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💰</span>
+                    <span>Revenue to GDP Ratio (Excluding Grants %)</span>
+                  </div>
+                </Option>
+                <Option value="cash_surplus_deficit_percent_gdp" label="💸 Cash Surplus/Deficit to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💸</span>
+                    <span>Cash Surplus/Deficit to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="startup_procedures_register" label="🏢 Number of Startup Procedures">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🏢</span>
+                    <span>Number of Startup Procedures</span>
+                  </div>
+                </Option>
+                <Option value="market_cap_domestic_companies_percent_gdp" label="📈 Domestic Listed Companies Market Cap to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📈</span>
+                    <span>Domestic Listed Companies Market Cap to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="mobile_subscriptions_per_hundred" label="📱 Mobile Phone Subscriptions per 100 People">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📱</span>
+                    <span>Mobile Phone Subscriptions per 100 People</span>
+                  </div>
+                </Option>
+                <Option value="internet_users_per_hundred" label="🌐 Internet Users per 100 People">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🌐</span>
+                    <span>Internet Users per 100 People</span>
+                  </div>
+                </Option>
+                <Option value="high_technology_exports_percent_total" label="🔬 High-Tech Exports to Total Manufactured Goods Exports Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>🔬</span>
+                    <span>High-Tech Exports to Total Manufactured Goods Exports Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="merchandise_trade_percent_gdp" label="📦 Merchandise Trade to GDP Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📦</span>
+                    <span>Merchandise Trade to GDP Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="total_debt_service_percent_gni" label="💳 Total Debt Service to GNI Ratio (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>💳</span>
+                    <span>Total Debt Service to GNI Ratio (%)</span>
+                  </div>
+                </Option>
+                <Option value="unemployment_total_percent" label="👷 Total Unemployment Rate (%)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>👷</span>
+                    <span>Total Unemployment Rate (%)</span>
+                  </div>
+                </Option>
               </Select>
             </Form.Item>
           </>
@@ -555,14 +919,14 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
         <Divider />
 
         <Alert
-          message="配置总览"
+          message="Configuration Overview"
           description={
             <div>
-              <p><strong>任务类型：</strong>{taskConfig?.label}</p>
-              <p><strong>任务名称：</strong>{formData.name}</p>
-              <p><strong>调度配置：</strong>{form.getFieldValue('cronExpression') && schedulerAPI.describeCronExpression(form.getFieldValue('cronExpression'))}</p>
-              <p><strong>时区：</strong>{form.getFieldValue('timezone')}</p>
-              <p><strong>启用状态：</strong>{formData.enabled ? '启用' : '禁用'}</p>
+              <p><strong>Task Type:</strong>{taskConfig?.label}</p>
+              <p><strong>Task Name:</strong>{formData.name}</p>
+              <p><strong>Schedule Configuration:</strong>{form.getFieldValue('cronExpression') && schedulerAPI.describeCronExpression(form.getFieldValue('cronExpression'))}</p>
+              <p><strong>Timezone:</strong>{form.getFieldValue('timezone')}</p>
+              <p><strong>Enabled Status:</strong>{formData.enabled ? 'Enabled' : 'Disabled'}</p>
             </div>
           }
           type="info"
@@ -574,23 +938,23 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
 
   const steps = [
     {
-      title: '任务类型',
-      description: '选择任务类型',
+      title: 'Task Type',
+      description: 'Select Task Type',
       icon: <RocketOutlined />
     },
     {
-      title: '基本配置',
-      description: '设置基本信息',
+      title: 'Basic Configuration',
+      description: 'Set Basic Information',
       icon: <SettingOutlined />
     },
     {
-      title: '调度配置',
-      description: '设置执行时间',
+      title: 'Schedule Configuration',
+      description: 'Set Execution Time',
       icon: <ClockCircleOutlined />
     },
     {
-      title: '任务参数',
-      description: '配置任务参数',
+      title: 'Task Parameters',
+      description: 'Configure Task Parameters',
       icon: <BulbOutlined />
     }
   ];
@@ -600,7 +964,7 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
       title={
         <Space>
           <ScheduleOutlined />
-          任务配置向导
+          Task Configuration Wizard
         </Space>
       }
       open={open}
@@ -610,11 +974,11 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
         <div style={{ textAlign: 'right' }}>
           <Space>
             <Button onClick={handleCancel}>
-              取消
+              Cancel
             </Button>
             {currentStep > 0 && (
               <Button onClick={handlePrev}>
-                上一步
+                Previous Step
               </Button>
             )}
             <Button 
@@ -623,7 +987,7 @@ const TaskConfigurationWizard: React.FC<TaskConfigurationWizardProps> = ({
               loading={loading}
               icon={currentStep === 3 ? <CheckCircleOutlined /> : undefined}
             >
-              {currentStep === 3 ? '创建任务' : '下一步'}
+              {currentStep === 3 ? 'Create Task' : 'Next Step'}
             </Button>
           </Space>
         </div>

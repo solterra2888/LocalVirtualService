@@ -87,7 +87,7 @@ const CronScheduleModal: React.FC<CronScheduleModalProps> = ({
         setTimezoneOptions(timezoneResult.data);
       }
     } catch (error) {
-      console.error('加载预设配置失败:', error);
+      console.error('Failed to load preset configuration:', error);
     }
   };
 

@@ -455,8 +455,8 @@ async def get_economic_events(
 
 @router.get("/macro-indicators", response_model=List[MacroIndicatorResponse], summary="获取宏观指标数据")
 async def get_macro_indicators(
-    country: Optional[str] = Query(None, description="国家代码"),
-    indicator: Optional[str] = Query(None, description="指标代码"),
+    country: Optional[Union[str, List[str]]] = Query(None, description="国家代码，支持单个或多个国家"),
+    indicator: Optional[Union[str, List[str]]] = Query(None, description="指标代码，支持单个或多个指标"),
     year_from: Optional[int] = Query(None, description="起始年份"),
     year_to: Optional[int] = Query(None, description="结束年份"),
     limit: int = Query(1000, ge=1, le=5000, description="返回数量限制"),
@@ -465,8 +465,8 @@ async def get_macro_indicators(
     """
     获取宏观指标数据
     
-    - **country**: 国家代码 (ISO 3166 Alpha-3)
-    - **indicator**: 指标代码
+    - **country**: 国家代码 (ISO 3166 Alpha-3)，支持单个或多个国家，多个国家用逗号分隔
+    - **indicator**: 指标代码，支持单个或多个指标，多个指标用逗号分隔
     - **year_from**: 起始年份
     - **year_to**: 结束年份
     - **limit**: 返回数量限制 (1-5000)
@@ -474,13 +474,47 @@ async def get_macro_indicators(
     try:
         info(f"获取宏观指标数据请求: user={current_user.username}, country={country}, indicator={indicator}", source="markets_api")
         
+        # 处理多选参数
+        processed_country = None
+        processed_indicator = None
+        
+        if country:
+            if isinstance(country, str):
+                # 如果是字符串，按逗号分割
+                processed_country = [c.strip() for c in country.split(',') if c.strip()]
+            elif isinstance(country, list):
+                # 如果是列表，需要处理每个元素可能包含逗号的情况
+                processed_country = []
+                for item in country:
+                    if isinstance(item, str):
+                        processed_country.extend([c.strip() for c in item.split(',') if c.strip()])
+                    else:
+                        processed_country.append(str(item))
+            else:
+                processed_country = [str(country)]
+        
+        if indicator:
+            if isinstance(indicator, str):
+                # 如果是字符串，按逗号分割
+                processed_indicator = [i.strip() for i in indicator.split(',') if i.strip()]
+            elif isinstance(indicator, list):
+                # 如果是列表，需要处理每个元素可能包含逗号的情况
+                processed_indicator = []
+                for item in indicator:
+                    if isinstance(item, str):
+                        processed_indicator.extend([i.strip() for i in item.split(',') if i.strip()])
+                    else:
+                        processed_indicator.append(str(item))
+            else:
+                processed_indicator = [str(indicator)]
+        
         # 初始化API客户端
         macro_service = get_macro_indicators_service()
         
         # 从数据库获取数据
         data = macro_service.get_stored_data(
-            country=country,
-            indicator=indicator,
+            country=processed_country,
+            indicator=processed_indicator,
             year_from=year_from,
             year_to=year_to,
             limit=limit
@@ -766,4 +800,148 @@ async def cleanup_old_economic_events(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理旧数据失败: {str(e)}"
+        )
+
+@router.get("/macro-indicators/export", summary="导出宏观指标数据为CSV")
+async def export_macro_indicators_csv(
+    country: Optional[Union[str, List[str]]] = Query(None, description="国家代码，支持单个或多个国家"),
+    indicator: Optional[Union[str, List[str]]] = Query(None, description="指标代码，支持单个或多个指标"),
+    year_from: Optional[int] = Query(None, description="起始年份"),
+    year_to: Optional[int] = Query(None, description="结束年份"),
+    current_user=Depends(get_current_user)
+):
+    """
+    导出宏观指标数据为CSV格式
+    
+    - **country**: 国家代码 (ISO 3166 Alpha-3)，支持单个或多个国家，多个国家用逗号分隔
+    - **indicator**: 指标代码，支持单个或多个指标，多个指标用逗号分隔
+    - **year_from**: 起始年份
+    - **year_to**: 结束年份
+    
+    如果所有参数都为空，则导出整个宏观指标表的数据
+    """
+    try:
+        info(f"导出宏观指标CSV请求: user={current_user.username}, country={country}, indicator={indicator}, year_from={year_from}, year_to={year_to}", source="markets_api")
+        
+        # 处理多选参数
+        processed_country = None
+        processed_indicator = None
+        
+        if country:
+            if isinstance(country, str):
+                # 如果是字符串，按逗号分割
+                processed_country = [c.strip() for c in country.split(',') if c.strip()]
+            elif isinstance(country, list):
+                # 如果是列表，需要处理每个元素可能包含逗号的情况
+                processed_country = []
+                for item in country:
+                    if isinstance(item, str):
+                        processed_country.extend([c.strip() for c in item.split(',') if c.strip()])
+                    else:
+                        processed_country.append(str(item))
+            else:
+                processed_country = [str(country)]
+        
+        if indicator:
+            if isinstance(indicator, str):
+                # 如果是字符串，按逗号分割
+                processed_indicator = [i.strip() for i in indicator.split(',') if i.strip()]
+            elif isinstance(indicator, list):
+                # 如果是列表，需要处理每个元素可能包含逗号的情况
+                processed_indicator = []
+                for item in indicator:
+                    if isinstance(item, str):
+                        processed_indicator.extend([i.strip() for i in item.split(',') if i.strip()])
+                    else:
+                        processed_indicator.append(str(item))
+            else:
+                processed_indicator = [str(indicator)]
+        
+        # 初始化API客户端
+        macro_service = get_macro_indicators_service()
+        
+        # 从数据库获取数据
+        data = macro_service.get_stored_data(
+            country=processed_country,
+            indicator=processed_indicator,
+            year_from=year_from,
+            year_to=year_to,
+            limit=50000  # 导出时允许更大的数据量
+        )
+        
+        info(f"获取到 {len(data)} 条宏观指标数据用于导出", source="markets_api")
+        
+        # 生成CSV内容
+        import csv
+        import io
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # 写入CSV头部
+        headers = [
+            "Country Code", "Country Name", "Indicator", "Indicator Name", 
+            "Year", "Value", "Date String", "Fetch Timestamp"
+        ]
+        writer.writerow(headers)
+        
+        # 写入数据行
+        for item in data:
+            row = [
+                item.get("country_code", ""),
+                item.get("country_name", ""),
+                item.get("indicator", ""),
+                item.get("indicator_name", ""),
+                item.get("year", ""),
+                item.get("value", ""),
+                item.get("date_str", ""),
+                item.get("fetch_timestamp", "")
+            ]
+            writer.writerow(row)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"macro_indicators_{timestamp}.csv"
+        
+        # 如果有筛选条件，在文件名中体现
+        if processed_country or processed_indicator or year_from or year_to:
+            conditions = []
+            if processed_country:
+                conditions.append(f"countries_{len(processed_country)}")
+            if processed_indicator:
+                conditions.append(f"indicators_{len(processed_indicator)}")
+            if year_from and year_to:
+                conditions.append(f"years_{year_from}-{year_to}")
+            elif year_from:
+                conditions.append(f"from_{year_from}")
+            elif year_to:
+                conditions.append(f"to_{year_to}")
+            
+            if conditions:
+                filename = f"macro_indicators_{'_'.join(conditions)}_{timestamp}.csv"
+        
+        info(f"成功生成CSV文件: {filename}", 
+             record_count=len(data),
+             user=current_user.username,
+             source="markets_api")
+        
+        from fastapi.responses import StreamingResponse
+        
+        return StreamingResponse(
+            io.StringIO(csv_content),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "text/csv; charset=utf-8"
+            }
+        )
+        
+    except Exception as e:
+        error(f"导出宏观指标CSV失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导出宏观指标CSV失败: {str(e)}"
         )

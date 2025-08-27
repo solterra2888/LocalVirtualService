@@ -35,178 +35,178 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
 }) => {
   const [copiedExpression, setCopiedExpression] = useState<string>('');
 
-  // 复制表达式到剪贴板
+  // Copy expression to clipboard
   const copyToClipboard = (expression: string) => {
     navigator.clipboard.writeText(expression);
     setCopiedExpression(expression);
     setTimeout(() => setCopiedExpression(''), 2000);
   };
 
-  // Cron表达式格式说明
+  // Cron expression format description
   const cronFormatData = [
     {
-      field: '分钟',
+      field: 'Minutes',
       range: '0-59',
       examples: ['0', '30', '*/15', '0,30', '0-30'],
-      description: '指定分钟，0表示整点'
+      description: 'Specify minutes, 0 means on the hour'
     },
     {
-      field: '小时',
+      field: 'Hours',
       range: '0-23',
       examples: ['9', '17', '*/2', '9,17', '9-17'],
-      description: '指定小时，24小时制'
+      description: 'Specify hours, 24-hour format'
     },
     {
-      field: '日期',
+      field: 'Day of Month',
       range: '1-31',
       examples: ['1', '15', '*', '1,15', '1-15'],
-      description: '指定月份中的日期'
+      description: 'Specify day of the month'
     },
     {
-      field: '月份',
+      field: 'Month',
       range: '1-12',
       examples: ['1', '6', '*', '1,6', '1-6'],
-      description: '指定月份，1表示1月'
+      description: 'Specify month, 1 means January'
     },
     {
-      field: '星期',
+      field: 'Day of Week',
       range: '0-7',
       examples: ['1', '5', '*', '1-5', '0,6'],
-      description: '0和7都表示周日，1-6表示周一到周六'
+      description: '0 and 7 both mean Sunday, 1-6 means Monday to Saturday'
     }
   ];
 
-  // 常用Cron表达式示例
+  // Common Cron expression examples
   const commonExamples = [
     {
       expression: '* * * * *',
-      description: '每分钟执行',
-      useCase: '需要实时监控的场景',
-      category: '高频'
+      description: 'Execute every minute',
+      useCase: 'Scenarios requiring real-time monitoring',
+      category: 'High Frequency'
     },
     {
       expression: '*/5 * * * *',
-      description: '每5分钟执行',
-      useCase: '数据更新频率较高的场景',
-      category: '高频'
+      description: 'Execute every 5 minutes',
+      useCase: 'Scenarios with high data update frequency',
+      category: 'High Frequency'
     },
     {
       expression: '*/15 * * * *',
-      description: '每15分钟执行',
-      useCase: '新闻数据获取、市场数据更新',
-      category: '中频'
+      description: 'Execute every 15 minutes',
+      useCase: 'News data acquisition, market data updates',
+      category: 'Medium Frequency'
     },
     {
       expression: '0 * * * *',
-      description: '每小时执行',
-      useCase: '定期数据同步',
-      category: '中频'
+      description: 'Execute every hour',
+      useCase: 'Regular data synchronization',
+      category: 'Medium Frequency'
+    },
+    {
+      expression: '0 */2 * * *',
+      description: 'Execute every 2 hours',
+      useCase: 'Periodic data collection',
+      category: 'Medium Frequency'
     },
     {
       expression: '0 9 * * 1-5',
-      description: '工作日上午9点执行',
-      useCase: '美股开盘前数据准备',
-      category: '工作日'
-    },
-    {
-      expression: '0 17 * * 1-5',
-      description: '工作日下午5点执行',
-      useCase: '美股收盘后数据汇总',
-      category: '工作日'
+      description: 'Execute at 9 AM on weekdays',
+      useCase: 'Business hours data processing',
+      category: 'Business Hours'
     },
     {
       expression: '0 9,17 * * 1-5',
-      description: '工作日早上9点和下午5点执行',
-      useCase: '美股开盘和收盘时间数据获取',
-      category: '工作日'
+      description: 'Execute at 9 AM and 5 PM on weekdays',
+      useCase: 'Morning and evening data updates',
+      category: 'Business Hours'
     },
     {
-      expression: '0 10 * * 1',
-      description: '每周一上午10点执行',
-      useCase: '周报数据生成',
-      category: '周频'
+      expression: '0 0 * * 0',
+      description: 'Execute at midnight on Sundays',
+      useCase: 'Weekly data processing',
+      category: 'Weekly'
     },
     {
-      expression: '0 9 1 * *',
-      description: '每月1号上午9点执行',
-      useCase: '月度数据汇总',
-      category: '月频'
+      expression: '0 0 1 * *',
+      description: 'Execute at midnight on the 1st of each month',
+      useCase: 'Monthly data processing',
+      category: 'Monthly'
     },
     {
       expression: '0 0 1 1 *',
-      description: '每年1月1日零点执行',
-      useCase: '年度数据备份',
-      category: '年频'
+      description: 'Execute at midnight on January 1st',
+      useCase: 'Annual data processing',
+      category: 'Annual'
     }
   ];
 
-  // 特殊字符说明
+  // Special character description
   const specialCharacters = [
     {
       symbol: '*',
-      meaning: '表示所有值',
+      meaning: 'Represents all values',
       example: '0 * * * *',
-      description: '每小时的第0分钟执行'
+      description: 'Execute at 0th minute of every hour'
     },
     {
       symbol: '/',
-      meaning: '表示间隔',
+      meaning: 'Represents interval',
       example: '*/15 * * * *',
-      description: '每15分钟执行一次'
+      description: 'Execute every 15 minutes'
     },
     {
       symbol: ',',
-      meaning: '表示多个值',
+      meaning: 'Represents multiple values',
       example: '0 9,17 * * 1-5',
-      description: '工作日9点和17点执行'
+      description: 'Execute at 9 AM and 5 PM on weekdays'
     },
     {
       symbol: '-',
-      meaning: '表示范围',
+      meaning: 'Represents range',
       example: '0 9-17 * * 1-5',
-      description: '工作日9点到17点每小时执行'
+      description: 'Execute every hour from 9 AM to 5 PM on weekdays'
     },
     {
       symbol: '?',
-      meaning: '不指定值（仅用于日期或星期）',
+      meaning: 'Does not specify a value (only for date or day of week)',
       example: '0 9 * * ?',
-      description: '每天9点执行，不指定星期'
+      description: 'Execute at 9 AM every day, without specifying the day of the week'
     }
   ];
 
-  // 时区说明
+  // Timezone description
   const timezoneInfo = [
     {
       timezone: 'America/New_York',
-      label: '美国纽约时区 (EST/EDT)',
-      description: '纽约时间，适用于美股相关数据获取',
+      label: 'America/New_York Time Zone (EST/EDT)',
+      description: 'New York time, suitable for US stock market data acquisition',
       offset: 'UTC-5 (EST) / UTC-4 (EDT)',
-      recommended: '美股数据、经济事件'
+      recommended: 'US stock data, economic events'
     },
     {
       timezone: 'Asia/Shanghai',
-      label: '中国北京时区 (CST)',
-      description: '北京时间，适用于中国相关数据获取',
+      label: 'Asia/Shanghai Time Zone (CST)',
+      description: 'Beijing time, suitable for Chinese data acquisition',
       offset: 'UTC+8',
-      recommended: '中国股市数据、宏观经济指标'
+      recommended: 'Chinese stock data, macroeconomic indicators'
     }
   ];
 
   const columns = [
     {
-      title: '字段',
+      title: 'Field',
       dataIndex: 'field',
       key: 'field',
       width: 60
     },
     {
-      title: '取值范围',
+      title: 'Range',
       dataIndex: 'range',
       key: 'range',
       width: 80
     },
     {
-      title: '示例',
+      title: 'Example',
       dataIndex: 'examples',
       key: 'examples',
       width: 300,
@@ -219,7 +219,7 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
       )
     },
     {
-      title: '说明',
+      title: 'Description',
       dataIndex: 'description',
       key: 'description'
     }
@@ -227,7 +227,7 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
 
   const exampleColumns = [
     {
-      title: '表达式',
+      title: 'Expression',
       dataIndex: 'expression',
       key: 'expression',
       width: 150,
@@ -244,30 +244,30 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
       )
     },
     {
-      title: '描述',
+      title: 'Description',
       dataIndex: 'description',
       key: 'description',
       width: 120
     },
     {
-      title: '使用场景',
+      title: 'Use Case',
       dataIndex: 'useCase',
       key: 'useCase',
       width: 200
     },
     {
-      title: '分类',
+      title: 'Category',
       dataIndex: 'category',
       key: 'category',
       width: 80,
       render: (category: string) => {
         const colors = {
-          '高频': 'red',
-          '中频': 'orange',
-          '工作日': 'blue',
-          '周频': 'green',
-          '月频': 'purple',
-          '年频': 'geekblue'
+          'High Frequency': 'red',
+          'Medium Frequency': 'orange',
+          'Business Hours': 'blue',
+          'Weekly': 'green',
+          'Monthly': 'purple',
+          'Annual': 'geekblue'
         };
         return <Tag color={colors[category as keyof typeof colors]} style={{ fontSize: '12px' }}>{category}</Tag>;
       }
@@ -279,7 +279,7 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
       title={
         <Space>
           <ClockCircleOutlined />
-          Cron表达式使用说明
+          Cron Expression Guide
         </Space>
       }
       open={open}
@@ -289,24 +289,24 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
       destroyOnClose
     >
       <div style={{ padding: '0' }}>
-        {/* 基本介绍 */}
+        {/* Basic Introduction */}
         <Card size="small" style={{ marginBottom: 16 }}>
           <Title level={5}>
-            <InfoCircleOutlined /> 什么是Cron表达式？
+            <InfoCircleOutlined /> What is a Cron Expression?
           </Title>
           <Paragraph style={{ fontSize: '14px', marginBottom: 12 }}>
-            Cron表达式是一种用于指定定时任务执行时间的字符串格式。它由5个字段组成，分别表示分钟、小时、日期、月份和星期。
+            A Cron expression is a string format used to specify the execution time of a scheduled task. It consists of 5 fields, representing minutes, hours, day of month, month, and day of week.
           </Paragraph>
           <Alert
-            message="格式：分 时 日 月 星期"
-            description="例如：0 9 * * 1-5 表示工作日上午9点执行"
+            message="Format: Minute Hour Day Month Week"
+            description="For example: 0 9 * * 1-5 means execute at 9 AM on weekdays"
             type="info"
             showIcon
           />
         </Card>
 
-        {/* 格式说明表格 */}
-        <Card title="Cron表达式格式说明" size="small" style={{ marginBottom: 16 }}>
+        {/* Format Description Table */}
+        <Card title="Cron Expression Format Description" size="small" style={{ marginBottom: 16 }}>
           <Table
             dataSource={cronFormatData}
             columns={columns}
@@ -316,8 +316,8 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
           />
         </Card>
 
-        {/* 特殊字符说明 */}
-        <Card title="特殊字符说明" size="small" style={{ marginBottom: 16 }}>
+        {/* Special Character Description */}
+        <Card title="Special Character Description" size="small" style={{ marginBottom: 16 }}>
           <List
             dataSource={specialCharacters}
             renderItem={(item) => (
@@ -331,7 +331,7 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
                   }
                   description={
                     <Space direction="vertical" size="small">
-                      <Text>示例：<Text code>{item.example}</Text></Text>
+                      <Text>Example: <Text code>{item.example}</Text></Text>
                       <Text type="secondary">{item.description}</Text>
                     </Space>
                   }
@@ -341,8 +341,8 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
           />
         </Card>
 
-        {/* 常用示例 */}
-        <Card title="常用Cron表达式示例" size="small" style={{ marginBottom: 16 }}>
+        {/* Common Examples */}
+        <Card title="Common Cron Expression Examples" size="small" style={{ marginBottom: 16 }}>
           <Table
             dataSource={commonExamples}
             columns={exampleColumns}
@@ -352,16 +352,16 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
           />
         </Card>
 
-        {/* 时区说明 */}
+        {/* Timezone Description */}
         <Card title={
           <Space>
             <GlobalOutlined />
-            时区说明
+            Timezone Description
           </Space>
         } size="small" style={{ marginBottom: 16 }}>
           <Alert
-            message="重要提示"
-            description="Cron表达式的执行时间会根据选择的时区而变化。同一个表达式在不同时区会有不同的执行时间。"
+            message="Important Note"
+            description="The execution time of a Cron expression will vary based on the selected timezone. The same expression will have different execution times in different timezones."
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
@@ -375,14 +375,14 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
                     title={
                       <Space>
                         <Text strong>{tz.label}</Text>
-                        <Tag color="green">推荐</Tag>
+                        <Tag color="green">Recommended</Tag>
                       </Space>
                     }
                     description={
                       <Space direction="vertical" size="small">
                         <Text>{tz.description}</Text>
-                        <Text type="secondary">时区偏移：{tz.offset}</Text>
-                        <Text type="secondary">推荐用途：{tz.recommended}</Text>
+                        <Text type="secondary">Timezone Offset: {tz.offset}</Text>
+                        <Text type="secondary">Recommended Use: {tz.recommended}</Text>
                       </Space>
                     }
                   />
@@ -392,67 +392,67 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
           </Row>
         </Card>
 
-        {/* 使用建议 */}
-        <Card title="使用建议" size="small" style={{ marginBottom: 16 }}>
+        {/* Usage Suggestions */}
+        <Card title="Usage Suggestions" size="small" style={{ marginBottom: 16 }}>
           <Collapse defaultActiveKey={['1']}>
-            <Panel header="数据获取频率建议" key="1">
+            <Panel header="Data Acquisition Frequency Suggestions" key="1">
               <List>
                 <List.Item>
                   <List.Item.Meta
-                    title="高频数据（每5-15分钟）"
-                    description="适用于新闻数据、实时市场数据等需要及时更新的信息"
+                    title="High Frequency (every 5-15 minutes)"
+                    description="Suitable for news data, real-time market data, etc., requiring timely updates"
                   />
                 </List.Item>
                 <List.Item>
                   <List.Item.Meta
-                    title="中频数据（每小时）"
-                    description="适用于定期数据同步、状态检查等任务"
+                    title="Medium Frequency (every hour)"
+                    description="Suitable for periodic data synchronization, status checks, etc."
                   />
                 </List.Item>
                 <List.Item>
                   <List.Item.Meta
-                    title="低频数据（每日/每周/每月）"
-                    description="适用于数据汇总、报告生成、备份等任务"
+                    title="Low Frequency (daily/weekly/monthly)"
+                    description="Suitable for data aggregation, report generation, backups, etc."
                   />
                 </List.Item>
               </List>
             </Panel>
             
-            <Panel header="时区选择建议" key="2">
+            <Panel header="Timezone Selection Suggestions" key="2">
               <List>
                 <List.Item>
                   <List.Item.Meta
-                    title="美股相关数据"
-                    description="建议使用 America/New_York 时区，确保在美股交易时间获取数据"
+                    title="US Stock Related Data"
+                    description="It is recommended to use the America/New_York timezone to ensure data acquisition during US stock trading hours"
                   />
                 </List.Item>
                 <List.Item>
                   <List.Item.Meta
-                    title="中国相关数据"
-                    description="建议使用 Asia/Shanghai 时区，确保在中国时间获取数据"
+                    title="Chinese Related Data"
+                    description="It is recommended to use the Asia/Shanghai timezone to ensure data acquisition during Chinese time"
                   />
                 </List.Item>
               </List>
             </Panel>
             
-            <Panel header="注意事项" key="3">
+            <Panel header="Considerations" key="3">
               <List>
                 <List.Item>
                   <List.Item.Meta
-                    title="避免过于频繁的执行"
-                    description="过于频繁的任务执行可能会影响系统性能，建议根据实际需求设置合理的执行频率"
+                    title="Avoid excessive execution"
+                    description="Excessively frequent task execution may affect system performance. It is recommended to set a reasonable execution frequency based on actual needs."
                   />
                 </List.Item>
                 <List.Item>
                   <List.Item.Meta
-                    title="考虑数据源的时间特性"
-                    description="某些数据源在特定时间更新，建议将任务执行时间设置在数据更新后"
+                    title="Consider data source time characteristics"
+                    description="Some data sources update at specific times. It is recommended to set the task execution time after the data update."
                   />
                 </List.Item>
                 <List.Item>
                   <List.Item.Meta
-                    title="测试表达式"
-                    description="在正式使用前，建议先测试cron表达式的正确性，确保任务按预期时间执行"
+                    title="Test the expression"
+                    description="Before officially using it, it is recommended to test the correctness of the cron expression to ensure that the task executes as expected at the specified time."
                   />
                 </List.Item>
               </List>
@@ -460,50 +460,50 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
           </Collapse>
         </Card>
 
-        {/* 快速参考 */}
-        <Card title="快速参考" size="small" style={{ marginBottom: 16 }}>
+        {/* Quick Reference */}
+        <Card title="Quick Reference" size="small" style={{ marginBottom: 16 }}>
           <Row gutter={[8, 8]}>
             <Col span={24}>
-              <Card size="small" title="高频任务" style={{ marginBottom: 8 }}>
+              <Card size="small" title="High Frequency Tasks" style={{ marginBottom: 8 }}>
                 <List size="small">
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>*/5 * * * *</Text> - 每5分钟
+                    <Text code style={{ fontSize: '12px' }}>*/5 * * * *</Text> - Every 5 minutes
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>*/15 * * * *</Text> - 每15分钟
+                    <Text code style={{ fontSize: '12px' }}>*/15 * * * *</Text> - Every 15 minutes
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 * * * *</Text> - 每小时
+                    <Text code style={{ fontSize: '12px' }}>0 * * * *</Text> - Every hour
                   </List.Item>
                 </List>
               </Card>
             </Col>
             <Col span={24}>
-              <Card size="small" title="工作日任务" style={{ marginBottom: 8 }}>
+              <Card size="small" title="Business Hours Tasks" style={{ marginBottom: 8 }}>
                 <List size="small">
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 9 * * 1-5</Text> - 工作日9点
+                    <Text code style={{ fontSize: '12px' }}>0 9 * * 1-5</Text> - 9 AM on weekdays
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 17 * * 1-5</Text> - 工作日17点
+                    <Text code style={{ fontSize: '12px' }}>0 17 * * 1-5</Text> - 5 PM on weekdays
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 9,17 * * 1-5</Text> - 工作日9点和17点
+                    <Text code style={{ fontSize: '12px' }}>0 9,17 * * 1-5</Text> - 9 AM and 5 PM on weekdays
                   </List.Item>
                 </List>
               </Card>
             </Col>
             <Col span={24}>
-              <Card size="small" title="定期任务">
+              <Card size="small" title="Periodic Tasks">
                 <List size="small">
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 10 * * 1</Text> - 每周一10点
+                    <Text code style={{ fontSize: '12px' }}>0 0 * * 0</Text> - Midnight on Sundays
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 9 1 * *</Text> - 每月1号9点
+                    <Text code style={{ fontSize: '12px' }}>0 0 1 * *</Text> - Midnight on the 1st of each month
                   </List.Item>
                   <List.Item style={{ padding: '4px 0' }}>
-                    <Text code style={{ fontSize: '12px' }}>0 0 1 1 *</Text> - 每年1月1日
+                    <Text code style={{ fontSize: '12px' }}>0 0 1 1 *</Text> - Midnight on January 1st
                   </List.Item>
                 </List>
               </Card>

@@ -560,9 +560,157 @@ class SchedulerService:
     
     async def _execute_macro_indicators_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行宏观指标获取任务"""
-        # TODO: 实现宏观指标获取逻辑
-        logger.info("执行宏观指标获取任务", params=params)
-        return {'success': True, 'message': '宏观指标获取任务执行成功'}
+        try:
+            logger.info(f"开始执行宏观指标获取任务，参数: {params}")
+            
+            # 获取参数
+            countries = params.get('country', [])
+            indicators = params.get('indicator', [])
+            
+            # 参数验证
+            if not countries:
+                logger.warning("未指定国家参数，跳过宏观指标获取任务")
+                return {
+                    'success': False, 
+                    'message': '未指定国家参数，请至少选择一个国家'
+                }
+            
+            # 确保countries是列表格式
+            if isinstance(countries, str):
+                countries = [countries]
+            
+            # 确保indicators是列表格式
+            if isinstance(indicators, str):
+                indicators = [indicators]
+            
+            # 如果没有指定指标，获取所有可用指标
+            if not indicators:
+                from backend.services.macro_indicators_service import MacroIndicatorsService
+                macro_service = MacroIndicatorsService()
+                indicators = list(macro_service.AVAILABLE_INDICATORS.keys())
+                logger.info(f"未指定指标，将获取所有 {len(indicators)} 个指标")
+            
+            logger.info(f"准备获取 {len(countries)} 个国家的 {len(indicators)} 个指标数据")
+            
+            # 初始化宏观指标服务
+            from backend.services.macro_indicators_service import MacroIndicatorsService
+            macro_service = MacroIndicatorsService()
+            
+            total_success = 0
+            total_failed = 0
+            results = []
+            
+            # 遍历每个国家
+            for country in countries:
+                logger.info(f"开始获取国家 {country} 的宏观指标数据")
+                
+                # 如果指定了特定指标，逐个获取
+                if indicators and len(indicators) > 0:
+                    for indicator in indicators:
+                        try:
+                            logger.info(f"获取 {country} 的 {indicator} 指标数据")
+                            data = macro_service.get_macro_indicator(country, indicator)
+                            if data:
+                                total_success += 1
+                                results.append({
+                                    'country': country,
+                                    'indicator': indicator,
+                                    'data_count': len(data),
+                                    'status': 'success'
+                                })
+                                logger.info(f"成功获取 {country} 的 {indicator} 数据，共 {len(data)} 条记录")
+                            else:
+                                total_failed += 1
+                                results.append({
+                                    'country': country,
+                                    'indicator': indicator,
+                                    'data_count': 0,
+                                    'status': 'failed',
+                                    'error': '未获取到数据'
+                                })
+                                logger.warning(f"获取 {country} 的 {indicator} 数据失败")
+                            
+                            # 避免API请求过于频繁
+                            import asyncio
+                            await asyncio.sleep(0.1)
+                            
+                        except Exception as e:
+                            total_failed += 1
+                            error_msg = f"获取 {country} 的 {indicator} 数据时出错: {str(e)}"
+                            logger.error(error_msg)
+                            results.append({
+                                'country': country,
+                                'indicator': indicator,
+                                'data_count': 0,
+                                'status': 'error',
+                                'error': str(e)
+                            })
+                else:
+                    # 获取该国家的所有指标
+                    try:
+                        logger.info(f"获取 {country} 的所有指标数据")
+                        data = macro_service.get_all_indicators_for_country(country)
+                        if data:
+                            total_success += 1
+                            results.append({
+                                'country': country,
+                                'indicator': 'all',
+                                'data_count': len(data),
+                                'status': 'success'
+                            })
+                            logger.info(f"成功获取 {country} 的所有指标数据，共 {len(data)} 条记录")
+                        else:
+                            total_failed += 1
+                            results.append({
+                                'country': country,
+                                'indicator': 'all',
+                                'data_count': 0,
+                                'status': 'failed',
+                                'error': '未获取到数据'
+                            })
+                            logger.warning(f"获取 {country} 的所有指标数据失败")
+                    except Exception as e:
+                        total_failed += 1
+                        error_msg = f"获取 {country} 的所有指标数据时出错: {str(e)}"
+                        logger.error(error_msg)
+                        results.append({
+                            'country': country,
+                            'indicator': 'all',
+                            'data_count': 0,
+                            'status': 'error',
+                            'error': str(e)
+                        })
+            
+            # 生成执行结果消息
+            if total_success > 0:
+                message = f"宏观指标获取任务执行完成: 成功 {total_success} 个，失败 {total_failed} 个"
+                if total_failed > 0:
+                    message += f"。失败详情: {[r for r in results if r['status'] != 'success']}"
+            else:
+                message = f"宏观指标获取任务执行失败: 所有 {total_failed} 个请求都失败了"
+            
+            logger.info(f"宏观指标获取任务执行完成: {message}")
+            
+            return {
+                'success': total_success > 0,
+                'message': message,
+                'data': {
+                    'total_requests': total_success + total_failed,
+                    'successful': total_success,
+                    'failed': total_failed,
+                    'results': results,
+                    'params': params
+                }
+            }
+            
+        except Exception as e:
+            error_msg = f"宏观指标获取任务执行失败: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
     
     def _job_listener(self, event):
         """任务执行监听器"""

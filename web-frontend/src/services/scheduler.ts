@@ -293,27 +293,27 @@ export class SchedulerAPI {
   }
 
   /**
-   * 获取时区选项
+   * Get timezone options
    */
   async getTimezonePresets(): Promise<TimezonePresetsResponse> {
     try {
       const response = await api.get('/scheduler/presets/timezones');
-      console.log('时区API原始响应:', response);
+      console.log('Timezone API raw response:', response);
       
-      // 根据后端API的实际响应结构处理数据
+      // Process data based on backend API response structure
       const timezoneData = response.data;
-      console.log('处理后的时区数据:', timezoneData);
+      console.log('Processed timezone data:', timezoneData);
       
       return {
         success: true,
-        message: '获取时区选项成功',
+        message: 'Successfully retrieved timezone options',
         data: timezoneData
       };
     } catch (error: any) {
-      console.error('获取时区选项失败:', error);
+      console.error('Failed to get timezone options:', error);
       return {
         success: false,
-        message: error.response?.data?.detail || error.message || '获取时区选项失败',
+        message: error.response?.data?.detail || error.message || 'Failed to get timezone options',
         data: []
       };
     }

@@ -673,27 +673,27 @@ async def get_cron_presets():
     }
 
 
-@router.get("/presets/timezones", summary="获取支持的时区列表")
+@router.get("/presets/timezones", summary="Get supported timezone list")
 async def get_timezone_presets():
     """
-    获取支持的时区列表
+    Get supported timezone list
     """
     timezones = [
         {
             "value": "America/New_York",
-            "label": "美国纽约时区 (EST/EDT)",
-            "description": "纽约时间"
+            "label": "America/New_York Time Zone (EST/EDT)",
+            "description": "New York time"
         },
         {
             "value": "Asia/Shanghai",
-            "label": "中国北京时区 (CST)",
-            "description": "北京时间"
+            "label": "Asia/Shanghai Time Zone (CST)",
+            "description": "Beijing time"
         }
     ]
     
     return {
         "success": True,
-        "message": "获取时区列表成功",
+        "message": "Successfully retrieved timezone list",
         "data": timezones
     }
 

@@ -70,21 +70,21 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       params: ['max_results', 'symbols', 'topic', 'keywords'],
       defaultSchedule: '*/15 * * * *',
       defaultName: 'EODHD News Auto Fetch',
-      description: '从EODHD API获取最新的股票新闻和市场信息'
+      description: 'Get latest stock news and market information from EODHD API'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
       params: ['limit'],
       defaultSchedule: '0 9 * * 1-5',
       defaultName: 'Economic Events Auto Fetch',
-      description: '获取经济日历事件数据，包括GDP、CPI等重要指标'
+      description: 'Get economic calendar event data including GDP, CPI and other important indicators'
     },
     eodhd_macro: {
       icon: <BarChartOutlined style={{ color: '#722ed1' }} />,
       params: ['country', 'indicator'],
       defaultSchedule: '0 10 1 * *',
       defaultName: 'Macro Indicators Auto Fetch',
-      description: '获取宏观经济指标数据，如通胀率、失业率等'
+      description: 'Get macroeconomic indicator data such as inflation rate, unemployment rate, etc.'
     }
   };
 
@@ -92,18 +92,18 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
   const loadPresets = async () => {
     try {
-      console.log('开始加载时区配置...');
+      console.log('Loading timezone configuration...');
       const timezonesResponse = await schedulerAPI.getTimezonePresets();
-      console.log('时区API响应:', timezonesResponse);
+      console.log('Timezone API response:', timezonesResponse);
       
       if (timezonesResponse.success) {
-        console.log('设置时区选项:', timezonesResponse.data);
+        console.log('Setting timezone options:', timezonesResponse.data);
         setTimezoneOptions(timezonesResponse.data || []);
       } else {
-        console.error('时区API返回失败:', timezonesResponse.message);
+        console.error('Timezone API returned failure:', timezonesResponse.message);
       }
     } catch (error) {
-      console.error('加载时区配置失败:', error);
+      console.error('Failed to load timezone configuration:', error);
     }
   };
 
@@ -178,15 +178,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       }
 
       if (result.success) {
-        message.success('数据获取策略配置成功！');
+        message.success('Data acquisition strategy configuration successful!');
         onSuccess(result.data?.task_id || '');
         handleCancel();
       } else {
-        message.error(result.message || '配置失败');
+        message.error(result.message || 'Configuration failed');
       }
     } catch (error) {
-      console.error('配置失败:', error);
-      message.error('配置失败');
+      console.error('Configuration failed:', error);
+      message.error('Configuration failed');
     } finally {
       setLoading(false);
     }
@@ -212,14 +212,14 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     <div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={4}>
-          <ClockCircleOutlined /> 调度配置
+          <ClockCircleOutlined /> Schedule Configuration
         </Title>
         <Text type="secondary">
-          为 {dataSourceName} 设置数据获取的执行时间和频率
+          Set the execution time and frequency for data acquisition for {dataSourceName}
         </Text>
       </div>
 
-      {/* 数据源信息卡片 */}
+      {/* Data source information card */}
       <Card 
         style={{ marginBottom: 24, backgroundColor: '#f9f9f9' }}
         size="small"
@@ -244,7 +244,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       <Form.Item
         label={
           <Space>
-            Cron表达式
+            Cron Expression
             <Button
               type="text"
               size="small"
@@ -252,13 +252,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               onClick={() => setShowCronGuide(true)}
               style={{ padding: 0, height: 'auto' }}
             >
-              使用说明
+              Usage Guide
             </Button>
           </Space>
         }
         name="cronExpression"
         rules={[
-          { required: true, message: '请输入Cron表达式' },
+          { required: true, message: 'Please enter a Cron expression' },
           {
             validator: (_, value) => {
               if (!value) return Promise.resolve();
@@ -267,12 +267,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             }
           }
         ]}
-        extra="格式：分 时 日 月 星期（例如：*/15 * * * * 表示每15分钟执行一次）"
+        extra="Format: Minutes Hours Day Month Week (e.g., */15 * * * * means execute every 15 minutes)"
       >
         <Input 
-          placeholder="输入Cron表达式，如: */15 * * * *"
+          placeholder="Enter Cron expression, e.g., */15 * * * *"
           suffix={
-            <Tooltip title="格式：分 时 日 月 星期">
+            <Tooltip title="Format: Minutes Hours Day Month Week">
               <InfoCircleOutlined />
             </Tooltip>
           }
@@ -280,11 +280,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       </Form.Item>
 
       <Form.Item
-        label="时区"
+        label="Timezone"
         name="timezone"
-        rules={[{ required: true, message: '请选择时区' }]}
+        rules={[{ required: true, message: 'Please select a timezone' }]}
       >
-        <Select placeholder="选择时区" showSearch>
+        <Select placeholder="Select timezone" showSearch>
           {timezoneOptions.map(tz => (
             <Option key={tz.value} value={tz.value}>
               {tz.label}
@@ -295,12 +295,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
 
 
-      <Alert
-        message="推荐配置"
-        description={`建议使用 "${currentConfig.defaultSchedule}" 表达式，在纽约时间执行，适合获取美股相关数据。任务创建后将自动启用，您可以通过主页面的开关控制启用/禁用状态。`}
-        type="info"
-        showIcon
-      />
+
     </div>
   );
 
@@ -311,9 +306,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return (
             <>
               <Form.Item
-                label="最大结果数"
+                label="Max Results"
                 name={['taskParams', 'max_results']}
-                extra="每次获取的最大新闻条数，最多1000条"
+                extra="Maximum number of news items to fetch per time, up to 1000"
               >
                 <InputNumber 
                   min={1} 
@@ -324,30 +319,30 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <Form.Item
-                label="股票代码"
+                label="Stock Symbols"
                 name={['taskParams', 'symbols']}
-                extra="指定股票代码，多个用逗号分隔，留空获取所有"
+                extra="Specify stock symbols, separated by commas, leave empty to get all"
               >
                 <Input placeholder="AAPL,MSFT,GOOGL" />
               </Form.Item>
               
               <Form.Item
-                label="主题标签"
+                label="Topic Tags"
                 name={['taskParams', 'topic']}
-                extra="新闻主题分类"
+                extra="News topic classification"
               >
-                <Select placeholder="选择主题" allowClear>
-                  <Option value="technology">科技</Option>
-                  <Option value="finance">金融</Option>
-                  <Option value="economics">经济</Option>
-                  <Option value="earnings">财报</Option>
+                <Select placeholder="Select topic" allowClear>
+                  <Option value="technology">Technology</Option>
+                  <Option value="finance">Finance</Option>
+                  <Option value="economics">Economics</Option>
+                  <Option value="earnings">Earnings</Option>
                 </Select>
               </Form.Item>
               
               <Form.Item
-                label="关键词"
+                label="Keywords"
                 name={['taskParams', 'keywords']}
-                extra="新闻内容关键词，多个用逗号分隔"
+                extra="News content keywords, separated by commas"
               >
                 <Input placeholder="AI,blockchain,cryptocurrency" />
               </Form.Item>
@@ -358,9 +353,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return (
             <>
               <Form.Item
-                label="数据条数限制"
+                label="Data Limit"
                 name={['taskParams', 'limit']}
-                extra="每次获取的最大事件数，最多1000条"
+                extra="Maximum number of events to fetch per time, up to 1000"
               >
                 <InputNumber 
                   min={1} 
@@ -376,31 +371,394 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return (
             <>
               <Form.Item
-                label="国家"
+                label="Country"
                 name={['taskParams', 'country']}
-                rules={[{ required: true, message: '请选择国家' }]}
-                extra="指定获取哪个国家的宏观指标"
+                rules={[{ required: true, message: 'Please select a country' }]}
+                extra="Specify which countries to get macro indicators for, multiple selection allowed"
               >
-                <Select placeholder="选择国家">
-                  <Option value="USA">美国</Option>
-                  <Option value="CHN">中国</Option>
-                  <Option value="JPN">日本</Option>
-                  <Option value="GBR">英国</Option>
-                  <Option value="DEU">德国</Option>
+                <Select 
+                  placeholder="Select country" 
+                  mode="multiple"
+                  showSearch
+                  optionLabelProp="label"
+                  filterOption={(input, option) => {
+                    const label = String(option?.label || '');
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
+                >
+                  <Option value="USA" label="🇺🇸 United States (USA)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇺🇸</span>
+                      <span>United States (USA)</span>
+                    </div>
+                  </Option>
+                  <Option value="CHN" label="🇨🇳 China (CHN)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇳</span>
+                      <span>China (CHN)</span>
+                    </div>
+                  </Option>
+                  <Option value="JPN" label="🇯🇵 Japan (JPN)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇯🇵</span>
+                      <span>Japan (JPN)</span>
+                    </div>
+                  </Option>
+                  <Option value="DEU" label="��🇪 Germany (DEU)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇩🇪</span>
+                      <span>Germany (DEU)</span>
+                    </div>
+                  </Option>
+                  <Option value="GBR" label="🇬🇧 United Kingdom (GBR)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇬🇧</span>
+                      <span>United Kingdom (GBR)</span>
+                    </div>
+                  </Option>
+                  <Option value="FRA" label="🇫🇷 France (FRA)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇫🇷</span>
+                      <span>France (FRA)</span>
+                    </div>
+                  </Option>
+                  <Option value="ITA" label="🇮🇹 Italy (ITA)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇹</span>
+                      <span>Italy (ITA)</span>
+                    </div>
+                  </Option>
+                  <Option value="BRA" label="🇧🇷 Brazil (BRA)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇧🇷</span>
+                      <span>Brazil (BRA)</span>
+                    </div>
+                  </Option>
+                  <Option value="CAN" label="🇨🇦 Canada (CAN)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇦</span>
+                      <span>Canada (CAN)</span>
+                    </div>
+                  </Option>
+                  <Option value="RUS" label="🇷🇺 Russia (RUS)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇷🇺</span>
+                      <span>Russia (RUS)</span>
+                    </div>
+                  </Option>
+                  <Option value="IND" label="🇮🇳 India (IND)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇳</span>
+                      <span>India (IND)</span>
+                    </div>
+                  </Option>
+                  <Option value="KOR" label="🇰🇷 South Korea (KOR)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇰🇷</span>
+                      <span>South Korea (KOR)</span>
+                    </div>
+                  </Option>
+                  <Option value="ESP" label="🇪🇸 Spain (ESP)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇪🇸</span>
+                      <span>Spain (ESP)</span>
+                    </div>
+                  </Option>
+                  <Option value="AUS" label="🇦🇺 Australia (AUS)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇦🇺</span>
+                      <span>Australia (AUS)</span>
+                    </div>
+                  </Option>
+                  <Option value="MEX" label="🇲🇽 Mexico (MEX)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇲🇽</span>
+                      <span>Mexico (MEX)</span>
+                    </div>
+                  </Option>
+                  <Option value="IDN" label="🇮🇩 Indonesia (IDN)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇩</span>
+                      <span>Indonesia (IDN)</span>
+                    </div>
+                  </Option>
+                  <Option value="NLD" label="🇳🇱 Netherlands (NLD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇳🇱</span>
+                      <span>Netherlands (NLD)</span>
+                    </div>
+                  </Option>
+                  <Option value="SAU" label="🇸🇦 Saudi Arabia (SAU)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇸🇦</span>
+                      <span>Saudi Arabia (SAU)</span>
+                    </div>
+                  </Option>
+                  <Option value="TUR" label="🇹🇷 Turkey (TUR)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇹🇷</span>
+                      <span>Turkey (TUR)</span>
+                    </div>
+                  </Option>
+                  <Option value="TWN" label="🇹🇼 Taiwan (TWN)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇹🇼</span>
+                      <span>Taiwan (TWN)</span>
+                    </div>
+                  </Option>
                 </Select>
               </Form.Item>
               
               <Form.Item
-                label="指标类型"
+                label="Indicator Type"
                 name={['taskParams', 'indicator']}
-                extra="指定宏观指标类型，留空获取所有"
+                extra="Specify macro indicator types, multiple selection allowed, leave empty to get all indicators"
               >
-                <Select placeholder="选择指标类型" allowClear>
-                  <Option value="GDP">GDP</Option>
-                  <Option value="inflation_rate">通胀率</Option>
-                  <Option value="unemployment_rate">失业率</Option>
-                  <Option value="interest_rate">利率</Option>
-                  <Option value="trade_balance">贸易平衡</Option>
+                <Select 
+                  placeholder="Select indicator type" 
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  optionLabelProp="label"
+                  filterOption={(input, option) => {
+                    const label = String(option?.label || '');
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
+                >
+                  <Option value="real_interest_rate" label="📊 Real Interest Rate (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📊</span>
+                      <span>Real Interest Rate (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="population_total" label="�� Total Population">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👥</span>
+                      <span>Total Population</span>
+                    </div>
+                  </Option>
+                  <Option value="population_growth_annual" label="📈 Annual Population Growth (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📈</span>
+                      <span>Annual Population Growth (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="inflation_consumer_prices_annual" label="💰 Annual Consumer Price Inflation (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💰</span>
+                      <span>Annual Consumer Price Inflation (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="consumer_price_index" label="📊 Consumer Price Index (2010=100)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📊</span>
+                      <span>Consumer Price Index (2010=100)</span>
+                    </div>
+                  </Option>
+                  <Option value="gdp_current_usd" label="💵 GDP (Current Price USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💵</span>
+                      <span>GDP (Current Price USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="gdp_per_capita_usd" label="👤 Per Capita GDP (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👤</span>
+                      <span>Per Capita GDP (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="gdp_growth_annual" label="📈 Annual GDP Growth (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📈</span>
+                      <span>Annual GDP Growth (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="debt_percent_gdp" label="💳 Debt to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💳</span>
+                      <span>Debt to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="net_trades_goods_services" label="🔄 Net Trade in Goods and Services (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🔄</span>
+                      <span>Net Trade in Goods and Services (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="inflation_gdp_deflator_annual" label="📊 Annual GDP Deflator Inflation (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📊</span>
+                      <span>Annual GDP Deflator Inflation (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="agriculture_value_added_percent_gdp" label="🌾 Agriculture Value Added to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🌾</span>
+                      <span>Agriculture Value Added to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="industry_value_added_percent_gdp" label="🏭 Industry Value Added to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏭</span>
+                      <span>Industry Value Added to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="services_value_added_percent_gdp" label="💼 Services Value Added to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💼</span>
+                      <span>Services Value Added to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="exports_of_goods_services_percent_gdp" label="📤 Export of Goods and Services to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📤</span>
+                      <span>Export of Goods and Services to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="imports_of_goods_services_percent_gdp" label="📥 Import of Goods and Services to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📥</span>
+                      <span>Import of Goods and Services to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="gross_capital_formation_percent_gdp" label="🏗️ Gross Capital Formation to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏗️</span>
+                      <span>Gross Capital Formation to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="net_migration" label="🚶 Net Migration">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🚶</span>
+                      <span>Net Migration</span>
+                    </div>
+                  </Option>
+                  <Option value="gni_usd" label="💵 Gross National Income (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💵</span>
+                      <span>Gross National Income (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="gni_per_capita_usd" label="👤 Per Capita Gross National Income (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👤</span>
+                      <span>Per Capita Gross National Income (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="gni_ppp_usd" label="💱 Purchasing Power Parity Gross National Income (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💱</span>
+                      <span>Purchasing Power Parity Gross National Income (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="gni_per_capita_ppp_usd" label="👤 Per Capita Purchasing Power Parity Gross National Income (USD)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👤</span>
+                      <span>Per Capita Purchasing Power Parity Gross National Income (USD)</span>
+                    </div>
+                  </Option>
+                  <Option value="income_share_lowest_twenty" label="📊 Income Share of Lowest 20% (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📊</span>
+                      <span>Income Share of Lowest 20% (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="life_expectancy" label="👴 Life Expectancy (Years)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👴</span>
+                      <span>Life Expectancy (Years)</span>
+                    </div>
+                  </Option>
+                  <Option value="fertility_rate" label="👶 Fertility Rate (Births per Woman)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👶</span>
+                      <span>Fertility Rate (Births per Woman)</span>
+                    </div>
+                  </Option>
+                  <Option value="prevalence_hiv_total" label="🩺 HIV Prevalence (15-49 Years %)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🩺</span>
+                      <span>HIV Prevalence (15-49 Years %)</span>
+                    </div>
+                  </Option>
+                  <Option value="co2_emissions_tons_per_capita" label="🌍 CO2 Emissions per Capita (Tons)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🌍</span>
+                      <span>CO2 Emissions per Capita (Tons)</span>
+                    </div>
+                  </Option>
+                  <Option value="surface_area_km" label="🗺️ Surface Area (Square Kilometers)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🗺️</span>
+                      <span>Surface Area (Square Kilometers)</span>
+                    </div>
+                  </Option>
+                  <Option value="poverty_poverty_lines_percent_population" label="🏚️ Poverty Line Population Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏚️</span>
+                      <span>Poverty Line Population Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="revenue_excluding_grants_percent_gdp" label="💰 Revenue to GDP Ratio (Excluding Grants %)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💰</span>
+                      <span>Revenue to GDP Ratio (Excluding Grants %)</span>
+                    </div>
+                  </Option>
+                  <Option value="cash_surplus_deficit_percent_gdp" label="💸 Cash Surplus/Deficit to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💸</span>
+                      <span>Cash Surplus/Deficit to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="startup_procedures_register" label="🏢 Number of Startup Procedures">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏢</span>
+                      <span>Number of Startup Procedures</span>
+                    </div>
+                  </Option>
+                  <Option value="market_cap_domestic_companies_percent_gdp" label="📈 Domestic Listed Companies Market Cap to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📈</span>
+                      <span>Domestic Listed Companies Market Cap to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="mobile_subscriptions_per_hundred" label="📱 Mobile Phone Subscriptions per 100 People">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📱</span>
+                      <span>Mobile Phone Subscriptions per 100 People</span>
+                    </div>
+                  </Option>
+                  <Option value="internet_users_per_hundred" label="🌐 Internet Users per 100 People">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🌐</span>
+                      <span>Internet Users per 100 People</span>
+                    </div>
+                  </Option>
+                  <Option value="high_technology_exports_percent_total" label="🔬 High-Tech Exports to Manufactured Goods Exports Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🔬</span>
+                      <span>High-Tech Exports to Manufactured Goods Exports Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="merchandise_trade_percent_gdp" label="📦 Merchandise Trade to GDP Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📦</span>
+                      <span>Merchandise Trade to GDP Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="total_debt_service_percent_gni" label="�� Total Debt Service to GNI Ratio (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💳</span>
+                      <span>Total Debt Service to GNI Ratio (%)</span>
+                    </div>
+                  </Option>
+                  <Option value="unemployment_total_percent" label="👷 Total Unemployment Rate (%)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>👷</span>
+                      <span>Total Unemployment Rate (%)</span>
+                    </div>
+                  </Option>
                 </Select>
               </Form.Item>
             </>
@@ -415,18 +773,18 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       <div>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Title level={4}>
-            <BulbOutlined /> 参数配置
+            <BulbOutlined /> Parameter Configuration
           </Title>
           <Text type="secondary">
-            为 {dataSourceName} 配置具体的数据获取参数
+            Configure specific data acquisition parameters for {dataSourceName}
           </Text>
         </div>
 
         {renderParamFields()}
 
         <Alert
-          message="参数说明"
-          description="所有参数都是可选的，留空将使用默认配置。任务创建后将自动启用，您可以通过主页面开关控制启用/禁用状态，也可以通过编辑功能修改参数。"
+          message="Parameter Description"
+          description="All parameters are optional, leave empty for default configuration. The task will be automatically enabled after creation, and you can control its enable/disable status through the switch on the main page, or modify parameters through the edit function."
           type="info"
           showIcon
         />
@@ -436,13 +794,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
   const steps = [
     {
-      title: '调度配置',
-      description: '设置执行时间',
+      title: 'Schedule Configuration',
+      description: 'Set execution time',
       icon: <ClockCircleOutlined />
     },
     {
-      title: '参数配置',
-      description: '配置获取参数',
+      title: 'Parameter Configuration',
+      description: 'Configure acquisition parameters',
       icon: <BulbOutlined />
     }
   ];
@@ -452,7 +810,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       title={
         <Space>
           {currentConfig.icon}
-          配置 {dataSourceName} 数据获取策略
+          Configure Data Acquisition Strategy for {dataSourceName}
         </Space>
       }
       open={open}
@@ -462,11 +820,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         <div style={{ textAlign: 'right' }}>
           <Space>
             <Button onClick={handleCancel}>
-              取消
+              Cancel
             </Button>
             {currentStep > 0 && (
               <Button onClick={handlePrev}>
-                上一步
+                Previous Step
               </Button>
             )}
             <Button 
@@ -475,7 +833,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               loading={loading}
               icon={currentStep === 1 ? <CheckCircleOutlined /> : undefined}
             >
-              {currentStep === 1 ? '创建策略' : '下一步'}
+              {currentStep === 1 ? 'Create Strategy' : 'Next Step'}
             </Button>
           </Space>
         </div>
@@ -498,7 +856,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         </Form>
       </div>
       
-      {/* Cron表达式使用说明 */}
+      {/* Cron expression usage guide */}
       <CronExpressionGuide
         open={showCronGuide}
         onCancel={() => setShowCronGuide(false)}

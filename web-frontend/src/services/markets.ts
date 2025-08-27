@@ -58,8 +58,8 @@ export interface EconomicEventParams {
 }
 
 export interface MacroIndicatorParams {
-  country?: string;
-  indicator?: string;
+  country?: string | string[];
+  indicator?: string | string[];
   year_from?: number;
   year_to?: number;
   limit?: number;
@@ -274,6 +274,85 @@ export const marketsAPI = {
       year_to: yearTo,
       limit: 1000
     });
+  },
+
+  /**
+   * 导出宏观指标数据为CSV
+   */
+  exportMacroIndicatorsCSV: async (params?: {
+    country?: string | string[];
+    indicator?: string | string[];
+    year_from?: number;
+    year_to?: number;
+  }): Promise<void> => {
+    try {
+      console.log('正在导出宏观指标CSV...', params);
+      
+      // 构建查询参数
+      const queryParams = new URLSearchParams();
+      
+      if (params?.country) {
+        if (Array.isArray(params.country)) {
+          queryParams.append('country', params.country.join(','));
+        } else {
+          queryParams.append('country', params.country);
+        }
+      }
+      
+      if (params?.indicator) {
+        if (Array.isArray(params.indicator)) {
+          queryParams.append('indicator', params.indicator.join(','));
+        } else {
+          queryParams.append('indicator', params.indicator);
+        }
+      }
+      
+      if (params?.year_from) {
+        queryParams.append('year_from', params.year_from.toString());
+      }
+      
+      if (params?.year_to) {
+        queryParams.append('year_to', params.year_to.toString());
+      }
+      
+      // 发起下载请求
+      const response = await fetch(`/api/markets/macro-indicators/export?${queryParams.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`导出失败: ${response.status} ${response.statusText}`);
+      }
+      
+      // 获取文件名
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = 'macro_indicators.csv';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=(.+)/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      // 下载文件
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log('宏观指标CSV导出成功:', filename);
+    } catch (error) {
+      console.error('导出宏观指标CSV失败:', error);
+      throw error;
+    }
   }
 };
 

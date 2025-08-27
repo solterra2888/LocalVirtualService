@@ -10,14 +10,18 @@ import {
   Col,
   message,
   Tooltip,
-  InputNumber
+  InputNumber,
+  Modal,
+  Checkbox,
+  Divider
 } from 'antd';
 import {
   ReloadOutlined,
-  LineChartOutlined
+  LineChartOutlined,
+  ExportOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { marketsAPI, MacroIndicator, CountryInfo } from '../services/markets';
+import { marketsAPI, MacroIndicator, CountryInfo, IndicatorInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
 import CountryFlag from '../components/CountryFlag';
 
@@ -29,9 +33,17 @@ const MacroIndicatorsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [indicators, setIndicators] = useState<MacroIndicator[]>([]);
   const [countries, setCountries] = useState<CountryInfo[]>([]);
+  const [availableIndicators, setAvailableIndicators] = useState<IndicatorInfo[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<string>('USA');
   const [selectedIndicator, setSelectedIndicator] = useState<string>('');
   const [yearRange, setYearRange] = useState<[number, number]>([2020, 2024]);
+
+  // 导出相关状态
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportCountries, setExportCountries] = useState<string[]>([]);
+  const [exportIndicators, setExportIndicators] = useState<string[]>([]);
+  const [exportYearRange, setExportYearRange] = useState<[number, number]>([2020, 2024]);
 
   // 获取宏观指标数据
   const fetchIndicators = useCallback(async () => {
@@ -68,13 +80,63 @@ const MacroIndicatorsPage: React.FC = () => {
     }
   }, []);
 
+  // 获取可用指标列表
+  const fetchAvailableIndicators = useCallback(async () => {
+    try {
+      const result = await marketsAPI.getAvailableIndicators();
+      setAvailableIndicators(result.indicators);
+    } catch (error) {
+      console.error('获取可用指标列表失败:', error);
+      message.error('Failed to retrieve available indicators');
+    }
+  }, []);
+
+  // 导出CSV
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      const params: any = {};
+      
+      // 只有当选择了国家时才添加参数
+      if (exportCountries.length > 0) {
+        params.country = exportCountries;
+      }
+      
+      // 只有当选择了指标时才添加参数
+      if (exportIndicators.length > 0) {
+        params.indicator = exportIndicators;
+      }
+      
+      // 添加年份范围
+      params.year_from = exportYearRange[0];
+      params.year_to = exportYearRange[1];
+      
+      await marketsAPI.exportMacroIndicatorsCSV(params);
+      message.success('CSV export completed successfully');
+      setExportModalVisible(false);
+    } catch (error) {
+      console.error('导出CSV失败:', error);
+      message.error('Failed to export CSV');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // 重置导出选项
+  const resetExportOptions = () => {
+    setExportCountries([]);
+    setExportIndicators([]);
+    setExportYearRange([2020, 2024]);
+  };
+
   // 初始加载
   useEffect(() => {
     if (isAuthenticated) {
       fetchIndicators();
       fetchCountries();
+      fetchAvailableIndicators();
     }
-  }, [fetchIndicators, fetchCountries, isAuthenticated]);
+  }, [fetchIndicators, fetchCountries, fetchAvailableIndicators, isAuthenticated]);
 
   // 表格列定义
   const indicatorColumns = [
@@ -82,17 +144,19 @@ const MacroIndicatorsPage: React.FC = () => {
       title: 'Year',
       dataIndex: 'year',
       key: 'year',
-      width: 80,
+      width: 70,
+      fixed: 'left' as const,
       sorter: (a: MacroIndicator, b: MacroIndicator) => a.year - b.year,
     },
     {
       title: 'Indicator Name',
       dataIndex: 'indicator_name',
       key: 'indicator_name',
+      width: 300,
       ellipsis: { showTitle: false },
       render: (name: string) => (
         <Tooltip title={name} placement="topLeft">
-          {name}
+          <Text style={{ fontSize: '12px' }}>{name}</Text>
         </Tooltip>
       )
     },
@@ -100,7 +164,8 @@ const MacroIndicatorsPage: React.FC = () => {
       title: 'Value',
       dataIndex: 'value',
       key: 'value',
-      width: 150,
+      width: 120,
+      align: 'left' as const,
       render: (value: number) => {
         if (value === null || value === undefined) return '-';
         
@@ -120,7 +185,7 @@ const MacroIndicatorsPage: React.FC = () => {
       title: 'Country/Region',
       dataIndex: 'country_name',
       key: 'country_name',
-      width: 120,
+      width: 140,
       render: (name: string, record: MacroIndicator) => (
         <CountryFlag countryCode={record.country_code} showName={true} />
       )
@@ -129,8 +194,8 @@ const MacroIndicatorsPage: React.FC = () => {
       title: 'Fetch Time',
       dataIndex: 'fetch_timestamp',
       key: 'fetch_timestamp',
-      width: 150,
-      render: (timestamp: string) => timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm') : '-'
+      width: 130,
+      render: (timestamp: string) => timestamp ? dayjs(timestamp).format('MM-DD HH:mm') : '-'
     }
   ];
 
@@ -195,12 +260,19 @@ const MacroIndicatorsPage: React.FC = () => {
                 allowClear
                 value={selectedIndicator}
                 onChange={setSelectedIndicator}
+                showSearch
+                filterOption={(input, option) => {
+                  const indicator = availableIndicators.find(i => i.indicator === option?.value);
+                  if (!indicator) return false;
+                  return indicator.indicator_name.toLowerCase().includes(input.toLowerCase()) ||
+                         indicator.indicator.toLowerCase().includes(input.toLowerCase());
+                }}
               >
-                <Option value="gdp_current_usd">GDP (Current USD)</Option>
-                <Option value="gdp_per_capita_usd">GDP Per Capita</Option>
-                <Option value="inflation_consumer_prices_annual">Inflation Rate</Option>
-                <Option value="unemployment_total_percent">Unemployment Rate</Option>
-                <Option value="population_total">Total Population</Option>
+                {availableIndicators.map(indicator => (
+                  <Option key={indicator.indicator} value={indicator.indicator}>
+                    {indicator.indicator_name}
+                  </Option>
+                ))}
               </Select>
             </Space>
           </Col>
@@ -229,14 +301,22 @@ const MacroIndicatorsPage: React.FC = () => {
           <Col xs={24} sm={12} md={8} lg={6}>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
               <Text strong>Actions:</Text>
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={fetchIndicators}
-                loading={loading}
-              >
-                Refresh
-              </Button>
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={fetchIndicators}
+                  loading={loading}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  icon={<ExportOutlined />}
+                  onClick={() => setExportModalVisible(true)}
+                >
+                  Export
+                </Button>
+              </Space>
             </Space>
           </Col>
         </Row>
@@ -249,7 +329,7 @@ const MacroIndicatorsPage: React.FC = () => {
           dataSource={indicators.map((item, index) => ({ ...item, key: index }))}
           loading={loading}
           size="small"
-          scroll={{ x: 800 }}
+          scroll={{ x: 760 }}
           pagination={{
             total: indicators.length,
             pageSize: 50,
@@ -259,6 +339,98 @@ const MacroIndicatorsPage: React.FC = () => {
           }}
         />
       </Card>
+
+      {/* 导出CSV弹窗 */}
+      <Modal
+        title="Export Macro Indicators CSV"
+        open={exportModalVisible}
+        onOk={handleExportCSV}
+        onCancel={() => setExportModalVisible(false)}
+        confirmLoading={exportLoading}
+        width={600}
+        okText="Export"
+        cancelText="Cancel"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">
+            Select countries, indicators, and year range for export. Leave all fields empty to export all data.
+          </Text>
+        </div>
+
+        <Divider orientation="left">Export Options</Divider>
+
+        {/* 国家选择 */}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Countries (Multi-select):</Text>
+          <div style={{ marginTop: 8 }}>
+            <Checkbox.Group
+              options={countries.map(country => ({
+                label: (
+                  <CountryFlag countryCode={country.code} showName={true} />
+                ),
+                value: country.code
+              }))}
+              value={exportCountries}
+              onChange={(checkedValues) => setExportCountries(checkedValues as string[])}
+            />
+          </div>
+        </div>
+
+        {/* 指标选择 */}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Indicators (Multi-select):</Text>
+          <div style={{ marginTop: 8 }}>
+            <Checkbox.Group
+              options={availableIndicators.map(indicator => ({
+                label: indicator.indicator_name,
+                value: indicator.indicator
+              }))}
+              value={exportIndicators}
+              onChange={(checkedValues) => setExportIndicators(checkedValues as string[])}
+            />
+          </div>
+        </div>
+
+        {/* 年份范围 */}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Year Range:</Text>
+          <div style={{ marginTop: 8 }}>
+            <Space>
+              <InputNumber
+                min={1960}
+                max={2030}
+                value={exportYearRange[0]}
+                onChange={(value) => value && setExportYearRange([value, exportYearRange[1]])}
+                style={{ width: 100 }}
+                placeholder="From"
+              />
+              <Text>-</Text>
+              <InputNumber
+                min={1960}
+                max={2030}
+                value={exportYearRange[1]}
+                onChange={(value) => value && setExportYearRange([exportYearRange[0], value])}
+                style={{ width: 100 }}
+                placeholder="To"
+              />
+            </Space>
+          </div>
+        </div>
+
+        <Divider />
+
+        <div style={{ textAlign: 'center' }}>
+          <Button onClick={resetExportOptions} style={{ marginRight: 8 }}>
+            Reset Options
+          </Button>
+          <Text type="secondary">
+            {exportCountries.length === 0 && exportIndicators.length === 0 
+              ? 'Will export all macro indicators data'
+              : `Will export ${exportCountries.length || 'all'} countries, ${exportIndicators.length || 'all'} indicators`
+            }
+          </Text>
+        </div>
+      </Modal>
     </div>
   );
 };
