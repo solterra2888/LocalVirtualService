@@ -1,0 +1,769 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Markets API - 市场数据接口
+
+提供经济事件和宏观指标数据的API端点
+"""
+
+import os
+import sys
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Union
+from fastapi import APIRouter, HTTPException, Depends, Query, status
+from pydantic import BaseModel, Field
+
+from backend.auth.jwt_utils import get_current_user
+from backend.utils.logger import info, error, warning
+from backend.utils.service_registry import get_service_registry
+from backend.services.economic_events_service import EconomicEventsService
+from backend.services.macro_indicators_service import MacroIndicatorsService
+from backend.services.market_data_service import MarketDataService
+
+def calculate_event_impact(event_name: str) -> int:
+    """
+    根据事件名称计算重要性等级
+    
+    Args:
+        event_name: 事件名称
+    
+    Returns:
+        重要性等级 (1-3星)
+    """
+    if not event_name:
+        return 1
+    
+    # 3星 - 最高重要性事件
+    high_impact_events = [
+        # 央行利率决策
+        'Fed Interest Rate Decision', 'BoE Interest Rate Decision', 'ECB Interest Rate Decision',
+        'BoJ Interest Rate Decision', 'RBA Interest Rate Decision', 'BoC Interest Rate Decision',
+        'SNB Interest Rate Decision', 'RBNZ Interest Rate Decision', 'CNB Interest Rate Decision',
+        'Norges Bank Interest Rate Decision', 'Riksbank Rate Decision', 'TCMB Interest Rate Decision',
+        'RBI Interest Rate Decision', 'SARB Interest Rate Decision', 'BCB Interest Rate Decision',
+        
+        # 关键经济指标
+        'Non-Farm Payrolls', 'Non Farm Payrolls', 'GDP Growth Rate', 'Consumer Price Index',
+        'Inflation Rate', 'Unemployment Rate', 'Interest Rate',
+        
+        # 重要央行会议和报告
+        'FOMC Minutes', 'FOMC Economic Projections', 'BoE Monetary Policy Report',
+        'ECB Monetary Policy Statement and Press Conference', 'BoJ Monetary Policy Meeting Minutes',
+        'RBA Monetary Policy Statement', 'Norges Bank Monetary Policy Report',
+        
+        # 重要经济数据
+        'GDP Growth Annualized', 'GDP Growth Mainland', 'GDP 3-Month Avg',
+        'Core CPI', 'Core PCE Price Index', 'Core PCE Prices',
+        
+        # 重要就业数据
+        'Employment Change', 'Unemployment Change', 'Initial Jobless Claims',
+        'JOLTs Job Openings', 'Average Hourly Earnings', 'Employment Cost Index',
+        
+        # 重要通胀数据
+        'Harmonised Inflation Rate', 'HICP', 'Core Inflation Rate',
+        'Inflation Rate Ex-Food and Energy', 'Mid-month Inflation Rate',
+        
+        # 重要制造业数据
+        'ISM Manufacturing PMI', 'ISM Services PMI', 'ISM Non-Manufacturing PMI',
+        'S&P Global Manufacturing PMI', 'S&P Global Services PMI', 'S&P Global Composite PMI',
+        'HCOB Manufacturing PMI', 'HCOB Services PMI', 'HCOB Composite PMI',
+        
+        # 重要消费者数据
+        'Michigan Consumer Sentiment', 'CB Consumer Confidence', 'Consumer Confidence',
+        'Retail Sales', 'Personal Spending', 'Personal Income',
+        
+        # 重要贸易数据
+        'Trade Balance', 'Balance of Trade', 'Current Account',
+        'Exports', 'Imports', 'Goods Trade Balance',
+        
+        # 重要房价数据
+        'Existing Home Sales', 'New Home Sales', 'Housing Starts',
+        'Building Permits', 'House Price Index', 'S&P/Case-Shiller Home Price',
+        
+        # 重要能源数据
+        'EIA Crude Oil Stocks Change', 'EIA Crude Oil Imports Change',
+        'Baker Hughes Oil Rig Count', 'OPEC Meeting', 'OPEC Monthly Report',
+        
+        # 重要农产品数据
+        'WASDE Report', 'NOPA Crush Report', 'Quarterly Grain Stocks - Corn',
+        'Quarterly Grain Stocks - Soy', 'Quarterly Grain Stocks - Wheat',
+        
+        # 重要货币数据
+        'M2 Money Supply', 'M1 Money Supply', 'Money Supply',
+        'Foreign Exchange Reserves', 'Central Bank Reserves $',
+        
+        # 重要债券拍卖
+        '10-Year Bond Auction', '30-Year Bond Auction', '2-Year Bond Auction',
+        '10-Year Treasury Gilt Auction', '30-Year Treasury Gilt Auction',
+        '10-Year Bund Auction', '30-Year Bund Auction', '10-Year BTP Auction',
+        '30-Year BTP Auction', '10-Year Note Auction', '30-Year TIPS Auction',
+        
+        # 重要央行官员讲话
+        'Fed Chair Powell Speech', 'Fed Chair Powell Testimony', 'BoE Gov Bailey Speech',
+        'ECB President Lagarde Speech', 'BoJ Gov Ueda Speech', 'RBA Gov Bullock Speaks',
+        'SNB Press Conference', 'BoC Press Conference', 'RBA Press Conference',
+        
+        # 重要经济报告
+        'Beige Book', 'Fed Beige Book', 'Financial Stability Report',
+        'BoE Financial Stability Report', 'ECB Financial Stability Review',
+        'RBNZ Financial Stability Report', 'SARB Monetary Policy Review',
+        
+        # 重要会议
+        'BRICS Summit', 'IMF Meeting', 'Euro Summit', 'Eurozone Leaders Meeting',
+        'EcoFin Meeting', 'Eurogroup Meeting'
+    ]
+    
+    # 2星 - 中等重要性事件
+    medium_impact_events = [
+        # 次要央行决策
+        'Deposit Facility Rate', 'Lending Facility Rate', 'Marginal Lending Rate',
+        'Reverse Repo Rate', 'Prime Rate', 'Prime Overdraft Rate',
+        
+        # 次要经济指标
+        'Core PPI', 'PPI Output', 'PPI Input', 'Producer Price Index',
+        'Wholesale Prices', 'Import Prices', 'Export Prices',
+        
+        # 次要就业数据
+        'Continuing Jobless Claims', 'Jobless Claims 4-Week Average',
+        'Full Time Employment Chg', 'Part Time Employment Chg',
+        'Employment Level', 'Employment Growth', 'Employment Wages',
+        'Employment Benefits', 'Employment Cost - Wages', 'Employment Cost - Benefits',
+        
+        # 次要制造业数据
+        'Manufacturing PMI', 'Manufacturing Confidence', 'Manufacturing Output',
+        'Manufacturing Production', 'Manufacturing Sales', 'Manufacturing Payrolls',
+        'Industrial Production', 'Industrial Sales', 'Industrial Inventories',
+        'Industrial Confidence', 'Industrial Sentiment',
+        
+        # 次要服务业数据
+        'Services PMI', 'Services Sentiment', 'Services NZ PSI',
+        'ISM Services Business Activity', 'ISM Services Employment', 'ISM Services New Orders',
+        'ISM Services Prices', 'ISM Non-Manufacturing Business Activity',
+        'ISM Non-Manufacturing Employment', 'ISM Non-Manufacturing New Orders',
+        'ISM Non-Manufacturing Prices',
+        
+        # 次要消费者数据
+        'Consumer Credit Change', 'Consumer Spending', 'Household Spending',
+        'Household Consumption', 'Retail Sales Ex Autos', 'Retail Sales Ex Fuel',
+        'Retail Sales Ex Gas/Autos', 'Retail Inventories Ex Autos',
+        'Personal Income', 'Real Consumer Spending', 'Real Earnings',
+        
+        # 次要通胀数据
+        'Food Inflation', 'WPI Food', 'WPI Food Index', 'WPI Fuel',
+        'WPI Inflation', 'WPI Manufacturing', 'Raw Materials Prices',
+        'Selling Price Expectations', 'Inflation Expectations',
+        'Michigan Inflation Expectations', 'Michigan 5 Year Inflation Expectations',
+        
+        # 次要贸易数据
+        'Current Account s.a', 'Foreign Direct Investment', 'FDI',
+        'Foreign Bond Investment', 'Foreign Securities Purchases',
+        'Foreign Securities Purchases by Canadians', 'Overall Net Capital Flows',
+        'Net Long-Term TIC Flows', 'Stock Investment by Foreigners',
+        
+        # 次要房价数据
+        'Residential Property Prices', 'Resi Prop Prices', 'New Housing Price Index',
+        'RICS House Price Balance', 'Nationwide Housing Prices',
+        'CoreLogic Dwelling Prices', 'Used Car Prices',
+        
+        # 次要能源数据
+        'EIA Gasoline Stocks Change', 'EIA Distillate Stocks Change',
+        'EIA Heating Oil Stocks Change', 'EIA Natural Gas Stocks Change',
+        'EIA Crude Oil Imports Change', 'EIA Cushing Crude Oil Stocks Change',
+        'EIA Distillate Fuel Production Change', 'EIA Gasoline Production Change',
+        'EIA Refinery Crude Runs Change', 'EIA Weekly Refinery Utilization Rates WoW',
+        'API Crude Oil Stock Change', 'IEA Oil Market Report',
+        
+        # 次要债券拍卖
+        '5-Year Bond Auction', '7-Year Bond Auction', '15-Year Bond Auction',
+        '20-Year Bond Auction', '5-Year Treasury Gilt Auction', '7-Year Treasury Gilt Auction',
+        '15-Year Treasury Gilt Auction', '20-Year Treasury Gilt Auction',
+        '5-Year TIPS Auction', '20-Year TIPS Auction', '5-Year Bobl Auction',
+        '7-Year Bund Auction', '15-Year Bund Auction', '20-Year Bund Auction',
+        '5-Year BTP Auction', '7-Year BTP Auction', '15-Year BTP Auction',
+        '20-Year BTP Auction', '5-Year Note Auction', '7-Year Note Auction',
+        '5-Year OAT Auction', '17-Year OAT Auction',
+        
+        # 次要央行官员讲话
+        'Fed Barkin Speech', 'Fed Bostic Speech', 'Fed Bowman Speech',
+        'Fed Collins Speech', 'Fed Cook Speech', 'Fed Daly Speech',
+        'Fed Goolsbee Speech', 'Fed Harker Speech', 'Fed Jefferson Speech',
+        'Fed Kashkari Speech', 'Fed Kugler Speech', 'Fed Logan Speech',
+        'Fed Musalem Speech', 'Fed Schmid Speech', 'Fed Waller Speech',
+        'Fed Williams Speech', 'BoE Benford Speech', 'BoE Benjamin Speech',
+        'BoE Breeden Speech', 'BoE Dhingra Speech', 'BoE Greene Speech',
+        'BoE Hauser Speech', 'BoE L Mann Speech', 'BoE Lombardelli Speech',
+        'BoE Mann Speech', 'BoE Member Pill Speech', 'BoE Pill Speech',
+        'BoE Ramsden Speech', 'ECB Buch Speech', 'ECB Cipollone Speech',
+        'ECB De Guindos Speech', 'ECB Elderson Speech', 'ECB Knot Speech',
+        'ECB Lane Speech', 'ECB Montagner Speech', 'ECB Nagel Speech',
+        'ECB Schnabel Speech', 'ECB Tuominen Speech', 'BoJ Himino Speech',
+        'BoJ Nakamura Speech', 'BOJ Uchida Speech', 'RBA Assist Gov Jones Speech',
+        'RBA Bullock Speech', 'RBA Connolly Speech', 'RBA Hauser Speech',
+        'RBA Hunter Speech', 'RBA Jacobs Speech', 'RBA Jones Speech',
+        'RBA Kent Speech', 'BoC Gov Macklem Speech', 'BoC Gravelle Speech',
+        'BoC Macklem Speech', 'SNB Moser Speech', 'SNB Schlegel Speech',
+        'SNB Tschudin Speech', 'Bundesbank Balz Speech', 'Bundesbank Buch Speech',
+        'Bundesbank Mauderer Speech', 'Bundesbank Nagel Speech',
+        
+        # 次要经济报告
+        'BoE Quarterly Bulletin', 'BoJ Summary of Opinions', 'BoJ Monetary Policy Meeting Minutes',
+        'ECB Economic Bulletin', 'ECB Monetary Policy Meeting Accounts',
+        'ECB Survey of Monetary Analysts', 'ECB Survey of Professional Forecasters',
+        'BoC Business Outlook Survey', 'BoC Financial System Review',
+        'BoC Market Participants Survey', 'BoC Senior Loan Officer Survey',
+        'BoC Summary of Deliberations', 'RBA Chart Pack', 'SNB Quarterly Bulletin',
+        'Bundesbank Annual Report', 'Bundesbank Monthly Report',
+        'SARB Quarterly Bulletin', 'BCB Inflation Report',
+        
+        # 次要调查数据
+        'Business Confidence', 'Business Climate', 'Business Climate Indicator',
+        'Economic Confidence Index', 'Economic Sentiment', 'Economic Sentiment Index',
+        'Economic Tendency Indicator', 'Consumer Confidence', 'Westpac Consumer Confidence',
+        'Westpac Consumer Confidence Change', 'Westpac Consumer Confidence Index',
+        'ANZ Roy Morgan Consumer Confidence', 'FGV Consumer Confidence',
+        'Thomson Reuters IPSOS PCSI', 'RCM/TIPP Economic Optimism Index',
+        'IBD/TIPP Economic Optimism', 'Sentix Investors Sentiment',
+        'ZEW Economic Sentiment Index', 'ZEW Current Conditions', 'ZEW Expectations',
+        'Ifo Business Climate', 'Ifo Current Conditions', 'Ifo Expectations',
+        'KOF Leading Indicators', 'Leading Economic Index', 'Leading Index',
+        'Leading Indicator', 'Leading Business Cycle Indicator', 'Coincident Index',
+        'Coincident Indicator', 'Composite Economic Index',
+        
+        # 次要地区数据
+        'Dallas Fed Manufacturing Index', 'Dallas Fed Services Index',
+        'Dallas Fed Services Revenues Index', 'Philadelphia Fed Manufacturing Index',
+        'Philly Fed Business Conditions', 'Philly Fed CAPEX Index',
+        'Philly Fed Employment', 'Philly Fed New Orders', 'Philly Fed Prices Paid',
+        'Richmond Fed Manufacturing Index', 'Richmond Fed Manufacturing Shipments Index',
+        'Richmond Fed Services Index', 'Richmond Fed Services Revenues Index',
+        'Kansas Fed Composite Index', 'Kansas Fed Manufacturing Index',
+        'Chicago PMI', 'Chicago Fed National Activity Index',
+        'NY Empire State Manufacturing Index', 'Atlanta Fed GDPNow',
+        
+        # 次要商品数据
+        'Gold Production', 'Copper Production', 'Mining Production',
+        'Cement Production', 'Car Production', 'Auto Production',
+        'Machine Tool Orders', 'Construction Orders', 'Infrastructure Output',
+        
+        # 次要汽车数据
+        'Car Sales', 'Auto Sales', 'New Car Sales', 'New Car Registrations',
+        'New Passenger Car Registrations', 'All Car Sales', 'All Truck Sales',
+        'Total Vehicle Sales', 'Total New Vehicle Sales', 'Passenger Vehicles Sales',
+        'Motorbike Sales', 'New Motor Vehicle Sales',
+        
+        # 次要信贷数据
+        'Bank Lending', 'Bank Loan Growth', 'Loan Growth', 'New Loans',
+        'Outstanding Loan Growth', 'Private Sector Credit', 'Private sector loans',
+        'Total Credit', 'Total Credit Growth', 'Total Household Debt',
+        'Net Lending to Individuals', 'Household Lending Growth',
+        'Loans to Companies', 'Loans to Households', 'New Yuan Loans',
+        'Total Social Financing', 'Credit Expansion', 'Credit Indicator',
+        
+        # 次要货币数据
+        'M3 Money Supply', 'M4 Money Supply', 'Monetary Base',
+        'Currency Reserves', 'Currency Swaps', 'Cash Reserve Ratio',
+        'Deposit Growth', 'Deposit Interest Rate',
+        
+        # 次要政府数据
+        'Government Budget', 'Government Budget to GDP', 'Government Budget Value',
+        'Government Debt to GDP', 'Gross Debt to GDP', 'Net Debt-to-GDP ratio',
+        'Government Payrolls', 'Net Payrolls', 'Public Sector Net Borrowing',
+        'Public Sector Net Borrowing Ex Banks', 'Monthly Budget Statement',
+        'Federal Tax Revenues', 'Tax Revenue', 'Primary Budget Surplus',
+        'Nominal Budget Balance', 'Budget Balance', 'Fiscal Balance',
+        'Central Government Debt', 'External Debt',
+        
+        # 次要劳动力数据
+        'Labour Cost Index', 'Labour Productivity', 'Unit Labour Costs',
+        'Wage Growth', 'Real Wage Growth', 'Real Wages', 'Average Hourly Wages',
+        'Average Weekly Earnings', 'Average Weekly Hours', 'Average Cash Earnings',
+        'Average Earnings excl. Bonus', 'Average Earnings incl. Bonus',
+        'Corporate Sector Wages', 'Negotiated Wage Growth', 'Overtime Pay',
+        'Participation Rate', 'Jobs/applications ratio', 'Jobseekers Total',
+        'Unemployed Persons', 'U-6 Unemployment Rate', 'Unemployment Benefit Claims',
+        'Registered Jobless Rate',
+        
+        # 次要建筑数据
+        'Construction Output', 'Construction Spending', 'Construction PMI',
+        'Building Permits', 'Housing Starts',
+        
+        # 次要订单数据
+        'New Orders', 'Factory Orders', 'Factory Orders ex Transportation',
+        'Durable Goods Orders', 'Durable Goods Orders ex Defense',
+        'Durable Goods Orders Ex Defense', 'Durable Goods Orders Ex Transp',
+        'Non Defense Goods Orders Ex Air', 'Machinery Orders',
+        'ISM Manufacturing New Orders', 'ISM Manufacturing Employment',
+        'ISM Manufacturing Prices', 'Philly Fed New Orders', 'Philly Fed Employment',
+        'Philly Fed Prices Paid',
+        
+        # 次要库存数据
+        'Business Inventories', 'Industrial Inventories', 'Retail Inventories Ex Autos',
+        'Wholesale Inventories', 'Manufacturing Inventories',
+        
+        # 次要投资数据
+        'Business Investment', 'Capital Expenditure', 'Gross Fixed Investment',
+        'Private Investment', 'Private Spending', 'FDI', 'Foreign Direct Investment',
+        
+        # 次要生产率数据
+        'Nonfarm Productivity', 'Labour Productivity',
+        
+        # 次要旅游数据
+        'Tourism Revenues', 'Tourist Arrivals', 'Visitor Arrivals',
+        
+        # 次要农业数据
+        'Milk Auctions', 'Global Dairy Trade Price Index', 'GlobalDairyTrade Price Index',
+        
+        # 次要天气和假期
+        'Chinese New Year', 'Duarte\'s Day', 'Republic Day', 'Inauguration Day',
+        'January 25 Revolution Day', 'Federal Election', 'National People\'s Congress',
+        
+        # 次要其他数据
+        'Cash Remittances', 'Electronic Retail Card Spending', 'Redbook',
+        'BRC Retail Sales Monitor', 'BRC Shop Price Index', 'CBI Business Optimism Index',
+        'CBI Distributive Trades', 'CBI Industrial Trends Orders', 'CB Leading Index',
+        'CB Employment Trends Index', 'CFIB Business Barometer', 'NIESR Monthly GDP Tracker',
+        'SECO Consumer Climate', 'SECO Economic Forecasts', 'European Commission Forecasts',
+        'European Commission Spring Forecasts', 'European Commission Winter Forecasts',
+        'ECB Non-Monetary Policy Meeting', 'BoE MPC Treasury Committee Hearings',
+        'BoE MPC Vote Cut', 'BoE MPC Vote Hike', 'BoE MPC Vote Unchanged',
+        'BoE Credit Conditions Survey', 'BoE Decision Maker Panel', 'BoE Consumer Credit',
+        'BoE FPC Meeting Minutes', 'Fed Balance Sheet', 'Fed Bank Stress Test Results',
+        'BCB Copom Meeting Minutes', 'BCB Focus Market Readout', 'BCB National Monetary Council Meeting',
+        'CBR Press Conference', 'Summary of the Key Rate Discussion',
+        'Irish Exchequer Returns', 'Annual Report'
+    ]
+    
+    # 检查重要性等级
+    if event_name in high_impact_events:
+        return 3
+    elif event_name in medium_impact_events:
+        return 2
+    else:
+        return 1  # 默认1星
+
+router = APIRouter()
+
+# === 服务获取辅助函数 ===
+
+def get_market_data_service() -> MarketDataService:
+    """获取市场数据服务实例（单例）"""
+    registry = get_service_registry()
+    return registry.get_or_create_service("market_data_service", MarketDataService)
+
+def get_macro_indicators_service() -> MacroIndicatorsService:
+    """获取宏观指标服务实例（单例）"""
+    registry = get_service_registry()
+    return registry.get_or_create_service("macro_indicators_service", MacroIndicatorsService)
+
+def get_economic_events_service() -> EconomicEventsService:
+    """获取经济事件服务实例（单例）"""
+    registry = get_service_registry()
+    return registry.get_or_create_service("economic_events_service", EconomicEventsService)
+
+# === Pydantic Models ===
+
+class EconomicEventResponse(BaseModel):
+    """经济事件响应模型"""
+    date: Optional[str] = Field(None, description="事件日期")
+    time: Optional[str] = Field(None, description="事件时间")
+    country: Optional[str] = Field(None, description="国家代码")
+    event: Optional[str] = Field(None, description="事件名称")
+    period: Optional[str] = Field(None, description="周期")
+    actual: Optional[Union[str, int, float]] = Field(None, description="实际值")
+    previous: Optional[Union[str, int, float]] = Field(None, description="前值")
+    forecast: Optional[Union[str, int, float]] = Field(None, description="预期值")
+    calculated_change: Optional[float] = Field(None, description="计算变化值")
+    calculated_change_pct: Optional[float] = Field(None, description="计算变化率")
+    impact: Optional[int] = Field(None, description="重要性等级 (1-3星)")
+
+class MacroIndicatorResponse(BaseModel):
+    """宏观指标响应模型"""
+    country_code: str = Field(..., description="国家代码")
+    country_name: str = Field(..., description="国家名称")
+    indicator: str = Field(..., description="指标代码")
+    indicator_name: str = Field(..., description="指标名称")
+    year: int = Field(..., description="年份")
+    value: Optional[float] = Field(None, description="指标值")
+    date_str: Optional[str] = Field(None, description="原始日期字符串")
+    fetch_timestamp: Optional[datetime] = Field(None, description="获取时间戳")
+
+class MarketStatsResponse(BaseModel):
+    """市场统计响应模型"""
+    total_events: int = Field(..., description="总事件数")
+    latest_date: Optional[str] = Field(None, description="最新数据日期")
+    country_stats: Dict[str, int] = Field(..., description="按国家统计")
+    date_stats: Dict[str, int] = Field(..., description="按日期统计")
+    total_countries: int = Field(..., description="总国家数")
+
+class CountryInfo(BaseModel):
+    """国家信息模型"""
+    code: str = Field(..., description="国家代码")
+    name: str = Field(..., description="国家名称")
+
+class IndicatorInfo(BaseModel):
+    """指标信息模型"""
+    indicator: str = Field(..., description="指标代码")
+    indicator_name: str = Field(..., description="指标名称")
+    data_points: int = Field(..., description="数据点数量")
+    earliest_year: int = Field(..., description="最早年份")
+    latest_year: int = Field(..., description="最新年份")
+
+# === API Endpoints ===
+
+@router.get("/economic-events", response_model=List[EconomicEventResponse], summary="获取经济事件数据")
+async def get_economic_events(
+    from_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    country: Optional[str] = Query(None, description="国家代码"),
+    limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取经济事件数据
+    
+    - **from_date**: 开始日期，格式 YYYY-MM-DD
+    - **to_date**: 结束日期，格式 YYYY-MM-DD  
+    - **country**: 国家代码 (ISO 3166)
+    - **limit**: 返回数量限制 (1-1000)
+    - **offset**: 偏移量
+    """
+    try:
+        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}", source="markets_api")
+        
+        # 从数据库获取数据
+        market_service = get_market_data_service()
+        events = market_service.get_economic_events(
+            from_date=from_date,
+            to_date=to_date,
+            country=country,
+            limit=limit,
+            offset=offset
+        )
+        
+        info(f"获取到 {len(events)} 条经济事件数据", source="markets_api")
+        return events
+        
+    except Exception as e:
+        error(f"获取经济事件数据失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取经济事件数据失败: {str(e)}"
+        )
+
+
+
+@router.get("/macro-indicators", response_model=List[MacroIndicatorResponse], summary="获取宏观指标数据")
+async def get_macro_indicators(
+    country: Optional[str] = Query(None, description="国家代码"),
+    indicator: Optional[str] = Query(None, description="指标代码"),
+    year_from: Optional[int] = Query(None, description="起始年份"),
+    year_to: Optional[int] = Query(None, description="结束年份"),
+    limit: int = Query(1000, ge=1, le=5000, description="返回数量限制"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取宏观指标数据
+    
+    - **country**: 国家代码 (ISO 3166 Alpha-3)
+    - **indicator**: 指标代码
+    - **year_from**: 起始年份
+    - **year_to**: 结束年份
+    - **limit**: 返回数量限制 (1-5000)
+    """
+    try:
+        info(f"获取宏观指标数据请求: user={current_user.username}, country={country}, indicator={indicator}", source="markets_api")
+        
+        # 初始化API客户端
+        macro_service = get_macro_indicators_service()
+        
+        # 从数据库获取数据
+        data = macro_service.get_stored_data(
+            country=country,
+            indicator=indicator,
+            year_from=year_from,
+            year_to=year_to,
+            limit=limit
+        )
+        
+        info(f"获取到 {len(data)} 条宏观指标数据", source="markets_api")
+        return data
+        
+    except Exception as e:
+        error(f"获取宏观指标数据失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取宏观指标数据失败: {str(e)}"
+        )
+
+
+
+@router.get("/statistics", response_model=MarketStatsResponse, summary="获取市场数据统计")
+async def get_market_statistics(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取市场数据统计信息
+    """
+    try:
+        info(f"获取市场数据统计: user={current_user.username}", source="markets_api")
+        
+        market_service = get_market_data_service()
+        stats = market_service.get_events_statistics()
+        
+        return stats
+        
+    except Exception as e:
+        error(f"获取市场数据统计失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取市场数据统计失败: {str(e)}"
+        )
+
+@router.get("/countries", response_model=List[CountryInfo], summary="获取可用国家列表")
+async def get_available_countries(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取数据库中可用的国家列表
+    """
+    try:
+        # 初始化API客户端
+        macro_service = get_macro_indicators_service()
+        
+        # 从数据库获取国家列表
+        countries = macro_service.get_available_countries()
+        
+        # 如果数据库中没有数据，返回常用国家列表
+        if not countries:
+            common_countries = macro_service.list_common_countries()
+            countries = [{"code": code, "name": name} for code, name in common_countries.items()]
+        
+        return countries
+        
+    except Exception as e:
+        error(f"获取国家列表失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取国家列表失败: {str(e)}"
+        )
+
+@router.get("/economic-events/countries", response_model=List[CountryInfo], summary="获取经济事件可用国家列表")
+async def get_economic_events_countries(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取经济事件数据库中可用的国家列表
+    """
+    try:
+        # 初始化数据库服务
+        market_service = get_market_data_service()
+        
+        # 从经济事件数据库获取国家列表
+        countries = market_service.get_available_countries()
+        
+        return countries
+        
+    except Exception as e:
+        error(f"获取经济事件国家列表失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取经济事件国家列表失败: {str(e)}"
+        )
+
+@router.get("/indicators", summary="获取可用指标列表")
+async def get_available_indicators(
+    country: Optional[str] = Query(None, description="国家代码，获取该国家的可用指标"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取可用的宏观指标列表
+    
+    - **country**: 可选，获取指定国家的可用指标
+    """
+    try:
+        # 初始化API客户端
+        macro_service = get_macro_indicators_service()
+        
+        if country:
+            # 获取指定国家的可用指标
+            indicators = macro_service.get_available_indicators_for_country(country)
+            return {
+                "country": country,
+                "indicators": indicators
+            }
+        else:
+            # 获取所有指标定义
+            all_indicators = macro_service.list_all_indicators()
+            indicators = [
+                {
+                    "indicator": code,
+                    "indicator_name": name,
+                    "data_points": 0,
+                    "earliest_year": 0,
+                    "latest_year": 0
+                }
+                for code, name in all_indicators.items()
+            ]
+            return {
+                "country": None,
+                "indicators": indicators
+            }
+        
+    except Exception as e:
+        error(f"获取指标列表失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取指标列表失败: {str(e)}"
+        )
+
+@router.get("/supported-countries", summary="获取支持的国家代码")
+async def get_supported_countries(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取API支持的国家代码列表
+    """
+    try:
+        # 经济事件API支持的国家
+        events_service = get_economic_events_service()
+        event_countries = events_service.get_supported_countries()
+        
+        # 宏观指标API支持的国家
+        macro_service = get_macro_indicators_service()
+        macro_countries = macro_service.list_common_countries()
+        
+        return {
+            "economic_events": event_countries,
+            "macro_indicators": macro_countries
+        }
+        
+    except Exception as e:
+        error(f"获取支持的国家代码失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取支持的国家代码失败: {str(e)}"
+        )
+
+@router.post("/economic-events/fetch", summary="获取经济事件数据")
+async def fetch_economic_events(
+    from_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    country: Optional[str] = Query(None, description="国家代码"),
+    limit: int = Query(100, ge=1, le=1000, description="获取数量限制"),
+    current_user=Depends(get_current_user)
+):
+    """
+    从EODHD API获取经济事件数据并存储到数据库
+    
+    - **from_date**: 开始日期，格式 YYYY-MM-DD
+    - **to_date**: 结束日期，格式 YYYY-MM-DD  
+    - **country**: 国家代码 (ISO 3166)
+    - **limit**: 获取数量限制 (1-1000)
+    """
+    try:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="需要管理员权限"
+            )
+        
+        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}, country={country}", source="markets_api")
+        
+        # 获取经济事件服务
+        events_service = get_economic_events_service()
+        market_service = get_market_data_service()
+        
+        # 从API获取数据
+        events_data = events_service.get_economic_events(
+            from_date=from_date,
+            to_date=to_date,
+            country=country,
+            limit=limit
+        )
+        
+        if not events_data:
+            return {
+                "message": "未获取到经济事件数据",
+                "total_fetched": 0,
+                "new_records": 0,
+                "updated_records": 0
+            }
+        
+        # 存储数据并计算impact
+        total_fetched = len(events_data)
+        new_records = 0
+        updated_records = 0
+        
+        for event_data in events_data:
+            # 格式化事件数据
+            formatted_event = events_service.format_event_data(event_data)
+            
+            # 计算impact值
+            impact = calculate_event_impact(formatted_event['event'])
+            formatted_event['impact'] = impact
+            
+            # 存储到数据库
+            event_id = market_service.insert_economic_event(formatted_event)
+            if event_id > 0:
+                new_records += 1
+            else:
+                # 可能是重复数据，尝试更新
+                updated = market_service.update_economic_event(formatted_event)
+                if updated:
+                    updated_records += 1
+        
+        info(f"经济事件数据获取完成: 获取{total_fetched}条，新增{new_records}条，更新{updated_records}条", source="markets_api")
+        
+        return {
+            "message": f"经济事件数据获取完成",
+            "total_fetched": total_fetched,
+            "new_records": new_records,
+            "updated_records": updated_records
+        }
+        
+    except Exception as e:
+        error(f"获取经济事件数据失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取经济事件数据失败: {str(e)}"
+        )
+
+@router.delete("/economic-events/cleanup", summary="清理旧的经济事件数据")
+async def cleanup_old_economic_events(
+    days: int = Query(365, ge=30, le=3650, description="保留天数"),
+    current_user=Depends(get_current_user)
+):
+    """
+    清理指定天数之前的旧经济事件数据
+    
+    - **days**: 保留天数 (30-3650)
+    """
+    try:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="需要管理员权限"
+            )
+        
+        info(f"清理旧经济事件数据: user={current_user.username}, days={days}", source="markets_api")
+        
+        market_service = get_market_data_service()
+        deleted_count = market_service.delete_old_events(days)
+        
+        info(f"清理完成，删除了 {deleted_count} 条旧数据", source="markets_api")
+        
+        return {
+            "message": f"清理完成，删除了 {deleted_count} 条旧数据",
+            "deleted_count": deleted_count,
+            "retention_days": days
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"清理旧数据失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"清理旧数据失败: {str(e)}"
+        )

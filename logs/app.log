@@ -1,0 +1,1245 @@
+2025-08-27 00:00:00 [INFO] [scheduler_service] 开始执行任务: economic_events_Economic Events Auto Fetch_1755921193, 类型: economic_events
+2025-08-27 00:00:01 [INFO] [scheduler_service] 任务执行开始记录已保存: 683
+2025-08-27 00:00:01 [INFO] [scheduler_service] 执行经济事件获取任务 | params={'limit': 1000}
+2025-08-27 00:00:04 [INFO] [scheduler_service] 经济事件任务执行完成: 获取1000条，保存0条
+2025-08-27 00:00:06 [INFO] [scheduler_service] 任务执行完成记录已更新: 683, 状态: success
+2025-08-27 00:00:07 [INFO] [scheduler_service] 任务执行成功: economic_events_Economic Events Auto Fetch_1755921193, 耗时: 4285ms
+2025-08-27 00:00:07 [INFO] [scheduler_service] 任务执行完成: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:16:04 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:16:04 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:16:08 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:16:08 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:16:09 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:16:09 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:16:09 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:16:09 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:16:09 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:16:09 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:16:09 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:16:09 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:16:09 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:16:09 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:16:09 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:16:21 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:16:21 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:16:23 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:16:23 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:16:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:16:30 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:16:30 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:16:30 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:16:30 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:16:30 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:16:31 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:16:31 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:16:31 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:16:31 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:16:32 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:16:32 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:16:32 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:16:32 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:16:33 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:16:33 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:17:23 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:17:23 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:17:23 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:17:23 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:17:23 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:17:23 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:17:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-14, to_date=2025-08-27
+2025-08-27 00:17:28 [INFO] [universal_glance] [market_data] 查询到 112 条经济事件数据
+2025-08-27 00:17:28 [INFO] [universal_glance] [markets_api] 获取到 112 条经济事件数据
+2025-08-27 00:17:31 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-14, to_date=2025-08-27
+2025-08-27 00:17:31 [INFO] [universal_glance] [market_data] 查询到 112 条经济事件数据
+2025-08-27 00:17:31 [INFO] [universal_glance] [markets_api] 获取到 112 条经济事件数据
+2025-08-27 00:17:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:17:36 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:17:36 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:17:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-14, to_date=2025-08-27
+2025-08-27 00:17:37 [INFO] [universal_glance] [market_data] 查询到 112 条经济事件数据
+2025-08-27 00:17:37 [INFO] [universal_glance] [markets_api] 获取到 112 条经济事件数据
+2025-08-27 00:17:43 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:17:43 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:17:43 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:17:43 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:17:46 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:17:46 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:17:46 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:17:46 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:17:46 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:17:46 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:17:46 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:17:46 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:17:47 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:17:47 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:17:47 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:17:47 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:17:47 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:17:57 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:17:58 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:18:02 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:18:02 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:18:02 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:18:03 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:18:03 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:18:03 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:18:03 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:18:03 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:18:03 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:18:04 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:18:04 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:18:04 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:18:04 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:18:04 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:18:05 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:18:05 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:18:05 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:18:05 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:18:17 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:18:17 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:18:17 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:18:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:18:23 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:18:23 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:18:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:18:23 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:18:23 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:43 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:43 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:43 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:19:44 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:44 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:44 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:44 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:44 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:44 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:45 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:45 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:45 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:45 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:19:46 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:19:46 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:19:46 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:19:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:47 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:47 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:19:47 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:19:47 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:19:47 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:06 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:07 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:07 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:07 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:20:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:08 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:08 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:08 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:09 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:09 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:09 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:20:09 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:20:09 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:20:09 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:20:10 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:10 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:10 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:10 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:10 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:10 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:10 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:11 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:11 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:36 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:36 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:36 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:20:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:37 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:37 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:38 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:38 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:38 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:51 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:51 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:55 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:55 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:20:55 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:20:55 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:20:55 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:21:42 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:21:42 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:21:42 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:21:42 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:21:43 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:21:43 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:21:43 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:21:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:21:44 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:21:44 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:21:44 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:21:44 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:21:44 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:24:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:24:36 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:24:36 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:24:36 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:24:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:24:37 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:24:37 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:24:38 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:24:38 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:24:38 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:24:38 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:24:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:24:39 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:24:39 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:24:53 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:24:53 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:24:53 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:24:53 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:24:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:24:54 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:24:54 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:24:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:24:55 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:24:55 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:24:55 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:24:55 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:24:55 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:24:55 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:25:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:25:25 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:25:25 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:25:25 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:25:26 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:25:26 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:25:26 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:25:26 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:25:27 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:25:27 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:25:27 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:25:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:25:28 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:25:28 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:25:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:25:56 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:25:56 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:25:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-27, to_date=2025-09-06
+2025-08-27 00:25:56 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:25:56 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:27:31 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:27:31 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:27:31 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:27:32 [INFO] [universal_glance] [market_data] 查询到 5 条经济事件数据
+2025-08-27 00:27:32 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:27:32 [INFO] [universal_glance] [market_data] 查询到 5 条经济事件数据
+2025-08-27 00:27:59 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:27:59 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:27:59 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:27:59 [INFO] [universal_glance] [market_data] 查询到 50 条经济事件数据
+2025-08-27 00:27:59 [INFO] [universal_glance] [market_data] 查询到 50 条经济事件数据
+2025-08-27 00:28:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:28:54 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:28:54 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:28:55 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:28:55 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:28:56 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:28:56 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:28:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:28:57 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:28:57 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:28:57 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 00:28:57 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 00:28:57 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 00:28:57 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:28:58 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:28:58 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:28:58 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:29:45 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:29:46 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:29:46 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:29:46 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:29:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:29:47 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:29:47 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:29:47 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:29:48 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:29:48 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:29:48 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:29:48 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:29:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:29:49 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:29:49 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:29:49 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:29:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:29:57 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:29:57 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:29:57 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:30:05 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:30:06 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:30:06 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:30:07 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:30:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:30:51 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:30:51 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:30:51 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:30:52 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:30:52 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:30:52 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:30:52 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:30:53 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:30:53 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:30:53 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:30:56 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:30:57 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:30:57 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:30:57 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:30:57 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:36:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:25 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:36:25 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:36:33 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:33 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:36:33 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:36:34 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:34 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:36:34 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:36:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:35 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:36:35 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:36:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:37 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:36:37 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:36:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:36:40 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:36:40 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:36:59 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:37:00 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:37:00 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:37:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:37:36 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:37:36 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:37:37 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:37:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:37:38 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:37:38 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:37:38 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:37:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:37:39 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:37:39 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:37:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:37:40 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:37:40 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:38:00 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:00 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:00 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:00 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:01 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:01 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:01 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:01 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:02 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:02 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:02 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:02 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:03 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:03 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:03 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:03 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:07 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:07 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:07 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:09 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:09 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:09 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:09 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:10 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:11 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:11 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:11 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:12 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:12 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:12 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:13 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:13 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:13 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:13 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:38:14 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:38:14 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:38:14 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:38:14 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:40:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:40 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:40:40 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:40:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:40 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:40:40 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:40:41 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:42 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:40:42 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:40:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:51 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:40:51 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:40:53 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:54 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:40:54 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:40:55 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:40:55 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:40:55 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:41:00 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:41:00 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:41:00 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:41:41 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:41:42 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:41:42 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:41:43 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:41:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:41:43 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:41:43 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:41:44 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:41:59 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:41:59 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:41:59 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:42:04 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:42:04 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:42:04 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:42:11 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:42:12 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:42:12 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:42:21 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:42:21 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:42:21 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:42:27 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:42:27 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:42:27 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:43:19 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:43:19 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:43:19 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:44:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:44:08 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:44:08 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:44:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:44:56 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:44:56 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:44:57 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:44:57 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:44:57 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:44:57 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:44:58 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:45:04 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:04 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:45:04 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:45:05 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:45:05 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:06 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:06 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:06 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:45:20 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:20 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:20 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:22 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:22 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:45:22 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:45:30 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:30 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:30 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:31 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:31 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:31 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:32 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:33 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:33 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:34 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:34 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:45:34 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:45:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:36 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:36 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:38 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:38 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:38 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:39 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:45:39 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:45:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:45:40 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:45:40 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:46:18 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:19 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:46:19 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:46:20 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:46:21 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:22 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:46:22 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:46:22 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:46:26 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:26 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:46:26 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:46:26 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:46:27 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:27 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:46:27 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:46:28 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:46:34 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:35 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:46:35 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:46:35 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:46:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:46:36 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:46:36 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:46:37 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:47:06 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:06 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:47:06 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:47:08 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:09 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:47:09 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:47:09 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:10 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:47:10 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:47:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:13 [INFO] [universal_glance] [market_data] 查询到 1 条经济事件数据
+2025-08-27 00:47:13 [INFO] [universal_glance] [markets_api] 获取到 1 条经济事件数据
+2025-08-27 00:47:16 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:16 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:47:16 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:47:50 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:51 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:47:51 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:47:51 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:47:52 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:52 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:47:52 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:47:52 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:47:59 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:47:59 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:47:59 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:48:00 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:48:00 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:01 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:48:01 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:48:01 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:48:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:07 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:48:07 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:48:08 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:48:08 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:09 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:48:09 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:48:09 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:48:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:28 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:48:28 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:48:29 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:30 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:48:30 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:48:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:37 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:48:37 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:48:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:40 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:48:40 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:48:42 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:42 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:48:42 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:48:44 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:48:44 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:48:44 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:49:11 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:49:11 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:49:11 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:49:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:49:47 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:49:47 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:49:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:49:50 [INFO] [universal_glance] [market_data] 查询到 13 条经济事件数据
+2025-08-27 00:49:50 [INFO] [universal_glance] [markets_api] 获取到 13 条经济事件数据
+2025-08-27 00:50:33 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:33 [INFO] [universal_glance] [market_data] 查询到 13 条经济事件数据
+2025-08-27 00:50:33 [INFO] [universal_glance] [markets_api] 获取到 13 条经济事件数据
+2025-08-27 00:50:34 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:34 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:34 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:50:34 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:50:35 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:41 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:43 [INFO] [universal_glance] [market_data] 查询到 13 条经济事件数据
+2025-08-27 00:50:43 [INFO] [universal_glance] [markets_api] 获取到 13 条经济事件数据
+2025-08-27 00:50:44 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:45 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:46 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:50:46 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:50:46 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:49 [INFO] [universal_glance] [market_data] 查询到 13 条经济事件数据
+2025-08-27 00:50:49 [INFO] [universal_glance] [markets_api] 获取到 13 条经济事件数据
+2025-08-27 00:50:50 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:51 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:50:51 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:50:52 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:50:53 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:54 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:50:54 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:50:56 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:56 [INFO] [universal_glance] [market_data] 查询到 1 条经济事件数据
+2025-08-27 00:50:56 [INFO] [universal_glance] [markets_api] 获取到 1 条经济事件数据
+2025-08-27 00:50:57 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:50:57 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:50:57 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:51:01 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:01 [INFO] [universal_glance] [market_data] 查询到 7 条经济事件数据
+2025-08-27 00:51:01 [INFO] [universal_glance] [markets_api] 获取到 7 条经济事件数据
+2025-08-27 00:51:02 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:03 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:51:03 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:51:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:07 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:51:07 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:51:11 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:11 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:51:11 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:51:13 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:13 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:51:13 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:51:16 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:51:16 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:51:16 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:51:57 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:51:57 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:51:57 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:51:57 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:51:59 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:51:59 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:52:00 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:52:00 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:52:00 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:52:00 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:52:00 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:52:00 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:52:00 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:52:00 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:52:00 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:52:00 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:52:00 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:52:22 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:22 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:52:22 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:52:22 [INFO] [universal_glance] [market_data] 查询到 70 条经济事件数据
+2025-08-27 00:52:22 [INFO] [universal_glance] [markets_api] 获取到 70 条经济事件数据
+2025-08-27 00:52:22 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:52:23 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:52:23 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:52:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:24 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:52:24 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:52:24 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:52:33 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:34 [INFO] [universal_glance] [market_data] 查询到 70 条经济事件数据
+2025-08-27 00:52:34 [INFO] [universal_glance] [markets_api] 获取到 70 条经济事件数据
+2025-08-27 00:52:34 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:52:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:35 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:52:35 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:52:35 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:52:42 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:52:42 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:52:42 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:52:42 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:52:44 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:52:44 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:52:45 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:52:45 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:52:45 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:52:45 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:52:45 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:52:45 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:52:45 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:52:45 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:52:45 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:52:45 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:52:45 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:52:45 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:45 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:52:45 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:52:45 [INFO] [universal_glance] [market_data] 查询到 13 条经济事件数据
+2025-08-27 00:52:45 [INFO] [universal_glance] [markets_api] 获取到 13 条经济事件数据
+2025-08-27 00:52:45 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:46 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:52:46 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:52:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:52 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:52:52 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:52:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:52:54 [INFO] [universal_glance] [market_data] 查询到 70 条经济事件数据
+2025-08-27 00:52:54 [INFO] [universal_glance] [markets_api] 获取到 70 条经济事件数据
+2025-08-27 00:53:04 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:53:05 [INFO] [universal_glance] [market_data] 查询到 71 条经济事件数据
+2025-08-27 00:53:05 [INFO] [universal_glance] [markets_api] 获取到 71 条经济事件数据
+2025-08-27 00:53:22 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-01, to_date=2025-08-31
+2025-08-27 00:53:22 [INFO] [universal_glance] [market_data] 查询到 222 条经济事件数据
+2025-08-27 00:53:22 [INFO] [universal_glance] [markets_api] 获取到 222 条经济事件数据
+2025-08-27 00:53:27 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:53:27 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:53:27 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:53:27 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:53:30 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:53:30 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:53:31 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:53:31 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:53:31 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:53:31 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:53:31 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:53:31 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:53:32 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:53:32 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:53:32 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:53:32 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:53:32 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:53:44 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:53:45 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:53:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:53:46 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:53:46 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:53:47 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:53:47 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:53:47 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:53:47 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:53:47 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:53:48 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:53:48 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:53:48 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:53:48 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:53:57 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:53:57 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:53:57 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:54:08 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:54:09 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:54:09 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:54:09 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:54:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:54:37 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:54:37 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:54:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:54:39 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:54:39 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:54:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:54:41 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:54:41 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:54:42 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:54:42 [INFO] [universal_glance] [market_data] 查询到 1 条经济事件数据
+2025-08-27 00:54:42 [INFO] [universal_glance] [markets_api] 获取到 1 条经济事件数据
+2025-08-27 00:54:53 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:54:53 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:54:53 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:54:53 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:54:56 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:54:56 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:54:57 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:54:57 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:54:57 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:54:57 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:54:57 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:54:57 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:54:57 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:54:57 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:54:57 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:54:57 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:54:57 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:55:08 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:55:08 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:55:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:55:23 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:55:23 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:55:23 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:55:23 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:55:23 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:55:24 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:55:24 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:55:24 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:55:24 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:55:24 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:55:24 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:56:11 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:56:11 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:56:11 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:56:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:56:12 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:56:12 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:56:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:11 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:58:11 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:58:12 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:58:12 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:58:12 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:58:12 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:58:12 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:58:12 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:58:12 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:58:12 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:58:12 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:58:12 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:58:12 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:58:27 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:58:27 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 00:58:30 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:30 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:58:30 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:58:31 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:58:31 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:58:31 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:58:31 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 00:58:31 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 00:58:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:35 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:58:35 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:58:35 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 00:58:37 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:38 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:58:38 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:58:38 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:39 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 00:58:39 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 00:58:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:40 [INFO] [universal_glance] [market_data] 查询到 311 条经济事件数据
+2025-08-27 00:58:40 [INFO] [universal_glance] [markets_api] 获取到 311 条经济事件数据
+2025-08-27 00:58:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:46 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:58:46 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:58:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:50 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:58:50 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:58:51 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:58:51 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:58:51 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:59:14 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:14 [INFO] [universal_glance] [market_data] 查询到 58 条经济事件数据
+2025-08-27 00:59:14 [INFO] [universal_glance] [markets_api] 获取到 58 条经济事件数据
+2025-08-27 00:59:21 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:59:21 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:59:21 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:59:21 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 00:59:24 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:59:24 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 00:59:25 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 00:59:25 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 00:59:25 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 00:59:25 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 00:59:25 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 00:59:25 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 00:59:25 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 00:59:25 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 00:59:25 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 00:59:25 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 00:59:25 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 00:59:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:25 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 00:59:25 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 00:59:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 00:59:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 00:59:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:35 [INFO] [universal_glance] [market_data] 查询到 59 条经济事件数据
+2025-08-27 00:59:35 [INFO] [universal_glance] [markets_api] 获取到 59 条经济事件数据
+2025-08-27 00:59:36 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:36 [INFO] [universal_glance] [market_data] 查询到 57 条经济事件数据
+2025-08-27 00:59:36 [INFO] [universal_glance] [markets_api] 获取到 57 条经济事件数据
+2025-08-27 00:59:38 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:39 [INFO] [universal_glance] [market_data] 查询到 70 条经济事件数据
+2025-08-27 00:59:39 [INFO] [universal_glance] [markets_api] 获取到 70 条经济事件数据
+2025-08-27 00:59:46 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 00:59:47 [INFO] [universal_glance] [market_data] 查询到 70 条经济事件数据
+2025-08-27 00:59:47 [INFO] [universal_glance] [markets_api] 获取到 70 条经济事件数据
+2025-08-27 00:59:55 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 00:59:55 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 00:59:55 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 00:59:55 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:00:01 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:00:01 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:00:02 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:00:02 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:00:02 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:00:02 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:00:02 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:00:02 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:00:02 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:00:02 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:00:02 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:00:02 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:00:02 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:00:11 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:00:14 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:00:14 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:00:14 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 01:00:14 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 01:00:16 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 01:00:16 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 01:00:16 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:00:17 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 01:00:17 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 01:00:17 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:00:18 [INFO] [universal_glance] [market_data] 查询到 0 条经济事件数据
+2025-08-27 01:00:18 [INFO] [universal_glance] [markets_api] 获取到 0 条经济事件数据
+2025-08-27 01:00:18 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:01:16 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:01:16 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:01:16 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:01:16 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:01:18 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:01:18 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:01:19 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:01:19 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:01:19 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:01:19 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:01:19 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:01:19 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:01:19 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:01:19 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:01:19 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:01:19 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:01:19 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:01:29 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:01:29 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 01:01:29 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 01:01:33 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:01:33 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:01:33 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:01:34 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 01:01:34 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 01:01:35 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:01:35 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:01:35 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:03:54 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:03:54 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:03:54 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:03:54 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:03:55 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:03:55 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:03:56 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:03:56 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:03:56 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:03:56 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:03:56 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:03:56 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:03:56 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:03:56 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:03:56 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:03:56 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:03:56 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:03:57 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:03:57 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:03:57 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:03:57 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:03:59 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:03:59 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:04:00 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:04:00 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:04:00 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:04:00 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:04:00 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:04:00 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:04:00 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:04:00 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:04:00 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:04:00 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:04:00 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:04:33 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:04:33 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:04:33 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:04:33 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:04:35 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:04:35 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:04:36 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:04:36 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:04:36 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:04:36 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:04:36 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:04:36 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:04:37 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:04:37 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:04:37 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:04:37 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:04:37 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:04:47 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:04:48 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:05:21 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:05:21 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 01:05:21 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 01:05:21 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:05:21 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:05:22 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:05:22 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 01:05:22 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 01:05:26 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:05:26 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:05:26 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:05:27 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:05:52 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:05:52 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:05:52 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:05:52 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:05:54 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:05:54 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:05:56 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:05:56 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:05:56 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:05:56 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:05:56 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:05:56 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:05:56 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:05:56 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:05:56 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:05:56 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:05:56 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:06:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:06:28 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 01:06:28 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 01:06:28 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:06:28 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:06:29 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:06:29 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 01:06:29 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 01:08:45 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:08:46 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:08:49 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:08:50 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:08:50 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:08:51 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:10:53 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:10:54 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:11:39 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:11:40 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:11:47 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:11:48 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:15:43 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:15:45 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:15:45 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:15:46 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:18:18 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:18:19 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:18:19 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:18:20 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:23:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:26 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:26 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:26 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:26 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:26 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:29 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:29 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:29 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:30 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:30 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:31 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:31 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:31 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:31 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:32 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:32 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:32 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:32 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:33 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:33 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:33 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:34 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:23:34 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:23:34 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:23:35 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:23:35 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:23:35 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:23:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:39 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:39 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:40 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:23:40 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:23:40 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:23:40 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:23:41 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:23:41 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:23:41 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:23:42 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:23:42 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:23:42 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:25:38 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:25:38 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:25:38 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:25:38 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:25:42 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:25:42 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:25:42 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:25:42 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:25:42 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:25:42 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:25:42 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:25:42 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:25:43 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:25:43 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:25:43 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:25:43 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:25:43 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:26:14 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:26:14 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:28:08 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-27 01:28:08 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-27 01:28:08 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-27 01:28:08 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-27 01:28:11 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:28:11 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 01:28:12 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 01:28:12 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:28:12 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 01:28:12 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 01:28:12 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 01:28:12 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 01:28:12 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 01:28:12 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 01:28:12 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 01:28:12 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 01:28:12 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 01:28:22 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:28:22 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 01:28:29 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:29 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 01:28:29 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 01:28:29 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:29 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:30 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:30 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:31 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:31 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:31 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:37 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:28:37 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 01:28:37 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 01:28:38 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:28:38 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:28:38 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:28:38 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:28:38 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:28:40 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:41 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:41 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:41 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:42 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:42 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:42 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:42 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:43 [INFO] [scheduler_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 01:28:43 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
+2025-08-27 01:28:44 [INFO] [scheduler_api] 成功获取 3 条 task_scheduling 表记录 | user=admin
+2025-08-27 01:28:44 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
+2025-08-27 01:28:45 [INFO] [scheduler_api] 成功获取 3 个定时任务 | user=admin
+2025-08-27 01:28:45 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
+2025-08-27 01:28:45 [INFO] [scheduler_api] 成功获取 3 条 task_scheduling 表记录 | user=admin
+2025-08-27 01:28:45 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
+2025-08-27 01:28:45 [INFO] [scheduler_api] 成功获取 3 个定时任务 | user=admin
+2025-08-27 01:28:53 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:53 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:53 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:53 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:54 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 01:28:54 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 01:28:54 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 01:28:55 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 01:28:57 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:28:57 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:28:57 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 01:28:57 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 01:28:58 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 01:28:58 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 08:27:26 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 08:27:26 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-27 08:27:26 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-27 08:27:26 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-27 08:27:26 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-27 08:27:26 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-27 08:27:26 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-27 08:27:26 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-27 08:27:27 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
+2025-08-27 08:27:27 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
+2025-08-27 08:27:27 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
+2025-08-27 08:27:27 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-27 08:27:27 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-27 08:30:23 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 08:30:24 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-27 08:30:27 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:30:27 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-27 08:30:27 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-27 08:30:27 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:30:27 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:30:27 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:30:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:30:28 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:30:28 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:30:28 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:03 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 08:31:03 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-27 08:31:03 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-27 08:31:04 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 08:31:04 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 08:31:04 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 08:31:04 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 08:31:04 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 08:31:07 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:08 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:08 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:08 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:08 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:09 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:09 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:09 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:09 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:09 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:10 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:10 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:13 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:13 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:13 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:13 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:13 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:13 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:14 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-27 08:31:23 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:24 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:24 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:24 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:24 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:24 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:24 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:31:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:31:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:31:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:33:39 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:33:39 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:33:39 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:34:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:34:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:34:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:36:21 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:36:21 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:36:21 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:37:04 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:37:04 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:37:04 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:38:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:38:50 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:38:50 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:39:25 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-20, to_date=2025-09-26
+2025-08-27 08:39:25 [INFO] [universal_glance] [market_data] 查询到 60 条经济事件数据
+2025-08-27 08:39:25 [INFO] [universal_glance] [markets_api] 获取到 60 条经济事件数据
+2025-08-27 08:39:51 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 08:39:51 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 08:39:51 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-27 08:39:51 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-27 08:39:52 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-27 08:39:52 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据

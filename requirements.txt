@@ -1,0 +1,35 @@
+# FastAPI Web框架
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# 认证相关
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# 数据验证
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# 数据库
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+
+# 异步支持
+asyncio==3.4.3
+aiofiles==23.2.1
+
+# 任务调度
+APScheduler==3.10.4
+pytz==2023.3
+
+# 现有依赖保持
+requests==2.31.0
+pandas==2.1.4
+openpyxl==3.1.2
+Pillow==10.1.0
+
+# 开发和测试
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2 

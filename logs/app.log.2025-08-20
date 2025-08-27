@@ -1,0 +1,505 @@
+2025-08-20 19:36:24 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 19:36:24 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 19:36:24 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 19:36:48 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 19:36:48 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 19:36:48 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 19:36:48 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 19:36:48 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 19:36:48 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 19:36:49 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 19:36:49 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 19:36:49 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 19:36:49 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 19:36:49 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 19:36:49 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 19:50:27 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 19:50:38 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 19:50:38 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 19:50:39 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 20:02:56 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 20:02:56 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 20:06:36 [INFO] [eodhd_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:06:36 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:06:36 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:06:36 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:06:36 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:06:36 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:06:36 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:06:36 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:06:36 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:06:36 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:06:36 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:06:36 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:06:37 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:06:37 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:06:37 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=None | end_date=None | limit=1 | offset=0
+2025-08-20 20:06:37 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=4
+2025-08-20 20:06:38 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 20:06:38 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=1
+2025-08-20 20:08:47 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 20:08:47 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 20:08:47 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 20:08:48 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 20:08:48 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 20:08:48 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 20:08:48 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 20:08:49 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 20:08:49 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 20:08:49 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 20:08:50 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 20:08:55 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:08:55 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 20:08:55 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 20:09:17 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-20 20:09:17 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 20:09:17 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 20:09:17 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-20 20:09:17 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-20 20:09:17 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=USA, indicator=None
+2025-08-20 20:09:17 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
+2025-08-20 20:09:17 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
+2025-08-20 20:09:21 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 20:09:23 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:09:23 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 20:09:23 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 20:09:41 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 20:09:43 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:09:43 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 20:09:43 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 20:12:15 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=None, to_date=None
+2025-08-20 20:12:15 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 20:12:15 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 20:12:15 [INFO] [universal_glance] [market_data] 查询到 1 条经济事件数据
+2025-08-20 20:12:15 [INFO] [universal_glance] [markets_api] 获取到 1 条经济事件数据
+2025-08-20 20:13:24 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 20:17:13 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:17:13 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 20:17:14 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 20:18:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 20:18:43 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 20:18:43 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 20:18:43 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 20:18:43 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 20:18:43 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 20:18:44 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 20:18:44 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 20:18:44 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 20:18:44 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 20:18:44 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 20:18:45 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 20:25:01 [INFO] [news_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:25:01 [INFO] [news_api] 开始新闻获取请求 | user=admin | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=100 | topic_filter=energy | keywords=None
+2025-08-20 20:25:01 [INFO] [news_api] 初始化EODHD新闻服务
+2025-08-20 20:25:01 [INFO] [eodhd_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 20:25:01 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:25:01 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:25:01 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:25:01 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:25:01 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:25:01 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:25:01 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:25:01 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:25:01 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:25:01 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:25:01 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:25:01 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:25:01 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:25:01 [INFO] [news_api] 开始调用EODHD新闻服务获取新闻
+2025-08-20 20:25:01 [INFO] [eodhd_service] 开始新闻获取和存储流程 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=100 | topic_filter=energy | keywords_count=0
+2025-08-20 20:25:01 [INFO] [eodhd_service] 步骤1：从EODHD API获取原始新闻数据
+2025-08-20 20:25:01 [INFO] [eodhd_service] 调用_get_all_news方法
+2025-08-20 20:25:01 [INFO] [eodhd_service] 开始分页获取新闻 | max_results=100 | symbols=None | topic=None
+2025-08-20 20:25:01 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | limit=100 | offset=0
+2025-08-20 20:25:01 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=6
+2025-08-20 20:25:31 [ERROR] [eodhd_service] EODHD API请求超时 | error=HTTPSConnectionPool(host='eodhd.com', port=443): Read timed out. (read timeout=30) | url=https://eodhd.com/api/news
+2025-08-20 20:25:31 [ERROR] [eodhd_service] 新闻获取和存储流程失败 | error=获取新闻超时: HTTPSConnectionPool(host='eodhd.com', port=443): Read timed out. (read timeout=30)
+2025-08-20 20:25:31 [ERROR] [news_api] 新闻获取请求失败 | error=获取和存储新闻时发生错误: 获取新闻超时: HTTPSConnectionPool(host='eodhd.com', port=443): Read timed out. (read timeout=30) | user=admin
+2025-08-20 20:25:42 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:25:42 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:25:42 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:25:42 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:25:42 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:25:42 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:25:42 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:25:42 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:25:42 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:25:42 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:25:42 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:25:42 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:25:42 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:25:42 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=None | end_date=None | limit=1 | offset=0
+2025-08-20 20:25:42 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=4
+2025-08-20 20:25:43 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 20:25:43 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=1
+2025-08-20 20:25:53 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:25:53 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:25:53 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:25:53 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:25:53 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:25:53 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:25:53 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:25:53 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:25:53 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:25:53 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:25:53 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:25:53 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:25:53 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:25:53 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=None | end_date=None | limit=1 | offset=0
+2025-08-20 20:25:53 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=4
+2025-08-20 20:25:54 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 20:25:54 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=1
+2025-08-20 20:26:01 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:26:01 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:26:01 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:26:01 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:26:01 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:26:01 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:26:01 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:26:01 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:26:01 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:26:01 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:26:01 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:26:01 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:26:01 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:26:01 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=None | end_date=None | limit=1 | offset=0
+2025-08-20 20:26:01 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=4
+2025-08-20 20:26:02 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 20:26:02 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=1
+2025-08-20 20:26:21 [INFO] [news_api] 开始新闻获取请求 | user=admin | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords=None
+2025-08-20 20:26:21 [INFO] [news_api] 初始化EODHD新闻服务
+2025-08-20 20:26:21 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 20:26:21 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 20:26:21 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 20:26:21 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 20:26:21 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 20:26:21 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 20:26:21 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 20:26:21 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 20:26:21 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 20:26:21 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 20:26:21 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 20:26:21 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 20:26:21 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 20:26:21 [INFO] [news_api] 开始调用EODHD新闻服务获取新闻
+2025-08-20 20:26:21 [INFO] [eodhd_service] 开始新闻获取和存储流程 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords_count=0
+2025-08-20 20:26:21 [INFO] [eodhd_service] 步骤1：从EODHD API获取原始新闻数据
+2025-08-20 20:26:21 [INFO] [eodhd_service] 调用_get_all_news方法
+2025-08-20 20:26:21 [INFO] [eodhd_service] 开始分页获取新闻 | max_results=10 | symbols=None | topic=None
+2025-08-20 20:26:21 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | limit=10 | offset=0
+2025-08-20 20:26:21 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=6
+2025-08-20 20:26:22 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 20:26:22 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=10
+2025-08-20 20:26:22 [INFO] [eodhd_service] 达到最大结果数限制 | max_results=10
+2025-08-20 20:26:22 [INFO] [eodhd_service] 分页获取新闻完成 | total_batches=1 | raw_collected=10 | final_count=10
+2025-08-20 20:26:22 [INFO] [eodhd_service] _get_all_news方法调用完成
+2025-08-20 20:26:22 [INFO] [eodhd_service] 原始新闻数据获取完成 | raw_count=10
+2025-08-20 20:26:22 [INFO] [eodhd_service] 步骤2：跳过过滤器（未指定过滤条件）
+2025-08-20 20:26:22 [INFO] [eodhd_service] 步骤3：处理新闻数据以适配数据库 | articles_to_process=10
+2025-08-20 20:26:24 [INFO] [eodhd_service] 新闻数据处理完成 | total_processed=10 | failed_count=0
+2025-08-20 20:26:24 [INFO] [eodhd_service] 步骤4：批量插入新闻到数据库 | articles_to_insert=10
+2025-08-20 20:26:24 [INFO] [eodhd_service] 开始批量插入新闻到数据库 | articles_count=10
+2025-08-20 20:26:29 [INFO] [eodhd_service] 数据库事务提交成功
+2025-08-20 20:26:29 [INFO] [eodhd_service] 批量插入新闻完成 | success_count=10 | existing_count=0 | failed_count=0
+2025-08-20 20:26:29 [INFO] [eodhd_service] 新闻获取和存储流程完成 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10 | fetched_count=10
+2025-08-20 20:26:29 [INFO] [news_api] 新闻获取请求完成 | fetched_count=10 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10
+2025-08-20 21:27:01 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:27:01 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:27:01 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:42:27 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:42:29 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:42:29 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:42:29 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:44:37 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:44:40 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:44:40 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:44:41 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:44:47 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:44:49 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:44:49 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:44:49 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:45:04 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:45:06 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:45:06 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:45:07 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:45:15 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:45:17 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:45:17 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:45:18 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:45:42 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:45:45 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:45:45 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:45:45 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 21:54:19 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 21:54:24 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 21:54:24 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 21:54:27 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 22:07:16 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 22:07:16 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 22:07:16 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 22:07:16 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 22:07:16 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 22:07:16 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 22:07:17 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 22:07:17 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 22:07:17 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 22:07:18 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 22:07:18 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 22:07:18 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 22:07:33 [INFO] [news_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 22:07:33 [INFO] [news_api] 开始新闻获取请求 | user=admin | symbols=AAPL | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords=None
+2025-08-20 22:07:33 [INFO] [news_api] 初始化EODHD新闻服务
+2025-08-20 22:07:33 [INFO] [eodhd_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 22:07:33 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 22:07:33 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 22:07:33 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 22:07:33 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 22:07:33 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 22:07:33 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 22:07:33 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 22:07:33 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 22:07:33 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 22:07:33 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 22:07:33 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 22:07:33 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 22:07:33 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 22:07:33 [INFO] [news_api] 开始调用EODHD新闻服务获取新闻
+2025-08-20 22:07:33 [INFO] [eodhd_service] 开始新闻获取和存储流程 | symbols=AAPL | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords_count=0
+2025-08-20 22:07:33 [INFO] [eodhd_service] 步骤1：从EODHD API获取原始新闻数据
+2025-08-20 22:07:33 [INFO] [eodhd_service] 调用_get_all_news方法
+2025-08-20 22:07:33 [INFO] [eodhd_service] 开始分页获取新闻 | max_results=10 | symbols=AAPL | topic=None
+2025-08-20 22:07:33 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=AAPL | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | limit=10 | offset=0
+2025-08-20 22:07:33 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=7
+2025-08-20 22:07:40 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 22:07:40 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=10
+2025-08-20 22:07:40 [INFO] [eodhd_service] 达到最大结果数限制 | max_results=10
+2025-08-20 22:07:40 [INFO] [eodhd_service] 分页获取新闻完成 | total_batches=1 | raw_collected=10 | final_count=10
+2025-08-20 22:07:40 [INFO] [eodhd_service] _get_all_news方法调用完成
+2025-08-20 22:07:40 [INFO] [eodhd_service] 原始新闻数据获取完成 | raw_count=10
+2025-08-20 22:07:40 [INFO] [eodhd_service] 步骤2：跳过过滤器（未指定过滤条件）
+2025-08-20 22:07:40 [INFO] [eodhd_service] 步骤3：处理新闻数据以适配数据库 | articles_to_process=10
+2025-08-20 22:07:49 [INFO] [eodhd_service] 新闻数据处理完成 | total_processed=10 | failed_count=0
+2025-08-20 22:07:49 [INFO] [eodhd_service] 步骤4：批量插入新闻到数据库 | articles_to_insert=10
+2025-08-20 22:07:49 [INFO] [eodhd_service] 开始批量插入新闻到数据库 | articles_count=10
+2025-08-20 22:07:57 [INFO] [eodhd_service] 数据库事务提交成功
+2025-08-20 22:07:57 [INFO] [eodhd_service] 批量插入新闻完成 | success_count=10 | existing_count=0 | failed_count=0
+2025-08-20 22:07:57 [INFO] [eodhd_service] 新闻获取和存储流程完成 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10 | fetched_count=10
+2025-08-20 22:07:57 [INFO] [news_api] 新闻获取请求完成 | fetched_count=10 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10
+2025-08-20 22:45:46 [INFO] [news_api] 开始新闻获取请求 | user=admin | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords=None
+2025-08-20 22:45:46 [INFO] [news_api] 初始化EODHD新闻服务
+2025-08-20 22:45:46 [INFO] [eodhd_service] 开始初始化EODHD新闻服务
+2025-08-20 22:45:46 [INFO] [eodhd_service] 加载环境变量
+2025-08-20 22:45:46 [INFO] [eodhd_service] 环境变量加载完成
+2025-08-20 22:45:46 [INFO] [eodhd_service] 获取EODHD API密钥
+2025-08-20 22:45:46 [INFO] [eodhd_service] API密钥获取成功 | token_length=23
+2025-08-20 22:45:46 [INFO] [eodhd_service] 设置API基础URL | base_url=https://eodhd.com/api/news
+2025-08-20 22:45:46 [INFO] [eodhd_service] 准备数据库连接配置
+2025-08-20 22:45:46 [INFO] [eodhd_service] 数据库配置准备完成 | host=111.230.48.119 | port=5432 | database=rc_database | user=postgres | password_set=True
+2025-08-20 22:45:46 [INFO] [eodhd_service] 创建数据库管理器
+2025-08-20 22:45:46 [INFO] [eodhd_service] 数据库管理器创建完成
+2025-08-20 22:45:46 [INFO] [eodhd_service] 测试数据库连接
+2025-08-20 22:45:46 [INFO] [eodhd_service] 数据库连接测试成功
+2025-08-20 22:45:46 [INFO] [eodhd_service] EODHD新闻服务初始化完成
+2025-08-20 22:45:46 [INFO] [news_api] 开始调用EODHD新闻服务获取新闻
+2025-08-20 22:45:46 [INFO] [eodhd_service] 开始新闻获取和存储流程 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | max_results=10 | topic_filter=None | keywords_count=0
+2025-08-20 22:45:46 [INFO] [eodhd_service] 步骤1：从EODHD API获取原始新闻数据
+2025-08-20 22:45:46 [INFO] [eodhd_service] 调用_get_all_news方法
+2025-08-20 22:45:46 [INFO] [eodhd_service] 开始分页获取新闻 | max_results=10 | symbols=None | topic=None
+2025-08-20 22:45:46 [INFO] [eodhd_service] 调用EODHD API获取新闻 | symbols=None | topic=None | start_date=2025-08-13 | end_date=2025-08-20 | limit=10 | offset=0
+2025-08-20 22:45:46 [INFO] [eodhd_service] 发送EODHD API请求 | url=https://eodhd.com/api/news | params_count=6
+2025-08-20 22:45:51 [INFO] [eodhd_service] EODHD API请求发送完成，正在解析响应
+2025-08-20 22:45:51 [INFO] [eodhd_service] EODHD API响应成功 | status_code=200 | result_count=10
+2025-08-20 22:45:51 [INFO] [eodhd_service] 达到最大结果数限制 | max_results=10
+2025-08-20 22:45:51 [INFO] [eodhd_service] 分页获取新闻完成 | total_batches=1 | raw_collected=10 | final_count=10
+2025-08-20 22:45:51 [INFO] [eodhd_service] _get_all_news方法调用完成
+2025-08-20 22:45:51 [INFO] [eodhd_service] 原始新闻数据获取完成 | raw_count=10
+2025-08-20 22:45:51 [INFO] [eodhd_service] 步骤2：跳过过滤器（未指定过滤条件）
+2025-08-20 22:45:51 [INFO] [eodhd_service] 步骤3：处理新闻数据以适配数据库 | articles_to_process=10
+2025-08-20 22:45:54 [INFO] [eodhd_service] 新闻数据处理完成 | total_processed=10 | failed_count=0
+2025-08-20 22:45:54 [INFO] [eodhd_service] 步骤4：批量插入新闻到数据库 | articles_to_insert=10
+2025-08-20 22:45:54 [INFO] [eodhd_service] 开始批量插入新闻到数据库 | articles_count=10
+2025-08-20 22:46:00 [INFO] [eodhd_service] 数据库事务提交成功
+2025-08-20 22:46:00 [INFO] [eodhd_service] 批量插入新闻完成 | success_count=10 | existing_count=0 | failed_count=0
+2025-08-20 22:46:00 [INFO] [eodhd_service] 新闻获取和存储流程完成 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10 | fetched_count=10
+2025-08-20 22:46:00 [INFO] [news_api] 新闻获取请求完成 | fetched_count=10 | success_count=10 | existing_count=0 | failed_count=0 | total_count=10
+2025-08-20 22:53:56 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 22:54:38 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 22:54:38 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 22:54:39 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:18:28 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 23:18:28 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 23:18:28 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 23:18:28 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 23:18:28 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 23:18:28 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 23:18:29 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 23:18:29 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 23:18:29 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 23:18:30 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 23:18:30 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 23:18:30 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 23:20:23 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:20:28 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:20:28 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:20:29 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:20:41 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 23:20:41 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
+2025-08-20 23:20:41 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
+2025-08-20 23:20:41 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 23:20:41 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 23:20:41 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 23:20:42 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
+2025-08-20 23:20:42 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
+2025-08-20 23:20:42 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-13, to_date=2025-08-27
+2025-08-20 23:20:43 [INFO] [universal_glance] [market_data] 查询到 491 条经济事件数据
+2025-08-20 23:20:43 [INFO] [universal_glance] [markets_api] 获取到 491 条经济事件数据
+2025-08-20 23:20:43 [INFO] [universal_glance] [markets_api] 获取市场数据统计: user=admin
+2025-08-20 23:27:11 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:27:14 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:27:14 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:27:17 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:27:17 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:27:20 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:27:20 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:27:21 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:29:47 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:29:50 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:29:50 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:29:52 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:30:01 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:50:42 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:50:42 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:50:43 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:50:43 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:50:43 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:50:43 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:50:43 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:50:43 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:50:43 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:50:43 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:50:43 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:50:43 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:50:51 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:50:51 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:50:51 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:50:51 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:50:55 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:50:55 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:50:55 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:50:55 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:50:55 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:50:55 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:50:55 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:50:55 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:50:55 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:50:55 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:50:55 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:50:55 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:51:33 [INFO] [scheduler_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:51:33 [INFO] [scheduler_api] 创建默认EODHD新闻定时任务请求 | user=admin
+2025-08-20 23:51:33 [INFO] [scheduler_service] 创建Cron定时任务: EODHD News Auto Fetch, 类型: eodhd_news, Cron: */15 * * * *
+2025-08-20 23:51:33 [ERROR] [scheduler_service] 创建Cron定时任务失败: 'timezone' is an invalid keyword argument for now()
+2025-08-20 23:51:33 [ERROR] [scheduler_api] 默认EODHD新闻定时任务创建失败 | error=创建定时任务失败: 'timezone' is an invalid keyword argument for now() | user=admin
+2025-08-20 23:51:33 [ERROR] [scheduler_api] 创建默认EODHD新闻定时任务失败 | error= | user=admin
+2025-08-20 23:54:29 [INFO] [scheduler_api] 创建默认EODHD新闻定时任务请求 | user=admin
+2025-08-20 23:54:29 [INFO] [scheduler_service] 创建Cron定时任务: EODHD News Auto Fetch, 类型: eodhd_news, Cron: */15 * * * *
+2025-08-20 23:54:29 [ERROR] [scheduler_service] 创建Cron定时任务失败: 'timezone' is an invalid keyword argument for now()
+2025-08-20 23:54:29 [ERROR] [scheduler_api] 默认EODHD新闻定时任务创建失败 | error=创建定时任务失败: 'timezone' is an invalid keyword argument for now() | user=admin
+2025-08-20 23:54:29 [ERROR] [scheduler_api] 创建默认EODHD新闻定时任务失败 | error= | user=admin
+2025-08-20 23:55:03 [INFO] [scheduler_api] 创建EODHD新闻定时任务请求 | user=admin | task_name=EODHD News Auto Fetch | cron_expression=*/1 * * * *
+2025-08-20 23:55:03 [INFO] [scheduler_service] 创建Cron定时任务: EODHD News Auto Fetch, 类型: eodhd_news, Cron: */1 * * * *
+2025-08-20 23:55:03 [ERROR] [scheduler_service] 创建Cron定时任务失败: 'timezone' is an invalid keyword argument for now()
+2025-08-20 23:55:03 [ERROR] [scheduler_api] EODHD新闻定时任务创建失败 | error=创建定时任务失败: 'timezone' is an invalid keyword argument for now() | user=admin
+2025-08-20 23:55:03 [ERROR] [scheduler_api] EODHD新闻定时任务创建失败 | error= | user=admin
+2025-08-20 23:55:16 [INFO] [scheduler_api] 创建EODHD新闻定时任务请求 | user=admin | task_name=EODHD News Auto Fetch | cron_expression=*/1 * * * *
+2025-08-20 23:55:16 [INFO] [scheduler_service] 创建Cron定时任务: EODHD News Auto Fetch, 类型: eodhd_news, Cron: */1 * * * *
+2025-08-20 23:55:16 [ERROR] [scheduler_service] 创建Cron定时任务失败: 'timezone' is an invalid keyword argument for now()
+2025-08-20 23:55:16 [ERROR] [scheduler_api] EODHD新闻定时任务创建失败 | error=创建定时任务失败: 'timezone' is an invalid keyword argument for now() | user=admin
+2025-08-20 23:55:16 [ERROR] [scheduler_api] EODHD新闻定时任务创建失败 | error= | user=admin
+2025-08-20 23:55:25 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:55:25 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:55:25 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:55:25 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:55:27 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:55:27 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:55:28 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:55:28 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:55:28 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:55:28 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:55:28 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:55:28 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:55:28 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:55:28 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:55:28 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:55:28 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:57:21 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:57:21 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:57:21 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:57:21 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:57:23 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:23 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:57:24 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:57:24 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:24 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:57:24 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:57:24 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:57:24 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:57:24 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:57:24 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:57:24 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:57:24 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:57:37 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:57:37 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:57:37 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:57:37 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:57:39 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:39 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:57:40 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:57:40 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:40 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:57:40 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:57:40 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:57:40 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:57:40 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:57:40 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:57:40 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:57:40 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:57:49 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:57:49 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:57:49 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:57:49 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:57:51 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:51 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:57:52 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:57:52 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:57:52 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:57:52 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:57:52 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:57:52 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:57:52 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:57:52 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:57:52 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:57:52 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-20 23:59:43 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-20 23:59:43 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-20 23:59:43 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-20 23:59:43 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-20 23:59:46 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:59:46 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-20 23:59:46 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-20 23:59:46 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-20 23:59:46 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-20 23:59:46 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-20 23:59:46 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-20 23:59:46 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-20 23:59:46 [ERROR] [scheduler_service] 获取所有任务配置失败: 'DatabaseManager' object has no attribute 'fetch_all'
+2025-08-20 23:59:46 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-20 23:59:46 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-20 23:59:46 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-21 00:00:00 [INFO] [scheduler_service] 创建Cron定时任务: EODHD News Auto Fetch, 类型: eodhd_news, Cron: */1 * * * *
+2025-08-21 00:00:00 [ERROR] [scheduler_service] 保存任务配置失败: 'DatabaseManager' object has no attribute 'execute_query'
+2025-08-21 00:00:00 [ERROR] [scheduler_service] 创建Cron定时任务失败: 保存任务配置到数据库失败
+2025-08-21 00:00:13 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-21 00:00:13 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-21 00:00:13 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-21 00:00:13 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭

@@ -1,0 +1,167 @@
+# -*- coding: utf-8 -*-
+"""
+文件相关数据模型
+"""
+
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from enum import Enum
+
+
+class FileType(str, Enum):
+    """文件类型枚举"""
+    PDF = "pdf"
+    EXCEL = "excel"
+    IMAGE = "image"
+    DOC = "doc"
+    OTHER = "other"
+
+
+class ProcessingStatus(str, Enum):
+    """处理状态枚举"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class TaskStatus(str, Enum):
+    """任务状态枚举"""
+    STARTING = "starting"
+    INITIALIZING = "initializing"
+    PROCESSING = "processing"
+    AI_PROCESSING = "ai_processing"
+    SAVING = "saving"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class FileUploadResponse(BaseModel):
+    """文件上传响应模型"""
+    filename: str
+    file_path: str
+    file_size: int
+    file_type: FileType
+    upload_time: datetime
+
+
+class FileProcessRequest(BaseModel):
+    """文件处理请求模型"""
+    file_paths: List[str] = Field(..., description="文件路径列表")
+    task_type: str = Field(..., description="AI Agent")
+    custom_inputs: Dict[str, Any] = Field(default_factory=dict, description="自定义输入参数")
+    params: Dict[str, Any] = Field(default_factory=dict, description="处理参数")
+
+
+class FileProcessResponse(BaseModel):
+    """文件处理响应模型"""
+    task_id: str
+    message: str
+    files_count: int
+
+
+class FileDetailResponse(BaseModel):
+    """文件详情响应模型"""
+    id: int
+    task_id: str
+    filename: str
+    file_type: FileType
+    file_size: float
+    processing_time: Optional[float] = None
+    ai_time: Optional[float] = None
+    content_length: Optional[int] = None
+    status: ProcessingStatus
+    total_tokens: Optional[int] = None
+    cost: Optional[float] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class ProcessingParamsRequest(BaseModel):
+    """处理参数请求模型"""
+    language: List[str] = Field(default=["ch_sim", "en"], description="解析语言")
+    fast_mode: bool = Field(default=False, description="快速模式")
+    disable_ocr: bool = Field(default=False, description="禁用OCR")
+    max_pages: int = Field(default=10, ge=1, le=1000, description="最大页数")
+    target_pages: Optional[str] = Field(None, description="目标页面")
+    skip_diagonal_text: bool = Field(default=False, description="跳过对角线文本")
+    skip_table_extraction: bool = Field(default=False, description="跳过表格提取")
+    extract_images: bool = Field(default=False, description="提取图像")
+    use_vendor_multimodal_model: bool = Field(default=False, description="使用供应商多模态模型")
+    vendor_multimodal_api_key: Optional[str] = Field(None, description="供应商多模态API密钥")
+    polling_interval: int = Field(default=10, ge=1, le=60, description="轮询间隔（秒）")
+    use_ai_agent: bool = Field(default=True, description="使用AI Agent处理")
+    llamaindex_api_key: Optional[str] = Field(None, description="LlamaIndex API密钥")
+
+
+class TaskLogResponse(BaseModel):
+    """任务日志响应模型"""
+    timestamp: str
+    level: str
+    message: str
+
+
+class TaskStatusResponse(BaseModel):
+    """任务状态响应模型"""
+    status: TaskStatus
+    progress: float
+    current_file: Optional[str] = None
+    files_processed: int
+    files_failed: int
+    total_files: int
+    logs: List[TaskLogResponse]
+    start_time: float
+
+
+class FileValidationResponse(BaseModel):
+    """文件验证响应模型"""
+    valid_files: List[str]
+    invalid_files: List[Dict[str, str]]
+    summary: Dict[str, Any]
+
+
+class FileInfoResponse(BaseModel):
+    """文件信息响应模型"""
+    file_name: str
+    file_path: str
+    file_type: str
+    file_size_mb: float
+    file_extension: str
+    is_supported: bool
+
+
+class ProcessingParamsOptions(BaseModel):
+    """处理参数选项模型"""
+    language_options: List[Dict[str, Any]]
+    boolean_options: List[Dict[str, Any]]
+    numeric_options: List[Dict[str, Any]]
+    text_options: List[Dict[str, Any]]
+
+
+class SupportedFileTypesResponse(BaseModel):
+    """支持的文件类型响应模型"""
+    supported_extensions: List[str]
+    descriptions: Dict[str, str]
+
+
+class FileReorderRequest(BaseModel):
+    """文件重新排序请求模型"""
+    file_paths: List[str] = Field(..., description="重新排序后的文件路径列表")
+
+
+class FileReorderResponse(BaseModel):
+    """文件重新排序响应模型"""
+    message: str
+    ordered_files: List[str]
+
+
+class TaskExecutionDetailResponse(BaseModel):
+    """任务执行详情响应模型"""
+    execution: Dict[str, Any]
+    files: List[Dict[str, Any]] 
