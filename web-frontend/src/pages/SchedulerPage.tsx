@@ -250,7 +250,8 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower.includes('news') && taskType.includes('news')) ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
-          (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
+          (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
+          (sourceIdLower.includes('exchange') && taskType.includes('exchange'))
         );
       });
       
@@ -335,7 +336,8 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower.includes('news') && taskType.includes('news')) ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
-          (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
+          (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
+          (sourceIdLower.includes('exchange') && taskType.includes('exchange'))
         );
       });
       
@@ -442,7 +444,7 @@ const SchedulerPage: React.FC = () => {
     // 如果是Cron调度配置，根据数据源类型决定使用哪个配置组件
     if (action.id.includes('configure') && action.id.includes('schedule')) {
       // 对于EODHD相关数据源，使用专门的配置模态框
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -813,7 +815,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'eodhd_events' | 'eodhd_macro'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange'}
           dataSourceName={selectedDataSource.name}
         />
       )}

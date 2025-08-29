@@ -381,10 +381,12 @@ class ExchangeDataService:
             if progress_callback:
                 await progress_callback(f"正在准备 {len(tickers_data)} 个ticker的批量插入数据...")
             
+            # 批量处理数据准备，提高性能
+            current_time = datetime.now()
             for i, ticker in enumerate(tickers_data):
                 try:
-                    # 每100个ticker报告一次进度
-                    if progress_callback and i % 100 == 0:
+                    # 每1000个ticker报告一次进度，减少日志频率
+                    if progress_callback and i % 1000 == 0:
                         await progress_callback(f"正在处理第 {i+1}/{len(tickers_data)} 个ticker...")
                     
                     # 准备插入数据
@@ -398,9 +400,9 @@ class ExchangeDataService:
                         ticker.get('Isin'),
                         exchange_code.lower(),  # 数据来源
                         True,  # ticker活跃状态
-                        datetime.now(),  # 最后更新时间
-                        datetime.now(),  # 创建时间
-                        datetime.now()   # 更新时间
+                        current_time,  # 最后更新时间
+                        current_time,  # 创建时间
+                        current_time   # 更新时间
                     )
                     
                     insert_data.append(ticker_data)
@@ -420,7 +422,7 @@ class ExchangeDataService:
             logger.info(f"使用批量插入保存 {len(insert_data)} 个ticker")
             
             # 使用批量操作
-            batch_size = 1000  # 每批次处理1000条记录
+            batch_size = 5000  # 增加批次大小到5000条记录，提高性能
             total_batches = (len(insert_data) + batch_size - 1) // batch_size
             
             for batch_num in range(total_batches):
@@ -458,46 +460,79 @@ class ExchangeDataService:
                     
                     cursor = conn.cursor()
                     try:
+                        # 设置更长的语句超时时间
+                        cursor.execute("SET statement_timeout = 300000")  # 5分钟
+                        
+                        # 使用execute_values进行批量插入，设置正确的模板
                         psycopg2.extras.execute_values(
                             cursor, upsert_sql, batch_data, 
-                            template=None, page_size=100
+                            template='(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                            page_size=1000  # 增加page_size提高性能
                         )
                         conn.commit()
                         success_count += len(batch_data)
                         
+                        logger.info(f"批次 {batch_num + 1}/{total_batches} 插入完成: {len(batch_data)} 条记录")
+                        
                     finally:
                         conn.close()
                         
-                    logger.debug(f"批次 {batch_num + 1} 插入完成: {len(batch_data)} 条记录")
-                    
                 except Exception as e:
                     logger.error(f"批次 {batch_num + 1} 插入失败: {str(e)}")
-                    # 如果批量插入失败，回退到单条插入
-                    logger.info("批量插入失败，回退到单条插入模式")
-                    for ticker_data in batch_data:
+                    # 如果批量插入失败，尝试较小的批次
+                    logger.info(f"尝试将批次 {batch_num + 1} 分割为更小的批次...")
+                    
+                    # 将大批次分割为更小的批次
+                    sub_batch_size = 1000
+                    for sub_batch_num in range(0, len(batch_data), sub_batch_size):
+                        sub_batch = batch_data[sub_batch_num:sub_batch_num + sub_batch_size]
                         try:
-                            single_upsert_sql = """
-                                INSERT INTO companies (
-                                    code, name, exchange, type, currencycode, countryname, isin,
-                                    data_source, ticker_active, last_ticker_update, created_at, updated_at
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (code) DO UPDATE SET
-                                    name = EXCLUDED.name,
-                                    exchange = EXCLUDED.exchange,
-                                    type = EXCLUDED.type,
-                                    currencycode = EXCLUDED.currencycode,
-                                    countryname = EXCLUDED.countryname,
-                                    isin = EXCLUDED.isin,
-                                    data_source = EXCLUDED.data_source,
-                                    ticker_active = EXCLUDED.ticker_active,
-                                    last_ticker_update = EXCLUDED.last_ticker_update,
-                                    updated_at = EXCLUDED.updated_at
-                            """
-                            self.db_manager.execute_query(single_upsert_sql, ticker_data)
-                            success_count += 1
-                        except Exception as single_e:
-                            logger.warning(f"单条插入失败 {ticker_data[0]}: {str(single_e)}")
-                            continue
+                            conn = self.db_manager.get_connection()
+                            if not conn:
+                                continue
+                            
+                            cursor = conn.cursor()
+                            try:
+                                # 设置更长的语句超时时间
+                                cursor.execute("SET statement_timeout = 300000")  # 5分钟
+                                
+                                psycopg2.extras.execute_values(
+                                    cursor, upsert_sql, sub_batch, 
+                                    template='(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                                    page_size=500
+                                )
+                                conn.commit()
+                                success_count += len(sub_batch)
+                                logger.debug(f"子批次 {sub_batch_num//sub_batch_size + 1} 插入完成: {len(sub_batch)} 条记录")
+                            finally:
+                                conn.close()
+                        except Exception as sub_e:
+                            logger.error(f"子批次插入失败: {str(sub_e)}")
+                            # 最后回退到单条插入
+                            for ticker_data in sub_batch:
+                                try:
+                                    single_upsert_sql = """
+                                        INSERT INTO companies (
+                                            code, name, exchange, type, currencycode, countryname, isin,
+                                            data_source, ticker_active, last_ticker_update, created_at, updated_at
+                                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT (code) DO UPDATE SET
+                                            name = EXCLUDED.name,
+                                            exchange = EXCLUDED.exchange,
+                                            type = EXCLUDED.type,
+                                            currencycode = EXCLUDED.currencycode,
+                                            countryname = EXCLUDED.countryname,
+                                            isin = EXCLUDED.isin,
+                                            data_source = EXCLUDED.data_source,
+                                            ticker_active = EXCLUDED.ticker_active,
+                                            last_ticker_update = EXCLUDED.last_ticker_update,
+                                            updated_at = EXCLUDED.updated_at
+                                    """
+                                    self.db_manager.execute_query(single_upsert_sql, ticker_data)
+                                    success_count += 1
+                                except Exception as single_e:
+                                    logger.warning(f"单条插入失败 {ticker_data[0]}: {str(single_e)}")
+                                    continue
             
             # 更新交易所配置中的统计信息
             update_sql = """

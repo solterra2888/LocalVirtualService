@@ -185,7 +185,7 @@ def main():
     print("   - 自动打开浏览器")
     print()
     
-    # 环境检查
+    # 环境检查1
     print("🔍 环境检查...")
     
     if not check_python_version():

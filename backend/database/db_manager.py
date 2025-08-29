@@ -31,7 +31,11 @@ class DatabaseManager:
                 database=self.db_conn_params.get('db_name', ''),
                 user=self.db_conn_params.get('db_user', ''),
                 password=self.db_conn_params.get('db_password', ''),
-                connect_timeout=5  # 设置5秒连接超时
+                connect_timeout=10,  # 增加连接超时到10秒
+                options='-c statement_timeout=300000',  # 设置5分钟语句超时
+                keepalives_idle=60,  # 60秒后开始发送keepalive
+                keepalives_interval=10,  # 每10秒发送一次keepalive
+                keepalives_count=5  # 最多发送5次keepalive
             )
             return conn
         except Exception as e:
@@ -326,13 +330,16 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
                 )
             )
             """)
+            
+            # 更新现有表的约束（如果表已存在）
+            self._update_task_scheduling_constraints(cursor)
             
             # 创建任务执行日志表
             cursor.execute("""
@@ -361,6 +368,44 @@ class DatabaseManager:
             print("调度器相关表创建/更新完成")
         except Exception as e:
             print(f"创建调度器表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _update_task_scheduling_constraints(self, cursor):
+        """更新task_scheduling表的约束以支持exchange_data任务类型"""
+        try:
+            # 检查表是否存在
+            cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'task_scheduling'
+            )
+            """)
+            
+            if not cursor.fetchone()[0]:
+                return  # 表不存在，不需要更新
+            
+            # 检查当前约束是否包含exchange_data
+            cursor.execute("""
+            SELECT constraint_name, check_clause 
+            FROM information_schema.check_constraints 
+            WHERE constraint_name = 'valid_task_type'
+            """)
+            
+            constraint_info = cursor.fetchone()
+            if constraint_info:
+                check_clause = constraint_info[1]
+                if 'exchange_data' not in check_clause:
+                    # 删除旧约束并添加新约束
+                    cursor.execute("ALTER TABLE task_scheduling DROP CONSTRAINT IF EXISTS valid_task_type")
+                    cursor.execute("""
+                    ALTER TABLE task_scheduling ADD CONSTRAINT valid_task_type 
+                    CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data'))
+                    """)
+                    print("已更新task_scheduling表的valid_task_type约束以支持exchange_data")
+            
+        except Exception as e:
+            print(f"更新task_scheduling约束时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
 

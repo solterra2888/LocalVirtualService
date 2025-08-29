@@ -1,381 +1,65 @@
-2025-08-28 00:19:45 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:19:45 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:19:46 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:19:46 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:19:46 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:19:46 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:19:46 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:19:46 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:19:47 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:19:47 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:19:47 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:19:47 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:19:47 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:20:01 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 00:20:01 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 00:27:12 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:27:12 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:27:12 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:27:12 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:28:50 [INFO] [scheduler_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:28:50 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 成功获取 3 条 task_scheduling 表记录 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 成功获取 3 个定时任务 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 成功获取 3 条 task_scheduling 表记录 | user=admin
-2025-08-28 00:28:51 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
-2025-08-28 00:28:52 [INFO] [scheduler_api] 成功获取 3 个定时任务 | user=admin
-2025-08-28 00:29:45 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:29:45 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:29:45 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:29:45 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:29:47 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:29:47 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:29:49 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:29:49 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:29:49 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:29:49 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:29:49 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:29:49 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:29:49 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:29:49 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:29:49 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:29:49 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:29:49 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:29:55 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:29:55 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:29:55 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:29:55 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:29:57 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:29:57 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:29:58 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:29:58 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:29:58 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:29:58 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:29:58 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:29:58 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:29:59 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:29:59 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:29:59 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:29:59 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:29:59 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:30:41 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:30:41 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:30:41 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:30:41 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:30:43 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:30:43 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:30:45 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:30:45 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:30:45 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:30:45 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:30:45 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:30:45 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:30:45 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:30:45 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:30:45 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:30:45 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:30:45 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:30:56 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:30:56 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:30:56 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:30:56 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:31:01 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:31:01 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:31:04 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:31:04 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:31:04 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:31:04 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:31:04 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:31:04 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:31:05 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:31:05 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:31:05 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:31:05 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:31:05 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:31:07 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:07 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:07 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:07 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:15 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:31:15 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
-2025-08-28 00:31:15 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
-2025-08-28 00:31:15 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:31:15 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:31:15 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:31:15 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:31:15 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:31:16 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:31:16 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
-2025-08-28 00:31:16 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
-2025-08-28 00:31:17 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:31:17 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:31:17 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:31:17 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:31:17 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:20 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:20 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:20 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取交易所列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取股票类型列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取ticker列表失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:31:39 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:31:39 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:31:39 [ERROR] [exchanges_api] 获取ticker统计失败 | error=EODHD_API_KEY未设置。请在配置文件或环境变量中设置API密钥。 | user=admin
-2025-08-28 00:32:35 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:32:35 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:32:35 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:32:35 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:32:36 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:32:36 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:32:38 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:32:38 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:32:38 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:32:39 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:32:39 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:32:39 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:32:39 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:32:39 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:32:39 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:32:39 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:32:39 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:34:10 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:34:10 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
-2025-08-28 00:34:10 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
-2025-08-28 00:34:11 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:34:11 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:34:11 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:34:11 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:34:11 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:34:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:34:12 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
-2025-08-28 00:34:12 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
-2025-08-28 00:34:12 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:34:12 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:34:12 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:34:13 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:34:13 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:34:14 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:34:14 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:34:14 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:34:14 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:34:23 [INFO] [exchange_data_service] 交易所数据服务初始化完成 - 支持 19 个交易所
-2025-08-28 00:34:23 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 00:34:23 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:34:23 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
-2025-08-28 00:34:23 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:34:25 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:34:25 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:34:26 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 00:34:26 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:34:26 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
-2025-08-28 00:34:26 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:34:28 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:34:45 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:34:45 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:34:45 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:34:45 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:34:47 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:34:47 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:34:48 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:34:48 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:34:48 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:34:48 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:34:48 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:34:48 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:34:48 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:34:48 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:34:48 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:34:48 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:34:48 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:37:18 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:37:18 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:37:19 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:37:19 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:37:19 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:37:19 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:37:19 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:37:19 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:37:19 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:37:19 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:37:19 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:37:19 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:37:19 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:37:30 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 00:37:30 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 00:37:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:37:43 [INFO] [universal_glance] [market_data] 市场数据数据库连接初始化完成
-2025-08-28 00:37:43 [INFO] [universal_glance] [market_data] 市场数据服务初始化完成
-2025-08-28 00:37:43 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:37:43 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:37:43 [INFO] [universal_glance] [markets_api] 获取经济事件数据请求: user=admin, from_date=2025-08-21, to_date=2025-09-27
-2025-08-28 00:37:44 [INFO] [universal_glance] [market_data] 查询到 39 条经济事件数据
-2025-08-28 00:37:44 [INFO] [universal_glance] [markets_api] 获取到 39 条经济事件数据
-2025-08-28 00:37:48 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:37:48 [INFO] [universal_glance] [macro_indicators] 宏观指标数据库连接初始化完成
-2025-08-28 00:37:48 [INFO] [universal_glance] [macro_indicators] 宏观经济指标API服务初始化完成
-2025-08-28 00:37:48 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:37:48 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:37:49 [INFO] [universal_glance] [markets_api] 获取宏观指标数据请求: user=admin, country=['USA'], indicator=None
-2025-08-28 00:37:49 [INFO] [universal_glance] [macro_indicators] 从数据库获取到 195 条宏观指标数据
-2025-08-28 00:37:49 [INFO] [universal_glance] [markets_api] 获取到 195 条宏观指标数据
-2025-08-28 00:40:16 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:40:16 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:40:16 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:40:16 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 00:40:23 [INFO] [exchange_data_service] 交易所数据服务初始化完成 - 支持 19 个交易所
-2025-08-28 00:40:23 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 00:40:23 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:40:24 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
-2025-08-28 00:40:24 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:40:25 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:40:25 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 00:40:25 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 00:40:25 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:40:26 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:40:27 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 00:40:27 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
-2025-08-28 00:47:53 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=ARMS | limit=1000 | user=admin
-2025-08-28 00:47:53 [INFO] [exchanges_api] 成功获取 11 个ticker | user=admin
-2025-08-28 00:47:53 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:47:56 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:48:10 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=AAPL | limit=1000 | user=admin
-2025-08-28 00:48:10 [INFO] [exchanges_api] 成功获取 5 个ticker | user=admin
-2025-08-28 00:48:10 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 00:48:11 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 00:48:51 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:48:51 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:48:51 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:48:51 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 00:48:53 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:48:53 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 00:48:54 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 00:48:54 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 00:48:54 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 00:48:54 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 00:48:54 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 00:48:54 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 00:48:55 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 00:48:55 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 00:48:55 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 00:48:55 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 00:48:55 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 00:48:57 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
-2025-08-28 00:48:57 [INFO] [scheduler_service] 停止定时任务调度器
-2025-08-28 00:48:57 [INFO] [scheduler_service] 定时任务调度器已停止
-2025-08-28 00:48:57 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
-2025-08-28 01:00:26 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 01:00:26 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
-2025-08-28 01:00:27 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
-2025-08-28 01:00:27 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 01:00:27 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
-2025-08-28 01:00:27 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
-2025-08-28 01:00:27 [INFO] [scheduler_service] 启动定时任务调度器
-2025-08-28 01:00:27 [INFO] [scheduler_service] 加载已保存的定时任务
-2025-08-28 01:00:27 [INFO] [scheduler_service] 任务已添加到调度器: macro_indicators_Macro Indicators Auto Fetch_1755864462
-2025-08-28 01:00:27 [INFO] [scheduler_service] 任务已添加到调度器: economic_events_Economic Events Auto Fetch_1755921193
-2025-08-28 01:00:27 [INFO] [scheduler_service] 已加载 2 个启用的定时任务
-2025-08-28 01:00:27 [INFO] [scheduler_service] 定时任务调度器启动成功
-2025-08-28 01:00:27 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
-2025-08-28 01:00:38 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 01:00:39 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
-2025-08-28 01:00:40 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 01:00:40 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 01:00:40 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
-2025-08-28 01:00:40 [INFO] [exchange_data_service] 开始初始化交易所数据服务
-2025-08-28 01:00:47 [INFO] [exchange_data_service] 交易所数据服务初始化完成 - 支持 19 个交易所
-2025-08-28 01:00:47 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 01:00:47 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 01:00:48 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
-2025-08-28 01:00:48 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 01:00:49 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 01:00:49 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
-2025-08-28 01:00:49 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
-2025-08-28 01:00:49 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
-2025-08-28 01:00:51 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
-2025-08-28 01:00:51 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
-2025-08-28 01:00:51 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
+2025-08-29 22:14:55 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:14:55 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-29 22:14:56 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-29 22:14:56 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:14:56 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-29 22:14:56 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-29 22:14:56 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-29 22:14:56 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-29 22:14:56 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-29 22:14:56 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-29 22:14:56 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成
+2025-08-29 22:15:12 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-29 22:15:12 [INFO] [universal_glance] [dashboard_api] 获取行业信息成功: 3 个行业
+2025-08-29 22:15:18 [INFO] [exchanges_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:15:18 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
+2025-08-29 22:15:18 [INFO] [exchange_data_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:15:18 [INFO] [exchange_data_service] 开始初始化交易所数据服务
+2025-08-29 22:15:26 [INFO] [exchange_data_service] 交易所数据服务初始化完成 - 支持 19 个交易所
+2025-08-29 22:15:27 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
+2025-08-29 22:15:27 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
+2025-08-29 22:15:27 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
+2025-08-29 22:15:27 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
+2025-08-29 22:15:28 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
+2025-08-29 22:15:28 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
+2025-08-29 22:15:29 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
+2025-08-29 22:15:29 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
+2025-08-29 22:15:29 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
+2025-08-29 22:15:30 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
+2025-08-29 22:15:30 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:15:55 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 成功获取 4 条 task_scheduling 表记录 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 成功获取 4 个定时任务 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 查看数据库表数据请求 | table_name=task_scheduling | limit=100 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 成功获取 4 条 task_scheduling 表记录 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 获取定时任务列表请求 | user=admin
+2025-08-29 22:15:55 [INFO] [scheduler_api] 成功获取 4 个定时任务 | user=admin
+2025-08-29 22:16:04 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
+2025-08-29 22:16:05 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
+2025-08-29 22:16:05 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
+2025-08-29 22:16:05 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
+2025-08-29 22:16:05 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
+2025-08-29 22:16:06 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
+2025-08-29 22:16:06 [INFO] [exchanges_api] 获取交易所列表请求 | user=admin
+2025-08-29 22:16:07 [INFO] [exchanges_api] 成功获取 62 个交易所 | user=admin
+2025-08-29 22:16:07 [INFO] [exchanges_api] 获取ticker列表请求 | exchange=None | ticker_type=None | search=None | limit=1000 | user=admin
+2025-08-29 22:16:07 [INFO] [exchanges_api] 成功获取 1000 个ticker | user=admin
+2025-08-29 22:16:07 [INFO] [exchanges_api] 获取股票类型列表请求 | exchange=None | user=admin
+2025-08-29 22:16:07 [INFO] [exchanges_api] 获取ticker统计请求 | exchange=None | user=admin
+2025-08-29 22:31:36 [INFO] [universal_glance] [shutdown] 🔄 应用关闭，清理资源...
+2025-08-29 22:31:36 [INFO] [scheduler_service] 停止定时任务调度器
+2025-08-29 22:31:36 [INFO] [scheduler_service] 定时任务调度器已停止
+2025-08-29 22:31:36 [INFO] [universal_glance] [shutdown] ✅ 定时任务调度器已关闭
+2025-08-29 22:31:38 [INFO] [universal_glance] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:31:38 [INFO] [universal_glance] [startup] 🚀 Universal Glance API 启动中...
+2025-08-29 22:31:39 [INFO] [universal_glance] [startup] ✅ 数据库初始化完成
+2025-08-29 22:31:39 [INFO] [scheduler_service] 日志系统初始化完成 - 级别: INFO, 文件输出: True, 控制台输出: True
+2025-08-29 22:31:39 [INFO] [scheduler_service] 开始初始化定时任务调度器服务
+2025-08-29 22:31:39 [INFO] [scheduler_service] 定时任务调度器服务初始化完成
+2025-08-29 22:31:39 [INFO] [scheduler_service] 启动定时任务调度器
+2025-08-29 22:31:39 [INFO] [scheduler_service] 加载已保存的定时任务
+2025-08-29 22:31:39 [INFO] [scheduler_service] 已加载 0 个启用的定时任务
+2025-08-29 22:31:39 [INFO] [scheduler_service] 定时任务调度器启动成功
+2025-08-29 22:31:39 [INFO] [universal_glance] [startup] ✅ 定时任务调度器启动完成

@@ -311,3 +311,4 @@ async def get_exchange_configs(
     except Exception as e:
         logger.error("查看交易所配置失败", error=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"查看交易所配置失败: {str(e)}")
+

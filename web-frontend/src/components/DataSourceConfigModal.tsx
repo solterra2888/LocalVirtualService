@@ -23,7 +23,8 @@ import {
   ScheduleOutlined,
   BulbOutlined,
   BarChartOutlined,
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  DatabaseOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
@@ -87,11 +88,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       description: 'Get macroeconomic indicator data such as inflation rate, unemployment rate, etc.'
     },
     eodhd_exchange: {
-      icon: <InfoCircleOutlined style={{ color: '#f5222d' }} />,
+      icon: <DatabaseOutlined style={{ color: '#722ed1' }} />,
       params: ['exchanges'],
       defaultSchedule: '0 2 * * 0',
-      defaultName: 'Exchange Data Auto Fetch',
-      description: 'Get exchange ticker data from EODHD API for multiple exchanges'
+      defaultName: 'EODHD Exchange Data Auto Fetch',
+      description: 'Get exchange ticker symbols and company data from EODHD API for fundamentals analysis'
     }
   };
 
@@ -172,6 +173,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         // 其他任务类型的创建逻辑
         const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
                         dataSourceType === 'eodhd_macro' ? 'macro_indicators' : 
+                        dataSourceType === 'eodhd_exchange' ? 'exchange_data' : 
                         dataSourceType;
         
         result = await schedulerAPI.createCronTask({
@@ -764,6 +766,155 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>👷</span>
                       <span>Total Unemployment Rate (%)</span>
+                    </div>
+                  </Option>
+                </Select>
+              </Form.Item>
+            </>
+          );
+          
+        case 'eodhd_exchange':
+          return (
+            <>
+              <Form.Item
+                label="Exchanges"
+                name={['taskParams', 'exchanges']}
+                rules={[{ required: true, message: 'Please select at least one exchange' }]}
+                extra="Select exchanges to fetch ticker data from. Based on EODHD Exchanges API documentation."
+              >
+                <Select 
+                  placeholder="Select exchanges" 
+                  mode="multiple"
+                  showSearch
+                  optionLabelProp="label"
+                  filterOption={(input, option) => {
+                    const label = String(option?.label || '');
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
+                >
+                  {/* Major Global Exchanges based on EODHD API */}
+                  <Option value="US" label="🇺🇸 USA Stocks (NYSE, NASDAQ, etc.)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇺🇸</span>
+                      <span>USA Stocks (NYSE, NASDAQ, NYSE ARCA, OTC markets)</span>
+                    </div>
+                  </Option>
+                  
+                  {/* European Exchanges */}
+                  <Option value="LSE" label="🇬🇧 London Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇬🇧</span>
+                      <span>London Stock Exchange (LSE)</span>
+                    </div>
+                  </Option>
+                  <Option value="PA" label="🇫🇷 Euronext Paris">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇫🇷</span>
+                      <span>Euronext Paris (PA)</span>
+                    </div>
+                  </Option>
+                  <Option value="AS" label="🇳🇱 Euronext Amsterdam">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇳🇱</span>
+                      <span>Euronext Amsterdam (AS)</span>
+                    </div>
+                  </Option>
+                  <Option value="BR" label="🇧🇪 Euronext Brussels">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇧🇪</span>
+                      <span>Euronext Brussels (BR)</span>
+                    </div>
+                  </Option>
+                  <Option value="VX" label="🇨🇭 Swiss Exchange (SIX)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇭</span>
+                      <span>Swiss Exchange (SIX) (VX)</span>
+                    </div>
+                  </Option>
+                  <Option value="MC" label="🇪🇸 Madrid Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇪🇸</span>
+                      <span>Madrid Stock Exchange (MC)</span>
+                    </div>
+                  </Option>
+                  <Option value="F" label="🇩🇪 Frankfurt Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇩🇪</span>
+                      <span>Frankfurt Stock Exchange (F)</span>
+                    </div>
+                  </Option>
+                  
+                  {/* Asia-Pacific Exchanges */}
+                  <Option value="HK" label="🇭🇰 Hong Kong Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇭🇰</span>
+                      <span>Hong Kong Stock Exchange (HK)</span>
+                    </div>
+                  </Option>
+                  <Option value="SHG" label="🇨🇳 Shanghai Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇳</span>
+                      <span>Shanghai Stock Exchange (SHG)</span>
+                    </div>
+                  </Option>
+                  <Option value="SHE" label="🇨🇳 Shenzhen Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇳</span>
+                      <span>Shenzhen Stock Exchange (SHE)</span>
+                    </div>
+                  </Option>
+                  <Option value="KO" label="🇰🇷 Korea Stock Exchange (KRX)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇰🇷</span>
+                      <span>Korea Stock Exchange (KRX) (KO)</span>
+                    </div>
+                  </Option>
+                  <Option value="TW" label="🇹🇼 Taiwan Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇹🇼</span>
+                      <span>Taiwan Stock Exchange (TW)</span>
+                    </div>
+                  </Option>
+                  <Option value="SG" label="🇸🇬 Singapore Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇸🇬</span>
+                      <span>Singapore Exchange (SG)</span>
+                    </div>
+                  </Option>
+                  <Option value="AU" label="🇦🇺 Australian Securities Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇦🇺</span>
+                      <span>Australian Securities Exchange (AU)</span>
+                    </div>
+                  </Option>
+                  
+                  {/* North America Other */}
+                  <Option value="TO" label="🇨🇦 Toronto Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇦</span>
+                      <span>Toronto Stock Exchange (TO)</span>
+                    </div>
+                  </Option>
+                  
+                  {/* Indian Exchanges */}
+                  <Option value="BSE" label="🇮🇳 Bombay Stock Exchange">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇳</span>
+                      <span>Bombay Stock Exchange (BSE)</span>
+                    </div>
+                  </Option>
+                  <Option value="NSE" label="🇮🇳 National Stock Exchange of India">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇳</span>
+                      <span>National Stock Exchange of India (NSE)</span>
+                    </div>
+                  </Option>
+                  
+                  {/* South American Exchanges */}
+                  <Option value="SA" label="🇧🇷 São Paulo Stock Exchange (B3)">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇧🇷</span>
+                      <span>São Paulo Stock Exchange (B3) (SA)</span>
                     </div>
                   </Option>
                 </Select>
