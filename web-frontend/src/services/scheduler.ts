@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'economic_events' | 'macro_indicators' | 'exchange_data';
+  type: 'eodhd_news' | 'economic_events' | 'macro_indicators' | 'exchange_data' | 'eodhd_fundamentals_low_freq';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -49,6 +49,15 @@ export interface CreateEODHDNewsTaskParams {
   topic?: string;
   topic_filter?: string;
   keywords?: string;
+}
+
+export interface CreateEODHDFundamentalsLowFreqTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  exchanges?: string[];
+  data_types?: string[];
 }
 
 export interface CronPreset {
@@ -245,6 +254,26 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建EODHD新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建EODHD基本面数据低频定时任务
+   */
+  async createEODHDFundamentalsLowFreqTask(params: CreateEODHDFundamentalsLowFreqTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/eodhd-fundamentals-low-freq', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建EODHD基本面数据低频定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建EODHD基本面数据低频定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建EODHD基本面数据低频定时任务失败'
       };
     }
   }

@@ -71,6 +71,16 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     keywords: Optional[str] = Field(default=None, description="关键词，逗号分隔")
 
 
+class CreateEODHDFundamentalsLowFreqTaskRequest(BaseModel):
+    """创建EODHD基本面数据低频定时任务请求模型"""
+    name: str = Field(default="EODHD Fundamentals Low Frequency", description="任务名称")
+    cron_expression: str = Field(default="0 6 * * 0", description="Cron表达式 (每周日6:00AM)")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    exchanges: List[str] = Field(default=["NYSE", "NASDAQ"], description="交易所列表，仅支持NYSE和NASDAQ")
+    data_types: List[str] = Field(default=["General", "Holders", "outstandingShares", "Earnings"], description="数据类型列表")
+
+
 # ============ 定时任务管理API ============
 
 @router.post("/tasks/cron", summary="创建Cron定时任务")
@@ -369,6 +379,100 @@ async def create_eodhd_news_task(
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
         logger.error("EODHD新闻定时任务创建失败", error=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ============ EODHD基本面数据低频定时任务专用API ============
+
+@router.post("/tasks/eodhd-fundamentals-low-freq", summary="创建EODHD基本面数据低频定时任务")
+async def create_eodhd_fundamentals_low_freq_task(
+    request: CreateEODHDFundamentalsLowFreqTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建EODHD基本面数据低频获取定时任务
+    
+    默认配置：
+    - 纽约时间每周日6:00AM执行 (0 6 * * 0)
+    - 支持NYSE和NASDAQ交易所
+    - 支持General, Holders, outstandingShares, Earnings四种数据类型
+    """
+    try:
+        logger.info("创建EODHD基本面数据低频定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression,
+                   exchanges=request.exchanges,
+                   data_types=request.data_types)
+        
+        # 验证交易所
+        supported_exchanges = ['NYSE', 'NASDAQ']
+        valid_exchanges = [ex for ex in request.exchanges if ex in supported_exchanges]
+        if not valid_exchanges:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不支持的交易所，仅支持: {', '.join(supported_exchanges)}"
+            )
+        
+        # 验证数据类型
+        supported_data_types = ['General', 'Holders', 'outstandingShares', 'Earnings']
+        valid_data_types = [dt for dt in request.data_types if dt in supported_data_types]
+        if not valid_data_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的数据类型，仅支持: {', '.join(supported_data_types)}"
+            )
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 构建任务参数
+        task_params = {
+            'exchanges': valid_exchanges,
+            'data_types': valid_data_types
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="eodhd_fundamentals_low_freq",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params
+        )
+        
+        if result['success']:
+            logger.info("EODHD基本面数据低频定时任务创建成功", 
+                       user=current_user.username,
+                       task_name=request.name,
+                       task_id=result['task_id'],
+                       exchanges=valid_exchanges,
+                       data_types=valid_data_types)
+            
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("EODHD基本面数据低频定时任务创建失败", 
+                        error=result.get('message', '未知错误'),
+                        user=current_user.username,
+                        task_name=request.name)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+    
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error("EODHD基本面数据低频定时任务创建参数错误", error=str(e), user=current_user.username)
+        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+    except Exception as e:
+        logger.error("创建EODHD基本面数据低频定时任务失败", 
+                    error=str(e), 
+                    user=current_user.username,
+                    task_name=request.name)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 

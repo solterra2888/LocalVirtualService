@@ -54,7 +54,7 @@ import { schedulerAPI, ScheduledTask } from '../services/scheduler';
 
 import DatabaseTableViewer from '../components/DatabaseTableViewer';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
-import TaskConfigurationWizard from '../components/TaskConfigurationWizard';
+
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
 
 const { Title, Text } = Typography;
@@ -65,13 +65,12 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'other';
+  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
   lastRun?: string;
   lastSuccess?: string;
-
   quickActions: QuickAction[];
 }
 
@@ -170,6 +169,24 @@ const SchedulerPage: React.FC = () => {
       ]
     },
     {
+      id: 'eodhd_fundamentals_low_freq',
+      name: 'EODHD Fundamentals Low Frequency',
+      type: 'eodhd_fundamentals_low_freq',
+      description: 'Get company fundamentals data from EODHD API with low frequency scheduling (General, Holders, outstandingShares, Earnings)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_fundamentals_low_freq_schedule',
+          name: 'Configure Data Fetch Strategy',
+          description: 'Set up Cron-based periodic fundamentals data fetching for NYSE and NASDAQ companies',
+          endpoint: '/scheduler/tasks/eodhd-fundamentals-low-freq',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
       id: 'alpha_vantage',
       name: 'Alpha Vantage',
       type: 'alpha_vantage',
@@ -225,7 +242,7 @@ const SchedulerPage: React.FC = () => {
   
   // 定时任务相关状态
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
-  const [wizardVisible, setWizardVisible] = useState(false);
+
   const [dataSourceConfigVisible, setDataSourceConfigVisible] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<DataSource | null>(null);
 
@@ -337,7 +354,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('news') && taskType.includes('news')) ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
-          (sourceIdLower.includes('exchange') && taskType.includes('exchange'))
+          (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
+          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq'))
         );
       });
       
@@ -444,12 +462,12 @@ const SchedulerPage: React.FC = () => {
     // 如果是Cron调度配置，根据数据源类型决定使用哪个配置组件
     if (action.id.includes('configure') && action.id.includes('schedule')) {
       // 对于EODHD相关数据源，使用专门的配置模态框
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals_low_freq') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
-        // 其他数据源使用通用的任务配置向导
-        setWizardVisible(true);
+        // 其他数据源暂不支持配置
+        message.info('该数据源配置功能即将推出');
       }
       return;
     }
@@ -562,11 +580,7 @@ const SchedulerPage: React.FC = () => {
 
 
 
-  const handleWizardSuccess = (taskId: string) => {
-    message.success('任务配置向导完成，定时任务创建成功！');
-    setWizardVisible(false);
-    loadScheduledTasks(); // 重新加载任务列表
-  };
+
 
   const handleDataSourceConfigSuccess = (taskId: string) => {
     message.success(`数据获取策略配置成功！任务ID: ${taskId}`);
@@ -799,12 +813,7 @@ const SchedulerPage: React.FC = () => {
 
 
 
-      {/* 任务配置向导 */}
-      <TaskConfigurationWizard
-        open={wizardVisible}
-        onCancel={() => setWizardVisible(false)}
-        onSuccess={handleWizardSuccess}
-      />
+
 
       {/* 数据源专用配置模态框 */}
       {selectedDataSource && (

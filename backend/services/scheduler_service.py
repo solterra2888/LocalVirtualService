@@ -53,7 +53,8 @@ class SchedulerService:
             'eodhd_news': self._execute_eodhd_news_task,
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
-            'exchange_data': self._execute_exchange_data_task
+            'exchange_data': self._execute_exchange_data_task,
+            'eodhd_fundamentals_low_freq': self._execute_fundamentals_low_freq_task
         }
         
         # 添加事件监听器
@@ -92,7 +93,7 @@ class SchedulerService:
         
         Args:
             task_name: 任务名称
-            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators)
+            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals_low_freq)
             cron_expression: Cron表达式
             timezone: 时区
             enabled: 是否启用
@@ -817,6 +818,76 @@ class SchedulerService:
             
         except Exception as e:
             error_msg = f"交易所数据获取任务执行失败: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
+    
+    async def _execute_fundamentals_low_freq_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行EODHD基本面数据低频获取任务"""
+        try:
+            logger.info(f"开始执行基本面数据低频获取任务，参数: {params}")
+            
+            # 获取参数
+            exchanges = params.get('exchanges', [])
+            data_types = params.get('data_types', ['General', 'Holders', 'outstandingShares', 'Earnings'])
+            
+            # 参数验证
+            if not exchanges:
+                logger.warning("未指定交易所参数，跳过基本面数据获取任务")
+                return {
+                    'success': False, 
+                    'message': '未指定交易所参数，请至少选择一个交易所'
+                }
+            
+            # 确保exchanges是列表格式
+            if isinstance(exchanges, str):
+                exchanges = [exchanges]
+            
+            # 验证交易所只能是NYSE和NASDAQ
+            supported_exchanges = ['NYSE', 'NASDAQ']
+            valid_exchanges = [ex for ex in exchanges if ex.upper() in [se.upper() for se in supported_exchanges]]
+            
+            if not valid_exchanges:
+                logger.warning(f"不支持的交易所: {exchanges}，仅支持 NYSE 和 NASDAQ")
+                return {
+                    'success': False, 
+                    'message': '不支持的交易所，仅支持 NYSE 和 NASDAQ'
+                }
+            
+            logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {data_types}")
+            
+            # 初始化基本面数据服务
+            from backend.services.eodhd_fundamentals_service import get_fundamentals_service
+            fundamentals_service = await get_fundamentals_service()
+            
+            # 执行基本面数据获取
+            result = await fundamentals_service.fetch_and_store_fundamentals(
+                exchanges=valid_exchanges,
+                data_types=data_types
+            )
+            
+            if result['success']:
+                success_msg = f"基本面数据获取成功: {result['message']}"
+                logger.info(success_msg)
+                return {
+                    'success': True,
+                    'message': success_msg,
+                    'data': result['data']
+                }
+            else:
+                error_msg = f"基本面数据获取失败: {result['message']}"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': result['data']
+                }
+            
+        except Exception as e:
+            error_msg = f"基本面数据低频获取任务执行失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,

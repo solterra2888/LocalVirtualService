@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange';
+  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq';
   dataSourceName: string;
 }
 
@@ -93,6 +93,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 2 * * 0',
       defaultName: 'EODHD Exchange Data Auto Fetch',
       description: 'Get exchange ticker symbols and company data from EODHD API for fundamentals analysis'
+    },
+    eodhd_fundamentals_low_freq: {
+      icon: <BarChartOutlined style={{ color: '#13c2c2' }} />,
+      params: ['exchanges', 'data_types'],
+      defaultSchedule: '0 6 * * 0',
+      defaultName: 'EODHD Fundamentals Low Frequency Auto Fetch',
+      description: 'Get company fundamentals data from EODHD API with low frequency scheduling (General, Holders, outstandingShares, Earnings) for NYSE and NASDAQ companies'
     }
   };
 
@@ -169,6 +176,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       let result;
       if (dataSourceType === 'eodhd_news') {
         result = await schedulerAPI.createEODHDNewsTask(params);
+      } else if (dataSourceType === 'eodhd_fundamentals_low_freq') {
+        // EODHD基本面数据低频任务的专用创建逻辑
+        const fundamentalsParams = {
+          name: currentConfig.defaultName,
+          cron_expression: data.cronExpression!,
+          timezone: data.timezone!,
+          enabled: true,
+          exchanges: data.taskParams?.exchanges || ['NYSE', 'NASDAQ'],
+          data_types: data.taskParams?.data_types || ['General', 'Holders', 'outstandingShares', 'Earnings']
+        };
+        result = await schedulerAPI.createEODHDFundamentalsLowFreqTask(fundamentalsParams);
       } else {
         // 其他任务类型的创建逻辑
         const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -774,13 +792,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
           
         case 'eodhd_exchange':
+        case 'eodhd_fundamentals_low_freq':
           return (
             <>
               <Form.Item
                 label="Exchanges"
                 name={['taskParams', 'exchanges']}
                 rules={[{ required: true, message: 'Please select at least one exchange' }]}
-                extra="Select exchanges to fetch ticker data from. Based on EODHD Exchanges API documentation."
+                extra={dataSourceType === 'eodhd_fundamentals_low_freq' ? 
+                  "Select exchanges to fetch fundamentals data from (Only NYSE and NASDAQ are supported)" : 
+                  "Select exchanges to fetch ticker data from. Based on EODHD Exchanges API documentation."}
               >
                 <Select 
                   placeholder="Select exchanges" 
@@ -792,21 +813,40 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                     return label.toLowerCase().includes(input.toLowerCase());
                   }}
                 >
-                  {/* Major Global Exchanges based on EODHD API */}
-                  <Option value="US" label="🇺🇸 USA Stocks (NYSE, NASDAQ, etc.)">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>🇺🇸</span>
-                      <span>USA Stocks (NYSE, NASDAQ, NYSE ARCA, OTC markets)</span>
-                    </div>
-                  </Option>
-                  
-                  {/* European Exchanges */}
-                  <Option value="LSE" label="🇬🇧 London Stock Exchange">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>🇬🇧</span>
-                      <span>London Stock Exchange (LSE)</span>
-                    </div>
-                  </Option>
+                  {/* 根据数据源类型显示不同的交易所选项 */}
+                  {dataSourceType === 'eodhd_fundamentals_low_freq' ? (
+                    <>
+                      {/* EODHD Fundamentals Low Frequency 仅支持 NYSE 和 NASDAQ */}
+                      <Option value="NYSE" label="🏛️ New York Stock Exchange (NYSE)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏛️</span>
+                          <span>New York Stock Exchange (NYSE)</span>
+                        </div>
+                      </Option>
+                      <Option value="NASDAQ" label="💻 NASDAQ">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>💻</span>
+                          <span>NASDAQ Global Market</span>
+                        </div>
+                      </Option>
+                    </>
+                  ) : (
+                    <>
+                      {/* 其他数据源的完整交易所列表 */}
+                      <Option value="US" label="🇺🇸 USA Stocks (NYSE, NASDAQ, etc.)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🇺🇸</span>
+                          <span>USA Stocks (NYSE, NASDAQ, NYSE ARCA, OTC markets)</span>
+                        </div>
+                      </Option>
+                      
+                      {/* European Exchanges */}
+                      <Option value="LSE" label="🇬🇧 London Stock Exchange">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🇬🇧</span>
+                          <span>London Stock Exchange (LSE)</span>
+                        </div>
+                      </Option>
                   <Option value="PA" label="🇫🇷 Euronext Paris">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>🇫🇷</span>
@@ -910,15 +950,58 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                     </div>
                   </Option>
                   
-                  {/* South American Exchanges */}
-                  <Option value="SA" label="🇧🇷 São Paulo Stock Exchange (B3)">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>🇧🇷</span>
-                      <span>São Paulo Stock Exchange (B3) (SA)</span>
-                    </div>
-                  </Option>
+                      {/* South American Exchanges */}
+                      <Option value="SA" label="🇧🇷 São Paulo Stock Exchange (B3)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🇧🇷</span>
+                          <span>São Paulo Stock Exchange (B3) (SA)</span>
+                        </div>
+                      </Option>
+                    </>
+                  )}
                 </Select>
               </Form.Item>
+              
+              {/* Data Types selection for EODHD Fundamentals Low Frequency */}
+              {dataSourceType === 'eodhd_fundamentals_low_freq' && (
+                <Form.Item
+                  label="Data Types"
+                  name={['taskParams', 'data_types']}
+                  rules={[{ required: true, message: 'Please select at least one data type' }]}
+                  extra="Select fundamentals data types to fetch (Only General, Holders, outstandingShares, Earnings are supported)"
+                >
+                  <Select 
+                    placeholder="Select data types" 
+                    mode="multiple"
+                    style={{ width: '100%' }}
+                  >
+                    <Option value="General" label="📊 General">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📊</span>
+                        <span>General (Basic company information)</span>
+                      </div>
+                    </Option>
+                    <Option value="Holders" label="👥 Holders">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>👥</span>
+                        <span>Holders (Institutional and insider holders)</span>
+                      </div>
+                    </Option>
+                    <Option value="outstandingShares" label="📈 Outstanding Shares">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📈</span>
+                        <span>Outstanding Shares (Share structure data)</span>
+                      </div>
+                    </Option>
+                    <Option value="Earnings" label="💰 Earnings">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>💰</span>
+                        <span>Earnings (Earnings history and forecasts)</span>
+                      </div>
+                    </Option>
+                  </Select>
+                </Form.Item>
+              )}
             </>
           );
           
