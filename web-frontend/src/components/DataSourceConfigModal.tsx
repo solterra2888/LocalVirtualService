@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq';
+  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'finviz_screener';
   dataSourceName: string;
 }
 
@@ -100,6 +100,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 6 * * 0',
       defaultName: 'EODHD Fundamentals Low Frequency Auto Fetch',
       description: 'Get company fundamentals data from EODHD API with low frequency scheduling (General, Holders, outstandingShares, Earnings) for NYSE and NASDAQ companies'
+    },
+    finviz_screener: {
+      icon: <DatabaseOutlined style={{ color: '#fa8c16' }} />,
+      params: [],
+      defaultSchedule: '0 8 * * 1-5',
+      defaultName: 'Finviz Screener Data Auto Fetch',
+      description: 'Get comprehensive stock screener data from Finviz with technical and fundamental metrics (no parameters required)'
     }
   };
 
@@ -187,6 +194,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           data_types: data.taskParams?.data_types || ['General', 'Holders', 'outstandingShares', 'Earnings']
         };
         result = await schedulerAPI.createEODHDFundamentalsLowFreqTask(fundamentalsParams);
+      } else if (dataSourceType === 'finviz_screener') {
+        // Finviz筛选数据任务的专用创建逻辑
+        const finvizParams = {
+          name: currentConfig.defaultName,
+          cron_expression: data.cronExpression!,
+          timezone: data.timezone!,
+          enabled: true
+        };
+        result = await schedulerAPI.createFinvizScreenerTask(finvizParams);
       } else {
         // 其他任务类型的创建逻辑
         const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 

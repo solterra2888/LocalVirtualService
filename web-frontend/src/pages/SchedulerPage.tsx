@@ -44,7 +44,7 @@ import {
   DeleteOutlined,
   BulbOutlined,
   ScheduleOutlined,
-
+  FilterOutlined,
   BarChartOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -65,7 +65,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'other';
+  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -204,19 +204,20 @@ const SchedulerPage: React.FC = () => {
       ]
     },
     {
-      id: 'finviz',
-      name: 'Finviz',
-      type: 'finviz',
-      description: 'Stock screening and market overview (Coming soon)',
-      enabled: false,
+      id: 'finviz_screener',
+      name: 'Finviz Screener',
+      type: 'finviz_screener',
+      description: 'Comprehensive stock screener data from Finviz with technical and fundamental metrics',
+      enabled: true,
       status: 'idle',
       quickActions: [
         {
-          id: 'fetch_screener',
-          name: 'Stock Screening',
-          description: 'Get filtered stock list',
-          endpoint: '/finviz/screener',
-          icon: <DatabaseOutlined />
+          id: 'configure_finviz_screener_schedule',
+          name: 'Configure Screener Data Fetch',
+          description: 'Set up periodic stock screener data fetching from Finviz',
+          endpoint: '/scheduler/tasks/finviz-screener',
+          params: {},
+          icon: <FilterOutlined />
         }
       ]
     }
@@ -355,7 +356,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
-          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq'))
+          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq')) ||
+          (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });
       
@@ -462,7 +464,7 @@ const SchedulerPage: React.FC = () => {
     // 如果是Cron调度配置，根据数据源类型决定使用哪个配置组件
     if (action.id.includes('configure') && action.id.includes('schedule')) {
       // 对于EODHD相关数据源，使用专门的配置模态框
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals_low_freq') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals_low_freq' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {

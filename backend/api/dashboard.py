@@ -1,585 +1,496 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Dashboard API - 仪表板数据接口
-
-提供公司、行业、新闻、AI分析等数据的综合查询接口
+仪表板API路由
 """
 
-import os
-import sys
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends, Query, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, status, Depends, Query
+from typing import List, Optional, Dict, Any
+from datetime import datetime
 
+from backend.schemas.user import UserResponse
 from backend.auth.jwt_utils import get_current_user
-from backend.utils.logger import info, error, warning
 from backend.database.db_manager import DatabaseManager
-from config.settings import get_db_conn_params
+from config.settings import config
 
 router = APIRouter()
 
-# === 响应模型 ===
+# 获取数据库连接参数
+def get_db_conn_params() -> Dict[str, Any]:
+    """获取数据库连接参数"""
+    return {
+        'db_host': config.get('DB_HOST', 'localhost'),
+        'db_port': config.get('DB_PORT', '5432'),
+        'db_name': config.get('DB_NAME', 'targettracking'),
+        'db_user': config.get('DB_USER', 'postgres'),
+        'db_password': config.get('DB_PASSWORD', '')
+    }
 
-class CompanyInfoResponse(BaseModel):
-    """公司信息响应模型"""
-    id: int
-    name: str
-    primaryticker: str
-    sector: Optional[str] = None
-    industry: Optional[str] = None
-    gicsector: Optional[str] = None
-    gicindustry: Optional[str] = None
-    gicsubindustry: Optional[str] = None
-    countryname: Optional[str] = None
-
-class SectorInfoResponse(BaseModel):
-    """行业信息响应模型"""
-    sector: str
-    company_count: int
-    companies: List[CompanyInfoResponse]
-
-class DashboardNewsResponse(BaseModel):
-    """Dashboard新闻响应模型"""
-    id: int
-    title: str
-    content: Optional[str] = None
-    date: Optional[str] = None
-    source: Optional[str] = None
-    link: Optional[str] = None
-    sentiment_polarity: Optional[float] = None
-    sentiment_pos: Optional[float] = None
-    sentiment_neg: Optional[float] = None
-    sentiment_neu: Optional[float] = None
-    symbols: List[str] = Field(default_factory=list)
-    tags: List[str] = Field(default_factory=list)
-
-class DashboardAnalysisResponse(BaseModel):
-    """Dashboard分析结果响应模型"""
-    id: int
-    filename: str
-    content: str
-    created_at: str
-    file_type: str
-    status: str
-    total_tokens: int
-    cost: float
-    task_id: Optional[str] = None
-
-# === 辅助函数 ===
-
-def get_db_connection():
-    """获取数据库连接"""
-    db_conn_params = get_db_conn_params()
-    db_manager = DatabaseManager(db_conn_params)
-    conn = db_manager.get_connection()
-    if not conn:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="无法连接到数据库"
-        )
-    return conn
-
-# === API端点 ===
-
-@router.get("/sectors", response_model=List[SectorInfoResponse], summary="获取所有行业信息")
-async def get_sectors(current_user=Depends(get_current_user)):
+@router.get("/sectors", summary="获取所有行业信息")
+async def get_sectors(current_user: UserResponse = Depends(get_current_user)):
     """
-    获取所有行业信息，包括每个行业的公司数量
+    获取所有行业信息及其包含的公司数量
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            # 获取行业及其公司数量
-            cursor.execute("""
-                SELECT sector, COUNT(*) as company_count
-                FROM companies 
-                WHERE sector IS NOT NULL AND sector != '' AND ticker_active = true
-                GROUP BY sector
-                ORDER BY company_count DESC, sector
-            """)
-            
-            sector_stats = cursor.fetchall()
-            result = []
-            
-            for sector_name, company_count in sector_stats:
-                # 获取该行业的前20家公司
-                cursor.execute("""
-                    SELECT id, name, primaryticker, sector, industry, 
-                           gicsector, gicindustry, gicsubindustry, countryname
-                    FROM companies 
-                    WHERE sector = %s AND ticker_active = true
-                    ORDER BY name
-                    LIMIT 20
-                """, (sector_name,))
-                
-                companies_data = cursor.fetchall()
-                companies = [
-                    CompanyInfoResponse(
-                        id=row[0],
-                        name=row[1],
-                        primaryticker=row[2],
-                        sector=row[3],
-                        industry=row[4],
-                        gicsector=row[5],
-                        gicindustry=row[6],
-                        gicsubindustry=row[7],
-                        countryname=row[8]
-                    )
-                    for row in companies_data
-                ]
-                
-                result.append(SectorInfoResponse(
-                    sector=sector_name,
-                    company_count=company_count,
-                    companies=companies
-                ))
-            
-            info(f"获取行业信息成功: {len(result)} 个行业", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+        # 查询行业信息
+        query = """
+        SELECT 
+            sector,
+            COUNT(*) as company_count
+        FROM companies 
+        WHERE sector IS NOT NULL AND sector != ''
+        GROUP BY sector 
+        ORDER BY company_count DESC
+        """
+        
+        results = db_manager.execute_query(query)
+        
+        sectors = []
+        for row in results:
+            sector_info = {
+                "sector": row[0],
+                "company_count": row[1],
+                "companies": []  # 这里可以后续添加公司列表
+            }
+            sectors.append(sector_info)
+        
+        return sectors
     except Exception as e:
-        error(f"获取行业信息失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取行业信息失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取行业信息失败: {str(e)}"
+        )
 
-@router.get("/companies", response_model=List[CompanyInfoResponse], summary="获取公司信息")
+@router.get("/companies", summary="获取公司信息")
 async def get_companies(
     sector: Optional[str] = Query(None, description="行业筛选"),
     search: Optional[str] = Query(None, description="搜索关键词"),
-    limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
-    current_user=Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取公司信息，支持按行业筛选和关键词搜索
+    获取公司信息列表，支持按行业筛选和关键词搜索
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            # 构建查询条件
-            where_conditions = ["ticker_active = true"]
-            params = []
-            
-            if sector:
-                where_conditions.append("sector = %s")
-                params.append(sector)
-            
-            if search:
-                where_conditions.append("""
-                    (LOWER(name) LIKE %s 
-                     OR LOWER(primaryticker) LIKE %s 
-                     OR LOWER(industry) LIKE %s)
-                """)
-                search_term = f"%{search.lower()}%"
-                params.extend([search_term, search_term, search_term])
-            
-            where_clause = " AND ".join(where_conditions)
-            
-            cursor.execute(f"""
-                SELECT id, name, primaryticker, sector, industry, 
-                       gicsector, gicindustry, gicsubindustry, countryname
-                FROM companies 
-                WHERE {where_clause}
-                ORDER BY name
-                LIMIT %s
-            """, params + [limit])
-            
-            companies_data = cursor.fetchall()
-            result = [
-                CompanyInfoResponse(
-                    id=row[0],
-                    name=row[1],
-                    primaryticker=row[2],
-                    sector=row[3],
-                    industry=row[4],
-                    gicsector=row[5],
-                    gicindustry=row[6],
-                    gicsubindustry=row[7],
-                    countryname=row[8]
-                )
-                for row in companies_data
-            ]
-            
-            info(f"获取公司信息成功: {len(result)} 家公司", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if sector:
+            where_conditions.append("sector = %s")
+            params.append(sector)
+        
+        if search:
+            where_conditions.append("(companyname ILIKE %s OR primaryticker ILIKE %s)")
+            params.extend([f"%{search}%", f"%{search}%"])
+        
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+        
+        query = f"""
+        SELECT 
+            id, companyname, primaryticker, sector, industry,
+            gicsector, gicindustry, gicsubindustry, market_cap, country
+        FROM companies 
+        WHERE {where_clause}
+        ORDER BY companyname
+        LIMIT 100
+        """
+        
+        results = db_manager.execute_query(query, params)
+        
+        companies = []
+        for row in results:
+            company = {
+                "id": row[0],
+                "companyname": row[1],
+                "primaryticker": row[2],
+                "sector": row[3],
+                "industry": row[4],
+                "gicsector": row[5],
+                "gicindustry": row[6],
+                "gicsubindustry": row[7],
+                "market_cap": row[8],
+                "country": row[9]
+            }
+            companies.append(company)
+        
+        return companies
     except Exception as e:
-        error(f"获取公司信息失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取公司信息失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取公司信息失败: {str(e)}"
+        )
 
-@router.get("/companies/{ticker}", response_model=CompanyInfoResponse, summary="获取特定公司信息")
+@router.get("/companies/{ticker}", summary="获取特定公司信息")
 async def get_company_info(
     ticker: str,
-    current_user=Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取特定公司的详细信息
+    根据股票代码获取特定公司的详细信息
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            cursor.execute("""
-                SELECT id, name, primaryticker, sector, industry, 
-                       gicsector, gicindustry, gicsubindustry, countryname
-                FROM companies 
-                WHERE primaryticker = %s AND ticker_active = true
-            """, (ticker.upper(),))
-            
-            company_data = cursor.fetchone()
-            if not company_data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"公司不存在: {ticker}"
-                )
-            
-            result = CompanyInfoResponse(
-                id=company_data[0],
-                name=company_data[1],
-                primaryticker=company_data[2],
-                sector=company_data[3],
-                industry=company_data[4],
-                gicsector=company_data[5],
-                gicindustry=company_data[6],
-                gicsubindustry=company_data[7],
-                countryname=company_data[8]
+        query = """
+        SELECT 
+            id, companyname, primaryticker, sector, industry,
+            gicsector, gicindustry, gicsubindustry, market_cap, country
+        FROM companies 
+        WHERE primaryticker = %s
+        """
+        
+        results = db_manager.execute_query(query, [ticker])
+        
+        if not results:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到股票代码为 {ticker} 的公司"
             )
-            
-            info(f"获取公司详情成功: {ticker}", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+        
+        row = results[0]
+        company = {
+            "id": row[0],
+            "companyname": row[1],
+            "primaryticker": row[2],
+            "sector": row[3],
+            "industry": row[4],
+            "gicsector": row[5],
+            "gicindustry": row[6],
+            "gicsubindustry": row[7],
+            "market_cap": row[8],
+            "country": row[9]
+        }
+        
+        return company
     except HTTPException:
         raise
     except Exception as e:
-        error(f"获取公司详情失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取公司详情失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取公司信息失败: {str(e)}"
+        )
 
-@router.get("/companies/{ticker}/news", response_model=List[DashboardNewsResponse], summary="获取公司相关新闻")
+@router.get("/companies/{ticker}/news", summary="获取公司相关新闻")
 async def get_company_news(
     ticker: str,
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
-    current_user=Depends(get_current_user)
+    limit: Optional[int] = Query(10, description="返回新闻数量限制"),
+    current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取特定公司相关的新闻
+    获取与特定公司相关的新闻
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            cursor.execute("""
-                SELECT DISTINCT n.id, n.title, n.content, n.date, n.source, n.link,
-                       n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
-                FROM news n
-                JOIN news_symbols ns ON n.id = ns.news_id
-                JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                WHERE UPPER(nsd.symbol_code) = %s
-                ORDER BY n.date DESC, n.id DESC
-                LIMIT %s
-            """, (ticker.upper(), limit))
-            
-            news_data = cursor.fetchall()
-            result = []
-            
-            for row in news_data:
-                news_id = row[0]
-                
-                # 获取相关股票代码
-                cursor.execute("""
-                    SELECT nsd.symbol_code
-                    FROM news_symbols ns
-                    JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                    WHERE ns.news_id = %s
-                """, (news_id,))
-                symbols = [s[0] for s in cursor.fetchall()]
-                
-                # 获取相关标签
-                cursor.execute("""
-                    SELECT nt.tag_name
-                    FROM news_tags_mapping ntm
-                    JOIN news_tags nt ON ntm.tag_id = nt.id
-                    WHERE ntm.news_id = %s
-                """, (news_id,))
-                tags = [t[0] for t in cursor.fetchall()]
-                
-                result.append(DashboardNewsResponse(
-                    id=news_id,
-                    title=row[1],
-                    content=row[2],
-                    date=row[3].isoformat() if row[3] else None,
-                    source=row[4],
-                    link=row[5],
-                    sentiment_polarity=row[6],
-                    sentiment_pos=row[7],
-                    sentiment_neg=row[8],
-                    sentiment_neu=row[9],
-                    symbols=symbols,
-                    tags=tags
-                ))
-            
-            info(f"获取公司新闻成功: {ticker}, {len(result)} 条", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
-    except Exception as e:
-        error(f"获取公司新闻失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取公司新闻失败: {str(e)}")
-
-@router.get("/companies/{ticker}/analysis", response_model=List[DashboardAnalysisResponse], summary="获取公司AI分析结果")
-async def get_company_analysis(
-    ticker: str,
-    limit: int = Query(10, ge=1, le=50, description="返回数量限制"),
-    current_user=Depends(get_current_user)
-):
-    """
-    获取特定公司相关的AI分析结果
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        query = """
+        SELECT 
+            n.id, n.title, n.content, n.date, n.source, n.link,
+            n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
+        FROM news n
+        JOIN news_symbols ns ON n.id = ns.news_id
+        WHERE ns.symbol = %s
+        ORDER BY n.date DESC
+        LIMIT %s
+        """
         
-        try:
-            # 搜索文件名包含股票代码的AI分析结果
-            cursor.execute("""
-                SELECT id, filename, content, created_at, file_type, status, 
-                       total_tokens, cost, task_id
-                FROM file_processing_details
-                WHERE (UPPER(filename) LIKE %s OR UPPER(content) LIKE %s)
-                  AND status = 'completed'
-                  AND content IS NOT NULL 
-                  AND content != ''
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, (f'%{ticker.upper()}%', f'%{ticker.upper()}%', limit))
-            
-            analysis_data = cursor.fetchall()
-            result = [
-                DashboardAnalysisResponse(
-                    id=row[0],
-                    filename=row[1],
-                    content=row[2],
-                    created_at=row[3].isoformat() if row[3] else '',
-                    file_type=row[4] or '',
-                    status=row[5],
-                    total_tokens=row[6] or 0,
-                    cost=float(row[7]) if row[7] else 0.0,
-                    task_id=row[8]
-                )
-                for row in analysis_data
-            ]
-            
-            info(f"获取公司AI分析成功: {ticker}, {len(result)} 条", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
-    except Exception as e:
-        error(f"获取公司AI分析失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取公司AI分析失败: {str(e)}")
-
-@router.get("/companies/{ticker}/reports", response_model=List[DashboardAnalysisResponse], summary="获取公司相关研报文件")
-async def get_company_reports(
-    ticker: str,
-    limit: int = Query(10, ge=1, le=50, description="返回数量限制"),
-    current_user=Depends(get_current_user)
-):
-    """
-    获取特定公司相关的原始研报文件（不包含AI分析内容）
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        results = db_manager.execute_query(query, [ticker, limit])
         
-        try:
-            # 搜索文件名包含股票代码的原始文件
-            cursor.execute("""
-                SELECT id, filename, '' as content, created_at, file_type, status, 
-                       0 as total_tokens, 0 as cost, task_id
-                FROM file_processing_details
-                WHERE UPPER(filename) LIKE %s
-                  AND file_type IN ('pdf', 'docx', 'doc', 'txt')
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, (f'%{ticker.upper()}%', limit))
+        news_items = []
+        for row in results:
+            # 获取新闻标签
+            tag_query = """
+            SELECT tag FROM news_tags WHERE news_id = %s
+            """
+            tags = [tag_row[0] for tag_row in db_manager.execute_query(tag_query, [row[0]])]
             
-            reports_data = cursor.fetchall()
-            result = [
-                DashboardAnalysisResponse(
-                    id=row[0],
-                    filename=row[1],
-                    content=row[2],  # 空内容，因为这是原始文件
-                    created_at=row[3].isoformat() if row[3] else '',
-                    file_type=row[4] or '',
-                    status=row[5],
-                    total_tokens=row[6] or 0,
-                    cost=float(row[7]) if row[7] else 0.0,
-                    task_id=row[8]
-                )
-                for row in reports_data
-            ]
+            # 获取新闻符号
+            symbol_query = """
+            SELECT symbol FROM news_symbols WHERE news_id = %s
+            """
+            symbols = [symbol_row[0] for symbol_row in db_manager.execute_query(symbol_query, [row[0]])]
             
-            info(f"获取公司研报成功: {ticker}, {len(result)} 条", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+            news_item = {
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "date": row[3].isoformat() if row[3] else None,
+                "source": row[4],
+                "link": row[5],
+                "sentiment_polarity": row[6],
+                "sentiment_pos": row[7],
+                "sentiment_neg": row[8],
+                "sentiment_neu": row[9],
+                "symbols": symbols,
+                "tags": tags
+            }
+            news_items.append(news_item)
+        
+        return news_items
     except Exception as e:
-        error(f"获取公司研报失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取公司研报失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取公司新闻失败: {str(e)}"
+        )
 
-# 行业相关的API端点（类似公司的实现）
-@router.get("/sectors/{sector}/news", response_model=List[DashboardNewsResponse], summary="获取行业相关新闻")
+@router.get("/sectors/{sector}/news", summary="获取行业相关新闻")
 async def get_sector_news(
     sector: str,
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
-    current_user=Depends(get_current_user)
+    limit: Optional[int] = Query(10, description="返回新闻数量限制"),
+    current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取特定行业相关的新闻
+    获取与特定行业相关的新闻
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            # 首先获取该行业的所有公司股票代码
-            cursor.execute("""
-                SELECT DISTINCT primaryticker 
-                FROM companies 
-                WHERE sector = %s AND ticker_active = true
-            """, (sector,))
+        query = """
+        SELECT DISTINCT
+            n.id, n.title, n.content, n.date, n.source, n.link,
+            n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
+        FROM news n
+        JOIN news_symbols ns ON n.id = ns.news_id
+        JOIN companies c ON ns.symbol = c.primaryticker
+        WHERE c.sector = %s
+        ORDER BY n.date DESC
+        LIMIT %s
+        """
+        
+        results = db_manager.execute_query(query, [sector, limit])
+        
+        news_items = []
+        for row in results:
+            # 获取新闻标签
+            tag_query = """
+            SELECT tag FROM news_tags WHERE news_id = %s
+            """
+            tags = [tag_row[0] for tag_row in db_manager.execute_query(tag_query, [row[0]])]
             
-            tickers = [t[0] for t in cursor.fetchall()]
+            # 获取新闻符号
+            symbol_query = """
+            SELECT symbol FROM news_symbols WHERE news_id = %s
+            """
+            symbols = [symbol_row[0] for symbol_row in db_manager.execute_query(symbol_query, [row[0]])]
             
-            if not tickers:
-                return []
-            
-            # 获取这些公司相关的新闻
-            ticker_placeholders = ','.join(['%s'] * len(tickers))
-            cursor.execute(f"""
-                SELECT DISTINCT n.id, n.title, n.content, n.date, n.source, n.link,
-                       n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
-                FROM news n
-                JOIN news_symbols ns ON n.id = ns.news_id
-                JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                WHERE UPPER(nsd.symbol_code) IN ({ticker_placeholders})
-                ORDER BY n.date DESC, n.id DESC
-                LIMIT %s
-            """, [t.upper() for t in tickers] + [limit])
-            
-            news_data = cursor.fetchall()
-            result = []
-            
-            for row in news_data:
-                news_id = row[0]
-                
-                # 获取相关股票代码
-                cursor.execute("""
-                    SELECT nsd.symbol_code
-                    FROM news_symbols ns
-                    JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                    WHERE ns.news_id = %s
-                """, (news_id,))
-                symbols = [s[0] for s in cursor.fetchall()]
-                
-                # 获取相关标签
-                cursor.execute("""
-                    SELECT nt.tag_name
-                    FROM news_tags_mapping ntm
-                    JOIN news_tags nt ON ntm.tag_id = nt.id
-                    WHERE ntm.news_id = %s
-                """, (news_id,))
-                tags = [t[0] for t in cursor.fetchall()]
-                
-                result.append(DashboardNewsResponse(
-                    id=news_id,
-                    title=row[1],
-                    content=row[2],
-                    date=row[3].isoformat() if row[3] else None,
-                    source=row[4],
-                    link=row[5],
-                    sentiment_polarity=row[6],
-                    sentiment_pos=row[7],
-                    sentiment_neg=row[8],
-                    sentiment_neu=row[9],
-                    symbols=symbols,
-                    tags=tags
-                ))
-            
-            info(f"获取行业新闻成功: {sector}, {len(result)} 条", source="dashboard_api")
-            return result
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+            news_item = {
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "date": row[3].isoformat() if row[3] else None,
+                "source": row[4],
+                "link": row[5],
+                "sentiment_polarity": row[6],
+                "sentiment_pos": row[7],
+                "sentiment_neg": row[8],
+                "sentiment_neu": row[9],
+                "symbols": symbols,
+                "tags": tags
+            }
+            news_items.append(news_item)
+        
+        return news_items
     except Exception as e:
-        error(f"获取行业新闻失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取行业新闻失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取行业新闻失败: {str(e)}"
+        )
+
+@router.get("/companies/{ticker}/analysis", summary="获取公司AI分析结果")
+async def get_company_analysis(
+    ticker: str,
+    limit: Optional[int] = Query(10, description="返回分析结果数量限制"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取特定公司的AI分析结果
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        query = """
+        SELECT 
+            f.id, f.filename, f.content, f.created_at, f.file_type, f.status,
+            f.total_tokens, f.cost, t.id as task_id
+        FROM files f
+        LEFT JOIN tasks t ON f.task_id = t.id
+        WHERE f.symbols LIKE %s
+        ORDER BY f.created_at DESC
+        LIMIT %s
+        """
+        
+        results = db_manager.execute_query(query, [f"%{ticker}%", limit])
+        
+        analysis_results = []
+        for row in results:
+            analysis_result = {
+                "id": row[0],
+                "filename": row[1],
+                "content": row[2],
+                "created_at": row[3].isoformat() if row[3] else None,
+                "file_type": row[4],
+                "status": row[5],
+                "total_tokens": row[6] or 0,
+                "cost": row[7] or 0,
+                "task_id": str(row[8]) if row[8] else None
+            }
+            analysis_results.append(analysis_result)
+        
+        return analysis_results
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取公司AI分析失败: {str(e)}"
+        )
+
+@router.get("/sectors/{sector}/analysis", summary="获取行业AI分析结果")
+async def get_sector_analysis(
+    sector: str,
+    limit: Optional[int] = Query(10, description="返回分析结果数量限制"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取特定行业的AI分析结果
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        query = """
+        SELECT DISTINCT
+            f.id, f.filename, f.content, f.created_at, f.file_type, f.status,
+            f.total_tokens, f.cost, t.id as task_id
+        FROM files f
+        LEFT JOIN tasks t ON f.task_id = t.id
+        JOIN companies c ON f.symbols LIKE '%' || c.primaryticker || '%'
+        WHERE c.sector = %s
+        ORDER BY f.created_at DESC
+        LIMIT %s
+        """
+        
+        results = db_manager.execute_query(query, [sector, limit])
+        
+        analysis_results = []
+        for row in results:
+            analysis_result = {
+                "id": row[0],
+                "filename": row[1],
+                "content": row[2],
+                "created_at": row[3].isoformat() if row[3] else None,
+                "file_type": row[4],
+                "status": row[5],
+                "total_tokens": row[6] or 0,
+                "cost": row[7] or 0,
+                "task_id": str(row[8]) if row[8] else None
+            }
+            analysis_results.append(analysis_result)
+        
+        return analysis_results
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取行业AI分析失败: {str(e)}"
+        )
+
+@router.get("/search/companies", summary="搜索公司")
+async def search_companies(
+    q: str = Query(..., description="搜索关键词"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    根据关键词搜索公司
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        query = """
+        SELECT 
+            id, companyname, primaryticker, sector, industry,
+            gicsector, gicindustry, gicsubindustry, market_cap, country
+        FROM companies 
+        WHERE companyname ILIKE %s OR primaryticker ILIKE %s
+        ORDER BY companyname
+        LIMIT 50
+        """
+        
+        search_term = f"%{q}%"
+        results = db_manager.execute_query(query, [search_term, search_term])
+        
+        companies = []
+        for row in results:
+            company = {
+                "id": row[0],
+                "companyname": row[1],
+                "primaryticker": row[2],
+                "sector": row[3],
+                "industry": row[4],
+                "gicsector": row[5],
+                "gicindustry": row[6],
+                "gicsubindustry": row[7],
+                "market_cap": row[8],
+                "country": row[9]
+            }
+            companies.append(company)
+        
+        return companies
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索公司失败: {str(e)}"
+        )
 
 @router.get("/files/{file_id}/content", summary="获取文件内容")
 async def get_file_content(
     file_id: int,
-    current_user=Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取文件的详细内容
+    获取指定文件的内容
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
         
-        try:
-            cursor.execute("""
-                SELECT filename, content, file_type
-                FROM file_processing_details
-                WHERE id = %s
-            """, (file_id,))
-            
-            file_data = cursor.fetchone()
-            if not file_data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"文件不存在: {file_id}"
-                )
-            
-            return {
-                "filename": file_data[0],
-                "content": file_data[1] or "内容为空",
-                "file_type": file_data[2]
-            }
-            
-        finally:
-            cursor.close()
-            conn.close()
-            
+        query = """
+        SELECT filename, content FROM files WHERE id = %s
+        """
+        
+        results = db_manager.execute_query(query, [file_id])
+        
+        if not results:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到ID为 {file_id} 的文件"
+            )
+        
+        row = results[0]
+        return {
+            "filename": row[0],
+            "content": row[1]
+        }
     except HTTPException:
         raise
     except Exception as e:
-        error(f"获取文件内容失败: {str(e)}", source="dashboard_api")
-        raise HTTPException(status_code=500, detail=f"获取文件内容失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取文件内容失败: {str(e)}"
+        )
+
+@router.get("/health", summary="健康检查")
+async def health_check():
+    """
+    仪表板API健康检查端点
+    """
+    return {"status": "healthy", "service": "dashboard", "timestamp": datetime.now().isoformat()}
+
+
+

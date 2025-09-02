@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|finviz_screener)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|finviz_screener)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -77,8 +77,16 @@ class CreateEODHDFundamentalsLowFreqTaskRequest(BaseModel):
     cron_expression: str = Field(default="0 6 * * 0", description="Cron表达式 (每周日6:00AM)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
-    exchanges: List[str] = Field(default=["NYSE", "NASDAQ"], description="交易所列表，仅支持NYSE和NASDAQ")
+    exchanges: List[str] = Field(default=["NYSE", "NASDAQ"], description="交易所列表，支持美国、中国和香港交易所")
     data_types: List[str] = Field(default=["General", "Holders", "outstandingShares", "Earnings"], description="数据类型列表")
+
+
+class CreateFinvizScreenerTaskRequest(BaseModel):
+    """创建Finviz筛选数据定时任务请求模型"""
+    name: str = Field(default="Finviz Screener Data", description="任务名称")
+    cron_expression: str = Field(default="0 8 * * 1-5", description="Cron表达式 (工作日8:00AM)")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
 
 
 # ============ 定时任务管理API ============
@@ -394,7 +402,7 @@ async def create_eodhd_fundamentals_low_freq_task(
     
     默认配置：
     - 纽约时间每周日6:00AM执行 (0 6 * * 0)
-    - 支持NYSE和NASDAQ交易所
+    - 支持美国、中国和香港交易所 (NYSE, NASDAQ, US, SHG, SHE, HK)
     - 支持General, Holders, outstandingShares, Earnings四种数据类型
     """
     try:
@@ -406,7 +414,7 @@ async def create_eodhd_fundamentals_low_freq_task(
                    data_types=request.data_types)
         
         # 验证交易所
-        supported_exchanges = ['NYSE', 'NASDAQ']
+        supported_exchanges = ['NYSE', 'NASDAQ', 'US', 'SHG', 'SHE', 'HK']
         valid_exchanges = [ex for ex in request.exchanges if ex in supported_exchanges]
         if not valid_exchanges:
             raise HTTPException(
@@ -470,6 +478,71 @@ async def create_eodhd_fundamentals_low_freq_task(
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
         logger.error("创建EODHD基本面数据低频定时任务失败", 
+                    error=str(e), 
+                    user=current_user.username,
+                    task_name=request.name)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ============ Finviz筛选数据定时任务专用API ============
+
+@router.post("/tasks/finviz-screener", summary="创建Finviz筛选数据定时任务")
+async def create_finviz_screener_task(
+    request: CreateFinvizScreenerTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建Finviz筛选数据获取定时任务
+    
+    默认配置：
+    - 纽约时间工作日8:00AM执行 (0 8 * * 1-5)
+    - 不需要参数配置，直接获取所有筛选数据
+    """
+    try:
+        logger.info("创建Finviz筛选数据定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # Finviz任务不需要参数，传递空字典
+        task_params = {}
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="finviz_screener",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params
+        )
+        
+        if result['success']:
+            logger.info("Finviz筛选数据定时任务创建成功", 
+                       user=current_user.username,
+                       task_name=request.name,
+                       task_id=result['task_id'])
+            
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("Finviz筛选数据定时任务创建失败", 
+                        error=result.get('message', '未知错误'),
+                        user=current_user.username,
+                        task_name=request.name)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建Finviz筛选数据定时任务失败", 
                     error=str(e), 
                     user=current_user.username,
                     task_name=request.name)
