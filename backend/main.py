@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, scheduler, dashboard, exchanges
+from backend.api import auth, files, tasks, users, news, markets, scheduler, dashboard, exchanges, screener
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -104,6 +104,7 @@ app.include_router(markets.router, prefix="/api/markets", tags=["市场数据"])
 app.include_router(scheduler.router, prefix="/api", tags=["定时任务调度"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
 app.include_router(exchanges.router, prefix="/api", tags=["交易所数据"])
+app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
 # 静态文件服务
 if os.path.exists("web-frontend/dist"):

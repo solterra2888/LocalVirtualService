@@ -269,7 +269,9 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('news') && taskType.includes('news')) ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
-          (sourceIdLower.includes('exchange') && taskType.includes('exchange'))
+          (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
+          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq')) ||
+          (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });
       

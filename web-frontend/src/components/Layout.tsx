@@ -90,6 +90,11 @@ const Layout: React.FC = () => {
           icon: <BuildOutlined />,
           label: 'Companies',
         },
+        {
+          key: '/fundamentals/screener',
+          icon: <AppstoreOutlined />,
+          label: 'Stock Screener',
+        },
       ],
     },
     {

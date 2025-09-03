@@ -94,7 +94,7 @@ class SchedulerService:
         
         Args:
             task_name: 任务名称
-            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals_low_freq)
+            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals_low_freq, finviz_screener)
             cron_expression: Cron表达式
             timezone: 时区
             enabled: 是否启用
