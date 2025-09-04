@@ -690,14 +690,7 @@ const SchedulerPage: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 系统状态提示 */}
-      <Alert
-        message="System Status: Data Source Management"
-        description="EODHD news, economic events and macro indicators data sources are configured, Alpha Vantage and Finviz data sources coming soon"
-        type="success"
-        showIcon
-        style={{ marginBottom: '24px' }}
-      />
+
 
       {/* 数据源卡片 */}
       <Row gutter={[16, 16]}>

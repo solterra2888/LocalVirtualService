@@ -647,6 +647,11 @@ class DatabaseManager:
             else:
                 cursor.execute(query)
             result = cursor.fetchone()
+            
+            # 如果是INSERT/UPDATE/DELETE语句，需要commit
+            if query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')):
+                conn.commit()
+            
             conn.close()
             return result
         except Exception as e:

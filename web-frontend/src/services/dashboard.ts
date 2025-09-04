@@ -11,6 +11,7 @@ export interface CompanyInfo {
   gicindustry?: string;
   gicsubindustry?: string;
   market_cap?: string;
+  price?: number;
   country?: string;
 }
 
@@ -52,6 +53,38 @@ export interface DashboardSearchParams {
   ticker?: string;
   limit?: number;
   offset?: number;
+}
+
+// Watchlist相关类型定义
+export interface WatchlistItem {
+  watchlist_id: number;
+  symbol: string;
+  custom_name?: string;
+  priority: number;
+  notes?: string;
+  added_at?: string;
+  company?: string;
+  sector?: string;
+  industry?: string;
+  market_cap?: number;
+  price?: number;
+  change_percent?: string;
+  company_id?: number;
+}
+
+export interface WatchlistGroup {
+  group_name: string;
+  items: WatchlistItem[];
+}
+
+export interface StockSearchResult {
+  ticker: string;
+  company: string;
+  sector: string;
+  industry: string;
+  price?: number;
+  market_cap?: number;
+  company_id?: number;
 }
 
 // API服务
@@ -172,6 +205,57 @@ export const dashboardAPI = {
       return await api.download(`/dashboard/files/${fileId}/download`);
     } catch (error) {
       console.error('下载文件失败:', error);
+      throw error;
+    }
+  },
+
+  // === Watchlist相关API ===
+
+  // 获取用户的watchlist
+  getUserWatchlist: async (): Promise<WatchlistGroup[]> => {
+    try {
+      return await api.get<WatchlistGroup[]>('/dashboard/watchlist');
+    } catch (error) {
+      console.error('获取用户watchlist失败:', error);
+      throw error;
+    }
+  },
+
+  // 添加股票到watchlist
+  addToWatchlist: async (params: {
+    symbol: string;
+    name?: string;
+    group_name?: string;
+    priority?: number;
+    notes?: string;
+  }): Promise<{ message: string; watchlist_id: number; symbol: string; company_name: string }> => {
+    try {
+      return await api.post('/dashboard/watchlist', params);
+    } catch (error) {
+      console.error('添加到watchlist失败:', error);
+      throw error;
+    }
+  },
+
+  // 从watchlist移除股票
+  removeFromWatchlist: async (watchlistId: number): Promise<{ message: string; symbol: string }> => {
+    try {
+      return await api.delete(`/dashboard/watchlist/${watchlistId}`);
+    } catch (error) {
+      console.error('从watchlist移除失败:', error);
+      throw error;
+    }
+  },
+
+  // 搜索股票（用于添加到watchlist）
+  searchStocks: async (query: string, limit?: number): Promise<StockSearchResult[]> => {
+    try {
+      return await api.get<StockSearchResult[]>('/dashboard/search/stocks', { 
+        q: query, 
+        limit: limit || 20 
+      });
+    } catch (error) {
+      console.error('搜索股票失败:', error);
       throw error;
     }
   }
