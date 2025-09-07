@@ -78,7 +78,7 @@ class CreateEODHDFundamentalsTaskRequest(BaseModel):
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     exchanges: List[str] = Field(default=["NYSE", "NASDAQ"], description="交易所列表，支持美国、中国和香港交易所")
-    data_types: List[str] = Field(default=["General", "Holders", "outstandingShares", "Earnings"], description="数据类型列表")
+    data_types: List[str] = Field(default=["General", "Financials"], description="数据类型列表 (General: 公司基本信息, Financials: 财务报表数据)")
 
 
 class CreateFinvizScreenerTaskRequest(BaseModel):

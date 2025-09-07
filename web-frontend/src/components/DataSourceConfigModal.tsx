@@ -99,7 +99,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       params: ['exchanges', 'data_types'],
       defaultSchedule: '0 6 * * 0',
       defaultName: 'EODHD Fundamentals Auto Fetch',
-      description: 'Get company fundamentals data from EODHD API (General data: company info, address, officers) for multiple markets'
+      description: 'Get comprehensive company fundamentals data from EODHD API (General + Financials: company info, address, officers, balance sheet, income statement, cash flow) for multiple markets'
     },
     finviz_screener: {
       icon: <DatabaseOutlined style={{ color: '#fa8c16' }} />,
@@ -1032,19 +1032,25 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   label="Data Types"
                   name={['taskParams', 'data_types']}
                   rules={[]}
-                  extra="Currently only General data is supported (company info, address, officers). Other data types will be added in future versions."
-                  initialValue={['General']}
+                  extra="Select data types to fetch. General includes company info, address, officers. Financials includes balance sheet, income statement, cash flow."
+                  initialValue={['General', 'Financials']}
                 >
                   <Select 
                     placeholder="Select data types" 
                     mode="multiple"
                     style={{ width: '100%' }}
-                    disabled={true}
+                    disabled={false}
                   >
                     <Option value="General" label="📊 General">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>📊</span>
                         <span>General (Company information, address, officers)</span>
+                      </div>
+                    </Option>
+                    <Option value="Financials" label="💰 Financials">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>💰</span>
+                        <span>Financials (Balance sheet, income statement, cash flow)</span>
                       </div>
                     </Option>
                   </Select>

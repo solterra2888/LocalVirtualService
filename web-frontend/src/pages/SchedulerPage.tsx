@@ -172,14 +172,14 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_fundamentals',
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
-      description: 'Get company fundamentals data from EODHD API (Currently focused on General data: company info, address, officers)',
+      description: 'Get comprehensive company fundamentals data from EODHD API (General data: company info, address, officers + Financials: balance sheet, income statement, cash flow)',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_fundamentals_schedule',
           name: 'Configure Data Fetch Strategy',
-          description: 'Set up Cron-based periodic fundamentals data fetching for multiple markets (US, China, Hong Kong, Taiwan, Japan, UK)',
+          description: 'Set up Cron-based periodic fundamentals data fetching for multiple markets (US, China, Hong Kong, Taiwan, Japan, UK) including financial statements',
           endpoint: '/scheduler/tasks/eodhd-fundamentals',
           params: {},
           icon: <ScheduleOutlined />

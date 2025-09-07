@@ -838,7 +838,7 @@ class SchedulerService:
             
             # 获取参数
             exchanges = params.get('exchanges', [])
-            data_types = params.get('data_types', ['General'])  # 当前只支持General数据
+            data_types = params.get('data_types', ['General', 'Financials'])  # 支持General和Financials数据
             
             # 参数验证
             if not exchanges:
@@ -863,7 +863,15 @@ class SchedulerService:
                     'message': f'不支持的交易所，支持的交易所: {", ".join(supported_exchanges)}'
                 }
             
-            logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {data_types}")
+            # 验证数据类型
+            supported_data_types = ['General', 'Financials']
+            valid_data_types = [dt for dt in data_types if dt in supported_data_types]
+            
+            if not valid_data_types:
+                logger.warning(f"无效的数据类型: {data_types}，支持的数据类型: {supported_data_types}")
+                valid_data_types = ['General', 'Financials']  # 默认使用所有支持的类型
+            
+            logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {valid_data_types}")
             
             # 初始化基本面数据服务
             try:
@@ -877,7 +885,19 @@ class SchedulerService:
                 )
                 
                 if result.get('success', False):
-                    success_msg = f"基本面数据获取成功: 总计 {result.get('total_companies', 0)} 家公司, 成功 {result.get('successful_companies', 0)} 家"
+                    total_companies = result.get('total_companies', 0)
+                    successful_companies = result.get('successful_companies', 0)
+                    exchanges_data = result.get('exchanges', {})
+                    
+                    # 统计处理详情
+                    processed_exchanges = len([ex for ex, data in exchanges_data.items() if data.get('successful', 0) > 0])
+                    
+                    success_msg = f"基本面数据获取成功: 总计 {total_companies} 家公司, 成功 {successful_companies} 家, 处理 {processed_exchanges} 个交易所"
+                    
+                    # 如果包含财务数据，添加相关信息
+                    if 'Financials' in valid_data_types:
+                        success_msg += " (包含财务报表数据)"
+                    
                     logger.info(success_msg)
                     return {
                         'success': True,

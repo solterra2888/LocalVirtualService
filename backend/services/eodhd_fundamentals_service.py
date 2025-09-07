@@ -352,21 +352,22 @@ class EODHDFundamentalsService:
             logger.error(f"获取 {exchange} 交易所股票代码失败: {str(e)}")
             return []
     
-    def fetch_company_general_data(self, symbol: str, exchange: str) -> Optional[Dict[str, Any]]:
-        """获取单个公司的General数据
+    def fetch_company_full_data(self, symbol: str, exchange: str) -> Optional[Dict[str, Any]]:
+        """获取单个公司的完整数据（General + Financials）
         
-        通过EODHD的General端点获取公司的完整基本信息，包括：
-        - 基本信息（Code, Name, Exchange等）
-        - 地址信息（AddressData字段）
-        - 高管信息（Officers字段）
+        通过EODHD的Fundamentals端点获取公司的完整信息，包括：
+        - 基本信息（General: Code, Name, Exchange等）
+        - 地址信息（General.AddressData字段）
+        - 高管信息（General.Officers字段）
+        - 财务数据（Financials: Balance_Sheet, Income_Statement, Cash_Flow）
         
         这是一个优化的方法，通过单一API调用获取所有需要的数据，
         避免多次调用不同的API端点。
         """
         try:
-            logger.debug(f"开始获取 {symbol} (交易所: {exchange}) 的General数据")
+            logger.debug(f"开始获取 {symbol} (交易所: {exchange}) 的完整数据（General + Financials）")
             
-            # 构建API URL - 只获取General数据
+            # 构建API URL - 获取General和Financials数据
             # 根据EODHD文档，所有交易所都应使用 {SYMBOL}.{EXCHANGE} 格式
             # 美国交易所统一使用 .US 后缀
             us_exchanges = ['NYSE', 'NASDAQ', 'AMEX']
@@ -377,29 +378,34 @@ class EODHDFundamentalsService:
             else:
                 symbol_with_exchange = f"{symbol}.{exchange}"
             
-            url = f'https://eodhd.com/api/fundamentals/{symbol_with_exchange}?filter=General&api_token={self.api_key}&fmt=json'
+            url = f'https://eodhd.com/api/fundamentals/{symbol_with_exchange}?filter=General,Financials&api_token={self.api_key}&fmt=json'
             
             # 请求数据
             data = self._safe_api_request(url)
             
             # 检查API返回结果
             if not data:
-                logger.warning(f"获取 {symbol} General数据失败：API返回空结果")
+                logger.warning(f"获取 {symbol} 数据失败：API返回空结果")
                 return None
-            elif isinstance(data, str) and data.strip().upper() == 'NA':
-                logger.warning(f"获取 {symbol} General数据失败：该股票在EODHD中无基本面数据（返回NA）")
+            elif isinstance(data, str):
+                # 处理所有字符串返回情况
+                data_stripped = data.strip().upper()
+                if data_stripped == 'NA':
+                    logger.warning(f"获取 {symbol} 数据失败：该股票在EODHD中无基本面数据（返回NA）")
+                else:
+                    logger.warning(f"获取 {symbol} 数据失败：API返回非JSON格式数据: {data[:100]}...")
                 return None
             elif not isinstance(data, dict):
-                logger.warning(f"获取 {symbol} General数据失败：API返回格式错误，期望dict但获得{type(data)}")
+                logger.warning(f"获取 {symbol} 数据失败：API返回格式错误，期望dict但获得{type(data)}")
                 return None
             
             # 检查数据格式：如果包含'General'键，则使用嵌套格式；否则直接使用返回的数据
             if 'General' in data:
-                logger.debug(f"成功获取 {symbol} 的General数据（嵌套格式）")
-                return data['General']
+                logger.debug(f"成功获取 {symbol} 的完整数据（嵌套格式）")
+                return data  # 返回完整数据，包括General和Financials
             elif any(key in data for key in ['Code', 'Name', 'Exchange', 'Type']):
-                # 如果包含基本的General字段，则直接返回整个数据作为General数据
-                logger.debug(f"成功获取 {symbol} 的General数据（平铺格式）")
+                # 如果包含基本的General字段，则直接返回整个数据
+                logger.debug(f"成功获取 {symbol} 的完整数据（平铺格式）")
                 return data
             else:
                 logger.warning(f"{symbol} 返回数据格式不正确，缺少必要的General字段")
@@ -415,14 +421,23 @@ class EODHDFundamentalsService:
         def fetch_single_company(symbol_exchange):
             symbol, exchange = symbol_exchange
             try:
-                general_data = self.fetch_company_general_data(symbol, exchange)
-                if general_data:
+                full_data = self.fetch_company_full_data(symbol, exchange)
+                if full_data and isinstance(full_data, dict):
+                    # 提取General数据用于兼容性
+                    general_data = full_data.get('General', full_data)
+                    
+                    # 确保general_data是字典类型
+                    if not isinstance(general_data, dict):
+                        logger.warning(f"跳过 {symbol}：General数据格式不正确，期望dict但获得{type(general_data)}")
+                        return None
+                    
                     return {
                         'symbol': symbol,
                         'exchange': exchange,
                         'general_data': general_data,
                         'address_data': general_data.get('AddressData'),
-                        'officers_data': self._extract_officers_list(general_data.get('Officers', {}))
+                        'officers_data': self._extract_officers_list(general_data.get('Officers', {})),
+                        'full_data': full_data  # 包含完整数据用于财务数据保存
                     }
                 return None
             except Exception as e:
@@ -495,9 +510,17 @@ class EODHDFundamentalsService:
                     successful += save_result.get('companies_saved', 0)
                     
                     # 详细日志
+                    financials_detail = ""
+                    if 'balance_sheet_records' in save_result:
+                        financials_detail = (f", 财务数据: 资产负债表 {save_result.get('balance_sheet_records', 0)} 条, "
+                                           f"损益表 {save_result.get('income_statement_records', 0)} 条, "
+                                           f"现金流量表 {save_result.get('cash_flow_records', 0)} 条")
+                    else:
+                        financials_detail = f", 财务数据 {save_result.get('financials_saved', 0)} 个公司"
+                    
                     logger.info(f"📊 批次保存完成: {save_result.get('companies_saved')} 个公司, "
                               f"{save_result.get('addresses_saved')} 个地址, "
-                              f"{save_result.get('officers_saved')} 个高管记录")
+                              f"{save_result.get('officers_saved')} 个高管记录{financials_detail}")
                 
                 failed += len(batch_tickers) - len(companies_data)
                 
@@ -648,6 +671,37 @@ class EODHDFundamentalsService:
             
         except Exception as e:
             logger.error(f"保存公司General数据失败: {str(e)}")
+            return None
+
+    def save_company_data(self, data: Dict[str, Any], symbol: str, exchange: str) -> Optional[int]:
+        """保存公司完整数据（包括General和Financials）到数据库"""
+        try:
+            company_id = None
+            
+            # 保存General数据
+            if 'General' in data:
+                company_id = self.save_company_general_data(data['General'], symbol, exchange)
+            elif any(key in data for key in ['Code', 'Name', 'Exchange', 'Type']):
+                # 如果包含基本的General字段，则直接使用这些数据
+                company_id = self.save_company_general_data(data, symbol, exchange)
+            
+            if not company_id:
+                logger.warning(f"无法获取或创建公司ID: {symbol}")
+                return None
+            
+            # 保存Financials数据
+            if 'Financials' in data:
+                try:
+                    self.save_financials_data(company_id, data['Financials'])
+                    logger.debug(f"成功保存财务数据: {symbol} -> ID {company_id}")
+                except Exception as e:
+                    logger.error(f"保存财务数据失败 {symbol}: {str(e)}")
+                    # 财务数据保存失败不影响公司基本信息的保存
+            
+            return company_id
+            
+        except Exception as e:
+            logger.error(f"保存公司完整数据失败: {str(e)}")
             return None
     
     def _create_company_record(self, general_data: Dict[str, Any], symbol: str, exchange: str) -> Optional[int]:
@@ -843,7 +897,7 @@ class EODHDFundamentalsService:
             raise
     
     def batch_save_companies_data(self, companies_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """批量保存公司数据（基本信息、地址、高管）"""
+        """批量保存公司数据（基本信息、地址、高管、财务数据）"""
         try:
             logger.info(f"开始批量保存 {len(companies_data)} 个公司的数据")
             
@@ -851,6 +905,7 @@ class EODHDFundamentalsService:
             companies_batch = []
             addresses_batch = []
             officers_batch = []
+            financials_batch = []
             
             for company_data in companies_data:
                 symbol = company_data.get('symbol')
@@ -858,6 +913,7 @@ class EODHDFundamentalsService:
                 general_data = company_data.get('general_data')
                 address_data = company_data.get('address_data')
                 officers_data = company_data.get('officers_data')
+                full_data = company_data.get('full_data', {})
                 
                 if not general_data:
                     continue
@@ -883,6 +939,13 @@ class EODHDFundamentalsService:
                         'symbol': symbol,
                         'officers_data': officers_data
                     })
+                
+                # 准备财务数据（将在公司插入后处理）
+                if full_data and 'Financials' in full_data:
+                    financials_batch.append({
+                        'symbol': symbol,
+                        'financials_data': full_data['Financials']
+                    })
             
             # 批量处理公司基本信息
             companies_result = self._batch_save_companies(companies_batch)
@@ -894,17 +957,32 @@ class EODHDFundamentalsService:
             # 批量处理高管数据
             officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
             
+            # 批量处理财务数据
+            financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
+            
             result = {
                 'success': True,
                 'total_companies': len(companies_data),
                 'companies_saved': companies_result.get('saved_count', 0),
                 'addresses_saved': addresses_result.get('saved_count', 0),
                 'officers_saved': officers_result.get('saved_count', 0),
+                'financials_saved': financials_result.get('saved_count', 0),
+                'balance_sheet_records': financials_result.get('balance_sheet_records', 0),
+                'income_statement_records': financials_result.get('income_statement_records', 0),
+                'cash_flow_records': financials_result.get('cash_flow_records', 0),
                 'symbol_to_id': symbol_to_id
             }
             
+            financials_detail = ""
+            if 'balance_sheet_records' in result:
+                financials_detail = (f", 财务数据: 资产负债表 {result.get('balance_sheet_records', 0)} 条, "
+                                   f"损益表 {result.get('income_statement_records', 0)} 条, "
+                                   f"现金流量表 {result.get('cash_flow_records', 0)} 条")
+            else:
+                financials_detail = f", 财务数据 {result['financials_saved']} 个公司"
+            
             logger.info(f"批量保存完成: 公司 {result['companies_saved']}, "
-                       f"地址 {result['addresses_saved']}, 高管 {result['officers_saved']}")
+                       f"地址 {result['addresses_saved']}, 高管 {result['officers_saved']}{financials_detail}")
             
             return result
             
@@ -916,7 +994,8 @@ class EODHDFundamentalsService:
                 'total_companies': len(companies_data),
                 'companies_saved': 0,
                 'addresses_saved': 0,
-                'officers_saved': 0
+                'officers_saved': 0,
+                'financials_saved': 0
             }
     
     def _batch_save_companies(self, companies_batch: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -933,9 +1012,18 @@ class EODHDFundamentalsService:
             seen_codes = set()  # 防止同批次中重复的code导致UPSERT冲突
             
             for company_record in companies_batch:
-                symbol = company_record['symbol']
-                exchange = company_record['exchange']
-                general_data = company_record['general_data']
+                try:
+                    symbol = company_record.get('symbol', 'Unknown')
+                    exchange = company_record.get('exchange', 'Unknown')
+                    general_data = company_record.get('general_data', {})
+                    
+                    # 验证数据完整性
+                    if not isinstance(general_data, dict):
+                        logger.warning(f"跳过公司 {symbol}：general_data不是字典类型: {type(general_data)}")
+                        continue
+                except Exception as e:
+                    logger.error(f"处理公司记录时出错: {company_record}, 错误: {str(e)}")
+                    continue
                 
                 # 准备UPSERT数据
                 primary_ticker = f"{symbol}.US" if exchange in ['NASDAQ', 'NYSE', 'AMEX'] else f"{symbol}.{exchange}"
@@ -1181,6 +1269,254 @@ class EODHDFundamentalsService:
             logger.error(f"批量保存高管数据失败: {str(e)}")
             raise
 
+    def _batch_save_financials(self, financials_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """🚀 优化批量保存财务数据 - 使用真正的批量插入"""
+        try:
+            if not financials_batch:
+                return {'saved_count': 0, 'balance_sheet_records': 0, 'income_statement_records': 0, 'cash_flow_records': 0}
+            
+            logger.info(f"🚀 优化批量保存财务数据，涉及 {len(financials_batch)} 个公司")
+            
+            # 分别收集三个财务报表的数据
+            balance_sheet_records = []
+            income_statement_records = []
+            cash_flow_records = []
+            
+            for financials_record in financials_batch:
+                symbol = financials_record['symbol']
+                financials_data = financials_record['financials_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"找不到公司ID: {symbol}")
+                    continue
+                
+                # 收集资产负债表数据
+                if 'Balance_Sheet' in financials_data:
+                    balance_sheet_data = self._extract_financial_records(
+                        company_id, financials_data['Balance_Sheet'], 'balance_sheet'
+                    )
+                    balance_sheet_records.extend(balance_sheet_data)
+                
+                # 收集损益表数据
+                if 'Income_Statement' in financials_data:
+                    income_statement_data = self._extract_financial_records(
+                        company_id, financials_data['Income_Statement'], 'income_statement'
+                    )
+                    income_statement_records.extend(income_statement_data)
+                
+                # 收集现金流量表数据
+                if 'Cash_Flow' in financials_data:
+                    cash_flow_data = self._extract_financial_records(
+                        company_id, financials_data['Cash_Flow'], 'cash_flow'
+                    )
+                    cash_flow_records.extend(cash_flow_data)
+            
+            # 批量保存到各个表
+            balance_sheet_saved = self._bulk_upsert_balance_sheet(balance_sheet_records)
+            income_statement_saved = self._bulk_upsert_income_statement(income_statement_records)
+            cash_flow_saved = self._bulk_upsert_cash_flow(cash_flow_records)
+            
+            total_companies = len([r for r in financials_batch if symbol_to_id.get(r['symbol'])])
+            
+            logger.info(f"🚀 批量财务数据保存完成: {total_companies} 个公司, "
+                       f"资产负债表 {balance_sheet_saved} 条, "
+                       f"损益表 {income_statement_saved} 条, "
+                       f"现金流量表 {cash_flow_saved} 条")
+            
+            return {
+                'saved_count': total_companies,
+                'balance_sheet_records': balance_sheet_saved,
+                'income_statement_records': income_statement_saved, 
+                'cash_flow_records': cash_flow_saved
+            }
+            
+        except Exception as e:
+            logger.error(f"批量保存财务数据失败: {str(e)}")
+            raise
+
+    def _extract_financial_records(self, company_id: int, financial_data: Dict[str, Any], statement_type: str) -> List[tuple]:
+        """从财务数据中提取记录用于批量插入"""
+        records = []
+        
+        if not isinstance(financial_data, dict):
+            return records
+        
+        # 处理季度和年度数据
+        for period_type_key in ['quarterly', 'yearly']:
+            if period_type_key not in financial_data:
+                continue
+            
+            period_type = 'quarterly' if period_type_key == 'quarterly' else 'annual'
+            period_data = financial_data[period_type_key]
+            
+            if not isinstance(period_data, dict):
+                continue
+            
+            for date_str, data in period_data.items():
+                if not isinstance(data, dict):
+                    continue
+                
+                try:
+                    # 解析日期
+                    from datetime import datetime
+                    data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    filing_date = self._safe_date(data.get('filing_date'))
+                    currency_symbol = data.get('currency_symbol', 'USD')
+                    
+                    if statement_type == 'balance_sheet':
+                        record = (
+                            company_id, period_type, data_date, filing_date, currency_symbol,
+                            # 资产数据
+                            self._safe_float(data.get('totalAssets')),
+                            self._safe_float(data.get('totalCurrentAssets')), 
+                            self._safe_float(data.get('cash')),
+                            self._safe_float(data.get('cashAndEquivalents')),
+                            self._safe_float(data.get('cashAndShortTermInvestments')),
+                            self._safe_float(data.get('shortTermInvestments')),
+                            self._safe_float(data.get('netReceivables')),
+                            self._safe_float(data.get('inventory')),
+                            self._safe_float(data.get('otherCurrentAssets')),
+                            self._safe_float(data.get('nonCurrentAssetsTotal')),
+                            self._safe_float(data.get('longTermInvestments')),
+                            self._safe_float(data.get('propertyPlantEquipment')),
+                            self._safe_float(data.get('propertyPlantAndEquipmentGross')),
+                            self._safe_float(data.get('propertyPlantAndEquipmentNet')),
+                            self._safe_float(data.get('accumulatedDepreciation')),
+                            self._safe_float(data.get('goodWill')),
+                            self._safe_float(data.get('intangibleAssets')),
+                            self._safe_float(data.get('accumulatedAmortization')),
+                            self._safe_float(data.get('nonCurrrentAssetsOther')),
+                            self._safe_float(data.get('deferredLongTermAssetCharges')),
+                            self._safe_float(data.get('otherAssets')),
+                            self._safe_float(data.get('earningAssets')),
+                            self._safe_float(data.get('netTangibleAssets')),
+                            # 负债数据
+                            self._safe_float(data.get('totalLiab')),
+                            self._safe_float(data.get('totalCurrentLiabilities')),
+                            self._safe_float(data.get('accountsPayable')),
+                            self._safe_float(data.get('shortTermDebt')),
+                            self._safe_float(data.get('shortLongTermDebt')),
+                            self._safe_float(data.get('shortLongTermDebtTotal')),
+                            self._safe_float(data.get('otherCurrentLiab')),
+                            self._safe_float(data.get('currentDeferredRevenue')),
+                            self._safe_float(data.get('nonCurrentLiabilitiesTotal')),
+                            self._safe_float(data.get('longTermDebt')),
+                            self._safe_float(data.get('longTermDebtTotal')),
+                            self._safe_float(data.get('capitalLeaseObligations')),
+                            self._safe_float(data.get('deferredLongTermLiab')),
+                            self._safe_float(data.get('nonCurrentLiabilitiesOther')),
+                            self._safe_float(data.get('otherLiab')),
+                            self._safe_float(data.get('netDebt')),
+                            # 股东权益数据
+                            self._safe_float(data.get('totalStockholderEquity')),
+                            self._safe_float(data.get('commonStock')),
+                            self._safe_float(data.get('capitalStock')),
+                            self._safe_float(data.get('retainedEarnings')),
+                            self._safe_float(data.get('otherStockholderEquity')),
+                            self._safe_float(data.get('accumulatedOtherComprehensiveIncome')),
+                            self._safe_float(data.get('additionalPaidInCapital')),
+                            self._safe_float(data.get('commonStockTotalEquity')),
+                            self._safe_float(data.get('preferredStockTotalEquity')),
+                            self._safe_float(data.get('retainedEarningsTotalEquity')),
+                            self._safe_float(data.get('treasuryStock')),
+                            self._safe_float(data.get('totalPermanentEquity')),
+                            self._safe_float(data.get('noncontrollingInterestInConsolidatedEntity')),
+                            self._safe_float(data.get('temporaryEquityRedeemableNoncontrollingInterests')),
+                            self._safe_float(data.get('negativeGoodwill')),
+                            self._safe_float(data.get('warrants')),
+                            self._safe_float(data.get('preferredStockRedeemable')),
+                            self._safe_float(data.get('capitalSurpluse')),
+                            self._safe_float(data.get('liabilitiesAndStockholdersEquity')),
+                            self._safe_float(data.get('netWorkingCapital')),
+                            self._safe_float(data.get('netInvestedCapital')),
+                            self._safe_float(data.get('commonStockSharesOutstanding')),
+                            datetime.now(), datetime.now()
+                        )
+                        
+                    elif statement_type == 'income_statement':
+                        record = (
+                            company_id, period_type, data_date, filing_date, currency_symbol,
+                            self._safe_float(data.get('totalRevenue')),
+                            self._safe_float(data.get('costOfRevenue')),
+                            self._safe_float(data.get('grossProfit')),
+                            self._safe_float(data.get('totalOperatingExpenses')),
+                            self._safe_float(data.get('researchDevelopment')),
+                            self._safe_float(data.get('sellingGeneralAdministrative')),
+                            self._safe_float(data.get('sellingAndMarketingExpenses')),
+                            self._safe_float(data.get('otherOperatingExpenses')),
+                            self._safe_float(data.get('operatingIncome')),
+                            self._safe_float(data.get('ebit')),
+                            self._safe_float(data.get('ebitda')),
+                            self._safe_float(data.get('interestIncome')),
+                            self._safe_float(data.get('interestExpense')),
+                            self._safe_float(data.get('netInterestIncome')),
+                            self._safe_float(data.get('totalOtherIncomeExpenseNet')),
+                            self._safe_float(data.get('nonOperatingIncomeNetOther')),
+                            self._safe_float(data.get('incomeBeforeTax')),
+                            self._safe_float(data.get('taxProvision')),
+                            self._safe_float(data.get('incomeTaxExpense')),
+                            self._safe_float(data.get('netIncome')),
+                            self._safe_float(data.get('netIncomeFromContinuingOps')),
+                            self._safe_float(data.get('netIncomeApplicableToCommonShares')),
+                            self._safe_float(data.get('reconciledDepreciation')),
+                            self._safe_float(data.get('depreciationAndAmortization')),
+                            self._safe_float(data.get('extraordinaryItems')),
+                            self._safe_float(data.get('nonRecurring')),
+                            self._safe_float(data.get('otherItems')),
+                            self._safe_float(data.get('discontinuedOperations')),
+                            self._safe_float(data.get('effectOfAccountingCharges')),
+                            self._safe_float(data.get('minorityInterest')),
+                            self._safe_float(data.get('preferredStockAndOtherAdjustments')),
+                            datetime.now(), datetime.now()
+                        )
+                        
+                    elif statement_type == 'cash_flow':
+                        record = (
+                            company_id, period_type, data_date, filing_date, currency_symbol,
+                            self._safe_float(data.get('totalCashFromOperatingActivities')),
+                            self._safe_float(data.get('netIncome')),
+                            self._safe_float(data.get('depreciation')),
+                            self._safe_float(data.get('stockBasedCompensation')),
+                            self._safe_float(data.get('changeInWorkingCapital')),
+                            self._safe_float(data.get('changeToAccountReceivables')),
+                            self._safe_float(data.get('changeToInventory')),
+                            self._safe_float(data.get('changeToLiabilities')),
+                            self._safe_float(data.get('changeToOperatingActivities')),
+                            self._safe_float(data.get('changeToNetincome')),
+                            self._safe_float(data.get('changeReceivables')),
+                            self._safe_float(data.get('otherNonCashItems')),
+                            self._safe_float(data.get('cashFlowsOtherOperating')),
+                            self._safe_float(data.get('totalCashflowsFromInvestingActivities')),
+                            self._safe_float(data.get('capitalExpenditures')),
+                            self._safe_float(data.get('investments')),
+                            self._safe_float(data.get('otherCashflowsFromInvestingActivities')),
+                            self._safe_float(data.get('salePurchaseOfStock')),
+                            self._safe_float(data.get('totalCashFromFinancingActivities')),
+                            self._safe_float(data.get('dividendsPaid')),
+                            self._safe_float(data.get('netBorrowings')),
+                            self._safe_float(data.get('issuanceOfCapitalStock')),
+                            self._safe_float(data.get('otherCashflowsFromFinancingActivities')),
+                            self._safe_float(data.get('changeInCash')),
+                            self._safe_float(data.get('beginPeriodCashFlow')),
+                            self._safe_float(data.get('endPeriodCashFlow')),
+                            self._safe_float(data.get('exchangeRateChanges')),
+                            self._safe_float(data.get('cashAndCashEquivalentsChanges')),
+                            self._safe_float(data.get('freeCashFlow')),
+                            datetime.now(), datetime.now()
+                        )
+                    
+                    records.append(record)
+                    
+                except ValueError as e:
+                    logger.warning(f"财务数据日期解析失败: {date_str}, 错误: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"提取财务记录失败 {date_str}: {str(e)}")
+                    continue
+        
+        return records
+
     def _save_officers_data(self, company_id: int, officers_data: Dict[str, Any]) -> int:
         """保存高管信息到 company_officers 表"""
         try:
@@ -1274,10 +1610,19 @@ class EODHDFundamentalsService:
                         if progress_callback and i % 10 == 0:  # 每10个更新一次进度
                             progress_callback(f"获取 {exchange}: {ticker} ({batch_start + i + 1}/{len(tickers)})")
                         
-                        # 获取General数据
-                        general_data = self.fetch_company_general_data(ticker, exchange)
+                        # 获取完整数据（General + Financials）
+                        full_data = self.fetch_company_full_data(ticker, exchange)
                         
-                        if general_data:
+                        if full_data and isinstance(full_data, dict):
+                            # 提取General数据用于批处理兼容性
+                            general_data = full_data.get('General', full_data)
+                            
+                            # 确保general_data是字典类型
+                            if not isinstance(general_data, dict):
+                                logger.warning(f"跳过 {ticker}：General数据格式不正确，期望dict但获得{type(general_data)}")
+                                total_failed += 1
+                                continue
+                            
                             # 获取高管数据 - 直接从General数据中提取
                             officers_data = []
                             if 'Officers' in general_data and isinstance(general_data['Officers'], dict):
@@ -1299,7 +1644,8 @@ class EODHDFundamentalsService:
                                 'exchange': exchange,
                                 'general_data': general_data,
                                 'address_data': address_data,
-                                'officers_data': officers_data
+                                'officers_data': officers_data,
+                                'full_data': full_data  # 包含完整数据用于财务数据保存
                             })
                             
                             logger.debug(f"✅ {ticker}: 数据获取成功")
@@ -1324,9 +1670,17 @@ class EODHDFundamentalsService:
                             total_successful += batch_successful
                             
                             # 显示批次保存的详细信息
+                            financials_detail = ""
+                            if 'balance_sheet_records' in batch_result:
+                                financials_detail = (f", 财务数据: 资产负债表 {batch_result.get('balance_sheet_records', 0)} 条, "
+                                                   f"损益表 {batch_result.get('income_statement_records', 0)} 条, "
+                                                   f"现金流量表 {batch_result.get('cash_flow_records', 0)} 条")
+                            else:
+                                financials_detail = f", 财务数据 {batch_result.get('financials_saved', 0)} 个公司"
+                            
                             logger.info(f"📊 批次保存完成: {batch_successful} 个公司, "
                                        f"{batch_result['addresses_saved']} 个地址, "
-                                       f"{batch_result['officers_saved']} 个高管记录")
+                                       f"{batch_result['officers_saved']} 个高管记录{financials_detail}")
                             
                             # 🚀 优化：移除冗余的逐条日志，只保留批次摘要
                         else:
@@ -1448,6 +1802,502 @@ class EODHDFundamentalsService:
                 'failed_companies': 0
             }
     
+    def save_financials_data(self, company_id: int, financials: Dict[str, Any]):
+        """保存财务数据"""
+        try:
+            if not isinstance(financials, dict) or not financials:
+                logger.warning(f"财务数据无效: {financials}")
+                return
+            
+            # 保存资产负债表数据
+            if 'Balance_Sheet' in financials:
+                self.save_balance_sheet_data(company_id, financials['Balance_Sheet'])
+            
+            # 保存损益表数据
+            if 'Income_Statement' in financials:
+                self.save_income_statement_data(company_id, financials['Income_Statement'])
+            
+            # 保存现金流量表数据
+            if 'Cash_Flow' in financials:
+                self.save_cash_flow_data(company_id, financials['Cash_Flow'])
+            
+            logger.debug(f"成功保存财务数据 - 公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存财务数据失败: {str(e)}")
+            raise
+
+    def save_balance_sheet_data(self, company_id: int, balance_sheet: Dict[str, Any]):
+        """保存资产负债表数据"""
+        try:
+            if not isinstance(balance_sheet, dict):
+                return
+            
+            # 处理季度和年度数据
+            for period_type_key in ['quarterly', 'yearly']:
+                if period_type_key not in balance_sheet:
+                    continue
+                
+                period_type = 'quarterly' if period_type_key == 'quarterly' else 'annual'
+                period_data = balance_sheet[period_type_key]
+                
+                if not isinstance(period_data, dict):
+                    continue
+                
+                for date_str, data in period_data.items():
+                    if not isinstance(data, dict):
+                        continue
+                    
+                    try:
+                        # 解析日期
+                        from datetime import datetime
+                        data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        filing_date = self._safe_date(data.get('filing_date'))
+                        
+                        # 使用UPSERT插入或更新数据
+                        insert_sql = """
+                            INSERT INTO company_balance_sheet (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalassets, totalcurrentassets, cash, cashandequivalents, cashandshortterminvestments,
+                                shortterminvestments, netreceivables, inventory, othercurrentassets, noncurrentassetstotal,
+                                longterminvestments, propertyplantequipment, propertyplantandequipmentgross, propertyplantandequipmentnet,
+                                accumulateddepreciation, goodwill, intangibleassets, accumulatedamortization, noncurrrentassetsother,
+                                deferredlongtermassetcharges, otherassets, earningassets, nettangibleassets,
+                                totalliab, totalcurrentliabilities, accountspayable, shorttermdebt, shortlongtermdebt,
+                                shortlongtermdebttotal, othercurrentliab, currentdeferredrevenue, noncurrentliabilitiestotal,
+                                longtermdebt, longtermdebttotal, capitalleaseobligations, deferredlongtermliab,
+                                noncurrentliabilitiesother, otherliab, netdebt,
+                                totalstockholderequity, commonstock, capitalstock, retainedearnings, otherstockholderequity,
+                                accumulatedothercomprehensiveincome, additionalpaidincapital, commonstocktotalequity,
+                                preferredstocktotalequity, retainedearningstotalequity, treasurystock, totalpermanentequity,
+                                noncontrollinginterestinconsolidatedentity, temporaryequityredeemablenoncontrollinginterests,
+                                negativegoodwill, warrants, preferredstockredeemable, capitalsurpluse,
+                                liabilitiesandstockholdersequity, networkingcapital, netinvestedcapital, commonstocksharesoutstanding,
+                                created_at, updated_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalassets = EXCLUDED.totalassets,
+                                totalcurrentassets = EXCLUDED.totalcurrentassets,
+                                cash = EXCLUDED.cash,
+                                cashandequivalents = EXCLUDED.cashandequivalents,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        values = (
+                            company_id, period_type, data_date, filing_date, data.get('currency_symbol', 'USD'),
+                            self._safe_float(data.get('totalAssets')),
+                            self._safe_float(data.get('totalCurrentAssets')),
+                            self._safe_float(data.get('cash')),
+                            self._safe_float(data.get('cashAndEquivalents')),
+                            self._safe_float(data.get('cashAndShortTermInvestments')),
+                            self._safe_float(data.get('shortTermInvestments')),
+                            self._safe_float(data.get('netReceivables')),
+                            self._safe_float(data.get('inventory')),
+                            self._safe_float(data.get('otherCurrentAssets')),
+                            self._safe_float(data.get('nonCurrentAssetsTotal')),
+                            self._safe_float(data.get('longTermInvestments')),
+                            self._safe_float(data.get('propertyPlantEquipment')),
+                            self._safe_float(data.get('propertyPlantAndEquipmentGross')),
+                            self._safe_float(data.get('propertyPlantAndEquipmentNet')),
+                            self._safe_float(data.get('accumulatedDepreciation')),
+                            self._safe_float(data.get('goodWill')),
+                            self._safe_float(data.get('intangibleAssets')),
+                            self._safe_float(data.get('accumulatedAmortization')),
+                            self._safe_float(data.get('nonCurrrentAssetsOther')),
+                            self._safe_float(data.get('deferredLongTermAssetCharges')),
+                            self._safe_float(data.get('otherAssets')),
+                            self._safe_float(data.get('earningAssets')),
+                            self._safe_float(data.get('netTangibleAssets')),
+                            self._safe_float(data.get('totalLiab')),
+                            self._safe_float(data.get('totalCurrentLiabilities')),
+                            self._safe_float(data.get('accountsPayable')),
+                            self._safe_float(data.get('shortTermDebt')),
+                            self._safe_float(data.get('shortLongTermDebt')),
+                            self._safe_float(data.get('shortLongTermDebtTotal')),
+                            self._safe_float(data.get('otherCurrentLiab')),
+                            self._safe_float(data.get('currentDeferredRevenue')),
+                            self._safe_float(data.get('nonCurrentLiabilitiesTotal')),
+                            self._safe_float(data.get('longTermDebt')),
+                            self._safe_float(data.get('longTermDebtTotal')),
+                            self._safe_float(data.get('capitalLeaseObligations')),
+                            self._safe_float(data.get('deferredLongTermLiab')),
+                            self._safe_float(data.get('nonCurrentLiabilitiesOther')),
+                            self._safe_float(data.get('otherLiab')),
+                            self._safe_float(data.get('netDebt')),
+                            self._safe_float(data.get('totalStockholderEquity')),
+                            self._safe_float(data.get('commonStock')),
+                            self._safe_float(data.get('capitalStock')),
+                            self._safe_float(data.get('retainedEarnings')),
+                            self._safe_float(data.get('otherStockholderEquity')),
+                            self._safe_float(data.get('accumulatedOtherComprehensiveIncome')),
+                            self._safe_float(data.get('additionalPaidInCapital')),
+                            self._safe_float(data.get('commonStockTotalEquity')),
+                            self._safe_float(data.get('preferredStockTotalEquity')),
+                            self._safe_float(data.get('retainedEarningsTotalEquity')),
+                            self._safe_float(data.get('treasuryStock')),
+                            self._safe_float(data.get('totalPermanentEquity')),
+                            self._safe_float(data.get('noncontrollingInterestInConsolidatedEntity')),
+                            self._safe_float(data.get('temporaryEquityRedeemableNoncontrollingInterests')),
+                            self._safe_float(data.get('negativeGoodwill')),
+                            self._safe_float(data.get('warrants')),
+                            self._safe_float(data.get('preferredStockRedeemable')),
+                            self._safe_float(data.get('capitalSurpluse')),
+                            self._safe_float(data.get('liabilitiesAndStockholdersEquity')),
+                            self._safe_float(data.get('netWorkingCapital')),
+                            self._safe_float(data.get('netInvestedCapital')),
+                            self._safe_float(data.get('commonStockSharesOutstanding')),
+                            datetime.now(),
+                            datetime.now()
+                        )
+                        
+                        self.db_manager.execute_query(insert_sql, values)
+                        
+                    except Exception as e:
+                        logger.error(f"保存资产负债表数据失败 {date_str}: {str(e)}")
+                        continue
+            
+            logger.debug(f"成功保存资产负债表数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存资产负债表失败: {str(e)}")
+            raise
+
+    def save_income_statement_data(self, company_id: int, income_statement: Dict[str, Any]):
+        """保存损益表数据"""
+        try:
+            if not isinstance(income_statement, dict):
+                return
+            
+            # 处理季度和年度数据
+            for period_type_key in ['quarterly', 'yearly']:
+                if period_type_key not in income_statement:
+                    continue
+                
+                period_type = 'quarterly' if period_type_key == 'quarterly' else 'annual'
+                period_data = income_statement[period_type_key]
+                
+                if not isinstance(period_data, dict):
+                    continue
+                
+                for date_str, data in period_data.items():
+                    if not isinstance(data, dict):
+                        continue
+                    
+                    try:
+                        # 解析日期
+                        from datetime import datetime
+                        data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        filing_date = self._safe_date(data.get('filing_date'))
+                        
+                        # 使用UPSERT插入或更新数据
+                        insert_sql = """
+                            INSERT INTO company_income_statement (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalrevenue, costofrevenue, grossprofit, totaloperatingexpenses,
+                                researchdevelopment, sellinggeneraladministrative, sellingandmarketingexpenses, otheroperatingexpenses,
+                                operatingincome, ebit, ebitda, interestincome, interestexpense, netinterestincome,
+                                totalotherincomeexpensenet, nonoperatingincomenetother, incomebeforetax, taxprovision,
+                                incometaxexpense, netincome, netincomefromcontinuingops, netincomeapplicabletocommonshares,
+                                reconcileddepreciation, depreciationandamortization, extraordinaryitems, nonrecurring,
+                                otheritems, discontinuedoperations, effectofaccountingcharges, minorityinterest,
+                                preferredstockandotheradjustments, created_at, updated_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalrevenue = EXCLUDED.totalrevenue,
+                                costofrevenue = EXCLUDED.costofrevenue,
+                                grossprofit = EXCLUDED.grossprofit,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        values = (
+                            company_id, period_type, data_date, filing_date, data.get('currency_symbol', 'USD'),
+                            self._safe_float(data.get('totalRevenue')),
+                            self._safe_float(data.get('costOfRevenue')),
+                            self._safe_float(data.get('grossProfit')),
+                            self._safe_float(data.get('totalOperatingExpenses')),
+                            self._safe_float(data.get('researchDevelopment')),
+                            self._safe_float(data.get('sellingGeneralAdministrative')),
+                            self._safe_float(data.get('sellingAndMarketingExpenses')),
+                            self._safe_float(data.get('otherOperatingExpenses')),
+                            self._safe_float(data.get('operatingIncome')),
+                            self._safe_float(data.get('ebit')),
+                            self._safe_float(data.get('ebitda')),
+                            self._safe_float(data.get('interestIncome')),
+                            self._safe_float(data.get('interestExpense')),
+                            self._safe_float(data.get('netInterestIncome')),
+                            self._safe_float(data.get('totalOtherIncomeExpenseNet')),
+                            self._safe_float(data.get('nonOperatingIncomeNetOther')),
+                            self._safe_float(data.get('incomeBeforeTax')),
+                            self._safe_float(data.get('taxProvision')),
+                            self._safe_float(data.get('incomeTaxExpense')),
+                            self._safe_float(data.get('netIncome')),
+                            self._safe_float(data.get('netIncomeFromContinuingOps')),
+                            self._safe_float(data.get('netIncomeApplicableToCommonShares')),
+                            self._safe_float(data.get('reconciledDepreciation')),
+                            self._safe_float(data.get('depreciationAndAmortization')),
+                            self._safe_float(data.get('extraordinaryItems')),
+                            self._safe_float(data.get('nonRecurring')),
+                            self._safe_float(data.get('otherItems')),
+                            self._safe_float(data.get('discontinuedOperations')),
+                            self._safe_float(data.get('effectOfAccountingCharges')),
+                            self._safe_float(data.get('minorityInterest')),
+                            self._safe_float(data.get('preferredStockAndOtherAdjustments')),
+                            datetime.now(),
+                            datetime.now()
+                        )
+                        
+                        self.db_manager.execute_query(insert_sql, values)
+                        
+                    except Exception as e:
+                        logger.error(f"保存损益表数据失败 {date_str}: {str(e)}")
+                        continue
+            
+            logger.debug(f"成功保存损益表数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存损益表失败: {str(e)}")
+            raise
+
+    def save_cash_flow_data(self, company_id: int, cash_flow: Dict[str, Any]):
+        """保存现金流量表数据"""
+        try:
+            if not isinstance(cash_flow, dict):
+                return
+            
+            # 处理季度和年度数据
+            for period_type_key in ['quarterly', 'yearly']:
+                if period_type_key not in cash_flow:
+                    continue
+                
+                period_type = 'quarterly' if period_type_key == 'quarterly' else 'annual'
+                period_data = cash_flow[period_type_key]
+                
+                if not isinstance(period_data, dict):
+                    continue
+                
+                for date_str, data in period_data.items():
+                    if not isinstance(data, dict):
+                        continue
+                    
+                    try:
+                        # 解析日期
+                        from datetime import datetime
+                        data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        filing_date = self._safe_date(data.get('filing_date'))
+                        
+                        # 使用UPSERT插入或更新数据
+                        insert_sql = """
+                            INSERT INTO company_cash_flow (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalcashfromoperatingactivities, netincome, depreciation, stockbasedcompensation,
+                                changeinworkingcapital, changetoaccountreceivables, changetoinventory, changetoliabilities,
+                                changetooperatingactivities, changetonetincome, changereceivables, othernoncashitems,
+                                cashflowsotheroperating, totalcashflowsfrominvestingactivities, capitalexpenditures,
+                                investments, othercashflowsfrominvestingactivities, salepurchaseofstock,
+                                totalcashfromfinancingactivities, dividendspaid, netborrowings, issuanceofcapitalstock,
+                                othercashflowsfromfinancingactivities, changeincash, beginperiodcashflow, endperiodcashflow,
+                                exchangeratechanges, cashandcashequivalentschanges, freecashflow,
+                                created_at, updated_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalcashfromoperatingactivities = EXCLUDED.totalcashfromoperatingactivities,
+                                netincome = EXCLUDED.netincome,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        values = (
+                            company_id, period_type, data_date, filing_date, data.get('currency_symbol', 'USD'),
+                            self._safe_float(data.get('totalCashFromOperatingActivities')),
+                            self._safe_float(data.get('netIncome')),
+                            self._safe_float(data.get('depreciation')),
+                            self._safe_float(data.get('stockBasedCompensation')),
+                            self._safe_float(data.get('changeInWorkingCapital')),
+                            self._safe_float(data.get('changeToAccountReceivables')),
+                            self._safe_float(data.get('changeToInventory')),
+                            self._safe_float(data.get('changeToLiabilities')),
+                            self._safe_float(data.get('changeToOperatingActivities')),
+                            self._safe_float(data.get('changeToNetincome')),
+                            self._safe_float(data.get('changeReceivables')),
+                            self._safe_float(data.get('otherNonCashItems')),
+                            self._safe_float(data.get('cashFlowsOtherOperating')),
+                            self._safe_float(data.get('totalCashflowsFromInvestingActivities')),
+                            self._safe_float(data.get('capitalExpenditures')),
+                            self._safe_float(data.get('investments')),
+                            self._safe_float(data.get('otherCashflowsFromInvestingActivities')),
+                            self._safe_float(data.get('salePurchaseOfStock')),
+                            self._safe_float(data.get('totalCashFromFinancingActivities')),
+                            self._safe_float(data.get('dividendsPaid')),
+                            self._safe_float(data.get('netBorrowings')),
+                            self._safe_float(data.get('issuanceOfCapitalStock')),
+                            self._safe_float(data.get('otherCashflowsFromFinancingActivities')),
+                            self._safe_float(data.get('changeInCash')),
+                            self._safe_float(data.get('beginPeriodCashFlow')),
+                            self._safe_float(data.get('endPeriodCashFlow')),
+                            self._safe_float(data.get('exchangeRateChanges')),
+                            self._safe_float(data.get('cashAndCashEquivalentsChanges')),
+                            self._safe_float(data.get('freeCashFlow')),
+                            datetime.now(),
+                            datetime.now()
+                        )
+                        
+                        self.db_manager.execute_query(insert_sql, values)
+                        
+                    except Exception as e:
+                        logger.error(f"保存现金流量表数据失败 {date_str}: {str(e)}")
+                        continue
+            
+            logger.debug(f"成功保存现金流量表数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存现金流量表失败: {str(e)}")
+            raise
+
+    def _bulk_upsert_balance_sheet(self, records: List[tuple]) -> int:
+        """批量UPSERT资产负债表数据"""
+        if not records:
+            return 0
+        
+        try:
+            upsert_sql = """
+                INSERT INTO company_balance_sheet (
+                    company_id, period_type, date, filing_date, currency_symbol,
+                    totalassets, totalcurrentassets, cash, cashandequivalents, cashandshortterminvestments,
+                    shortterminvestments, netreceivables, inventory, othercurrentassets, noncurrentassetstotal,
+                    longterminvestments, propertyplantequipment, propertyplantandequipmentgross, propertyplantandequipmentnet,
+                    accumulateddepreciation, goodwill, intangibleassets, accumulatedamortization, noncurrrentassetsother,
+                    deferredlongtermassetcharges, otherassets, earningassets, nettangibleassets,
+                    totalliab, totalcurrentliabilities, accountspayable, shorttermdebt, shortlongtermdebt,
+                    shortlongtermdebttotal, othercurrentliab, currentdeferredrevenue, noncurrentliabilitiestotal,
+                    longtermdebt, longtermdebttotal, capitalleaseobligations, deferredlongtermliab,
+                    noncurrentliabilitiesother, otherliab, netdebt,
+                    totalstockholderequity, commonstock, capitalstock, retainedearnings, otherstockholderequity,
+                    accumulatedothercomprehensiveincome, additionalpaidincapital, commonstocktotalequity,
+                    preferredstocktotalequity, retainedearningstotalequity, treasurystock, totalpermanentequity,
+                    noncontrollinginterestinconsolidatedentity, temporaryequityredeemablenoncontrollinginterests,
+                    negativegoodwill, warrants, preferredstockredeemable, capitalsurpluse,
+                    liabilitiesandstockholdersequity, networkingcapital, netinvestedcapital, commonstocksharesoutstanding,
+                    created_at, updated_at
+                ) VALUES %s
+                ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                    filing_date = EXCLUDED.filing_date,
+                    currency_symbol = EXCLUDED.currency_symbol,
+                    totalassets = EXCLUDED.totalassets,
+                    totalcurrentassets = EXCLUDED.totalcurrentassets,
+                    cash = EXCLUDED.cash,
+                    cashandequivalents = EXCLUDED.cashandequivalents,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    import psycopg2.extras
+                    psycopg2.extras.execute_values(
+                        cursor, upsert_sql, records,
+                        template=None, page_size=100
+                    )
+                    conn.commit()
+            
+            logger.debug(f"批量UPSERT资产负债表数据完成: {len(records)} 条记录")
+            return len(records)
+            
+        except Exception as e:
+            logger.error(f"批量UPSERT资产负债表数据失败: {str(e)}")
+            raise
+
+    def _bulk_upsert_income_statement(self, records: List[tuple]) -> int:
+        """批量UPSERT损益表数据"""
+        if not records:
+            return 0
+        
+        try:
+            upsert_sql = """
+                INSERT INTO company_income_statement (
+                    company_id, period_type, date, filing_date, currency_symbol,
+                    totalrevenue, costofrevenue, grossprofit, totaloperatingexpenses,
+                    researchdevelopment, sellinggeneraladministrative, sellingandmarketingexpenses, otheroperatingexpenses,
+                    operatingincome, ebit, ebitda, interestincome, interestexpense, netinterestincome,
+                    totalotherincomeexpensenet, nonoperatingincomenetother, incomebeforetax, taxprovision,
+                    incometaxexpense, netincome, netincomefromcontinuingops, netincomeapplicabletocommonshares,
+                    reconcileddepreciation, depreciationandamortization, extraordinaryitems, nonrecurring,
+                    otheritems, discontinuedoperations, effectofaccountingcharges, minorityinterest,
+                    preferredstockandotheradjustments, created_at, updated_at
+                ) VALUES %s
+                ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                    filing_date = EXCLUDED.filing_date,
+                    currency_symbol = EXCLUDED.currency_symbol,
+                    totalrevenue = EXCLUDED.totalrevenue,
+                    costofrevenue = EXCLUDED.costofrevenue,
+                    grossprofit = EXCLUDED.grossprofit,
+                    netincome = EXCLUDED.netincome,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    import psycopg2.extras
+                    psycopg2.extras.execute_values(
+                        cursor, upsert_sql, records,
+                        template=None, page_size=100
+                    )
+                    conn.commit()
+            
+            logger.debug(f"批量UPSERT损益表数据完成: {len(records)} 条记录")
+            return len(records)
+            
+        except Exception as e:
+            logger.error(f"批量UPSERT损益表数据失败: {str(e)}")
+            raise
+
+    def _bulk_upsert_cash_flow(self, records: List[tuple]) -> int:
+        """批量UPSERT现金流量表数据"""
+        if not records:
+            return 0
+        
+        try:
+            upsert_sql = """
+                INSERT INTO company_cash_flow (
+                    company_id, period_type, date, filing_date, currency_symbol,
+                    totalcashfromoperatingactivities, netincome, depreciation, stockbasedcompensation,
+                    changeinworkingcapital, changetoaccountreceivables, changetoinventory, changetoliabilities,
+                    changetooperatingactivities, changetonetincome, changereceivables, othernoncashitems,
+                    cashflowsotheroperating, totalcashflowsfrominvestingactivities, capitalexpenditures,
+                    investments, othercashflowsfrominvestingactivities, salepurchaseofstock,
+                    totalcashfromfinancingactivities, dividendspaid, netborrowings, issuanceofcapitalstock,
+                    othercashflowsfromfinancingactivities, changeincash, beginperiodcashflow, endperiodcashflow,
+                    exchangeratechanges, cashandcashequivalentschanges, freecashflow,
+                    created_at, updated_at
+                ) VALUES %s
+                ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                    filing_date = EXCLUDED.filing_date,
+                    currency_symbol = EXCLUDED.currency_symbol,
+                    totalcashfromoperatingactivities = EXCLUDED.totalcashfromoperatingactivities,
+                    netincome = EXCLUDED.netincome,
+                    freecashflow = EXCLUDED.freecashflow,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    import psycopg2.extras
+                    psycopg2.extras.execute_values(
+                        cursor, upsert_sql, records,
+                        template=None, page_size=100
+                    )
+                    conn.commit()
+            
+            logger.debug(f"批量UPSERT现金流量表数据完成: {len(records)} 条记录")
+            return len(records)
+            
+        except Exception as e:
+            logger.error(f"批量UPSERT现金流量表数据失败: {str(e)}")
+            raise
+
     def __del__(self):
         """清理资源"""
         if hasattr(self, 'session'):
