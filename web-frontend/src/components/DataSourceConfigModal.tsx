@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'finviz_screener';
+  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals' | 'finviz_screener';
   dataSourceName: string;
 }
 
@@ -94,12 +94,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultName: 'EODHD Exchange Data Auto Fetch',
       description: 'Get exchange ticker symbols and company data from EODHD API for fundamentals analysis'
     },
-    eodhd_fundamentals_low_freq: {
+    eodhd_fundamentals: {
       icon: <BarChartOutlined style={{ color: '#13c2c2' }} />,
       params: ['exchanges', 'data_types'],
       defaultSchedule: '0 6 * * 0',
-      defaultName: 'EODHD Fundamentals Low Frequency Auto Fetch',
-      description: 'Get company fundamentals data from EODHD API with low frequency scheduling (General, Holders, outstandingShares, Earnings) for NYSE and NASDAQ companies'
+      defaultName: 'EODHD Fundamentals Auto Fetch',
+      description: 'Get company fundamentals data from EODHD API (General data: company info, address, officers) for multiple markets'
     },
     finviz_screener: {
       icon: <DatabaseOutlined style={{ color: '#fa8c16' }} />,
@@ -183,17 +183,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       let result;
       if (dataSourceType === 'eodhd_news') {
         result = await schedulerAPI.createEODHDNewsTask(params);
-      } else if (dataSourceType === 'eodhd_fundamentals_low_freq') {
-        // EODHD基本面数据低频任务的专用创建逻辑
+      } else if (dataSourceType === 'eodhd_fundamentals') {
+        // EODHD基本面数据任务的专用创建逻辑
         const fundamentalsParams = {
           name: currentConfig.defaultName,
           cron_expression: data.cronExpression!,
           timezone: data.timezone!,
           enabled: true,
           exchanges: data.taskParams?.exchanges || ['NYSE', 'NASDAQ'],
-          data_types: data.taskParams?.data_types || ['General', 'Holders', 'outstandingShares', 'Earnings']
+          data_types: data.taskParams?.data_types || ['General']
         };
-        result = await schedulerAPI.createEODHDFundamentalsLowFreqTask(fundamentalsParams);
+        result = await schedulerAPI.createEODHDFundamentalsTask(fundamentalsParams);
       } else if (dataSourceType === 'finviz_screener') {
         // Finviz筛选数据任务的专用创建逻辑
         const finvizParams = {
@@ -808,15 +808,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
           
         case 'eodhd_exchange':
-        case 'eodhd_fundamentals_low_freq':
+        case 'eodhd_fundamentals':
           return (
             <>
               <Form.Item
                 label="Exchanges"
                 name={['taskParams', 'exchanges']}
                 rules={[{ required: true, message: 'Please select at least one exchange' }]}
-                extra={dataSourceType === 'eodhd_fundamentals_low_freq' ? 
-                  "Select exchanges to fetch fundamentals data from (Only NYSE and NASDAQ are supported)" : 
+                extra={dataSourceType === 'eodhd_fundamentals' ? 
+                  "Select exchanges to fetch fundamentals data from (Supports US, China, Hong Kong, Taiwan, Japan, UK markets)" : 
                   "Select exchanges to fetch ticker data from. Based on EODHD Exchanges API documentation."}
               >
                 <Select 
@@ -830,9 +830,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   }}
                 >
                   {/* 根据数据源类型显示不同的交易所选项 */}
-                  {dataSourceType === 'eodhd_fundamentals_low_freq' ? (
+                  {dataSourceType === 'eodhd_fundamentals' ? (
                     <>
-                      {/* EODHD Fundamentals Low Frequency 仅支持 NYSE 和 NASDAQ */}
+                      {/* EODHD Fundamentals 支持多个国家和地区的交易所 */}
                       <Option value="NYSE" label="🏛️ New York Stock Exchange (NYSE)">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span>🏛️</span>
@@ -843,6 +843,54 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span>💻</span>
                           <span>NASDAQ Global Market</span>
+                        </div>
+                      </Option>
+                      <Option value="AMEX" label="🏦 American Stock Exchange (AMEX)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏦</span>
+                          <span>American Stock Exchange (AMEX)</span>
+                        </div>
+                      </Option>
+                      <Option value="SHG" label="🏢 Shanghai Stock Exchange (SHG)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏢</span>
+                          <span>Shanghai Stock Exchange (SHG)</span>
+                        </div>
+                      </Option>
+                      <Option value="SHE" label="🏪 Shenzhen Stock Exchange (SHE)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏪</span>
+                          <span>Shenzhen Stock Exchange (SHE)</span>
+                        </div>
+                      </Option>
+                      <Option value="HK" label="🏙️ Hong Kong Stock Exchange (HK)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏙️</span>
+                          <span>Hong Kong Stock Exchange (HK)</span>
+                        </div>
+                      </Option>
+                      <Option value="TWO" label="🏝️ Taiwan Stock Exchange (TWO)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🏝️</span>
+                          <span>Taiwan Stock Exchange (TWO)</span>
+                        </div>
+                      </Option>
+                      <Option value="JP" label="🗾 Tokyo Stock Exchange (JP)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🗾</span>
+                          <span>Tokyo Stock Exchange (JP)</span>
+                        </div>
+                      </Option>
+                      <Option value="LSE" label="🇬🇧 London Stock Exchange (LSE)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>🇬🇧</span>
+                          <span>London Stock Exchange (LSE)</span>
+                        </div>
+                      </Option>
+                      <Option value="AIM" label="💡 London AIM Market (AIM)">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>💡</span>
+                          <span>London AIM Market (AIM)</span>
                         </div>
                       </Option>
                     </>
@@ -979,40 +1027,24 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               {/* Data Types selection for EODHD Fundamentals Low Frequency */}
-              {dataSourceType === 'eodhd_fundamentals_low_freq' && (
+              {dataSourceType === 'eodhd_fundamentals' && (
                 <Form.Item
                   label="Data Types"
                   name={['taskParams', 'data_types']}
-                  rules={[{ required: true, message: 'Please select at least one data type' }]}
-                  extra="Select fundamentals data types to fetch (Only General, Holders, outstandingShares, Earnings are supported)"
+                  rules={[]}
+                  extra="Currently only General data is supported (company info, address, officers). Other data types will be added in future versions."
+                  initialValue={['General']}
                 >
                   <Select 
                     placeholder="Select data types" 
                     mode="multiple"
                     style={{ width: '100%' }}
+                    disabled={true}
                   >
                     <Option value="General" label="📊 General">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>📊</span>
-                        <span>General (Basic company information)</span>
-                      </div>
-                    </Option>
-                    <Option value="Holders" label="👥 Holders">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>👥</span>
-                        <span>Holders (Institutional and insider holders)</span>
-                      </div>
-                    </Option>
-                    <Option value="outstandingShares" label="📈 Outstanding Shares">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>📈</span>
-                        <span>Outstanding Shares (Share structure data)</span>
-                      </div>
-                    </Option>
-                    <Option value="Earnings" label="💰 Earnings">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>💰</span>
-                        <span>Earnings (Earnings history and forecasts)</span>
+                        <span>General (Company information, address, officers)</span>
                       </div>
                     </Option>
                   </Select>

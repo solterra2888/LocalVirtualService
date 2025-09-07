@@ -330,7 +330,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals_low_freq', 'finviz_screener')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals', 'finviz_screener')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -400,7 +400,7 @@ class DatabaseManager:
                     cursor.execute("ALTER TABLE task_scheduling DROP CONSTRAINT IF EXISTS valid_task_type")
                     cursor.execute("""
                     ALTER TABLE task_scheduling ADD CONSTRAINT valid_task_type 
-                    CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals_low_freq', 'finviz_screener'))
+                    CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals', 'finviz_screener'))
                     """)
                     print("已更新task_scheduling表的valid_task_type约束以支持exchange_data")
             

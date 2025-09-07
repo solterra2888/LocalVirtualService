@@ -65,7 +65,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals_low_freq' | 'other';
+  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -169,18 +169,18 @@ const SchedulerPage: React.FC = () => {
       ]
     },
     {
-      id: 'eodhd_fundamentals_low_freq',
-      name: 'EODHD Fundamentals Low Frequency',
-      type: 'eodhd_fundamentals_low_freq',
-      description: 'Get company fundamentals data from EODHD API with low frequency scheduling (General, Holders, outstandingShares, Earnings)',
+      id: 'eodhd_fundamentals',
+      name: 'EODHD Fundamentals',
+      type: 'eodhd_fundamentals',
+      description: 'Get company fundamentals data from EODHD API (Currently focused on General data: company info, address, officers)',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
-          id: 'configure_fundamentals_low_freq_schedule',
+          id: 'configure_fundamentals_schedule',
           name: 'Configure Data Fetch Strategy',
-          description: 'Set up Cron-based periodic fundamentals data fetching for NYSE and NASDAQ companies',
-          endpoint: '/scheduler/tasks/eodhd-fundamentals-low-freq',
+          description: 'Set up Cron-based periodic fundamentals data fetching for multiple markets (US, China, Hong Kong, Taiwan, Japan, UK)',
+          endpoint: '/scheduler/tasks/eodhd-fundamentals',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -270,7 +270,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
-          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq')) ||
+          (sourceIdLower.includes('fundamentals') && taskType.includes('fundamentals')) ||
           (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });
@@ -358,7 +358,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
-          (sourceIdLower.includes('fundamentals_low_freq') && taskType.includes('fundamentals_low_freq')) ||
+          (sourceIdLower.includes('fundamentals') && taskType.includes('fundamentals')) ||
           (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });
@@ -466,7 +466,7 @@ const SchedulerPage: React.FC = () => {
     // 如果是Cron调度配置，根据数据源类型决定使用哪个配置组件
     if (action.id.includes('configure') && action.id.includes('schedule')) {
       // 对于EODHD相关数据源，使用专门的配置模态框
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals_low_freq' || dataSource.id === 'finviz_screener') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {

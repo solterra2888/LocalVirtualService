@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|eodhd_fundamentals_low_freq|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|eodhd_fundamentals|finviz_screener)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|eodhd_fundamentals_low_freq|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|exchange_data|eodhd_fundamentals|finviz_screener)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -71,9 +71,9 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     keywords: Optional[str] = Field(default=None, description="关键词，逗号分隔")
 
 
-class CreateEODHDFundamentalsLowFreqTaskRequest(BaseModel):
-    """创建EODHD基本面数据低频定时任务请求模型"""
-    name: str = Field(default="EODHD Fundamentals Low Frequency", description="任务名称")
+class CreateEODHDFundamentalsTaskRequest(BaseModel):
+    """创建EODHD基本面数据定时任务请求模型"""
+    name: str = Field(default="EODHD Fundamentals", description="任务名称")
     cron_expression: str = Field(default="0 6 * * 0", description="Cron表达式 (每周日6:00AM)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -125,7 +125,8 @@ async def create_cron_task(
             cron_expression=request.cron_expression,
             timezone=request.timezone,
             enabled=request.enabled,
-            task_params=request.params
+            task_params=request.params,
+            created_by=current_user.username
         )
         
         if result['success']:
@@ -177,7 +178,8 @@ async def create_interval_task(
             interval_minutes=request.interval_minutes,
             timezone=request.timezone,
             enabled=request.enabled,
-            task_params=request.params
+            task_params=request.params,
+            created_by=current_user.username
         )
         
         if result['success']:
@@ -361,7 +363,8 @@ async def create_eodhd_news_task(
             cron_expression=request.cron_expression,
             timezone=request.timezone,
             enabled=request.enabled,
-            task_params=task_params
+            task_params=task_params,
+            created_by=current_user.username
         )
         
         if result['success']:
@@ -390,45 +393,45 @@ async def create_eodhd_news_task(
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
-# ============ EODHD基本面数据低频定时任务专用API ============
+# ============ EODHD基本面数据定时任务专用API ============
 
-@router.post("/tasks/eodhd-fundamentals-low-freq", summary="创建EODHD基本面数据低频定时任务")
-async def create_eodhd_fundamentals_low_freq_task(
-    request: CreateEODHDFundamentalsLowFreqTaskRequest,
+@router.post("/tasks/eodhd-fundamentals", summary="创建EODHD基本面数据定时任务")
+async def create_eodhd_fundamentals_task(
+    request: CreateEODHDFundamentalsTaskRequest,
     current_user=Depends(get_current_user)
 ):
     """
-    创建EODHD基本面数据低频获取定时任务
+    创建EODHD基本面数据获取定时任务
     
     默认配置：
     - 纽约时间每周日6:00AM执行 (0 6 * * 0)
-    - 支持美国、中国和香港交易所 (NYSE, NASDAQ, US, SHG, SHE, HK)
-    - 支持General, Holders, outstandingShares, Earnings四种数据类型
+    - 支持美国、中国、香港、台湾、日本、英国交易所 (NYSE, NASDAQ, AMEX, SHG, SHE, HK, TWO, JP, LSE, AIM)
+    - 当前仅支持General数据类型，包含公司基本信息、地址和高管信息
     """
     try:
-        logger.info("创建EODHD基本面数据低频定时任务请求", 
+        logger.info("创建EODHD基本面数据定时任务请求", 
                    user=current_user.username,
                    task_name=request.name,
                    cron_expression=request.cron_expression,
                    exchanges=request.exchanges,
                    data_types=request.data_types)
         
-        # 验证交易所
-        supported_exchanges = ['NYSE', 'NASDAQ', 'US', 'SHG', 'SHE', 'HK']
+        # 验证交易所 - 支持美国、中国、香港、台湾、日本、英国
+        supported_exchanges = ['NYSE', 'NASDAQ', 'AMEX', 'SHG', 'SHE', 'HK', 'TWO', 'JP', 'LSE', 'AIM']
         valid_exchanges = [ex for ex in request.exchanges if ex in supported_exchanges]
         if not valid_exchanges:
             raise HTTPException(
                 status_code=400, 
-                detail=f"不支持的交易所，仅支持: {', '.join(supported_exchanges)}"
+                detail=f"不支持的交易所，支持的交易所: {', '.join(supported_exchanges)}"
             )
         
-        # 验证数据类型
-        supported_data_types = ['General', 'Holders', 'outstandingShares', 'Earnings']
+        # 验证数据类型 - 当前只支持General
+        supported_data_types = ['General']
         valid_data_types = [dt for dt in request.data_types if dt in supported_data_types]
         if not valid_data_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"不支持的数据类型，仅支持: {', '.join(supported_data_types)}"
+                detail=f"不支持的数据类型，当前仅支持: {', '.join(supported_data_types)}"
             )
         
         scheduler_service = await get_scheduler_service()
@@ -441,15 +444,16 @@ async def create_eodhd_fundamentals_low_freq_task(
         
         result = await scheduler_service.create_cron_task(
             task_name=request.name,
-            task_type="eodhd_fundamentals_low_freq",
+            task_type="eodhd_fundamentals",
             cron_expression=request.cron_expression,
             timezone=request.timezone,
             enabled=request.enabled,
-            task_params=task_params
+            task_params=task_params,
+            created_by=current_user.username
         )
         
         if result['success']:
-            logger.info("EODHD基本面数据低频定时任务创建成功", 
+            logger.info("EODHD基本面数据定时任务创建成功", 
                        user=current_user.username,
                        task_name=request.name,
                        task_id=result['task_id'],
@@ -465,7 +469,7 @@ async def create_eodhd_fundamentals_low_freq_task(
                 }
             }
         else:
-            logger.error("EODHD基本面数据低频定时任务创建失败", 
+            logger.error("EODHD基本面数据定时任务创建失败", 
                         error=result.get('message', '未知错误'),
                         user=current_user.username,
                         task_name=request.name)
@@ -515,7 +519,8 @@ async def create_finviz_screener_task(
             cron_expression=request.cron_expression,
             timezone=request.timezone,
             enabled=request.enabled,
-            task_params=task_params
+            task_params=task_params,
+            created_by=current_user.username
         )
         
         if result['success']:
@@ -566,7 +571,7 @@ async def create_default_eodhd_news_task(
         logger.info("创建默认EODHD新闻定时任务请求", user=current_user.username)
         
         scheduler_service = await get_scheduler_service()
-        result = await scheduler_service.create_default_eodhd_news_task()
+        result = await scheduler_service.create_default_eodhd_news_task(created_by=current_user.username)
         
         if result['success']:
             logger.info("默认EODHD新闻定时任务创建成功", 

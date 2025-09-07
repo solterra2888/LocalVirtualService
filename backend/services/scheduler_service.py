@@ -54,7 +54,7 @@ class SchedulerService:
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'exchange_data': self._execute_exchange_data_task,
-            'eodhd_fundamentals_low_freq': self._execute_fundamentals_low_freq_task,
+            'eodhd_fundamentals': self._execute_fundamentals_task,
             'finviz_screener': self._execute_finviz_screener_task
         }
         
@@ -88,13 +88,14 @@ class SchedulerService:
     
     async def create_cron_task(self, task_name: str, task_type: str, cron_expression: str, 
                               timezone: str = "America/New_York", enabled: bool = True,
-                              task_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                              task_params: Optional[Dict[str, Any]] = None, 
+                              created_by: str = "system") -> Dict[str, Any]:
         """
         创建基于Cron表达式的定时任务
         
         Args:
             task_name: 任务名称
-            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals_low_freq, finviz_screener)
+            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals, finviz_screener)
             cron_expression: Cron表达式
             timezone: 时区
             enabled: 是否启用
@@ -144,7 +145,8 @@ class SchedulerService:
                 'last_run': None,
                 'next_run': None,
                 'success_count': 0,
-                'fail_count': 0
+                'fail_count': 0,
+                'created_by': created_by
             }
             
             # 检查是否已存在相同类型的任务
@@ -203,7 +205,8 @@ class SchedulerService:
     
     async def create_interval_task(self, task_name: str, task_type: str, interval_minutes: int,
                                   timezone: str = "America/New_York", enabled: bool = True,
-                                  task_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                                  task_params: Optional[Dict[str, Any]] = None, 
+                                  created_by: str = "system") -> Dict[str, Any]:
         """
         创建基于间隔的定时任务
         
@@ -248,7 +251,8 @@ class SchedulerService:
                 'last_run': None,
                 'next_run': None,
                 'success_count': 0,
-                'fail_count': 0
+                'fail_count': 0,
+                'created_by': created_by
             }
             
             # 检查是否已存在相同类型的任务
@@ -381,7 +385,7 @@ class SchedulerService:
             logger.error(f"删除任务失败: {str(e)}")
             return {'success': False, 'message': f'删除任务失败: {str(e)}'}
     
-    async def create_default_eodhd_news_task(self) -> Dict[str, Any]:
+    async def create_default_eodhd_news_task(self, created_by: str = "system") -> Dict[str, Any]:
         """创建默认的EODHD新闻获取任务（纽约时间每15分钟）"""
         return await self.create_cron_task(
             task_name="EODHD News Auto Fetch",
@@ -395,7 +399,8 @@ class SchedulerService:
                 'topic': None,
                 'topic_filter': None,
                 'keywords': None
-            }
+            },
+            created_by=created_by
         )
     
     async def _execute_task(self, task_id: str, task_type: str, task_params: Dict[str, Any]):
@@ -826,14 +831,14 @@ class SchedulerService:
                 'data': None
             }
     
-    async def _execute_fundamentals_low_freq_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EODHD基本面数据低频获取任务"""
+    async def _execute_fundamentals_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行EODHD基本面数据获取任务"""
         try:
-            logger.info(f"开始执行基本面数据低频获取任务，参数: {params}")
+            logger.info(f"开始执行基本面数据获取任务，参数: {params}")
             
             # 获取参数
             exchanges = params.get('exchanges', [])
-            data_types = params.get('data_types', ['General', 'Holders', 'outstandingShares', 'Earnings'])
+            data_types = params.get('data_types', ['General'])  # 当前只支持General数据
             
             # 参数验证
             if not exchanges:
@@ -847,43 +852,62 @@ class SchedulerService:
             if isinstance(exchanges, str):
                 exchanges = [exchanges]
             
-            # 验证交易所只能是NYSE和NASDAQ
-            supported_exchanges = ['NYSE', 'NASDAQ']
+            # 验证支持的交易所
+            supported_exchanges = ['NYSE', 'NASDAQ', 'AMEX', 'SHG', 'SHE', 'HK', 'TWO', 'JP', 'LSE', 'AIM']
             valid_exchanges = [ex for ex in exchanges if ex.upper() in [se.upper() for se in supported_exchanges]]
             
             if not valid_exchanges:
-                logger.warning(f"不支持的交易所: {exchanges}，仅支持 NYSE 和 NASDAQ")
+                logger.warning(f"不支持的交易所: {exchanges}，支持的交易所: {supported_exchanges}")
                 return {
                     'success': False, 
-                    'message': '不支持的交易所，仅支持 NYSE 和 NASDAQ'
+                    'message': f'不支持的交易所，支持的交易所: {", ".join(supported_exchanges)}'
                 }
             
             logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {data_types}")
             
             # 初始化基本面数据服务
-            # TODO: eodhd_fundamentals_service 服务已被删除，需要重新实现
-            logger.warning("基本面数据服务暂不可用")
-            result = {
-                'success': False,
-                'message': '基本面数据服务暂不可用',
-                'data': None
-            }
-            
-            if result['success']:
-                success_msg = f"基本面数据获取成功: {result['message']}"
-                logger.info(success_msg)
-                return {
-                    'success': True,
-                    'message': success_msg,
-                    'data': result['data']
+            try:
+                from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                fundamentals_service = EODHDFundamentalsService()
+                
+                # 执行基本面数据获取
+                result = await fundamentals_service.fetch_exchange_fundamentals(
+                    exchanges=valid_exchanges,
+                    progress_callback=lambda msg: logger.info(f"进度: {msg}")
+                )
+                
+                if result.get('success', False):
+                    success_msg = f"基本面数据获取成功: 总计 {result.get('total_companies', 0)} 家公司, 成功 {result.get('successful_companies', 0)} 家"
+                    logger.info(success_msg)
+                    return {
+                        'success': True,
+                        'message': success_msg,
+                        'data': result
                 }
-            else:
-                error_msg = f"基本面数据获取失败: {result['message']}"
+                else:
+                    error_msg = f"基本面数据获取失败: {result.get('message', '未知错误')}"
+                    logger.error(error_msg)
+                    return {
+                        'success': False,
+                        'message': error_msg,
+                        'data': result
+                    }
+                    
+            except ImportError as e:
+                error_msg = f"无法导入基本面数据服务: {str(e)}"
                 logger.error(error_msg)
                 return {
                     'success': False,
                     'message': error_msg,
-                    'data': result['data']
+                    'data': None
+                }
+            except Exception as service_error:
+                error_msg = f"基本面数据服务执行失败: {str(service_error)}"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': None
                 }
             
         except Exception as e:
@@ -1222,9 +1246,9 @@ class SchedulerService:
                     INSERT INTO task_scheduling (
                         id, name, type, schedule_type, cron_expression, interval_minutes,
                         timezone, enabled, params, created_at, last_run, next_run,
-                        success_count, fail_count
+                        success_count, fail_count, created_by
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
                 
@@ -1242,7 +1266,8 @@ class SchedulerService:
                     task_config.get('last_run'),
                     task_config.get('next_run'),
                     task_config['success_count'],
-                    task_config['fail_count']
+                    task_config['fail_count'],
+                    task_config.get('created_by', 'system')  # 添加created_by字段
                 ]
             
             return self.db_manager.execute_query(query, params)
