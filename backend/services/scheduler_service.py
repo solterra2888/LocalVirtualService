@@ -838,7 +838,7 @@ class SchedulerService:
             
             # 获取参数
             exchanges = params.get('exchanges', [])
-            data_types = params.get('data_types', ['General', 'Financials'])  # 支持General和Financials数据
+            data_types = params.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings'])  # 支持所有基本面数据类型
             
             # 参数验证
             if not exchanges:
@@ -864,12 +864,12 @@ class SchedulerService:
                 }
             
             # 验证数据类型
-            supported_data_types = ['General', 'Financials']
+            supported_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
             valid_data_types = [dt for dt in data_types if dt in supported_data_types]
             
             if not valid_data_types:
                 logger.warning(f"无效的数据类型: {data_types}，支持的数据类型: {supported_data_types}")
-                valid_data_types = ['General', 'Financials']  # 默认使用所有支持的类型
+                valid_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']  # 默认使用所有支持的类型
             
             logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {valid_data_types}")
             
@@ -881,36 +881,102 @@ class SchedulerService:
                 # 执行基本面数据获取
                 result = await fundamentals_service.fetch_exchange_fundamentals(
                     exchanges=valid_exchanges,
+                    data_types=valid_data_types,
                     progress_callback=lambda msg: logger.info(f"进度: {msg}")
                 )
                 
                 if result.get('success', False):
                     total_companies = result.get('total_companies', 0)
                     successful_companies = result.get('successful_companies', 0)
+                    failed_companies = result.get('failed_companies', 0)
                     exchanges_data = result.get('exchanges', {})
                     
-                    # 统计处理详情
+                    # 详细统计处理结果
                     processed_exchanges = len([ex for ex, data in exchanges_data.items() if data.get('successful', 0) > 0])
+                    success_rate = (successful_companies / total_companies * 100) if total_companies > 0 else 0
                     
-                    success_msg = f"基本面数据获取成功: 总计 {total_companies} 家公司, 成功 {successful_companies} 家, 处理 {processed_exchanges} 个交易所"
+                    # 构建成功率描述
+                    if success_rate >= 90:
+                        success_level = "优秀"
+                    elif success_rate >= 70:
+                        success_level = "良好"
+                    elif success_rate >= 50:
+                        success_level = "一般"
+                    else:
+                        success_level = "需要关注"
                     
-                    # 如果包含财务数据，添加相关信息
+                    success_msg = f"基本面数据获取完成: 总计 {total_companies} 家公司, 成功 {successful_companies} 家, 失败 {failed_companies} 家 (成功率: {success_rate:.1f}% - {success_level}), 处理 {processed_exchanges} 个交易所"
+                    
+                    # 添加数据类型详情信息
+                    data_type_details = []
+                    if 'General' in valid_data_types:
+                        data_type_details.append("基本信息")
                     if 'Financials' in valid_data_types:
-                        success_msg += " (包含财务报表数据)"
+                        data_type_details.append("财务报表")
+                    if 'Highlights' in valid_data_types:
+                        data_type_details.append("关键指标")
+                    if 'Valuation' in valid_data_types:
+                        data_type_details.append("估值数据")
+                    if 'Technicals' in valid_data_types:
+                        data_type_details.append("技术指标")
+                    if 'Holders' in valid_data_types:
+                        data_type_details.append("股东数据")
+                    if 'outstandingShares' in valid_data_types:
+                        data_type_details.append("流通股数据")
+                    if 'Earnings' in valid_data_types:
+                        data_type_details.append("盈利数据")
+                    
+                    if data_type_details:
+                        success_msg += f" (包含: {', '.join(data_type_details)})"
+                    
+                    # 添加交易所详细信息
+                    exchange_details = []
+                    for exchange, data in exchanges_data.items():
+                        ex_success = data.get('successful', 0)
+                        ex_total = data.get('total', 0)
+                        if ex_total > 0:
+                            ex_rate = (ex_success / ex_total * 100)
+                            exchange_details.append(f"{exchange}: {ex_success}/{ex_total} ({ex_rate:.1f}%)")
+                    
+                    if exchange_details:
+                        success_msg += f"\n交易所详情: {', '.join(exchange_details)}"
                     
                     logger.info(success_msg)
                     return {
                         'success': True,
                         'message': success_msg,
-                        'data': result
+                        'data': result,
+                        'statistics': {
+                            'total_companies': total_companies,
+                            'successful_companies': successful_companies,
+                            'failed_companies': failed_companies,
+                            'success_rate': success_rate,
+                            'processed_exchanges': processed_exchanges,
+                            'data_types': valid_data_types,
+                            'exchange_details': exchanges_data
+                        }
                 }
                 else:
+                    # 详细分析失败原因
+                    error_details = result.get('data', {})
+                    exchanges_data = error_details.get('exchanges', {})
+                    
+                    failed_exchanges = []
+                    for exchange, data in exchanges_data.items():
+                        if data.get('successful', 0) == 0:
+                            error_reason = data.get('message', '未知错误')
+                            failed_exchanges.append(f"{exchange}: {error_reason}")
+                    
                     error_msg = f"基本面数据获取失败: {result.get('message', '未知错误')}"
+                    if failed_exchanges:
+                        error_msg += f"\n失败的交易所: {'; '.join(failed_exchanges)}"
+                    
                     logger.error(error_msg)
                     return {
                         'success': False,
                         'message': error_msg,
-                        'data': result
+                        'data': result,
+                        'failed_exchanges': failed_exchanges
                     }
                     
             except ImportError as e:

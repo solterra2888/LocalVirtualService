@@ -56,6 +56,7 @@ import DatabaseTableViewer from '../components/DatabaseTableViewer';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
 
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
+import TaskStatusModal from '../components/TaskStatusModal';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -172,14 +173,14 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_fundamentals',
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
-      description: 'Get comprehensive company fundamentals data from EODHD API (General data: company info, address, officers + Financials: balance sheet, income statement, cash flow)',
+      description: 'Get comprehensive company fundamentals data from EODHD API (8 data types: General info, Financials, Highlights, Valuation, Technicals, Holders, Outstanding Shares, Earnings) for complete company analysis',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_fundamentals_schedule',
           name: 'Configure Data Fetch Strategy',
-          description: 'Set up Cron-based periodic fundamentals data fetching for multiple markets (US, China, Hong Kong, Taiwan, Japan, UK) including financial statements',
+          description: 'Set up comprehensive fundamentals data fetching for multiple markets with 5 data types: General, Financials, Highlights, Valuation, and Technicals',
           endpoint: '/scheduler/tasks/eodhd-fundamentals',
           params: {},
           icon: <ScheduleOutlined />
@@ -247,6 +248,9 @@ const SchedulerPage: React.FC = () => {
   const [dataSourceConfigVisible, setDataSourceConfigVisible] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<DataSource | null>(null);
 
+  // 任务状态监控模态框
+  const [taskStatusVisible, setTaskStatusVisible] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null);
   
   // 数据库表查看功能已移至DatabaseTableViewer组件
   
@@ -256,6 +260,12 @@ const SchedulerPage: React.FC = () => {
   useEffect(() => {
     loadScheduledTasks();
   }, []);
+
+  // 查看任务状态
+  // const handleViewTaskStatus = (task: ScheduledTask) => {
+  //   setSelectedTask(task);
+  //   setTaskStatusVisible(true);
+  // };
 
   // 同步数据源状态与定时任务状态
   const syncDataSourceStatus = useCallback(() => {
@@ -587,7 +597,6 @@ const SchedulerPage: React.FC = () => {
 
 
   const handleDataSourceConfigSuccess = (taskId: string) => {
-    message.success(`数据获取策略配置成功！任务ID: ${taskId}`);
     setDataSourceConfigVisible(false);
     setSelectedDataSource(null);
     loadScheduledTasks(); // 重新加载任务列表
@@ -1195,6 +1204,26 @@ const SchedulerPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 任务状态监控模态框 */}
+      <TaskStatusModal
+        open={taskStatusVisible}
+        onCancel={() => {
+          setTaskStatusVisible(false);
+          setSelectedTask(null);
+        }}
+        taskData={selectedTask ? {
+          id: selectedTask.id,
+          name: selectedTask.name,
+          type: selectedTask.type,
+          status: selectedTask.status === 'running' ? 'running' : 
+                  selectedTask.status === 'paused' ? 'scheduled' :
+                  selectedTask.status === 'disabled' ? 'scheduled' : 'scheduled',
+          cron_expression: selectedTask.cron_expression,
+          next_execution: selectedTask.next_run,
+          statistics: undefined // ScheduledTask接口中没有last_execution属性
+        } : undefined}
+      />
     </div>
   );
 };

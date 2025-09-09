@@ -99,7 +99,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       params: ['exchanges', 'data_types'],
       defaultSchedule: '0 6 * * 0',
       defaultName: 'EODHD Fundamentals Auto Fetch',
-      description: 'Get comprehensive company fundamentals data from EODHD API (General + Financials: company info, address, officers, balance sheet, income statement, cash flow) for multiple markets'
+      description: 'Get comprehensive company fundamentals data from EODHD API (8 data types: General info, Financials, Highlights, Valuation, Technicals, Holders, Outstanding Shares, Earnings) for multiple markets'
     },
     finviz_screener: {
       icon: <DatabaseOutlined style={{ color: '#fa8c16' }} />,
@@ -191,7 +191,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           timezone: data.timezone!,
           enabled: true,
           exchanges: data.taskParams?.exchanges || ['NYSE', 'NASDAQ'],
-          data_types: data.taskParams?.data_types || ['General']
+          data_types: data.taskParams?.data_types || ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
         };
         result = await schedulerAPI.createEODHDFundamentalsTask(fundamentalsParams);
       } else if (dataSourceType === 'finviz_screener') {
@@ -1032,8 +1032,8 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   label="Data Types"
                   name={['taskParams', 'data_types']}
                   rules={[]}
-                  extra="Select data types to fetch. General includes company info, address, officers. Financials includes balance sheet, income statement, cash flow."
-                  initialValue={['General', 'Financials']}
+                  extra="Select data types to fetch. Choose from 8 comprehensive data categories for complete company analysis."
+                  initialValue={['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']}
                 >
                   <Select 
                     placeholder="Select data types" 
@@ -1051,6 +1051,42 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>💰</span>
                         <span>Financials (Balance sheet, income statement, cash flow)</span>
+                      </div>
+                    </Option>
+                    <Option value="Highlights" label="⭐ Highlights">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>⭐</span>
+                        <span>Highlights (Key metrics: market cap, P/E, earnings, margins)</span>
+                      </div>
+                    </Option>
+                    <Option value="Valuation" label="📈 Valuation">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📈</span>
+                        <span>Valuation (P/E ratios, enterprise value, price multiples)</span>
+                      </div>
+                    </Option>
+                    <Option value="Technicals" label="📊 Technicals">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📊</span>
+                        <span>Technicals (Beta, 52-week range, moving averages, short data)</span>
+                      </div>
+                    </Option>
+                    <Option value="Holders" label="👥 Holders">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>👥</span>
+                        <span>Holders (Institutional holdings, fund holdings, ownership data)</span>
+                      </div>
+                    </Option>
+                    <Option value="outstandingShares" label="📈 Outstanding Shares">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📈</span>
+                        <span>Outstanding Shares (Annual/quarterly shares outstanding data)</span>
+                      </div>
+                    </Option>
+                    <Option value="Earnings" label="💸 Earnings">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>💸</span>
+                        <span>Earnings (Annual earnings, history, trend, estimates)</span>
                       </div>
                     </Option>
                   </Select>

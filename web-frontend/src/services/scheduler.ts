@@ -286,6 +286,47 @@ export class SchedulerAPI {
   }
 
   /**
+   * 获取任务详细状态（包含执行统计）
+   */
+  async getTaskStatus(taskId: string): Promise<APIResponse<any>> {
+    try {
+      const response = await api.get(`/scheduler/tasks/${taskId}/status`);
+      return {
+        success: true,
+        data: response.data,
+        message: '获取任务状态成功'
+      };
+    } catch (error: any) {
+      console.error('获取任务状态失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '获取任务状态失败'
+      };
+    }
+  }
+
+  /**
+   * 获取任务执行历史
+   */
+  async getTaskHistory(taskId: string, limit: number = 10): Promise<APIResponse<any[]>> {
+    try {
+      const response = await api.get(`/scheduler/tasks/${taskId}/history?limit=${limit}`);
+      return {
+        success: true,
+        data: response.data || [],
+        message: '获取任务历史成功'
+      };
+    } catch (error: any) {
+      console.error('获取任务历史失败:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.detail || error.message || '获取任务历史失败'
+      };
+    }
+  }
+
+  /**
    * 创建Finviz筛选数据定时任务
    */
   async createFinvizScreenerTask(params: CreateFinvizScreenerTaskParams): Promise<TaskCreateResponse> {

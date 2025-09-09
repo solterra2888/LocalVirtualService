@@ -406,7 +406,7 @@ async def create_eodhd_fundamentals_task(
     默认配置：
     - 纽约时间每周日6:00AM执行 (0 6 * * 0)
     - 支持美国、中国、香港、台湾、日本、英国交易所 (NYSE, NASDAQ, AMEX, SHG, SHE, HK, TWO, JP, LSE, AIM)
-    - 当前仅支持General数据类型，包含公司基本信息、地址和高管信息
+    - 支持8种数据类型：General（基本信息）、Financials（财务报表）、Highlights（关键指标）、Valuation（估值数据）、Technicals（技术指标）、Holders（股东数据）、outstandingShares（流通股数据）、Earnings（盈利数据）
     """
     try:
         logger.info("创建EODHD基本面数据定时任务请求", 
@@ -425,13 +425,13 @@ async def create_eodhd_fundamentals_task(
                 detail=f"不支持的交易所，支持的交易所: {', '.join(supported_exchanges)}"
             )
         
-        # 验证数据类型 - 当前只支持General
-        supported_data_types = ['General']
+        # 验证数据类型 - 支持所有基本面数据类型
+        supported_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
         valid_data_types = [dt for dt in request.data_types if dt in supported_data_types]
         if not valid_data_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"不支持的数据类型，当前仅支持: {', '.join(supported_data_types)}"
+                detail=f"不支持的数据类型，支持的数据类型: {', '.join(supported_data_types)}"
             )
         
         scheduler_service = await get_scheduler_service()
