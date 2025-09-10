@@ -286,6 +286,26 @@ export class SchedulerAPI {
   }
 
   /**
+   * 手动执行EODHD基本面数据更新
+   */
+  async executeFundamentalsUpdate(params: { exchanges: string[]; data_types: string[] }): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/execute/eodhd-fundamentals', params);
+      return {
+        success: true,
+        message: response.data?.message || 'EODHD基本面数据更新已启动',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('执行EODHD基本面数据更新失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '执行EODHD基本面数据更新失败'
+      };
+    }
+  }
+
+  /**
    * 获取任务详细状态（包含执行统计）
    */
   async getTaskStatus(taskId: string): Promise<APIResponse<any>> {

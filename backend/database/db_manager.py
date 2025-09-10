@@ -6,6 +6,8 @@
 import os
 import psycopg2
 import json
+import time
+import contextlib
 from config.settings import config, get_app_config_path
 from backend.auth.user_auth import UserAuth
 
@@ -22,25 +24,59 @@ class DatabaseManager:
         """
         self.db_conn_params = db_conn_params or {}
     
-    def get_connection(self):
-        """获取PostgreSQL数据库连接"""
+    def get_connection(self, max_retries=3, retry_delay=1):
+        """获取PostgreSQL数据库连接，支持重试机制"""
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                conn = psycopg2.connect(
+                    host=self.db_conn_params.get('db_host', ''),
+                    port=self.db_conn_params.get('db_port', '5432'),
+                    database=self.db_conn_params.get('db_name', ''),
+                    user=self.db_conn_params.get('db_user', ''),
+                    password=self.db_conn_params.get('db_password', ''),
+                    connect_timeout=15,  # 统一连接超时到15秒
+                    options='-c statement_timeout=600000',  # 设置10分钟语句超时
+                    keepalives_idle=30,  # 30秒后开始发送keepalive
+                    keepalives_interval=5,  # 每5秒发送一次keepalive
+                    keepalives_count=6  # 最多发送6次keepalive
+                )
+                return conn
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    print(f"数据库连接失败，{retry_delay}秒后重试 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    print(f"连接PostgreSQL数据库时出错 (所有重试都失败): {str(e)}")
+        
+        return None
+    
+    @contextlib.contextmanager
+    def get_connection_context(self, max_retries=3, retry_delay=1):
+        """提供安全的数据库连接上下文管理器"""
+        conn = None
         try:
-            conn = psycopg2.connect(
-                host=self.db_conn_params.get('db_host', ''),
-                port=self.db_conn_params.get('db_port', '5432'),
-                database=self.db_conn_params.get('db_name', ''),
-                user=self.db_conn_params.get('db_user', ''),
-                password=self.db_conn_params.get('db_password', ''),
-                connect_timeout=10,  # 增加连接超时到10秒
-                options='-c statement_timeout=300000',  # 设置5分钟语句超时
-                keepalives_idle=60,  # 60秒后开始发送keepalive
-                keepalives_interval=10,  # 每10秒发送一次keepalive
-                keepalives_count=5  # 最多发送5次keepalive
-            )
-            return conn
+            conn = self.get_connection(max_retries, retry_delay)
+            if conn is None:
+                raise Exception("无法建立数据库连接")
+            yield conn
+            conn.commit()  # 自动提交事务
         except Exception as e:
-            print(f"连接PostgreSQL数据库时出错: {str(e)}")
-            return None
+            if conn:
+                try:
+                    conn.rollback()  # 发生错误时回滚
+                except:
+                    pass
+            raise e
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def _create_tables(self, conn):
         """创建数据库表"""
@@ -231,7 +267,7 @@ class DatabaseManager:
                 database=name,
                 user=user,
                 password=password,
-                connect_timeout=5  # 设置5秒连接超时
+                connect_timeout=15  # 统一连接超时到15秒
             )
             conn.close()
             return True, "连接成功"

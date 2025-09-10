@@ -99,7 +99,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       params: ['exchanges', 'data_types'],
       defaultSchedule: '0 6 * * 0',
       defaultName: 'EODHD Fundamentals Auto Fetch',
-      description: 'Get comprehensive company fundamentals data from EODHD API (8 data types: General info, Financials, Highlights, Valuation, Technicals, Holders, Outstanding Shares, Earnings) for multiple markets'
+      description: 'Get comprehensive company fundamentals data from EODHD API for multiple markets'
     },
     finviz_screener: {
       icon: <DatabaseOutlined style={{ color: '#fa8c16' }} />,
@@ -130,7 +130,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   };
 
   const resetModal = () => {
-    setCurrentStep(0);
+    // EODHD Fundamentals不需要schedule configuration，直接跳到参数配置
+    const startStep = dataSourceType === 'eodhd_fundamentals' ? 1 : 0;
+    setCurrentStep(startStep);
     setFormData({});
     form.resetFields();
     
@@ -154,7 +156,10 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       const newFormData = { ...formData, ...values };
       setFormData(newFormData);
       
-      if (currentStep < 1) {
+      // EODHD Fundamentals跳过schedule configuration，直接提交
+      if (dataSourceType === 'eodhd_fundamentals') {
+        await handleSubmit(newFormData);
+      } else if (currentStep < 1) {
         setCurrentStep(currentStep + 1);
       } else {
         await handleSubmit(newFormData);
@@ -172,60 +177,61 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     try {
       setLoading(true);
       
-      const params: CreateEODHDNewsTaskParams = {
-        name: currentConfig.defaultName,
-        cron_expression: data.cronExpression!,
-        timezone: data.timezone!,
-        enabled: true, // 新创建的任务默认启用，用户可通过主页面switch控制
-        ...data.taskParams
-      };
-
       let result;
-      if (dataSourceType === 'eodhd_news') {
-        result = await schedulerAPI.createEODHDNewsTask(params);
-      } else if (dataSourceType === 'eodhd_fundamentals') {
-        // EODHD基本面数据任务的专用创建逻辑
+      if (dataSourceType === 'eodhd_fundamentals') {
+        // EODHD基本面数据手动更新逻辑（不需要cron表达式）
         const fundamentalsParams = {
-          name: currentConfig.defaultName,
-          cron_expression: data.cronExpression!,
-          timezone: data.timezone!,
-          enabled: true,
           exchanges: data.taskParams?.exchanges || ['NYSE', 'NASDAQ'],
-          data_types: data.taskParams?.data_types || ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
+          data_types: data.taskParams?.data_types || ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']
         };
-        result = await schedulerAPI.createEODHDFundamentalsTask(fundamentalsParams);
-      } else if (dataSourceType === 'finviz_screener') {
-        // Finviz筛选数据任务的专用创建逻辑
-        const finvizParams = {
-          name: currentConfig.defaultName,
-          cron_expression: data.cronExpression!,
-          timezone: data.timezone!,
-          enabled: true
-        };
-        result = await schedulerAPI.createFinvizScreenerTask(finvizParams);
+        result = await schedulerAPI.executeFundamentalsUpdate(fundamentalsParams);
       } else {
-        // 其他任务类型的创建逻辑
-        const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
-                        dataSourceType === 'eodhd_macro' ? 'macro_indicators' : 
-                        dataSourceType === 'eodhd_exchange' ? 'exchange_data' : 
-                        dataSourceType;
-        
-        result = await schedulerAPI.createCronTask({
+        const params: CreateEODHDNewsTaskParams = {
           name: currentConfig.defaultName,
-          task_type: taskType,
           cron_expression: data.cronExpression!,
           timezone: data.timezone!,
           enabled: true, // 新创建的任务默认启用，用户可通过主页面switch控制
-          params: data.taskParams
-        });
+          ...data.taskParams
+        };
+
+        if (dataSourceType === 'eodhd_news') {
+          result = await schedulerAPI.createEODHDNewsTask(params);
+        } else if (dataSourceType === 'finviz_screener') {
+          // Finviz筛选数据任务的专用创建逻辑
+          const finvizParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true
+          };
+          result = await schedulerAPI.createFinvizScreenerTask(finvizParams);
+        } else {
+          // 其他任务类型的创建逻辑
+          const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
+                          dataSourceType === 'eodhd_macro' ? 'macro_indicators' : 
+                          dataSourceType === 'eodhd_exchange' ? 'exchange_data' : 
+                          dataSourceType;
+          
+          result = await schedulerAPI.createCronTask({
+            name: currentConfig.defaultName,
+            task_type: taskType,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true, // 新创建的任务默认启用，用户可通过主页面switch控制
+            params: data.taskParams
+          });
+        }
       }
 
       if (result.success) {
-        message.success('Data acquisition strategy configuration successful!');
+        const successMessage = dataSourceType === 'eodhd_fundamentals' 
+          ? 'Data update initiated successfully!' 
+          : 'Data acquisition strategy configuration successful!';
+        message.success(successMessage);
         onSuccess(result.data?.task_id || '');
         handleCancel();
       } else {
-        message.error(result.message || 'Configuration failed');
+        message.error(result.message || (dataSourceType === 'eodhd_fundamentals' ? 'Data update failed' : 'Configuration failed'));
       }
     } catch (error) {
       console.error('Configuration failed:', error);
@@ -1032,8 +1038,8 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   label="Data Types"
                   name={['taskParams', 'data_types']}
                   rules={[]}
-                  extra="Select data types to fetch. Choose from 8 comprehensive data categories for complete company analysis."
-                  initialValue={['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']}
+                  extra="Select data types to fetch. Choose from 12 comprehensive data categories for complete company analysis."
+                  initialValue={['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']}
                 >
                   <Select 
                     placeholder="Select data types" 
@@ -1089,6 +1095,30 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                         <span>Earnings (Annual earnings, history, trend, estimates)</span>
                       </div>
                     </Option>
+                    <Option value="SharesStats" label="📊 Shares Stats">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📊</span>
+                        <span>Shares Stats (Outstanding, float, short interest, insider %)</span>
+                      </div>
+                    </Option>
+                    <Option value="AnalystRatings" label="🎯 Analyst Ratings">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>🎯</span>
+                        <span>Analyst Ratings (Strong buy/buy/hold/sell, target price)</span>
+                      </div>
+                    </Option>
+                    <Option value="SplitsDividends" label="💰 Splits & Dividends">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>💰</span>
+                        <span>Splits & Dividends (Dividend rate/yield, split history)</span>
+                      </div>
+                    </Option>
+                    <Option value="InsiderTransactions" label="🔐 Insider Transactions">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>🔐</span>
+                        <span>Insider Transactions (Executive trading activity)</span>
+                      </div>
+                    </Option>
                   </Select>
                 </Form.Item>
               )}
@@ -1123,7 +1153,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     );
   };
 
-  const steps = [
+  const steps = dataSourceType === 'eodhd_fundamentals' ? [
+    {
+      title: 'Parameter Configuration',
+      description: 'Configure data types and exchanges',
+      icon: <BulbOutlined />
+    }
+  ] : [
     {
       title: 'Schedule Configuration',
       description: 'Set execution time',
@@ -1141,7 +1177,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       title={
         <Space>
           {currentConfig.icon}
-          Configure Data Acquisition Strategy for {dataSourceName}
+          {dataSourceType === 'eodhd_fundamentals' 
+            ? `Update Data for ${dataSourceName}` 
+            : `Configure Data Acquisition Strategy for ${dataSourceName}`}
         </Space>
       }
       open={open}
@@ -1153,7 +1191,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             <Button onClick={handleCancel}>
               Cancel
             </Button>
-            {currentStep > 0 && (
+            {currentStep > 0 && dataSourceType !== 'eodhd_fundamentals' && (
               <Button onClick={handlePrev}>
                 Previous Step
               </Button>
@@ -1162,9 +1200,14 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               type="primary" 
               onClick={handleNext}
               loading={loading}
-              icon={currentStep === 1 ? <CheckCircleOutlined /> : undefined}
+              icon={(
+                dataSourceType === 'eodhd_fundamentals' || 
+                currentStep === 1
+              ) ? <CheckCircleOutlined /> : undefined}
             >
-              {currentStep === 1 ? 'Create Strategy' : 'Next Step'}
+              {dataSourceType === 'eodhd_fundamentals' 
+                ? 'Update Data' 
+                : (currentStep === 1 ? 'Create Strategy' : 'Next Step')}
             </Button>
           </Space>
         </div>

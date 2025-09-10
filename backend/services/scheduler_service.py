@@ -838,7 +838,7 @@ class SchedulerService:
             
             # 获取参数
             exchanges = params.get('exchanges', [])
-            data_types = params.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings'])  # 支持所有基本面数据类型
+            data_types = params.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions'])  # 支持所有基本面数据类型
             
             # 参数验证
             if not exchanges:
@@ -864,12 +864,12 @@ class SchedulerService:
                 }
             
             # 验证数据类型
-            supported_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
+            supported_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']
             valid_data_types = [dt for dt in data_types if dt in supported_data_types]
             
             if not valid_data_types:
                 logger.warning(f"无效的数据类型: {data_types}，支持的数据类型: {supported_data_types}")
-                valid_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']  # 默认使用所有支持的类型
+                valid_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']  # 默认使用所有支持的类型
             
             logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {valid_data_types}")
             

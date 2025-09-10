@@ -78,7 +78,7 @@ class CreateEODHDFundamentalsTaskRequest(BaseModel):
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     exchanges: List[str] = Field(default=["NYSE", "NASDAQ"], description="交易所列表，支持美国、中国和香港交易所")
-    data_types: List[str] = Field(default=["General", "Financials"], description="数据类型列表 (General: 公司基本信息, Financials: 财务报表数据)")
+    data_types: List[str] = Field(default=["General", "Financials"], description="数据类型列表 (General: 公司基本信息, Financials: 财务报表数据, Highlights: 关键指标, Valuation: 估值数据, Technicals: 技术指标, Holders: 股东数据, outstandingShares: 流通股数据, Earnings: 盈利数据, SharesStats: 股票统计, AnalystRatings: 分析师评级, SplitsDividends: 拆股分红, InsiderTransactions: 内部人交易)")
 
 
 class CreateFinvizScreenerTaskRequest(BaseModel):
@@ -406,7 +406,7 @@ async def create_eodhd_fundamentals_task(
     默认配置：
     - 纽约时间每周日6:00AM执行 (0 6 * * 0)
     - 支持美国、中国、香港、台湾、日本、英国交易所 (NYSE, NASDAQ, AMEX, SHG, SHE, HK, TWO, JP, LSE, AIM)
-    - 支持8种数据类型：General（基本信息）、Financials（财务报表）、Highlights（关键指标）、Valuation（估值数据）、Technicals（技术指标）、Holders（股东数据）、outstandingShares（流通股数据）、Earnings（盈利数据）
+    - 支持12种数据类型：General（基本信息）、Financials（财务报表）、Highlights（关键指标）、Valuation（估值数据）、Technicals（技术指标）、Holders（股东数据）、outstandingShares（流通股数据）、Earnings（盈利数据）、SharesStats（股票统计）、AnalystRatings（分析师评级）、SplitsDividends（拆股分红）、InsiderTransactions（内部人交易）
     """
     try:
         logger.info("创建EODHD基本面数据定时任务请求", 
@@ -425,8 +425,12 @@ async def create_eodhd_fundamentals_task(
                 detail=f"不支持的交易所，支持的交易所: {', '.join(supported_exchanges)}"
             )
         
-        # 验证数据类型 - 支持所有基本面数据类型
-        supported_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
+        # 验证数据类型 - 支持所有基本面数据类型，包括新增的4种类型
+        supported_data_types = [
+            'General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 
+            'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 
+            'AnalystRatings', 'SplitsDividends', 'InsiderTransactions'
+        ]
         valid_data_types = [dt for dt in request.data_types if dt in supported_data_types]
         if not valid_data_types:
             raise HTTPException(
@@ -594,6 +598,57 @@ async def create_default_eodhd_news_task(
     except Exception as e:
         logger.error("创建默认EODHD新闻定时任务失败", error=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建默认定时任务失败: {str(e)}")
+
+
+# ============ 手动执行任务API ============
+
+@router.post("/execute/eodhd-fundamentals", summary="手动执行EODHD基本面数据更新")
+async def execute_fundamentals_update(
+    request: dict = Body(..., description="执行参数"),
+    current_user=Depends(get_current_user)
+):
+    """
+    手动执行EODHD基本面数据更新，不创建定时任务
+    
+    参数：
+    - exchanges: 交易所列表，如 ["NYSE", "NASDAQ"]
+    - data_types: 数据类型列表，如 ["General", "Financials", "Highlights"]
+    """
+    try:
+        logger.info("手动执行EODHD基本面数据更新请求", 
+                   user=current_user.username,
+                   exchanges=request.get('exchanges', []),
+                   data_types=request.get('data_types', []))
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 构建任务参数
+        task_params = {
+            'exchanges': request.get('exchanges', ['NYSE', 'NASDAQ']),
+            'data_types': request.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals'])
+        }
+        
+        # 直接执行基本面数据获取任务
+        result = await scheduler_service._execute_fundamentals_task(task_params)
+        
+        if result['success']:
+            logger.info("EODHD基本面数据更新执行成功", 
+                       user=current_user.username,
+                       message=result['message'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": result.get('data', {})
+            }
+        else:
+            logger.error("EODHD基本面数据更新执行失败", 
+                        error=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except Exception as e:
+        logger.error("手动执行EODHD基本面数据更新失败", error=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"手动执行基本面数据更新失败: {str(e)}")
 
 
 # ============ 任务执行日志API ============

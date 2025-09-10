@@ -173,17 +173,17 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_fundamentals',
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
-      description: 'Get comprehensive company fundamentals data from EODHD API (8 data types: General info, Financials, Highlights, Valuation, Technicals, Holders, Outstanding Shares, Earnings) for complete company analysis',
+      description: 'Get comprehensive company fundamentals data from EODHD API for complete company analysis',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
-          id: 'configure_fundamentals_schedule',
-          name: 'Configure Data Fetch Strategy',
-          description: 'Set up comprehensive fundamentals data fetching for multiple markets with 5 data types: General, Financials, Highlights, Valuation, and Technicals',
+          id: 'update_fundamentals_data',
+          name: 'Update Data',
+          description: 'Manually update fundamentals data for multiple markets with comprehensive data types',
           endpoint: '/scheduler/tasks/eodhd-fundamentals',
           params: {},
-          icon: <ScheduleOutlined />
+          icon: <CloudDownloadOutlined />
         }
       ]
     },
@@ -270,6 +270,11 @@ const SchedulerPage: React.FC = () => {
   // 同步数据源状态与定时任务状态
   const syncDataSourceStatus = useCallback(() => {
     setDataSources(prev => prev.map(source => {
+      // EODHD Fundamentals 始终显示为启用状态，因为只支持手动触发
+      if (source.id === 'eodhd_fundamentals') {
+        return { ...source, enabled: true };
+      }
+      
       // 找到对应的定时任务
       const relatedTasks = scheduledTasks.filter(task => {
         const taskType = task.type.toLowerCase();
@@ -356,6 +361,12 @@ const SchedulerPage: React.FC = () => {
   const toggleDataSource = async (sourceId: string, enabled: boolean) => {
     try {
       setLoading(true);
+      
+      // EODHD Fundamentals 不支持切换状态，只支持手动触发
+      if (sourceId === 'eodhd_fundamentals') {
+        message.info('EODHD Fundamentals 只支持手动触发更新，无法通过开关控制');
+        return;
+      }
       
       // 根据数据源ID找到对应的定时任务
       const relatedTasks = scheduledTasks.filter(task => {
@@ -473,8 +484,8 @@ const SchedulerPage: React.FC = () => {
 
   // 显示快速操作对话框
   const showQuickActionModal = (action: QuickAction, dataSource: DataSource) => {
-    // 如果是Cron调度配置，根据数据源类型决定使用哪个配置组件
-    if (action.id.includes('configure') && action.id.includes('schedule')) {
+    // 如果是Cron调度配置或基本面数据更新，根据数据源类型决定使用哪个配置组件
+    if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // 对于EODHD相关数据源，使用专门的配置模态框
       if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
@@ -713,28 +724,30 @@ const SchedulerPage: React.FC = () => {
                 </Space>
               }
               extra={
-                <Tooltip title={
-                  source.description.includes('Coming soon') 
-                    ? '此数据源即将推出' 
-                    : !source.enabled && scheduledTasks.filter(task => {
-                        const taskType = task.type.toLowerCase();
-                        const sourceIdLower = source.id.toLowerCase();
-                        return (
-                          (sourceIdLower.includes('news') && taskType.includes('news')) ||
-                          (sourceIdLower.includes('events') && taskType.includes('events')) ||
-                          (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
-                        );
-                      }).length === 0
-                    ? '请先配置数据获取策略'
-                    : undefined
-                }>
-                  <Switch
-                    checked={source.enabled}
-                    onChange={(checked) => toggleDataSource(source.id, checked)}
-                    disabled={source.description.includes('Coming soon') || loading}
-                    loading={loading && source.status === 'running'}
-                  />
-                </Tooltip>
+                source.id === 'eodhd_fundamentals' ? null : (
+                  <Tooltip title={
+                    source.description.includes('Coming soon') 
+                      ? '此数据源即将推出' 
+                      : !source.enabled && scheduledTasks.filter(task => {
+                          const taskType = task.type.toLowerCase();
+                          const sourceIdLower = source.id.toLowerCase();
+                          return (
+                            (sourceIdLower.includes('news') && taskType.includes('news')) ||
+                            (sourceIdLower.includes('events') && taskType.includes('events')) ||
+                            (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
+                          );
+                        }).length === 0
+                      ? '请先配置数据获取策略'
+                      : undefined
+                  }>
+                    <Switch
+                      checked={source.enabled}
+                      onChange={(checked) => toggleDataSource(source.id, checked)}
+                      disabled={source.description.includes('Coming soon') || loading}
+                      loading={loading && source.status === 'running'}
+                    />
+                  </Tooltip>
+                )
               }
               style={{ 
                 height: '100%',

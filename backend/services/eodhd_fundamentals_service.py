@@ -6,6 +6,7 @@ EODHD Fundamentals Service - 基本面数据获取服务
 - 基本信息保存到companies表（从General获取）
 - 地址信息保存到company_address表（从General.AddressData获取）
 - 高管信息保存到company_officers表（从General.Officers获取）
+- 列表信息保存到company_listings表（从General.Listings获取）
 - 财务数据保存到相关财务表（从Financials获取）
 - 关键指标保存到company_highlights表（从Highlights获取）
 - 估值数据保存到company_valuations表（从Valuation获取）
@@ -106,8 +107,11 @@ class EODHDFundamentalsService:
             'request_interval_seconds': 0.01,
             
             # 🚀 批处理大小（大幅提升处理能力）
-            'production_batch_size': 2000,  # 从1000提升到2000（2倍提升）
-            'test_batch_size': 500,          # 从200提升到500（2.5倍提升）
+            'production_batch_size': 10000,  
+            'test_batch_size': 500,
+            
+            # 🚀 并发优化配置
+            'max_concurrent_requests_per_minute': 800,  # 每分钟最大并发请求数
         }
         
         # 生产环境配置
@@ -145,7 +149,7 @@ class EODHDFundamentalsService:
             'max_retries_on_rate_limit': int(config.get('EODHD_MAX_RETRIES_ON_RATE_LIMIT', 3)),
             'rate_limit_backoff_factor': int(config.get('EODHD_RATE_LIMIT_BACKOFF_FACTOR', 2)),
             'turbo_mode': turbo_mode,
-            'max_workers': int(config.get('EODHD_MAX_WORKERS', 80 if turbo_mode else 50)),  # 超速模式使用更多线程
+            'max_workers': int(config.get('EODHD_MAX_WORKERS', 100 if turbo_mode else 80)),  # 🚀 增加并发线程数
         }
         
         # 🚀 超速模式配置
@@ -352,8 +356,6 @@ class EODHDFundamentalsService:
     def get_exchange_tickers(self, exchange: str) -> List[str]:
         """获取指定交易所的股票代码列表"""
         try:
-            logger.info(f"开始获取 {exchange} 交易所的股票代码")
-            
             # 构建API URL
             url = f'https://eodhd.com/api/exchange-symbol-list/{exchange}?api_token={self.api_key}&fmt=json'
             
@@ -373,7 +375,7 @@ class EODHDFundamentalsService:
                     if code and code != 'UNKNOWN':
                         tickers.append(code)
             
-            logger.info(f"获取 {exchange} 交易所股票代码完成，共 {len(tickers)} 个")
+            logger.info(f"获取 {exchange} 交易所股票代码: {len(tickers)} 个")
             return tickers
             
         except Exception as e:
@@ -412,7 +414,7 @@ class EODHDFundamentalsService:
             else:
                 symbol_with_exchange = f"{symbol}.{exchange}"
             
-            url = f'https://eodhd.com/api/fundamentals/{symbol_with_exchange}?filter=General,Financials,Highlights,Valuation,Technicals,Holders,outstandingShares,Earnings&api_token={self.api_key}&fmt=json'
+            url = f'https://eodhd.com/api/fundamentals/{symbol_with_exchange}?filter=General,Financials,Highlights,Valuation,Technicals,Holders,outstandingShares,Earnings,SharesStats,AnalystRatings,SplitsDividends,InsiderTransactions&api_token={self.api_key}&fmt=json'
             
             # 请求数据
             data = self._safe_api_request(url)
@@ -477,6 +479,7 @@ class EODHDFundamentalsService:
                         'general_data': general_data,
                         'address_data': general_data.get('AddressData'),
                         'officers_data': self._extract_officers_list(general_data.get('Officers', {})),
+                        'listings_data': general_data.get('Listings'),
                         'full_data': full_data  # 包含完整数据用于财务数据保存
                     }
                 return None
@@ -504,10 +507,10 @@ class EODHDFundamentalsService:
                     if result:
                         valid_results.append(result)
                     
-                    # 每完成25%显示进度
-                    if completed_count % max(1, len(symbols_exchanges) // 4) == 0:
+                    # 每完成50%显示进度（减少日志频率）
+                    if completed_count % max(1, len(symbols_exchanges) // 2) == 0:
                         progress_pct = (completed_count / len(symbols_exchanges)) * 100
-                        logger.info(f"🚀 并发获取进度: {completed_count}/{len(symbols_exchanges)} ({progress_pct:.1f}%)")
+                        logger.info(f"🚀 并发获取进度: {completed_count}/{len(symbols_exchanges)} ({progress_pct:.0f}%)")
                 except Exception as e:
                     logger.warning(f"并发任务失败: {str(e)}")
         
@@ -720,6 +723,11 @@ class EODHDFundamentalsService:
             if 'Officers' in general_data:
                 officers_count = self._save_officers_data(company_id, general_data['Officers'])
             
+            # 保存列表信息
+            listings_count = 0
+            if 'Listings' in general_data:
+                listings_count = self._save_listings_data(company_id, general_data['Listings'])
+            
             # 🚀 优化：移除冗余的逐条日志
             
             return company_id
@@ -729,7 +737,21 @@ class EODHDFundamentalsService:
             return None
 
     def save_company_data(self, data: Dict[str, Any], symbol: str, exchange: str) -> Optional[int]:
-        """保存公司完整数据（包括General、Financials、Highlights、Valuation、Technicals、Holders、outstandingShares、Earnings）到数据库"""
+        """保存公司完整数据（优化版本 - 使用批量处理）"""
+        try:
+            # 🚀 优化：将单个公司数据转换为批量格式，然后使用批量处理方法
+            return self.save_companies_batch([{
+                'symbol': symbol,
+                'exchange': exchange,
+                'data': data
+            }]).get(symbol)
+            
+        except Exception as e:
+            logger.error(f"保存公司完整数据失败: {str(e)}")
+            return None
+
+    def save_company_data_legacy(self, data: Dict[str, Any], symbol: str, exchange: str) -> Optional[int]:
+        """保存公司完整数据（原始版本 - 已弃用，保留用于兼容性）"""
         try:
             company_id = None
             
@@ -810,12 +832,255 @@ class EODHDFundamentalsService:
                 except Exception as e:
                     logger.error(f"保存盈利数据失败 {symbol}: {str(e)}")
                     # 盈利数据保存失败不影响公司基本信息的保存
+
+            # 保存SharesStats数据
+            if 'SharesStats' in data:
+                try:
+                    self.save_shares_stats_data(company_id, data['SharesStats'], current_date)
+                    logger.debug(f"成功保存股票统计数据: {symbol} -> ID {company_id}")
+                except Exception as e:
+                    logger.error(f"保存股票统计数据失败 {symbol}: {str(e)}")
+
+            # 保存AnalystRatings数据
+            if 'AnalystRatings' in data:
+                try:
+                    self.save_analyst_ratings_data(company_id, data['AnalystRatings'], current_date)
+                    logger.debug(f"成功保存分析师评级数据: {symbol} -> ID {company_id}")
+                except Exception as e:
+                    logger.error(f"保存分析师评级数据失败 {symbol}: {str(e)}")
+
+            # 保存SplitsDividends数据
+            if 'SplitsDividends' in data:
+                try:
+                    self.save_splits_dividends_data(company_id, data['SplitsDividends'], current_date)
+                    logger.debug(f"成功保存拆股分红数据: {symbol} -> ID {company_id}")
+                except Exception as e:
+                    logger.error(f"保存拆股分红数据失败 {symbol}: {str(e)}")
+
+            # 保存InsiderTransactions数据
+            if 'InsiderTransactions' in data:
+                try:
+                    self.save_insider_transactions_data(company_id, data['InsiderTransactions'])
+                    logger.debug(f"成功保存内部人交易数据: {symbol} -> ID {company_id}")
+                except Exception as e:
+                    logger.error(f"保存内部人交易数据失败 {symbol}: {str(e)}")
             
             return company_id
             
         except Exception as e:
             logger.error(f"保存公司完整数据失败: {str(e)}")
             return None
+
+    def save_companies_batch(self, companies_data: List[Dict[str, Any]]) -> Dict[str, Optional[int]]:
+        """🚀 批量保存公司完整数据（超级优化版本）"""
+        try:
+            if not companies_data:
+                return {}
+            
+            logger.info(f"🚀 开始批量保存 {len(companies_data)} 个公司的完整数据")
+            
+            # 1. 准备各类数据批次
+            companies_batch = []
+            addresses_batch = []
+            officers_batch = []
+            listings_batch = []
+            financials_batch = []
+            highlights_batch = []
+            valuation_batch = []
+            technicals_batch = []
+            holders_batch = []
+            outstanding_shares_batch = []
+            earnings_batch = []
+            shares_stats_batch = []
+            analyst_ratings_batch = []
+            splits_dividends_batch = []
+            insider_transactions_batch = []
+            
+            # 2. 分类收集数据
+            for company_data in companies_data:
+                symbol = company_data['symbol']
+                exchange = company_data['exchange']
+                data = company_data['data']
+                
+                # General数据
+                if 'General' in data:
+                    general_data = data['General']
+                    companies_batch.append({
+                        'symbol': symbol,
+                        'exchange': exchange,
+                        'general_data': general_data
+                    })
+                    
+                    # 收集地址数据
+                    if 'AddressData' in general_data and isinstance(general_data.get('AddressData'), dict):
+                        addresses_batch.append({
+                            'symbol': symbol,
+                            'address_data': general_data['AddressData']
+                        })
+                    
+                    # 收集高管数据
+                    if 'Officers' in general_data and general_data.get('Officers'):
+                        officers_data = self._extract_officers_list(general_data['Officers'])
+                        if officers_data:  # 只有当提取到有效数据时才添加
+                            officers_batch.append({
+                                'symbol': symbol,
+                                'officers_data': officers_data
+                            })
+                    
+                    # 收集列表数据
+                    if 'Listings' in general_data and isinstance(general_data.get('Listings'), dict):
+                        listings_batch.append({
+                            'symbol': symbol,
+                            'listings_data': general_data['Listings']
+                        })
+                        
+                elif any(key in data for key in ['Code', 'Name', 'Exchange', 'Type']):
+                    companies_batch.append({
+                        'symbol': symbol,
+                        'exchange': exchange,
+                        'general_data': data
+                    })
+                
+                # 收集其他类型的数据
+                if 'Financials' in data:
+                    financials_batch.append({
+                        'symbol': symbol,
+                        'financials_data': data['Financials']
+                    })
+                
+                if 'Highlights' in data:
+                    highlights_batch.append({
+                        'symbol': symbol,
+                        'highlights_data': data['Highlights']
+                    })
+                
+                if 'Valuation' in data:
+                    valuation_batch.append({
+                        'symbol': symbol,
+                        'valuation_data': data['Valuation']
+                    })
+                
+                if 'Technicals' in data:
+                    technicals_batch.append({
+                        'symbol': symbol,
+                        'technicals_data': data['Technicals']
+                    })
+                
+                if 'Holders' in data:
+                    holders_batch.append({
+                        'symbol': symbol,
+                        'holders_data': data['Holders']
+                    })
+                
+                if 'outstandingShares' in data:
+                    outstanding_shares_batch.append({
+                        'symbol': symbol,
+                        'outstanding_shares_data': data['outstandingShares']
+                    })
+                
+                if 'Earnings' in data:
+                    earnings_batch.append({
+                        'symbol': symbol,
+                        'earnings_data': data['Earnings']
+                    })
+                
+                if 'SharesStats' in data:
+                    shares_stats_batch.append({
+                        'symbol': symbol,
+                        'shares_stats_data': data['SharesStats']
+                    })
+                
+                if 'AnalystRatings' in data:
+                    analyst_ratings_batch.append({
+                        'symbol': symbol,
+                        'analyst_ratings_data': data['AnalystRatings']
+                    })
+                
+                if 'SplitsDividends' in data:
+                    splits_dividends_batch.append({
+                        'symbol': symbol,
+                        'splits_dividends_data': data['SplitsDividends']
+                    })
+                
+                if 'InsiderTransactions' in data:
+                    insider_transactions_batch.append({
+                        'symbol': symbol,
+                        'insider_transactions_data': data['InsiderTransactions']
+                    })
+            
+            # 3. 按顺序批量保存数据
+            symbol_to_id = {}
+            
+            # 首先保存公司基本信息
+            if companies_batch:
+                companies_result = self._batch_save_companies(companies_batch)
+                symbol_to_id.update(companies_result.get('symbol_to_id', {}))
+                logger.info(f"✅ 批量保存公司基本信息完成: {companies_result.get('saved_count', 0)} 个")
+            
+            # 然后批量保存地址、高管、列表数据
+            if addresses_batch:
+                addresses_result = self._batch_save_addresses(addresses_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存地址数据完成: {addresses_result.get('saved_count', 0)} 个")
+            
+            if officers_batch:
+                officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存高管数据完成: {officers_result.get('saved_count', 0)} 个")
+            
+            if listings_batch:
+                listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存列表数据完成: {listings_result.get('saved_count', 0)} 个")
+            
+            # 然后批量保存所有其他数据
+            if financials_batch:
+                financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存财务数据完成: {financials_result.get('saved_count', 0)} 个")
+            
+            if highlights_batch:
+                highlights_result = self._batch_save_highlights(highlights_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存关键指标数据完成: {highlights_result.get('saved_count', 0)} 个")
+            
+            if valuation_batch:
+                valuation_result = self._batch_save_valuation(valuation_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存估值数据完成: {valuation_result.get('saved_count', 0)} 个")
+            
+            if technicals_batch:
+                technicals_result = self._batch_save_technicals(technicals_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存技术指标数据完成: {technicals_result.get('saved_count', 0)} 个")
+            
+            if holders_batch:
+                holders_result = self._batch_save_holders(holders_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存股东数据完成: {holders_result.get('saved_count', 0)} 个")
+            
+            if outstanding_shares_batch:
+                outstanding_shares_result = self._batch_save_outstanding_shares(outstanding_shares_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存流通股数据完成: {outstanding_shares_result.get('saved_count', 0)} 个")
+            
+            if earnings_batch:
+                earnings_result = self._batch_save_earnings(earnings_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存盈利数据完成: {earnings_result.get('saved_count', 0)} 个")
+            
+            if shares_stats_batch:
+                shares_stats_result = self._batch_save_shares_stats(shares_stats_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存股票统计数据完成: {shares_stats_result.get('saved_count', 0)} 个")
+            
+            if analyst_ratings_batch:
+                analyst_ratings_result = self._batch_save_analyst_ratings(analyst_ratings_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存分析师评级数据完成: {analyst_ratings_result.get('saved_count', 0)} 个")
+            
+            if splits_dividends_batch:
+                splits_dividends_result = self._batch_save_splits_dividends(splits_dividends_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存拆股分红数据完成: {splits_dividends_result.get('saved_count', 0)} 个")
+            
+            if insider_transactions_batch:
+                insider_transactions_result = self._batch_save_insider_transactions(insider_transactions_batch, symbol_to_id)
+                logger.info(f"✅ 批量保存内部人交易数据完成: {insider_transactions_result.get('saved_count', 0)} 个")
+            
+            logger.info(f"🎉 批量保存完成: {len(companies_data)} 个公司的完整数据全部保存成功")
+            return symbol_to_id
+            
+        except Exception as e:
+            logger.error(f"批量保存公司完整数据失败: {str(e)}")
+            return {}
     
     def _create_company_record(self, general_data: Dict[str, Any], symbol: str, exchange: str) -> Optional[int]:
         """创建新的公司记录"""
@@ -1010,7 +1275,7 @@ class EODHDFundamentalsService:
             raise
     
     def batch_save_companies_data(self, companies_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """批量保存公司数据（基本信息、地址、高管、财务数据、关键指标、估值、技术指标、股东、流通股、盈利数据）"""
+        """批量保存公司数据（基本信息、地址、高管、财务数据、关键指标、估值、技术指标、股东、流通股、盈利数据、股票统计、分析师评级、拆股分红、内部人交易）"""
         try:
             logger.info(f"开始批量保存 {len(companies_data)} 个公司的数据")
             
@@ -1018,6 +1283,7 @@ class EODHDFundamentalsService:
             companies_batch = []
             addresses_batch = []
             officers_batch = []
+            listings_batch = []
             financials_batch = []
             highlights_batch = []
             valuation_batch = []
@@ -1025,6 +1291,10 @@ class EODHDFundamentalsService:
             holders_batch = []
             outstanding_shares_batch = []
             earnings_batch = []
+            shares_stats_batch = []
+            analyst_ratings_batch = []
+            splits_dividends_batch = []
+            insider_transactions_batch = []
             
             for company_data in companies_data:
                 symbol = company_data.get('symbol')
@@ -1032,6 +1302,7 @@ class EODHDFundamentalsService:
                 general_data = company_data.get('general_data')
                 address_data = company_data.get('address_data')
                 officers_data = company_data.get('officers_data')
+                listings_data = company_data.get('listings_data')
                 full_data = company_data.get('full_data', {})
                 
                 if not general_data:
@@ -1057,6 +1328,13 @@ class EODHDFundamentalsService:
                     officers_batch.append({
                         'symbol': symbol,
                         'officers_data': officers_data
+                    })
+                
+                # 准备列表数据（将在公司插入后处理）
+                if listings_data:
+                    listings_batch.append({
+                        'symbol': symbol,
+                        'listings_data': listings_data
                     })
                 
                 # 准备财务数据（将在公司插入后处理）
@@ -1107,6 +1385,34 @@ class EODHDFundamentalsService:
                         'symbol': symbol,
                         'earnings_data': full_data['Earnings']
                     })
+                
+                # 准备股票统计数据
+                if full_data and 'SharesStats' in full_data:
+                    shares_stats_batch.append({
+                        'symbol': symbol,
+                        'shares_stats_data': full_data['SharesStats']
+                    })
+                
+                # 准备分析师评级数据
+                if full_data and 'AnalystRatings' in full_data:
+                    analyst_ratings_batch.append({
+                        'symbol': symbol,
+                        'analyst_ratings_data': full_data['AnalystRatings']
+                    })
+                
+                # 准备拆股分红数据
+                if full_data and 'SplitsDividends' in full_data:
+                    splits_dividends_batch.append({
+                        'symbol': symbol,
+                        'splits_dividends_data': full_data['SplitsDividends']
+                    })
+                
+                # 准备内部人交易数据
+                if full_data and 'InsiderTransactions' in full_data:
+                    insider_transactions_batch.append({
+                        'symbol': symbol,
+                        'insider_transactions_data': full_data['InsiderTransactions']
+                    })
             
             # 批量处理公司基本信息
             companies_result = self._batch_save_companies(companies_batch)
@@ -1117,6 +1423,9 @@ class EODHDFundamentalsService:
             
             # 批量处理高管数据
             officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
+            
+            # 批量处理列表数据
+            listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
             
             # 批量处理财务数据
             financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
@@ -1139,12 +1448,25 @@ class EODHDFundamentalsService:
             # 批量处理盈利数据
             earnings_result = self._batch_save_earnings(earnings_batch, symbol_to_id)
             
+            # 批量处理股票统计数据
+            shares_stats_result = self._batch_save_shares_stats(shares_stats_batch, symbol_to_id)
+            
+            # 批量处理分析师评级数据
+            analyst_ratings_result = self._batch_save_analyst_ratings(analyst_ratings_batch, symbol_to_id)
+            
+            # 批量处理拆股分红数据
+            splits_dividends_result = self._batch_save_splits_dividends(splits_dividends_batch, symbol_to_id)
+            
+            # 批量处理内部人交易数据
+            insider_transactions_result = self._batch_save_insider_transactions(insider_transactions_batch, symbol_to_id)
+            
             result = {
                 'success': True,
                 'total_companies': len(companies_data),
                 'companies_saved': companies_result.get('saved_count', 0),
                 'addresses_saved': addresses_result.get('saved_count', 0),
                 'officers_saved': officers_result.get('saved_count', 0),
+                'listings_saved': listings_result.get('saved_count', 0),
                 'financials_saved': financials_result.get('saved_count', 0),
                 'balance_sheet_records': financials_result.get('balance_sheet_records', 0),
                 'income_statement_records': financials_result.get('income_statement_records', 0),
@@ -1155,6 +1477,10 @@ class EODHDFundamentalsService:
                 'holders_saved': holders_result.get('saved_count', 0),
                 'outstanding_shares_saved': outstanding_shares_result.get('saved_count', 0),
                 'earnings_saved': earnings_result.get('saved_count', 0),
+                'shares_stats_saved': shares_stats_result.get('saved_count', 0),
+                'analyst_ratings_saved': analyst_ratings_result.get('saved_count', 0),
+                'splits_dividends_saved': splits_dividends_result.get('saved_count', 0),
+                'insider_transactions_saved': insider_transactions_result.get('saved_count', 0),
                 'symbol_to_id': symbol_to_id
             }
             
@@ -1180,9 +1506,17 @@ class EODHDFundamentalsService:
                 additional_detail += f", 流通股数据 {result['outstanding_shares_saved']}"
             if result['earnings_saved'] > 0:
                 additional_detail += f", 盈利数据 {result['earnings_saved']}"
+            if result['shares_stats_saved'] > 0:
+                additional_detail += f", 股票统计 {result['shares_stats_saved']}"
+            if result['analyst_ratings_saved'] > 0:
+                additional_detail += f", 分析师评级 {result['analyst_ratings_saved']}"
+            if result['splits_dividends_saved'] > 0:
+                additional_detail += f", 拆股分红 {result['splits_dividends_saved']}"
+            if result['insider_transactions_saved'] > 0:
+                additional_detail += f", 内部人交易 {result['insider_transactions_saved']}"
             
             logger.info(f"批量保存完成: 公司 {result['companies_saved']}, "
-                       f"地址 {result['addresses_saved']}, 高管 {result['officers_saved']}{financials_detail}{additional_detail}")
+                       f"地址 {result['addresses_saved']}, 高管 {result['officers_saved']}, 列表 {result['listings_saved']}{financials_detail}{additional_detail}")
             
             return result
             
@@ -1195,13 +1529,18 @@ class EODHDFundamentalsService:
                 'companies_saved': 0,
                 'addresses_saved': 0,
                 'officers_saved': 0,
+                'listings_saved': 0,
                 'financials_saved': 0,
                 'highlights_saved': 0,
                 'valuation_saved': 0,
                 'technicals_saved': 0,
                 'holders_saved': 0,
                 'outstanding_shares_saved': 0,
-                'earnings_saved': 0
+                'earnings_saved': 0,
+                'shares_stats_saved': 0,
+                'analyst_ratings_saved': 0,
+                'splits_dividends_saved': 0,
+                'insider_transactions_saved': 0
             }
     
     def _batch_save_companies(self, companies_batch: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1305,7 +1644,7 @@ class EODHDFundamentalsService:
                     RETURNING id, code
                 """
                 
-                with self.db_manager.get_connection() as conn:
+                with self.db_manager.get_connection_context() as conn:
                     with conn.cursor() as cursor:
                         result = psycopg2.extras.execute_values(
                             cursor, upsert_sql, upsert_values,
@@ -1341,7 +1680,7 @@ class EODHDFundamentalsService:
             if not addresses_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存 {len(addresses_batch)} 个地址数据")
+            logger.info(f"🚀 批量保存 {len(addresses_batch)} 个地址数据")
             
             # 准备批量插入数据
             values_list = []
@@ -1353,6 +1692,11 @@ class EODHDFundamentalsService:
                 
                 if not company_id:
                     logger.warning(f"找不到公司ID: {symbol}")
+                    continue
+                
+                # 检查address_data是否为有效字典
+                if not isinstance(address_data, dict) or not address_data:
+                    logger.debug(f"地址数据无效，跳过 {symbol}: {address_data}")
                     continue
                 
                 values_list.append((
@@ -1381,7 +1725,7 @@ class EODHDFundamentalsService:
                         updated_at = EXCLUDED.updated_at
                 """
                 
-                with self.db_manager.get_connection() as conn:
+                with self.db_manager.get_connection_context() as conn:
                     with conn.cursor() as cursor:
                         psycopg2.extras.execute_values(
                             cursor, upsert_sql, values_list,
@@ -1389,7 +1733,7 @@ class EODHDFundamentalsService:
                         )
                         conn.commit()
             
-            logger.info(f"批量保存地址数据完成: {len(values_list)} 条记录")
+            logger.info(f"🚀 批量保存地址数据完成: {len(values_list)} 条记录")
             return {'saved_count': len(values_list)}
             
         except Exception as e:
@@ -1402,7 +1746,7 @@ class EODHDFundamentalsService:
             if not officers_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存高管数据，涉及 {len(officers_batch)} 个公司")
+            logger.info(f"🚀 批量保存高管数据，涉及 {len(officers_batch)} 个公司")
             
             # 准备批量插入数据
             values_list = []
@@ -1414,6 +1758,11 @@ class EODHDFundamentalsService:
                 
                 if not company_id:
                     logger.warning(f"找不到公司ID: {symbol}")
+                    continue
+                
+                # 检查officers_data是否为有效列表
+                if not isinstance(officers_data, list) or not officers_data:
+                    logger.debug(f"高管数据无效，跳过 {symbol}: {officers_data}")
                     continue
                 
                 # 处理每个高管
@@ -1460,7 +1809,7 @@ class EODHDFundamentalsService:
                 """
                 
                 import psycopg2.extras
-                with self.db_manager.get_connection() as conn:
+                with self.db_manager.get_connection_context() as conn:
                     with conn.cursor() as cursor:
                         psycopg2.extras.execute_values(
                             cursor, insert_sql, values_list,
@@ -1468,11 +1817,91 @@ class EODHDFundamentalsService:
                         )
                         conn.commit()
             
-            logger.info(f"批量保存高管数据完成: {len(values_list)} 条记录")
+            logger.info(f"🚀 批量保存高管数据完成: {len(values_list)} 条记录")
             return {'saved_count': len(values_list)}
             
         except Exception as e:
             logger.error(f"批量保存高管数据失败: {str(e)}")
+            raise
+
+    def _batch_save_listings(self, listings_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """批量保存公司列表数据"""
+        try:
+            if not listings_batch:
+                return {'saved_count': 0}
+            
+            logger.info(f"🚀 批量保存列表数据，涉及 {len(listings_batch)} 个公司")
+            
+            # 准备批量插入数据
+            values_list = []
+            
+            for listings_record in listings_batch:
+                symbol = listings_record['symbol']
+                listings_data = listings_record['listings_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"找不到公司ID: {symbol}")
+                    continue
+                
+                # 检查listings_data是否为有效字典
+                if not isinstance(listings_data, dict) or not listings_data:
+                    logger.debug(f"列表数据无效，跳过 {symbol}: {listings_data}")
+                    continue
+                
+                # 处理每个列表
+                for key, listing_info in listings_data.items():
+                    if not isinstance(listing_info, dict):
+                        continue
+                    
+                    code = listing_info.get('Code', '').strip()
+                    exchange = listing_info.get('Exchange', '').strip()
+                    name = listing_info.get('Name', '').strip()
+                    
+                    if not code or not exchange:
+                        logger.warning(f"列表代码或交易所为空，跳过: {listing_info}")
+                        continue
+                    
+                    # 判断是否为主要列表（通常第一个是主要的）
+                    is_primary = (key == "0")
+                    
+                    values_list.append((
+                        company_id,
+                        code,
+                        exchange,
+                        name,
+                        is_primary,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+            
+            if values_list:
+                # 先删除现有列表数据
+                company_ids = [symbol_to_id[record['symbol']] for record in listings_batch if symbol_to_id.get(record['symbol'])]
+                if company_ids:
+                    delete_sql = "DELETE FROM company_listings WHERE company_id = ANY(%s)"
+                    self.db_manager.execute_query(delete_sql, (company_ids,))
+                
+                # 批量插入新的列表数据
+                insert_sql = """
+                    INSERT INTO company_listings (
+                        company_id, code, exchange, name, is_primary, created_at, updated_at
+                    ) VALUES %s
+                """
+                
+                with self.db_manager.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        psycopg2.extras.execute_values(
+                            cursor, insert_sql, values_list,
+                            template=None, page_size=1000
+                        )
+                        conn.commit()
+            
+            logger.info(f"🚀 批量保存列表数据完成: {len(values_list)} 条记录")
+            return {'saved_count': len(values_list)}
+            
+        except Exception as e:
+            logger.error(f"批量保存列表数据失败: {str(e)}")
             raise
 
     def _batch_save_financials(self, financials_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
@@ -1483,20 +1912,21 @@ class EODHDFundamentalsService:
             
             logger.info(f"🚀 优化批量保存财务数据，涉及 {len(financials_batch)} 个公司")
             
-            # 分别收集三个财务报表的数据
+            # 🚀 预分配列表容量，避免动态扩容
+            estimated_records_per_company = 120  # 根据AAPL的382条记录估算，每个报表约120条
             balance_sheet_records = []
             income_statement_records = []
             cash_flow_records = []
             
-            for financials_record in financials_batch:
-                symbol = financials_record['symbol']
-                financials_data = financials_record['financials_data']
-                company_id = symbol_to_id.get(symbol)
-                
-                if not company_id:
-                    logger.warning(f"找不到公司ID: {symbol}")
-                    continue
-                
+            # 🚀 优化：批量预处理数据，减少循环开销
+            valid_companies = [(symbol, financials_data, symbol_to_id.get(symbol)) 
+                             for record in financials_batch 
+                             for symbol, financials_data in [(record['symbol'], record['financials_data'])]
+                             if symbol_to_id.get(symbol)]
+            
+            logger.debug(f"🚀 有效公司数量: {len(valid_companies)}/{len(financials_batch)}")
+            
+            for symbol, financials_data, company_id in valid_companies:
                 # 收集资产负债表数据
                 if 'Balance_Sheet' in financials_data:
                     balance_sheet_data = self._extract_financial_records(
@@ -1518,10 +1948,10 @@ class EODHDFundamentalsService:
                     )
                     cash_flow_records.extend(cash_flow_data)
             
-            # 批量保存到各个表
-            balance_sheet_saved = self._bulk_upsert_balance_sheet(balance_sheet_records)
-            income_statement_saved = self._bulk_upsert_income_statement(income_statement_records)
-            cash_flow_saved = self._bulk_upsert_cash_flow(cash_flow_records)
+            # 🚀 优化：合并事务处理，避免多次提交
+            balance_sheet_saved, income_statement_saved, cash_flow_saved = self._bulk_upsert_all_financials(
+                balance_sheet_records, income_statement_records, cash_flow_records
+            )
             
             total_companies = len([r for r in financials_batch if symbol_to_id.get(r['symbol'])])
             
@@ -1539,6 +1969,141 @@ class EODHDFundamentalsService:
             
         except Exception as e:
             logger.error(f"批量保存财务数据失败: {str(e)}")
+            raise
+
+    def _bulk_upsert_all_financials(self, balance_sheet_records: List[tuple], 
+                                   income_statement_records: List[tuple], 
+                                   cash_flow_records: List[tuple]) -> tuple:
+        """🚀 优化版本：在单个事务中处理所有财务报表数据"""
+        try:
+            import time
+            start_time = time.time()
+            
+            balance_sheet_saved = 0
+            income_statement_saved = 0
+            cash_flow_saved = 0
+            
+            total_records = len(balance_sheet_records) + len(income_statement_records) + len(cash_flow_records)
+            logger.info(f"🚀 开始单事务处理 {total_records} 条财务记录（资产负债表:{len(balance_sheet_records)}, 损益表:{len(income_statement_records)}, 现金流:{len(cash_flow_records)}）")
+            
+            # 使用单个数据库连接和事务处理所有数据
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    import psycopg2.extras
+                    
+                    # 处理资产负债表数据
+                    if balance_sheet_records:
+                        balance_sheet_sql = """
+                            INSERT INTO company_balance_sheet (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalassets, totalcurrentassets, cash, cashandequivalents, cashandshortterminvestments,
+                                shortterminvestments, netreceivables, inventory, othercurrentassets, noncurrentassetstotal,
+                                longterminvestments, propertyplantequipment, propertyplantandequipmentgross, propertyplantandequipmentnet,
+                                accumulateddepreciation, goodwill, intangibleassets, accumulatedamortization, noncurrrentassetsother,
+                                deferredlongtermassetcharges, otherassets, earningassets, nettangibleassets,
+                                totalliab, totalcurrentliabilities, accountspayable, shorttermdebt, shortlongtermdebt,
+                                shortlongtermdebttotal, othercurrentliab, currentdeferredrevenue, noncurrentliabilitiestotal,
+                                longtermdebt, longtermdebttotal, capitalleaseobligations, deferredlongtermliab,
+                                noncurrentliabilitiesother, otherliab, netdebt,
+                                totalstockholderequity, commonstock, capitalstock, retainedearnings, otherstockholderequity,
+                                accumulatedothercomprehensiveincome, additionalpaidincapital, commonstocktotalequity,
+                                preferredstocktotalequity, retainedearningstotalequity, treasurystock, totalpermanentequity,
+                                noncontrollinginterestinconsolidatedentity, temporaryequityredeemablenoncontrollinginterests,
+                                negativegoodwill, warrants, preferredstockredeemable, capitalsurpluse,
+                                liabilitiesandstockholdersequity, networkingcapital, netinvestedcapital, commonstocksharesoutstanding,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalassets = EXCLUDED.totalassets,
+                                totalcurrentassets = EXCLUDED.totalcurrentassets,
+                                cash = EXCLUDED.cash,
+                                cashandequivalents = EXCLUDED.cashandequivalents,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        psycopg2.extras.execute_values(
+                            cursor, balance_sheet_sql, balance_sheet_records,
+                            template=None, page_size=1000
+                        )
+                        balance_sheet_saved = len(balance_sheet_records)
+                        logger.debug(f"🚀 单事务处理资产负债表: {balance_sheet_saved} 条记录")
+                    
+                    # 处理损益表数据
+                    if income_statement_records:
+                        income_statement_sql = """
+                            INSERT INTO company_income_statement (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalrevenue, costofrevenue, grossprofit, totaloperatingexpenses,
+                                researchdevelopment, sellinggeneraladministrative, sellingandmarketingexpenses, otheroperatingexpenses,
+                                operatingincome, ebit, ebitda, interestincome, interestexpense, netinterestincome,
+                                totalotherincomeexpensenet, nonoperatingincomenetother, incomebeforetax, taxprovision,
+                                incometaxexpense, netincome, netincomefromcontinuingops, netincomeapplicabletocommonshares,
+                                reconcileddepreciation, depreciationandamortization, extraordinaryitems, nonrecurring,
+                                otheritems, discontinuedoperations, effectofaccountingcharges, minorityinterest,
+                                preferredstockandotheradjustments, created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalrevenue = EXCLUDED.totalrevenue,
+                                costofrevenue = EXCLUDED.costofrevenue,
+                                grossprofit = EXCLUDED.grossprofit,
+                                netincome = EXCLUDED.netincome,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        psycopg2.extras.execute_values(
+                            cursor, income_statement_sql, income_statement_records,
+                            template=None, page_size=1000
+                        )
+                        income_statement_saved = len(income_statement_records)
+                        logger.debug(f"🚀 单事务处理损益表: {income_statement_saved} 条记录")
+                    
+                    # 处理现金流量表数据
+                    if cash_flow_records:
+                        cash_flow_sql = """
+                            INSERT INTO company_cash_flow (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalcashfromoperatingactivities, netincome, depreciation, stockbasedcompensation,
+                                changeinworkingcapital, changetoaccountreceivables, changetoinventory, changetoliabilities,
+                                changetooperatingactivities, changetonetincome, changereceivables, othernoncashitems,
+                                cashflowsotheroperating, totalcashflowsfrominvestingactivities, capitalexpenditures,
+                                investments, othercashflowsfrominvestingactivities, salepurchaseofstock,
+                                totalcashfromfinancingactivities, dividendspaid, netborrowings, issuanceofcapitalstock,
+                                othercashflowsfromfinancingactivities, changeincash, beginperiodcashflow, endperiodcashflow,
+                                exchangeratechanges, cashandcashequivalentschanges, freecashflow,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalcashfromoperatingactivities = EXCLUDED.totalcashfromoperatingactivities,
+                                netincome = EXCLUDED.netincome,
+                                freecashflow = EXCLUDED.freecashflow,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        psycopg2.extras.execute_values(
+                            cursor, cash_flow_sql, cash_flow_records,
+                            template=None, page_size=1000
+                        )
+                        cash_flow_saved = len(cash_flow_records)
+                        logger.debug(f"🚀 单事务处理现金流量表: {cash_flow_saved} 条记录")
+                    
+                    # 🚀 关键优化：所有数据在一个事务中提交
+                    conn.commit()
+            
+            # 🚀 性能监控
+            end_time = time.time()
+            duration = end_time - start_time
+            records_per_second = total_records / duration if duration > 0 else 0
+            
+            logger.info(f"🚀 单事务财务数据处理完成: 资产负债表 {balance_sheet_saved}, 损益表 {income_statement_saved}, 现金流量表 {cash_flow_saved}")
+            logger.info(f"⚡ 性能统计: 处理 {total_records} 条记录耗时 {duration:.2f}秒, 速度: {records_per_second:.0f} 条/秒")
+            
+            return balance_sheet_saved, income_statement_saved, cash_flow_saved
+            
+        except Exception as e:
+            logger.error(f"🚀 单事务财务数据处理失败: {str(e)}")
             raise
 
     def _extract_financial_records(self, company_id: int, financial_data: Dict[str, Any], statement_type: str) -> List[tuple]:
@@ -1788,14 +2353,81 @@ class EODHDFundamentalsService:
         except Exception as e:
             logger.error(f"保存高管数据失败: {str(e)}")
             return 0
+
+    def _save_listings_data(self, company_id: int, listings_data: Dict[str, Any]) -> int:
+        """保存公司列表信息到 company_listings 表"""
+        try:
+            if not isinstance(listings_data, dict) or not listings_data:
+                logger.debug(f"公司列表数据为空或无效，跳过保存: {listings_data}")
+                return 0
+            
+            # 首先删除该公司现有的列表记录
+            self.db_manager.execute_query("""
+                DELETE FROM company_listings WHERE company_id = %s
+            """, (company_id,))
+            
+            # 插入新的列表记录
+            success_count = 0
+            for key, listing_info in listings_data.items():
+                if not isinstance(listing_info, dict):
+                    logger.warning(f"列表信息不是字典类型，跳过 {key}: {listing_info}")
+                    continue
+                
+                try:
+                    code = listing_info.get('Code', '').strip()
+                    exchange = listing_info.get('Exchange', '').strip()
+                    name = listing_info.get('Name', '').strip()
+                    
+                    if not code or not exchange:
+                        logger.warning(f"列表代码或交易所为空，跳过: {listing_info}")
+                        continue
+                    
+                    # 判断是否为主要列表（通常第一个是主要的）
+                    is_primary = (key == "0")
+                    
+                    insert_sql = """
+                        INSERT INTO company_listings (
+                            company_id, code, exchange, name, is_primary, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (company_id, exchange, code) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            is_primary = EXCLUDED.is_primary,
+                            updated_at = EXCLUDED.updated_at
+                    """
+                    
+                    values = (
+                        company_id,
+                        code,
+                        exchange,
+                        name,
+                        is_primary,
+                        datetime.now(),
+                        datetime.now()
+                    )
+                    
+                    self.db_manager.execute_query(insert_sql, values)
+                    success_count += 1
+                    logger.debug(f"成功保存列表数据: {code} - {exchange} - {name}")
+                    
+                except Exception as e:
+                    logger.error(f"保存单个列表数据失败 {listing_info}: {str(e)}")
+                    continue
+            
+            logger.debug(f"列表数据保存完成，公司ID: {company_id}, 成功保存 {success_count} 个列表")
+            return success_count
+            
+        except Exception as e:
+            logger.error(f"保存列表数据失败: {str(e)}")
+            return 0
     
     async def _process_exchange_batch(self, exchange: str, tickers: List[str], progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """批量处理交易所的股票数据"""
+        """🚀 批量处理交易所的股票数据（并发优化版本）"""
         try:
-            logger.info(f"开始批量处理交易所 {exchange} 的 {len(tickers)} 个股票")
+            logger.info(f"🚀 开始并发处理 {exchange}: {len(tickers)} 个股票")
             
-            # 🚀 大幅优化：增加批量大小，充分利用数据库性能提升
-            batch_size = 500  # 每批处理500个股票（12.5倍提升）
+            # 🚀 并发优化：增加批量大小，利用并发处理
+            batch_size = 500  # 每批处理500个股票
+            max_workers = self.production_config.get('max_workers', 50)  # 并发线程数
             total_successful = 0
             total_failed = 0
             
@@ -1805,99 +2437,89 @@ class EODHDFundamentalsService:
                 batch_tickers = tickers[batch_start:batch_end]
                 
                 if progress_callback:
-                    progress_callback(f"批量处理 {exchange}: 批次 {batch_start//batch_size + 1} ({batch_start+1}-{batch_end}/{len(tickers)})")
+                    progress_callback(f"🚀 并发处理 {exchange}: 批次 {batch_start//batch_size + 1} ({batch_start+1}-{batch_end}/{len(tickers)})")
                 
-                logger.info(f"处理批次 {batch_start//batch_size + 1}: {len(batch_tickers)} 个股票")
+                logger.info(f"🚀 处理批次 {batch_start//batch_size + 1}: {len(batch_tickers)} 个股票")
                 
-                # 1. 批量获取API数据
-                companies_data = []
-                for i, ticker in enumerate(batch_tickers):
-                    try:
-                        if progress_callback and i % 10 == 0:  # 每10个更新一次进度
-                            progress_callback(f"获取 {exchange}: {ticker} ({batch_start + i + 1}/{len(tickers)})")
+                # 1. 🚀 并发获取API数据（替代逐个请求）
+                batch_start_time = time.time()
+                symbols_exchanges = [(ticker, exchange) for ticker in batch_tickers]
+                
+                # 使用并发方法替代逐个请求循环
+                companies_data = self.concurrent_fetch_companies_data(symbols_exchanges, max_workers=max_workers)
+                
+                # 转换数据格式以兼容批量保存
+                formatted_companies_data = []
+                for company_data in companies_data:
+                    if company_data and 'full_data' in company_data:
+                        # 重新构造数据结构
+                        full_data = company_data['full_data']
+                        general_data = company_data['general_data']
                         
-                        # 获取完整数据（General + Financials）
-                        full_data = self.fetch_company_full_data(ticker, exchange)
-                        
-                        if full_data and isinstance(full_data, dict):
-                            # 提取General数据用于批处理兼容性
-                            general_data = full_data.get('General', full_data)
-                            
-                            # 确保general_data是字典类型且不为空
-                            if not isinstance(general_data, dict) or not general_data:
-                                logger.warning(f"跳过 {ticker}：General数据格式不正确或为空，期望非空dict但获得{type(general_data)}")
-                                total_failed += 1
-                                continue
-                            
-                            # 获取高管数据 - 直接从General数据中提取
-                            officers_data = []
-                            if 'Officers' in general_data and isinstance(general_data['Officers'], dict):
-                                # Officers是字典格式，键是字符串数字
-                                for key, officer in general_data['Officers'].items():
-                                    if isinstance(officer, dict):
-                                        officers_data.append(officer)
-                            
-                            # 获取地址数据 - 优先使用AddressData，如果没有则解析Address字符串
-                            address_data = None
-                            if 'AddressData' in general_data and isinstance(general_data['AddressData'], dict):
-                                address_data = general_data['AddressData']
-                            elif 'Address' in general_data and general_data['Address']:
-                                # 如果只有Address字符串，可以创建简单的地址数据
-                                address_data = {'Street': general_data['Address']}
-                            
-                            companies_data.append({
-                                'symbol': ticker,
-                                'exchange': exchange,
+                        formatted_companies_data.append({
+                            'symbol': company_data['symbol'],
+                            'exchange': company_data['exchange'],
                                 'general_data': general_data,
-                                'address_data': address_data,
-                                'officers_data': officers_data,
-                                'full_data': full_data  # 包含完整数据用于财务数据保存
-                            })
-                            
-                            logger.debug(f"✅ {ticker}: 数据获取成功")
-                        else:
-                            logger.warning(f"❌ {ticker}: 获取基本数据失败")
-                            total_failed += 1
-                        
-                        # 🚀 优化：大幅减少API速率限制延迟
-                        await asyncio.sleep(max(0.005, self.production_config['request_delay'] * 0.2))  # 减少到原来的20%
-                        
-                    except Exception as e:
-                        logger.error(f"❌ {ticker}: 获取数据时出错 - {str(e)}")
-                        total_failed += 1
-                        continue
+                            'address_data': company_data['address_data'],
+                            'officers_data': company_data['officers_data'],
+                            'full_data': full_data
+                        })
                 
-                # 2. 批量保存到数据库
-                if companies_data:
+                # 统计本批次结果
+                batch_successful = len(formatted_companies_data)
+                batch_failed = len(batch_tickers) - batch_successful
+                total_failed += batch_failed
+                
+                batch_fetch_time = time.time() - batch_start_time
+                
+                if progress_callback and batch_successful > 0:
+                    # 更详细的进度报告
+                    sample_tickers = [cd['symbol'] for cd in formatted_companies_data[:3]]
+                    if len(sample_tickers) < len(formatted_companies_data):
+                        sample_str = f"{', '.join(sample_tickers)}... (+{len(formatted_companies_data)-3}个)"
+                    else:
+                        sample_str = ', '.join(sample_tickers)
+                    progress_callback(f"✅ 并发获取完成 {exchange}: {sample_str} ({batch_successful}/{len(batch_tickers)}) 用时{batch_fetch_time:.1f}s")
+                
+                logger.info(f"📊 批次API并发获取完成: {batch_successful}/{len(batch_tickers)} 成功, 用时 {batch_fetch_time:.1f}s (速度: {batch_successful/batch_fetch_time:.1f} 股票/秒)")
+                
+                # 2. 🚀 批量保存到数据库（使用新的优化保存方法）
+                if formatted_companies_data:
                     try:
-                        batch_result = self.batch_save_companies_data(companies_data)
-                        if batch_result['success']:
-                            batch_successful = batch_result['companies_saved']
-                            total_successful += batch_successful
-                            
-                            # 显示批次保存的详细信息
-                            financials_detail = ""
-                            if 'balance_sheet_records' in batch_result:
-                                financials_detail = (f", 财务数据: 资产负债表 {batch_result.get('balance_sheet_records', 0)} 条, "
-                                                   f"损益表 {batch_result.get('income_statement_records', 0)} 条, "
-                                                   f"现金流量表 {batch_result.get('cash_flow_records', 0)} 条")
-                            else:
-                                financials_detail = f", 财务数据 {batch_result.get('financials_saved', 0)} 个公司"
-                            
-                            logger.info(f"📊 批次保存完成: {batch_successful} 个公司, "
-                                       f"{batch_result['addresses_saved']} 个地址, "
-                                       f"{batch_result['officers_saved']} 个高管记录{financials_detail}")
-                            
-                            # 🚀 优化：移除冗余的逐条日志，只保留批次摘要
-                        else:
-                            logger.error(f"批量保存失败: {batch_result.get('error', '未知错误')}")
-                            total_failed += len(companies_data)
-                            
+                        batch_save_start_time = time.time()
+                        
+                        # 转换为save_companies_batch需要的格式
+                        companies_batch_data = []
+                        for company_data in formatted_companies_data:
+                            companies_batch_data.append({
+                                'symbol': company_data['symbol'],
+                                'exchange': company_data['exchange'],
+                                'data': company_data['full_data']  # 完整的基本面数据
+                            })
+                        
+                        # 使用新的批量保存方法
+                        symbol_to_id = self.save_companies_batch(companies_batch_data)
+                        
+                        batch_save_time = time.time() - batch_save_start_time
+                        batch_successful = len([id for id in symbol_to_id.values() if id is not None])
+                        total_successful += batch_successful
+                        
+                        if progress_callback:
+                            progress_callback(f"💾 批量保存完成 {exchange}: {batch_successful} 个公司, 用时 {batch_save_time:.1f}s")
+                        
+                        logger.info(f"💾 批次数据库保存完成: {batch_successful}/{len(formatted_companies_data)} 成功, 用时 {batch_save_time:.1f}s (速度: {batch_successful/batch_save_time:.1f} 公司/秒)")
+                        
                     except Exception as e:
                         logger.error(f"批量保存数据时出错: {str(e)}")
-                        total_failed += len(companies_data)
+                        total_failed += len(formatted_companies_data)
                 
-                logger.info(f"批次 {batch_start//batch_size + 1} 完成: 成功 {len(companies_data)}, 失败 {batch_size - len(companies_data)}")
+                # 批次总结
+                batch_total_time = time.time() - batch_start_time
+                batch_successful = len(formatted_companies_data)
+                actual_failed = len(batch_tickers) - batch_successful
+                
+                logger.info(f"✅ 批次 {batch_start//batch_size + 1} 完成: 成功 {batch_successful}/{len(batch_tickers)}, "
+                           f"失败 {actual_failed}, 总用时 {batch_total_time:.1f}s (整体速度: {batch_successful/batch_total_time:.1f} 股票/秒)")
             
             logger.info(f"交易所 {exchange} 批量处理完成: 总成功 {total_successful}, 总失败 {total_failed}")
             
@@ -1922,7 +2544,7 @@ class EODHDFundamentalsService:
         try:
             # 设置默认数据类型
             if data_types is None:
-                data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings']
+                data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']
             
             logger.info(f"开始获取交易所基本面数据: {exchanges}, 数据类型: {data_types}")
             
@@ -1935,8 +2557,6 @@ class EODHDFundamentalsService:
                 if progress_callback:
                     progress_callback(f"正在处理交易所: {exchange}")
                 
-                logger.info(f"开始处理交易所: {exchange}")
-                
                 # 获取交易所的股票代码
                 tickers = self.get_exchange_tickers(exchange)
                 if not tickers:
@@ -1948,8 +2568,6 @@ class EODHDFundamentalsService:
                         'message': '未获取到股票代码'
                     }
                     continue
-                
-                logger.info(f"交易所 {exchange} 共有 {len(tickers)} 个股票代码")
                 total_companies += len(tickers)
                 
                 exchange_successful = 0
@@ -1959,8 +2577,7 @@ class EODHDFundamentalsService:
                 max_tickers = min(len(tickers), self.production_config['batch_size'])
                 tickers = tickers[:max_tickers]
                 
-                logger.info(f"批处理配置 - 交易所: {exchange}, 总股票数: {len(tickers)}, "
-                           f"本批处理: {max_tickers}, 请求间隔: {self.production_config['request_delay']}s")
+                logger.info(f"批处理配置 - 交易所: {exchange}, 处理股票数: {max_tickers}")
                 
                 # 使用批量处理模式
                 batch_result = await self._process_exchange_batch(exchange, tickers, progress_callback)
@@ -2013,7 +2630,34 @@ class EODHDFundamentalsService:
             }
     
     def save_financials_data(self, company_id: int, financials: Dict[str, Any]):
-        """保存财务数据"""
+        """保存财务数据（优化版本 - 使用批量处理）"""
+        try:
+            if not isinstance(financials, dict) or not financials:
+                logger.debug(f"财务数据为空或无效，跳过保存: {financials}")
+                return
+            
+            # 🚀 优化：使用批量保存方法
+            # 创建一个虚拟的symbol（因为我们已经有company_id了）
+            dummy_symbol = f"company_{company_id}"
+            financials_batch = [{
+                'symbol': dummy_symbol,
+                'financials_data': financials
+            }]
+            
+            # 创建symbol_to_id映射
+            symbol_to_id = {dummy_symbol: company_id}
+            
+            # 使用批量保存方法
+            result = self._batch_save_financials(financials_batch, symbol_to_id)
+            
+            logger.debug(f"成功保存财务数据 - 公司ID: {company_id}, 批量结果: {result}")
+            
+        except Exception as e:
+            logger.error(f"保存财务数据失败: {str(e)}")
+            raise
+
+    def save_financials_data_legacy(self, company_id: int, financials: Dict[str, Any]):
+        """保存财务数据（原始版本 - 已弃用，保留用于兼容性）"""
         try:
             if not isinstance(financials, dict) or not financials:
                 logger.debug(f"财务数据为空或无效，跳过保存: {financials}")
@@ -2404,12 +3048,12 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cursor:
                     import psycopg2.extras
                     psycopg2.extras.execute_values(
                         cursor, upsert_sql, records,
-                        template=None, page_size=100
+                        template=None, page_size=1000  # 🚀 优化：增大批次大小到1000
                     )
                     conn.commit()
             
@@ -2448,12 +3092,12 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cursor:
                     import psycopg2.extras
                     psycopg2.extras.execute_values(
                         cursor, upsert_sql, records,
-                        template=None, page_size=100
+                        template=None, page_size=1000  # 🚀 优化：增大批次大小到1000
                     )
                     conn.commit()
             
@@ -2492,12 +3136,12 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cursor:
                     import psycopg2.extras
                     psycopg2.extras.execute_values(
                         cursor, upsert_sql, records,
-                        template=None, page_size=100
+                        template=None, page_size=1000  # 🚀 优化：增大批次大小到1000
                     )
                     conn.commit()
             
@@ -2557,7 +3201,7 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     cur.execute(insert_sql, (
                         company_id,
@@ -2623,7 +3267,7 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     cur.execute(insert_sql, (
                         company_id,
@@ -2673,7 +3317,7 @@ class EODHDFundamentalsService:
                     updated_at = EXCLUDED.updated_at
             """
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     cur.execute(insert_sql, (
                         company_id,
@@ -2727,7 +3371,7 @@ class EODHDFundamentalsService:
             if not isinstance(holders_data, dict):
                 return
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     for key, holder_info in holders_data.items():
                         if not isinstance(holder_info, dict):
@@ -2800,7 +3444,7 @@ class EODHDFundamentalsService:
             
             logger.debug(f"保存流通股数据 - 公司ID: {company_id}")
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     # 处理年度和季度数据
                     for period_type in ['annual', 'quarterly']:
@@ -2893,6 +3537,214 @@ class EODHDFundamentalsService:
         except Exception as e:
             logger.error(f"保存盈利数据失败: {str(e)}")
             raise
+
+    def save_shares_stats_data(self, company_id: int, shares_stats: Dict[str, Any], data_date):
+        """保存股票统计数据"""
+        try:
+            if not isinstance(shares_stats, dict) or not shares_stats:
+                logger.debug(f"股票统计数据为空或无效，跳过保存: {shares_stats}")
+                return
+            
+            # PostgreSQL使用ON CONFLICT替代INSERT OR REPLACE
+            insert_sql = """
+                INSERT INTO company_shares_stats (
+                    company_id, sharesoutstanding, sharesfloat, percentinsiders, 
+                    percentinstitutions, sharesshort, sharesshortpriormonth, 
+                    shortratio, shortpercentoutstanding, shortpercentfloat,
+                    data_date, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (company_id, data_date) DO UPDATE SET
+                    sharesoutstanding = EXCLUDED.sharesoutstanding,
+                    sharesfloat = EXCLUDED.sharesfloat,
+                    percentinsiders = EXCLUDED.percentinsiders,
+                    percentinstitutions = EXCLUDED.percentinstitutions,
+                    sharesshort = EXCLUDED.sharesshort,
+                    sharesshortpriormonth = EXCLUDED.sharesshortpriormonth,
+                    shortratio = EXCLUDED.shortratio,
+                    shortpercentoutstanding = EXCLUDED.shortpercentoutstanding,
+                    shortpercentfloat = EXCLUDED.shortpercentfloat,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        company_id,
+                        self._safe_float(shares_stats.get('SharesOutstanding')),
+                        self._safe_float(shares_stats.get('SharesFloat')),
+                        self._safe_float(shares_stats.get('PercentInsiders')),
+                        self._safe_float(shares_stats.get('PercentInstitutions')),
+                        self._safe_float(shares_stats.get('SharesShort')),
+                        self._safe_float(shares_stats.get('SharesShortPriorMonth')),
+                        self._safe_float(shares_stats.get('ShortRatio')),
+                        self._safe_float(shares_stats.get('ShortPercentOutstanding')),
+                        self._safe_float(shares_stats.get('ShortPercentFloat')),
+                        data_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                conn.commit()
+            
+            logger.debug(f"成功保存股票统计数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存股票统计数据失败: {str(e)}")
+            raise
+
+    def save_analyst_ratings_data(self, company_id: int, analyst_ratings: Dict[str, Any], data_date):
+        """保存分析师评级数据"""
+        try:
+            if not isinstance(analyst_ratings, dict) or not analyst_ratings:
+                logger.debug(f"分析师评级数据为空或无效，跳过保存: {analyst_ratings}")
+                return
+            
+            # PostgreSQL使用ON CONFLICT替代INSERT OR REPLACE
+            insert_sql = """
+                INSERT INTO company_analyst_ratings (
+                    company_id, rating, targetprice, strongbuy, buy, hold, 
+                    sell, strongsell, data_date, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (company_id, data_date) DO UPDATE SET
+                    rating = EXCLUDED.rating,
+                    targetprice = EXCLUDED.targetprice,
+                    strongbuy = EXCLUDED.strongbuy,
+                    buy = EXCLUDED.buy,
+                    hold = EXCLUDED.hold,
+                    sell = EXCLUDED.sell,
+                    strongsell = EXCLUDED.strongsell,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        company_id,
+                        self._safe_float(analyst_ratings.get('Rating')),
+                        self._safe_float(analyst_ratings.get('TargetPrice')),
+                        analyst_ratings.get('StrongBuy'),
+                        analyst_ratings.get('Buy'),
+                        analyst_ratings.get('Hold'),
+                        analyst_ratings.get('Sell'),
+                        analyst_ratings.get('StrongSell'),
+                        data_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                conn.commit()
+            
+            logger.debug(f"成功保存分析师评级数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存分析师评级数据失败: {str(e)}")
+            raise
+
+    def save_splits_dividends_data(self, company_id: int, splits_dividends: Dict[str, Any], data_date):
+        """保存拆股分红数据"""
+        try:
+            if not isinstance(splits_dividends, dict) or not splits_dividends:
+                logger.debug(f"拆股分红数据为空或无效，跳过保存: {splits_dividends}")
+                return
+            
+            # PostgreSQL使用ON CONFLICT替代INSERT OR REPLACE
+            insert_sql = """
+                INSERT INTO company_dividend_info (
+                    company_id, forwardannualdividendrate, forwardannualdividendyield, 
+                    payoutratio, dividenddate, exdividenddate, lastsplitfactor, 
+                    lastsplitdate, data_date, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (company_id, data_date) DO UPDATE SET
+                    forwardannualdividendrate = EXCLUDED.forwardannualdividendrate,
+                    forwardannualdividendyield = EXCLUDED.forwardannualdividendyield,
+                    payoutratio = EXCLUDED.payoutratio,
+                    dividenddate = EXCLUDED.dividenddate,
+                    exdividenddate = EXCLUDED.exdividenddate,
+                    lastsplitfactor = EXCLUDED.lastsplitfactor,
+                    lastsplitdate = EXCLUDED.lastsplitdate,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        company_id,
+                        self._safe_float(splits_dividends.get('ForwardAnnualDividendRate')),
+                        self._safe_float(splits_dividends.get('ForwardAnnualDividendYield')),
+                        self._safe_float(splits_dividends.get('PayoutRatio')),
+                        self._safe_date(splits_dividends.get('DividendDate')),
+                        self._safe_date(splits_dividends.get('ExDividendDate')),
+                        splits_dividends.get('LastSplitFactor'),
+                        self._safe_date(splits_dividends.get('LastSplitDate')),
+                        data_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                conn.commit()
+            
+            logger.debug(f"成功保存拆股分红数据，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存拆股分红数据失败: {str(e)}")
+            raise
+
+    def save_insider_transactions_data(self, company_id: int, insider_transactions: Dict[str, Any]):
+        """保存内部人交易数据"""
+        try:
+            if not isinstance(insider_transactions, dict) or not insider_transactions:
+                logger.debug(f"内部人交易数据为空或无效，跳过保存: {insider_transactions}")
+                return
+            
+            saved_count = 0
+            # insider_transactions通常是一个包含交易记录的字典或列表
+            transactions = insider_transactions if isinstance(insider_transactions, list) else [insider_transactions]
+            
+            insert_sql = """
+                INSERT INTO company_insider_transactions (
+                    company_id, date, ownercik, ownername, transactiondate, 
+                    transactioncode, transactionamount, transactionprice, 
+                    transactionacquireddisposed, posttransactionamount, seclink,
+                    created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (company_id, date, ownername) DO UPDATE SET
+                    ownercik = EXCLUDED.ownercik,
+                    transactiondate = EXCLUDED.transactiondate,
+                    transactioncode = EXCLUDED.transactioncode,
+                    transactionamount = EXCLUDED.transactionamount,
+                    transactionprice = EXCLUDED.transactionprice,
+                    transactionacquireddisposed = EXCLUDED.transactionacquireddisposed,
+                    posttransactionamount = EXCLUDED.posttransactionamount,
+                    seclink = EXCLUDED.seclink,
+                    updated_at = EXCLUDED.updated_at
+            """
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    for transaction in transactions:
+                        if not isinstance(transaction, dict):
+                            continue
+                            
+                        cur.execute(insert_sql, (
+                            company_id,
+                            self._safe_date(transaction.get('Date')),
+                            transaction.get('OwnerCik'),
+                            transaction.get('OwnerName', ''),
+                            self._safe_date(transaction.get('TransactionDate')),
+                            transaction.get('TransactionCode'),
+                            self._safe_float(transaction.get('TransactionAmount')),
+                            self._safe_float(transaction.get('TransactionPrice')),
+                            transaction.get('TransactionAcquiredDisposed'),
+                            self._safe_float(transaction.get('PostTransactionAmount')),
+                            transaction.get('SecLink'),
+                            datetime.now(),
+                            datetime.now()
+                        ))
+                        saved_count += 1
+                conn.commit()
+            
+            logger.debug(f"成功保存内部人交易数据 {saved_count} 条，公司ID: {company_id}")
+            
+        except Exception as e:
+            logger.error(f"保存内部人交易数据失败: {str(e)}")
+            raise
     
     def _save_earnings_annual_data(self, company_id: int, annual_data: Dict[str, Any]):
         """保存年度盈利数据到 company_earnings_annual 表"""
@@ -2900,7 +3752,7 @@ class EODHDFundamentalsService:
             if not isinstance(annual_data, dict):
                 return
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     for date_str, data in annual_data.items():
                         if not isinstance(data, dict):
@@ -2945,7 +3797,7 @@ class EODHDFundamentalsService:
             if not isinstance(history_data, dict):
                 return
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     for date_str, data in history_data.items():
                         if not isinstance(data, dict):
@@ -3008,7 +3860,7 @@ class EODHDFundamentalsService:
             if not isinstance(trend_data, dict):
                 return
             
-            with self.db_manager.get_connection() as conn:
+            with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     for date_str, data in trend_data.items():
                         if not isinstance(data, dict):
@@ -3106,15 +3958,17 @@ class EODHDFundamentalsService:
             raise
 
     def _batch_save_highlights(self, highlights_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存关键指标数据"""
+        """批量保存关键指标数据（优化版本）"""
         try:
             if not highlights_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存关键指标数据，涉及 {len(highlights_batch)} 个公司")
+            logger.info(f"🚀 批量保存关键指标数据，涉及 {len(highlights_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            insert_data = []
             current_date = date.today()
+            processed_companies = 0
             
             for highlights_record in highlights_batch:
                 symbol = highlights_record['symbol']
@@ -3125,30 +3979,140 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过关键指标数据保存：找不到公司ID - {symbol}")
                     continue
                 
+                if not isinstance(highlights_data, dict) or not highlights_data:
+                    logger.debug(f"关键指标数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
                 try:
-                    self.save_highlights_data(company_id, highlights_data, current_date)
-                    saved_count += 1
+                    insert_data.append((
+                        company_id,
+                        self._safe_float(highlights_data.get('MarketCapitalization')),
+                        self._safe_float(highlights_data.get('MarketCapitalizationMln')),
+                        self._safe_float(highlights_data.get('EBITDA')),
+                        self._safe_float(highlights_data.get('PERatio')),
+                        self._safe_float(highlights_data.get('PEGRatio')),
+                        self._safe_float(highlights_data.get('WallStreetTargetPrice')),
+                        self._safe_float(highlights_data.get('BookValue')),
+                        self._safe_float(highlights_data.get('DividendShare')),
+                        self._safe_float(highlights_data.get('DividendYield')),
+                        self._safe_float(highlights_data.get('EarningsShare')),
+                        self._safe_float(highlights_data.get('EPSEstimateCurrentYear')),
+                        self._safe_float(highlights_data.get('EPSEstimateNextYear')),
+                        self._safe_float(highlights_data.get('EPSEstimateNextQuarter')),
+                        self._safe_float(highlights_data.get('EPSEstimateCurrentQuarter')),
+                        self._safe_date(highlights_data.get('MostRecentQuarter')),
+                        self._safe_float(highlights_data.get('DilutedEpsTTM')),
+                        self._safe_float(highlights_data.get('ProfitMargin')),
+                        self._safe_float(highlights_data.get('OperatingMarginTTM')),
+                        self._safe_float(highlights_data.get('ReturnOnAssetsTTM')),
+                        self._safe_float(highlights_data.get('ReturnOnEquityTTM')),
+                        self._safe_float(highlights_data.get('RevenueTTM')),
+                        self._safe_float(highlights_data.get('RevenuePerShareTTM')),
+                        self._safe_float(highlights_data.get('QuarterlyRevenueGrowthYOY')),
+                        self._safe_float(highlights_data.get('QuarterlyEarningsGrowthYOY')),
+                        self._safe_float(highlights_data.get('GrossProfitTTM')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                    processed_companies += 1
+                    
                 except Exception as e:
-                    logger.warning(f"保存关键指标数据失败 {symbol}: {str(e)}")
+                    logger.warning(f"准备关键指标数据失败 {symbol}: {str(e)}")
                     continue
             
-            logger.info(f"🚀 批量关键指标数据保存完成: {len(highlights_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                # 每1000个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 1000:
+                    self._execute_batch_highlights_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_highlights_insert(insert_data)
+            
+            logger.info(f"🚀 批量关键指标数据保存完成: {len(highlights_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存关键指标数据失败: {str(e)}")
             raise
 
+    def _execute_batch_highlights_insert(self, insert_data: List[tuple]):
+        """执行批量关键指标数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量关键指标数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_highlights (
+                            company_id, marketcapitalization, marketcapitalizationmln, ebitda, 
+                            peratio, pegratio, wallstreettargetprice, bookvalue, 
+                            dividendshare, dividendyield, earningsshare,
+                            epsestimatecurrentyear, epsestimatenextyear, epsestimatenextquarter, 
+                            epsestimatecurrentquarter, mostrecentquarter, dilutedepsttm,
+                            profitmargin, operatingmarginttm, returnonassetsttm, returnonequityttm,
+                            revenuettm, revenuepersharettm, quarterlyrevenuegrowthyoy, 
+                            quarterlyearningsgrowthyoy, grossprofitttm,
+                            data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            marketcapitalization = EXCLUDED.marketcapitalization,
+                            marketcapitalizationmln = EXCLUDED.marketcapitalizationmln,
+                            ebitda = EXCLUDED.ebitda,
+                            peratio = EXCLUDED.peratio,
+                            pegratio = EXCLUDED.pegratio,
+                            wallstreettargetprice = EXCLUDED.wallstreettargetprice,
+                            bookvalue = EXCLUDED.bookvalue,
+                            dividendshare = EXCLUDED.dividendshare,
+                            dividendyield = EXCLUDED.dividendyield,
+                            earningsshare = EXCLUDED.earningsshare,
+                            epsestimatecurrentyear = EXCLUDED.epsestimatecurrentyear,
+                            epsestimatenextyear = EXCLUDED.epsestimatenextyear,
+                            epsestimatenextquarter = EXCLUDED.epsestimatenextquarter,
+                            epsestimatecurrentquarter = EXCLUDED.epsestimatecurrentquarter,
+                            mostrecentquarter = EXCLUDED.mostrecentquarter,
+                            dilutedepsttm = EXCLUDED.dilutedepsttm,
+                            profitmargin = EXCLUDED.profitmargin,
+                            operatingmarginttm = EXCLUDED.operatingmarginttm,
+                            returnonassetsttm = EXCLUDED.returnonassetsttm,
+                            returnonequityttm = EXCLUDED.returnonequityttm,
+                            revenuettm = EXCLUDED.revenuettm,
+                            revenuepersharettm = EXCLUDED.revenuepersharettm,
+                            quarterlyrevenuegrowthyoy = EXCLUDED.quarterlyrevenuegrowthyoy,
+                            quarterlyearningsgrowthyoy = EXCLUDED.quarterlyearningsgrowthyoy,
+                            grossprofitttm = EXCLUDED.grossprofitttm,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量关键指标数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入关键指标数据失败: {str(e)}")
+            raise
+
     def _batch_save_valuation(self, valuation_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存估值数据"""
+        """批量保存估值数据（优化版本）"""
         try:
             if not valuation_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存估值数据，涉及 {len(valuation_batch)} 个公司")
+            logger.info(f"🚀 批量保存估值数据，涉及 {len(valuation_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            insert_data = []
             current_date = date.today()
+            processed_companies = 0
             
             for valuation_record in valuation_batch:
                 symbol = valuation_record['symbol']
@@ -3159,30 +4123,98 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过估值数据保存：找不到公司ID - {symbol}")
                     continue
                 
+                if not isinstance(valuation_data, dict) or not valuation_data:
+                    logger.debug(f"估值数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
                 try:
-                    self.save_valuation_data(company_id, valuation_data, current_date)
-                    saved_count += 1
+                    insert_data.append((
+                        company_id,
+                        self._safe_float(valuation_data.get('TrailingPE')),
+                        self._safe_float(valuation_data.get('ForwardPE')),
+                        self._safe_float(valuation_data.get('PriceSalesTTM')),
+                        self._safe_float(valuation_data.get('PriceBookMRQ')),
+                        self._safe_float(valuation_data.get('EnterpriseValue')),
+                        self._safe_float(valuation_data.get('EnterpriseValueRevenue')),
+                        self._safe_float(valuation_data.get('EnterpriseValueEbitda')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                    processed_companies += 1
+                    
                 except Exception as e:
-                    logger.warning(f"保存估值数据失败 {symbol}: {str(e)}")
+                    logger.warning(f"准备估值数据失败 {symbol}: {str(e)}")
                     continue
             
-            logger.info(f"🚀 批量估值数据保存完成: {len(valuation_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                # 每1000个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 1000:
+                    self._execute_batch_valuation_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_valuation_insert(insert_data)
+            
+            logger.info(f"🚀 批量估值数据保存完成: {len(valuation_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存估值数据失败: {str(e)}")
             raise
 
+    def _execute_batch_valuation_insert(self, insert_data: List[tuple]):
+        """执行批量估值数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量估值数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_valuations (
+                            company_id, trailingpe, forwardpe, pricesalesttm, pricebookmrq,
+                            enterprisevalue, enterprisevaluerevenue, enterprisevalueebitda,
+                            data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            trailingpe = EXCLUDED.trailingpe,
+                            forwardpe = EXCLUDED.forwardpe,
+                            pricesalesttm = EXCLUDED.pricesalesttm,
+                            pricebookmrq = EXCLUDED.pricebookmrq,
+                            enterprisevalue = EXCLUDED.enterprisevalue,
+                            enterprisevaluerevenue = EXCLUDED.enterprisevaluerevenue,
+                            enterprisevalueebitda = EXCLUDED.enterprisevalueebitda,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量估值数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入估值数据失败: {str(e)}")
+            raise
+
     def _batch_save_technicals(self, technicals_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存技术指标数据"""
+        """批量保存技术指标数据（优化版本）"""
         try:
             if not technicals_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存技术指标数据，涉及 {len(technicals_batch)} 个公司")
+            logger.info(f"🚀 批量保存技术指标数据，涉及 {len(technicals_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            insert_data = []
             current_date = date.today()
+            processed_companies = 0
             
             for technicals_record in technicals_batch:
                 symbol = technicals_record['symbol']
@@ -3193,29 +4225,101 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过技术指标数据保存：找不到公司ID - {symbol}")
                     continue
                 
+                if not isinstance(technicals_data, dict) or not technicals_data:
+                    logger.debug(f"技术指标数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
                 try:
-                    self.save_technicals_data(company_id, technicals_data, current_date)
-                    saved_count += 1
+                    insert_data.append((
+                        company_id,
+                        self._safe_float(technicals_data.get('Beta')),
+                        self._safe_float(technicals_data.get('52WeekHigh')),
+                        self._safe_float(technicals_data.get('52WeekLow')),
+                        self._safe_float(technicals_data.get('50DayMA')),
+                        self._safe_float(technicals_data.get('200DayMA')),
+                        self._safe_float(technicals_data.get('SharesShort')),
+                        self._safe_float(technicals_data.get('SharesShortPriorMonth')),
+                        self._safe_float(technicals_data.get('ShortRatio')),
+                        self._safe_float(technicals_data.get('ShortPercent')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                    processed_companies += 1
+                    
                 except Exception as e:
-                    logger.warning(f"保存技术指标数据失败 {symbol}: {str(e)}")
+                    logger.warning(f"准备技术指标数据失败 {symbol}: {str(e)}")
                     continue
             
-            logger.info(f"🚀 批量技术指标数据保存完成: {len(technicals_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                # 每1000个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 1000:
+                    self._execute_batch_technicals_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_technicals_insert(insert_data)
+            
+            logger.info(f"🚀 批量技术指标数据保存完成: {len(technicals_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存技术指标数据失败: {str(e)}")
             raise
 
+    def _execute_batch_technicals_insert(self, insert_data: List[tuple]):
+        """执行批量技术指标数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量技术指标数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_technicals (
+                            company_id, beta, "52WeekHigh", "52WeekLow", "50DayMA",
+                            "200DayMA", sharesshort, sharesshortpriormonth,
+                            shortratio, shortpercent, data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            beta = EXCLUDED.beta,
+                            "52WeekHigh" = EXCLUDED."52WeekHigh",
+                            "52WeekLow" = EXCLUDED."52WeekLow",
+                            "50DayMA" = EXCLUDED."50DayMA",
+                            "200DayMA" = EXCLUDED."200DayMA",
+                            sharesshort = EXCLUDED.sharesshort,
+                            sharesshortpriormonth = EXCLUDED.sharesshortpriormonth,
+                            shortratio = EXCLUDED.shortratio,
+                            shortpercent = EXCLUDED.shortpercent,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量技术指标数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入技术指标数据失败: {str(e)}")
+            raise
+
     def _batch_save_holders(self, holders_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存股东数据"""
+        """批量保存股东数据（优化版本）"""
         try:
             if not holders_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存股东数据，涉及 {len(holders_batch)} 个公司")
+            logger.info(f"🚀 批量保存股东数据，涉及 {len(holders_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            insert_data = []
+            processed_companies = 0
             
             for holders_record in holders_batch:
                 symbol = holders_record['symbol']
@@ -3226,29 +4330,118 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过股东数据保存：找不到公司ID - {symbol}")
                     continue
                 
+                if not isinstance(holders_data, dict) or not holders_data:
+                    logger.debug(f"股东数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
                 try:
-                    self.save_holders_data(company_id, holders_data)
-                    saved_count += 1
+                    # 提取机构持股数据
+                    if 'Institutions' in holders_data:
+                        institution_records = self._extract_holders_records(company_id, holders_data['Institutions'], 'Institution')
+                        insert_data.extend(institution_records)
+                    
+                    # 提取基金持股数据
+                    if 'Funds' in holders_data:
+                        fund_records = self._extract_holders_records(company_id, holders_data['Funds'], 'Fund')
+                        insert_data.extend(fund_records)
+                    
+                    processed_companies += 1
+                    
                 except Exception as e:
-                    logger.warning(f"保存股东数据失败 {symbol}: {str(e)}")
+                    logger.warning(f"准备股东数据失败 {symbol}: {str(e)}")
                     continue
             
-            logger.info(f"🚀 批量股东数据保存完成: {len(holders_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                # 每500个公司进行一次批量插入，避免事务过大
+                if processed_companies % 500 == 0:
+                    if insert_data:
+                        self._execute_batch_holders_insert(insert_data)
+                        insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_holders_insert(insert_data)
+            
+            logger.info(f"🚀 批量股东数据保存完成: {len(holders_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存股东数据失败: {str(e)}")
             raise
 
+    def _extract_holders_records(self, company_id: int, holders_data: Dict[str, Any], holder_type: str) -> List[tuple]:
+        """提取股东数据记录"""
+        records = []
+        if not isinstance(holders_data, dict):
+            return records
+        
+        for holder_name, data in holders_data.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                # 需要添加date字段，使用当前日期
+                from datetime import date
+                records.append((
+                    company_id, holder_name, holder_type, date.today(),
+                    self._safe_float(data.get('totalShares')),      # totalshares
+                    self._safe_float(data.get('totalValue')),       # totalassets
+                    self._safe_float(data.get('percentHeld')),      # currentshares 
+                    self._safe_float(data.get('sharesChange')),     # change
+                    self._safe_float(data.get('sharesChangePercent')), # change_p
+                    datetime.now(), datetime.now()
+                ))
+            except Exception as e:
+                logger.debug(f"提取股东数据失败 {holder_name}: {str(e)}")
+                continue
+        return records
+
+    def _execute_batch_holders_insert(self, insert_data: List[tuple]):
+        """执行批量股东数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量股东数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_institutional_holdings (
+                            company_id, name, holder_type, date, totalshares, totalassets,
+                            currentshares, change, change_p, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, name, holder_type, date) DO UPDATE SET
+                            totalshares = EXCLUDED.totalshares,
+                            totalassets = EXCLUDED.totalassets,
+                            currentshares = EXCLUDED.currentshares,
+                            change = EXCLUDED.change,
+                            change_p = EXCLUDED.change_p,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量股东数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入股东数据失败: {str(e)}")
+            raise
+
     def _batch_save_outstanding_shares(self, outstanding_shares_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存流通股数据"""
+        """批量保存流通股数据（优化版本）"""
         try:
             if not outstanding_shares_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存流通股数据，涉及 {len(outstanding_shares_batch)} 个公司")
+            logger.info(f"🚀 批量保存流通股数据，涉及 {len(outstanding_shares_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            insert_data = []
+            processed_companies = 0
             
             for outstanding_shares_record in outstanding_shares_batch:
                 symbol = outstanding_shares_record['symbol']
@@ -3259,29 +4452,129 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过流通股数据保存：找不到公司ID - {symbol}")
                     continue
                 
-                try:
-                    self.save_outstanding_shares_data(company_id, outstanding_shares_data)
-                    saved_count += 1
-                except Exception as e:
-                    logger.warning(f"保存流通股数据失败 {symbol}: {str(e)}")
+                if not isinstance(outstanding_shares_data, dict) or not outstanding_shares_data:
+                    logger.debug(f"流通股数据为空或无效，跳过保存: {symbol}")
                     continue
+                
+                # 处理年度和季度数据
+                for period_type in ['annual', 'quarterly']:
+                    if period_type not in outstanding_shares_data:
+                        continue
+                    
+                    period_data = outstanding_shares_data[period_type]
+                    if not isinstance(period_data, dict):
+                        continue
+                    
+                    for index_key, data in period_data.items():
+                        if not isinstance(data, dict):
+                            continue
+                        
+                        try:
+                            # 获取数据字段
+                            date_str = data.get('date', '')
+                            date_formatted_str = data.get('dateFormatted', '')
+                            shares_mln = data.get('sharesMln', '')
+                            shares = data.get('shares', 0)
+                            
+                            if not date_str or not date_formatted_str:
+                                continue
+                            
+                            # 解析格式化日期
+                            date_formatted = self._safe_date(date_formatted_str)
+                            if not date_formatted:
+                                continue
+                            
+                            # 处理 shares 字段，确保是数字
+                            shares_float = self._safe_float(shares)
+                            
+                            insert_data.append((
+                                company_id, date_str, date_formatted, shares_mln, shares_float,
+                                datetime.now(), datetime.now()
+                            ))
+                            
+                        except Exception as e:
+                            logger.warning(f"准备流通股数据失败 {symbol}-{index_key}: {str(e)}")
             
-            logger.info(f"🚀 批量流通股数据保存完成: {len(outstanding_shares_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                processed_companies += 1
+                
+                # 每500个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 5000 or processed_companies % 500 == 0:
+                    if insert_data:
+                        self._execute_batch_outstanding_shares_insert(insert_data)
+                        insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_outstanding_shares_insert(insert_data)
+            
+            logger.info(f"🚀 批量流通股数据保存完成: {len(outstanding_shares_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存流通股数据失败: {str(e)}")
             raise
 
+    def _execute_batch_outstanding_shares_insert(self, insert_data: List[tuple]):
+        """执行批量流通股数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            # 🚀 修复：去重处理，避免同一批次中的重复键冲突
+            # 数据格式：(company_id, date, dateformatted, sharesmln, shares, created_at, updated_at)
+            unique_data = {}
+            for record in insert_data:
+                company_id, date_str, date_formatted, shares_mln, shares_float, created_at, updated_at = record
+                # 使用 (company_id, dateformatted) 作为唯一键
+                key = (company_id, date_formatted)
+                # 保留最新的记录（后面的会覆盖前面的）
+                unique_data[key] = record
+            
+            deduplicated_data = list(unique_data.values())
+            logger.debug(f"执行批量流通股数据插入: {len(insert_data)} 条原始记录 -> {len(deduplicated_data)} 条去重记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # 使用 execute_values 进行高效批量插入
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_outstanding_shares (
+                            company_id, date, dateformatted, sharesmln, shares,
+                            created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, dateformatted) DO UPDATE SET
+                            date = EXCLUDED.date,
+                            sharesmln = EXCLUDED.sharesmln,
+                            shares = EXCLUDED.shares,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        deduplicated_data,  # 🚀 使用去重后的数据
+                        template=None,
+                        page_size=1000  # 每页1000条记录
+                    )
+                    
+            logger.debug(f"批量流通股数据插入完成: {len(deduplicated_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入流通股数据失败: {str(e)}")
+            raise
+
     def _batch_save_earnings(self, earnings_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
-        """批量保存盈利数据"""
+        """批量保存盈利数据（优化版本）"""
         try:
             if not earnings_batch:
                 return {'saved_count': 0}
             
-            logger.info(f"批量保存盈利数据，涉及 {len(earnings_batch)} 个公司")
+            logger.info(f"🚀 批量保存盈利数据，涉及 {len(earnings_batch)} 个公司")
             
-            saved_count = 0
+            # 准备批量插入数据
+            annual_data = []
+            history_data = []
+            trend_data = []
+            processed_companies = 0
             
             for earnings_record in earnings_batch:
                 symbol = earnings_record['symbol']
@@ -3292,18 +4585,721 @@ class EODHDFundamentalsService:
                     logger.warning(f"跳过盈利数据保存：找不到公司ID - {symbol}")
                     continue
                 
+                if not isinstance(earnings_data, dict) or not earnings_data:
+                    logger.debug(f"盈利数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
                 try:
-                    self.save_earnings_data(company_id, earnings_data)
-                    saved_count += 1
+                    # 收集年度盈利数据
+                    if 'Annual' in earnings_data:
+                        annual_records = self._extract_earnings_annual_records(company_id, earnings_data['Annual'])
+                        annual_data.extend(annual_records)
+                    
+                    # 收集历史盈利数据
+                    if 'History' in earnings_data:
+                        history_records = self._extract_earnings_history_records(company_id, earnings_data['History'])
+                        history_data.extend(history_records)
+                    
+                    # 收集趋势盈利数据
+                    if 'Trend' in earnings_data:
+                        trend_records = self._extract_earnings_trend_records(company_id, earnings_data['Trend'])
+                        trend_data.extend(trend_records)
+                    
+                    processed_companies += 1
+                    
                 except Exception as e:
-                    logger.warning(f"保存盈利数据失败 {symbol}: {str(e)}")
+                    logger.warning(f"准备盈利数据失败 {symbol}: {str(e)}")
                     continue
             
-            logger.info(f"🚀 批量盈利数据保存完成: {len(earnings_batch)} 个公司, {saved_count} 条记录")
-            return {'saved_count': saved_count}
+                # 每500个公司进行一次批量插入，避免事务过大
+                if processed_companies % 500 == 0:
+                    self._execute_batch_earnings_insert(annual_data, history_data, trend_data)
+                    annual_data, history_data, trend_data = [], [], []
+            
+            # 处理剩余数据
+            if annual_data or history_data or trend_data:
+                self._execute_batch_earnings_insert(annual_data, history_data, trend_data)
+            
+            logger.info(f"🚀 批量盈利数据保存完成: {len(earnings_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
             
         except Exception as e:
             logger.error(f"批量保存盈利数据失败: {str(e)}")
+            raise
+
+    def _extract_earnings_annual_records(self, company_id: int, annual_data: Dict[str, Any]) -> List[tuple]:
+        """提取年度盈利数据记录"""
+        records = []
+        if not isinstance(annual_data, dict):
+            return records
+        
+        for date_str, data in annual_data.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                date_obj = self._safe_date(date_str)
+                if not date_obj:
+                    continue
+                
+                # 🚀 修复：只保存数据库表实际需要的字段
+                records.append((
+                    company_id, date_obj,
+                    self._safe_float(data.get('reportedEPS')),  # 映射到epsactual
+                    datetime.now(), datetime.now()
+                ))
+            except Exception as e:
+                logger.debug(f"提取年度盈利数据失败 {date_str}: {str(e)}")
+                continue
+        return records
+
+    def _extract_earnings_history_records(self, company_id: int, history_data: Dict[str, Any]) -> List[tuple]:
+        """提取历史盈利数据记录"""
+        records = []
+        if not isinstance(history_data, dict):
+            return records
+        
+        for date_str, data in history_data.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                date_obj = self._safe_date(date_str)
+                if not date_obj:
+                    continue
+                
+                # 🚀 修复：匹配数据库字段格式
+                # 数据格式：(company_id, reportdate, date, beforeaftermarket, currency, epsactual, epsestimate, epsdifference, surprisepercent, created_at, updated_at)
+                records.append((
+                    company_id,
+                    self._safe_date(data.get('reportDate')),  # reportdate
+                    date_obj,                                 # date
+                    data.get('beforeAfterMarket'),            # beforeaftermarket
+                    data.get('currency'),                     # currency
+                    self._safe_float(data.get('epsActual')),  # epsactual
+                    self._safe_float(data.get('epsEstimate')), # epsestimate
+                    self._safe_float(data.get('epsDifference')), # epsdifference
+                    self._safe_float(data.get('surprisePercent')), # surprisepercent
+                    datetime.now(), datetime.now()
+                ))
+            except Exception as e:
+                logger.debug(f"提取历史盈利数据失败 {date_str}: {str(e)}")
+                continue
+        return records
+
+    def _extract_earnings_trend_records(self, company_id: int, trend_data: Dict[str, Any]) -> List[tuple]:
+        """提取趋势盈利数据记录"""
+        records = []
+        if not isinstance(trend_data, dict):
+            return records
+        
+        for date_str, data in trend_data.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                date_obj = self._safe_date(date_str)
+                if not date_obj:
+                    continue
+                
+                records.append((
+                    company_id, date_obj, data.get('period'),
+                    self._safe_float(data.get('growth')),
+                    self._safe_float(data.get('earningsEstimateAvg')),
+                    self._safe_float(data.get('earningsEstimateLow')),
+                    self._safe_float(data.get('earningsEstimateHigh')),
+                    self._safe_float(data.get('earningsEstimateYearAgoEps')),
+                    self._safe_float(data.get('earningsEstimateNumberOfAnalysts')),
+                    self._safe_float(data.get('earningsEstimateGrowth')),
+                    self._safe_float(data.get('revenueEstimateAvg')),
+                    self._safe_float(data.get('revenueEstimateLow')),
+                    self._safe_float(data.get('revenueEstimateHigh')),
+                    self._safe_float(data.get('revenueEstimateYearAgoEps')),
+                    self._safe_float(data.get('revenueEstimateNumberOfAnalysts')),
+                    self._safe_float(data.get('revenueEstimateGrowth')),
+                    self._safe_float(data.get('epsTrendCurrent')),
+                    self._safe_float(data.get('epsTrend7daysAgo')),
+                    self._safe_float(data.get('epsTrend30daysAgo')),
+                    self._safe_float(data.get('epsTrend60daysAgo')),
+                    self._safe_float(data.get('epsTrend90daysAgo')),
+                    self._safe_float(data.get('epsRevisionsUpLast7days')),
+                    self._safe_float(data.get('epsRevisionsUpLast30days')),
+                    self._safe_float(data.get('epsRevisionsDownLast7days')),
+                    self._safe_float(data.get('epsRevisionsDownLast30days')),
+                    datetime.now(), datetime.now()
+                ))
+            except Exception as e:
+                logger.debug(f"提取趋势盈利数据失败 {date_str}: {str(e)}")
+                continue
+        return records
+
+    def _execute_batch_earnings_insert(self, annual_data: List[tuple], history_data: List[tuple], trend_data: List[tuple]):
+        """执行批量盈利数据插入"""
+        try:
+            from psycopg2.extras import execute_values
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # 批量插入年度盈利数据
+                    if annual_data:
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO company_earnings_annual (
+                                company_id, date, epsactual, created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, date) DO UPDATE SET
+                                epsactual = EXCLUDED.epsactual,
+                                updated_at = EXCLUDED.updated_at
+                            """,
+                            annual_data,
+                            page_size=1000
+                        )
+                        logger.debug(f"批量插入年度盈利数据: {len(annual_data)} 条记录")
+                    
+                    # 批量插入历史盈利数据
+                    if history_data:
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO company_earnings_history (
+                                company_id, reportdate, date, beforeaftermarket, currency,
+                                epsactual, epsestimate, epsdifference, surprisepercent,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, date) DO UPDATE SET
+                                reportdate = EXCLUDED.reportdate,
+                                beforeaftermarket = EXCLUDED.beforeaftermarket,
+                                currency = EXCLUDED.currency,
+                                epsactual = EXCLUDED.epsactual,
+                                epsestimate = EXCLUDED.epsestimate,
+                                epsdifference = EXCLUDED.epsdifference,
+                                surprisepercent = EXCLUDED.surprisepercent,
+                                updated_at = EXCLUDED.updated_at
+                            """,
+                            history_data,
+                            page_size=1000
+                        )
+                        logger.debug(f"批量插入历史盈利数据: {len(history_data)} 条记录")
+                    
+                    # 批量插入趋势盈利数据
+                    if trend_data:
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO company_earnings_trend (
+                                company_id, date, period, growth, earningsestimateavg,
+                                earningsestimatelow, earningsestimatehigh, earningsestimateyearagoeps,
+                                earningsestimatenumberofanalysts, earningsestimategrowth,
+                                revenueestimateavg, revenueestimatelow, revenueestimatehigh,
+                                revenueestimateyearagoeps, revenueestimatenumberofanalysts,
+                                revenueestimategrowth, epstrendcurrent, epstrend7daysago,
+                                epstrend30daysago, epstrend60daysago, epstrend90daysago,
+                                epsrevisionsuplast7days, epsrevisionsuplast30days,
+                                epsrevisionsdownlast7days, epsrevisionsdownlast30days,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, date, period) DO UPDATE SET
+                                growth = EXCLUDED.growth,
+                                earningsestimateavg = EXCLUDED.earningsestimateavg,
+                                earningsestimatelow = EXCLUDED.earningsestimatelow,
+                                earningsestimatehigh = EXCLUDED.earningsestimatehigh,
+                                earningsestimateyearagoeps = EXCLUDED.earningsestimateyearagoeps,
+                                earningsestimatenumberofanalysts = EXCLUDED.earningsestimatenumberofanalysts,
+                                earningsestimategrowth = EXCLUDED.earningsestimategrowth,
+                                revenueestimateavg = EXCLUDED.revenueestimateavg,
+                                revenueestimatelow = EXCLUDED.revenueestimatelow,
+                                revenueestimatehigh = EXCLUDED.revenueestimatehigh,
+                                revenueestimateyearagoeps = EXCLUDED.revenueestimateyearagoeps,
+                                revenueestimatenumberofanalysts = EXCLUDED.revenueestimatenumberofanalysts,
+                                revenueestimategrowth = EXCLUDED.revenueestimategrowth,
+                                epstrendcurrent = EXCLUDED.epstrendcurrent,
+                                epstrend7daysago = EXCLUDED.epstrend7daysago,
+                                epstrend30daysago = EXCLUDED.epstrend30daysago,
+                                epstrend60daysago = EXCLUDED.epstrend60daysago,
+                                epstrend90daysago = EXCLUDED.epstrend90daysago,
+                                epsrevisionsuplast7days = EXCLUDED.epsrevisionsuplast7days,
+                                epsrevisionsuplast30days = EXCLUDED.epsrevisionsuplast30days,
+                                epsrevisionsdownlast7days = EXCLUDED.epsrevisionsdownlast7days,
+                                epsrevisionsdownlast30days = EXCLUDED.epsrevisionsdownlast30days,
+                                updated_at = EXCLUDED.updated_at
+                            """,
+                            trend_data,
+                            page_size=1000
+                        )
+                        logger.debug(f"批量插入趋势盈利数据: {len(trend_data)} 条记录")
+            
+            logger.debug("批量盈利数据插入完成")
+            
+        except Exception as e:
+            logger.error(f"批量插入盈利数据失败: {str(e)}")
+            raise
+
+    def _batch_save_shares_stats(self, shares_stats_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """批量保存股票统计数据（优化版本）"""
+        try:
+            if not shares_stats_batch:
+                return {'saved_count': 0}
+            
+            logger.info(f"🚀 批量保存股票统计数据，涉及 {len(shares_stats_batch)} 个公司")
+            
+            # 准备批量插入数据
+            insert_data = []
+            current_date = date.today()
+            processed_companies = 0
+            
+            for shares_stats_record in shares_stats_batch:
+                symbol = shares_stats_record['symbol']
+                shares_stats_data = shares_stats_record['shares_stats_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"跳过股票统计数据保存：找不到公司ID - {symbol}")
+                    continue
+                
+                if not isinstance(shares_stats_data, dict) or not shares_stats_data:
+                    logger.debug(f"股票统计数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
+                try:
+                    insert_data.append((
+                        company_id,
+                        self._safe_float(shares_stats_data.get('SharesOutstanding')),
+                        self._safe_float(shares_stats_data.get('SharesFloat')),
+                        self._safe_float(shares_stats_data.get('PercentInsiders')),
+                        self._safe_float(shares_stats_data.get('PercentInstitutions')),
+                        self._safe_float(shares_stats_data.get('SharesShort')),
+                        self._safe_float(shares_stats_data.get('SharesShortPriorMonth')),
+                        self._safe_float(shares_stats_data.get('ShortRatio')),
+                        self._safe_float(shares_stats_data.get('ShortPercentOutstanding')),
+                        self._safe_float(shares_stats_data.get('ShortPercentFloat')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                    processed_companies += 1
+                    
+                except Exception as e:
+                    logger.warning(f"准备股票统计数据失败 {symbol}: {str(e)}")
+                    continue
+            
+                # 每1000个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 1000:
+                    self._execute_batch_shares_stats_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_shares_stats_insert(insert_data)
+            
+            logger.info(f"🚀 批量股票统计数据保存完成: {len(shares_stats_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
+            
+        except Exception as e:
+            logger.error(f"批量保存股票统计数据失败: {str(e)}")
+            raise
+
+    def _execute_batch_shares_stats_insert(self, insert_data: List[tuple]):
+        """执行批量股票统计数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量股票统计数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_shares_stats (
+                            company_id, sharesoutstanding, sharesfloat, percentinsiders, 
+                            percentinstitutions, sharesshort, sharesshortpriormonth, 
+                            shortratio, shortpercentoutstanding, shortpercentfloat,
+                            data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            sharesoutstanding = EXCLUDED.sharesoutstanding,
+                            sharesfloat = EXCLUDED.sharesfloat,
+                            percentinsiders = EXCLUDED.percentinsiders,
+                            percentinstitutions = EXCLUDED.percentinstitutions,
+                            sharesshort = EXCLUDED.sharesshort,
+                            sharesshortpriormonth = EXCLUDED.sharesshortpriormonth,
+                            shortratio = EXCLUDED.shortratio,
+                            shortpercentoutstanding = EXCLUDED.shortpercentoutstanding,
+                            shortpercentfloat = EXCLUDED.shortpercentfloat,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量股票统计数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入股票统计数据失败: {str(e)}")
+            raise
+
+    def _batch_save_analyst_ratings(self, analyst_ratings_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """批量保存分析师评级数据（优化版本）"""
+        try:
+            if not analyst_ratings_batch:
+                return {'saved_count': 0}
+            
+            logger.info(f"🚀 批量保存分析师评级数据，涉及 {len(analyst_ratings_batch)} 个公司")
+            
+            # 准备批量插入数据
+            insert_data = []
+            current_date = date.today()
+            processed_companies = 0
+            
+            for analyst_ratings_record in analyst_ratings_batch:
+                symbol = analyst_ratings_record['symbol']
+                analyst_ratings_data = analyst_ratings_record['analyst_ratings_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"跳过分析师评级数据保存：找不到公司ID - {symbol}")
+                    continue
+                
+                if not isinstance(analyst_ratings_data, dict) or not analyst_ratings_data:
+                    logger.debug(f"分析师评级数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
+                try:
+                    insert_data.append((
+                        company_id,
+                        self._safe_float(analyst_ratings_data.get('Rating')),
+                        self._safe_float(analyst_ratings_data.get('TargetPrice')),
+                        self._safe_float(analyst_ratings_data.get('StrongBuy')),
+                        self._safe_float(analyst_ratings_data.get('Buy')),
+                        self._safe_float(analyst_ratings_data.get('Hold')),
+                        self._safe_float(analyst_ratings_data.get('Sell')),
+                        self._safe_float(analyst_ratings_data.get('StrongSell')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    ))
+                    processed_companies += 1
+                    
+                except Exception as e:
+                    logger.warning(f"准备分析师评级数据失败 {symbol}: {str(e)}")
+                    continue
+            
+                # 每1000个公司进行一次批量插入，避免事务过大
+                if len(insert_data) >= 1000:
+                    self._execute_batch_analyst_ratings_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_analyst_ratings_insert(insert_data)
+            
+            logger.info(f"🚀 批量分析师评级数据保存完成: {len(analyst_ratings_batch)} 个公司, {processed_companies} 条公司记录")
+            return {'saved_count': processed_companies}
+            
+        except Exception as e:
+            logger.error(f"批量保存分析师评级数据失败: {str(e)}")
+            raise
+
+    def _execute_batch_analyst_ratings_insert(self, insert_data: List[tuple]):
+        """执行批量分析师评级数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量分析师评级数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_analyst_ratings (
+                            company_id, rating, targetprice, strongbuy, buy, hold,
+                            sell, strongsell, data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            rating = EXCLUDED.rating,
+                            targetprice = EXCLUDED.targetprice,
+                            strongbuy = EXCLUDED.strongbuy,
+                            buy = EXCLUDED.buy,
+                            hold = EXCLUDED.hold,
+                            sell = EXCLUDED.sell,
+                            strongsell = EXCLUDED.strongsell,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量分析师评级数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入分析师评级数据失败: {str(e)}")
+            raise
+
+    def _batch_save_splits_dividends(self, splits_dividends_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """批量保存拆股分红数据（优化版本）"""
+        try:
+            if not splits_dividends_batch:
+                return {'saved_count': 0}
+            
+            logger.info(f"🚀 批量保存拆股分红数据，涉及 {len(splits_dividends_batch)} 个公司")
+            
+            # 准备批量插入数据
+            dividend_info_data = []
+            dividend_by_year_data = []
+            current_date = date.today()
+            processed_companies = 0
+            
+            for splits_dividends_record in splits_dividends_batch:
+                symbol = splits_dividends_record['symbol']
+                splits_dividends_data = splits_dividends_record['splits_dividends_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"跳过拆股分红数据保存：找不到公司ID - {symbol}")
+                    continue
+                
+                if not isinstance(splits_dividends_data, dict) or not splits_dividends_data:
+                    logger.debug(f"拆股分红数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
+                try:
+                    # 处理分红基本信息
+                    dividend_info_record = (
+                        company_id,
+                        splits_dividends_data.get('ForwardAnnualDividendRate'),
+                        splits_dividends_data.get('ForwardAnnualDividendYield'),
+                        splits_dividends_data.get('PayoutRatio'),
+                        self._parse_date(splits_dividends_data.get('DividendDate')),
+                        self._parse_date(splits_dividends_data.get('ExDividendDate')),
+                        splits_dividends_data.get('LastSplitFactor'),
+                        self._parse_date(splits_dividends_data.get('LastSplitDate')),
+                        current_date,
+                        datetime.now(),
+                        datetime.now()
+                    )
+                    dividend_info_data.append(dividend_info_record)
+                    
+                    # 处理年度分红统计
+                    number_dividends_by_year = splits_dividends_data.get('NumberDividendsByYear', {})
+                    if isinstance(number_dividends_by_year, dict):
+                        for year_data in number_dividends_by_year.values():
+                            if isinstance(year_data, dict) and 'Year' in year_data and 'Count' in year_data:
+                                dividend_by_year_record = (
+                                    company_id,
+                                    year_data['Year'],
+                                    year_data['Count'],
+                                    datetime.now()
+                                )
+                                dividend_by_year_data.append(dividend_by_year_record)
+                    
+                    processed_companies += 1
+                    
+                except Exception as e:
+                    logger.warning(f"准备拆股分红数据失败 {symbol}: {str(e)}")
+                    continue
+            
+            # 批量保存分红基本信息
+            if dividend_info_data:
+                self._execute_batch_dividend_info_insert(dividend_info_data)
+            
+            # 批量保存年度分红统计
+            if dividend_by_year_data:
+                self._execute_batch_dividend_by_year_insert(dividend_by_year_data)
+            
+            logger.info(f"🚀 批量拆股分红数据保存完成: {len(splits_dividends_batch)} 个公司, 分红信息 {len(dividend_info_data)} 条, 年度统计 {len(dividend_by_year_data)} 条")
+            return {'saved_count': processed_companies}
+            
+        except Exception as e:
+            logger.error(f"批量保存拆股分红数据失败: {str(e)}")
+            raise
+
+    def _batch_save_insider_transactions(self, insider_transactions_batch: List[Dict[str, Any]], symbol_to_id: Dict[str, int]) -> Dict[str, Any]:
+        """批量保存内部人交易数据（优化版本）"""
+        try:
+            if not insider_transactions_batch:
+                return {'saved_count': 0}
+            
+            logger.info(f"🚀 批量保存内部人交易数据，涉及 {len(insider_transactions_batch)} 个公司")
+            
+            # 准备批量插入数据
+            insert_data = []
+            processed_transactions = 0
+            
+            for insider_transactions_record in insider_transactions_batch:
+                symbol = insider_transactions_record['symbol']
+                insider_transactions_data = insider_transactions_record['insider_transactions_data']
+                company_id = symbol_to_id.get(symbol)
+                
+                if not company_id:
+                    logger.warning(f"跳过内部人交易数据保存：找不到公司ID - {symbol}")
+                    continue
+                
+                if not isinstance(insider_transactions_data, dict) or not insider_transactions_data:
+                    logger.debug(f"内部人交易数据为空或无效，跳过保存: {symbol}")
+                    continue
+                
+                try:
+                    # 处理每个交易记录
+                    for transaction_key, transaction in insider_transactions_data.items():
+                        if not isinstance(transaction, dict):
+                            continue
+                        
+                        # 准备交易数据
+                        insert_data.append((
+                            company_id,
+                            self._safe_date(transaction.get('date')),
+                            transaction.get('ownerCik'),
+                            transaction.get('ownerName', ''),
+                            self._safe_date(transaction.get('transactionDate')),
+                            transaction.get('transactionCode'),
+                            self._safe_float(transaction.get('transactionAmount')),
+                            self._safe_float(transaction.get('transactionPrice')),
+                            transaction.get('transactionAcquiredDisposed'),
+                            self._safe_float(transaction.get('postTransactionAmount')),
+                            transaction.get('secLink'),
+                            datetime.now(),
+                            datetime.now()
+                        ))
+                        processed_transactions += 1
+                    
+                except Exception as e:
+                    logger.warning(f"准备内部人交易数据失败 {symbol}: {str(e)}")
+                    continue
+            
+                # 每1000个交易记录进行一次批量插入
+                if len(insert_data) >= 1000:
+                    self._execute_batch_insider_transactions_insert(insert_data)
+                    insert_data = []
+            
+            # 处理剩余数据
+            if insert_data:
+                self._execute_batch_insider_transactions_insert(insert_data)
+            
+            logger.info(f"🚀 批量内部人交易数据保存完成: {len(insider_transactions_batch)} 个公司, {processed_transactions} 条交易记录")
+            return {'saved_count': processed_transactions}
+            
+        except Exception as e:
+            logger.error(f"批量保存内部人交易数据失败: {str(e)}")
+            raise
+
+    def _parse_date(self, date_str):
+        """解析日期字符串"""
+        if not date_str:
+            return None
+        try:
+            if isinstance(date_str, str):
+                # 尝试解析 YYYY-MM-DD 格式
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
+            return date_str
+        except (ValueError, TypeError):
+            return None
+
+    def _execute_batch_dividend_info_insert(self, insert_data: List[tuple]):
+        """执行批量分红信息数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量分红信息数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_dividend_info (
+                            company_id, forwardannualdividendrate, forwardannualdividendyield, 
+                            payoutratio, dividenddate, exdividenddate, lastsplitfactor, 
+                            lastsplitdate, data_date, created_at, updated_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, data_date) DO UPDATE SET
+                            forwardannualdividendrate = EXCLUDED.forwardannualdividendrate,
+                            forwardannualdividendyield = EXCLUDED.forwardannualdividendyield,
+                            payoutratio = EXCLUDED.payoutratio,
+                            dividenddate = EXCLUDED.dividenddate,
+                            exdividenddate = EXCLUDED.exdividenddate,
+                            lastsplitfactor = EXCLUDED.lastsplitfactor,
+                            lastsplitdate = EXCLUDED.lastsplitdate,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量分红信息数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入分红信息数据失败: {str(e)}")
+            raise
+
+    def _execute_batch_dividend_by_year_insert(self, insert_data: List[tuple]):
+        """执行批量年度分红统计数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量年度分红统计数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_dividend_by_year (
+                            company_id, year, count, created_at
+                        ) VALUES %s
+                        ON CONFLICT (company_id, year) DO UPDATE SET
+                            count = EXCLUDED.count
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量年度分红统计数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入年度分红统计数据失败: {str(e)}")
+            raise
+
+    def _execute_batch_insider_transactions_insert(self, insert_data: List[tuple]):
+        """执行批量内部人交易数据插入"""
+        try:
+            if not insert_data:
+                return
+            
+            logger.debug(f"执行批量内部人交易数据插入: {len(insert_data)} 条记录")
+            
+            with self.db_manager.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    from psycopg2.extras import execute_values
+                    
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO company_insider_transactions (
+                            company_id, date, ownercik, ownername, transactiondate, 
+                            transactioncode, transactionamount, transactionprice, 
+                            transactionacquireddisposed, posttransactionamount, seclink,
+                            created_at, updated_at
+                        ) VALUES %s
+                        """,
+                        insert_data,
+                        page_size=1000
+                    )
+                    
+            logger.debug(f"批量内部人交易数据插入完成: {len(insert_data)} 条记录")
+            
+        except Exception as e:
+            logger.error(f"批量插入内部人交易数据失败: {str(e)}")
             raise
 
     def __del__(self):
