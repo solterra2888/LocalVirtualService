@@ -443,14 +443,14 @@ class EODHDFundamentalsService:
                     logger.debug(f"成功获取 {symbol} 的完整数据（嵌套格式）")
                     return data  # 返回完整数据，包括General和Financials
                 else:
-                    logger.warning(f"{symbol} General字段格式不正确或为空，期望非空dict但获得{type(general_data)}")
+                    logger.debug(f"{symbol} General字段格式不正确或为空，期望非空dict但获得{type(general_data)}")
                     return None
             elif any(key in data for key in ['Code', 'Name', 'Exchange', 'Type']):
                 # 如果包含基本的General字段，则直接返回整个数据
                 logger.debug(f"成功获取 {symbol} 的完整数据（平铺格式）")
                 return data
             else:
-                logger.warning(f"{symbol} 返回数据格式不正确，缺少必要的General字段")
+                logger.debug(f"{symbol} 返回数据格式不正确，缺少必要的General字段")
                 return None
             
         except Exception as e:
@@ -470,7 +470,7 @@ class EODHDFundamentalsService:
                     
                     # 确保general_data是字典类型且不为空
                     if not isinstance(general_data, dict) or not general_data:
-                        logger.warning(f"跳过 {symbol}：General数据格式不正确或为空，期望非空dict但获得{type(general_data)}")
+                        logger.debug(f"跳过 {symbol}：General数据格式不正确或为空，期望非空dict但获得{type(general_data)}")
                         return None
                     
                     return {
@@ -1011,69 +1011,132 @@ class EODHDFundamentalsService:
             # 3. 按顺序批量保存数据
             symbol_to_id = {}
             
+            # 调试日志：显示各批次大小
+            logger.info(f"🔍 调试批次大小 - 公司: {len(companies_batch)}, 财务: {len(financials_batch)}, 关键指标: {len(highlights_batch)}, 估值: {len(valuation_batch)}, 技术指标: {len(technicals_batch)}")
+            
             # 首先保存公司基本信息
             if companies_batch:
-                companies_result = self._batch_save_companies(companies_batch)
-                symbol_to_id.update(companies_result.get('symbol_to_id', {}))
-                logger.info(f"✅ 批量保存公司基本信息完成: {companies_result.get('saved_count', 0)} 个")
+                try:
+                    companies_result = self._batch_save_companies(companies_batch)
+                    symbol_to_id.update(companies_result.get('symbol_to_id', {}))
+                    logger.info(f"✅ 批量保存公司基本信息完成: {companies_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存公司基本信息失败，跳过: {str(e)}")
+                    companies_result = {'saved_count': 0, 'symbol_to_id': {}}
             
             # 然后批量保存地址、高管、列表数据
             if addresses_batch:
-                addresses_result = self._batch_save_addresses(addresses_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存地址数据完成: {addresses_result.get('saved_count', 0)} 个")
+                try:
+                    addresses_result = self._batch_save_addresses(addresses_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存地址数据完成: {addresses_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存地址数据失败，跳过: {str(e)}")
+                    addresses_result = {'saved_count': 0}
             
             if officers_batch:
-                officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存高管数据完成: {officers_result.get('saved_count', 0)} 个")
+                try:
+                    officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存高管数据完成: {officers_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存高管数据失败，跳过: {str(e)}")
+                    officers_result = {'saved_count': 0}
             
             if listings_batch:
-                listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存列表数据完成: {listings_result.get('saved_count', 0)} 个")
+                try:
+                    listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存列表数据完成: {listings_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存列表数据失败，跳过: {str(e)}")
+                    listings_result = {'saved_count': 0}
             
             # 然后批量保存所有其他数据
             if financials_batch:
-                financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存财务数据完成: {financials_result.get('saved_count', 0)} 个")
+                try:
+                    financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存财务数据完成: {financials_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存财务数据失败，跳过: {str(e)}")
+                    financials_result = {'saved_count': 0}
             
             if highlights_batch:
-                highlights_result = self._batch_save_highlights(highlights_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存关键指标数据完成: {highlights_result.get('saved_count', 0)} 个")
+                try:
+                    highlights_result = self._batch_save_highlights(highlights_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存关键指标数据完成: {highlights_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存关键指标数据失败，跳过: {str(e)}")
+                    highlights_result = {'saved_count': 0}
             
             if valuation_batch:
-                valuation_result = self._batch_save_valuation(valuation_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存估值数据完成: {valuation_result.get('saved_count', 0)} 个")
+                try:
+                    valuation_result = self._batch_save_valuation(valuation_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存估值数据完成: {valuation_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存估值数据失败，跳过: {str(e)}")
+                    valuation_result = {'saved_count': 0}
             
             if technicals_batch:
-                technicals_result = self._batch_save_technicals(technicals_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存技术指标数据完成: {technicals_result.get('saved_count', 0)} 个")
+                try:
+                    technicals_result = self._batch_save_technicals(technicals_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存技术指标数据完成: {technicals_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存技术指标数据失败，跳过: {str(e)}")
+                    technicals_result = {'saved_count': 0}
             
             if holders_batch:
-                holders_result = self._batch_save_holders(holders_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存股东数据完成: {holders_result.get('saved_count', 0)} 个")
+                try:
+                    holders_result = self._batch_save_holders(holders_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存股东数据完成: {holders_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存股东数据失败，跳过: {str(e)}")
+                    holders_result = {'saved_count': 0}
             
             if outstanding_shares_batch:
-                outstanding_shares_result = self._batch_save_outstanding_shares(outstanding_shares_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存流通股数据完成: {outstanding_shares_result.get('saved_count', 0)} 个")
+                try:
+                    outstanding_shares_result = self._batch_save_outstanding_shares(outstanding_shares_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存流通股数据完成: {outstanding_shares_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存流通股数据失败，跳过: {str(e)}")
+                    outstanding_shares_result = {'saved_count': 0}
             
             if earnings_batch:
-                earnings_result = self._batch_save_earnings(earnings_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存盈利数据完成: {earnings_result.get('saved_count', 0)} 个")
+                try:
+                    earnings_result = self._batch_save_earnings(earnings_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存盈利数据完成: {earnings_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存盈利数据失败，跳过: {str(e)}")
+                    earnings_result = {'saved_count': 0}
             
             if shares_stats_batch:
-                shares_stats_result = self._batch_save_shares_stats(shares_stats_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存股票统计数据完成: {shares_stats_result.get('saved_count', 0)} 个")
+                try:
+                    shares_stats_result = self._batch_save_shares_stats(shares_stats_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存股票统计数据完成: {shares_stats_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存股票统计数据失败，跳过: {str(e)}")
+                    shares_stats_result = {'saved_count': 0}
             
             if analyst_ratings_batch:
-                analyst_ratings_result = self._batch_save_analyst_ratings(analyst_ratings_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存分析师评级数据完成: {analyst_ratings_result.get('saved_count', 0)} 个")
+                try:
+                    analyst_ratings_result = self._batch_save_analyst_ratings(analyst_ratings_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存分析师评级数据完成: {analyst_ratings_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存分析师评级数据失败，跳过: {str(e)}")
+                    analyst_ratings_result = {'saved_count': 0}
             
             if splits_dividends_batch:
-                splits_dividends_result = self._batch_save_splits_dividends(splits_dividends_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存拆股分红数据完成: {splits_dividends_result.get('saved_count', 0)} 个")
+                try:
+                    splits_dividends_result = self._batch_save_splits_dividends(splits_dividends_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存拆股分红数据完成: {splits_dividends_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存拆股分红数据失败，跳过: {str(e)}")
+                    splits_dividends_result = {'saved_count': 0}
             
             if insider_transactions_batch:
-                insider_transactions_result = self._batch_save_insider_transactions(insider_transactions_batch, symbol_to_id)
-                logger.info(f"✅ 批量保存内部人交易数据完成: {insider_transactions_result.get('saved_count', 0)} 个")
+                try:
+                    insider_transactions_result = self._batch_save_insider_transactions(insider_transactions_batch, symbol_to_id)
+                    logger.info(f"✅ 批量保存内部人交易数据完成: {insider_transactions_result.get('saved_count', 0)} 个")
+                except Exception as e:
+                    logger.error(f"批量保存内部人交易数据失败，跳过: {str(e)}")
+                    insider_transactions_result = {'saved_count': 0}
             
             logger.info(f"🎉 批量保存完成: {len(companies_data)} 个公司的完整数据全部保存成功")
             return symbol_to_id
@@ -1425,7 +1488,11 @@ class EODHDFundamentalsService:
             officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
             
             # 批量处理列表数据
-            listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
+            try:
+                listings_result = self._batch_save_listings(listings_batch, symbol_to_id)
+            except Exception as e:
+                logger.error(f"批量保存列表数据失败，跳过: {str(e)}")
+                listings_result = {'saved_count': 0}
             
             # 批量处理财务数据
             financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
@@ -1795,17 +1862,14 @@ class EODHDFundamentalsService:
                     ))
             
             if values_list:
-                # 先删除现有高管数据
-                company_ids = [symbol_to_id[record['symbol']] for record in officers_batch if symbol_to_id.get(record['symbol'])]
-                if company_ids:
-                    delete_sql = "DELETE FROM company_officers WHERE company_id = ANY(%s)"
-                    self.db_manager.execute_query(delete_sql, (company_ids,))
-                
-                # 批量插入新的高管数据
+                # 🚀 修复：使用UPSERT避免重复键冲突
                 insert_sql = """
                     INSERT INTO company_officers (
                         company_id, name, title, yearborn, created_at, updated_at
                     ) VALUES %s
+                    ON CONFLICT (company_id, name, title) DO UPDATE SET
+                        yearborn = EXCLUDED.yearborn,
+                        updated_at = EXCLUDED.updated_at
                 """
                 
                 import psycopg2.extras
@@ -1854,9 +1918,9 @@ class EODHDFundamentalsService:
                     if not isinstance(listing_info, dict):
                         continue
                     
-                    code = listing_info.get('Code', '').strip()
-                    exchange = listing_info.get('Exchange', '').strip()
-                    name = listing_info.get('Name', '').strip()
+                    code = (listing_info.get('Code') or '').strip()
+                    exchange = (listing_info.get('Exchange') or '').strip()
+                    name = (listing_info.get('Name') or '').strip()
                     
                     if not code or not exchange:
                         logger.warning(f"列表代码或交易所为空，跳过: {listing_info}")
