@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals' | 'finviz_screener';
+  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener';
   dataSourceName: string;
 }
 
@@ -86,13 +86,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 10 1 * *',
       defaultName: 'Macro Indicators Auto Fetch',
       description: 'Get macroeconomic indicator data such as inflation rate, unemployment rate, etc.'
-    },
-    eodhd_exchange: {
-      icon: <DatabaseOutlined style={{ color: '#722ed1' }} />,
-      params: ['exchanges'],
-      defaultSchedule: '0 2 * * 0',
-      defaultName: 'EODHD Exchange Data Auto Fetch',
-      description: 'Get exchange ticker symbols and company data from EODHD API for fundamentals analysis'
     },
     eodhd_fundamentals: {
       icon: <BarChartOutlined style={{ color: '#13c2c2' }} />,
@@ -209,7 +202,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
                           dataSourceType === 'eodhd_macro' ? 'macro_indicators' : 
-                          dataSourceType === 'eodhd_exchange' ? 'exchange_data' : 
                           dataSourceType;
           
           result = await schedulerAPI.createCronTask({
@@ -813,7 +805,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             </>
           );
           
-        case 'eodhd_exchange':
         case 'eodhd_fundamentals':
           return (
             <>
@@ -821,9 +812,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 label="Exchanges"
                 name={['taskParams', 'exchanges']}
                 rules={[{ required: true, message: 'Please select at least one exchange' }]}
-                extra={dataSourceType === 'eodhd_fundamentals' ? 
-                  "Select exchanges to fetch fundamentals data from (Supports US, China, Hong Kong, Taiwan, Japan, UK markets)" : 
-                  "Select exchanges to fetch ticker data from. Based on EODHD Exchanges API documentation."}
+                extra="Select exchanges to fetch fundamentals data from (Supports US, China, Hong Kong, Taiwan, Japan, UK markets)"
               >
                 <Select 
                   placeholder="Select exchanges" 

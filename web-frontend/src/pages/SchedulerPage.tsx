@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange' | 'eodhd_fundamentals' | 'other';
+  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -148,24 +148,6 @@ const SchedulerPage: React.FC = () => {
           description: 'Set up Cron-based periodic macro indicators fetching',
           endpoint: '/scheduler/tasks/macro-indicators',
           icon: <ScheduleOutlined />
-        }
-      ]
-    },
-    {
-      id: 'eodhd_exchange',
-      name: 'EODHD Exchange Data',
-      type: 'eodhd_exchange',
-      description: 'Get exchange ticker data from EODHD API for fundamentals analysis',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_exchange_schedule',
-          name: 'Configure Exchange Data Fetch',
-          description: 'Set up periodic exchange ticker data fetching from multiple exchanges',
-          endpoint: '/scheduler/tasks/exchange-data',
-          params: {},
-          icon: <DatabaseOutlined />
         }
       ]
     },
@@ -487,7 +469,7 @@ const SchedulerPage: React.FC = () => {
     // 如果是Cron调度配置或基本面数据更新，根据数据源类型决定使用哪个配置组件
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // 对于EODHD相关数据源，使用专门的配置模态框
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_exchange' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -843,7 +825,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_exchange'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals'}
           dataSourceName={selectedDataSource.name}
         />
       )}

@@ -16,7 +16,6 @@ import UsersPage from './pages/UsersPage';
 import DiagnosticPage from './pages/DiagnosticPage';
 import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
-import CompaniesPage from './pages/CompaniesPage';
 import FinvizScreenerPage from './pages/FinvizScreenerPage';
 import './App.css';
 
@@ -117,7 +116,6 @@ const App: React.FC = () => {
                 <Route path="files" element={<FilesPage />} />
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="news" element={<NewsPage />} />
-                <Route path="fundamentals/companies" element={<CompaniesPage />} />
                 <Route path="fundamentals/screener" element={<FinvizScreenerPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />
                 <Route path="diagnostic" element={<DiagnosticPage />} />

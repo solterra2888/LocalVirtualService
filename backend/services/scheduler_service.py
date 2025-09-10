@@ -53,7 +53,6 @@ class SchedulerService:
             'eodhd_news': self._execute_eodhd_news_task,
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
-            'exchange_data': self._execute_exchange_data_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
             'finviz_screener': self._execute_finviz_screener_task
         }
@@ -95,7 +94,7 @@ class SchedulerService:
         
         Args:
             task_name: 任务名称
-            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, exchange_data, eodhd_fundamentals, finviz_screener)
+            task_type: 任务类型 (eodhd_news, economic_events, macro_indicators, eodhd_fundamentals, finviz_screener)
             cron_expression: Cron表达式
             timezone: 时区
             enabled: 是否启用
@@ -714,116 +713,6 @@ class SchedulerService:
             
         except Exception as e:
             error_msg = f"宏观指标获取任务执行失败: {str(e)}"
-            logger.error(error_msg)
-            return {
-                'success': False,
-                'message': error_msg,
-                'data': None
-            }
-    
-    async def _execute_exchange_data_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EODHD Exchange数据获取任务"""
-        try:
-            logger.info(f"开始执行交易所数据获取任务，参数: {params}")
-            
-            # 获取参数
-            exchanges = params.get('exchanges', [])
-            
-            # 参数验证
-            if not exchanges:
-                logger.warning("未指定交易所参数，跳过交易所数据获取任务")
-                return {
-                    'success': False, 
-                    'message': '未指定交易所参数，请至少选择一个交易所'
-                }
-            
-            # 确保exchanges是列表格式
-            if isinstance(exchanges, str):
-                exchanges = [exchanges]
-            
-            logger.info(f"准备获取 {len(exchanges)} 个交易所的数据")
-            
-            # 初始化交易所数据服务
-            from backend.services.exchange_data_service import get_exchange_service
-            exchange_service = await get_exchange_service()
-            
-            total_success = 0
-            total_failed = 0
-            results = []
-            
-            # 遍历每个交易所
-            for exchange_code in exchanges:
-                logger.info(f"开始获取交易所 {exchange_code} 的数据")
-                
-                try:
-                    # 获取交易所数据
-                    result = await exchange_service.fetch_exchange_tickers(
-                        exchange_code=exchange_code,
-                        progress_callback=None  # 暂时不使用进度回调
-                    )
-                    
-                    if result.get('success'):
-                        total_success += 1
-                        results.append({
-                            'exchange_code': exchange_code,
-                            'total_fetched': result.get('total_fetched', 0),
-                            'success_count': result.get('success_count', 0),
-                            'status': 'success',
-                            'message': result.get('message', '')
-                        })
-                        logger.info(f"成功获取 {exchange_code} 数据，保存 {result.get('success_count', 0)} 个ticker")
-                    else:
-                        total_failed += 1
-                        results.append({
-                            'exchange_code': exchange_code,
-                            'total_fetched': 0,
-                            'success_count': 0,
-                            'status': 'failed',
-                            'error': result.get('message', '未知错误')
-                        })
-                        logger.warning(f"获取 {exchange_code} 数据失败: {result.get('message', '')}")
-                    
-                    # 避免API请求过于频繁
-                    await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    total_failed += 1
-                    error_msg = f"获取 {exchange_code} 数据时出错: {str(e)}"
-                    logger.error(error_msg)
-                    results.append({
-                        'exchange_code': exchange_code,
-                        'total_fetched': 0,
-                        'success_count': 0,
-                        'status': 'error',
-                        'error': str(e)
-                    })
-            
-            # 生成执行结果消息
-            if total_success > 0:
-                total_tickers = sum(r.get('success_count', 0) for r in results if r['status'] == 'success')
-                message = f"交易所数据获取任务执行完成: 成功 {total_success} 个交易所，失败 {total_failed} 个，共获取 {total_tickers} 个ticker"
-                if total_failed > 0:
-                    failed_exchanges = [r['exchange_code'] for r in results if r['status'] != 'success']
-                    message += f"。失败的交易所: {', '.join(failed_exchanges)}"
-            else:
-                message = f"交易所数据获取任务执行失败: 所有 {total_failed} 个交易所都失败了"
-            
-            logger.info(f"交易所数据获取任务执行完成: {message}")
-            
-            return {
-                'success': total_success > 0,
-                'message': message,
-                'data': {
-                    'total_exchanges': total_success + total_failed,
-                    'successful': total_success,
-                    'failed': total_failed,
-                    'results': results,
-                    'params': params
-                }
-            }
-            
-        except Exception as e:
-            error_msg = f"交易所数据获取任务执行失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,

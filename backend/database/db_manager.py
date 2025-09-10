@@ -366,7 +366,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals', 'finviz_screener')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -408,7 +408,7 @@ class DatabaseManager:
             pass
 
     def _update_task_scheduling_constraints(self, cursor):
-        """更新task_scheduling表的约束以支持exchange_data任务类型"""
+        """更新现有task_scheduling表的约束"""
         try:
             # 检查表是否存在
             cursor.execute("""
@@ -419,31 +419,63 @@ class DatabaseManager:
             """)
             
             if not cursor.fetchone()[0]:
-                return  # 表不存在，不需要更新
+                return  # 表不存在，无需更新约束
             
-            # 检查当前约束是否包含exchange_data
+            # 检查并添加缺失的约束
+            # 1. 检查valid_schedule_type约束
             cursor.execute("""
-            SELECT constraint_name, check_clause 
-            FROM information_schema.check_constraints 
-            WHERE constraint_name = 'valid_task_type'
+            SELECT constraint_name FROM information_schema.table_constraints 
+            WHERE table_name = 'task_scheduling' AND constraint_name = 'valid_schedule_type'
             """)
             
-            constraint_info = cursor.fetchone()
-            if constraint_info:
-                check_clause = constraint_info[1]
-                if 'exchange_data' not in check_clause:
-                    # 删除旧约束并添加新约束
-                    cursor.execute("ALTER TABLE task_scheduling DROP CONSTRAINT IF EXISTS valid_task_type")
+            if not cursor.fetchone():
+                try:
                     cursor.execute("""
-                    ALTER TABLE task_scheduling ADD CONSTRAINT valid_task_type 
-                    CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'exchange_data', 'eodhd_fundamentals', 'finviz_screener'))
+                    ALTER TABLE task_scheduling 
+                    ADD CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval'))
                     """)
-                    print("已更新task_scheduling表的valid_task_type约束以支持exchange_data")
+                    print("已添加valid_schedule_type约束")
+                except Exception as e:
+                    print(f"添加valid_schedule_type约束时出错: {e}")
             
+            # 2. 检查valid_task_type约束
+            cursor.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints 
+            WHERE table_name = 'task_scheduling' AND constraint_name = 'valid_task_type'
+            """)
+            
+            if not cursor.fetchone():
+                try:
+                    cursor.execute("""
+                    ALTER TABLE task_scheduling 
+                    ADD CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener'))
+                    """)
+                    print("已添加valid_task_type约束")
+                except Exception as e:
+                    print(f"添加valid_task_type约束时出错: {e}")
+            
+            # 3. 检查cron_or_interval约束
+            cursor.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints 
+            WHERE table_name = 'task_scheduling' AND constraint_name = 'cron_or_interval'
+            """)
+            
+            if not cursor.fetchone():
+                try:
+                    cursor.execute("""
+                    ALTER TABLE task_scheduling 
+                    ADD CONSTRAINT cron_or_interval CHECK (
+                        (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
+                        (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
+                    )
+                    """)
+                    print("已添加cron_or_interval约束")
+                except Exception as e:
+                    print(f"添加cron_or_interval约束时出错: {e}")
+                    
         except Exception as e:
-            print(f"更新task_scheduling约束时出错: {str(e)}")
+            print(f"更新task_scheduling表约束时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
-            pass
 
     def _create_macro_indicators_tables(self, conn):
         """创建宏观指标相关表"""
