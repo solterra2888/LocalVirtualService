@@ -14,6 +14,7 @@ class TaskTypeCreateRequest(BaseModel):
     token: str = Field(..., min_length=1, description="RC Agent令牌")
     remarks: Optional[str] = Field(None, max_length=500, description="备注")
     input_fields: List[Dict[str, Any]] = Field(default_factory=list, description="自定义输入字段")
+    agent_type: str = Field(default="chatbot", description="Agent类型", pattern="^(chatbot|workflow)$")
 
 
 class TaskTypeUpdateRequest(BaseModel):
@@ -22,6 +23,7 @@ class TaskTypeUpdateRequest(BaseModel):
     token: Optional[str] = Field(None, min_length=1, description="RC Agent令牌")
     remarks: Optional[str] = Field(None, max_length=500, description="备注")
     input_fields: Optional[List[Dict[str, Any]]] = Field(None, description="自定义输入字段")
+    agent_type: Optional[str] = Field(None, description="Agent类型", pattern="^(chatbot|workflow)$")
 
 
 class TaskTypeResponse(BaseModel):
@@ -34,6 +36,7 @@ class TaskTypeResponse(BaseModel):
     remarks: Optional[str] = None
     input_fields: List[Dict[str, Any]]
     is_default: bool = False
+    agent_type: str = "chatbot"
     
     class Config:
         from_attributes = True

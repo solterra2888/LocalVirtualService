@@ -478,11 +478,11 @@ async def fetch_news_from_eodhd(
         }
         
     except ValueError as e:
-        logger.error("新闻获取请求参数错误", error=str(e), 
+        logger.error("新闻获取请求参数错误", exception=str(e), 
                     user=current_user.username if current_user else "unknown")
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
-        logger.error("新闻获取请求失败", error=str(e), 
+        logger.error("新闻获取请求失败", exception=str(e), 
                     user=current_user.username if current_user else "unknown")
         raise HTTPException(status_code=500, detail=f"获取新闻失败: {str(e)}")
 

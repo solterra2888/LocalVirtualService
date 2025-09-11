@@ -13,6 +13,7 @@ export interface TaskType {
     max_length: number;
   }>;
   is_default: boolean;
+  agent_type: 'chatbot' | 'workflow';
 }
 
 export interface TaskExecution {
@@ -37,6 +38,7 @@ export interface TaskCreateRequest {
     name: string;
     max_length: number;
   }>;
+  agent_type?: 'chatbot' | 'workflow';
 }
 
 export interface TaskUpdateRequest {
@@ -47,6 +49,7 @@ export interface TaskUpdateRequest {
     name: string;
     max_length: number;
   }>;
+  agent_type?: 'chatbot' | 'workflow';
 }
 
 export interface TaskExecutionDetail {

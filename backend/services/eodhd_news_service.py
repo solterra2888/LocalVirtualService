@@ -75,7 +75,7 @@ class EODHDNewsService:
             logger.info("EODHD新闻服务初始化完成")
             
         except Exception as e:
-            logger.error("EODHD新闻服务初始化失败", error=str(e))
+            logger.error("EODHD新闻服务初始化失败", exception=str(e))
             raise
     
     def get_news(self, symbols: Optional[str] = None, topic: Optional[str] = None, 
@@ -146,10 +146,10 @@ class EODHDNewsService:
             
             return result
         except requests.exceptions.Timeout as e:
-            logger.error("EODHD API请求超时", error=str(e), url=self.base_url)
+            logger.error("EODHD API请求超时", exception=str(e), url=self.base_url)
             raise Exception(f"获取新闻超时: {e}")
         except requests.exceptions.RequestException as e:
-            logger.error("EODHD API调用失败", error=str(e), url=self.base_url)
+            logger.error("EODHD API调用失败", exception=str(e), url=self.base_url)
             raise Exception(f"获取新闻失败: {e}")
     
     def fetch_and_store_news(self, symbols: Optional[str] = None, topic: Optional[str] = None,
@@ -239,7 +239,7 @@ class EODHDNewsService:
                 except Exception as e:
                     logger.warning("处理单条新闻失败", 
                                  article_index=i + 1, 
-                                 error=str(e),
+                                 exception=str(e),
                                  title=article.get('title', 'Unknown')[:50] if isinstance(article, dict) else 'Invalid article')
                     failed_count += 1
                     continue
@@ -277,7 +277,7 @@ class EODHDNewsService:
             return final_result
             
         except Exception as e:
-            logger.error("新闻获取和存储流程失败", error=str(e))
+            logger.error("新闻获取和存储流程失败", exception=str(e))
             raise Exception(f"获取和存储新闻时发生错误: {str(e)}")
     
     def _get_all_news(self, symbols: Optional[str] = None, topic: Optional[str] = None,
@@ -702,7 +702,7 @@ class EODHDNewsService:
         except Exception as e:
             # 回滚事务
             conn.rollback()
-            logger.error("批量插入新闻失败，事务回滚", error=str(e))
+            logger.error("批量插入新闻失败，事务回滚", exception=str(e))
             return {
                 'success_count': 0,
                 'existing_count': 0,
@@ -999,7 +999,7 @@ class EODHDNewsService:
         except Exception as e:
             # 回滚事务
             conn.rollback()
-            logger.error("高性能批量UPSERT新闻失败，事务回滚", error=str(e))
+            logger.error("高性能批量UPSERT新闻失败，事务回滚", exception=str(e))
             return {
                 'success_count': 0,
                 'existing_count': 0,

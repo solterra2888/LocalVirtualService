@@ -19,6 +19,25 @@ from backend.utils.service_registry import get_service_registry
 from backend.services.economic_events_service import EconomicEventsService
 from backend.services.macro_indicators_service import MacroIndicatorsService
 from backend.services.market_data_service import MarketDataService
+import psycopg2.extras
+
+def process_logo_url(logo_url):
+    """处理LogoURL，确保包含完整的EODHD域名"""
+    if not logo_url or logo_url == "N/A" or logo_url == "" or logo_url == "None":
+        return None
+    
+    logo_url = str(logo_url).strip()
+    
+    # 如果已经是完整URL，直接返回
+    if logo_url.startswith(('http://', 'https://')):
+        return logo_url
+    
+    # 如果是相对路径，添加EODHD域名前缀
+    if logo_url.startswith('/'):
+        return f"https://eodhd.com{logo_url}"
+    
+    # 如果路径不以/开头，添加/前缀
+    return f"https://eodhd.com/{logo_url}"
 
 def calculate_event_impact(event_name: str) -> int:
     """
@@ -944,4 +963,213 @@ async def export_macro_indicators_csv(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"导出宏观指标CSV失败: {str(e)}"
+        )
+
+
+# 基本面信息查询相关的数据模型
+class CompanySearchRequest(BaseModel):
+    query: str = Field(..., description="股票代码或公司名称")
+
+class CompanyFundamentalsResponse(BaseModel):
+    company: Dict[str, Any]
+    highlights: Optional[Dict[str, Any]] = None
+    balance_sheet: List[Dict[str, Any]] = []
+    income_statement: List[Dict[str, Any]] = []
+    cash_flow: List[Dict[str, Any]] = []
+    valuations: Optional[Dict[str, Any]] = None
+    analyst_ratings: List[Dict[str, Any]] = []
+    dividend_info: List[Dict[str, Any]] = []
+    insider_transactions: List[Dict[str, Any]] = []
+
+
+@router.post("/company/search", response_model=CompanyFundamentalsResponse)
+async def search_company_fundamentals(
+    request: CompanySearchRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    查询公司基本面信息
+    
+    支持通过股票代码或公司名称搜索，返回完整的基本面数据
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        info(f"开始查询公司基本面信息", 
+             query=request.query,
+             user=current_user.username,
+             source="markets_api")
+        
+        # 获取数据库连接参数
+        from config.settings import config
+        db_conn_params = {
+            'db_host': config.get('DB_HOST'),
+            'db_port': config.get('DB_PORT'),
+            'db_name': config.get('DB_NAME'),
+            'db_user': config.get('DB_USER'),
+            'db_password': config.get('DB_PASSWORD')
+        }
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查询公司基本信息
+        query_sql = """
+        SELECT * FROM companies 
+        WHERE UPPER(code) = UPPER(%s) 
+           OR UPPER(primaryticker) = UPPER(%s) 
+           OR UPPER(name) ILIKE %s
+        ORDER BY 
+            CASE 
+                WHEN UPPER(code) = UPPER(%s) THEN 1
+                WHEN UPPER(primaryticker) = UPPER(%s) THEN 2
+                ELSE 3
+            END
+        LIMIT 1
+        """
+        
+        search_pattern = f"%{request.query}%"
+        # 获取数据库连接并使用DictCursor
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute(query_sql, (request.query, request.query, search_pattern, request.query, request.query))
+            company_result = cursor.fetchall()
+        
+        if not company_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no data found: {request.query}"
+            )
+        
+        company = dict(company_result[0])
+        company_id = company['id']
+        
+        # 使用同一个连接执行所有查询
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            
+            # 查询highlights (最新数据)
+            highlights_sql = """
+            SELECT * FROM company_highlights 
+            WHERE company_id = %s 
+            ORDER BY data_date DESC 
+            LIMIT 1
+            """
+            cursor.execute(highlights_sql, (company_id,))
+            highlights_result = cursor.fetchall()
+            highlights = dict(highlights_result[0]) if highlights_result else None
+            
+            # 查询资产负债表 (最近8个季度)
+            balance_sheet_sql = """
+            SELECT * FROM company_balance_sheet 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 8
+            """
+            cursor.execute(balance_sheet_sql, (company_id,))
+            balance_sheet = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询利润表 (最近8个季度)
+            income_statement_sql = """
+            SELECT * FROM company_income_statement 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 8
+            """
+            cursor.execute(income_statement_sql, (company_id,))
+            income_statement = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询现金流量表 (最近8个季度)
+            cash_flow_sql = """
+            SELECT * FROM company_cash_flow 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 8
+            """
+            cursor.execute(cash_flow_sql, (company_id,))
+            cash_flow = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询估值信息 (最新数据)
+            valuations_sql = """
+            SELECT * FROM company_valuations 
+            WHERE company_id = %s 
+            ORDER BY data_date DESC 
+            LIMIT 1
+            """
+            cursor.execute(valuations_sql, (company_id,))
+            valuations_result = cursor.fetchall()
+            valuations = dict(valuations_result[0]) if valuations_result else None
+            
+            # 查询分析师评级 (最近10条)
+            analyst_ratings_sql = """
+            SELECT * FROM company_analyst_ratings 
+            WHERE company_id = %s 
+            ORDER BY created_at DESC 
+            LIMIT 10
+            """
+            cursor.execute(analyst_ratings_sql, (company_id,))
+            analyst_ratings = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询股息信息 (最近5年)
+            dividend_sql = """
+            SELECT * FROM company_dividend_info 
+            WHERE company_id = %s 
+            ORDER BY exdividenddate DESC 
+            LIMIT 20
+            """
+            cursor.execute(dividend_sql, (company_id,))
+            dividend_info = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询内部交易 (最近20条)
+            insider_sql = """
+            SELECT * FROM company_insider_transactions 
+            WHERE company_id = %s 
+            ORDER BY transactiondate DESC 
+            LIMIT 20
+            """
+            cursor.execute(insider_sql, (company_id,))
+            insider_transactions = [dict(row) for row in cursor.fetchall()]
+        
+        # 处理company中的logo URL
+        if 'logourl' in company:
+            company['logourl'] = process_logo_url(company['logourl'])
+        
+        # 构建响应
+        response = CompanyFundamentalsResponse(
+            company=company,
+            highlights=highlights,
+            balance_sheet=balance_sheet or [],
+            income_statement=income_statement or [],
+            cash_flow=cash_flow or [],
+            valuations=valuations,
+            analyst_ratings=analyst_ratings or [],
+            dividend_info=dividend_info or [],
+            insider_transactions=insider_transactions or []
+        )
+        
+        info(f"成功查询公司基本面信息", 
+             company_name=company.get('name'),
+             company_code=company.get('code'),
+             data_points={
+                 'highlights': 1 if highlights else 0,
+                 'balance_sheet': len(balance_sheet or []),
+                 'income_statement': len(income_statement or []),
+                 'cash_flow': len(cash_flow or []),
+                 'valuations': 1 if valuations else 0,
+                 'analyst_ratings': len(analyst_ratings or []),
+                 'dividend_info': len(dividend_info or []),
+                 'insider_transactions': len(insider_transactions or [])
+             },
+             user=current_user.username,
+             source="markets_api")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"查询公司基本面信息失败: {str(e)}", 
+              query=request.query,
+              source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询公司基本面信息失败: {str(e)}"
         )

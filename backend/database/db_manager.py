@@ -311,6 +311,9 @@ class DatabaseManager:
             # 检查并添加缺失的remarks列
             self._ensure_remarks_column(conn)
             
+            # 检查并添加缺失的agent_type列
+            self._ensure_agent_type_column(conn)
+            
             # 创建调度器相关表
             self._create_scheduler_tables(conn)
             
@@ -339,6 +342,23 @@ class DatabaseManager:
         if not cursor.fetchone():
             cursor.execute("ALTER TABLE agent_credentials ADD COLUMN remarks TEXT")
             print("已添加agent_credentials表的remarks列")
+    
+    def _ensure_agent_type_column(self, conn):
+        """确保agent_credentials表存在agent_type列"""
+        cursor = conn.cursor()
+        
+        # PostgreSQL检查列是否存在
+        cursor.execute("""
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'agent_credentials' AND column_name = 'agent_type'
+        """)
+        if not cursor.fetchone():
+            cursor.execute("""
+            ALTER TABLE agent_credentials ADD COLUMN agent_type VARCHAR(20) NOT NULL DEFAULT 'chatbot';
+            ALTER TABLE agent_credentials ADD CONSTRAINT agent_type_check 
+            CHECK (agent_type IN ('chatbot', 'workflow'))
+            """)
+            print("已添加agent_credentials表的agent_type列")
     
     def _create_scheduler_tables(self, conn):
         """创建调度器相关表"""
@@ -554,14 +574,16 @@ class DatabaseManager:
             if is_admin:
                 # 管理员可以看到所有凭据
                 cursor.execute("""
-                SELECT id, agent_name, agent_token, is_default, input_fields, remarks, created_by, created_at
+                SELECT id, agent_name, agent_token, is_default, input_fields, remarks, created_by, created_at, 
+                       COALESCE(agent_type, 'chatbot') as agent_type
                 FROM agent_credentials 
                 ORDER BY is_default DESC, created_at ASC
                 """)
             else:
                 # 普通用户只能看到自己创建的、共享的或默认的
                 cursor.execute("""
-                SELECT id, agent_name, agent_token, is_default, input_fields, remarks, created_by, created_at
+                SELECT id, agent_name, agent_token, is_default, input_fields, remarks, created_by, created_at,
+                       COALESCE(agent_type, 'chatbot') as agent_type
                 FROM agent_credentials 
                 WHERE created_by = %s 
                 OR shared = true 
@@ -596,6 +618,7 @@ class DatabaseManager:
                 is_default = (task_id == "default")
                 input_fields_json = json.dumps(task_info.get('input_fields', []))
                 remarks = task_info.get('remarks', '')
+                agent_type = task_info.get('agent_type', 'chatbot')
                 
                 # 检查是否已存在此Agent
                 if is_default:
@@ -615,18 +638,18 @@ class DatabaseManager:
                     cursor.execute("""
                     UPDATE agent_credentials 
                     SET agent_name = %s, agent_token = %s, shared = %s, 
-                        input_fields = %s, is_default = %s, remarks = %s
+                        input_fields = %s, is_default = %s, remarks = %s, agent_type = %s
                     WHERE id = %s
                     """, (agent_name, agent_token, True, input_fields_json, 
-                          is_default, remarks, existing_id))
+                          is_default, remarks, agent_type, existing_id))
                 else:
                     # 插入新记录
                     cursor.execute("""
                     INSERT INTO agent_credentials 
-                    (agent_name, agent_token, created_by, shared, is_default, input_fields, remarks)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (agent_name, agent_token, created_by, shared, is_default, input_fields, remarks, agent_type)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """, (agent_name, agent_token, username, True, is_default, 
-                          input_fields_json, remarks))
+                          input_fields_json, remarks, agent_type))
             
             # 提交事务
             conn.commit()

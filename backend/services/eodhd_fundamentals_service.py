@@ -4,7 +4,7 @@ EODHD Fundamentals Service - 基本面数据获取服务
 
 优化后的服务通过单一的Fundamentals端点获取公司完整信息：
 - 基本信息保存到companies表（从General获取）
-- 地址信息保存到company_address表（从General.AddressData获取）
+- 地址信息保存到company_address表（从General.AddressData获取）conda
 - 高管信息保存到company_officers表（从General.Officers获取）
 - 列表信息保存到company_listings表（从General.Listings获取）
 - 财务数据保存到相关财务表（从Financials获取）
@@ -32,9 +32,45 @@ import psycopg2.extras
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
+from functools import wraps
 from config.settings import config
 
 logger = get_logger("eodhd_fundamentals_service")
+
+
+def performance_monitor(operation_name: str):
+    """性能监控装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            
+            # 如果是处理记录的方法，记录数据量
+            records_count = 0
+            if 'records' in kwargs:
+                records_count = len(kwargs['records'])
+            elif len(args) > 1 and isinstance(args[1], list):
+                records_count = len(args[1])
+            
+            try:
+                result = func(*args, **kwargs)
+                end_time = time.time()
+                duration = end_time - start_time
+                
+                if records_count > 0:
+                    rate = records_count / duration if duration > 0 else 0
+                    logger.debug(f"📊 {operation_name} 完成: {records_count} 条记录，耗时 {duration:.2f}秒，速度 {rate:.0f} 条/秒")
+                else:
+                    logger.debug(f"📊 {operation_name} 完成: 耗时 {duration:.2f}秒")
+                    
+                return result
+            except Exception as e:
+                end_time = time.time()
+                duration = end_time - start_time
+                logger.error(f"❌ {operation_name} 失败: 耗时 {duration:.2f}秒，错误: {str(e)}")
+                raise
+        return wrapper
+    return decorator
 
 
 class EODHDFundamentalsService:
@@ -322,6 +358,24 @@ class EODHDFundamentalsService:
         except (ValueError, TypeError):
             return None
     
+    def _process_logo_url(self, logo_url):
+        """处理LogoURL，确保包含完整的EODHD域名"""
+        if not logo_url or logo_url == "N/A" or logo_url == "" or logo_url == "None":
+            return None
+        
+        logo_url = str(logo_url).strip()
+        
+        # 如果已经是完整URL，直接返回
+        if logo_url.startswith(('http://', 'https://')):
+            return logo_url
+        
+        # 如果是相对路径，添加EODHD域名前缀
+        if logo_url.startswith('/'):
+            return f"https://eodhd.com{logo_url}"
+        
+        # 如果路径不以/开头，添加/前缀
+        return f"https://eodhd.com/{logo_url}"
+    
     def _safe_date(self, value):
         """安全转换为日期，处理各种异常情况"""
         if value is None or value == '' or value == 'None':
@@ -593,8 +647,7 @@ class EODHDFundamentalsService:
                 # await asyncio.sleep(0.1)  # 移除短暂暂停以提升速度
             
             total_time = time.time() - total_start_time
-            logger.info(f"🎉 优化模式完成 {exchange}: 总耗时 {total_time:.2f}秒, "
-                       f"平均 {total_time/len(tickers):.3f}秒/股票")
+            logger.info(f"☑️ {exchange} 交易所完成: {successful} 个公司，耗时 {total_time:.2f}秒")
             
             return {
                 'successful': successful,
@@ -1019,7 +1072,7 @@ class EODHDFundamentalsService:
                 try:
                     companies_result = self._batch_save_companies(companies_batch)
                     symbol_to_id.update(companies_result.get('symbol_to_id', {}))
-                    logger.info(f"✅ 批量保存公司基本信息完成: {companies_result.get('saved_count', 0)} 个")
+                    logger.info(f"☑️ 公司基本信息: {companies_result.get('saved_count', 0)} 个")
                 except Exception as e:
                     logger.error(f"批量保存公司基本信息失败，跳过: {str(e)}")
                     companies_result = {'saved_count': 0, 'symbol_to_id': {}}
@@ -1028,7 +1081,7 @@ class EODHDFundamentalsService:
             if addresses_batch:
                 try:
                     addresses_result = self._batch_save_addresses(addresses_batch, symbol_to_id)
-                    logger.info(f"✅ 批量保存地址数据完成: {addresses_result.get('saved_count', 0)} 个")
+                    logger.info(f"☑️ 地址数据: {addresses_result.get('saved_count', 0)} 个")
                 except Exception as e:
                     logger.error(f"批量保存地址数据失败，跳过: {str(e)}")
                     addresses_result = {'saved_count': 0}
@@ -1036,7 +1089,7 @@ class EODHDFundamentalsService:
             if officers_batch:
                 try:
                     officers_result = self._batch_save_officers(officers_batch, symbol_to_id)
-                    logger.info(f"✅ 批量保存高管数据完成: {officers_result.get('saved_count', 0)} 个")
+                    logger.info(f"☑️ 高管数据: {officers_result.get('saved_count', 0)} 个")
                 except Exception as e:
                     logger.error(f"批量保存高管数据失败，跳过: {str(e)}")
                     officers_result = {'saved_count': 0}
@@ -1049,19 +1102,11 @@ class EODHDFundamentalsService:
                     logger.error(f"批量保存列表数据失败，跳过: {str(e)}")
                     listings_result = {'saved_count': 0}
             
-            # 然后批量保存所有其他数据
-            if financials_batch:
-                try:
-                    financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
-                    logger.info(f"✅ 批量保存财务数据完成: {financials_result.get('saved_count', 0)} 个")
-                except Exception as e:
-                    logger.error(f"批量保存财务数据失败，跳过: {str(e)}")
-                    financials_result = {'saved_count': 0}
-            
+            # 先批量保存非财务数据
             if highlights_batch:
                 try:
                     highlights_result = self._batch_save_highlights(highlights_batch, symbol_to_id)
-                    logger.info(f"✅ 批量保存关键指标数据完成: {highlights_result.get('saved_count', 0)} 个")
+                    logger.info(f"☑️ 关键指标: {highlights_result.get('saved_count', 0)} 个")
                 except Exception as e:
                     logger.error(f"批量保存关键指标数据失败，跳过: {str(e)}")
                     highlights_result = {'saved_count': 0}
@@ -1138,7 +1183,16 @@ class EODHDFundamentalsService:
                     logger.error(f"批量保存内部人交易数据失败，跳过: {str(e)}")
                     insider_transactions_result = {'saved_count': 0}
             
-            logger.info(f"🎉 批量保存完成: {len(companies_data)} 个公司的完整数据全部保存成功")
+            # 🚀 最后处理财务数据（最耗时的操作）
+            if financials_batch:
+                try:
+                    financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
+                    logger.info(f"☑️ 财务数据: {financials_result.get('saved_count', 0)} 个公司")
+                except Exception as e:
+                    logger.error(f"批量保存财务数据失败，跳过: {str(e)}")
+                    financials_result = {'saved_count': 0}
+            
+            logger.info(f"☑️ 批量保存完成: {len(companies_data)} 个公司")
             return symbol_to_id
             
         except Exception as e:
@@ -1196,7 +1250,7 @@ class EODHDFundamentalsService:
                 general_data.get('Address'),
                 general_data.get('Phone'),
                 general_data.get('WebURL'),
-                general_data.get('LogoURL'),
+                self._process_logo_url(general_data.get('LogoURL')),
                 self._safe_float(general_data.get('FullTimeEmployees')),
                 "eodhd_fundamentals",  # data_source
                 True,   # ticker_active
@@ -1283,7 +1337,7 @@ class EODHDFundamentalsService:
                 general_data.get('Address'),
                 general_data.get('Phone'),
                 general_data.get('WebURL'),
-                general_data.get('LogoURL'),
+                self._process_logo_url(general_data.get('LogoURL')),
                 self._safe_float(general_data.get('FullTimeEmployees')),
                 datetime.now(),  # last_ticker_update
                 datetime.now(),  # updated_at
@@ -1494,9 +1548,7 @@ class EODHDFundamentalsService:
                 logger.error(f"批量保存列表数据失败，跳过: {str(e)}")
                 listings_result = {'saved_count': 0}
             
-            # 批量处理财务数据
-            financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
-            
+            # 先批量处理非财务数据
             # 批量处理关键指标数据
             highlights_result = self._batch_save_highlights(highlights_batch, symbol_to_id)
             
@@ -1526,6 +1578,9 @@ class EODHDFundamentalsService:
             
             # 批量处理内部人交易数据
             insider_transactions_result = self._batch_save_insider_transactions(insider_transactions_batch, symbol_to_id)
+            
+            # 🚀 最后处理财务数据（最耗时的操作）
+            financials_result = self._batch_save_financials(financials_batch, symbol_to_id)
             
             result = {
                 'success': True,
@@ -1631,7 +1686,7 @@ class EODHDFundamentalsService:
                     
                     # 验证数据完整性
                     if not isinstance(general_data, dict):
-                        logger.warning(f"跳过公司 {symbol}：general_data不是字典类型: {type(general_data)}")
+                        logger.debug (f"跳过公司 {symbol}：general_data不是字典类型: {type(general_data)}")
                         continue
                 except Exception as e:
                     logger.error(f"处理公司记录时出错: {company_record}, 错误: {str(e)}")
@@ -1668,7 +1723,7 @@ class EODHDFundamentalsService:
                     general_data.get('Address'),
                     general_data.get('Phone'),
                     general_data.get('WebURL'),
-                    general_data.get('LogoURL'),
+                    self._process_logo_url(general_data.get('LogoURL')),
                     general_data.get('FullTimeEmployees'),
                     general_data.get('CUSIP'),
                     'EODHD',  # data_source
@@ -1758,7 +1813,7 @@ class EODHDFundamentalsService:
                 company_id = symbol_to_id.get(symbol)
                 
                 if not company_id:
-                    logger.warning(f"找不到公司ID: {symbol}")
+                    logger.debug(f"找不到公司ID: {symbol}")
                     continue
                 
                 # 检查address_data是否为有效字典
@@ -1923,7 +1978,7 @@ class EODHDFundamentalsService:
                     name = (listing_info.get('Name') or '').strip()
                     
                     if not code or not exchange:
-                        logger.warning(f"列表代码或交易所为空，跳过: {listing_info}")
+                        logger.debug(f"列表代码或交易所为空，跳过: {listing_info}")
                         continue
                     
                     # 判断是否为主要列表（通常第一个是主要的）
@@ -1974,7 +2029,7 @@ class EODHDFundamentalsService:
             if not financials_batch:
                 return {'saved_count': 0, 'balance_sheet_records': 0, 'income_statement_records': 0, 'cash_flow_records': 0}
             
-            logger.info(f"🚀 优化批量保存财务数据，涉及 {len(financials_batch)} 个公司")
+            logger.debug(f"🚀 优化批量保存财务数据，涉及 {len(financials_batch)} 个公司")
             
             # 🚀 预分配列表容量，避免动态扩容
             estimated_records_per_company = 120  # 根据AAPL的382条记录估算，每个报表约120条
@@ -2038,9 +2093,12 @@ class EODHDFundamentalsService:
     def _bulk_upsert_all_financials(self, balance_sheet_records: List[tuple], 
                                    income_statement_records: List[tuple], 
                                    cash_flow_records: List[tuple]) -> tuple:
-        """🚀 优化版本：在单个事务中处理所有财务报表数据"""
+        """🚀 优化版本：分批事务处理所有财务报表数据，支持并行处理"""
         try:
             import time
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import threading
+            
             start_time = time.time()
             
             balance_sheet_saved = 0
@@ -2048,127 +2106,111 @@ class EODHDFundamentalsService:
             cash_flow_saved = 0
             
             total_records = len(balance_sheet_records) + len(income_statement_records) + len(cash_flow_records)
-            logger.info(f"🚀 开始单事务处理 {total_records} 条财务记录（资产负债表:{len(balance_sheet_records)}, 损益表:{len(income_statement_records)}, 现金流:{len(cash_flow_records)}）")
+            logger.debug(f"🚀 开始分批并行处理 {total_records} 条财务记录（资产负债表:{len(balance_sheet_records)}, 损益表:{len(income_statement_records)}, 现金流:{len(cash_flow_records)}）")
             
-            # 使用单个数据库连接和事务处理所有数据
-            with self.db_manager.get_connection_context() as conn:
-                with conn.cursor() as cursor:
-                    import psycopg2.extras
+            # 🚀 优化1: 动态确定最优批次大小
+            optimal_batch_size = self._calculate_optimal_batch_size(total_records)
+            logger.debug(f"🎯 使用动态批次大小: {optimal_batch_size}")
+            
+            # 🚀 优化2: 并行处理三个财务报表
+            results = {}
+            lock = threading.Lock()
+            
+            def process_statement_type(statement_type, records):
+                try:
+                    if statement_type == 'balance_sheet':
+                        saved = self._batch_upsert_balance_sheet(records, optimal_batch_size)
+                    elif statement_type == 'income_statement':
+                        saved = self._batch_upsert_income_statement(records, optimal_batch_size)
+                    elif statement_type == 'cash_flow':
+                        saved = self._batch_upsert_cash_flow(records, optimal_batch_size)
+                    else:
+                        saved = 0
                     
-                    # 处理资产负债表数据
-                    if balance_sheet_records:
-                        balance_sheet_sql = """
-                            INSERT INTO company_balance_sheet (
-                                company_id, period_type, date, filing_date, currency_symbol,
-                                totalassets, totalcurrentassets, cash, cashandequivalents, cashandshortterminvestments,
-                                shortterminvestments, netreceivables, inventory, othercurrentassets, noncurrentassetstotal,
-                                longterminvestments, propertyplantequipment, propertyplantandequipmentgross, propertyplantandequipmentnet,
-                                accumulateddepreciation, goodwill, intangibleassets, accumulatedamortization, noncurrrentassetsother,
-                                deferredlongtermassetcharges, otherassets, earningassets, nettangibleassets,
-                                totalliab, totalcurrentliabilities, accountspayable, shorttermdebt, shortlongtermdebt,
-                                shortlongtermdebttotal, othercurrentliab, currentdeferredrevenue, noncurrentliabilitiestotal,
-                                longtermdebt, longtermdebttotal, capitalleaseobligations, deferredlongtermliab,
-                                noncurrentliabilitiesother, otherliab, netdebt,
-                                totalstockholderequity, commonstock, capitalstock, retainedearnings, otherstockholderequity,
-                                accumulatedothercomprehensiveincome, additionalpaidincapital, commonstocktotalequity,
-                                preferredstocktotalequity, retainedearningstotalequity, treasurystock, totalpermanentequity,
-                                noncontrollinginterestinconsolidatedentity, temporaryequityredeemablenoncontrollinginterests,
-                                negativegoodwill, warrants, preferredstockredeemable, capitalsurpluse,
-                                liabilitiesandstockholdersequity, networkingcapital, netinvestedcapital, commonstocksharesoutstanding,
-                                created_at, updated_at
-                            ) VALUES %s
-                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
-                                filing_date = EXCLUDED.filing_date,
-                                currency_symbol = EXCLUDED.currency_symbol,
-                                totalassets = EXCLUDED.totalassets,
-                                totalcurrentassets = EXCLUDED.totalcurrentassets,
-                                cash = EXCLUDED.cash,
-                                cashandequivalents = EXCLUDED.cashandequivalents,
-                                updated_at = EXCLUDED.updated_at
-                        """
-                        psycopg2.extras.execute_values(
-                            cursor, balance_sheet_sql, balance_sheet_records,
-                            template=None, page_size=1000
-                        )
-                        balance_sheet_saved = len(balance_sheet_records)
-                        logger.debug(f"🚀 单事务处理资产负债表: {balance_sheet_saved} 条记录")
+                    with lock:
+                        results[statement_type] = saved
                     
-                    # 处理损益表数据
-                    if income_statement_records:
-                        income_statement_sql = """
-                            INSERT INTO company_income_statement (
-                                company_id, period_type, date, filing_date, currency_symbol,
-                                totalrevenue, costofrevenue, grossprofit, totaloperatingexpenses,
-                                researchdevelopment, sellinggeneraladministrative, sellingandmarketingexpenses, otheroperatingexpenses,
-                                operatingincome, ebit, ebitda, interestincome, interestexpense, netinterestincome,
-                                totalotherincomeexpensenet, nonoperatingincomenetother, incomebeforetax, taxprovision,
-                                incometaxexpense, netincome, netincomefromcontinuingops, netincomeapplicabletocommonshares,
-                                reconcileddepreciation, depreciationandamortization, extraordinaryitems, nonrecurring,
-                                otheritems, discontinuedoperations, effectofaccountingcharges, minorityinterest,
-                                preferredstockandotheradjustments, created_at, updated_at
-                            ) VALUES %s
-                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
-                                filing_date = EXCLUDED.filing_date,
-                                currency_symbol = EXCLUDED.currency_symbol,
-                                totalrevenue = EXCLUDED.totalrevenue,
-                                costofrevenue = EXCLUDED.costofrevenue,
-                                grossprofit = EXCLUDED.grossprofit,
-                                netincome = EXCLUDED.netincome,
-                                updated_at = EXCLUDED.updated_at
-                        """
-                        psycopg2.extras.execute_values(
-                            cursor, income_statement_sql, income_statement_records,
-                            template=None, page_size=1000
-                        )
-                        income_statement_saved = len(income_statement_records)
-                        logger.debug(f"🚀 单事务处理损益表: {income_statement_saved} 条记录")
-                    
-                    # 处理现金流量表数据
-                    if cash_flow_records:
-                        cash_flow_sql = """
-                            INSERT INTO company_cash_flow (
-                                company_id, period_type, date, filing_date, currency_symbol,
-                                totalcashfromoperatingactivities, netincome, depreciation, stockbasedcompensation,
-                                changeinworkingcapital, changetoaccountreceivables, changetoinventory, changetoliabilities,
-                                changetooperatingactivities, changetonetincome, changereceivables, othernoncashitems,
-                                cashflowsotheroperating, totalcashflowsfrominvestingactivities, capitalexpenditures,
-                                investments, othercashflowsfrominvestingactivities, salepurchaseofstock,
-                                totalcashfromfinancingactivities, dividendspaid, netborrowings, issuanceofcapitalstock,
-                                othercashflowsfromfinancingactivities, changeincash, beginperiodcashflow, endperiodcashflow,
-                                exchangeratechanges, cashandcashequivalentschanges, freecashflow,
-                                created_at, updated_at
-                            ) VALUES %s
-                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
-                                filing_date = EXCLUDED.filing_date,
-                                currency_symbol = EXCLUDED.currency_symbol,
-                                totalcashfromoperatingactivities = EXCLUDED.totalcashfromoperatingactivities,
-                                netincome = EXCLUDED.netincome,
-                                freecashflow = EXCLUDED.freecashflow,
-                                updated_at = EXCLUDED.updated_at
-                        """
-                        psycopg2.extras.execute_values(
-                            cursor, cash_flow_sql, cash_flow_records,
-                            template=None, page_size=1000
-                        )
-                        cash_flow_saved = len(cash_flow_records)
-                        logger.debug(f"🚀 单事务处理现金流量表: {cash_flow_saved} 条记录")
-                    
-                    # 🚀 关键优化：所有数据在一个事务中提交
-                    conn.commit()
+                    return saved
+                except Exception as e:
+                    logger.error(f"处理 {statement_type} 数据失败: {str(e)}")
+                    with lock:
+                        results[statement_type] = 0
+                    return 0
+            
+            # 🚀 优化3: 使用线程池并行处理
+            with ThreadPoolExecutor(max_workers=3, thread_name_prefix="FinancialProcessor") as executor:
+                future_to_type = {}
+                
+                if balance_sheet_records:
+                    future_to_type[executor.submit(process_statement_type, 'balance_sheet', balance_sheet_records)] = 'balance_sheet'
+                
+                if income_statement_records:
+                    future_to_type[executor.submit(process_statement_type, 'income_statement', income_statement_records)] = 'income_statement'
+                
+                if cash_flow_records:
+                    future_to_type[executor.submit(process_statement_type, 'cash_flow', cash_flow_records)] = 'cash_flow'
+                
+                # 等待所有任务完成并收集结果
+                for future in as_completed(future_to_type):
+                    statement_type = future_to_type[future]
+                    try:
+                        saved_count = future.result()
+                        logger.debug(f"✅ {statement_type} 处理完成: {saved_count} 条记录")
+                    except Exception as e:
+                        logger.error(f"❌ {statement_type} 处理异常: {str(e)}")
+            
+            # 汇总结果
+            balance_sheet_saved = results.get('balance_sheet', 0)
+            income_statement_saved = results.get('income_statement', 0)
+            cash_flow_saved = results.get('cash_flow', 0)
             
             # 🚀 性能监控
             end_time = time.time()
             duration = end_time - start_time
-            records_per_second = total_records / duration if duration > 0 else 0
+            total_saved = balance_sheet_saved + income_statement_saved + cash_flow_saved
+            records_per_second = total_saved / duration if duration > 0 else 0
             
-            logger.info(f"🚀 单事务财务数据处理完成: 资产负债表 {balance_sheet_saved}, 损益表 {income_statement_saved}, 现金流量表 {cash_flow_saved}")
-            logger.info(f"⚡ 性能统计: 处理 {total_records} 条记录耗时 {duration:.2f}秒, 速度: {records_per_second:.0f} 条/秒")
+            logger.info(f"☑️ 财务数据处理完成: 共 {total_saved} 条记录，耗时 {duration:.2f}秒")
             
             return balance_sheet_saved, income_statement_saved, cash_flow_saved
             
         except Exception as e:
-            logger.error(f"🚀 单事务财务数据处理失败: {str(e)}")
+            logger.error(f"🚀 并行财务数据处理失败: {str(e)}")
             raise
+
+    def _calculate_optimal_batch_size(self, total_records: int) -> int:
+        """🎯 动态计算最优批次大小"""
+        try:
+            import psutil
+            
+            # 获取可用内存（GB）
+            available_memory_gb = psutil.virtual_memory().available / (1024 ** 3)
+            
+            # 根据记录数量和可用内存动态调整
+            if total_records <= 10000:
+                return min(2000, total_records)
+            elif total_records <= 50000:
+                return min(5000, total_records)
+            elif total_records <= 100000:
+                # 根据内存调整
+                if available_memory_gb >= 8:
+                    return 10000
+                elif available_memory_gb >= 4:
+                    return 7500
+                else:
+                    return 5000
+            else:
+                # 超大数据量
+                if available_memory_gb >= 16:
+                    return 15000
+                elif available_memory_gb >= 8:
+                    return 10000
+                else:
+                    return 7500
+                    
+        except Exception as e:
+            logger.warning(f"计算最优批次大小失败，使用默认值: {str(e)}")
+            return 5000
 
     def _extract_financial_records(self, company_id: int, financial_data: Dict[str, Any], statement_type: str) -> List[tuple]:
         """从财务数据中提取记录用于批量插入"""
@@ -2434,7 +2476,7 @@ class EODHDFundamentalsService:
             success_count = 0
             for key, listing_info in listings_data.items():
                 if not isinstance(listing_info, dict):
-                    logger.warning(f"列表信息不是字典类型，跳过 {key}: {listing_info}")
+                    logger.debug(f"列表信息不是字典类型，跳过 {key}: {listing_info}")
                     continue
                 
                 try:
@@ -2443,7 +2485,7 @@ class EODHDFundamentalsService:
                     name = listing_info.get('Name', '').strip()
                     
                     if not code or not exchange:
-                        logger.warning(f"列表代码或交易所为空，跳过: {listing_info}")
+                        logger.debug(f"列表代码或交易所为空，跳过: {listing_info}")
                         continue
                     
                     # 判断是否为主要列表（通常第一个是主要的）
@@ -5200,7 +5242,7 @@ class EODHDFundamentalsService:
                 company_id = symbol_to_id.get(symbol)
                 
                 if not company_id:
-                    logger.warning(f"跳过内部人交易数据保存：找不到公司ID - {symbol}")
+                    logger.debug(f"跳过内部人交易数据保存：找不到公司ID - {symbol}")
                     continue
                 
                 if not isinstance(insider_transactions_data, dict) or not insider_transactions_data:
@@ -5364,6 +5406,179 @@ class EODHDFundamentalsService:
             
         except Exception as e:
             logger.error(f"批量插入内部人交易数据失败: {str(e)}")
+            raise
+
+    @performance_monitor("资产负债表分批处理")
+    def _batch_upsert_balance_sheet(self, records: List[tuple], batch_size: int) -> int:
+        """🚀 分批处理资产负债表数据"""
+        try:
+            total_saved = 0
+            total_batches = (len(records) + batch_size - 1) // batch_size
+            
+            logger.debug(f"📊 开始分批处理资产负债表: {len(records)} 条记录，分为 {total_batches} 批")
+            
+            for i in range(0, len(records), batch_size):
+                batch_records = records[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                
+                logger.debug(f"🔄 处理资产负债表批次 {batch_num}/{total_batches}: {len(batch_records)} 条记录")
+                
+                with self.db_manager.get_connection_context() as conn:
+                    with conn.cursor() as cursor:
+                        import psycopg2.extras
+                        
+                        balance_sheet_sql = """
+                            INSERT INTO company_balance_sheet (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalassets, totalcurrentassets, cash, cashandequivalents, cashandshortterminvestments,
+                                shortterminvestments, netreceivables, inventory, othercurrentassets, noncurrentassetstotal,
+                                longterminvestments, propertyplantequipment, propertyplantandequipmentgross, propertyplantandequipmentnet,
+                                accumulateddepreciation, goodwill, intangibleassets, accumulatedamortization, noncurrrentassetsother,
+                                deferredlongtermassetcharges, otherassets, earningassets, nettangibleassets,
+                                totalliab, totalcurrentliabilities, accountspayable, shorttermdebt, shortlongtermdebt,
+                                shortlongtermdebttotal, othercurrentliab, currentdeferredrevenue, noncurrentliabilitiestotal,
+                                longtermdebt, longtermdebttotal, capitalleaseobligations, deferredlongtermliab,
+                                noncurrentliabilitiesother, otherliab, netdebt,
+                                totalstockholderequity, commonstock, capitalstock, retainedearnings, otherstockholderequity,
+                                accumulatedothercomprehensiveincome, additionalpaidincapital, commonstocktotalequity,
+                                preferredstocktotalequity, retainedearningstotalequity, treasurystock, totalpermanentequity,
+                                noncontrollinginterestinconsolidatedentity, temporaryequityredeemablenoncontrollinginterests,
+                                negativegoodwill, warrants, preferredstockredeemable, capitalsurpluse,
+                                liabilitiesandstockholdersequity, networkingcapital, netinvestedcapital, commonstocksharesoutstanding,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalassets = EXCLUDED.totalassets,
+                                totalcurrentassets = EXCLUDED.totalcurrentassets,
+                                cash = EXCLUDED.cash,
+                                cashandequivalents = EXCLUDED.cashandequivalents,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        psycopg2.extras.execute_values(
+                            cursor, balance_sheet_sql, batch_records,
+                            template=None, page_size=min(1000, len(batch_records))
+                        )
+                        
+                        total_saved += len(batch_records)
+                        
+            logger.debug(f"✅ 资产负债表分批处理完成: {total_saved} 条记录")
+            return total_saved
+            
+        except Exception as e:
+            logger.error(f"资产负债表分批处理失败: {str(e)}")
+            raise
+
+    @performance_monitor("损益表分批处理")
+    def _batch_upsert_income_statement(self, records: List[tuple], batch_size: int) -> int:
+        """🚀 分批处理损益表数据"""
+        try:
+            total_saved = 0
+            total_batches = (len(records) + batch_size - 1) // batch_size
+            
+            logger.debug(f"📊 开始分批处理损益表: {len(records)} 条记录，分为 {total_batches} 批")
+            
+            for i in range(0, len(records), batch_size):
+                batch_records = records[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                
+                logger.debug(f"🔄 处理损益表批次 {batch_num}/{total_batches}: {len(batch_records)} 条记录")
+                
+                with self.db_manager.get_connection_context() as conn:
+                    with conn.cursor() as cursor:
+                        import psycopg2.extras
+                        
+                        income_statement_sql = """
+                            INSERT INTO company_income_statement (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalrevenue, costofrevenue, grossprofit, totaloperatingexpenses,
+                                researchdevelopment, sellinggeneraladministrative, sellingandmarketingexpenses, otheroperatingexpenses,
+                                operatingincome, ebit, ebitda, interestincome, interestexpense, netinterestincome,
+                                totalotherincomeexpensenet, nonoperatingincomenetother, incomebeforetax, taxprovision,
+                                incometaxexpense, netincome, netincomefromcontinuingops, netincomeapplicabletocommonshares,
+                                reconcileddepreciation, depreciationandamortization, extraordinaryitems, nonrecurring,
+                                otheritems, discontinuedoperations, effectofaccountingcharges, minorityinterest,
+                                preferredstockandotheradjustments, created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalrevenue = EXCLUDED.totalrevenue,
+                                costofrevenue = EXCLUDED.costofrevenue,
+                                grossprofit = EXCLUDED.grossprofit,
+                                netincome = EXCLUDED.netincome,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        psycopg2.extras.execute_values(
+                            cursor, income_statement_sql, batch_records,
+                            template=None, page_size=min(1000, len(batch_records))
+                        )
+                        
+                        total_saved += len(batch_records)
+                        
+            logger.debug(f"✅ 损益表分批处理完成: {total_saved} 条记录")
+            return total_saved
+            
+        except Exception as e:
+            logger.error(f"损益表分批处理失败: {str(e)}")
+            raise
+
+    @performance_monitor("现金流量表分批处理")
+    def _batch_upsert_cash_flow(self, records: List[tuple], batch_size: int) -> int:
+        """🚀 分批处理现金流量表数据"""
+        try:
+            total_saved = 0
+            total_batches = (len(records) + batch_size - 1) // batch_size
+            
+            logger.debug(f"📊 开始分批处理现金流量表: {len(records)} 条记录，分为 {total_batches} 批")
+            
+            for i in range(0, len(records), batch_size):
+                batch_records = records[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                
+                logger.debug(f"🔄 处理现金流量表批次 {batch_num}/{total_batches}: {len(batch_records)} 条记录")
+                
+                with self.db_manager.get_connection_context() as conn:
+                    with conn.cursor() as cursor:
+                        import psycopg2.extras
+                        
+                        cash_flow_sql = """
+                            INSERT INTO company_cash_flow (
+                                company_id, period_type, date, filing_date, currency_symbol,
+                                totalcashfromoperatingactivities, netincome, depreciation, stockbasedcompensation,
+                                changeinworkingcapital, changetoaccountreceivables, changetoinventory, changetoliabilities,
+                                changetooperatingactivities, changetonetincome, changereceivables, othernoncashitems,
+                                cashflowsotheroperating, totalcashflowsfrominvestingactivities, capitalexpenditures,
+                                investments, othercashflowsfrominvestingactivities, salepurchaseofstock,
+                                totalcashfromfinancingactivities, dividendspaid, netborrowings, issuanceofcapitalstock,
+                                othercashflowsfromfinancingactivities, changeincash, beginperiodcashflow, endperiodcashflow,
+                                exchangeratechanges, cashandcashequivalentschanges, freecashflow,
+                                created_at, updated_at
+                            ) VALUES %s
+                            ON CONFLICT (company_id, period_type, date) DO UPDATE SET
+                                filing_date = EXCLUDED.filing_date,
+                                currency_symbol = EXCLUDED.currency_symbol,
+                                totalcashfromoperatingactivities = EXCLUDED.totalcashfromoperatingactivities,
+                                netincome = EXCLUDED.netincome,
+                                freecashflow = EXCLUDED.freecashflow,
+                                updated_at = EXCLUDED.updated_at
+                        """
+                        
+                        psycopg2.extras.execute_values(
+                            cursor, cash_flow_sql, batch_records,
+                            template=None, page_size=min(1000, len(batch_records))
+                        )
+                        
+                        total_saved += len(batch_records)
+                        
+            logger.debug(f"✅ 现金流量表分批处理完成: {total_saved} 条记录")
+            return total_saved
+            
+        except Exception as e:
+            logger.error(f"现金流量表分批处理失败: {str(e)}")
             raise
 
     def __del__(self):

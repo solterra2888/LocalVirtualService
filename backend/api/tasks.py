@@ -53,7 +53,8 @@ async def get_task_types(current_user=Depends(get_current_user)):
             created_at=task.get('created_at'),
             remarks=task.get('remarks', ''),
             input_fields=task.get('input_fields', []),
-            is_default=task.get('is_default', False)
+            is_default=task.get('is_default', False),
+            agent_type=task.get('agent_type', 'chatbot')
         )
         for task in task_list
     ]
@@ -83,7 +84,8 @@ async def create_task_type(
             task_name=request.name,
             task_token=request.token,
             input_fields=request.input_fields,
-            remarks=request.remarks
+            remarks=request.remarks,
+            agent_type=request.agent_type
         )
         
         if not success:
@@ -103,7 +105,8 @@ async def create_task_type(
             created_at=task_info.get('created_at'),
             remarks=task_info.get('remarks', ''),
             input_fields=task_info.get('input_fields', []),
-            is_default=task_info.get('is_default', False)
+            is_default=task_info.get('is_default', False),
+            agent_type=task_info.get('agent_type', 'chatbot')
         )
         
     except Exception as e:
@@ -149,7 +152,8 @@ async def update_task_type(
             task_name=request.name,
             task_token=request.token,
             input_fields=request.input_fields,
-            remarks=request.remarks
+            remarks=request.remarks,
+            agent_type=request.agent_type
         )
         
         if not success:
@@ -169,7 +173,8 @@ async def update_task_type(
             created_at=updated_task_info.get('created_at'),
             remarks=updated_task_info.get('remarks', ''),
             input_fields=updated_task_info.get('input_fields', []),
-            is_default=updated_task_info.get('is_default', False)
+            is_default=updated_task_info.get('is_default', False),
+            agent_type=updated_task_info.get('agent_type', 'chatbot')
         )
         
     except Exception as e:

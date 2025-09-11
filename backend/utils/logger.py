@@ -187,19 +187,31 @@ def init_logging(**kwargs):
 # 便捷函数
 def debug(message: str, source: str = None, **kwargs):
     """调试日志"""
+    # 避免参数名冲突：如果kwargs中有'message'，则重命名
+    if 'message' in kwargs:
+        kwargs['extra_message'] = kwargs.pop('message')
     logger.debug(message, source, **kwargs)
 
 
 def info(message: str, source: str = None, **kwargs):
     """信息日志"""
+    # 避免参数名冲突：如果kwargs中有'message'，则重命名
+    if 'message' in kwargs:
+        kwargs['extra_message'] = kwargs.pop('message')
     logger.info(message, source, **kwargs)
 
 
 def warning(message: str, source: str = None, **kwargs):
     """警告日志"""
+    # 避免参数名冲突：如果kwargs中有'message'，则重命名
+    if 'message' in kwargs:
+        kwargs['extra_message'] = kwargs.pop('message')
     logger.warning(message, source, **kwargs)
 
 
 def error(message: str, source: str = None, **kwargs):
     """错误日志"""
+    # 避免参数名冲突：如果kwargs中有'message'，则重命名
+    if 'message' in kwargs:
+        kwargs['extra_message'] = kwargs.pop('message')
     logger.error(message, source, **kwargs) 

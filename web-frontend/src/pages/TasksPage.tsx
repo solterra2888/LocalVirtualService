@@ -18,7 +18,8 @@ import {
   Tabs,
   Row,
   Col,
-  Divider
+  Divider,
+  Select
 } from 'antd';
 import {
   PlusOutlined,
@@ -48,6 +49,7 @@ interface TaskType {
     max_length: number;
   }>;
   is_default: boolean;
+  agent_type: 'chatbot' | 'workflow';
 }
 
 
@@ -56,6 +58,7 @@ interface TaskFormData {
   name: string;
   token: string;
   remarks: string;
+  agent_type: 'chatbot' | 'workflow';
   input_fields: Array<{
     name: string;
     max_length: number;
@@ -119,7 +122,8 @@ const TasksPage: React.FC = () => {
     form.setFieldsValue({
       name: task.name,
       token: task.token,
-      remarks: task.remarks
+      remarks: task.remarks,
+      agent_type: task.agent_type || 'chatbot'
     });
     
     // 设置自定义输入字段
@@ -205,6 +209,16 @@ const TasksPage: React.FC = () => {
       key: 'token',
       render: (token: string) => (
         token ? `${token.substring(0, 8)}...${token.substring(token.length - 8)}` : '-'
+      )
+    },
+    {
+      title: 'Agent Type',
+      dataIndex: 'agent_type',
+      key: 'agent_type',
+      render: (agent_type: string) => (
+        <Tag color={agent_type === 'workflow' ? 'green' : 'blue'}>
+          {agent_type === 'workflow' ? 'Workflow' : 'Chatbot'}
+        </Tag>
       )
     },
     {
@@ -317,6 +331,18 @@ const TasksPage: React.FC = () => {
             </Form.Item>
             
             <Form.Item
+              label="Agent Type"
+              name="agent_type"
+              rules={[{ required: true, message: 'Please select agent type' }]}
+              initialValue="chatbot"
+            >
+              <Select placeholder="Select Agent Type">
+                <Select.Option value="chatbot">Chatbot</Select.Option>
+                <Select.Option value="workflow">Workflow</Select.Option>
+              </Select>
+            </Form.Item>
+            
+            <Form.Item
               label="Remarks"
               name="remarks"
             >
@@ -414,6 +440,11 @@ const TasksPage: React.FC = () => {
           </Descriptions.Item>
           <Descriptions.Item label="Token" span={3}>
             {viewingTask.token ? `${viewingTask.token.substring(0, 8)}...${viewingTask.token.substring(viewingTask.token.length - 8)}` : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Agent Type" span={3}>
+            <Tag color={viewingTask.agent_type === 'workflow' ? 'green' : 'blue'}>
+              {viewingTask.agent_type === 'workflow' ? 'Workflow' : 'Chatbot'}
+            </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="Creator" span={3}>
             {viewingTask.creator || '-'}

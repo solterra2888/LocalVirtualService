@@ -131,6 +131,11 @@ class TaskManager:
                 if len(agent) > 7:  # 如果有created_at列
                     created_at = agent[7]
                 
+                # 获取agent_type
+                agent_type = "chatbot"  # 默认值
+                if len(agent) > 8:  # 如果有agent_type列
+                    agent_type = agent[8] or "chatbot"
+                
                 # 保存到RC Agent字典
                 task_id = "default" if is_default else agent_id
                 self.task_types[task_id] = {
@@ -139,7 +144,8 @@ class TaskManager:
                     "input_fields": input_fields,
                     "remarks": remarks,
                     "created_by": created_by,
-                    "created_at": created_at
+                    "created_at": created_at,
+                    "agent_type": agent_type
                 }
                 
                 if is_default:
@@ -201,7 +207,7 @@ class TaskManager:
         """获取指定任务的信息"""
         return self.task_types.get(task_id)
     
-    def add_task_type(self, task_name, task_token, input_fields=None, remarks=""):
+    def add_task_type(self, task_name, task_token, input_fields=None, remarks="", agent_type="chatbot"):
         """
         添加新的RC Agent
         
@@ -210,6 +216,7 @@ class TaskManager:
             task_token: RC Agent令牌
             input_fields: 自定义输入字段列表
             remarks: 备注
+            agent_type: Agent类型 ('chatbot' 或 'workflow')
             
         Returns:
             tuple: (success, message, task_id)
@@ -228,6 +235,10 @@ class TaskManager:
         # 生成唯一的数字格式任务ID
         task_id = str(int(time.time() * 1000) + random.randint(1, 1000))
         
+        # 验证agent_type
+        if agent_type not in ["chatbot", "workflow"]:
+            return False, "Agent类型必须是 'chatbot' 或 'workflow'", None
+        
         # 添加任务
         self.task_types[task_id] = {
             "name": task_name,
@@ -235,7 +246,8 @@ class TaskManager:
             "input_fields": input_fields or [],
             "remarks": remarks,
             "created_by": self.username,
-            "created_at": datetime.now()
+            "created_at": datetime.now(),
+            "agent_type": agent_type
         }
         
         # 保存到数据库
@@ -250,7 +262,7 @@ class TaskManager:
             del self.task_types[task_id]
             return False, "保存到数据库失败", None
     
-    def update_task_type(self, task_id, task_name=None, task_token=None, input_fields=None, remarks=None):
+    def update_task_type(self, task_id, task_name=None, task_token=None, input_fields=None, remarks=None, agent_type=None):
         """
         更新RC Agent
         
@@ -260,6 +272,7 @@ class TaskManager:
             task_token: 新的RC Agent令牌（可选）
             input_fields: 新的自定义输入字段列表（可选）
             remarks: 新的备注（可选）
+            agent_type: 新的Agent类型（可选）
             
         Returns:
             tuple: (success, message)
@@ -276,6 +289,10 @@ class TaskManager:
                 if other_id != task_id and other_info['name'] == task_name:
                     return False, "任务名称不能重复"
         
+        # 验证agent_type
+        if agent_type is not None and agent_type not in ["chatbot", "workflow"]:
+            return False, "Agent类型必须是 'chatbot' 或 'workflow'"
+        
         # 更新任务信息
         if task_name is not None:
             task_info["name"] = task_name
@@ -285,6 +302,8 @@ class TaskManager:
             task_info["input_fields"] = input_fields
         if remarks is not None:
             task_info["remarks"] = remarks
+        if agent_type is not None:
+            task_info["agent_type"] = agent_type
         
         # 保存到数据库
         success = self.save_to_database()
@@ -355,7 +374,8 @@ class TaskManager:
                 "remarks": task_info.get("remarks", ""),
                 "creator": task_info.get("created_by", ""),
                 "created_at": task_info.get("created_at"),
-                "is_default": task_id == "default"
+                "is_default": task_id == "default",
+                "agent_type": task_info.get("agent_type", "chatbot")
             })
         return task_list
     

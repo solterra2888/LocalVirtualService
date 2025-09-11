@@ -397,7 +397,8 @@ async def process_files_background(
         if successful_results and rc_agent_service:
             try:
                 update_task_status("ai_processing", 80.0, log_message="正在发送到RC Agent处理...")
-                final_report, file_ai_times = rc_agent_service.process_all_contents(successful_results, custom_inputs)
+                agent_type = task_info.get('agent_type', 'chatbot')
+                final_report, file_ai_times = rc_agent_service.process_all_contents(successful_results, custom_inputs, agent_type)
                 update_task_status(log_message="RC Agent处理完成")
             except Exception as e:
                 rc_agent_success = False

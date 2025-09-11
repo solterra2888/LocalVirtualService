@@ -67,7 +67,7 @@ class RCAgentService:
             if self.log_callback:
                 self.log_callback(log_message=message, log_level=level)
     
-    def send_to_rc_agent(self, content, conversation_id=None, custom_inputs=None, current_file_name=None):
+    def send_to_rc_agent(self, content, conversation_id=None, custom_inputs=None, current_file_name=None, agent_type="chatbot"):
         """
         发送内容到RC Agent服务器
         
@@ -76,6 +76,7 @@ class RCAgentService:
             conversation_id: 现有会话ID (可选)
             custom_inputs: 自定义输入字段字典 (可选)
             current_file_name: 当前处理的文件名 (可选)
+            agent_type: Agent类型 ('chatbot' 或 'workflow')
             
         Returns:
             tuple: (conversation_id, report_content, model_usage_info)
@@ -111,13 +112,31 @@ class RCAgentService:
         if custom_inputs:
             self.log(f"自定义输入字段: {json.dumps(custom_inputs, ensure_ascii=False)}")
         
-        # 准备请求数据
-        data = {
-            "inputs": custom_inputs,
-            "query": content,
-            "response_mode": "streaming",
-            "user": "llamaindex-processor"
-        }
+        # 根据Agent类型构建不同的URL和请求数据
+        if agent_type == "workflow":
+            # Workflow类型的请求
+            request_url = self.base_url.replace('/v1/chat-messages', '/v1/workflows/run')
+            # Workflow请求数据格式
+            data = {
+                "inputs": custom_inputs,
+                "response_mode": "streaming",
+                "user": "llamaindex-processor"
+            }
+            # 将content添加到inputs中
+            if content:
+                data["inputs"]["file_content"] = content
+            
+            self.log(f"🔄 使用Workflow模式, URL: {request_url}")
+        else:
+            # Chatbot类型的请求（默认）
+            request_url = self.base_url
+            data = {
+                "inputs": custom_inputs,
+                "query": content,
+                "response_mode": "streaming",
+                "user": "llamaindex-processor"
+            }
+            self.log(f"💬 使用Chatbot模式, URL: {request_url}")
         
         # 调试输出完整请求数据结构
         self.log(f"RC Agent请求数据结构: {json.dumps(data, ensure_ascii=False, indent=2)[:50]}...")
@@ -126,12 +145,15 @@ class RCAgentService:
         if custom_inputs:
             self.log(f"使用自定义输入字段: {', '.join(custom_inputs.keys())}")
         
-        # 使用现有会话ID（如果有）
-        if conversation_id:
+        # 使用现有会话ID（如果有，仅对chatbot有效）
+        if conversation_id and agent_type == "chatbot":
             data["conversation_id"] = conversation_id
             self.log(f"使用现有会话ID: {conversation_id}")
         else:
-            self.log("第一份文件，创建新的conversation_id")
+            if agent_type == "chatbot":
+                self.log("第一份文件，创建新的conversation_id")
+            else:
+                self.log("Workflow模式不支持conversation_id")
         
         # 用于存储提取的报告内容
         report_content = None
@@ -150,7 +172,7 @@ class RCAgentService:
                 self.log(f"正在发送请求到RC Agent服务器{file_info}{retry_info}...")
                 
                 response = self.session.post(
-                    self.base_url, 
+                    request_url, 
                     headers=headers, 
                     json=data, 
                     stream=True,
@@ -318,13 +340,14 @@ class RCAgentService:
         
         return conversation_id, None, None
     
-    def process_all_contents(self, successful_results, custom_inputs=None):
+    def process_all_contents(self, successful_results, custom_inputs=None, agent_type="chatbot"):
         """
         处理所有成功文件的内容并发送到RC Agent
         
         Args:
             successful_results (list): 成功处理的文件结果列表
             custom_inputs (dict, optional): 自定义输入字段
+            agent_type (str): Agent类型 ('chatbot' 或 'workflow')
             
         Returns:
             tuple: (final_report, file_rc_agent_times)
@@ -340,7 +363,7 @@ class RCAgentService:
         print(f"\n🚀 开始批量处理 {len(successful_results)} 个文件内容...")
         
         # 初始化变量
-        conversation_id = None
+        conversation_id = None if agent_type == "chatbot" else None  # workflow不使用conversation_id
         final_report = None
         file_rc_agent_times = []
         
@@ -358,7 +381,7 @@ class RCAgentService:
             
             # 发送到RC Agent并获取完整处理步骤
             conversation_id, report_content, model_usage_info = self.send_to_rc_agent(
-                content, conversation_id, custom_inputs, file_name
+                content, conversation_id, custom_inputs, file_name, agent_type
             )
             
             # 计算处理时间

@@ -86,6 +86,11 @@ const Layout: React.FC = () => {
       label: 'Fundamentals',
       children: [
         {
+          key: '/fundamentals',
+          icon: <FileTextOutlined />,
+          label: 'Company Query',
+        },
+        {
           key: '/fundamentals/screener',
           icon: <AppstoreOutlined />,
           label: 'Stock Screener',

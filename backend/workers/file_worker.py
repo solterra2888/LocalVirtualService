@@ -161,9 +161,11 @@ class FileProcessingWorker:
             if successful_results and rc_agent_service and not self.should_stop:
                 try:
                     self.update_status("ai_processing", 80.0, log_message="正在发送到RC Agent处理...")
+                    agent_type = task_info.get('agent_type', 'chatbot')
                     final_report, file_ai_times = rc_agent_service.process_all_contents(
                         successful_results, 
-                        custom_inputs
+                        custom_inputs,
+                        agent_type
                     )
                     self.update_status(log_message="RC Agent处理完成")
                 except Exception as e:

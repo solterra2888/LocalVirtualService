@@ -143,15 +143,15 @@ async def create_cron_task(
             }
         else:
             logger.error("Cron定时任务创建失败", 
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except ValueError as e:
-        logger.error("Cron定时任务创建参数错误", error=str(e), user=current_user.username)
+        logger.error("Cron定时任务创建参数错误", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
-        logger.error("Cron定时任务创建失败", error=str(e), user=current_user.username)
+        logger.error("Cron定时任务创建失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
@@ -196,15 +196,15 @@ async def create_interval_task(
             }
         else:
             logger.error("间隔定时任务创建失败", 
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except ValueError as e:
-        logger.error("间隔定时任务创建参数错误", error=str(e), user=current_user.username)
+        logger.error("间隔定时任务创建参数错误", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
-        logger.error("间隔定时任务创建失败", error=str(e), user=current_user.username)
+        logger.error("间隔定时任务创建失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
@@ -225,7 +225,7 @@ async def get_tasks(
         return tasks
         
     except Exception as e:
-        logger.error("获取定时任务列表失败", error=str(e), user=current_user.username)
+        logger.error("获取定时任务列表失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"获取定时任务列表失败: {str(e)}")
 
 
@@ -252,12 +252,12 @@ async def enable_task(
         else:
             logger.error("定时任务启用失败", 
                         task_id=task_id,
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except Exception as e:
-        logger.error("启用定时任务失败", task_id=task_id, error=str(e), user=current_user.username)
+        logger.error("启用定时任务失败", task_id=task_id, exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"启用定时任务失败: {str(e)}")
 
 
@@ -284,12 +284,12 @@ async def disable_task(
         else:
             logger.error("定时任务禁用失败", 
                         task_id=task_id,
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except Exception as e:
-        logger.error("禁用定时任务失败", task_id=task_id, error=str(e), user=current_user.username)
+        logger.error("禁用定时任务失败", task_id=task_id, exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"禁用定时任务失败: {str(e)}")
 
 
@@ -316,12 +316,12 @@ async def delete_task(
         else:
             logger.error("定时任务删除失败", 
                         task_id=task_id,
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except Exception as e:
-        logger.error("删除定时任务失败", task_id=task_id, error=str(e), user=current_user.username)
+        logger.error("删除定时任务失败", task_id=task_id, exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"删除定时任务失败: {str(e)}")
 
 
@@ -381,15 +381,15 @@ async def create_eodhd_news_task(
             }
         else:
             logger.error("EODHD新闻定时任务创建失败", 
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except ValueError as e:
-        logger.error("EODHD新闻定时任务创建参数错误", error=str(e), user=current_user.username)
+        logger.error("EODHD新闻定时任务创建参数错误", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
-        logger.error("EODHD新闻定时任务创建失败", error=str(e), user=current_user.username)
+        logger.error("EODHD新闻定时任务创建失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
@@ -474,7 +474,7 @@ async def create_eodhd_fundamentals_task(
             }
         else:
             logger.error("EODHD基本面数据定时任务创建失败", 
-                        error=result.get('message', '未知错误'),
+                        failure_reason=result.get('message', '未知错误'),
                         user=current_user.username,
                         task_name=request.name)
             raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
@@ -482,11 +482,11 @@ async def create_eodhd_fundamentals_task(
     except HTTPException:
         raise
     except ValueError as e:
-        logger.error("EODHD基本面数据低频定时任务创建参数错误", error=str(e), user=current_user.username)
+        logger.error("EODHD基本面数据低频定时任务创建参数错误", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
         logger.error("创建EODHD基本面数据低频定时任务失败", 
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username,
                     task_name=request.name)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
@@ -543,7 +543,7 @@ async def create_finviz_screener_task(
             }
         else:
             logger.error("Finviz筛选数据定时任务创建失败", 
-                        error=result.get('message', '未知错误'),
+                        failure_reason=result.get('message', '未知错误'),
                         user=current_user.username,
                         task_name=request.name)
             raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
@@ -552,7 +552,7 @@ async def create_finviz_screener_task(
         raise
     except Exception as e:
         logger.error("创建Finviz筛选数据定时任务失败", 
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username,
                     task_name=request.name)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
@@ -591,12 +591,12 @@ async def create_default_eodhd_news_task(
             }
         else:
             logger.error("默认EODHD新闻定时任务创建失败", 
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except Exception as e:
-        logger.error("创建默认EODHD新闻定时任务失败", error=str(e), user=current_user.username)
+        logger.error("创建默认EODHD新闻定时任务失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建默认定时任务失败: {str(e)}")
 
 
@@ -642,12 +642,12 @@ async def execute_fundamentals_update(
             }
         else:
             logger.error("EODHD基本面数据更新执行失败", 
-                        error=result['message'],
+                        failure_reason=result['message'],
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result['message'])
         
     except Exception as e:
-        logger.error("手动执行EODHD基本面数据更新失败", error=str(e), user=current_user.username)
+        logger.error("手动执行EODHD基本面数据更新失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"手动执行基本面数据更新失败: {str(e)}")
 
 
@@ -687,7 +687,7 @@ async def get_task_logs(
     except Exception as e:
         logger.error("获取任务执行日志失败", 
                     task_id=task_id, 
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"获取任务执行日志失败: {str(e)}")
 
@@ -723,7 +723,7 @@ async def get_all_execution_logs(
         
     except Exception as e:
         logger.error("获取所有任务执行日志失败", 
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"获取所有任务执行日志失败: {str(e)}")
 
@@ -811,7 +811,7 @@ async def download_execution_logs_csv(
     except Exception as e:
         logger.error("下载执行日志CSV失败", 
                     task_id=task_id,
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"下载执行日志CSV失败: {str(e)}")
 
@@ -843,7 +843,7 @@ async def clear_execution_logs(
         
     except Exception as e:
         logger.error("清空执行日志失败", 
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"清空执行日志失败: {str(e)}")
 
@@ -939,7 +939,7 @@ async def get_timezone_presets():
 
 @router.get("/debug/database-tables", summary="查看数据库表数据（调试用）")
 async def get_database_tables(
-    table_name: str = Query(..., description="表名", regex="^task_scheduling$"),
+    table_name: str = Query(..., description="表名", pattern="^task_scheduling$"),
     limit: int = Query(default=50, ge=1, le=1000, description="返回记录数"),
     current_user=Depends(get_current_user)
 ):
@@ -1006,7 +1006,7 @@ async def get_database_tables(
     except Exception as e:
         logger.error("查看数据库表数据失败", 
                     table_name=table_name,
-                    error=str(e), 
+                    exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"查看数据库表数据失败: {str(e)}")
 
@@ -1056,5 +1056,5 @@ async def get_table_structure(
         }
         
     except Exception as e:
-        logger.error("查看表结构失败", error=str(e), user=current_user.username)
+        logger.error("查看表结构失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"查看表结构失败: {str(e)}")
