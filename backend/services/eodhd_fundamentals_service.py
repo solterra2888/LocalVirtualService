@@ -3475,19 +3475,23 @@ class EODHDFundamentalsService:
         """保存特定类型的持股数据（机构或基金）"""
         try:
             if not isinstance(holders_data, dict):
+                logger.warning(f"持股数据格式错误，期望dict但获得{type(holders_data)}: {holders_data}")
                 return
+            
+            logger.debug(f"开始处理 {holder_type} 持股数据，数据类型: {type(holders_data)}, 内容: {holders_data}")
             
             with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     for key, holder_info in holders_data.items():
                         if not isinstance(holder_info, dict):
+                            logger.warning(f"跳过非字典类型的持股数据: key={key}, type={type(holder_info)}, value={holder_info}")
                             continue
                         
                         try:
                             # 获取持股机构信息
                             name = holder_info.get('name', '').strip()
                             if not name:
-                                logger.warning(f"持股机构名称为空，跳过: {holder_info}")
+                                logger.warning(f"持股机构名称为空，跳过: key={key}, holder_info={holder_info}")
                                 continue
                             
                             # 解析日期
@@ -3501,12 +3505,14 @@ class EODHDFundamentalsService:
                                 logger.warning(f"持股日期格式错误 {name}: {date_str}")
                                 continue
                             
-                            # 获取其他数据字段
-                            total_shares = self._safe_float(holder_info.get('totalShares'))
-                            total_assets = self._safe_float(holder_info.get('totalAssets'))
-                            current_shares = self._safe_float(holder_info.get('currentShares'))
+                            # 获取其他数据字段 - 注意字段名称可能不同
+                            total_shares = self._safe_float(holder_info.get('totalShares') or holder_info.get('total_shares'))
+                            total_assets = self._safe_float(holder_info.get('totalAssets') or holder_info.get('total_assets'))
+                            current_shares = self._safe_float(holder_info.get('currentShares') or holder_info.get('current_shares'))
                             change = self._safe_float(holder_info.get('change'))
-                            change_p = self._safe_float(holder_info.get('change_p'))
+                            change_p = self._safe_float(holder_info.get('change_p') or holder_info.get('changeP') or holder_info.get('changePercent'))
+                            
+                            logger.debug(f"解析 {holder_type} 持股数据: name={name}, date={holder_date}, total_shares={total_shares}, total_assets={total_assets}, current_shares={current_shares}, change={change}, change_p={change_p}")
                             
                             # 插入或更新数据，使用ON CONFLICT处理重复记录
                             cur.execute("""
@@ -3530,7 +3536,7 @@ class EODHDFundamentalsService:
                             logger.debug(f"成功保存 {holder_type} 持股数据: {name} ({holder_date})")
                             
                         except Exception as e:
-                            logger.error(f"保存单个 {holder_type} 持股数据失败 {name}: {str(e)}")
+                            logger.error(f"保存单个 {holder_type} 持股数据失败 key={key}, holder_info={holder_info}: {str(e)}")
                             continue
                 
                 conn.commit()
@@ -3590,16 +3596,16 @@ class EODHDFundamentalsService:
                                 # 插入或更新数据，使用ON CONFLICT处理重复记录
                                 cur.execute("""
                                     INSERT INTO company_outstanding_shares (
-                                        company_id, date, dateformatted, sharesmln, shares,
+                                        company_id, date, dateformatted, sharesmln, shares, type,
                                         created_at, updated_at
-                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                    ON CONFLICT (company_id, dateformatted) DO UPDATE SET
+                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT (company_id, dateformatted, type) DO UPDATE SET
                                         date = EXCLUDED.date,
                                         sharesmln = EXCLUDED.sharesmln,
                                         shares = EXCLUDED.shares,
                                         updated_at = EXCLUDED.updated_at
                                 """, (
-                                    company_id, date_str, date_formatted, shares_mln, shares_float,
+                                    company_id, date_str, date_formatted, shares_mln, shares_float, period_type,
                                     datetime.now(), datetime.now()
                                 ))
                                 
@@ -4594,7 +4600,7 @@ class EODHDFundamentalsService:
                             shares_float = self._safe_float(shares)
                             
                             insert_data.append((
-                                company_id, date_str, date_formatted, shares_mln, shares_float,
+                                company_id, date_str, date_formatted, shares_mln, shares_float, period_type,
                                 datetime.now(), datetime.now()
                             ))
                             
@@ -4627,12 +4633,12 @@ class EODHDFundamentalsService:
                 return
             
             # 🚀 修复：去重处理，避免同一批次中的重复键冲突
-            # 数据格式：(company_id, date, dateformatted, sharesmln, shares, created_at, updated_at)
+            # 数据格式：(company_id, date, dateformatted, sharesmln, shares, type, created_at, updated_at)
             unique_data = {}
             for record in insert_data:
-                company_id, date_str, date_formatted, shares_mln, shares_float, created_at, updated_at = record
-                # 使用 (company_id, dateformatted) 作为唯一键
-                key = (company_id, date_formatted)
+                company_id, date_str, date_formatted, shares_mln, shares_float, period_type, created_at, updated_at = record
+                # 使用 (company_id, dateformatted, type) 作为唯一键
+                key = (company_id, date_formatted, period_type)
                 # 保留最新的记录（后面的会覆盖前面的）
                 unique_data[key] = record
             
@@ -4648,10 +4654,10 @@ class EODHDFundamentalsService:
                         cur,
                         """
                         INSERT INTO company_outstanding_shares (
-                            company_id, date, dateformatted, sharesmln, shares,
+                            company_id, date, dateformatted, sharesmln, shares, type,
                             created_at, updated_at
                         ) VALUES %s
-                        ON CONFLICT (company_id, dateformatted) DO UPDATE SET
+                        ON CONFLICT (company_id, dateformatted, type) DO UPDATE SET
                             date = EXCLUDED.date,
                             sharesmln = EXCLUDED.sharesmln,
                             shares = EXCLUDED.shares,
@@ -4750,7 +4756,7 @@ class EODHDFundamentalsService:
                 # 🚀 修复：只保存数据库表实际需要的字段
                 records.append((
                     company_id, date_obj,
-                    self._safe_float(data.get('reportedEPS')),  # 映射到epsactual
+                    self._safe_float(data.get('epsActual')),  # 映射到epsactual
                     datetime.now(), datetime.now()
                 ))
             except Exception as e:

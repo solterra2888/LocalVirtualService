@@ -139,11 +139,21 @@ export interface AnalystRating {
   id: number;
   company_id: number;
   rating?: string;
+  rating_value?: number;
   target_price?: number;
   analyst_name?: string;
   brokerage?: string;
   rating_date?: string;
   created_at: string;
+  updated_at?: string;
+  total_analysts?: number;
+  rating_breakdown?: {
+    strong_buy: { count: number; percentage: number };
+    buy: { count: number; percentage: number };
+    hold: { count: number; percentage: number };
+    sell: { count: number; percentage: number };
+    strong_sell: { count: number; percentage: number };
+  };
 }
 
 export interface DividendInfo {
@@ -162,13 +172,155 @@ export interface DividendInfo {
 export interface InsiderTransaction {
   id: number;
   company_id: number;
-  transaction_date?: string;
-  insider_name?: string;
-  title?: string;
-  transaction_type?: string;
-  quantity?: number;
-  price?: number;
-  value?: number;
+  date: string;
+  ownercik?: string;
+  ownername: string;
+  transactiondate?: string;
+  transactioncode?: string;
+  transactionamount?: number;
+  transactionprice?: number;
+  transactionacquireddisposed?: string;
+  posttransactionamount?: number;
+  seclink?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CompanyTechnicals {
+  id: number;
+  company_id: number;
+  beta?: number;
+  '52WeekHigh'?: number;
+  '52WeekLow'?: number;
+  '50DayMA'?: number;
+  '200DayMA'?: number;
+  sharesshort?: number;
+  sharesshortpriormonth?: number;
+  shortratio?: number;
+  shortpercent?: number;
+  data_date: string;
+}
+
+// 盈利数据相关接口
+export interface EarningsAnnual {
+  id: number;
+  company_id: number;
+  date: string;
+  epsactual?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface EarningsHistory {
+  id: number;
+  company_id: number;
+  reportdate?: string;
+  date: string;
+  beforeaftermarket?: string;
+  currency?: string;
+  epsactual?: number;
+  epsestimate?: number;
+  epsdifference?: number;
+  surprisepercent?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface EarningsTrend {
+  id: number;
+  company_id: number;
+  date: string;
+  period?: string;
+  growth?: number;
+  earningsestimateavg?: number;
+  earningsestimatelow?: number;
+  earningsestimatehigh?: number;
+  earningsestimateyearagoeps?: number;
+  earningsestimatenumberofanalysts?: number;
+  earningsestimategrowth?: number;
+  revenueestimateavg?: number;
+  revenueestimatelow?: number;
+  revenueestimatehigh?: number;
+  revenueestimateyearagoeps?: number;
+  revenueestimatenumberofanalysts?: number;
+  revenueestimategrowth?: number;
+  epstrendcurrent?: number;
+  epstrend7daysago?: number;
+  epstrend30daysago?: number;
+  epstrend60daysago?: number;
+  epstrend90daysago?: number;
+  epsrevisionsuplast7days?: number;
+  epsrevisionsuplast30days?: number;
+  epsrevisionsdownlast7days?: number;
+  epsrevisionsdownlast30days?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+// 股东信息相关接口
+export interface InstitutionalHolding {
+  id: number;
+  company_id: number;
+  holder_type: string;
+  name: string;
+  date: string;
+  totalshares?: number;
+  totalassets?: number;
+  currentshares?: number;
+  change?: number;
+  change_p?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+// 高管信息相关接口
+export interface CompanyOfficer {
+  id: number;
+  company_id: number;
+  name: string;
+  title: string;
+  yearborn?: string;
+  sort_order?: number;
+  is_active?: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+// 流通股数据相关接口
+export interface OutstandingShares {
+  id: number;
+  company_id: number;
+  date: string;
+  dateformatted: string;
+  sharesmln?: string;
+  shares?: number;
+  type: 'annual' | 'quarterly';
+  created_at: string;
+  updated_at?: string;
+}
+
+// 分红数据相关接口
+export interface DividendByYear {
+  id: number;
+  company_id: number;
+  year: number;
+  count?: number;
+  created_at: string;
+}
+
+export interface DividendInfo {
+  id: number;
+  company_id: number;
+  forwardannualdividendrate?: number;
+  forwardannualdividendyield?: number;
+  payoutratio?: number;
+  dividenddate?: string;
+  exdividenddate?: string;
+  lastsplitfactor?: string;
+  lastsplitdate?: string;
+  data_date: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface CompanyFundamentalsResponse {
@@ -180,7 +332,15 @@ export interface CompanyFundamentalsResponse {
   valuations?: CompanyValuations;
   analyst_ratings: AnalystRating[];
   dividend_info: DividendInfo[];
+  dividend_by_year: DividendByYear[];
   insider_transactions: InsiderTransaction[];
+  technicals?: CompanyTechnicals;
+  earnings_annual: EarningsAnnual[];
+  earnings_history: EarningsHistory[];
+  earnings_trend: EarningsTrend[];
+  institutional_holdings: InstitutionalHolding[];
+  officers: CompanyOfficer[];
+  outstanding_shares: OutstandingShares[];
 }
 
 export interface CompanySearchRequest {
@@ -285,15 +445,16 @@ export const fundamentalsUtils = {
   },
 
   // 获取评级颜色
-  getRatingColor: (rating: string | null | undefined): string => {
+  getRatingColor: (rating: string | number | null | undefined): string => {
     if (!rating) return '#999999';
     
-    const ratingLower = rating.toLowerCase();
-    if (ratingLower.includes('strong buy') || ratingLower.includes('buy')) {
+    // Convert to string and handle non-string values
+    const ratingStr = String(rating).toLowerCase();
+    if (ratingStr.includes('strong buy') || ratingStr.includes('buy')) {
       return '#52c41a';
-    } else if (ratingLower.includes('hold') || ratingLower.includes('neutral')) {
+    } else if (ratingStr.includes('hold') || ratingStr.includes('neutral')) {
       return '#faad14';
-    } else if (ratingLower.includes('sell')) {
+    } else if (ratingStr.includes('sell')) {
       return '#ff4d4f';
     } else {
       return '#999999';

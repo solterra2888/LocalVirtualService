@@ -979,7 +979,15 @@ class CompanyFundamentalsResponse(BaseModel):
     valuations: Optional[Dict[str, Any]] = None
     analyst_ratings: List[Dict[str, Any]] = []
     dividend_info: List[Dict[str, Any]] = []
+    dividend_by_year: List[Dict[str, Any]] = []
     insider_transactions: List[Dict[str, Any]] = []
+    technicals: Optional[Dict[str, Any]] = None
+    earnings_annual: List[Dict[str, Any]] = []
+    earnings_history: List[Dict[str, Any]] = []
+    earnings_trend: List[Dict[str, Any]] = []
+    institutional_holdings: List[Dict[str, Any]] = []
+    officers: List[Dict[str, Any]] = []
+    outstanding_shares: List[Dict[str, Any]] = []
 
 
 @router.post("/company/search", response_model=CompanyFundamentalsResponse)
@@ -1057,35 +1065,85 @@ async def search_company_fundamentals(
             highlights_result = cursor.fetchall()
             highlights = dict(highlights_result[0]) if highlights_result else None
             
-            # 查询资产负债表 (最近8个季度)
+            # 查询资产负债表 (最近4期数据，包含季度和年度)
             balance_sheet_sql = """
             SELECT * FROM company_balance_sheet 
             WHERE company_id = %s 
             ORDER BY date DESC 
-            LIMIT 8
+            LIMIT 20
             """
             cursor.execute(balance_sheet_sql, (company_id,))
-            balance_sheet = [dict(row) for row in cursor.fetchall()]
+            balance_sheet_raw = [dict(row) for row in cursor.fetchall()]
             
-            # 查询利润表 (最近8个季度)
+            # 查询利润表 (最近4期数据，包含季度和年度)
             income_statement_sql = """
             SELECT * FROM company_income_statement 
             WHERE company_id = %s 
             ORDER BY date DESC 
-            LIMIT 8
+            LIMIT 20
             """
             cursor.execute(income_statement_sql, (company_id,))
-            income_statement = [dict(row) for row in cursor.fetchall()]
+            income_statement_raw = [dict(row) for row in cursor.fetchall()]
             
-            # 查询现金流量表 (最近8个季度)
+            # 查询现金流量表 (最近4期数据，包含季度和年度)
             cash_flow_sql = """
             SELECT * FROM company_cash_flow 
             WHERE company_id = %s 
             ORDER BY date DESC 
-            LIMIT 8
+            LIMIT 20
             """
             cursor.execute(cash_flow_sql, (company_id,))
-            cash_flow = [dict(row) for row in cursor.fetchall()]
+            cash_flow_raw = [dict(row) for row in cursor.fetchall()]
+            
+            # 按期间类型分组数据
+            def group_by_period_type(data_list):
+                quarterly = []
+                annual = []
+                for item in data_list:
+                    period_type = item.get('period_type', '').lower()
+                    if period_type in ['quarterly', 'q', 'quarter']:
+                        quarterly.append(item)
+                    elif period_type in ['annual', 'a', 'year', 'yearly']:
+                        annual.append(item)
+                return quarterly, annual
+            
+            # 分组财务数据
+            balance_sheet_q, balance_sheet_a = group_by_period_type(balance_sheet_raw)
+            income_statement_q, income_statement_a = group_by_period_type(income_statement_raw)
+            cash_flow_q, cash_flow_a = group_by_period_type(cash_flow_raw)
+            
+            # 返回包含两种期间类型的数据，但保持Pydantic模型兼容性
+            # 将季度和年度数据合并，并添加period_type标识
+            balance_sheet = []
+            income_statement = []
+            cash_flow = []
+            
+            # 添加季度数据
+            for item in balance_sheet_q[:4]:
+                item['period_type'] = 'quarterly'
+                balance_sheet.append(item)
+            for item in income_statement_q[:4]:
+                item['period_type'] = 'quarterly'
+                income_statement.append(item)
+            for item in cash_flow_q[:4]:
+                item['period_type'] = 'quarterly'
+                cash_flow.append(item)
+            
+            # 添加年度数据
+            for item in balance_sheet_a[:4]:
+                item['period_type'] = 'annual'
+                balance_sheet.append(item)
+            for item in income_statement_a[:4]:
+                item['period_type'] = 'annual'
+                income_statement.append(item)
+            for item in cash_flow_a[:4]:
+                item['period_type'] = 'annual'
+                cash_flow.append(item)
+            
+            # 按日期排序（最新的在前）
+            balance_sheet.sort(key=lambda x: x['date'], reverse=True)
+            income_statement.sort(key=lambda x: x['date'], reverse=True)
+            cash_flow.sort(key=lambda x: x['date'], reverse=True)
             
             # 查询估值信息 (最新数据)
             valuations_sql = """
@@ -1100,33 +1158,245 @@ async def search_company_fundamentals(
             
             # 查询分析师评级 (最近10条)
             analyst_ratings_sql = """
-            SELECT * FROM company_analyst_ratings 
+            SELECT 
+                id,
+                company_id,
+                rating,
+                targetprice as target_price,
+                strongbuy,
+                buy,
+                hold,
+                sell,
+                strongsell,
+                data_date as rating_date,
+                created_at,
+                updated_at
+            FROM company_analyst_ratings 
             WHERE company_id = %s 
             ORDER BY created_at DESC 
             LIMIT 10
             """
             cursor.execute(analyst_ratings_sql, (company_id,))
-            analyst_ratings = [dict(row) for row in cursor.fetchall()]
+            analyst_ratings_raw = cursor.fetchall()
+            
+            # 转换数据格式以匹配前端期望
+            analyst_ratings = []
+            for row in analyst_ratings_raw:
+                rating_data = dict(row)
+                
+                # 获取所有评级分布数据
+                strong_buy = rating_data.get('strongbuy', 0) or 0
+                buy_count = rating_data.get('buy', 0) or 0
+                hold_count = rating_data.get('hold', 0) or 0
+                sell_count = rating_data.get('sell', 0) or 0
+                strong_sell = rating_data.get('strongsell', 0) or 0
+                total_analysts = strong_buy + buy_count + hold_count + sell_count + strong_sell
+                
+                # 根据数值评级生成文本评级
+                rating_value = rating_data.get('rating')
+                if rating_value is not None:
+                    if rating_value >= 4.5:
+                        rating_text = "Strong Buy"
+                    elif rating_value >= 3.5:
+                        rating_text = "Buy"
+                    elif rating_value >= 2.5:
+                        rating_text = "Hold"
+                    elif rating_value >= 1.5:
+                        rating_text = "Sell"
+                    else:
+                        rating_text = "Strong Sell"
+                else:
+                    rating_text = "N/A"
+                
+                # 计算评级分布百分比
+                def calculate_percentage(count, total):
+                    return round((count / total * 100), 1) if total > 0 else 0
+                
+                # 生成详细的分析师信息
+                if total_analysts > 0:
+                    analyst_name = f"Consensus ({total_analysts} analysts)"
+                    rating_breakdown = {
+                        'strong_buy': {
+                            'count': strong_buy,
+                            'percentage': calculate_percentage(strong_buy, total_analysts)
+                        },
+                        'buy': {
+                            'count': buy_count,
+                            'percentage': calculate_percentage(buy_count, total_analysts)
+                        },
+                        'hold': {
+                            'count': hold_count,
+                            'percentage': calculate_percentage(hold_count, total_analysts)
+                        },
+                        'sell': {
+                            'count': sell_count,
+                            'percentage': calculate_percentage(sell_count, total_analysts)
+                        },
+                        'strong_sell': {
+                            'count': strong_sell,
+                            'percentage': calculate_percentage(strong_sell, total_analysts)
+                        }
+                    }
+                else:
+                    analyst_name = "Consensus"
+                    rating_breakdown = {
+                        'strong_buy': {'count': 0, 'percentage': 0},
+                        'buy': {'count': 0, 'percentage': 0},
+                        'hold': {'count': 0, 'percentage': 0},
+                        'sell': {'count': 0, 'percentage': 0},
+                        'strong_sell': {'count': 0, 'percentage': 0}
+                    }
+                
+                # 生成券商名称
+                brokerage = "Multiple Brokers"
+                
+                analyst_ratings.append({
+                    'id': rating_data['id'],
+                    'company_id': rating_data['company_id'],
+                    'rating': rating_text,
+                    'rating_value': rating_value,
+                    'target_price': rating_data.get('target_price'),
+                    'analyst_name': analyst_name,
+                    'brokerage': brokerage,
+                    'rating_date': rating_data.get('rating_date'),
+                    'created_at': rating_data['created_at'],
+                    'updated_at': rating_data.get('updated_at'),
+                    'total_analysts': total_analysts,
+                    'rating_breakdown': rating_breakdown
+                })
             
             # 查询股息信息 (最近5年)
             dividend_sql = """
             SELECT * FROM company_dividend_info 
             WHERE company_id = %s 
             ORDER BY exdividenddate DESC 
-            LIMIT 20
+            LIMIT 10
             """
             cursor.execute(dividend_sql, (company_id,))
             dividend_info = [dict(row) for row in cursor.fetchall()]
             
-            # 查询内部交易 (最近20条)
+            # 查询年度分红统计 (最近50年)
+            dividend_by_year_sql = """
+            SELECT * FROM company_dividend_by_year 
+            WHERE company_id = %s 
+            ORDER BY year DESC 
+            LIMIT 50
+            """
+            cursor.execute(dividend_by_year_sql, (company_id,))
+            dividend_by_year = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询内部交易 (最近100条)
             insider_sql = """
             SELECT * FROM company_insider_transactions 
             WHERE company_id = %s 
             ORDER BY transactiondate DESC 
-            LIMIT 20
+            LIMIT 100
             """
             cursor.execute(insider_sql, (company_id,))
             insider_transactions = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询技术指标 (最新数据)
+            technicals_sql = """
+            SELECT * FROM company_technicals 
+            WHERE company_id = %s 
+            ORDER BY data_date DESC 
+            LIMIT 1
+            """
+            cursor.execute(technicals_sql, (company_id,))
+            technicals_result = cursor.fetchall()
+            technicals = dict(technicals_result[0]) if technicals_result else None
+            
+            # 查询年度盈利数据 (最近100年)
+            earnings_annual_sql = """
+            SELECT * FROM company_earnings_annual 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 100
+            """
+            cursor.execute(earnings_annual_sql, (company_id,))
+            earnings_annual = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询盈利历史数据 (最近100条)
+            earnings_history_sql = """
+            SELECT * FROM company_earnings_history 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 100
+            """
+            cursor.execute(earnings_history_sql, (company_id,))
+            earnings_history = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询盈利趋势数据 (最近100条)
+            earnings_trend_sql = """
+            SELECT * FROM company_earnings_trend 
+            WHERE company_id = %s 
+            ORDER BY date DESC 
+            LIMIT 100
+            """
+            cursor.execute(earnings_trend_sql, (company_id,))
+            earnings_trend = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询股东信息 (最近100条)
+            institutional_holdings_sql = """
+            SELECT 
+                id,
+                company_id,
+                holder_type,
+                name,
+                date,
+                totalshares,
+                totalassets,
+                currentshares,
+                change,
+                change_p,
+                created_at,
+                updated_at
+            FROM company_institutional_holdings 
+            WHERE company_id = %s 
+            ORDER BY date DESC, currentshares DESC 
+            LIMIT 100
+            """
+            cursor.execute(institutional_holdings_sql, (company_id,))
+            institutional_holdings = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询高管信息
+            officers_sql = """
+            SELECT 
+                id,
+                company_id,
+                name,
+                title,
+                yearborn,
+                sort_order,
+                is_active,
+                created_at,
+                updated_at
+            FROM company_officers 
+            WHERE company_id = %s 
+            ORDER BY sort_order ASC, name ASC
+            """
+            cursor.execute(officers_sql, (company_id,))
+            officers = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询流通股数据 (最近50条)
+            outstanding_shares_sql = """
+            SELECT 
+                id,
+                company_id,
+                date,
+                dateformatted,
+                sharesmln,
+                shares,
+                type,
+                created_at,
+                updated_at
+            FROM company_outstanding_shares 
+            WHERE company_id = %s 
+            ORDER BY dateformatted DESC 
+            LIMIT 50
+            """
+            cursor.execute(outstanding_shares_sql, (company_id,))
+            outstanding_shares = [dict(row) for row in cursor.fetchall()]
         
         # 处理company中的logo URL
         if 'logourl' in company:
@@ -1142,7 +1412,15 @@ async def search_company_fundamentals(
             valuations=valuations,
             analyst_ratings=analyst_ratings or [],
             dividend_info=dividend_info or [],
-            insider_transactions=insider_transactions or []
+            dividend_by_year=dividend_by_year or [],
+            insider_transactions=insider_transactions or [],
+            technicals=technicals,
+            earnings_annual=earnings_annual or [],
+            earnings_history=earnings_history or [],
+            earnings_trend=earnings_trend or [],
+            institutional_holdings=institutional_holdings or [],
+            officers=officers or [],
+            outstanding_shares=outstanding_shares or []
         )
         
         info(f"成功查询公司基本面信息", 
@@ -1156,7 +1434,13 @@ async def search_company_fundamentals(
                  'valuations': 1 if valuations else 0,
                  'analyst_ratings': len(analyst_ratings or []),
                  'dividend_info': len(dividend_info or []),
-                 'insider_transactions': len(insider_transactions or [])
+                 'dividend_by_year': len(dividend_by_year or []),
+                 'insider_transactions': len(insider_transactions or []),
+                 'earnings_annual': len(earnings_annual or []),
+                 'earnings_history': len(earnings_history or []),
+                 'earnings_trend': len(earnings_trend or []),
+                 'institutional_holdings': len(institutional_holdings or []),
+                 'outstanding_shares': len(outstanding_shares or [])
              },
              user=current_user.username,
              source="markets_api")
