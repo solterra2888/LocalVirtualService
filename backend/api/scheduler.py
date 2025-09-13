@@ -634,7 +634,7 @@ async def execute_fundamentals_update(
         if result['success']:
             logger.info("EODHD基本面数据更新执行成功", 
                        user=current_user.username,
-                       message=result['message'])
+                       result_message=result['message'])
             return {
                 "success": True,
                 "message": result['message'],

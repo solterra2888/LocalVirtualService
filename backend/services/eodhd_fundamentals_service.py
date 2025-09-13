@@ -4486,23 +4486,45 @@ class EODHDFundamentalsService:
         if not isinstance(holders_data, dict):
             return records
         
-        for holder_name, data in holders_data.items():
-            if not isinstance(data, dict):
+        for key, holder_info in holders_data.items():
+            if not isinstance(holder_info, dict):
                 continue
             try:
-                # 需要添加date字段，使用当前日期
-                from datetime import date
+                # 获取持股机构信息 - 使用正确的字段名
+                name = holder_info.get('name', '').strip()
+                if not name:
+                    logger.warning(f"持股机构名称为空，跳过: key={key}, holder_info={holder_info}")
+                    continue
+                
+                # 解析日期
+                date_str = holder_info.get('date', '')
+                if not date_str:
+                    logger.warning(f"持股日期为空，跳过 {name}: {holder_info}")
+                    continue
+                
+                holder_date = self._safe_date(date_str)
+                if not holder_date:
+                    logger.warning(f"持股日期格式错误 {name}: {date_str}")
+                    continue
+                
+                # 获取其他数据字段 - 使用正确的EODHD字段名
+                total_shares = self._safe_float(holder_info.get('totalShares') or holder_info.get('total_shares'))
+                total_assets = self._safe_float(holder_info.get('totalAssets') or holder_info.get('total_assets'))
+                current_shares = self._safe_float(holder_info.get('currentShares') or holder_info.get('current_shares'))
+                change = self._safe_float(holder_info.get('change'))
+                change_p = self._safe_float(holder_info.get('change_p') or holder_info.get('changeP') or holder_info.get('changePercent'))
+                
                 records.append((
-                    company_id, holder_name, holder_type, date.today(),
-                    self._safe_float(data.get('totalShares')),      # totalshares
-                    self._safe_float(data.get('totalValue')),       # totalassets
-                    self._safe_float(data.get('percentHeld')),      # currentshares 
-                    self._safe_float(data.get('sharesChange')),     # change
-                    self._safe_float(data.get('sharesChangePercent')), # change_p
+                    company_id, holder_type, name, holder_date,
+                    total_shares,      # totalshares
+                    total_assets,      # totalassets
+                    current_shares,    # currentshares 
+                    change,            # change
+                    change_p,          # change_p
                     datetime.now(), datetime.now()
                 ))
             except Exception as e:
-                logger.debug(f"提取股东数据失败 {holder_name}: {str(e)}")
+                logger.debug(f"提取股东数据失败 {key}: {str(e)}")
                 continue
         return records
 
@@ -4522,10 +4544,10 @@ class EODHDFundamentalsService:
                         cur,
                         """
                         INSERT INTO company_institutional_holdings (
-                            company_id, name, holder_type, date, totalshares, totalassets,
+                            company_id, holder_type, name, date, totalshares, totalassets,
                             currentshares, change, change_p, created_at, updated_at
                         ) VALUES %s
-                        ON CONFLICT (company_id, name, holder_type, date) DO UPDATE SET
+                        ON CONFLICT (company_id, holder_type, name, date) DO UPDATE SET
                             totalshares = EXCLUDED.totalshares,
                             totalassets = EXCLUDED.totalassets,
                             currentshares = EXCLUDED.currentshares,
