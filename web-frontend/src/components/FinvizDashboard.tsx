@@ -471,15 +471,6 @@ const FinvizDashboard: React.FC = () => {
     return 'Neutral';
   };
 
-  const formatMarketCap = (marketCap?: number) => {
-    if (!marketCap) return 'N/A';
-    if (marketCap >= 1e9) {
-      return `$${(marketCap / 1e9).toFixed(1)}B`;
-    } else if (marketCap >= 1e6) {
-      return `$${(marketCap / 1e6).toFixed(1)}M`;
-    }
-    return `$${marketCap.toFixed(0)}`;
-  };
 
   // 新闻列表骨架屏
   const renderNewsSkeleton = () => (
@@ -564,33 +555,21 @@ const FinvizDashboard: React.FC = () => {
     return (
       <Card size="small" style={{ marginBottom: '16px' }}>
         <Row gutter={16}>
-          <Col span={6}>
-            <Statistic 
-              title="股价" 
-              value={selectedStock.price || 0} 
-              prefix="$"
-              precision={2}
-              valueStyle={{ 
-                fontSize: '16px',
-                color: selectedStock.change_percent?.startsWith('-') ? '#ff4d4f' : '#52c41a'
-              }}
-            />
+          <Col span={8}>
+            <div>
+              <Text strong style={{ fontSize: '12px' }}>Company</Text>
+              <br />
+              <Text style={{ fontSize: '14px' }}>{selectedStock.company || selectedStock.symbol}</Text>
+            </div>
           </Col>
-          <Col span={6}>
-            <Statistic 
-              title="市值" 
-              value={formatMarketCap(selectedStock.market_cap)} 
-              valueStyle={{ fontSize: '16px' }}
-            />
+          <Col span={8}>
+            <div>
+              <Text strong style={{ fontSize: '12px' }}>Sector</Text>
+              <br />
+              <Text style={{ fontSize: '14px' }}>{selectedStock.sector || 'N/A'}</Text>
+            </div>
           </Col>
-          <Col span={6}>
-                          <div>
-                <Text strong style={{ fontSize: '12px' }}>Sector</Text>
-                <br />
-                <Text style={{ fontSize: '14px' }}>{selectedStock.sector || 'N/A'}</Text>
-              </div>
-          </Col>
-          <Col span={6}>
+          <Col span={8}>
             <div style={{ textAlign: 'right' }}>
               <Space>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -624,14 +603,14 @@ const FinvizDashboard: React.FC = () => {
     const group = watchlistGroups.find(g => g.group_name === selectedGroup);
     if (!group) return null;
 
-    const totalValue = group.items
-      .filter(item => item.price && item.market_cap)
-      .reduce((sum, item) => sum + (item.market_cap || 0), 0);
+    const sectorCount = group.items.reduce((acc, item) => {
+      const sector = item.sector || 'Unknown';
+      acc[sector] = (acc[sector] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
 
-    const avgPrice = group.items
-      .filter(item => item.price)
-      .reduce((sum, item) => sum + (item.price || 0), 0) / 
-      group.items.filter(item => item.price).length;
+    const topSector = Object.entries(sectorCount)
+      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'N/A';
 
     return (
       <Card size="small" style={{ marginBottom: '16px' }}>
@@ -645,17 +624,15 @@ const FinvizDashboard: React.FC = () => {
           </Col>
           <Col span={8}>
             <Statistic 
-              title="Total Market Cap" 
-              value={formatMarketCap(totalValue)}
+              title="Top Sector" 
+              value={topSector}
               valueStyle={{ fontSize: '16px' }}
             />
           </Col>
           <Col span={8}>
             <Statistic 
-              title="Average Price" 
-              value={avgPrice || 0}
-              prefix="$"
-              precision={2}
+              title="Sectors" 
+              value={Object.keys(sectorCount).length}
               valueStyle={{ fontSize: '16px' }}
             />
           </Col>
@@ -749,11 +726,6 @@ const FinvizDashboard: React.FC = () => {
                     <Space size="large" style={{ marginBottom: '16px' }}>
                       <Tag color="blue">{selectedStock.sector}</Tag>
                       <Tag color="green">{selectedStock.industry}</Tag>
-                      {selectedStock.change_percent && (
-                        <Tag color={selectedStock.change_percent.startsWith('-') ? 'red' : 'green'}>
-                          {selectedStock.change_percent}
-                        </Tag>
-                      )}
                     </Space>
                   )}
                 </div>

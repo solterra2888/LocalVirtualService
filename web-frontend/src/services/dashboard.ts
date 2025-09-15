@@ -66,9 +66,6 @@ export interface WatchlistItem {
   company?: string;
   sector?: string;
   industry?: string;
-  market_cap?: number;
-  price?: number;
-  change_percent?: string;
   company_id?: number;
 }
 
@@ -82,8 +79,6 @@ export interface StockSearchResult {
   company: string;
   sector: string;
   industry: string;
-  price?: number;
-  market_cap?: number;
   company_id?: number;
 }
 

@@ -561,7 +561,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
         db_conn_params = get_db_conn_params()
         db_manager = DatabaseManager(db_conn_params)
         
-        # 查询用户的watchlist，并关联finviz_screener获取最新数据
+        # 查询用户的watchlist，只关联companies表获取基础信息
         query = """
         SELECT 
             ttc.id as watchlist_id,
@@ -571,16 +571,11 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
             ttc.priority,
             ttc.notes,
             ttc.added_at,
-            f.company,
-            f.sector,
-            f.industry,
-            f.market_cap,
-            f.price,
-            f.change_percent,
+            c.name as company,
+            c.sector,
+            c.industry,
             c.id as company_id
         FROM target_tracking_config ttc
-        LEFT JOIN finviz_screener f ON ttc.symbol = f.ticker 
-            AND f.snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
         LEFT JOIN companies c ON ttc.symbol = c.code
         WHERE ttc.user_id = %s AND ttc.enabled = true
         ORDER BY ttc.priority DESC, ttc.added_at DESC
@@ -608,10 +603,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
                 "company": row[7],
                 "sector": row[8],
                 "industry": row[9],
-                "market_cap": float(row[10]) if row[10] else None,
-                "price": float(row[11]) if row[11] else None,
-                "change_percent": row[12],
-                "company_id": row[13]
+                "company_id": row[10]
             }
             
             watchlist_dict[group_name]["items"].append(item)
@@ -652,10 +644,10 @@ async def add_to_watchlist(
                 detail="股票代码不能为空"
             )
         
-        # 验证股票代码是否存在于finviz_screener表中
+        # 验证股票代码是否存在于companies表中
         check_query = """
-        SELECT ticker, company, sector FROM finviz_screener 
-        WHERE ticker = %s AND snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
+        SELECT code, name, sector FROM companies 
+        WHERE code = %s AND ticker_active = true
         LIMIT 1
         """
         stock_info = db_manager.fetch_one(check_query, [symbol])
@@ -663,7 +655,7 @@ async def add_to_watchlist(
         if not stock_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stock {symbol} not found"
+                detail=f"Stock {symbol} not found in companies database"
             )
         
         # 检查是否已经在watchlist中
@@ -809,23 +801,20 @@ async def search_stocks(
         
         query = """
         SELECT 
-            f.ticker,
-            f.company,
-            f.sector,
-            f.industry,
-            f.price,
-            f.market_cap,
+            c.code as ticker,
+            c.name as company,
+            c.sector,
+            c.industry,
             c.id as company_id
-        FROM finviz_screener f
-        LEFT JOIN companies c ON f.ticker = c.code
-        WHERE f.snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
+        FROM companies c
+        WHERE c.ticker_active = true
         AND (
-            f.ticker ILIKE %s OR 
-            f.company ILIKE %s OR
-            f.sector ILIKE %s OR
-            f.industry ILIKE %s
+            c.code ILIKE %s OR 
+            c.name ILIKE %s OR
+            c.sector ILIKE %s OR
+            c.industry ILIKE %s
         )
-        ORDER BY f.market_cap DESC NULLS LAST
+        ORDER BY c.name
         LIMIT %s
         """
         
@@ -839,9 +828,7 @@ async def search_stocks(
                 "company": row[1],
                 "sector": row[2],
                 "industry": row[3],
-                "price": float(row[4]) if row[4] else None,
-                "market_cap": float(row[5]) if row[5] else None,
-                "company_id": row[6]
+                "company_id": row[4]
             }
             stocks.append(stock)
         

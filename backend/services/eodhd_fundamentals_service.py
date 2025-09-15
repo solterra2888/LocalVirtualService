@@ -121,6 +121,9 @@ class EODHDFundamentalsService:
             'session_start_time': datetime.now()
         }
         
+        # API配额状态标志
+        self.api_quota_exhausted = False
+        
         # EODHD API限制配置（基于官方文档）
         self.api_limits = {
             # 每分钟请求限制：1000 requests/minute
@@ -276,6 +279,15 @@ class EODHDFundamentalsService:
                     logger.warning(f"股票代码不存在 (404): {url}")
                     return None
                 
+                # 对于402错误（Payment Required），API配额已用完，立即停止所有请求
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 402:
+                    logger.error(f"🚨 API配额已用完 (402 Payment Required): {url}")
+                    logger.error("🚨 检测到API配额限制，停止所有后续请求以避免浪费资源")
+                    # 设置一个标志，表示API配额已用完
+                    self.api_quota_exhausted = True
+                    # 抛出特殊异常，让上层调用者知道需要停止
+                    raise Exception("API_QUOTA_EXHAUSTED")
+                
                 # 对于429错误（速率限制），实施指数退避策略
                 if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
                     self.api_usage_stats['rate_limit_hits'] += 1
@@ -305,6 +317,15 @@ class EODHDFundamentalsService:
                     raise
         
         return None
+    
+    def reset_api_quota_status(self):
+        """重置API配额状态，允许重新开始请求"""
+        self.api_quota_exhausted = False
+        logger.info("🔄 API配额状态已重置，可以重新开始请求")
+    
+    def is_api_quota_exhausted(self) -> bool:
+        """检查API配额是否已用完"""
+        return self.api_quota_exhausted
     
     def get_api_usage_stats(self) -> Dict[str, Any]:
         """获取API使用统计信息"""
@@ -357,6 +378,12 @@ class EODHDFundamentalsService:
             return float(value)
         except (ValueError, TypeError):
             return None
+    
+    def _safe_string(self, value, default=None):
+        """安全获取字符串值，处理null值"""
+        if value is None or value == '' or str(value).strip() == '':
+            return default
+        return str(value).strip()
     
     def _process_logo_url(self, logo_url):
         """处理LogoURL，确保包含完整的EODHD域名"""
@@ -517,6 +544,11 @@ class EODHDFundamentalsService:
         def fetch_single_company(symbol_exchange):
             symbol, exchange = symbol_exchange
             try:
+                # 检查API配额是否已用完
+                if self.api_quota_exhausted:
+                    logger.warning(f"API配额已用完，跳过 {symbol}")
+                    return None
+                
                 full_data = self.fetch_company_full_data(symbol, exchange)
                 if full_data and isinstance(full_data, dict):
                     # 提取General数据用于兼容性
@@ -538,6 +570,11 @@ class EODHDFundamentalsService:
                     }
                 return None
             except Exception as e:
+                # 检查是否是API配额用完的异常
+                if "API_QUOTA_EXHAUSTED" in str(e):
+                    logger.error(f"🚨 检测到API配额用完，停止处理 {symbol}")
+                    self.api_quota_exhausted = True
+                    return None
                 logger.warning(f"并发获取{symbol}失败: {str(e)}")
                 return None
         
@@ -556,6 +593,16 @@ class EODHDFundamentalsService:
             completed_count = 0
             for future in as_completed(future_to_symbol):
                 completed_count += 1
+                
+                # 检查API配额是否已用完，如果是则取消剩余任务
+                if self.api_quota_exhausted:
+                    logger.error("🚨 API配额已用完，取消剩余任务")
+                    # 取消所有未完成的任务
+                    for remaining_future in future_to_symbol:
+                        if not remaining_future.done():
+                            remaining_future.cancel()
+                    break
+                
                 try:
                     result = future.result()
                     if result:
@@ -566,6 +613,15 @@ class EODHDFundamentalsService:
                         progress_pct = (completed_count / len(symbols_exchanges)) * 100
                         logger.info(f"🚀 并发获取进度: {completed_count}/{len(symbols_exchanges)} ({progress_pct:.0f}%)")
                 except Exception as e:
+                    # 检查是否是API配额用完的异常
+                    if "API_QUOTA_EXHAUSTED" in str(e):
+                        logger.error("🚨 检测到API配额用完，停止所有并发任务")
+                        self.api_quota_exhausted = True
+                        # 取消所有未完成的任务
+                        for remaining_future in future_to_symbol:
+                            if not remaining_future.done():
+                                remaining_future.cancel()
+                        break
                     logger.warning(f"并发任务失败: {str(e)}")
         
         success_rate = (len(valid_results) / len(symbols_exchanges)) * 100 if symbols_exchanges else 0
@@ -1220,7 +1276,7 @@ class EODHDFundamentalsService:
             
             values = (
                 general_data.get('Code', symbol),
-                general_data.get('Name', f"Company {symbol}"),
+                general_data.get('Name') or f"Company {symbol}",  # 修复：处理null值
                 exchange,
                 general_data.get('PrimaryTicker', symbol),
                 general_data.get('Type'),
@@ -1308,7 +1364,7 @@ class EODHDFundamentalsService:
             """
             
             values = (
-                general_data.get('Name'),
+                general_data.get('Name') or None,  # 保持null值，让COALESCE处理
                 general_data.get('Type'),
                 general_data.get('PrimaryTicker'),
                 general_data.get('CurrencyCode'),
@@ -1532,8 +1588,14 @@ class EODHDFundamentalsService:
                     })
             
             # 批量处理公司基本信息
-            companies_result = self._batch_save_companies(companies_batch)
-            symbol_to_id = companies_result.get('symbol_to_id', {})
+            try:
+                companies_result = self._batch_save_companies(companies_batch)
+                symbol_to_id = companies_result.get('symbol_to_id', {})
+                logger.info(f"☑️ 公司基本信息: {companies_result.get('saved_count', 0)} 个")
+            except Exception as e:
+                logger.error(f"批量保存公司基本信息失败，跳过: {str(e)}")
+                companies_result = {'saved_count': 0, 'symbol_to_id': {}}
+                symbol_to_id = {}
             
             # 批量处理地址数据
             addresses_result = self._batch_save_addresses(addresses_batch, symbol_to_id)
@@ -1704,7 +1766,7 @@ class EODHDFundamentalsService:
                 
                 upsert_values.append((
                     code,           # code (用于ON CONFLICT)
-                    general_data.get('Name', f"Company {symbol}"),
+                    general_data.get('Name') or f"Company {symbol}",  # 修复：处理null值
                     exchange,
                     primary_ticker,
                     general_data.get('Type'),
@@ -1768,20 +1830,47 @@ class EODHDFundamentalsService:
                 
                 with self.db_manager.get_connection_context() as conn:
                     with conn.cursor() as cursor:
-                        result = psycopg2.extras.execute_values(
-                            cursor, upsert_sql, upsert_values,
-                            template=None, page_size=100, fetch=True
-                        )
-                        conn.commit()
-                        
-                        # 构建symbol到id的映射
-                        for row in result:
-                            company_id, code = row
-                            # 找到对应的symbol
-                            for company_record in companies_batch:
-                                if company_record['general_data'].get('Code', company_record['symbol']) == code:
-                                    symbol_to_id[company_record['symbol']] = company_id
-                                    break
+                        try:
+                            result = psycopg2.extras.execute_values(
+                                cursor, upsert_sql, upsert_values,
+                                template=None, page_size=100, fetch=True
+                            )
+                            conn.commit()
+                            
+                            # 构建symbol到id的映射
+                            for row in result:
+                                company_id, code = row
+                                # 找到对应的symbol
+                                for company_record in companies_batch:
+                                    if company_record['general_data'].get('Code', company_record['symbol']) == code:
+                                        symbol_to_id[company_record['symbol']] = company_id
+                                        break
+                        except Exception as e:
+                            logger.error(f"批量UPSERT公司信息失败: {str(e)}")
+                            # 尝试逐个插入，跳过有问题的记录
+                            logger.info("尝试逐个插入公司信息...")
+                            successful_inserts = 0
+                            for i, upsert_value in enumerate(upsert_values):
+                                try:
+                                    cursor.execute(upsert_sql.replace('%s', '(%s)' % ','.join(['%s'] * len(upsert_value))), [upsert_value])
+                                    conn.commit()
+                                    successful_inserts += 1
+                                    
+                                    # 获取插入的ID
+                                    cursor.execute("SELECT id, code FROM companies WHERE code = %s", (upsert_value[0],))
+                                    row = cursor.fetchone()
+                                    if row:
+                                        company_id, code = row
+                                        # 找到对应的symbol
+                                        for company_record in companies_batch:
+                                            if company_record['general_data'].get('Code', company_record['symbol']) == code:
+                                                symbol_to_id[company_record['symbol']] = company_id
+                                                break
+                                except Exception as individual_error:
+                                    logger.warning(f"跳过有问题的公司记录 {i}: {str(individual_error)}")
+                                    continue
+                            
+                            logger.info(f"逐个插入完成: {successful_inserts}/{len(upsert_values)} 个成功")
                 
                 logger.info(f"🚀 超级UPSERT完成: {len(upsert_values)} 条记录")
             
@@ -1872,6 +1961,8 @@ class EODHDFundamentalsService:
             
             # 准备批量插入数据
             values_list = []
+            # 用于去重的集合，避免同一批次中的重复记录
+            seen_keys = set()
             
             for officers_record in officers_batch:
                 symbol = officers_record['symbol']
@@ -1899,6 +1990,14 @@ class EODHDFundamentalsService:
                     if not name:
                         continue
                     
+                    # 创建唯一键用于去重
+                    unique_key = (company_id, name, title)
+                    if unique_key in seen_keys:
+                        logger.debug(f"跳过重复的高管记录: {symbol} - {name} ({title})")
+                        continue
+                    
+                    seen_keys.add(unique_key)
+                    
                     # 处理出生年份
                     birth_year = None
                     if year_born and year_born != 'NA':
@@ -1917,7 +2016,7 @@ class EODHDFundamentalsService:
                     ))
             
             if values_list:
-                # 🚀 修复：使用UPSERT避免重复键冲突
+                # 🚀 修复：使用UPSERT避免重复键冲突，并分批处理避免单次操作过大
                 insert_sql = """
                     INSERT INTO company_officers (
                         company_id, name, title, yearborn, created_at, updated_at
@@ -1930,11 +2029,26 @@ class EODHDFundamentalsService:
                 import psycopg2.extras
                 with self.db_manager.get_connection_context() as conn:
                     with conn.cursor() as cursor:
-                        psycopg2.extras.execute_values(
-                            cursor, insert_sql, values_list,
-                            template=None, page_size=100
-                        )
+                        # 分批处理，每批100条记录，避免单次操作过大
+                        batch_size = 100
+                        total_saved = 0
+                        
+                        for i in range(0, len(values_list), batch_size):
+                            batch = values_list[i:i + batch_size]
+                            try:
+                                psycopg2.extras.execute_values(
+                                    cursor, insert_sql, batch,
+                                    template=None, page_size=batch_size
+                                )
+                                total_saved += len(batch)
+                                logger.debug(f"高管数据批次保存完成: {len(batch)} 条记录")
+                            except Exception as batch_error:
+                                logger.error(f"高管数据批次保存失败: {str(batch_error)}")
+                                # 继续处理下一批次，不中断整个流程
+                                continue
+                        
                         conn.commit()
+                        logger.info(f"🚀 批量保存高管数据完成: {total_saved}/{len(values_list)} 条记录")
             
             logger.info(f"🚀 批量保存高管数据完成: {len(values_list)} 条记录")
             return {'saved_count': len(values_list)}
@@ -2539,6 +2653,11 @@ class EODHDFundamentalsService:
             
             # 分批处理
             for batch_start in range(0, len(tickers), batch_size):
+                # 检查API配额是否已用完
+                if self.api_quota_exhausted:
+                    logger.error(f"🚨 API配额已用完，停止处理 {exchange} 的剩余批次")
+                    break
+                
                 batch_end = min(batch_start + batch_size, len(tickers))
                 batch_tickers = tickers[batch_start:batch_end]
                 
@@ -4459,15 +4578,15 @@ class EODHDFundamentalsService:
                     
                     processed_companies += 1
                     
+                    # 每500个公司进行一次批量插入，避免事务过大
+                    if processed_companies % 500 == 0:
+                        if insert_data:
+                            self._execute_batch_holders_insert(insert_data)
+                            insert_data = []
+                    
                 except Exception as e:
                     logger.warning(f"准备股东数据失败 {symbol}: {str(e)}")
                     continue
-            
-                # 每500个公司进行一次批量插入，避免事务过大
-                if processed_companies % 500 == 0:
-                    if insert_data:
-                        self._execute_batch_holders_insert(insert_data)
-                        insert_data = []
             
             # 处理剩余数据
             if insert_data:
@@ -4534,7 +4653,27 @@ class EODHDFundamentalsService:
             if not insert_data:
                 return
             
-            logger.debug(f"执行批量股东数据插入: {len(insert_data)} 条记录")
+            # 去重处理：基于(company_id, holder_type, name, date)去重
+            # 如果存在重复，保留最新的记录（基于updated_at）
+            unique_data = {}
+            for record in insert_data:
+                # 提取唯一键：(company_id, holder_type, name, date)
+                unique_key = (record[0], record[1], record[2], record[3])
+                if unique_key not in unique_data:
+                    unique_data[unique_key] = record
+                else:
+                    # 如果已存在，比较updated_at时间，保留更新的记录
+                    existing_record = unique_data[unique_key]
+                    if record[10] > existing_record[10]:  # updated_at字段在索引10
+                        unique_data[unique_key] = record
+            
+            # 转换回列表
+            deduplicated_data = list(unique_data.values())
+            
+            if len(deduplicated_data) != len(insert_data):
+                logger.info(f"股东数据去重: {len(insert_data)} -> {len(deduplicated_data)} 条记录")
+            
+            logger.debug(f"执行批量股东数据插入: {len(deduplicated_data)} 条记录")
             
             with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
@@ -4555,7 +4694,7 @@ class EODHDFundamentalsService:
                             change_p = EXCLUDED.change_p,
                             updated_at = EXCLUDED.updated_at
                         """,
-                        insert_data,
+                        deduplicated_data,
                         page_size=1000
                     )
                     

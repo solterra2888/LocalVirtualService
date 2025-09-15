@@ -15,8 +15,7 @@ import {
 } from 'antd';
 import {
   SearchOutlined,
-  PlusOutlined,
-  DollarOutlined
+  PlusOutlined
 } from '@ant-design/icons';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 
@@ -119,16 +118,6 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
     }
   };
 
-  // 格式化市值
-  const formatMarketCap = (marketCap?: number) => {
-    if (!marketCap) return 'N/A';
-    if (marketCap >= 1e9) {
-      return `$${(marketCap / 1e9).toFixed(1)}B`;
-    } else if (marketCap >= 1e6) {
-      return `$${(marketCap / 1e6).toFixed(1)}M`;
-    }
-    return `$${marketCap.toFixed(0)}`;
-  };
 
   return (
     <Modal
@@ -178,14 +167,6 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
                       <Space>
                         <Tag color="blue">{stock.sector}</Tag>
                         <Tag color="green">{stock.industry}</Tag>
-                        {stock.price && (
-                          <Text type="secondary">
-                            <DollarOutlined /> ${stock.price.toFixed(2)}
-                          </Text>
-                        )}
-                        <Text type="secondary">
-                          Market Cap: {formatMarketCap(stock.market_cap)}
-                        </Text>
                       </Space>
                     }
                   />
