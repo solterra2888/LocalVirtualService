@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -41,6 +43,11 @@ class EODHDNewsService:
             logger.info("API密钥获取成功", token_length=len(self.api_token))
             self.base_url = "https://eodhd.com/api/news"
             logger.info("设置API基础URL", base_url=self.base_url)
+            
+            # 创建优化的HTTP会话
+            logger.info("创建优化的HTTP会话")
+            self.session = self._create_robust_session()
+            logger.info("HTTP会话创建完成")
             
             # 数据库连接配置
             logger.info("准备数据库连接配置")
@@ -77,6 +84,41 @@ class EODHDNewsService:
         except Exception as e:
             logger.error("EODHD新闻服务初始化失败", exception=str(e))
             raise
+    
+    def _create_robust_session(self):
+        """创建一个具有重试机制和优化超时设置的会话"""
+        session = requests.Session()
+        
+        # 配置重试策略
+        retry_strategy = Retry(
+            total=3,  # 总重试次数
+            backoff_factor=2,  # 指数退避因子
+            status_forcelist=[429, 500, 502, 503, 504],  # 需要重试的状态码
+            allowed_methods=["GET"],  # 只对GET请求重试
+            raise_on_status=False  # 不立即抛出异常，让重试机制处理
+        )
+        
+        # 创建适配器
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,  # 连接池大小
+            pool_maxsize=20,  # 最大连接数
+            pool_block=False  # 不阻塞连接池
+        )
+        
+        # 挂载适配器
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 设置默认请求头
+        session.headers.update({
+            'User-Agent': 'Universal Glance/1.0 (EODHD News Service)',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'
+        })
+        
+        return session
     
     def get_news(self, symbols: Optional[str] = None, topic: Optional[str] = None, 
                  start_date: Optional[str] = None, end_date: Optional[str] = None,
@@ -131,7 +173,13 @@ class EODHDNewsService:
                        url=self.base_url, 
                        params_count=len(params),
                        params=params)  # 完整打印请求参数
-            response = requests.get(self.base_url, params=params, timeout=30)  # 添加30秒超时
+            
+            # 使用优化的会话和更长的超时时间
+            response = self.session.get(
+                self.base_url, 
+                params=params, 
+                timeout=(10, 60)  # 连接超时10秒，读取超时60秒
+            )
             response.raise_for_status()
             
             # 记录响应状态和内容预览

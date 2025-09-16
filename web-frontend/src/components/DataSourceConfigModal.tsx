@@ -170,6 +170,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     try {
       setLoading(true);
       
+      // 显示详细的处理状态信息
+      if (dataSourceType === 'eodhd_news') {
+        message.loading('Creating EODHD News strategy, this may take up to 2 minutes...', 0);
+      }
+      
       let result;
       if (dataSourceType === 'eodhd_fundamentals') {
         // EODHD基本面数据手动更新逻辑（不需要cron表达式）
@@ -215,6 +220,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         }
       }
 
+      // 关闭loading消息
+      message.destroy();
+
       if (result.success) {
         const successMessage = dataSourceType === 'eodhd_fundamentals' 
           ? 'Data update initiated successfully!' 
@@ -225,9 +233,25 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       } else {
         message.error(result.message || (dataSourceType === 'eodhd_fundamentals' ? 'Data update failed' : 'Configuration failed'));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Configuration failed:', error);
-      message.error('Configuration failed');
+      
+      // 关闭loading消息
+      message.destroy();
+      
+      // 提供更详细的错误信息
+      let errorMessage = 'Configuration failed';
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = 'Request timeout. The strategy creation is taking longer than expected. Please check the task list in a moment to see if it was created successfully.';
+      } else if (error.response?.status === 504) {
+        errorMessage = 'Gateway timeout. The strategy creation is in progress but taking longer than expected. Please check the task list in a moment.';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      message.error(errorMessage, 8); // 显示8秒
     } finally {
       setLoading(false);
     }

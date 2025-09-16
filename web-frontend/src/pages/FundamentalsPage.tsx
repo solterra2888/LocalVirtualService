@@ -80,11 +80,15 @@ const FundamentalsPage: React.FC = () => {
         fundamentalsData: data,
         loading: false
       }));
-      
-      message.success(`Successfully loaded fundamental information for ${data.company.name}`);
     } catch (error) {
       console.error('Failed to query fundamental information:', error);
-      message.error(`Query failed: ${getErrorMessage(error)}`);
+      const errorMessage = getErrorMessage(error);
+      // Avoid duplicate "no data found" messages
+      if (errorMessage.includes('no data found')) {
+        message.error(errorMessage);
+      } else {
+        message.error(`Query failed: ${errorMessage}`);
+      }
       setState(prev => ({ ...prev, loading: false }));
     }
   };

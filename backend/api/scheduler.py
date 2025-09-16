@@ -657,8 +657,7 @@ async def execute_fundamentals_update(
 async def get_task_logs(
     task_id: str,
     limit: int = Query(default=50, ge=1, le=500, description="返回日志条数"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
-    current_user=Depends(get_current_user)
+    offset: int = Query(default=0, ge=0, description="偏移量")
 ):
     """
     获取指定任务的执行日志
@@ -667,8 +666,7 @@ async def get_task_logs(
         logger.info("获取任务执行日志请求", 
                    task_id=task_id,
                    limit=limit,
-                   offset=offset,
-                   user=current_user.username)
+                   offset=offset)
         
         scheduler_service = await get_scheduler_service()
         logs = await scheduler_service.get_task_execution_logs(task_id, limit, offset)
@@ -687,16 +685,14 @@ async def get_task_logs(
     except Exception as e:
         logger.error("获取任务执行日志失败", 
                     task_id=task_id, 
-                    exception=str(e), 
-                    user=current_user.username)
+                    exception=str(e))
         raise HTTPException(status_code=500, detail=f"获取任务执行日志失败: {str(e)}")
 
 
 @router.get("/execution-logs", summary="获取所有任务执行日志")
 async def get_all_execution_logs(
     limit: int = Query(default=50, ge=1, le=500, description="返回日志条数"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
-    current_user=Depends(get_current_user)
+    offset: int = Query(default=0, ge=0, description="偏移量")
 ):
     """
     获取所有任务的执行日志
@@ -704,8 +700,7 @@ async def get_all_execution_logs(
     try:
         logger.info("获取所有任务执行日志请求", 
                    limit=limit,
-                   offset=offset,
-                   user=current_user.username)
+                   offset=offset)
         
         scheduler_service = await get_scheduler_service()
         logs = await scheduler_service.get_task_execution_logs(None, limit, offset)
@@ -723,8 +718,7 @@ async def get_all_execution_logs(
         
     except Exception as e:
         logger.error("获取所有任务执行日志失败", 
-                    exception=str(e), 
-                    user=current_user.username)
+                    exception=str(e))
         raise HTTPException(status_code=500, detail=f"获取所有任务执行日志失败: {str(e)}")
 
 
@@ -732,8 +726,7 @@ async def get_all_execution_logs(
 async def download_execution_logs_csv(
     task_id: Optional[str] = Query(default=None, description="任务ID，不提供则下载所有任务日志"),
     limit: int = Query(default=1000, ge=1, le=10000, description="返回日志条数"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
-    current_user=Depends(get_current_user)
+    offset: int = Query(default=0, ge=0, description="偏移量")
 ):
     """
     下载任务执行日志为CSV格式
@@ -742,8 +735,7 @@ async def download_execution_logs_csv(
         logger.info("下载执行日志CSV请求", 
                    task_id=task_id,
                    limit=limit,
-                   offset=offset,
-                   user=current_user.username)
+                   offset=offset)
         
         scheduler_service = await get_scheduler_service()
         logs = await scheduler_service.get_task_execution_logs(task_id, limit, offset)
@@ -794,8 +786,7 @@ async def download_execution_logs_csv(
             filename = f"all_execution_logs_{timestamp}.csv"
         
         logger.info(f"成功生成CSV文件: {filename}", 
-                   record_count=len(logs),
-                   user=current_user.username)
+                   record_count=len(logs))
         
         from fastapi.responses import StreamingResponse
         
@@ -811,20 +802,17 @@ async def download_execution_logs_csv(
     except Exception as e:
         logger.error("下载执行日志CSV失败", 
                     task_id=task_id,
-                    exception=str(e), 
-                    user=current_user.username)
+                    exception=str(e))
         raise HTTPException(status_code=500, detail=f"下载执行日志CSV失败: {str(e)}")
 
 
 @router.delete("/execution-logs/clear", summary="清空执行日志")
-async def clear_execution_logs(
-    current_user=Depends(get_current_user)
-):
+async def clear_execution_logs():
     """
     清空所有任务执行日志
     """
     try:
-        logger.info("清空执行日志请求", user=current_user.username)
+        logger.info("清空执行日志请求")
         
         scheduler_service = await get_scheduler_service()
         
@@ -832,19 +820,18 @@ async def clear_execution_logs(
         success = await scheduler_service.clear_execution_logs()
         
         if success:
-            logger.info("成功清空执行日志", user=current_user.username)
+            logger.info("成功清空执行日志")
             return {
                 "success": True,
                 "message": "执行日志已清空"
             }
         else:
-            logger.error("清空执行日志失败", user=current_user.username)
+            logger.error("清空执行日志失败")
             raise HTTPException(status_code=500, detail="清空执行日志失败")
         
     except Exception as e:
         logger.error("清空执行日志失败", 
-                    exception=str(e), 
-                    user=current_user.username)
+                    exception=str(e))
         raise HTTPException(status_code=500, detail=f"清空执行日志失败: {str(e)}")
 
 
