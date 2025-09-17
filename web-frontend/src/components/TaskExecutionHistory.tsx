@@ -38,7 +38,7 @@ dayjs.extend(relativeTime);
 const { Text } = Typography;
 const { Option } = Select;
 
-// 使用从scheduler service导入的ExecutionLog类型
+// Use ExecutionLog type imported from scheduler service
 
 interface TaskExecutionHistoryProps {
   taskId?: string;
@@ -78,12 +78,12 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       if (response.success && response.data) {
         setTasks(response.data);
       } else {
-        console.error('获取任务列表失败:', response.message);
-        message.error('获取任务列表失败');
+        console.error('Failed to get task list:', response.message);
+        message.error('Failed to get task list');
       }
     } catch (error) {
-      console.error('获取任务列表失败:', error);
-      message.error('获取任务列表失败');
+      console.error('Failed to get task list:', error);
+      message.error('Failed to get task list');
     }
   };
 
@@ -93,22 +93,22 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       
       let response;
       if (selectedTaskId && selectedTaskId !== 'all') {
-        // 获取特定任务的执行日志
+        // Get execution logs for specific task
         response = await schedulerAPI.getTaskLogs(selectedTaskId, 50, 0);
       } else {
-        // 获取所有任务的执行日志
+        // Get execution logs for all tasks
         response = await schedulerAPI.getAllExecutionLogs(50, 0);
       }
 
       if (response.success && response.data) {
         let filteredLogs = response.data.logs;
         
-        // 根据状态过滤
+        // Filter by status
         if (statusFilter && statusFilter !== 'all') {
           filteredLogs = filteredLogs.filter((log: ExecutionLog) => log.status === statusFilter);
         }
 
-        // 根据日期范围过滤
+        // Filter by date range
         if (dateRange && dateRange.length === 2) {
           const [startDate, endDate] = dateRange;
           filteredLogs = filteredLogs.filter((log: ExecutionLog) => {
@@ -119,13 +119,13 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
         setLogs(filteredLogs);
       } else {
-        message.error(response.message || '获取执行历史失败');
+        message.error(response.message || 'Failed to get execution history');
         setLogs([]);
       }
       
     } catch (error) {
-      console.error('加载执行日志失败:', error);
-      message.error('加载执行日志失败');
+      console.error('Failed to load execution logs:', error);
+      message.error('Failed to load execution logs');
       setLogs([]);
     } finally {
       setLoading(false);
@@ -134,10 +134,10 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   const getStatusTag = (status: string) => {
     const statusConfig = {
-      success: { color: 'success', icon: <CheckCircleOutlined />, text: '成功' },
-      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: '失败' },
-      error: { color: 'error', icon: <ExclamationCircleOutlined />, text: '错误' },
-      running: { color: 'processing', icon: <PlayCircleOutlined />, text: '运行中' }
+      success: { color: 'success', icon: <CheckCircleOutlined />, text: 'Success' },
+      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: 'Failed' },
+      error: { color: 'error', icon: <ExclamationCircleOutlined />, text: 'Error' },
+      running: { color: 'processing', icon: <PlayCircleOutlined />, text: 'Running' }
     };
     
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.error;
@@ -155,9 +155,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     const remainingSeconds = seconds % 60;
     
     if (minutes > 0) {
-      return `${minutes}分${remainingSeconds}秒`;
+      return `${minutes}m${remainingSeconds}s`;
     }
-    return `${remainingSeconds}秒`;
+    return `${remainingSeconds}s`;
   };
 
   const getTaskTypeIcon = (taskType: string) => {
@@ -180,33 +180,33 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   const handleDownloadCSV = async () => {
     try {
-      console.log('开始下载CSV，任务ID:', selectedTaskId);
-      message.loading('正在生成CSV文件...', 0);
+      console.log('Starting CSV download, task ID:', selectedTaskId);
+      message.loading('Generating CSV file...', 0);
       await schedulerAPI.downloadExecutionLogsCSV(selectedTaskId, 1000, 0);
       message.destroy();
-      message.success('CSV文件下载成功');
+      message.success('CSV file downloaded successfully');
     } catch (error: any) {
       message.destroy();
-      console.error('下载CSV失败:', error);
-      console.error('错误详情:', {
+      console.error('CSV download failed:', error);
+      console.error('Error details:', {
         message: error?.message,
         response: error?.response,
         status: error?.response?.status,
         data: error?.response?.data
       });
-      message.error(`下载CSV失败: ${error?.response?.data?.detail || error?.message}`);
+      message.error(`CSV download failed: ${error?.response?.data?.detail || error?.message}`);
     }
   };
 
   const handleClearLogs = async () => {
     try {
-      // 显示确认对话框
+      // Show confirmation dialog
       const confirmed = await new Promise<boolean>((resolve) => {
         Modal.confirm({
-          title: '确认清空',
-          content: '确定要清空所有任务执行日志吗？此操作不可恢复！',
-          okText: '确认清空',
-          cancelText: '取消',
+          title: 'Confirm Clear',
+          content: 'Are you sure you want to clear all task execution logs? This operation cannot be undone!',
+          okText: 'Confirm Clear',
+          cancelText: 'Cancel',
           okType: 'danger',
           onOk: () => resolve(true),
           onCancel: () => resolve(false),
@@ -217,25 +217,25 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         return;
       }
 
-      message.loading('正在清空执行日志...', 0);
+      message.loading('Clearing execution logs...', 0);
       const result = await schedulerAPI.clearExecutionLogs();
       message.destroy();
 
       if (result.success) {
-        message.success('执行日志已清空');
-        // 重新加载日志数据
+        message.success('Execution logs cleared');
+        // Reload log data
         await loadExecutionLogs();
       } else {
-        message.error(`清空失败: ${result.message}`);
+        message.error(`Clear failed: ${result.message}`);
       }
     } catch (error: any) {
       message.destroy();
-      console.error('清空日志失败:', error);
-      message.error(`清空日志失败: ${error?.message || '未知错误'}`);
+      console.error('Failed to clear logs:', error);
+      message.error(`Failed to clear logs: ${error?.message || 'Unknown error'}`);
     }
   };
 
-  // 统计数据
+  // Statistics data
   const stats = {
     total: logs.length,
     success: logs.filter(log => log.status === 'success').length,
@@ -250,7 +250,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   const columns = [
     {
-      title: '任务信息',
+      title: 'Task Info',
       key: 'task',
       render: (log: ExecutionLog) => (
         <Space>
@@ -269,7 +269,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       )
     },
     {
-      title: '执行时间',
+      title: 'Execution Time',
       key: 'time',
       render: (log: ExecutionLog) => (
         <div>
@@ -289,7 +289,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         dayjs(a.started_at).valueOf() - dayjs(b.started_at).valueOf()
     },
     {
-      title: '耗时',
+      title: 'Duration',
       dataIndex: 'duration_ms',
       key: 'duration',
       render: (duration: number) => (
@@ -300,37 +300,37 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       sorter: (a: ExecutionLog, b: ExecutionLog) => (a.duration_ms || 0) - (b.duration_ms || 0)
     },
     {
-      title: '状态',
+      title: 'Status',
       dataIndex: 'status',
       key: 'status',
       render: (status: string) => getStatusTag(status),
       filters: [
-        { text: '成功', value: 'success' },
-        { text: '失败', value: 'failed' },
-        { text: '错误', value: 'error' },
-        { text: '运行中', value: 'running' }
+        { text: 'Success', value: 'success' },
+        { text: 'Failed', value: 'failed' },
+        { text: 'Error', value: 'error' },
+        { text: 'Running', value: 'running' }
       ],
       onFilter: (value: any, record: ExecutionLog) => record.status === value
     },
     {
-      title: '结果',
+      title: 'Result',
       key: 'result',
       render: (log: ExecutionLog) => (
         <div style={{ maxWidth: 200 }}>
           {log.status === 'success' ? (
             <Text style={{ fontSize: '11px', color: '#52c41a' }}>
-              {log.result_message || '执行成功'}
+              {log.result_message || 'Execution successful'}
             </Text>
           ) : (
             <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
-              {log.error_message || '执行失败'}
+              {log.error_message || 'Execution failed'}
             </Text>
           )}
         </div>
       )
     },
     {
-      title: '操作',
+      title: 'Actions',
       key: 'actions',
       render: (log: ExecutionLog) => (
         <Button
@@ -339,7 +339,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
           icon={<InfoCircleOutlined />}
           onClick={() => handleViewDetail(log)}
         >
-          详情
+          Details
         </Button>
       )
     }
@@ -347,22 +347,22 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   return (
     <div>
-      {/* 过滤器 */}
+      {/* Filters */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[16, 16]} align="middle">
           {showTaskFilter && (
             <Col xs={24} sm={8}>
               <Space>
-                <Text strong>任务:</Text>
+                <Text strong>Task:</Text>
                 <Select
-                  placeholder="选择任务"
+                  placeholder="Select task"
                   style={{ width: 200 }}
                   allowClear
                   value={selectedTaskId}
                   onChange={setSelectedTaskId}
                   loading={loading}
                 >
-                  <Option value="all">所有任务</Option>
+                  <Option value="all">All Tasks</Option>
                   {tasks.map((task) => (
                     <Option key={task.id} value={task.id}>
                       {task.name}
@@ -375,17 +375,17 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
           
           <Col xs={24} sm={8}>
             <Space>
-              <Text strong>状态:</Text>
+              <Text strong>Status:</Text>
               <Select
                 value={statusFilter}
                 onChange={setStatusFilter}
                 style={{ width: 100 }}
               >
-                <Option value="all">全部</Option>
-                <Option value="success">成功</Option>
-                <Option value="failed">失败</Option>
-                <Option value="error">错误</Option>
-                <Option value="running">运行中</Option>
+                <Option value="all">All</Option>
+                <Option value="success">Success</Option>
+                <Option value="failed">Failed</Option>
+                <Option value="error">Error</Option>
+                <Option value="running">Running</Option>
               </Select>
             </Space>
           </Col>
@@ -398,19 +398,19 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
                 loading={loading}
                 size="small"
               >
-                刷新
+                Refresh
               </Button>
             </Space>
           </Col>
         </Row>
       </Card>
 
-      {/* 统计卡片 */}
+      {/* Statistics cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={6}>
           <Card>
             <Statistic
-              title="总执行次数"
+              title="Total Executions"
               value={stats.total}
               prefix={<ClockCircleOutlined />}
               valueStyle={{ color: '#1890ff' }}
@@ -420,7 +420,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         <Col xs={12} sm={6}>
           <Card>
             <Statistic
-              title="成功次数"
+              title="Success Count"
               value={stats.success}
               prefix={<CheckCircleOutlined />}
               valueStyle={{ color: '#52c41a' }}
@@ -430,7 +430,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         <Col xs={12} sm={6}>
           <Card>
             <Statistic
-              title="失败次数"
+              title="Failure Count"
               value={stats.failed}
               prefix={<ExclamationCircleOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
@@ -440,7 +440,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         <Col xs={12} sm={6}>
           <Card>
             <Statistic
-              title="成功率"
+              title="Success Rate"
               value={stats.successRate.toFixed(1)}
               suffix="%"
               prefix={<TrophyOutlined />}
@@ -453,11 +453,11 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         </Col>
       </Row>
 
-      {/* 成功率进度条 */}
+      {/* Success rate progress bar */}
       {stats.total > 0 && (
         <Card size="small" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Text strong>执行成功率:</Text>
+            <Text strong>Execution Success Rate:</Text>
             <Progress
               percent={stats.successRate}
               status={stats.successRate >= 90 ? 'success' : stats.successRate >= 70 ? 'active' : 'exception'}
@@ -465,21 +465,21 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               style={{ flex: 1 }}
             />
             <Text style={{ fontSize: '12px' }}>
-              平均耗时: {formatDuration(stats.avgDuration)}
+              Average Duration: {formatDuration(stats.avgDuration)}
             </Text>
           </div>
         </Card>
       )}
 
-      {/* 执行日志表格 */}
+      {/* Execution logs table */}
       <Card 
         title={
           <Space>
             <BarChartOutlined />
-            任务执行历史
+            Task Execution History
             {selectedTaskId && (
               <Tag color="blue">
-                任务过滤已启用
+                Task filtering enabled
               </Tag>
             )}
           </Space>
@@ -487,7 +487,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         extra={
           <Space>
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              共 {logs.length} 条记录
+              Total {logs.length} records
             </Text>
             <Button
               icon={<DownloadOutlined />}
@@ -495,7 +495,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               size="small"
               type="primary"
             >
-              下载CSV
+              Download CSV
             </Button>
             <Button
               icon={<DeleteOutlined />}
@@ -503,7 +503,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               size="small"
               danger
             >
-              清空
+              Clear
             </Button>
           </Space>
         }
@@ -518,7 +518,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               pageSize: 10,
               showSizeChanger: true,
               showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} 条记录，共 ${total} 条`
+              showTotal: (total, range) => `${range[0]}-${range[1]} records, total ${total}`
             }}
             scroll={{ y: height - 200 }}
             size="small"
@@ -528,9 +528,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               <Space direction="vertical">
-                <Text type="secondary">暂无执行记录</Text>
+                <Text type="secondary">No execution records</Text>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
-                  {selectedTaskId ? '该任务暂无执行记录' : '请选择任务或调整过滤条件'}
+                  {selectedTaskId ? 'No execution records for this task' : 'Please select a task or adjust filter conditions'}
                 </Text>
               </Space>
             }
@@ -538,12 +538,12 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         )}
       </Card>
 
-      {/* 详情模态框 */}
+      {/* Details modal */}
       <Modal
         title={
           <Space>
             <InfoCircleOutlined />
-            执行详情
+            Execution Details
           </Space>
         }
         open={detailVisible}
@@ -553,62 +553,62 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       >
         {selectedLog && (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="任务名称">
+            <Descriptions.Item label="Task Name">
               <Space>
                 {getTaskTypeIcon(selectedLog.task_type)}
                 {selectedLog.task_name}
               </Space>
             </Descriptions.Item>
-            <Descriptions.Item label="任务类型">
+            <Descriptions.Item label="Task Type">
               <Tag color="blue">
                 {selectedLog.task_type.replace('_', ' ').toUpperCase()}
               </Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="执行状态">
+            <Descriptions.Item label="Execution Status">
               {getStatusTag(selectedLog.status)}
             </Descriptions.Item>
-            <Descriptions.Item label="开始时间">
+            <Descriptions.Item label="Start Time">
               {dayjs(selectedLog.started_at).format('YYYY-MM-DD HH:mm:ss')}
             </Descriptions.Item>
-            <Descriptions.Item label="结束时间">
+            <Descriptions.Item label="End Time">
               {selectedLog.finished_at 
                 ? dayjs(selectedLog.finished_at).format('YYYY-MM-DD HH:mm:ss')
                 : '-'
               }
             </Descriptions.Item>
-            <Descriptions.Item label="执行耗时">
+            <Descriptions.Item label="Execution Duration">
               {formatDuration(selectedLog.duration_ms)}
             </Descriptions.Item>
             {selectedLog.result_message && (
-              <Descriptions.Item label="执行结果">
+              <Descriptions.Item label="Execution Result">
                 <Text style={{ color: '#52c41a' }}>
                   {selectedLog.result_message}
                 </Text>
               </Descriptions.Item>
             )}
             {selectedLog.result_data && (
-              <Descriptions.Item label="结果数据">
+              <Descriptions.Item label="Result Data">
                 <pre style={{ fontSize: '11px', margin: 0, whiteSpace: 'pre-wrap' }}>
                   {JSON.stringify(selectedLog.result_data, null, 2)}
                 </pre>
               </Descriptions.Item>
             )}
             {selectedLog.error_message && (
-              <Descriptions.Item label="错误信息">
+              <Descriptions.Item label="Error Message">
                 <Text style={{ color: '#ff4d4f' }}>
                   {selectedLog.error_message}
                 </Text>
               </Descriptions.Item>
             )}
             {selectedLog.error_traceback && (
-              <Descriptions.Item label="错误堆栈">
+              <Descriptions.Item label="Error Stack">
                 <pre style={{ fontSize: '10px', margin: 0, whiteSpace: 'pre-wrap', color: '#ff4d4f' }}>
                   {selectedLog.error_traceback}
                 </pre>
               </Descriptions.Item>
             )}
             {selectedLog.execution_params && (
-              <Descriptions.Item label="执行参数">
+              <Descriptions.Item label="Execution Parameters">
                 <pre style={{ fontSize: '11px', margin: 0, whiteSpace: 'pre-wrap' }}>
                   {JSON.stringify(selectedLog.execution_params, null, 2)}
                 </pre>

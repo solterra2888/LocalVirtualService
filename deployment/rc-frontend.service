@@ -1,0 +1,26 @@
+[Unit]
+Description=RC Project Frontend Application
+After=network.target rc-webapp.service
+Wants=rc-webapp.service
+
+[Service]
+Type=simple
+User=kevin
+Group=kevin
+WorkingDirectory=/home/kevin/rcproject/web-frontend
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=BROWSER=none
+Environment=REACT_APP_API_BASE_URL=http://localhost:8000/api
+Environment=REACT_APP_SCHEDULER_BASE_URL=http://localhost:8001
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# 性能优化
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

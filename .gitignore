@@ -28,6 +28,7 @@ build/
 env.example
 __pycache__/
 logs/
+venv/
 # Other files and folders
 .settings/
 

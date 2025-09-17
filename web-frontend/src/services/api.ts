@@ -62,8 +62,8 @@ apiClient.interceptors.response.use(
     } else if (error.response?.status === 403) {
       message.error('权限不足');
     } else if (error.response?.status === 404) {
-      const errorMessage = (error.response?.data as any)?.detail || '请求的资源不存在';
-      message.error(errorMessage);
+      // 不在这里显示404错误，让组件自己处理
+      console.warn('404 Error:', error.response?.data);
     } else if (error.response?.status && error.response.status >= 500) {
       const errorMessage = (error.response?.data as any)?.detail || '服务器内部错误';
       message.error(`服务器错误: ${errorMessage}`);

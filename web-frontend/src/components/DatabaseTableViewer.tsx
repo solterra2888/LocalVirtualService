@@ -36,7 +36,7 @@ interface TableData {
 }
 
 interface DatabaseTableViewerProps {
-  // 移除不再使用的props
+  // Remove unused props
 }
 
 const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
@@ -47,10 +47,10 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
 
-  // 表格配置 - 只保留定时任务配置表
+  // Table configuration - only keep scheduled task configuration table
   const tableConfigs = {
     task_scheduling: {
-      name: '定时任务配置表',
+      name: 'Scheduled Task Configuration',
       keyColumn: 'id',
       statusColumn: 'enabled',
       color: '#1890ff',
@@ -68,12 +68,12 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       if (response.success && response.data) {
         setTableData(response.data);
       } else {
-        message.error(response.message || '加载表数据失败');
+        message.error(response.message || 'Failed to load table data');
         setTableData(null);
       }
     } catch (error) {
-      console.error('加载表数据失败:', error);
-      message.error(`加载表数据失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      console.error('Failed to load table data:', error);
+      message.error(`Failed to load table data: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setTableData(null);
     } finally {
       setLoading(false);
@@ -93,7 +93,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
 
   const renderStatusTag = (value: any, column: string) => {
     if (column === 'enabled') {
-      return <Tag color={value ? 'green' : 'red'}>{value ? '已启用' : '已禁用'}</Tag>;
+      return <Tag color={value ? 'green' : 'red'}>{value ? 'Enabled' : 'Disabled'}</Tag>;
     }
     if (column === 'status') {
       const statusColors = {
@@ -114,12 +114,12 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       return <Text type="secondary">-</Text>;
     }
 
-    // 状态列特殊处理
+    // Special handling for status column
     if (column === currentConfig?.statusColumn) {
       return renderStatusTag(value, column);
     }
 
-    // JSON 对象处理
+    // JSON object handling
     if (typeof value === 'object') {
       return (
         <Tooltip title={<pre style={{ fontSize: '11px' }}>{JSON.stringify(value, null, 2)}</pre>}>
@@ -130,12 +130,12 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       );
     }
 
-    // 布尔值处理
+    // Boolean value handling
     if (typeof value === 'boolean') {
       return <Tag color={value ? 'green' : 'red'}>{value ? 'true' : 'false'}</Tag>;
     }
 
-    // 时间戳处理
+    // Timestamp handling
     if (column.includes('_at') && typeof value === 'string') {
       return (
         <Tooltip title={new Date(value).toLocaleString()}>
@@ -146,7 +146,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       );
     }
 
-    // ID 列处理
+    // ID column handling
     if (column === 'id' && typeof value === 'string') {
       return (
         <Text code style={{ fontSize: '10px' }}>
@@ -155,7 +155,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       );
     }
 
-    // 长文本处理
+    // Long text handling
     const stringValue = String(value);
     if (stringValue.length > 50) {
       return (
@@ -177,7 +177,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
   const getTableColumns = () => {
     if (!tableData || !tableData.columns) return [];
 
-    // 为定时任务配置表创建规范化的列配置
+    // Create normalized column configuration for scheduled task configuration table
     if (selectedTable === 'task_scheduling') {
       return [
         {
@@ -201,9 +201,9 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
           width: 150,
           render: (value: any) => {
             const typeMap: Record<string, string> = {
-              'eodhd_news': 'EODHD新闻',
-              'economic_events': '经济事件',
-              'macro_indicators': '宏观指标'
+              'eodhd_news': 'EODHD News',
+              'economic_events': 'Economic Events',
+              'macro_indicators': 'Macro Indicators'
             };
             return (
               <Tag color="blue" style={{ fontSize: '11px' }}>
@@ -247,7 +247,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
           }
         },
         {
-          title: '成功率',
+          title: 'Success Rate',
           dataIndex: 'success_rate',
           key: 'success_rate',
           width: 120,
@@ -257,7 +257,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
             const total = successCount + failCount;
             
             if (total === 0) {
-              return <Text type="secondary" style={{ fontSize: '11px' }}>暂无数据</Text>;
+              return <Text type="secondary" style={{ fontSize: '11px' }}>No Data</Text>;
             }
             
             const rate = (successCount / total * 100).toFixed(1);
@@ -291,13 +291,13 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
       ];
     }
 
-    // 其他表保持原有的动态列配置
+    // Other tables maintain original dynamic column configuration
     return tableData.columns.map((col: string) => ({
       title: (
         <Space>
           <Text strong style={{ fontSize: '12px' }}>{col}</Text>
-          {col === currentConfig?.keyColumn && <Tag color="blue" style={{ fontSize: '10px' }}>主键</Tag>}
-          {col === currentConfig?.statusColumn && <Tag color="green" style={{ fontSize: '10px' }}>状态</Tag>}
+          {col === currentConfig?.keyColumn && <Tag color="blue" style={{ fontSize: '10px' }}>Primary Key</Tag>}
+          {col === currentConfig?.statusColumn && <Tag color="green" style={{ fontSize: '10px' }}>Status</Tag>}
         </Space>
       ),
       dataIndex: col,
@@ -350,20 +350,20 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
 
   return (
     <div>
-      {/* 表格选择和统计 */}
+      {/* Table selection and statistics */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24}>
           <Card size="small">
             <Space direction="vertical" style={{ width: '100%' }}>
               <Space>
-                <Text strong>定时任务配置表</Text>
+                <Text strong>Scheduled Task Configuration</Text>
                 <Button
                   icon={<ReloadOutlined />}
                   onClick={() => loadTableData(selectedTable)}
                   loading={loading}
                   size="small"
                 >
-                  刷新
+                  Refresh
                 </Button>
               </Space>
             </Space>
@@ -373,13 +373,13 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
 
       </Row>
 
-      {/* 统计卡片 */}
+      {/* Statistics cards */}
       {stats && (
         <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
           <Col xs={12} sm={6}>
             <Card>
               <Statistic
-                title="总记录数"
+                title="Total Records"
                 value={stats.total}
                 prefix={<TableOutlined />}
                 valueStyle={{ color: currentConfig?.color }}
@@ -392,7 +392,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
               <Col xs={12} sm={6}>
                 <Card>
                   <Statistic
-                    title="已启用"
+                    title="Enabled"
                     value={stats.enabled}
                     prefix={<CheckCircleOutlined />}
                     valueStyle={{ color: '#52c41a' }}
@@ -402,7 +402,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
               <Col xs={12} sm={6}>
                 <Card>
                   <Statistic
-                    title="平均成功率"
+                    title="Average Success Rate"
                     value={stats.avgSuccessRate}
                     suffix="%"
                     prefix={<CheckCircleOutlined />}
@@ -417,7 +417,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
         </Row>
       )}
 
-      {/* 数据表格 */}
+      {/* Data table */}
       <Card
         title={
           <Space>
@@ -428,7 +428,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
         extra={
           tableData && (
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              共 {tableData.total_count} 条记录，{tableData.columns.length} 个字段
+              Total {tableData.total_count} records, {tableData.columns.length} fields
             </Text>
           )
         }
@@ -437,7 +437,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16 }}>
-              <Text type="secondary">正在加载表数据...</Text>
+              <Text type="secondary">Loading table data...</Text>
             </div>
           </div>
         ) : tableData && tableData.rows ? (
@@ -445,7 +445,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
             columns={[
               ...getTableColumns(),
               {
-                title: '操作',
+                title: 'Actions',
                 key: 'actions',
                 width: 80,
                 fixed: 'right',
@@ -465,7 +465,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
               pageSize: 20,
               showSizeChanger: true,
               showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} 条记录，共 ${total} 条`
+              showTotal: (total, range) => `${range[0]}-${range[1]} records, total ${total}`
             }}
             scroll={{ x: true }}
             size="small"
@@ -475,9 +475,9 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               <Space direction="vertical">
-                <Text type="secondary">暂无数据</Text>
+                <Text type="secondary">No Data</Text>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
-                  点击刷新按钮来加载数据
+                  Click refresh button to load data
                 </Text>
               </Space>
             }
@@ -485,12 +485,12 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
         )}
       </Card>
 
-      {/* 记录详情抽屉 */}
+      {/* Record details drawer */}
       <Drawer
         title={
           <Space>
             <InfoCircleOutlined />
-            记录详情
+            Record Details
           </Space>
         }
         open={detailVisible}

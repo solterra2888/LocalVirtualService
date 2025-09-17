@@ -476,16 +476,22 @@ class SchedulerService:
             # 创建EODHD新闻服务实例
             eodhd_service = EODHDNewsService()
             
-            # 执行新闻获取
-            result = eodhd_service.fetch_and_store_news(
-                symbols=params.get('symbols'),
-                topic=params.get('topic'),
-                start_date=params.get('start_date'),
-                end_date=params.get('end_date'),
-                max_results=params.get('max_results'),
-                topic_filter=params.get('topic_filter'),
-                keywords=params.get('keywords')
-            )
+            # 在线程池中执行耗时的新闻获取操作，避免阻塞事件循环
+            import asyncio
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    eodhd_service.fetch_and_store_news,
+                    params.get('symbols'),
+                    params.get('topic'),
+                    params.get('start_date'),
+                    params.get('end_date'),
+                    params.get('max_results'),
+                    params.get('topic_filter'),
+                    params.get('keywords')
+                )
             
             return {
                 'success': True,

@@ -62,7 +62,7 @@ const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
-// 数据源配置
+// Data source configuration
 interface DataSource {
   id: string;
   name: string;
@@ -84,7 +84,7 @@ interface QuickAction {
   icon: React.ReactNode;
 }
 
-// 新闻主题接口
+// News theme interface
 interface NewsTheme {
   id: number;
   topic_name: string;
@@ -217,47 +217,47 @@ const SchedulerPage: React.FC = () => {
     dataSource: null
   });
   
-  // 新闻相关状态
+  // News related state
   const [themes, setThemes] = useState<NewsTheme[]>([]);
 
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<NewsTheme | null>(null);
   const [themeForm] = Form.useForm();
   
-  // 定时任务相关状态
+  // Scheduled task related state
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
 
   const [dataSourceConfigVisible, setDataSourceConfigVisible] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<DataSource | null>(null);
 
-  // 任务状态监控模态框
+  // Task status monitoring modal
   const [taskStatusVisible, setTaskStatusVisible] = useState(false);
   const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null);
   
-  // 数据库表查看功能已移至DatabaseTableViewer组件
+  // Database table viewing functionality moved to DatabaseTableViewer component
   
   const [form] = Form.useForm();
 
-  // 页面加载时获取定时任务数据
+  // Load scheduled task data when page loads
   useEffect(() => {
     loadScheduledTasks();
   }, []);
 
-  // 查看任务状态
+  // View task status
   // const handleViewTaskStatus = (task: ScheduledTask) => {
   //   setSelectedTask(task);
   //   setTaskStatusVisible(true);
   // };
 
-  // 同步数据源状态与定时任务状态
+  // Sync data source status with scheduled task status
   const syncDataSourceStatus = useCallback(() => {
     setDataSources(prev => prev.map(source => {
-      // EODHD Fundamentals 始终显示为启用状态，因为只支持手动触发
+      // EODHD Fundamentals always shows as enabled because it only supports manual trigger
       if (source.id === 'eodhd_fundamentals') {
         return { ...source, enabled: true };
       }
       
-      // 找到对应的定时任务
+      // Find corresponding scheduled tasks
       const relatedTasks = scheduledTasks.filter(task => {
         const taskType = task.type.toLowerCase();
         const sourceIdLower = source.id.toLowerCase();
@@ -272,26 +272,26 @@ const SchedulerPage: React.FC = () => {
         );
       });
       
-      // 如果有相关任务，使用任务的enabled状态
+      // If there are related tasks, use the task's enabled status
       if (relatedTasks.length > 0) {
-        // 只要有一个任务启用，就认为数据源启用
+        // As long as one task is enabled, consider the data source enabled
         const hasEnabledTask = relatedTasks.some(task => task.enabled);
         return { ...source, enabled: hasEnabledTask };
       }
       
-      // 没有相关任务，保持原状态（Coming soon的数据源）
+      // No related tasks, maintain original status (Coming soon data sources)
       return source;
     }));
   }, [scheduledTasks]);
 
-  // 当定时任务列表更新时，同步数据源状态
+  // Sync data source status when scheduled task list updates
   useEffect(() => {
     if (scheduledTasks.length > 0) {
       syncDataSourceStatus();
     }
   }, [scheduledTasks, syncDataSourceStatus]);
 
-  // 获取状态标签
+  // Get status tag
   const getStatusTag = (status: string) => {
     const statusConfig = {
       running: { color: 'processing', icon: <SyncOutlined spin />, text: 'Running' },
@@ -310,7 +310,7 @@ const SchedulerPage: React.FC = () => {
 
 
 
-  // 加载主题数据
+  // Load theme data
   const loadThemes = async () => {
     try {
       const response = await newsAPI.getThemes();
@@ -321,7 +321,7 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 加载定时任务
+  // Load scheduled tasks
   const loadScheduledTasks = async () => {
     try {
       setLoading(true);
@@ -339,23 +339,23 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 切换数据源启用状态 - 通过启用/禁用对应的定时任务
+  // Toggle data source enabled status - by enabling/disabling corresponding scheduled tasks
   const toggleDataSource = async (sourceId: string, enabled: boolean) => {
     try {
       setLoading(true);
       
-      // EODHD Fundamentals 不支持切换状态，只支持手动触发
+      // EODHD Fundamentals does not support status toggle, only manual trigger
       if (sourceId === 'eodhd_fundamentals') {
-        message.info('EODHD Fundamentals 只支持手动触发更新，无法通过开关控制');
+        message.info('EODHD Fundamentals only supports manual trigger updates, cannot be controlled by switch');
         return;
       }
       
-      // 根据数据源ID找到对应的定时任务
+      // Find corresponding scheduled tasks based on data source ID
       const relatedTasks = scheduledTasks.filter(task => {
         const taskType = task.type.toLowerCase();
         const sourceIdLower = sourceId.toLowerCase();
         
-        // 映射关系：数据源ID -> 任务类型
+        // Mapping relationship: data source ID -> task type
         return (
           (sourceIdLower.includes('news') && taskType.includes('news')) ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
@@ -367,11 +367,11 @@ const SchedulerPage: React.FC = () => {
       });
       
       if (relatedTasks.length === 0) {
-        message.warning(`没有找到 ${sourceId} 对应的定时任务，请先配置数据获取策略`);
+        message.warning(`No scheduled tasks found for ${sourceId}, please configure data fetch strategy first`);
         return;
       }
       
-      // 批量启用/禁用相关任务
+      // Batch enable/disable related tasks
       let successCount = 0;
       let errorCount = 0;
       
@@ -385,43 +385,43 @@ const SchedulerPage: React.FC = () => {
             successCount++;
           } else {
             errorCount++;
-            console.error(`任务 ${task.id} 操作失败:`, result.message);
+            console.error(`Task ${task.id} operation failed:`, result.message);
           }
         } catch (error) {
           errorCount++;
-          console.error(`任务 ${task.id} 操作异常:`, error);
+          console.error(`Task ${task.id} operation error:`, error);
         }
       }
       
       if (successCount > 0) {
-        // 更新前端状态
+        // Update frontend status
         setDataSources(prev => prev.map(source => 
           source.id === sourceId ? { ...source, enabled } : source
         ));
         
-        // 重新加载任务列表以获取最新状态
+        // Reload task list to get latest status
         await loadScheduledTasks();
         
-        const message_text = `${enabled ? '启用' : '禁用'}成功：${successCount} 个任务`;
-        message.success(errorCount > 0 ? `${message_text}，${errorCount} 个任务失败` : message_text);
+        const message_text = `${enabled ? 'Enabled' : 'Disabled'} successfully: ${successCount} tasks`;
+        message.success(errorCount > 0 ? `${message_text}, ${errorCount} tasks failed` : message_text);
       } else {
-        message.error(`操作失败：所有 ${relatedTasks.length} 个任务都无法${enabled ? '启用' : '禁用'}`);
+        message.error(`Operation failed: all ${relatedTasks.length} tasks cannot be ${enabled ? 'enabled' : 'disabled'}`);
       }
       
     } catch (error) {
-      console.error('切换数据源状态失败:', error);
-      message.error('操作失败');
+      console.error('Failed to toggle data source status:', error);
+      message.error('Operation failed');
     } finally {
       setLoading(false);
     }
   };
 
-  // 执行快速操作
+  // Execute quick action
   const executeQuickAction = async (action: QuickAction, dataSource: DataSource, customParams?: any) => {
     try {
       setLoading(true);
       
-      // 更新数据源状态为运行中
+      // Update data source status to running
       setDataSources(prev => prev.map(source => 
         source.id === dataSource.id ? { ...source, status: 'running' } : source
       ));
@@ -431,7 +431,7 @@ const SchedulerPage: React.FC = () => {
 
       response = await api.post(action.endpoint, params);
 
-      // 更新数据源状态
+      // Update data source status
       setDataSources(prev => prev.map(source => 
         source.id === dataSource.id ? { 
           ...source, 
@@ -448,7 +448,7 @@ const SchedulerPage: React.FC = () => {
       
 
       
-      // 更新数据源状态为错误
+      // Update data source status to error
       setDataSources(prev => prev.map(source => 
         source.id === dataSource.id ? { 
           ...source, 
@@ -464,35 +464,35 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 显示快速操作对话框
+  // Show quick action dialog
   const showQuickActionModal = (action: QuickAction, dataSource: DataSource) => {
-    // 如果是Cron调度配置或基本面数据更新，根据数据源类型决定使用哪个配置组件
+    // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
-      // 对于EODHD相关数据源，使用专门的配置模态框
+      // For EODHD related data sources, use dedicated configuration modal
       if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
-        // 其他数据源暂不支持配置
-        message.info('该数据源配置功能即将推出');
+        // Other data sources do not support configuration yet
+        message.info('Data source configuration feature coming soon');
       }
       return;
     }
 
-    // 如果是简单操作，直接执行
+    // If it's a simple operation, execute directly
     if (!action.params || Object.keys(action.params).length === 0) {
       executeQuickAction(action, dataSource);
       return;
     }
 
-    // 显示参数配置对话框
+    // Show parameter configuration dialog
     setQuickActionModal({
       visible: true,
       action,
       dataSource
     });
     
-    // 如果是新闻获取，设置默认值并加载主题
+    // If it's news fetching, set default values and load themes
     if (action.id === 'fetch_latest_news') {
       form.setFieldsValue({
         ...action.params,
@@ -504,7 +504,7 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 确认执行快速操作
+  // Confirm execute quick action
   const confirmQuickAction = async () => {
     try {
       const values = await form.validateFields();
@@ -516,7 +516,7 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 主题管理函数
+  // Theme management functions
   const createTheme = async (values: any) => {
     try {
       const response = await newsAPI.createTheme(values);
@@ -582,7 +582,7 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 定时任务管理函数
+  // Scheduled task management functions
 
 
 
@@ -592,20 +592,20 @@ const SchedulerPage: React.FC = () => {
   const handleDataSourceConfigSuccess = (taskId: string) => {
     setDataSourceConfigVisible(false);
     setSelectedDataSource(null);
-    loadScheduledTasks(); // 重新加载任务列表
+    loadScheduledTasks(); // Reload task list
   };
 
 
 
 
 
-  // 数据库表查看函数已移至DatabaseTableViewer组件
+  // Database table viewing functions moved to DatabaseTableViewer component
 
-  // 刷新所有数据源状态
+  // Refresh all data source status
   const refreshAllSources = async () => {
     setLoading(true);
     try {
-      // 加载定时任务列表
+      // Load scheduled task list
       await loadScheduledTasks();
       message.success('Status refreshed');
     } catch (error) {
@@ -615,7 +615,7 @@ const SchedulerPage: React.FC = () => {
     }
   };
 
-  // 统计数据
+  // Statistics data
   const enabledSources = dataSources.filter(s => s.enabled).length;
   const runningSources = dataSources.filter(s => s.status === 'running').length;
   const enabledTasks = scheduledTasks.filter(t => t.enabled).length;
@@ -623,7 +623,7 @@ const SchedulerPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      {/* 页面标题 */}
+      {/* Page title */}
       <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <Title level={2} style={{ margin: 0 }}>
@@ -645,178 +645,181 @@ const SchedulerPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* 统计卡片 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={8} md={6}>
-          <Card>
-            <Statistic
-              title="Total Data Sources"
-              value={dataSources.length}
-              prefix={<DatabaseOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={8} md={6}>
-          <Card>
-            <Statistic
-              title="Enabled"
-              value={enabledSources}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-              suffix={`/ ${dataSources.length}`}
-            />
-          </Card>
-        </Col>
-
-        <Col xs={24} sm={8} md={6}>
-          <Card>
-            <Statistic
-              title="Running"
-              value={runningSources}
-              prefix={<SyncOutlined spin={runningSources > 0} />}
-              valueStyle={{ color: '#faad14' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={8} md={6}>
-          <Card>
-            <Statistic
-              title="Scheduled Tasks"
-              value={scheduledTasks.length}
-              prefix={<ScheduleOutlined />}
-              valueStyle={{ color: '#722ed1' }}
-              suffix={`(${enabledTasks} enabled)`}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-
-
-      {/* 数据源卡片 */}
-      <Row gutter={[16, 16]}>
-        {dataSources.map(source => (
-          <Col xs={24} lg={12} xl={8} key={source.id}>
-            <Card
-              title={
-                <Space>
-                  <span>{source.name}</span>
-                  {getStatusTag(source.status)}
-                </Space>
-              }
-              extra={
-                source.id === 'eodhd_fundamentals' ? null : (
-                  <Tooltip title={
-                    source.description.includes('Coming soon') 
-                      ? '此数据源即将推出' 
-                      : !source.enabled && scheduledTasks.filter(task => {
-                          const taskType = task.type.toLowerCase();
-                          const sourceIdLower = source.id.toLowerCase();
-                          return (
-                            (sourceIdLower.includes('news') && taskType.includes('news')) ||
-                            (sourceIdLower.includes('events') && taskType.includes('events')) ||
-                            (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
-                          );
-                        }).length === 0
-                      ? '请先配置数据获取策略'
-                      : undefined
-                  }>
-                    <Switch
-                      checked={source.enabled}
-                      onChange={(checked) => toggleDataSource(source.id, checked)}
-                      disabled={source.description.includes('Coming soon') || loading}
-                      loading={loading && source.status === 'running'}
-                    />
-                  </Tooltip>
-                )
-              }
-              style={{ 
-                height: '100%',
-                opacity: source.enabled ? 1 : 0.6
-              }}
-            >
-              <div style={{ marginBottom: '16px' }}>
-                <Text type="secondary">{source.description}</Text>
-              </div>
-
-              {source.lastRun && (
-                <div style={{ marginBottom: '16px' }}>
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    Last Run: {source.lastRun}
-                  </Text>
-                </div>
-              )}
-
-              <div style={{ marginBottom: '16px' }}>
-                <Text strong>Configuration:</Text>
-              </div>
-
-              <Space direction="vertical" style={{ width: '100%' }}>
-                {source.quickActions.map(action => (
-                  <Tooltip key={action.id} title={action.description}>
-                    <Button
-                      block
-                      icon={action.icon}
-                      onClick={() => showQuickActionModal(action, source)}
-                      disabled={!source.enabled}
-                      loading={source.status === 'running'}
-                    >
-                      {action.name}
-                    </Button>
-                  </Tooltip>
-                ))}
-              </Space>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {/* 定时任务管理区域 */}
-      <Card 
-        title={
-          <Space>
-            <ScheduleOutlined />
-            <span>Scheduled Tasks</span>
-          </Space>
-        }
-        style={{ marginTop: '24px' }}
-      >
+      {/* Main content area - using Tabs layout */}
+      <Card>
         <Tabs 
-          defaultActiveKey="tasks" 
+          defaultActiveKey="scheduler_config" 
+          size="large"
           items={[
-          {
-            key: 'tasks',
-            label: (
-              <Space>
-                <ScheduleOutlined />
-                任务管理
-              </Space>
-            ),
-            children: (
-              <DatabaseTableViewer />
-            )
-          },
-          {
-            key: 'execution_history',
-            label: (
-              <Space>
-                <BarChartOutlined />
-                执行历史
-              </Space>
-            ),
-            children: (
-              <TaskExecutionHistory showTaskFilter={true} height={600} />
-            )
-          }
-        ]} />
+            {
+              key: 'scheduler_config',
+              label: (
+                <Space>
+                  <SettingOutlined />
+                  Scheduler Configuration
+                </Space>
+              ),
+              children: (
+                <div>
+                  {/* Statistics cards */}
+                  <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+                    <Col xs={24} sm={8} md={6}>
+                      <Card>
+                        <Statistic
+                          title="Total Data Sources"
+                          value={dataSources.length}
+                          prefix={<DatabaseOutlined />}
+                          valueStyle={{ color: '#1890ff' }}
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={8} md={6}>
+                      <Card>
+                        <Statistic
+                          title="Enabled"
+                          value={enabledSources}
+                          prefix={<CheckCircleOutlined />}
+                          valueStyle={{ color: '#52c41a' }}
+                          suffix={`/ ${dataSources.length}`}
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={8} md={6}>
+                      <Card>
+                        <Statistic
+                          title="Running"
+                          value={runningSources}
+                          prefix={<SyncOutlined spin={runningSources > 0} />}
+                          valueStyle={{ color: '#faad14' }}
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={8} md={6}>
+                      <Card>
+                        <Statistic
+                          title="Scheduled Tasks"
+                          value={scheduledTasks.length}
+                          prefix={<ScheduleOutlined />}
+                          valueStyle={{ color: '#722ed1' }}
+                          suffix={`(${enabledTasks} enabled)`}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+
+                  {/* Data source cards */}
+                  <Row gutter={[16, 16]}>
+                    {dataSources.map(source => (
+                      <Col xs={24} lg={12} xl={8} key={source.id}>
+                        <Card
+                          title={
+                            <Space>
+                              <span>{source.name}</span>
+                              {getStatusTag(source.status)}
+                            </Space>
+                          }
+                          extra={
+                            source.id === 'eodhd_fundamentals' ? null : (
+                              <Tooltip title={
+                                source.description.includes('Coming soon') 
+                                  ? 'This data source is coming soon' 
+                                  : !source.enabled && scheduledTasks.filter(task => {
+                                      const taskType = task.type.toLowerCase();
+                                      const sourceIdLower = source.id.toLowerCase();
+                                      return (
+                                        (sourceIdLower.includes('news') && taskType.includes('news')) ||
+                                        (sourceIdLower.includes('events') && taskType.includes('events')) ||
+                                        (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
+                                      );
+                                    }).length === 0
+                                  ? 'Please configure data fetch strategy first'
+                                  : undefined
+                              }>
+                                <Switch
+                                  checked={source.enabled}
+                                  onChange={(checked) => toggleDataSource(source.id, checked)}
+                                  disabled={source.description.includes('Coming soon') || loading}
+                                  loading={loading && source.status === 'running'}
+                                />
+                              </Tooltip>
+                            )
+                          }
+                          style={{ 
+                            height: '100%',
+                            opacity: source.enabled ? 1 : 0.6
+                          }}
+                        >
+                          <div style={{ marginBottom: '16px' }}>
+                            <Text type="secondary">{source.description}</Text>
+                          </div>
+
+                          {source.lastRun && (
+                            <div style={{ marginBottom: '16px' }}>
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                Last Run: {source.lastRun}
+                              </Text>
+                            </div>
+                          )}
+
+                          <div style={{ marginBottom: '16px' }}>
+                            <Text strong>Configuration:</Text>
+                          </div>
+
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            {source.quickActions.map(action => (
+                              <Tooltip key={action.id} title={action.description}>
+                                <Button
+                                  block
+                                  icon={action.icon}
+                                  onClick={() => showQuickActionModal(action, source)}
+                                  disabled={!source.enabled}
+                                  loading={source.status === 'running'}
+                                >
+                                  {action.name}
+                                </Button>
+                              </Tooltip>
+                            ))}
+                          </Space>
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
+                </div>
+              )
+            },
+            {
+              key: 'task_management',
+              label: (
+                <Space>
+                  <ScheduleOutlined />
+                  Task Management
+                </Space>
+              ),
+              children: (
+                <DatabaseTableViewer />
+              )
+            },
+            {
+              key: 'execution_history',
+              label: (
+                <Space>
+                  <BarChartOutlined />
+                  Execution History
+                </Space>
+              ),
+              children: (
+                <TaskExecutionHistory showTaskFilter={true} height={600} />
+              )
+            }
+          ]} 
+        />
       </Card>
 
 
 
 
 
-      {/* 数据源专用配置模态框 */}
+      {/* Data source specific configuration modal */}
       {selectedDataSource && (
         <DataSourceConfigModal
           open={dataSourceConfigVisible}
@@ -830,7 +833,7 @@ const SchedulerPage: React.FC = () => {
         />
       )}
 
-      {/* 快速操作参数配置对话框 */}
+      {/* Quick action parameter configuration dialog */}
       <Modal
         title={
           <Space>
@@ -849,7 +852,7 @@ const SchedulerPage: React.FC = () => {
         width={800}
         destroyOnClose
       >
-        {/* 进度条 */}
+        {/* Progress bar */}
 
 
         {quickActionModal.action && (
@@ -1126,7 +1129,7 @@ const SchedulerPage: React.FC = () => {
         )}
       </Modal>
 
-      {/* 主题编辑模态框 */}
+      {/* Theme editing modal */}
       <Modal
         title={selectedTheme ? "Edit Theme" : "New Theme"}
         open={themeModalVisible}
@@ -1200,7 +1203,7 @@ const SchedulerPage: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* 任务状态监控模态框 */}
+      {/* Task status monitoring modal */}
       <TaskStatusModal
         open={taskStatusVisible}
         onCancel={() => {
@@ -1216,7 +1219,7 @@ const SchedulerPage: React.FC = () => {
                   selectedTask.status === 'disabled' ? 'scheduled' : 'scheduled',
           cron_expression: selectedTask.cron_expression,
           next_execution: selectedTask.next_run,
-          statistics: undefined // ScheduledTask接口中没有last_execution属性
+          statistics: undefined // ScheduledTask interface does not have last_execution property
         } : undefined}
       />
     </div>
