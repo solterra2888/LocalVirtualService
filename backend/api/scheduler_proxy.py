@@ -16,24 +16,9 @@ logger = get_logger("scheduler_proxy")
 router = APIRouter(prefix="/scheduler", tags=["Scheduler Proxy"])
 
 # 调度器服务配置
-<<<<<<< HEAD
-import os
-
-# 从环境变量读取调度器服务地址，支持混合部署
-SCHEDULER_SERVICE_HOST = os.getenv('SCHEDULER_HOST', 'localhost')
-SCHEDULER_SERVICE_PORT = os.getenv('SCHEDULER_PORT', '8001')
-SCHEDULER_SERVICE_URL = os.getenv('SCHEDULER_SERVICE_URL', f"http://{SCHEDULER_SERVICE_HOST}:{SCHEDULER_SERVICE_PORT}")
-
-# 如果设置了完整的服务URL，使用它；否则构建URL
-if SCHEDULER_SERVICE_URL and not SCHEDULER_SERVICE_URL.startswith('http'):
-    SCHEDULER_SERVICE_URL = f"http://{SCHEDULER_SERVICE_URL}"
-
-SCHEDULER_BASE_URL = f"{SCHEDULER_SERVICE_URL}/api"
-=======
 SCHEDULER_SERVICE_HOST = 'localhost'  # 调度器服务在本地运行
 SCHEDULER_SERVICE_PORT = 8001
 SCHEDULER_BASE_URL = f"http://{SCHEDULER_SERVICE_HOST}:{SCHEDULER_SERVICE_PORT}/api"
->>>>>>> UG-Scheduler
 
 class SchedulerServiceClient:
     """调度器服务客户端"""
@@ -41,10 +26,6 @@ class SchedulerServiceClient:
     def __init__(self):
         self.base_url = SCHEDULER_BASE_URL
         self.timeout = 120.0  # 增加到2分钟，适应数据处理任务
-<<<<<<< HEAD
-        logger.info(f"调度器服务客户端初始化: {self.base_url}")
-=======
->>>>>>> UG-Scheduler
     
     async def _make_request(self, method: str, endpoint: str, headers: Optional[Dict] = None, **kwargs) -> Dict[str, Any]:
         """发起HTTP请求到调度器服务"""
@@ -106,13 +87,6 @@ class SchedulerServiceClient:
     async def delete(self, endpoint: str, headers: Optional[Dict] = None) -> Dict[str, Any]:
         """DELETE请求"""
         return await self._make_request("DELETE", endpoint, headers=headers)
-<<<<<<< HEAD
-    
-    async def get_health(self) -> Dict[str, Any]:
-        """获取调度器服务健康状态"""
-        return await self.get("/health")
-=======
->>>>>>> UG-Scheduler
 
 # 全局客户端实例
 scheduler_client = SchedulerServiceClient()

@@ -90,12 +90,9 @@ scheduler_app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # React开发服务器
         "http://localhost:8000",  # 主Web应用
-<<<<<<< HEAD
-=======
         "http://111.230.48.119:3000",  # 前端应用
         "http://111.230.48.119:8000",  # 主Web应用
         "http://111.230.48.119",  # nginx代理
->>>>>>> UG-Scheduler
         f"http://{config.get('DB_HOST', 'localhost')}:8000",  # 远程主应用
         f"http://{config.get('DB_HOST', 'localhost')}:3000",  # 远程前端
     ],

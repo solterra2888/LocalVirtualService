@@ -1,42 +1,4 @@
 [Unit]
-<<<<<<< HEAD
-Description=RC Project - Main Web Application
-After=network.target postgresql.service
-Wants=postgresql.service
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/rcproject
-Environment=PYTHONPATH=/opt/rcproject
-ExecStart=/opt/rcproject/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
-
-# 环境变量
-EnvironmentFile=/opt/rcproject/.env
-
-# 日志
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=rc-webapp
-
-# 安全设置
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/rcproject/uploads /opt/rcproject/logs
-
-# 资源限制
-LimitNOFILE=65536
-MemoryLimit=2G
-
-[Install]
-WantedBy=multi-user.target
-
-=======
 Description=RC Project Web Application
 After=network.target postgresql.service rc-scheduler.service
 Wants=postgresql.service rc-scheduler.service
@@ -68,4 +30,3 @@ LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target
->>>>>>> UG-Scheduler
