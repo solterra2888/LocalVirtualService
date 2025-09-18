@@ -13,10 +13,12 @@ fi
 
 echo "📋 启动服务列表:"
 echo "   - PostgreSQL数据库"
-echo "   - 调度器服务"
 echo "   - Web应用"
 echo "   - 前端应用"
 echo "   - Nginx代理"
+echo ""
+echo "ℹ️  注意: 调度器服务需要单独启动"
+echo "   启动调度器: sudo ./scheduler/start_scheduler.sh"
 echo ""
 
 # 启动PostgreSQL
@@ -30,19 +32,6 @@ else
 fi
 
 # 等待数据库启动
-sleep 3
-
-# 启动调度器服务
-echo "🕒 启动调度器服务..."
-systemctl start rc-scheduler
-if systemctl is-active --quiet rc-scheduler; then
-    echo "✅ 调度器服务已启动"
-else
-    echo "❌ 调度器服务启动失败"
-    exit 1
-fi
-
-# 等待调度器启动
 sleep 3
 
 # 启动Web应用
@@ -85,11 +74,15 @@ echo "🌐 访问地址:"
 echo "   - 前端应用: http://111.230.48.119:3000"
 echo "   - Web应用: http://111.230.48.119:8000"
 echo "   - API文档: http://111.230.48.119:8000/api/docs"
-echo "   - 调度器: http://111.230.48.119:8001"
-echo "   - 调度器文档: http://111.230.48.119:8001/scheduler-docs"
 echo ""
 echo "🔧 管理命令:"
 echo "   - 查看状态: systemctl status rc-*"
 echo "   - 停止服务: sudo ./stop_services.sh"
 echo "   - 重启服务: sudo ./restart_services.sh"
-echo "   - 查看日志: journalctl -u rc-scheduler -f"
+echo ""
+echo "🕒 调度器管理:"
+echo "   - 启动调度器: sudo ./scheduler/start_scheduler.sh"
+echo "   - 停止调度器: sudo ./scheduler/stop_scheduler.sh"
+echo "   - 重启调度器: sudo ./scheduler/restart_scheduler.sh"
+echo "   - 查看状态: sudo ./scheduler/status_scheduler.sh"
+echo "   - 查看日志: sudo ./scheduler/logs_scheduler.sh"

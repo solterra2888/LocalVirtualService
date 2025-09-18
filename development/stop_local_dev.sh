@@ -59,10 +59,9 @@ if [ -f "$PID_FILE" ]; then
     echo -e "${BLUE}📖 从PID文件读取进程信息...${NC}"
     source "$PID_FILE"
     
-    # 按逆序停止服务（前端 → Web应用 → 调度器）
+    # 按逆序停止服务（前端 → Web应用）
     stop_process "$FRONTEND_PID" "前端应用"
     stop_process "$WEBAPP_PID" "Web应用"
-    stop_process "$SCHEDULER_PID" "调度器"
     
     # 删除PID文件
     rm -f "$PID_FILE"
@@ -91,7 +90,6 @@ echo -e "${BLUE}🔍 检查并停止端口上的进程...${NC}"
 # 停止各个端口上的进程
 stop_process_by_port 3000 "前端应用"
 stop_process_by_port 8000 "Web应用"
-stop_process_by_port 8001 "调度器"
 
 # 清理可能的Node.js进程
 echo ""
@@ -111,14 +109,14 @@ if [ -n "$NODE_PIDS" ]; then
     echo -e "${GREEN}✅ Node.js进程已清理${NC}"
 fi
 
-# 查找并停止相关的Python进程
-PYTHON_PIDS=$(pgrep -f "uvicorn\|scheduler_main" 2>/dev/null || true)
+# 查找并停止相关的Python进程（仅限Web应用，不包含调度器）
+PYTHON_PIDS=$(pgrep -f "uvicorn.*main:app" 2>/dev/null || true)
 if [ -n "$PYTHON_PIDS" ]; then
     echo -e "${YELLOW}🔄 停止相关Python进程...${NC}"
     echo "$PYTHON_PIDS" | xargs kill 2>/dev/null || true
     sleep 2
     # 强制停止仍在运行的进程
-    PYTHON_PIDS=$(pgrep -f "uvicorn\|scheduler_main" 2>/dev/null || true)
+    PYTHON_PIDS=$(pgrep -f "uvicorn.*main:app" 2>/dev/null || true)
     if [ -n "$PYTHON_PIDS" ]; then
         echo "$PYTHON_PIDS" | xargs kill -9 2>/dev/null || true
     fi
@@ -156,12 +154,12 @@ check_port_status() {
 
 check_port_status 3000 "前端应用"
 check_port_status 8000 "Web应用"
-check_port_status 8001 "调度器"
 
 echo ""
-echo -e "${GREEN}🎉 所有开发服务已停止!${NC}"
+echo -e "${GREEN}🎉 开发服务已停止!${NC}"
 echo "=============================================="
 echo -e "${CYAN}💡 提示:${NC}"
 echo "   - 重新启动: ./development/start_local_dev.sh"
-echo "   - 查看状态: ps aux | grep -E 'uvicorn|npm|scheduler_main'"
+echo "   - 查看状态: ps aux | grep -E 'uvicorn.*main:app|npm'"
+echo "   - 调度器独立运行，不受此脚本管理"
 echo "=============================================="

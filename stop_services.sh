@@ -15,8 +15,10 @@ echo "📋 停止服务列表:"
 echo "   - Nginx代理"
 echo "   - 前端应用"
 echo "   - Web应用"
-echo "   - 调度器服务"
 echo "   - PostgreSQL数据库"
+echo ""
+echo "ℹ️  注意: 调度器服务需要单独停止"
+echo "   停止调度器: sudo ./scheduler/stop_scheduler.sh"
 echo ""
 
 # 停止Nginx
@@ -33,11 +35,6 @@ echo "✅ 前端应用已停止"
 echo "🌐 停止Web应用..."
 systemctl stop rc-webapp
 echo "✅ Web应用已停止"
-
-# 停止调度器服务
-echo "🕒 停止调度器服务..."
-systemctl stop rc-scheduler
-echo "✅ 调度器服务已停止"
 
 # 停止PostgreSQL
 echo "🗄️ 停止PostgreSQL数据库..."
@@ -62,19 +59,7 @@ if [ ! -z "$PORT_8000_PIDS" ]; then
     echo "✅ 8000端口进程已清理"
 fi
 
-# 清理8001端口进程
-PORT_8001_PIDS=$(lsof -t -i:8001 2>/dev/null)
-if [ ! -z "$PORT_8001_PIDS" ]; then
-    echo "🔄 发现8001端口残留进程，正在清理..."
-    kill -15 $PORT_8001_PIDS 2>/dev/null
-    sleep 2
-    # 如果还存在，强制终止
-    PORT_8001_PIDS=$(lsof -t -i:8001 2>/dev/null)
-    if [ ! -z "$PORT_8001_PIDS" ]; then
-        kill -9 $PORT_8001_PIDS 2>/dev/null
-    fi
-    echo "✅ 8001端口进程已清理"
-fi
+# 注意：8001端口由调度器管理脚本处理
 
 # 清理3000端口进程
 PORT_3000_PIDS=$(lsof -t -i:3000 2>/dev/null)
@@ -95,3 +80,8 @@ echo "🎉 所有服务已停止!"
 echo "================================"
 echo "💡 要重新启动服务，请运行:"
 echo "   sudo ./start_services.sh"
+echo ""
+echo "🕒 调度器管理:"
+echo "   - 启动调度器: sudo ./scheduler/start_scheduler.sh"
+echo "   - 停止调度器: sudo ./scheduler/stop_scheduler.sh"
+echo "   - 查看状态: sudo ./scheduler/status_scheduler.sh"
