@@ -37,7 +37,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (credentials: LoginRequest) => {
     set({ loading: true });
     try {
-      const response = await fetch('/api/auth/login', {
+      const apiBaseURL = process.env.REACT_APP_API_BASE_URL || '/api';
+      const response = await fetch(`${apiBaseURL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -95,7 +96,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         
         // 验证token是否仍然有效
         console.log('开始验证token...');
-        const verifyResponse = await fetch('/api/auth/verify', {
+        const apiBaseURL = process.env.REACT_APP_API_BASE_URL || '/api';
+        const verifyResponse = await fetch(`${apiBaseURL}/auth/verify`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,

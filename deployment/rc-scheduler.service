@@ -1,10 +1,15 @@
 [Unit]
+<<<<<<< HEAD
 Description=RC Project - Scheduler Service
+=======
+Description=RC Project Scheduler Service
+>>>>>>> UG-Scheduler
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
+<<<<<<< HEAD
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/rcproject
@@ -35,3 +40,29 @@ MemoryLimit=4G
 [Install]
 WantedBy=multi-user.target
 
+=======
+User=kevin
+Group=kevin
+WorkingDirectory=/home/kevin/rcproject
+Environment=PATH=/home/kevin/miniconda3/envs/rc_project/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/kevin/rcproject
+Environment=DB_HOST=localhost
+Environment=DB_PORT=5432
+Environment=DB_NAME=rc_database
+Environment=DB_USER=postgres
+Environment=DB_PASSWORD=1q23l,Sc45+@!
+Environment=SCHEDULER_SERVICE_URL=http://localhost:8001
+Environment=DEPLOYMENT_MODE=unified
+ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python /home/kevin/rcproject/scheduler_main.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# 性能优化
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
+>>>>>>> UG-Scheduler
