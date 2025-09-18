@@ -10,8 +10,8 @@ Group=kevin
 WorkingDirectory=/home/kevin/rcproject/web-frontend
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=BROWSER=none
-Environment=REACT_APP_API_BASE_URL=http://localhost:8000/api
-Environment=REACT_APP_SCHEDULER_BASE_URL=http://localhost:8001
+Environment=REACT_APP_API_BASE_URL=http://111.230.48.119/api
+Environment=REACT_APP_SCHEDULER_BASE_URL=http://111.230.48.119/scheduler
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=3
