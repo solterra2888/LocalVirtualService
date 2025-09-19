@@ -50,6 +50,7 @@ export interface FileDetail {
   cost?: number;
   error_message?: string;
   created_at: string;
+  original_file_path?: string;
 }
 
 export interface FileValidationResponse {
@@ -157,6 +158,23 @@ export const filesAPI = {
   // 获取处理参数选项
   getProcessingParams: async (): Promise<ProcessingParamsOptions> => {
     return api.get<ProcessingParamsOptions>('/files/processing-params');
+  },
+
+  // 获取原始文件信息
+  getOriginalFileInfo: async (fileId: number): Promise<{
+    filename: string;
+    file_type: string;
+    file_size_mb: number;
+    original_file_path: string;
+    file_url: string;
+  }> => {
+    return api.get<{
+      filename: string;
+      file_type: string;
+      file_size_mb: number;
+      original_file_path: string;
+      file_url: string;
+    }>(`/files/original/${fileId}`);
   },
 
   // 获取支持的文件类型扩展名

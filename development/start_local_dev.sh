@@ -62,6 +62,9 @@ echo "   1. 🔍 检查调度器状态"
 echo "   2. 🌐 Web应用 (localhost:8000)" 
 echo "   3. 🎨 前端应用 (localhost:3000)"
 echo ""
+echo -e "${CYAN}💡 提示: 如需独立测试调度器，请运行:${NC}"
+echo "   ./development/start_scheduler_dev.sh"
+echo ""
 
 # 创建日志目录
 LOGS_DIR="$PROJECT_ROOT/development/logs"

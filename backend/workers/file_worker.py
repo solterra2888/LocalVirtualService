@@ -99,7 +99,7 @@ class FileProcessingWorker:
             use_ai_agent = params.get('use_ai_agent', True)
             rc_agent_service = None
             if use_ai_agent and task_info.get('token'):
-                base_url = params.get('ai_agent_server_url', 'http://111.230.48.119/v1/chat-messages')
+                base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
                 rc_agent_service = RCAgentService(rc_agent_token=task_info.get('token'), base_url=base_url, log_callback=self.update_status)
             
             self.update_status("processing", 5.0, log_message="开始处理文件...")
@@ -337,8 +337,8 @@ class FileProcessingWorker:
                 INSERT INTO file_processing_details 
                 (processing_stats_id, filename, file_type, file_size_mb, 
                  processing_time, ai_time, content_length, status, 
-                 total_tokens, cost, content, created_at, task_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 total_tokens, cost, content, created_at, task_id, original_file_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     processing_stats_id,
                     file_info['file_name'],
@@ -352,7 +352,8 @@ class FileProcessingWorker:
                     ai_info.get('total_price', 0) if ai_info else 0,
                     result.get('content', ''),
                     datetime.now(),
-                    self.task_id
+                    self.task_id,
+                    result['original_file']  # 保存原始文件路径
                 ))
             
             # 插入失败文件的记录

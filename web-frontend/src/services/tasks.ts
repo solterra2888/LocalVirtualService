@@ -82,6 +82,7 @@ export interface TaskExecutionDetail {
     error_message?: string;
     content?: string;
     created_at: string;
+    original_file_path?: string;
   }>;
 }
 

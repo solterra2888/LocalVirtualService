@@ -183,6 +183,8 @@ const FilesPage: React.FC = () => {
   const [taskExecutions, setTaskExecutions] = useState<TaskExecution[]>([]);
   const [executionDetailVisible, setExecutionDetailVisible] = useState(false);
   const [selectedExecution, setSelectedExecution] = useState<TaskExecution | null>(null);
+  const [executionDetailData, setExecutionDetailData] = useState<TaskExecutionDetail | null>(null);
+  const [executionDetailLoading, setExecutionDetailLoading] = useState(false);
   const [selectedExecutionIds, setSelectedExecutionIds] = useState<string[]>([]);
   const [deleteExecutionVisible, setDeleteExecutionVisible] = useState(false);
   const [executionToDelete, setExecutionToDelete] = useState<TaskExecution | null>(null);
@@ -193,15 +195,16 @@ const FilesPage: React.FC = () => {
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   
-  // Files 详情相关状态
-  const [filesDetailVisible, setFilesDetailVisible] = useState(false);
-  const [filesDetailData, setFilesDetailData] = useState<TaskExecutionDetail | null>(null);
-  const [filesDetailLoading, setFilesDetailLoading] = useState(false);
   
   // 文件内容查看相关状态
   const [fileContentVisible, setFileContentVisible] = useState(false);
   const [selectedFileContent, setSelectedFileContent] = useState<any>(null);
   const [fileContentLoading, setFileContentLoading] = useState(false);
+  
+  // 文件选择相关状态
+  const [fileSelectionVisible, setFileSelectionVisible] = useState(false);
+  const [availableFiles, setAvailableFiles] = useState<any[]>([]);
+  const [selectedExecutionForFiles, setSelectedExecutionForFiles] = useState<any>(null);
   
   const [processingParams, setProcessingParams] = useState<ProcessingParams>({
     language: ['ch_sim', 'en'],
@@ -217,7 +220,7 @@ const FilesPage: React.FC = () => {
     polling_interval: 8, // 调整为与实际轮询间隔一致（秒）
     use_ai_agent: true,
     llamaindex_api_key: '', // 将通过API加载默认值
-    ai_agent_server_url: 'http://111.230.48.119/v1/chat-messages'
+    ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://111.230.48.119:81/v1/chat-messages'
   });
   const [form] = Form.useForm();
 
@@ -516,10 +519,25 @@ const FilesPage: React.FC = () => {
 
 
 
-  const handleViewExecution = (execution: TaskExecution) => {
-    setSelectedExecution(execution);
-    setExecutionDetailVisible(true);
-    logger.logInfo(`查看任务执行详情: ${execution.task_name}`, 'file-processing');
+  const handleViewExecution = async (execution: TaskExecution) => {
+    try {
+      setSelectedExecution(execution);
+      setExecutionDetailVisible(true);
+      setExecutionDetailLoading(true);
+      
+      logger.logInfo(`查看任务执行详情: ${execution.task_name}`, 'file-processing');
+      
+      // 获取包含文件详情的完整执行信息
+      const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+      setExecutionDetailData(details);
+      
+    } catch (error) {
+      message.error('获取执行详情失败');
+      logger.logError(`获取执行详情失败: ${execution.task_name}`, 'file-processing', error);
+      setExecutionDetailVisible(false);
+    } finally {
+      setExecutionDetailLoading(false);
+    }
   };
 
   const handleViewAiAnalysis = async (execution: TaskExecution) => {
@@ -541,29 +559,82 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleViewFiles = async (execution: TaskExecution) => {
-    try {
-      setFilesDetailLoading(true);
-      setFilesDetailVisible(true);
-      
-      logger.logInfo(`获取文件处理详情: ${execution.task_name}`, 'file-processing');
-      
-      const details = await tasksAPI.getTaskExecutionDetails(execution.id);
-      setFilesDetailData(details);
-      
-    } catch (error) {
-      message.error('获取文件处理详情失败');
-      logger.logError(`获取文件处理详情失败: ${execution.task_name}`, 'file-processing', error);
-      setFilesDetailVisible(false);
-    } finally {
-      setFilesDetailLoading(false);
-    }
-  };
 
   const handleViewFileContent = (fileData: any) => {
     setSelectedFileContent(fileData);
     setFileContentVisible(true);
-    logger.logInfo(`查看文件内容: ${fileData.filename}`, 'file-processing');
+    logger.logInfo(`查看AI处理内容: ${fileData.filename}`, 'file-processing');
+  };
+
+  const handleViewOriginalFile = async (fileData: any) => {
+    try {
+      const originalFileInfo = await filesAPI.getOriginalFileInfo(fileData.id);
+      logger.logInfo(`查看原始文件: ${fileData.filename}`, 'file-processing');
+      
+      // 根据文件类型决定如何打开
+      const fileType = originalFileInfo.file_type.toLowerCase();
+      
+      // 处理文件URL - 确保在不同环境下都能正确访问
+      const fileUrl = originalFileInfo.file_url;
+      
+      if (fileType === 'pdf') {
+        // PDF文件在新窗口打开
+        window.open(fileUrl, '_blank');
+      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'image'].includes(fileType)) {
+        // 图片文件在modal中显示
+        setSelectedFileContent({
+          ...fileData,
+          isOriginalFile: true,
+          originalFileInfo: {
+            ...originalFileInfo,
+            file_url: fileUrl  // 确保使用处理后的URL
+          }
+        });
+        setFileContentVisible(true);
+      } else {
+        // 其他文件类型（Excel, Word等）提供下载
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.download = originalFileInfo.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        message.success(`正在下载文件: ${originalFileInfo.filename}`);
+      }
+    } catch (error) {
+      console.error('Failed to get original file info:', error);
+      message.error('获取原始文件信息失败');
+    }
+  };
+
+  const handleShowOriginalFiles = async (execution: any) => {
+    try {
+      logger.logInfo(`查看任务原始文件: ${execution.task_name}`, 'file-processing');
+      
+      // 获取该执行任务的文件详情
+      const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+      
+      // 过滤出有原始文件路径的文件
+      const filesWithOriginal = details.files.filter(file => file.original_file_path);
+      
+      if (filesWithOriginal.length === 0) {
+        message.info('该任务没有可查看的原始文件');
+        return;
+      }
+      
+      if (filesWithOriginal.length === 1) {
+        // 只有一个文件，直接打开
+        await handleViewOriginalFile(filesWithOriginal[0]);
+      } else {
+        // 多个文件，显示选择对话框
+        setAvailableFiles(filesWithOriginal);
+        setSelectedExecutionForFiles(execution);
+        setFileSelectionVisible(true);
+      }
+    } catch (error) {
+      console.error('Failed to get execution files:', error);
+      message.error('获取任务文件失败');
+    }
   };
 
   const handleDeleteExecution = (execution: TaskExecution) => {
@@ -1232,10 +1303,15 @@ const FilesPage: React.FC = () => {
     {
       title: 'Files Status',
       key: 'files_stats',
+      align: 'center' as const,
       render: (_: any, record: TaskExecution) => (
         <Space>
-          <Tag color="green">Success: {record.files_processed}</Tag>
-          <Tag color="red">Failed: {record.files_failed}</Tag>
+          <span style={{ color: '#00b96b', fontSize: '14px' }}>
+            <CheckCircleOutlined /> {record.files_processed}
+          </span>
+          <span style={{ color: '#ff7875', fontSize: '14px' }}>
+            <ExclamationCircleOutlined /> {record.files_failed}
+          </span>
         </Space>
       )
     },
@@ -1243,18 +1319,23 @@ const FilesPage: React.FC = () => {
       title: 'RC Agent Status',
       dataIndex: 'rc_agent_status',
       key: 'rc_agent_status',
+      align: 'center' as const,
       render: (status: string) => {
-        if (!status) return <Tag color="default">Unknown</Tag>;
+        if (!status) return <span style={{ color: '#bfbfbf', fontSize: '16px' }}><ExclamationCircleOutlined /></span>;
         
         const statusConfig = {
-          success: { color: 'success', text: 'Success' },
-          failed: { color: 'error', text: 'Failed' },
-          pending: { color: 'processing', text: 'Pending' },
-          skipped: { color: 'default', text: 'Skipped' }
+          success: { color: '#00b96b', icon: <CheckCircleOutlined /> },
+          failed: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
+          pending: { color: '#40a9ff', icon: <ClockCircleOutlined /> },
+          skipped: { color: '#bfbfbf', icon: <ExclamationCircleOutlined /> }
         };
         
-        const config = statusConfig[status as keyof typeof statusConfig] || { color: 'default', text: status };
-        return <Tag color={config.color}>{config.text}</Tag>;
+        const config = statusConfig[status as keyof typeof statusConfig] || { color: '#bfbfbf', icon: <ExclamationCircleOutlined /> };
+        return (
+          <span style={{ color: config.color, fontSize: '16px' }}>
+            {config.icon}
+          </span>
+        );
       }
     },
     {
@@ -1278,11 +1359,11 @@ const FilesPage: React.FC = () => {
           </Button>
           <Button
             type="text"
-            icon={<FolderOutlined />}
-            onClick={() => handleViewFiles(record)}
+            icon={<FileTextOutlined />}
+            onClick={() => handleShowOriginalFiles(record)}
             size="small"
           >
-            Files
+            Original Files
           </Button>
           <Button
             type="text"
@@ -1308,81 +1389,224 @@ const FilesPage: React.FC = () => {
 
   const renderExecutionDetail = () => (
     <Modal
-      title="Details"
+      title="Execution Details"
       open={executionDetailVisible}
-      onCancel={() => setExecutionDetailVisible(false)}
+      onCancel={() => {
+        setExecutionDetailVisible(false);
+        setExecutionDetailData(null);
+      }}
       footer={null}
-      width={800}
+      width={1200}
       centered
     >
-      {selectedExecution && (
+      {executionDetailLoading ? (
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <Progress type="circle" percent={50} showInfo={false} />
+          <div style={{ marginTop: 16 }}>Loading Execution Details...</div>
+        </div>
+      ) : selectedExecution && (
         <div>
-          <Row gutter={16}>
-            <Col span={12}>
-              <div><strong>Agent Name:</strong> {selectedExecution.task_name}</div>
-            </Col>
-            <Col span={12}>
-              <div><strong>User:</strong> {selectedExecution.username}</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={24}>
-              <div><strong>Time:</strong> {new Date(selectedExecution.created_at).toLocaleString()}</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={8}>
-              <div><strong>Number of Files:</strong> {selectedExecution.files_processed}</div>
-            </Col>
-            <Col span={8}>
-              <div><strong>Number of Failed Files:</strong> {selectedExecution.files_failed}</div>
-            </Col>
-            <Col span={8}>
-              <div><strong>Success Rate:</strong> {selectedExecution.files_processed > 0 ? 
-                `${((selectedExecution.files_processed / (selectedExecution.files_processed + selectedExecution.files_failed)) * 100).toFixed(1)}%` : 
-                '0%'
-              }</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={8}>
-              <div><strong>Processing Time:</strong> {selectedExecution.total_time.toFixed(2)}秒</div>
-            </Col>
-            <Col span={8}>
-              <div><strong>File Processing Time:</strong> {selectedExecution.file_processing_time.toFixed(2)}秒</div>
-            </Col>
-            <Col span={8}>
-              <div><strong>RC Agent Processing Time:</strong> {selectedExecution.ai_processing_time.toFixed(2)}秒</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={12}>
-              <div><strong>Token Consumption:</strong> {selectedExecution.total_tokens ? selectedExecution.total_tokens.toLocaleString() : '-'}</div>
-            </Col>
-            <Col span={12}>
-              <div><strong>Approximate Cost:</strong> {selectedExecution.total_cost ? `¥${selectedExecution.total_cost.toFixed(4)}` : '-'}</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={12}>
-              <div><strong>RC Agent Status:</strong> 
-                {selectedExecution.rc_agent_status ? (
-                  (() => {
-                    const statusConfig = {
-                      success: { color: 'success', text: 'Success' },
-                      failed: { color: 'error', text: 'Failed' },
-                      pending: { color: 'processing', text: 'Pending' },
-                      skipped: { color: 'default', text: 'Skipped' }
-                    };
-                    const config = statusConfig[selectedExecution.rc_agent_status as keyof typeof statusConfig] || { color: 'default', text: selectedExecution.rc_agent_status };
-                    return <Tag color={config.color} style={{ marginLeft: 8 }}>{config.text}</Tag>;
-                  })()
-                ) : (
-                  <Tag color="default" style={{ marginLeft: 8 }}>Unknown</Tag>
-                )}
+          {/* 基础信息 */}
+          <Card size="small" title="Basic Information" style={{ marginBottom: 16 }}>
+            <Row gutter={16}>
+              <Col span={12}>
+                <div><strong>Agent Name:</strong> {selectedExecution.task_name}</div>
+              </Col>
+              <Col span={12}>
+                <div><strong>User:</strong> {selectedExecution.username}</div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col span={24}>
+                <div><strong>Time:</strong> {new Date(selectedExecution.created_at).toLocaleString()}</div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col span={8}>
+                <div><strong>Number of Files:</strong> {selectedExecution.files_processed}</div>
+              </Col>
+              <Col span={8}>
+                <div><strong>Number of Failed Files:</strong> {selectedExecution.files_failed}</div>
+              </Col>
+              <Col span={8}>
+                <div><strong>Success Rate:</strong> {selectedExecution.files_processed > 0 ? 
+                  `${((selectedExecution.files_processed / (selectedExecution.files_processed + selectedExecution.files_failed)) * 100).toFixed(1)}%` : 
+                  '0%'
+                }</div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col span={8}>
+                <div><strong>Processing Time:</strong> {selectedExecution.total_time.toFixed(2)}秒</div>
+              </Col>
+              <Col span={8}>
+                <div><strong>File Processing Time:</strong> {selectedExecution.file_processing_time.toFixed(2)}秒</div>
+              </Col>
+              <Col span={8}>
+                <div><strong>RC Agent Processing Time:</strong> {selectedExecution.ai_processing_time.toFixed(2)}秒</div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col span={12}>
+                <div><strong>Token Consumption:</strong> {selectedExecution.total_tokens ? selectedExecution.total_tokens.toLocaleString() : '-'}</div>
+              </Col>
+              <Col span={12}>
+                <div><strong>Approximate Cost:</strong> {selectedExecution.total_cost ? `¥${selectedExecution.total_cost.toFixed(4)}` : '-'}</div>
+              </Col>
+            </Row>
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col span={12}>
+                <div><strong>RC Agent Status:</strong> 
+                  {selectedExecution.rc_agent_status ? (
+                    (() => {
+                      const statusConfig = {
+                        success: { color: 'success', text: 'Success' },
+                        failed: { color: 'error', text: 'Failed' },
+                        pending: { color: 'processing', text: 'Pending' },
+                        skipped: { color: 'default', text: 'Skipped' }
+                      };
+                      const config = statusConfig[selectedExecution.rc_agent_status as keyof typeof statusConfig] || { color: 'default', text: selectedExecution.rc_agent_status };
+                      return <Tag color={config.color} style={{ marginLeft: 8 }}>{config.text}</Tag>;
+                    })()
+                  ) : (
+                    <Tag color="default" style={{ marginLeft: 8 }}>Unknown</Tag>
+                  )}
+                </div>
+              </Col>
+            </Row>
+          </Card>
+
+          {/* 文件处理详情 */}
+          {executionDetailData?.files && executionDetailData.files.length > 0 ? (
+            <Card size="small" title="File Processing Details">
+              <Table
+                dataSource={executionDetailData.files}
+                rowKey="id"
+                size="small"
+                scroll={{ y: 400 }}
+                pagination={false}
+                columns={[
+                  {
+                    title: 'File Name',
+                    dataIndex: 'filename',
+                    key: 'filename',
+                    width: 300,
+                    ellipsis: false,
+                    render: (filename, record) => (
+                      <div style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
+                        {record.content ? (
+                          <Button 
+                            type="link" 
+                            style={{ 
+                              padding: 0, 
+                              height: 'auto', 
+                              textAlign: 'left',
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-all'
+                            }}
+                            onClick={() => handleViewFileContent(record)}
+                          >
+                            {filename}
+                          </Button>
+                        ) : (
+                          <span>{filename}</span>
+                        )}
+                      </div>
+                    )
+                  },
+                  {
+                    title: 'Type',
+                    dataIndex: 'file_type',
+                    key: 'file_type',
+                    width: 80,
+                    render: (file_type) => {
+                      const typeMapping = {
+                        'pdf': { color: 'red', text: 'PDF' },
+                        'excel': { color: 'green', text: 'Excel' },
+                        'doc': { color: 'blue', text: 'Word' },
+                        'image': { color: 'orange', text: 'Image' }
+                      };
+                      const config = typeMapping[file_type as keyof typeof typeMapping] || { color: 'default', text: file_type?.toUpperCase() || 'Unknown' };
+                      return <Tag color={config.color}>{config.text}</Tag>;
+                    }
+                  },
+                  {
+                    title: 'Size (MB)',
+                    dataIndex: 'file_size_mb',
+                    key: 'file_size_mb',
+                    width: 100,
+                    render: (size) => size?.toFixed(2)
+                  },
+                  {
+                    title: 'Processing Time (s)',
+                    dataIndex: 'processing_time',
+                    key: 'processing_time',
+                    width: 120,
+                    render: (time) => time?.toFixed(2) || '-'
+                  },
+                  {
+                    title: 'AI Time (s)',
+                    dataIndex: 'ai_time',
+                    key: 'ai_time',
+                    width: 100,
+                    render: (time) => time?.toFixed(2) || '-'
+                  },
+                  {
+                    title: 'Tokens',
+                    dataIndex: 'total_tokens',
+                    key: 'total_tokens',
+                    width: 100,
+                    render: (tokens) => tokens ? tokens.toLocaleString() : '-'
+                  },
+                  {
+                    title: 'Cost (¥)',
+                    dataIndex: 'cost',
+                    key: 'cost',
+                    width: 100,
+                    render: (cost) => cost ? cost.toFixed(4) : '-'
+                  },
+                  {
+                    title: 'Actions',
+                    key: 'actions',
+                    width: 120,
+                    render: (_, record) => (
+                      <Space>
+                        {record.content && (
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<RobotOutlined />}
+                            onClick={() => handleViewFileContent(record)}
+                            title="View AI Content"
+                          >
+                          </Button>
+                        )}
+                        {record.original_file_path && (
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<FileTextOutlined />}
+                            onClick={() => handleViewOriginalFile(record)}
+                            title="View Original File"
+                          >
+                          </Button>
+                        )}
+                      </Space>
+                    )
+                  }
+                ]}
+              />
+            </Card>
+          ) : (
+            <Card size="small" title="File Processing Details">
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
+                <div style={{ marginTop: 16, fontSize: '16px' }}>
+                  No file processing details available for this execution.
+                </div>
               </div>
-            </Col>
-          </Row>
+            </Card>
+          )}
         </div>
       )}
     </Modal>
@@ -1447,146 +1671,15 @@ const FilesPage: React.FC = () => {
     </Modal>
   );
 
-  const renderFilesDetailModal = () => (
-    <Modal
-      title="File Processing Details"
-      open={filesDetailVisible}
-      onCancel={() => {
-        setFilesDetailVisible(false);
-        setFilesDetailData(null);
-      }}
-      footer={null}
-      width={1200}
-      centered
-    >
-      {filesDetailLoading ? (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <Progress type="circle" percent={50} showInfo={false} />
-          <div style={{ marginTop: 16 }}>Loading File Details...</div>
-        </div>
-      ) : filesDetailData?.files ? (
-        <div>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>Files for: </Text>
-            <Tag color="blue">{filesDetailData.execution.task_name}</Tag>
-            <Text style={{ marginLeft: 16 }}>
-              <Text strong>Total Files: </Text>
-              {filesDetailData.files.length}
-            </Text>
-            <Text style={{ marginLeft: 16 }}>
-              <Text strong>Processing Time: </Text>
-              {new Date(filesDetailData.execution.created_at).toLocaleString()}
-            </Text>
-          </div>
-          <Divider />
-          <Table
-            dataSource={filesDetailData.files}
-            rowKey="id"
-            size="small"
-            scroll={{ y: 400 }}
-            pagination={false}
-            columns={[
-              {
-                title: 'File Name',
-                dataIndex: 'filename',
-                key: 'filename',
-                width: 300,
-                ellipsis: false,
-                render: (filename, record) => (
-                  <div style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
-                    {record.content ? (
-                      <Button 
-                        type="link" 
-                        style={{ 
-                          padding: 0, 
-                          height: 'auto', 
-                          textAlign: 'left',
-                          whiteSpace: 'normal',
-                          wordBreak: 'break-all'
-                        }}
-                        onClick={() => handleViewFileContent(record)}
-                      >
-                        {filename}
-                      </Button>
-                    ) : (
-                      <span>{filename}</span>
-                    )}
-                  </div>
-                )
-              },
-              {
-                title: 'Type',
-                dataIndex: 'file_type',
-                key: 'file_type',
-                width: 80,
-                render: (file_type) => {
-                  const typeMapping = {
-                    'pdf': { color: 'red', text: 'PDF' },
-                    'excel': { color: 'green', text: 'Excel' },
-                    'doc': { color: 'blue', text: 'Word' },
-                    'image': { color: 'orange', text: 'Image' }
-                  };
-                  const config = typeMapping[file_type as keyof typeof typeMapping] || { color: 'default', text: file_type?.toUpperCase() || 'Unknown' };
-                  return <Tag color={config.color}>{config.text}</Tag>;
-                }
-              },
-              {
-                title: 'Size (MB)',
-                dataIndex: 'file_size_mb',
-                key: 'file_size_mb',
-                width: 100,
-                render: (size) => size?.toFixed(2)
-              },
-
-              {
-                title: 'Processing Time (s)',
-                dataIndex: 'processing_time',
-                key: 'processing_time',
-                width: 120,
-                render: (time) => time?.toFixed(2) || '-'
-              },
-              {
-                title: 'AI Time (s)',
-                dataIndex: 'ai_time',
-                key: 'ai_time',
-                width: 100,
-                render: (time) => time?.toFixed(2) || '-'
-              },
-              {
-                title: 'Tokens',
-                dataIndex: 'total_tokens',
-                key: 'total_tokens',
-                width: 100,
-                render: (tokens) => tokens ? tokens.toLocaleString() : '-'
-              },
-              {
-                title: 'Cost (¥)',
-                dataIndex: 'cost',
-                key: 'cost',
-                width: 100,
-                render: (cost) => cost ? cost.toFixed(4) : '-'
-              },
-
-            ]}
-          />
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-          <div style={{ marginTop: 16, fontSize: '16px' }}>
-            No file processing details available for this execution.
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
 
   const renderFileContentModal = () => (
     <Modal
       title={
         <Space>
-          <FileTextOutlined />
-          <span>File Content - {selectedFileContent?.filename || 'Unknown'}</span>
+          {selectedFileContent?.isOriginalFile ? <FolderOutlined /> : <FileTextOutlined />}
+          <span>
+            {selectedFileContent?.isOriginalFile ? 'Original File' : 'AI Processed Content'} - {selectedFileContent?.filename || 'Unknown'}
+          </span>
         </Space>
       }
       open={fileContentVisible}
@@ -1642,7 +1735,67 @@ const FilesPage: React.FC = () => {
             padding: '16px',
             backgroundColor: '#fafafa'
           }}>
-            {selectedFileContent.content ? (
+            {selectedFileContent.isOriginalFile && selectedFileContent.originalFileInfo ? (
+              // 原始文件显示
+              (() => {
+                const fileType = selectedFileContent.originalFileInfo.file_type.toLowerCase();
+                if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'image'].includes(fileType)) {
+                  // 显示图片
+                  return (
+                    <div style={{ textAlign: 'center' }}>
+                      <img 
+                        src={selectedFileContent.originalFileInfo.file_url} 
+                        alt={selectedFileContent.filename}
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '400px',
+                          objectFit: 'contain'
+                        }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          target.parentElement!.innerHTML = `
+                            <div style="text-align: center; padding: 40px 0;">
+                              <div style="font-size: 48px; color: #faad14;">⚠️</div>
+                              <div style="margin-top: 16px; font-size: 16px; color: #666;">
+                                Failed to load image
+                              </div>
+                            </div>
+                          `;
+                        }}
+                      />
+                    </div>
+                  );
+                } else {
+                  // 其他文件类型提示下载
+                  return (
+                    <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                      <FileTextOutlined style={{ fontSize: '48px', color: '#1890ff' }} />
+                      <div style={{ marginTop: 16, fontSize: '16px', color: '#666' }}>
+                        This file type cannot be previewed online.
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <Button 
+                          type="primary" 
+                          icon={<DownloadOutlined />}
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = selectedFileContent.originalFileInfo.file_url;
+                            link.download = selectedFileContent.originalFileInfo.filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }}
+                        >
+                          Download File
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }
+              })()
+            ) : selectedFileContent.content ? (
+              // AI处理后的内容
               <pre style={{ 
                 whiteSpace: 'pre-wrap', 
                 wordWrap: 'break-word',
@@ -1955,7 +2108,7 @@ const FilesPage: React.FC = () => {
                 }
               }}
               pagination={{
-                pageSize: 5,
+                pageSize: 10,
                 showSizeChanger: false,
                 showQuickJumper: false,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
@@ -1982,9 +2135,6 @@ const FilesPage: React.FC = () => {
 
         {/* AI分析报告对话框 */}
         {renderAiAnalysisModal()}
-
-        {/* 文件处理详情对话框 */}
-        {renderFilesDetailModal()}
 
         {/* 删除确认对话框 */}
         <Modal
@@ -2015,6 +2165,102 @@ const FilesPage: React.FC = () => {
         </Modal>
 
         {renderFileContentModal()}
+
+        {/* 文件选择对话框 */}
+        <Modal
+          title={
+            <Space>
+              <FileTextOutlined />
+              <span>Select Original File to View</span>
+              {selectedExecutionForFiles && (
+                <Tag color="blue">{selectedExecutionForFiles.task_name}</Tag>
+              )}
+            </Space>
+          }
+          open={fileSelectionVisible}
+          onCancel={() => {
+            setFileSelectionVisible(false);
+            setAvailableFiles([]);
+            setSelectedExecutionForFiles(null);
+          }}
+          footer={[
+            <Button key="close" onClick={() => {
+              setFileSelectionVisible(false);
+              setAvailableFiles([]);
+              setSelectedExecutionForFiles(null);
+            }}>
+              Close
+            </Button>
+          ]}
+          width={800}
+          centered
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text type="secondary">
+              This task contains {availableFiles.length} file(s) with original content. Select a file to view or download:
+            </Text>
+          </div>
+          
+          <Table
+            dataSource={availableFiles}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            scroll={{ y: 300 }}
+            columns={[
+              {
+                title: 'File Name',
+                dataIndex: 'filename',
+                key: 'filename',
+                ellipsis: true,
+                render: (filename) => (
+                  <Text strong>{filename}</Text>
+                )
+              },
+              {
+                title: 'Type',
+                dataIndex: 'file_type',
+                key: 'file_type',
+                width: 80,
+                render: (file_type) => {
+                  const typeMapping = {
+                    'pdf': { color: 'red', text: 'PDF' },
+                    'excel': { color: 'green', text: 'Excel' },
+                    'doc': { color: 'blue', text: 'Word' },
+                    'image': { color: 'orange', text: 'Image' }
+                  };
+                  const config = typeMapping[file_type as keyof typeof typeMapping] || { color: 'default', text: file_type?.toUpperCase() || 'Unknown' };
+                  return <Tag color={config.color}>{config.text}</Tag>;
+                }
+              },
+              {
+                title: 'Size (MB)',
+                dataIndex: 'file_size_mb',
+                key: 'file_size_mb',
+                width: 100,
+                render: (size) => size?.toFixed(2)
+              },
+              {
+                title: 'Action',
+                key: 'action',
+                width: 120,
+                render: (_, record) => (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => {
+                      setFileSelectionVisible(false);
+                      handleViewOriginalFile(record);
+                    }}
+                  >
+                    View
+                  </Button>
+                )
+              }
+            ]}
+          />
+        </Modal>
       </div>
     </div>
   );

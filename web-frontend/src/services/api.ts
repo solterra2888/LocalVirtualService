@@ -64,12 +64,16 @@ apiClient.interceptors.response.use(
     } else if (error.response?.status === 404) {
       // 不在这里显示404错误，让组件自己处理
       console.warn('404 Error:', error.response?.data);
+    } else if (error.response?.status === 409) {
+      // 不在这里显示409错误，让组件自己处理（如watchlist重复添加）
+      console.warn('409 Conflict:', error.response?.data);
     } else if (error.response?.status && error.response.status >= 500) {
       const errorMessage = (error.response?.data as any)?.detail || '服务器内部错误';
       message.error(`服务器错误: ${errorMessage}`);
       console.error('Server Error Details:', error.response?.data);
     } else if (error.message === 'Network Error') {
-      message.error('网络连接失败，请检查网络连接和服务器状态');
+      // 网络连接失败提示已移除
+      console.warn('Network Error:', error);
     } else if (error.code === 'ECONNABORTED') {
       message.error('请求超时，请稍后重试');
     } else {

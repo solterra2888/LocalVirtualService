@@ -330,7 +330,7 @@ async def process_files_background(
         rc_agent_service = None
         if use_ai_agent and task_info.get('token'):
             token = task_info.get('token')
-            base_url = params.get('ai_agent_server_url', 'http://111.230.48.119/v1/chat-messages')
+            base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
             # update_task_status(log_message=f"🔑 使用RC Agent Token: {token[:20]}... (长度: {len(token)})")
             # update_task_status(log_message=f"🌐 使用RC Agent服务器地址: {base_url}")
             rc_agent_service = RCAgentService(rc_agent_token=token, base_url=base_url, log_callback=update_task_status)
@@ -505,8 +505,8 @@ async def process_files_background(
                         INSERT INTO file_processing_details 
                         (processing_stats_id, filename, file_type, file_size_mb, 
                          processing_time, ai_time, content_length, status, 
-                         total_tokens, cost, content, created_at, task_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         total_tokens, cost, content, created_at, task_id, original_file_path)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             processing_stats_id,
                             file_info['file_name'],
@@ -520,7 +520,8 @@ async def process_files_background(
                             ai_info.get('total_price', 0) if ai_info else 0,
                             result.get('content', ''),
                             datetime.now(),
-                            task_id
+                            task_id,
+                            result['original_file']  # 保存原始文件路径
                         ))
                     except Exception as e:
                         # 如果获取文件信息失败，使用基本信息
@@ -697,7 +698,7 @@ async def get_task_files(
         cursor.execute("""
         SELECT id, filename, file_type, file_size_mb, processing_time,
                ai_time, content_length, status, total_tokens, cost,
-               error_message, created_at
+               error_message, created_at, original_file_path
         FROM file_processing_details 
         WHERE task_id = %s
         ORDER BY id
@@ -719,10 +720,95 @@ async def get_task_files(
                 total_tokens=file_data[8],
                 cost=file_data[9],
                 error_message=file_data[10],
-                created_at=file_data[11]
+                created_at=file_data[11],
+                original_file_path=file_data[12] if len(file_data) > 12 else None
             )
             for file_data in files_data
         ]
+        
+    finally:
+        conn.close()
+
+
+@router.get("/original/{file_id}", summary="获取原始文件信息")
+async def get_original_file_info(
+    file_id: int,
+    current_user=Depends(get_current_user)
+):
+    """
+    获取原始文件信息
+    
+    - **file_id**: 文件详情ID
+    """
+    db_conn_params = get_db_conn_params()
+    db_manager = DatabaseManager(db_conn_params)
+    
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法连接到数据库"
+        )
+    
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        SELECT filename, file_type, original_file_path, file_size_mb
+        FROM file_processing_details 
+        WHERE id = %s
+        """, (file_id,))
+        
+        result = cursor.fetchone()
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件记录未找到"
+            )
+        
+        filename, file_type, original_file_path, file_size_mb = result
+        
+        if not original_file_path or not os.path.exists(original_file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="原始文件不存在"
+            )
+        
+        # 构建可访问的URL - 根据环境动态调整
+        def build_file_url(file_path: str) -> str:
+            """根据部署环境构建正确的文件URL"""
+            # 获取相对文件名
+            if file_path.startswith("uploads/"):
+                relative_path = file_path[8:]  # 去掉 "uploads/" 前缀
+            else:
+                relative_path = os.path.basename(file_path)
+            
+            # 检查是否为开发环境
+            # 开发环境特征：DEBUG=True 或 ENVIRONMENT=development
+            is_development = (
+                config.get('DEBUG', 'false').lower() == 'true' or
+                config.get('ENVIRONMENT', 'production').lower() == 'development' or
+                config.get('APP_ENV', 'production').lower() == 'development'
+            )
+            
+            if is_development:
+                # 开发环境：需要包含后端服务器地址
+                backend_host = config.get('BACKEND_HOST', 'localhost')
+                backend_port = config.get('BACKEND_PORT', '8000')
+                return f"http://{backend_host}:{backend_port}/uploads/{relative_path}"
+            else:
+                # 生产环境：相对路径即可
+                return f"/uploads/{relative_path}"
+        
+        file_url = build_file_url(original_file_path)
+        
+        return {
+            "filename": filename,
+            "file_type": file_type,
+            "file_size_mb": file_size_mb,
+            "original_file_path": original_file_path,
+            "file_url": file_url
+        }
         
     finally:
         conn.close()
@@ -812,6 +898,6 @@ async def get_processing_params():
         ],
         "defaults": {
             "llamaindex_api_key": config.get_llama_api_key(),
-            "ai_agent_server_url": config.get('AI_AGENT_SERVER_URL', 'http://111.230.48.119/v1/chat-messages')
+            "ai_agent_server_url": config.get('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
         }
     } 

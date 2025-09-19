@@ -78,6 +78,7 @@ class FileDetailResponse(BaseModel):
     cost: Optional[float] = None
     error_message: Optional[str] = None
     created_at: datetime
+    original_file_path: Optional[str] = None
     
     class Config:
         from_attributes = True

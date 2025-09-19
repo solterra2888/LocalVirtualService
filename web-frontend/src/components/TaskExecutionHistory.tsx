@@ -44,12 +44,14 @@ interface TaskExecutionHistoryProps {
   taskId?: string;
   showTaskFilter?: boolean;
   height?: number;
+  refreshTrigger?: number; // Add refresh trigger prop
 }
 
 const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   taskId,
   showTaskFilter = true,
-  height = 600
+  height = 600,
+  refreshTrigger
 }) => {
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [loading, setLoading] = useState(false);
@@ -71,6 +73,14 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   useEffect(() => {
     loadTasks();
   }, []);
+
+  // Refresh data when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger !== undefined) {
+      loadExecutionLogs();
+      loadTasks();
+    }
+  }, [refreshTrigger]);
 
   const loadTasks = async () => {
     try {
@@ -132,19 +142,19 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     }
   };
 
-  const getStatusTag = (status: string) => {
+  const getStatusIcon = (status: string) => {
     const statusConfig = {
-      success: { color: 'success', icon: <CheckCircleOutlined />, text: 'Success' },
-      failed: { color: 'error', icon: <ExclamationCircleOutlined />, text: 'Failed' },
-      error: { color: 'error', icon: <ExclamationCircleOutlined />, text: 'Error' },
-      running: { color: 'processing', icon: <PlayCircleOutlined />, text: 'Running' }
+      success: { color: '#00b96b', icon: <CheckCircleOutlined /> },
+      failed: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
+      error: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
+      running: { color: '#40a9ff', icon: <PlayCircleOutlined /> }
     };
     
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.error;
     return (
-      <Tag color={config.color} icon={config.icon}>
-        {config.text}
-      </Tag>
+      <span style={{ color: config.color, fontSize: '16px' }}>
+        {config.icon}
+      </span>
     );
   };
 
@@ -303,7 +313,8 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => getStatusTag(status),
+      align: 'center' as const,
+      render: (status: string) => getStatusIcon(status),
       filters: [
         { text: 'Success', value: 'success' },
         { text: 'Failed', value: 'failed' },
@@ -565,7 +576,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="Execution Status">
-              {getStatusTag(selectedLog.status)}
+              {getStatusIcon(selectedLog.status)}
             </Descriptions.Item>
             <Descriptions.Item label="Start Time">
               {dayjs(selectedLog.started_at).format('YYYY-MM-DD HH:mm:ss')}

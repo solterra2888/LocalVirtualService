@@ -467,7 +467,7 @@ async def get_task_execution_details(
         cursor.execute("""
         SELECT id, filename, file_type, file_size_mb, processing_time,
                ai_time, content_length, status, total_tokens, cost,
-               error_message, content, created_at
+               error_message, content, created_at, original_file_path
         FROM file_processing_details 
         WHERE processing_stats_id = %s
         ORDER BY id
@@ -505,7 +505,8 @@ async def get_task_execution_details(
                     "cost": file_detail[9],
                     "error_message": file_detail[10],
                     "content": file_detail[11],
-                    "created_at": file_detail[12]
+                    "created_at": file_detail[12],
+                    "original_file_path": file_detail[13] if len(file_detail) > 13 else None
                 }
                 for file_detail in files_details
             ]

@@ -151,7 +151,7 @@ async def scheduler_detailed_status():
         scheduler_info = {
             "running": scheduler_service.scheduler.running,
             "timezone": str(scheduler_service.scheduler.timezone),
-            "job_defaults": scheduler_service.scheduler.job_defaults
+            "job_defaults": getattr(scheduler_service.scheduler, 'job_defaults', {})
         }
         
         # 获取所有任务

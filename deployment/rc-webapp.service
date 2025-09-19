@@ -1,7 +1,7 @@
 [Unit]
 Description=RC Project Web Application
-After=network.target postgresql.service rc-scheduler.service
-Wants=postgresql.service rc-scheduler.service
+After=network.target postgresql.service
+Wants=postgresql.service
 
 [Service]
 Type=simple

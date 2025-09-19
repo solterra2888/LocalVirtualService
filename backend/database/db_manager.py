@@ -128,6 +128,9 @@ class DatabaseManager:
             # 迁移：为现有表添加rc_agent_status字段（保留用于旧数据库升级）
             self._migrate_add_rc_agent_status(cursor)
             
+            # 迁移：为file_processing_details表添加original_file_path字段
+            self._migrate_add_original_file_path(cursor)
+            
             conn.commit()
             print("数据库表创建/验证完成")
         except Exception as e:
@@ -154,6 +157,27 @@ class DatabaseManager:
                 print("已添加rc_agent_status字段到processing_stats表")
         except Exception as e:
             print(f"迁移rc_agent_status字段时出错: {str(e)}")
+            # 迁移失败不应该阻止整个表创建过程
+    
+    def _migrate_add_original_file_path(self, cursor):
+        """迁移：为file_processing_details表添加original_file_path字段"""
+        try:
+            # 检查字段是否已存在
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='file_processing_details' AND column_name='original_file_path'
+            """)
+            
+            if not cursor.fetchone():
+                # 字段不存在，添加它
+                cursor.execute("""
+                ALTER TABLE file_processing_details 
+                ADD COLUMN original_file_path TEXT DEFAULT ''
+                """)
+                print("已添加original_file_path字段到file_processing_details表")
+        except Exception as e:
+            print(f"迁移original_file_path字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
 

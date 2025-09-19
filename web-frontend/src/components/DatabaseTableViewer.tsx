@@ -37,9 +37,10 @@ interface TableData {
 
 interface DatabaseTableViewerProps {
   // Remove unused props
+  refreshTrigger?: number; // Add refresh trigger prop
 }
 
-const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
+const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigger }) => {
   const [tableData, setTableData] = useState<TableData | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedTable] = useState('task_scheduling');
@@ -83,6 +84,13 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = () => {
   useEffect(() => {
     loadTableData(selectedTable);
   }, [selectedTable, loadTableData]);
+
+  // Refresh data when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger !== undefined) {
+      loadTableData(selectedTable);
+    }
+  }, [refreshTrigger, selectedTable, loadTableData]);
 
 
 

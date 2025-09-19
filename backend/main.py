@@ -98,6 +98,10 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"]
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
 # 静态文件服务
+# 为上传的文件提供静态文件访问
+if os.path.exists("uploads"):
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 if os.path.exists("web-frontend/dist"):
     app.mount("/", StaticFiles(directory="web-frontend/dist", html=True), name="static")
 

@@ -237,11 +237,32 @@ const SchedulerPage: React.FC = () => {
   // Database table viewing functionality moved to DatabaseTableViewer component
   
   const [form] = Form.useForm();
+  
+  // Active tab state for refresh functionality
+  const [activeTab, setActiveTab] = useState<string>('scheduler_config');
+  
+  // Refresh triggers for child components
+  const [taskManagementRefreshTrigger, setTaskManagementRefreshTrigger] = useState<number>(0);
+  const [executionHistoryRefreshTrigger, setExecutionHistoryRefreshTrigger] = useState<number>(0);
 
   // Load scheduled task data when page loads
   useEffect(() => {
     loadScheduledTasks();
   }, []);
+
+  // Handle tab change and refresh data
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    
+    // Refresh data when switching to specific tabs
+    if (key === 'scheduler_config') {
+      loadScheduledTasks();
+    } else if (key === 'task_management') {
+      setTaskManagementRefreshTrigger(prev => prev + 1);
+    } else if (key === 'execution_history') {
+      setExecutionHistoryRefreshTrigger(prev => prev + 1);
+    }
+  };
 
   // View task status
   // const handleViewTaskStatus = (task: ScheduledTask) => {
@@ -648,7 +669,8 @@ const SchedulerPage: React.FC = () => {
       {/* Main content area - using Tabs layout */}
       <Card>
         <Tabs 
-          defaultActiveKey="scheduler_config" 
+          activeKey={activeTab}
+          onChange={handleTabChange}
           size="large"
           items={[
             {
@@ -796,7 +818,7 @@ const SchedulerPage: React.FC = () => {
                 </Space>
               ),
               children: (
-                <DatabaseTableViewer />
+                <DatabaseTableViewer refreshTrigger={taskManagementRefreshTrigger} />
               )
             },
             {
@@ -808,7 +830,11 @@ const SchedulerPage: React.FC = () => {
                 </Space>
               ),
               children: (
-                <TaskExecutionHistory showTaskFilter={true} height={600} />
+                <TaskExecutionHistory 
+                  showTaskFilter={true} 
+                  height={600} 
+                  refreshTrigger={executionHistoryRefreshTrigger} 
+                />
               )
             }
           ]} 

@@ -26,7 +26,7 @@ class RCAgentService:
             log_callback: 日志回调函数
         """
         self.rc_agent_token = rc_agent_token
-        self.base_url = base_url or 'http://111.230.48.119/v1/chat-messages'
+        self.base_url = base_url or os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
         self.conversation_id = None
         self.log_callback = log_callback
         # 使用统一日志系统

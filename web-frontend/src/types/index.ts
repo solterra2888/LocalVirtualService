@@ -67,6 +67,7 @@ export interface FileDetail {
   cost?: number;
   error_message?: string;
   created_at: string;
+  original_file_path?: string;
 }
 
 export interface ProcessingParams {

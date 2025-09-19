@@ -485,7 +485,7 @@ const TasksPage: React.FC = () => {
       <div className="page-header">
         <div className="flex-between">
           <div>
-            <Title level={3} className="page-title">Task Management</Title>
+            <Title level={3} className="page-title">AI Agent Management</Title>
             <div className="page-description">Manage AI Agents</div>
           </div>
           <Space>

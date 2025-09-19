@@ -17,7 +17,6 @@ import {
   MenuUnfoldOutlined,
   NotificationOutlined,
   ThunderboltOutlined,
-  FundOutlined,
   BuildOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -54,9 +53,21 @@ const Layout: React.FC = () => {
   // 菜单项配置
   const menuItems = [
     {
-      key: '/dashboard',
+      key: 'dashboard',
       icon: <HomeOutlined />,
       label: 'UG Dashboard',
+      children: [
+        {
+          key: '/dashboard',
+          icon: <HomeOutlined />,
+          label: 'Target Tracking',
+        },
+        {
+          key: '/fundamentals/screener',
+          icon: <AppstoreOutlined />,
+          label: 'Stock Screener',
+        },
+      ],
     },
     {
       key: 'markets',
@@ -81,21 +92,9 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
-      key: 'fundamentals',
-      icon: <FundOutlined />,
-      label: 'Fundamentals',
-      children: [
-        {
-          key: '/fundamentals',
-          icon: <FileTextOutlined />,
-          label: 'Company Query',
-        },
-        {
-          key: '/fundamentals/screener',
-          icon: <AppstoreOutlined />,
-          label: 'Stock Screener',
-        },
-      ],
+      key: '/fundamentals',
+      icon: <FileTextOutlined />,
+      label: 'Company Query',
     },
     {
       key: 'ai-agents',
@@ -110,7 +109,7 @@ const Layout: React.FC = () => {
         {
           key: '/tasks',
           icon: <AppstoreOutlined />,
-          label: 'Task Management',
+          label: 'AI Agent Management',
         },
       ],
     },
@@ -222,7 +221,7 @@ const Layout: React.FC = () => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['markets', 'fundamentals']}
+          defaultOpenKeys={['dashboard', 'markets', 'fundamentals']}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ border: 'none', height: 'calc(100vh - 84px)' }}
