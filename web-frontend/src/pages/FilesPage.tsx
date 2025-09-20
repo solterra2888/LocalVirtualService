@@ -52,6 +52,8 @@ import { filesAPI } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useGlobalLogger } from '../contexts/LoggerContext';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import { downloadElementAsPDF } from '../utils/pdfDownload';
 
 const { Title, Text } = Typography;
 const { Dragger } = Upload;
@@ -194,6 +196,7 @@ const FilesPage: React.FC = () => {
   const [aiAnalysisVisible, setAiAnalysisVisible] = useState(false);
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   
   
   // 文件内容查看相关状态
@@ -548,14 +551,50 @@ const FilesPage: React.FC = () => {
       logger.logInfo(`获取AI分析报告: ${execution.task_name}`, 'file-processing');
       
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+      console.log('AI Analysis Data:', details);
+      console.log('Final Report:', details?.execution?.final_report);
       setAiAnalysisData(details);
       
     } catch (error) {
-      message.error('获取AI分析报告失败');
-      logger.logError(`获取AI分析报告失败: ${execution.task_name}`, 'file-processing', error);
+      message.error('Failed to load AI analysis report');
+      logger.logError(`Failed to load AI analysis report: ${execution.task_name}`, 'file-processing', error);
       setAiAnalysisVisible(false);
     } finally {
       setAiAnalysisLoading(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!aiAnalysisData?.execution?.final_report) {
+      message.error('No report content available for download');
+      return;
+    }
+
+    try {
+      setPdfDownloading(true);
+      
+      const filename = `AI_Analysis_Report_${aiAnalysisData.execution.task_name}_${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      logger.logInfo(`Starting PDF download: ${filename}`, 'file-processing');
+      
+      // 等待一小段时间确保MarkdownRenderer完全渲染
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await downloadElementAsPDF('ai-analysis-content', {
+        filename,
+        title: `AI Analysis Report - ${aiAnalysisData.execution.task_name}`,
+        author: 'Reverse Capital',
+        subject: 'AI Analysis Report'
+      });
+      
+      message.success('PDF report downloaded successfully');
+      logger.logInfo(`PDF report downloaded successfully: ${filename}`, 'file-processing');
+      
+    } catch (error) {
+      message.error('PDF download failed, please try again');
+      logger.logError(`PDF download failed: ${error}`, 'file-processing', error);
+    } finally {
+      setPdfDownloading(false);
     }
   };
 
@@ -1612,18 +1651,41 @@ const FilesPage: React.FC = () => {
     </Modal>
   );
 
-  const renderAiAnalysisModal = () => (
-    <Modal
-      title="AI Analysis Report"
-      open={aiAnalysisVisible}
-      onCancel={() => {
-        setAiAnalysisVisible(false);
-        setAiAnalysisData(null);
-      }}
-      footer={null}
-      width={1000}
-      centered
-    >
+  const renderAiAnalysisModal = () => {
+    console.log('Rendering AI Analysis Modal');
+    console.log('aiAnalysisData:', aiAnalysisData);
+    console.log('final_report exists:', !!aiAnalysisData?.execution?.final_report);
+    console.log('final_report length:', aiAnalysisData?.execution?.final_report?.length);
+    
+    return (
+      <Modal
+        title="AI Analysis Report"
+        open={aiAnalysisVisible}
+        onCancel={() => {
+          setAiAnalysisVisible(false);
+          setAiAnalysisData(null);
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setAiAnalysisVisible(false);
+            setAiAnalysisData(null);
+          }}>
+            Close
+          </Button>,
+          <Button 
+            key="download" 
+            type="primary" 
+            icon={<DownloadOutlined />}
+            loading={pdfDownloading}
+            onClick={handleDownloadPdf}
+            disabled={!aiAnalysisData?.execution?.final_report || pdfDownloading}
+          >
+            {pdfDownloading ? 'Generating...' : 'Download PDF'}
+          </Button>
+        ]}
+        width={1000}
+        centered
+      >
       {aiAnalysisLoading ? (
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
           <Progress type="circle" percent={50} showInfo={false} />
@@ -1640,24 +1702,24 @@ const FilesPage: React.FC = () => {
             </Text>
           </div>
           <Divider />
-          <div style={{ 
-            background: '#f6f8fa', 
-            padding: '16px', 
-            borderRadius: '8px', 
-            border: '1px solid #e1e4e8',
-            maxHeight: '60vh',
-            overflow: 'auto'
-          }}>
-            <pre style={{ 
-              whiteSpace: 'pre-wrap', 
-              wordWrap: 'break-word',
-              margin: 0,
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              lineHeight: '1.6'
-            }}>
-              {aiAnalysisData.execution.final_report}
-            </pre>
+          <div 
+            id="ai-analysis-content"
+            style={{ 
+              background: '#ffffff', 
+              padding: '20px', 
+              borderRadius: '8px', 
+              border: '1px solid #e1e4e8',
+              maxHeight: '60vh',
+              overflow: 'auto'
+            }}
+          >
+            <MarkdownRenderer 
+              content={aiAnalysisData.execution.final_report}
+              style={{
+                fontSize: '14px',
+                lineHeight: '1.6'
+              }}
+            />
           </div>
         </div>
       ) : (
@@ -1669,7 +1731,8 @@ const FilesPage: React.FC = () => {
         </div>
       )}
     </Modal>
-  );
+    );
+  };
 
 
   const renderFileContentModal = () => (
