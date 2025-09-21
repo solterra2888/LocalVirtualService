@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -69,6 +69,18 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     topic: Optional[str] = Field(default=None, description="题材标签")
     topic_filter: Optional[str] = Field(default=None, description="主题过滤器")
     keywords: Optional[str] = Field(default=None, description="关键词，逗号分隔")
+    recent_days: Optional[int] = Field(default=None, ge=1, le=365, description="最近天数，用于限制新闻日期范围")
+
+
+class CreateWatchlistNewsTaskRequest(BaseModel):
+    """创建Watchlist新闻定时任务请求模型"""
+    name: str = Field(default="My Watchlist News Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="*/15 * * * *", description="Cron表达式")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    max_results: int = Field(default=100, ge=1, le=1000, description="最大结果数")
+    recent_days: Optional[int] = Field(default=None, ge=1, le=365, description="最近天数，用于限制新闻日期范围")
+    user_id: Optional[int] = Field(default=None, description="用户ID，不指定则获取所有用户的watchlist")
 
 
 class CreateEODHDFundamentalsTaskRequest(BaseModel):
@@ -354,7 +366,8 @@ async def create_eodhd_news_task(
             'symbols': request.symbols,
             'topic': request.topic,
             'topic_filter': request.topic_filter,
-            'keywords': request.keywords.split(',') if request.keywords else None
+            'keywords': request.keywords.split(',') if request.keywords else None,
+            'recent_days': request.recent_days
         }
         
         result = await scheduler_service.create_cron_task(
@@ -597,6 +610,114 @@ async def create_default_eodhd_news_task(
         
     except Exception as e:
         logger.error("创建默认EODHD新闻定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建默认定时任务失败: {str(e)}")
+
+
+# ============ Watchlist新闻定时任务专用API ============
+
+@router.post("/tasks/watchlist-news", summary="创建Watchlist新闻定时任务")
+async def create_watchlist_news_task(
+    request: CreateWatchlistNewsTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建基于用户watchlist的新闻数据获取定时任务
+    
+    默认配置：
+    - 纽约时间每15分钟执行 (*/15 * * * *)
+    - 获取最新100条新闻
+    - 自动从target_tracking_config表中获取primaryticker
+    """
+    try:
+        logger.info("创建Watchlist新闻定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 构建任务参数
+        task_params = {
+            'max_results': request.max_results,
+            'recent_days': request.recent_days,
+            'user_id': request.user_id
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="watchlist_news",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("Watchlist新闻定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("Watchlist新闻定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except ValueError as e:
+        logger.error("Watchlist新闻定时任务创建参数错误", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+    except Exception as e:
+        logger.error("Watchlist新闻定时任务创建失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/watchlist-news/default", summary="创建默认Watchlist新闻定时任务")
+async def create_default_watchlist_news_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的Watchlist新闻定时任务
+    
+    默认配置：
+    - 任务名称：My Watchlist News Auto Fetch
+    - 纽约时间每15分钟执行 (*/15 * * * *)
+    - 获取最新100条新闻
+    - 自动从所有用户的watchlist中获取股票代码
+    """
+    try:
+        logger.info("创建默认Watchlist新闻定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        result = await scheduler_service.create_default_watchlist_news_task(created_by=current_user.username)
+        
+        if result['success']:
+            logger.info("默认Watchlist新闻定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认Watchlist新闻定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except Exception as e:
+        logger.error("创建默认Watchlist新闻定时任务失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建默认定时任务失败: {str(e)}")
 
 

@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -111,6 +111,24 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure Data Fetch Strategy',
           description: 'Set up Cron-based periodic data fetching with NY timezone every 15 minutes',
           endpoint: '/scheduler/tasks/eodhd-news',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'watchlist_news',
+      name: 'My Watchlist News',
+      type: 'watchlist',
+      description: 'Get news for stocks in your watchlist from EODHD API',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_watchlist_schedule',
+          name: 'Configure Watchlist News Fetch',
+          description: 'Set up Cron-based periodic news fetching for your watchlist stocks',
+          endpoint: '/scheduler/tasks/watchlist-news',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -284,7 +302,8 @@ const SchedulerPage: React.FC = () => {
         const sourceIdLower = source.id.toLowerCase();
         
         return (
-          (sourceIdLower.includes('news') && taskType.includes('news')) ||
+          (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+          (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -378,7 +397,8 @@ const SchedulerPage: React.FC = () => {
         
         // Mapping relationship: data source ID -> task type
         return (
-          (sourceIdLower.includes('news') && taskType.includes('news')) ||
+          (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+          (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
@@ -490,7 +510,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -749,7 +769,8 @@ const SchedulerPage: React.FC = () => {
                                       const taskType = task.type.toLowerCase();
                                       const sourceIdLower = source.id.toLowerCase();
                                       return (
-                                        (sourceIdLower.includes('news') && taskType.includes('news')) ||
+                                        (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+                                        (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
                                         (sourceIdLower.includes('events') && taskType.includes('events')) ||
                                         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
                                       );
@@ -794,7 +815,12 @@ const SchedulerPage: React.FC = () => {
                                   block
                                   icon={action.icon}
                                   onClick={() => showQuickActionModal(action, source)}
-                                  disabled={!source.enabled}
+                                  disabled={
+                                    // Configuration buttons should always be clickable
+                                    action.id.includes('configure') 
+                                      ? false 
+                                      : !source.enabled
+                                  }
                                   loading={source.status === 'running'}
                                 >
                                   {action.name}

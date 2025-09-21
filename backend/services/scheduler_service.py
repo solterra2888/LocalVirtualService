@@ -16,6 +16,7 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.services.eodhd_news_service import EODHDNewsService
+from backend.services.watchlist_news_service import WatchlistNewsService
 from config.settings import config
 
 logger = get_logger("scheduler_service")
@@ -51,6 +52,7 @@ class SchedulerService:
         # 注册任务类型和执行函数
         self.task_handlers = {
             'eodhd_news': self._execute_eodhd_news_task,
+            'watchlist_news': self._execute_watchlist_news_task,
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
@@ -402,6 +404,22 @@ class SchedulerService:
             created_by=created_by
         )
     
+    async def create_default_watchlist_news_task(self, created_by: str = "system") -> Dict[str, Any]:
+        """创建默认的Watchlist新闻获取任务（纽约时间每15分钟）"""
+        return await self.create_cron_task(
+            task_name="My Watchlist News Auto Fetch",
+            task_type="watchlist_news",
+            cron_expression="*/15 * * * *",  # 每15分钟
+            timezone="America/New_York",
+            enabled=True,
+            task_params={
+                'max_results': 100,
+                'recent_days': None,
+                'user_id': None  # 获取所有用户的watchlist
+            },
+            created_by=created_by
+        )
+    
     async def _execute_task(self, task_id: str, task_type: str, task_params: Dict[str, Any]):
         """执行任务"""
         execution_log_id = None
@@ -425,7 +443,23 @@ class SchedulerService:
             # 执行任务
             handler = self.task_handlers.get(task_type)
             if not handler:
-                raise ValueError(f"未找到任务类型 {task_type} 的处理器")
+                error_msg = f"未找到任务类型 {task_type} 的处理器。支持的任务类型: {', '.join(self.task_handlers.keys())}"
+                logger.error(error_msg)
+                
+                # 记录任务执行失败
+                await self._log_task_execution_end(
+                    execution_log_id, 
+                    started_at, 
+                    'failed', 
+                    error_msg, 
+                    error_message=error_msg
+                )
+                
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': None
+                }
             
             result = await handler(task_params)
             
@@ -473,6 +507,27 @@ class SchedulerService:
         try:
             logger.info("执行EODHD新闻获取任务", params=params)
             
+            # 处理recent_days参数，计算日期范围
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+            
+            if params.get('recent_days') is not None:
+                from datetime import datetime, timedelta
+                
+                # 获取当前日期
+                current_date = datetime.now()
+                recent_days = params.get('recent_days')
+                
+                # 计算开始日期和结束日期
+                # 如果当前时间是2022-04-22，用户选择最近天数为10天，则日期范围是2022-04-12到2022-04-22
+                end_date = current_date.strftime('%Y-%m-%d')
+                start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
+                
+                logger.info("根据recent_days参数计算日期范围", 
+                           recent_days=recent_days,
+                           start_date=start_date, 
+                           end_date=end_date)
+            
             # 创建EODHD新闻服务实例
             eodhd_service = EODHDNewsService()
             
@@ -486,8 +541,8 @@ class SchedulerService:
                     eodhd_service.fetch_and_store_news,
                     params.get('symbols'),
                     params.get('topic'),
-                    params.get('start_date'),
-                    params.get('end_date'),
+                    start_date,
+                    end_date,
                     params.get('max_results'),
                     params.get('topic_filter'),
                     params.get('keywords')
@@ -504,6 +559,41 @@ class SchedulerService:
             return {
                 'success': False,
                 'message': f"EODHD新闻获取失败: {str(e)}",
+                'data': None
+            }
+    
+    async def _execute_watchlist_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行Watchlist新闻获取任务"""
+        try:
+            logger.info("执行Watchlist新闻获取任务", params=params)
+            
+            # 创建Watchlist新闻服务实例
+            watchlist_service = WatchlistNewsService()
+            
+            # 在线程池中执行耗时的新闻获取操作，避免阻塞事件循环
+            import asyncio
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    watchlist_service.fetch_and_store_watchlist_news,
+                    params.get('max_results'),
+                    params.get('recent_days'),
+                    params.get('user_id')  # 可选：指定用户ID，为None时获取所有用户的watchlist
+                )
+            
+            return {
+                'success': True,
+                'message': f"成功获取并存储 {result['success_count']} 条watchlist新闻",
+                'data': result
+            }
+            
+        except Exception as e:
+            logger.error(f"Watchlist新闻获取任务执行失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f"Watchlist新闻获取失败: {str(e)}",
                 'data': None
             }
     
@@ -1022,6 +1112,12 @@ class SchedulerService:
             
             cursor = conn.cursor()
             try:
+                # 首先检查任务是否存在于 task_scheduling 表中
+                cursor.execute("SELECT id FROM task_scheduling WHERE id = %s", (task_id,))
+                if not cursor.fetchone():
+                    logger.warning(f"任务 {task_id} 不存在于 task_scheduling 表中，跳过执行日志记录")
+                    return None
+                
                 cursor.execute("""
                     INSERT INTO task_execution_logs 
                     (task_id, task_name, task_type, started_at, status, execution_params)

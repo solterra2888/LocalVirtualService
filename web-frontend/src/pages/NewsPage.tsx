@@ -423,6 +423,69 @@ const NewsPage: React.FC = () => {
       )
     },
     {
+      title: 'Auto Tags',
+      dataIndex: 'auto_tags',
+      key: 'auto_tags',
+      width: 200,
+      render: (autoTags: string[]) => (
+        <Tooltip 
+          title={
+            <div>
+              <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>All Auto Tags:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {autoTags && autoTags.map((tag, index) => (
+                  <Tag key={index} color="orange" style={{ fontSize: '11px', margin: 0 }}>
+                    {tag}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          }
+          placement="topLeft"
+          mouseEnterDelay={0.5}
+        >
+          <div style={{ 
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            overflow: 'hidden'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              gap: '4px',
+              overflow: 'hidden',
+              flex: 1
+            }}>
+              {autoTags && autoTags.slice(0, 2).map((tag, index) => (
+                <Tag key={index} color="orange" style={{ 
+                  fontSize: '11px', 
+                  margin: 0, 
+                  flexShrink: 0,
+                  maxWidth: '70px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {tag}
+                </Tag>
+              ))}
+            </div>
+            {autoTags && autoTags.length > 2 && (
+              <span style={{ 
+                fontSize: '10px', 
+                margin: 0, 
+                flexShrink: 0,
+                color: '#fa8c16',
+                fontWeight: 'bold'
+              }}>
+                +{autoTags.length - 2}
+              </span>
+            )}
+          </div>
+        </Tooltip>
+      )
+    },
+    {
       title: 'Actions',
       key: 'action',
       width: 100,
@@ -862,6 +925,20 @@ const NewsPage: React.FC = () => {
                 <div style={{ marginTop: 8 }}>
                   {state.selectedNews.tags.map((tag, index) => (
                     <Tag key={index} color="blue" style={{ marginBottom: 4 }}>
+                      {tag}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Auto Tags */}
+            {state.selectedNews.auto_tags && state.selectedNews.auto_tags.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <Text strong>Auto Tags: </Text>
+                <div style={{ marginTop: 8 }}>
+                  {state.selectedNews.auto_tags.map((tag, index) => (
+                    <Tag key={index} color="orange" style={{ marginBottom: 4 }}>
                       {tag}
                     </Tag>
                   ))}

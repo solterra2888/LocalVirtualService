@@ -139,7 +139,8 @@ class NewsService:
                     'created_at': row[10].isoformat() if row[10] else None,
                     'updated_at': row[11].isoformat() if row[11] else None,
                     'symbols': [],
-                    'tags': []
+                    'tags': [],
+                    'auto_tags': []
                 }
                 
                 # 获取相关股票代码
@@ -163,6 +164,17 @@ class NewsService:
                 cursor.execute(tag_query, (row[0],))
                 tags = [t[0] for t in cursor.fetchall()]
                 news_item['tags'] = tags
+                
+                # 获取相关auto tags
+                auto_tag_query = """
+                    SELECT nat.tag_name
+                    FROM news_auto_tags_relations natr
+                    JOIN news_auto_tags nat ON natr.auto_tag_id = nat.id
+                    WHERE natr.news_id = %s
+                """
+                cursor.execute(auto_tag_query, (row[0],))
+                auto_tags = [t[0] for t in cursor.fetchall()]
+                news_item['auto_tags'] = auto_tags
                 
                 news_list.append(news_item)
             
@@ -340,76 +352,6 @@ async def get_news_symbols(current_user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"获取股票代码失败: {str(e)}")
 
 
-# 将新闻详情路由移到文件末尾
-# @router.get("/{news_id}", response_model=NewsResponse, summary="获取新闻详情")
-        conn = news_service.db_manager.get_connection()
-        if not conn:
-            raise HTTPException(status_code=500, detail="数据库连接失败")
-        
-        try:
-            cursor = conn.cursor()
-            query = """
-                SELECT id, date, title, content, link, source,
-                       sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
-                       created_at, updated_at
-                FROM news
-                WHERE id = %s
-            """
-            cursor.execute(query, (news_id,))
-            row = cursor.fetchone()
-            
-            if not row:
-                raise HTTPException(status_code=404, detail="新闻未找到")
-            
-            news_item = {
-                'id': row[0],
-                'date': row[1].isoformat() if row[1] else None,
-                'title': row[2],
-                'content': row[3],
-                'link': row[4],
-                'source': row[5],
-                'sentiment_polarity': row[6],
-                'sentiment_neg': row[7],
-                'sentiment_neu': row[8],
-                'sentiment_pos': row[9],
-                'created_at': row[10].isoformat() if row[10] else None,
-                'updated_at': row[11].isoformat() if row[11] else None,
-                'symbols': [],
-                'tags': []
-            }
-            
-            # 获取相关股票代码
-            symbol_query = """
-                SELECT nsd.symbol_code
-                FROM news_symbols ns
-                JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                WHERE ns.news_id = %s
-            """
-            cursor.execute(symbol_query, (news_id,))
-            symbols = [s[0] for s in cursor.fetchall()]
-            news_item['symbols'] = symbols
-            
-            # 获取相关标签
-            tag_query = """
-                SELECT ntd.tag_name
-                FROM news_tags nt
-                JOIN news_tags_dict ntd ON nt.tag_id = ntd.id
-                WHERE nt.news_id = %s
-            """
-            cursor.execute(tag_query, (news_id,))
-            tags = [t[0] for t in cursor.fetchall()]
-            news_item['tags'] = tags
-            
-            return news_item
-            
-        finally:
-            cursor.close()
-            conn.close()
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取新闻详情失败: {str(e)}")
 
 
 # ============ EODHD新闻获取API ============
@@ -851,7 +793,8 @@ async def get_news_detail(
                 'created_at': row[10].isoformat() if row[10] else None,
                 'updated_at': row[11].isoformat() if row[11] else None,
                 'symbols': [],
-                'tags': []
+                'tags': [],
+                'auto_tags': []
             }
             
             # 获取相关股票代码
@@ -875,6 +818,17 @@ async def get_news_detail(
             cursor.execute(tag_query, (news_id,))
             tags = [t[0] for t in cursor.fetchall()]
             news_item['tags'] = tags
+            
+            # 获取相关auto tags
+            auto_tag_query = """
+                SELECT nat.tag_name
+                FROM news_auto_tags_relations natr
+                JOIN news_auto_tags nat ON natr.auto_tag_id = nat.id
+                WHERE natr.news_id = %s
+            """
+            cursor.execute(auto_tag_query, (news_id,))
+            auto_tags = [t[0] for t in cursor.fetchall()]
+            news_item['auto_tags'] = auto_tags
             
             return news_item
             

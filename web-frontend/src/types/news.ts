@@ -14,7 +14,8 @@ export interface NewsItem {
   created_at?: string;
   updated_at?: string;
   symbols: string[];
-  tags: string[];
+  tags: string[];          // 用户自定义的topic tags
+  auto_tags: string[];     // API原始tags
 }
 
 export interface NewsListResponse {

@@ -26,7 +26,7 @@ import {
   QuestionCircleOutlined,
   DatabaseOutlined
 } from '@ant-design/icons';
-import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
+import { schedulerAPI, CreateEODHDNewsTaskParams, CreateWatchlistNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
 
 const { Title, Text } = Typography;
@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener';
   dataSourceName: string;
 }
 
@@ -68,10 +68,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   const dataSourceConfigs = {
     eodhd_news: {
       icon: <InfoCircleOutlined style={{ color: '#1890ff' }} />,
-      params: ['max_results', 'symbols', 'topic', 'keywords'],
+      params: ['max_results', 'recent_days', 'symbols', 'topic', 'keywords'],
       defaultSchedule: '*/15 * * * *',
       defaultName: 'EODHD News Auto Fetch',
       description: 'Get latest stock news and market information from EODHD API'
+    },
+    watchlist_news: {
+      icon: <BulbOutlined style={{ color: '#f5222d' }} />,
+      params: ['max_results', 'recent_days'],
+      defaultSchedule: '*/15 * * * *',
+      defaultName: 'My Watchlist News Auto Fetch',
+      description: 'Get news for stocks in your watchlist automatically from EODHD API'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
@@ -194,6 +201,18 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
         if (dataSourceType === 'eodhd_news') {
           result = await schedulerAPI.createEODHDNewsTask(params);
+        } else if (dataSourceType === 'watchlist_news') {
+          // Watchlist新闻任务的专用创建逻辑
+          const watchlistParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            max_results: data.taskParams?.max_results || 100,
+            recent_days: data.taskParams?.recent_days,
+            user_id: data.taskParams?.user_id
+          };
+          result = await schedulerAPI.createWatchlistNewsTask(watchlistParams);
         } else if (dataSourceType === 'finviz_screener') {
           // Finviz筛选数据任务的专用创建逻辑
           const finvizParams = {
@@ -378,7 +397,20 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 <InputNumber 
                   min={1} 
                   max={1000} 
-                  placeholder="100"
+                  placeholder="100" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Recent Days"
+                name={['taskParams', 'recent_days']}
+                extra="Limit news to recent N days from current date. Leave empty to fetch all available news."
+              >
+                <InputNumber 
+                  min={1} 
+                  max={365} 
+                  placeholder="Leave empty for all news" 
                   style={{ width: '100%' }}
                 />
               </Form.Item>
@@ -411,6 +443,45 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               >
                 <Input placeholder="AI,blockchain,cryptocurrency" />
               </Form.Item>
+            </>
+          );
+          
+        case 'watchlist_news':
+          return (
+            <>
+              <Form.Item
+                label="Max Results"
+                name={['taskParams', 'max_results']}
+                extra="Maximum number of news items to fetch per time, up to 1000"
+              >
+                <InputNumber 
+                  min={1} 
+                  max={1000} 
+                  placeholder="100" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Recent Days"
+                name={['taskParams', 'recent_days']}
+                extra="Limit news to recent N days from current date. Leave empty to fetch all available news."
+              >
+                <InputNumber 
+                  min={1} 
+                  max={365} 
+                  placeholder="Leave empty for all news" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Alert
+                message="Stock symbols are automatically fetched from your watchlist"
+                description="This scheduler will automatically get news for all stocks in your watchlist based on the primaryticker field from target_tracking_config table."
+                type="info"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
             </>
           );
           

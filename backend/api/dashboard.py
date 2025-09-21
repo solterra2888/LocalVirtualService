@@ -571,6 +571,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
             ttc.priority,
             ttc.notes,
             ttc.added_at,
+            ttc.primaryticker,
             c.name as company,
             c.sector,
             c.industry,
@@ -600,10 +601,11 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
                 "priority": row[4],
                 "notes": row[5],
                 "added_at": row[6].isoformat() if row[6] else None,
-                "company": row[7],
-                "sector": row[8],
-                "industry": row[9],
-                "company_id": row[10]
+                "primaryticker": row[7],
+                "company": row[8],
+                "sector": row[9],
+                "industry": row[10],
+                "company_id": row[11]
             }
             
             watchlist_dict[group_name]["items"].append(item)
@@ -646,7 +648,7 @@ async def add_to_watchlist(
         
         # 验证股票代码是否存在于companies表中
         check_query = """
-        SELECT code, name, sector FROM companies 
+        SELECT code, name, sector, primaryticker FROM companies 
         WHERE code = %s AND ticker_active = true
         LIMIT 1
         """
@@ -679,8 +681,8 @@ async def add_to_watchlist(
         # 插入到watchlist
         insert_query = """
         INSERT INTO target_tracking_config 
-        (user_id, company_id, symbol, name, group_name, priority, notes, enabled)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        (user_id, company_id, symbol, name, group_name, priority, notes, enabled, primaryticker)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """
         
@@ -692,7 +694,8 @@ async def add_to_watchlist(
             request.get('group_name', stock_info[2] or 'Other'),  # 使用sector作为默认分组
             request.get('priority', 1),
             request.get('notes', ''),
-            True
+            True,
+            stock_info[3]  # primaryticker
         ]
         
         result = db_manager.fetch_one(insert_query, values)

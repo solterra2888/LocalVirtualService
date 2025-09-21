@@ -338,6 +338,11 @@ class EODHDNewsService:
         
         logger.info("开始分页获取新闻", max_results=max_results, symbols=symbols, topic=topic)
         
+        # 如果指定了多个股票代码，尝试逐个股票请求
+        if symbols and ',' in symbols:
+            logger.info("检测到多个股票代码，尝试逐个股票请求", symbols=symbols)
+            return self._get_news_by_individual_symbols(symbols, topic, start_date, end_date, max_results)
+        
         all_news = []
         limit = min(1000, max_results)
         offset = 0
@@ -362,20 +367,13 @@ class EODHDNewsService:
             
             if not response:
                 logger.warning("API响应为空，停止获取", batch=batch_count)
-                # 如果是第一批且有股票代码限制，尝试无股票代码限制的查询
+                # 如果是第一批且有股票代码限制，尝试逐个股票请求作为备用方案
                 if batch_count == 1 and symbols:
-                    logger.info("尝试无股票代码限制的查询作为备用方案")
-                    backup_response = self.get_news(
-                        symbols=None,  # 不限制股票代码
-                        topic=topic,
-                        start_date=start_date,
-                        end_date=end_date,
-                        limit=limit,
-                        offset=offset
-                    )
-                    if backup_response:
-                        response = backup_response
-                        logger.info("备用查询成功获取到数据")
+                    logger.info("尝试逐个股票请求作为备用方案", symbols=symbols)
+                    individual_news = self._get_news_by_individual_symbols(symbols, topic, start_date, end_date, max_results)
+                    if individual_news:
+                        logger.info("逐个股票请求成功获取到数据", news_count=len(individual_news))
+                        return individual_news
                     else:
                         break
                 else:
@@ -418,6 +416,127 @@ class EODHDNewsService:
                    final_count=len(final_news))
         
         return final_news
+    
+    def _get_news_by_individual_symbols(self, symbols: str, topic: Optional[str] = None,
+                                      start_date: Optional[str] = None, end_date: Optional[str] = None,
+                                      max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        逐个股票代码请求新闻（用于港股等不支持批量请求的情况）
+        
+        Args:
+            symbols: 逗号分隔的股票代码字符串
+            topic: 题材标签
+            start_date: 开始日期
+            end_date: 结束日期
+            max_results: 最大结果数
+            
+        Returns:
+            新闻列表
+        """
+        if not symbols:
+            return []
+        
+        # 解析股票代码
+        symbol_list = [s.strip() for s in symbols.split(',') if s.strip()]
+        if not symbol_list:
+            return []
+        
+        logger.info("开始逐个股票请求新闻", 
+                   symbols_count=len(symbol_list), 
+                   symbols=symbol_list,
+                   max_results=max_results)
+        
+        all_news = []
+        successful_symbols = []
+        failed_symbols = []
+        
+        # 计算每个股票的最大结果数
+        per_symbol_limit = max(1, max_results // len(symbol_list)) if max_results else 50
+        
+        for i, symbol in enumerate(symbol_list, 1):
+            logger.info(f"请求股票 {i}/{len(symbol_list)}: {symbol}")
+            
+            try:
+                # 确保股票代码格式正确（添加.HK后缀如果缺失）
+                formatted_symbol = self._format_stock_symbol(symbol)
+                
+                # 请求单个股票的新闻
+                response = self.get_news(
+                    symbols=formatted_symbol,
+                    topic=topic,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=per_symbol_limit,
+                    offset=0
+                )
+                
+                if response:
+                    news_articles = self._extract_news_from_response(response)
+                    if news_articles:
+                        all_news.extend(news_articles)
+                        successful_symbols.append(symbol)
+                        logger.info(f"股票 {symbol} 请求成功: {len(news_articles)} 条新闻")
+                    else:
+                        logger.warning(f"股票 {symbol} 无新闻数据")
+                        failed_symbols.append(symbol)
+                else:
+                    logger.warning(f"股票 {symbol} API响应为空")
+                    failed_symbols.append(symbol)
+                
+                # 添加延迟避免API限制
+                if i < len(symbol_list):
+                    logger.debug("等待2秒避免API限制")
+                    time.sleep(2)
+                    
+            except Exception as e:
+                logger.error(f"股票 {symbol} 请求失败: {str(e)}")
+                failed_symbols.append(symbol)
+        
+        # 限制总结果数
+        if max_results and len(all_news) > max_results:
+            all_news = all_news[:max_results]
+        
+        logger.info("逐个股票请求完成", 
+                   total_news=len(all_news),
+                   successful_symbols=successful_symbols,
+                   failed_symbols=failed_symbols)
+        
+        return all_news
+    
+    def _format_stock_symbol(self, symbol: str) -> str:
+        """
+        格式化股票代码，确保格式正确
+        
+        Args:
+            symbol: 原始股票代码
+            
+        Returns:
+            格式化后的股票代码
+        """
+        symbol = symbol.strip()
+        
+        # 如果已经有正确的后缀，直接返回
+        if any(symbol.endswith(suffix) for suffix in ['.HK', '.US', '.SHE', '.SHG']):
+            return symbol
+        
+        # 港股代码：4位数字
+        if symbol.isdigit() and len(symbol) == 4:
+            return f"{symbol}.HK"
+        
+        # A股代码：6位数字
+        if symbol.isdigit() and len(symbol) == 6:
+            # 根据代码判断市场
+            if symbol.startswith(('000', '001', '002', '003', '300')):
+                return f"{symbol}.SHE"  # 深交所
+            elif symbol.startswith(('600', '601', '603', '605', '688')):
+                return f"{symbol}.SHG"  # 上交所
+        
+        # 美股代码：通常是字母组合
+        if symbol.isalpha() and len(symbol) <= 5:
+            return f"{symbol}.US"
+        
+        # 其他情况直接返回
+        return symbol
     
     def _extract_news_from_response(self, response) -> List[Dict[str, Any]]:
         """从API响应中提取新闻数组"""
@@ -544,7 +663,8 @@ class EODHDNewsService:
             'link': article.get('link'),
             'source': source,
             'symbols': article.get('symbols', []),
-            'tags': self._auto_tag_article(article),
+            'tags': self._auto_tag_article(article),  # 用户自定义的topic tags
+            'api_tags': article.get('tags', []),      # EODHD API原始tags
             'sentiment_polarity': sentiment.get('polarity') if sentiment else None,
             'sentiment_neg': sentiment.get('neg') if sentiment else None,
             'sentiment_neu': sentiment.get('neu') if sentiment else None,
@@ -830,16 +950,18 @@ class EODHDNewsService:
             return [], 0, len(new_articles)
     
     def _batch_insert_symbols_and_tags(self, cursor, articles: List[Dict[str, Any]], news_ids: List[int]):
-        """批量插入symbols和tags关联"""
+        """批量插入symbols、tags和api_tags关联"""
         if not articles or not news_ids:
             return
         
-        # 收集所有需要处理的symbols和tags
+        # 收集所有需要处理的symbols、tags和api_tags
         all_symbols = set()
         all_tags = set()
+        all_api_tags = set()
         
         symbol_relations = []  # (news_id, symbol)
         tag_relations = []     # (news_id, tag)
+        api_tag_relations = [] # (news_id, api_tag)
         
         for i, article in enumerate(articles):
             news_id = news_ids[i] if i < len(news_ids) else None
@@ -853,24 +975,36 @@ class EODHDNewsService:
                     all_symbols.add(symbol)
                     symbol_relations.append((news_id, symbol))
                     
-            # 收集tags
+            # 收集用户自定义tags
             tags = article.get('tags', [])
             for tag in tags:
                 if tag:
                     all_tags.add(tag)
                     tag_relations.append((news_id, tag))
+            
+            # 收集API原始tags
+            api_tags = article.get('api_tags', [])
+            for api_tag in api_tags:
+                if api_tag:
+                    all_api_tags.add(api_tag)
+                    api_tag_relations.append((news_id, api_tag))
         
         # 批量插入symbols
         if all_symbols:
             self._batch_upsert_symbols(cursor, list(all_symbols))
             self._batch_create_symbol_relations(cursor, symbol_relations)
         
-        # 批量插入tags
+        # 批量插入用户自定义tags
         if all_tags:
             self._batch_upsert_tags(cursor, list(all_tags))
             self._batch_create_tag_relations(cursor, tag_relations)
         
-        logger.debug(f"批量处理关联: {len(symbol_relations)}个symbols, {len(tag_relations)}个tags")
+        # 批量插入API原始tags
+        if all_api_tags:
+            self._batch_upsert_api_tags(cursor, list(all_api_tags))
+            self._batch_create_api_tag_relations(cursor, api_tag_relations)
+        
+        logger.debug(f"批量处理关联: {len(symbol_relations)}个symbols, {len(tag_relations)}个tags, {len(api_tag_relations)}个api_tags")
     
     def _batch_upsert_symbols(self, cursor, symbols: List[str]):
         """批量插入或更新symbols字典"""
@@ -899,6 +1033,30 @@ class EODHDNewsService:
             ON CONFLICT (tag_name) DO NOTHING
         """
         cursor.executemany(sql, tag_data)
+    
+    def _batch_upsert_api_tags(self, cursor, api_tags: List[str]):
+        """批量插入或更新API原始tags字典"""
+        if not api_tags:
+            return
+        
+        # 创建news_auto_tags表（如果不存在）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS news_auto_tags (
+                id SERIAL PRIMARY KEY,
+                tag_name VARCHAR(255) UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 使用ON CONFLICT批量插入
+        api_tag_data = [(api_tag,) for api_tag in api_tags]
+        sql = """
+            INSERT INTO news_auto_tags (tag_name) 
+            VALUES (%s) 
+            ON CONFLICT (tag_name) DO NOTHING
+        """
+        cursor.executemany(sql, api_tag_data)
     
     def _batch_create_symbol_relations(self, cursor, relations: List[tuple]):
         """批量创建新闻-symbols关联"""
@@ -953,6 +1111,46 @@ class EODHDNewsService:
                 INSERT INTO news_tags (news_id, tag_id) 
                 VALUES (%s, %s) 
                 ON CONFLICT (news_id, tag_id) DO NOTHING
+            """
+            cursor.executemany(sql, relation_data)
+    
+    def _batch_create_api_tag_relations(self, cursor, relations: List[tuple]):
+        """批量创建新闻-API原始tags关联"""
+        if not relations:
+            return
+        
+        # 创建news_auto_tags_relations表（如果不存在）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS news_auto_tags_relations (
+                id SERIAL PRIMARY KEY,
+                news_id INTEGER NOT NULL,
+                auto_tag_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (auto_tag_id) REFERENCES news_auto_tags(id) ON DELETE CASCADE,
+                UNIQUE(news_id, auto_tag_id)
+            )
+        """)
+        
+        # 首先获取所有API tag的ID
+        api_tags = list(set([rel[1] for rel in relations]))
+        placeholders = ','.join(['%s'] * len(api_tags))
+        query = f"SELECT id, tag_name FROM news_auto_tags WHERE tag_name IN ({placeholders})"
+        cursor.execute(query, api_tags)
+        
+        api_tag_id_map = {row[1]: row[0] for row in cursor.fetchall()}
+        
+        # 准备关联数据
+        relation_data = []
+        for news_id, api_tag in relations:
+            api_tag_id = api_tag_id_map.get(api_tag)
+            if api_tag_id:
+                relation_data.append((news_id, api_tag_id))
+        
+        if relation_data:
+            sql = """
+                INSERT INTO news_auto_tags_relations (news_id, auto_tag_id) 
+                VALUES (%s, %s) 
+                ON CONFLICT (news_id, auto_tag_id) DO NOTHING
             """
             cursor.executemany(sql, relation_data)
     
@@ -1106,6 +1304,31 @@ class EODHDNewsService:
             VALUES (%s, %s) 
             ON CONFLICT (news_id, tag_id) DO NOTHING
         """, (news_id, tag_id))
+    
+    def _insert_api_tag(self, cursor, news_id: int, api_tag: str):
+        """插入API原始tag并建立关系"""
+        # 获取或创建API tag
+        cursor.execute("""
+            INSERT INTO news_auto_tags (tag_name) 
+            VALUES (%s) 
+            ON CONFLICT (tag_name) DO NOTHING 
+            RETURNING id
+        """, (api_tag,))
+        
+        result = cursor.fetchone()
+        if result:
+            api_tag_id = result[0]
+        else:
+            # 如果没有插入（已存在），获取现有ID
+            cursor.execute("SELECT id FROM news_auto_tags WHERE tag_name = %s", (api_tag,))
+            api_tag_id = cursor.fetchone()[0]
+        
+        # 创建关联
+        cursor.execute("""
+            INSERT INTO news_auto_tags_relations (news_id, auto_tag_id) 
+            VALUES (%s, %s) 
+            ON CONFLICT (news_id, auto_tag_id) DO NOTHING
+        """, (news_id, api_tag_id))
 
 
 class NewsThemeService:

@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -49,6 +49,7 @@ export interface CreateEODHDNewsTaskParams {
   topic?: string;
   topic_filter?: string;
   keywords?: string;
+  recent_days?: number;
 }
 
 export interface CreateEODHDFundamentalsTaskParams {
@@ -65,6 +66,16 @@ export interface CreateFinvizScreenerTaskParams {
   cron_expression?: string;
   timezone?: string;
   enabled?: boolean;
+}
+
+export interface CreateWatchlistNewsTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  max_results?: number;
+  recent_days?: number;
+  user_id?: number;
 }
 
 export interface CronPreset {
@@ -382,6 +393,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认EODHD新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建Watchlist新闻定时任务
+   */
+  async createWatchlistNewsTask(params: CreateWatchlistNewsTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/watchlist-news', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建Watchlist新闻定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建Watchlist新闻定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建Watchlist新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认Watchlist新闻定时任务
+   */
+  async createDefaultWatchlistNewsTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/watchlist-news/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认Watchlist新闻定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认Watchlist新闻定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认Watchlist新闻定时任务失败'
       };
     }
   }

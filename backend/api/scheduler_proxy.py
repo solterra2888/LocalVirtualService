@@ -217,6 +217,31 @@ async def create_default_eodhd_news_task_proxy(request: Request, current_user=De
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认EODHD新闻任务代理失败: {str(e)}")
 
+@router.post("/tasks/watchlist-news", summary="创建Watchlist新闻定时任务")
+async def create_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建Watchlist新闻定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/watchlist-news", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建Watchlist新闻任务代理失败: {str(e)}")
+
+@router.post("/tasks/watchlist-news/default", summary="创建默认Watchlist新闻定时任务")
+async def create_default_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认Watchlist新闻定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/watchlist-news/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认Watchlist新闻任务代理失败: {str(e)}")
+
 @router.post("/tasks/{task_id}/enable", summary="启用定时任务")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""

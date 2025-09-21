@@ -180,6 +180,27 @@ class DatabaseManager:
             print(f"迁移original_file_path字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
+    def _migrate_add_primaryticker_to_target_tracking_config(self, cursor):
+        """迁移：为target_tracking_config表添加primaryticker字段"""
+        try:
+            # 检查字段是否已存在
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='target_tracking_config' AND column_name='primaryticker'
+            """)
+            
+            if not cursor.fetchone():
+                # 字段不存在，添加它
+                cursor.execute("""
+                ALTER TABLE target_tracking_config 
+                ADD COLUMN primaryticker TEXT DEFAULT ''
+                """)
+                print("已添加primaryticker字段到target_tracking_config表")
+        except Exception as e:
+            print(f"迁移primaryticker字段时出错: {str(e)}")
+            # 迁移失败不应该阻止整个表创建过程
+    
 
     
     def migrate_database_schema(self, conn):
@@ -338,6 +359,9 @@ class DatabaseManager:
             # 检查并添加缺失的agent_type列
             self._ensure_agent_type_column(conn)
             
+            # 检查并添加target_tracking_config表的primaryticker列
+            self._migrate_add_primaryticker_to_target_tracking_config(conn.cursor())
+            
             # 创建调度器相关表
             self._create_scheduler_tables(conn)
             
@@ -410,7 +434,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
