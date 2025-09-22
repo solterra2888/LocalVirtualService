@@ -6,6 +6,8 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import os
+import urllib.parse
 
 from backend.schemas.user import UserResponse
 from backend.auth.jwt_utils import get_current_user
@@ -552,6 +554,76 @@ async def get_file_content(
             detail=f"获取文件内容失败: {str(e)}"
         )
 
+@router.get("/files/{file_id}/download", summary="下载文件")
+async def download_file(
+    file_id: int,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    下载指定文件
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查询文件信息，从 file_processing_details 表获取
+        query = """
+        SELECT filename, original_file_path, file_type 
+        FROM file_processing_details 
+        WHERE id = %s AND status = 'completed'
+        """
+        
+        results = db_manager.fetch_all(query, [file_id])
+        
+        if not results:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到ID为 {file_id} 的文件"
+            )
+        
+        filename, file_path, file_type = results[0]
+        
+        # 检查文件是否存在
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
+            )
+        
+        # 确定MIME类型
+        mime_type = "application/octet-stream"
+        if file_type:
+            type_lower = file_type.lower()
+            if type_lower == "pdf":
+                mime_type = "application/pdf"
+            elif type_lower in ["doc", "docx"]:
+                mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            elif type_lower in ["xls", "xlsx"]:
+                mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            elif type_lower in ["jpg", "jpeg"]:
+                mime_type = "image/jpeg"
+            elif type_lower == "png":
+                mime_type = "image/png"
+        
+        # 返回文件响应
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type=mime_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(filename)}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下载文件失败: {str(e)}"
+        )
+
 @router.get("/watchlist", summary="获取用户的watchlist")
 async def get_user_watchlist(current_user: UserResponse = Depends(get_current_user)):
     """
@@ -632,7 +704,7 @@ async def add_to_watchlist(
     - symbol: 股票代码 (必需)
     - name: 自定义名称 (可选)
     - group_name: 分组名称 (可选，默认为'default')
-    - priority: 优先级 (可选，默认为1)
+    - priority: 优先级 (可选，默认为1，支持1=Low, 2=Medium, 3=High)
     - notes: 备注 (可选)
     """
     try:

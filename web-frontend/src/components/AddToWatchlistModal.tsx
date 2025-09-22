@@ -11,16 +11,34 @@ import {
   Empty,
   Spin,
   Form,
-  Select
+  Select,
+  Radio
 } from 'antd';
 import {
   SearchOutlined,
-  PlusOutlined
+  PlusOutlined,
+  StarFilled,
+  StarOutlined
 } from '@ant-design/icons';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 
 const { Text } = Typography;
 const { Option } = Select;
+
+// 渲染星星图标的辅助函数
+const renderStars = (count: number, filled: boolean = true) => {
+  const stars = [];
+  for (let i = 0; i < count; i++) {
+    stars.push(
+      filled ? (
+        <StarFilled key={i} style={{ color: '#faad14', fontSize: '14px' }} />
+      ) : (
+        <StarOutlined key={i} style={{ color: '#d9d9d9', fontSize: '14px' }} />
+      )
+    );
+  }
+  return <Space size={2}>{stars}</Space>;
+};
 
 interface AddToWatchlistModalProps {
   open: boolean;
@@ -197,14 +215,30 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
               name="priority"
               label="Priority"
               initialValue={1}
-              tooltip="Higher numbers get higher priority in the list"
+              tooltip="Select priority level: 1 star = Low, 2 stars = Medium, 3 stars = High"
             >
-              <Select>
-                <Option value={1}>Low (1)</Option>
-                <Option value={2}>Medium (2)</Option>
-                <Option value={3}>High (3)</Option>
-                <Option value={4}>Very High (4)</Option>
-              </Select>
+              <Radio.Group>
+                <Space direction="vertical" size="small">
+                  <Radio value={1}>
+                    <Space>
+                      {renderStars(1)}
+                      <Text>Low Priority</Text>
+                    </Space>
+                  </Radio>
+                  <Radio value={2}>
+                    <Space>
+                      {renderStars(2)}
+                      <Text>Medium Priority</Text>
+                    </Space>
+                  </Radio>
+                  <Radio value={3}>
+                    <Space>
+                      {renderStars(3)}
+                      <Text>High Priority</Text>
+                    </Space>
+                  </Radio>
+                </Space>
+              </Radio.Group>
             </Form.Item>
 
             <Form.Item

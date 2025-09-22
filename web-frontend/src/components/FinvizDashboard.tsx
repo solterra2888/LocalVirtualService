@@ -42,7 +42,9 @@ import {
   FilePdfOutlined,
   FileExcelOutlined,
   FileWordOutlined,
-  FileImageOutlined
+  FileImageOutlined,
+  StarFilled,
+  StarOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport } from '../services/dashboard';
@@ -93,6 +95,49 @@ const getSectorIcon = (sector: string) => {
     default:
       return <HeartOutlined style={{ color: '#ff4d4f' }} />;
   }
+};
+
+// Priority级别映射函数
+const getPriorityLabel = (priority: number) => {
+  switch (priority) {
+    case 1:
+      return 'Low';
+    case 2:
+      return 'Medium';
+    case 3:
+      return 'High';
+    default:
+      return `Level ${priority}`;
+  }
+};
+
+// Priority级别颜色映射函数
+const getPriorityColor = (priority: number) => {
+  switch (priority) {
+    case 1:
+      return '#52c41a'; // Green for Low
+    case 2:
+      return '#faad14'; // Orange for Medium
+    case 3:
+      return '#f5222d'; // Red for High
+    default:
+      return '#8c8c8c'; // Gray for unknown
+  }
+};
+
+// 渲染星星图标的辅助函数
+const renderStars = (count: number, filled: boolean = true) => {
+  const stars = [];
+  for (let i = 0; i < count; i++) {
+    stars.push(
+      filled ? (
+        <StarFilled key={i} style={{ color: '#faad14', fontSize: '6px', opacity: 0.5 }} />
+      ) : (
+        <StarOutlined key={i} style={{ color: '#d9d9d9', fontSize: '6px', opacity: 0.3 }} />
+      )
+    );
+  }
+  return <Space size={1}>{stars}</Space>;
 };
 
 const FinvizDashboard: React.FC = () => {
@@ -202,9 +247,15 @@ const FinvizDashboard: React.FC = () => {
       }, 300); // 300ms 防抖
       
       return () => clearTimeout(timer);
+    } else if (selectedKey && activeTab === 'reports' && selectedStock) {
+      const timer = setTimeout(() => {
+        loadResearchReports(selectedStock.symbol);
+      }, 300); // 300ms 防抖
+      
+      return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, selectedType, activeTab]);
+  }, [selectedKey, selectedType, activeTab, selectedStock]);
 
   const loadUserWatchlist = async () => {
     setLoading(true);
@@ -214,6 +265,23 @@ const FinvizDashboard: React.FC = () => {
       
       const totalStocks = watchlistData.reduce((sum, group) => sum + group.items.length, 0);
       logger.logInfo(`加载了 ${watchlistData.length} 个分组，${totalStocks} 支股票`, 'finviz-dashboard');
+      
+      // 如果有股票且当前没有选中任何股票，自动选择第一个股票
+      if (totalStocks > 0 && !selectedKey) {
+        const firstGroup = watchlistData.find(group => group.items.length > 0);
+        if (firstGroup && firstGroup.items.length > 0) {
+          const firstStock = firstGroup.items[0];
+          const stockKey = `stock-${firstStock.watchlist_id}`;
+          
+          // 设置选中状态
+          setSelectedKey(stockKey);
+          setSelectedType('stock');
+          setSelectedStock(firstStock);
+          setSelectedGroup('');
+          
+          logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
+        }
+      }
       
     } catch (error) {
       message.error('Failed to load user watchlist');
@@ -303,9 +371,13 @@ const FinvizDashboard: React.FC = () => {
                   color: '#666', 
                   fontFamily: 'monospace', 
                   letterSpacing: '0.5px',
-                  lineHeight: '1.2'
+                  lineHeight: '1.2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
                 }}>
-                  {item.symbol}
+                  <span>{item.symbol}</span>
+                  {renderStars(item.priority)}
                 </div>
               </div>
             </div>
@@ -324,6 +396,13 @@ const FinvizDashboard: React.FC = () => {
   };
 
   const handleTreeSelect = (selectedKeys: React.Key[], info: any) => {
+    // 如果点击的是已选中的项目，保持选中状态不变
+    if (selectedKeys.length === 0 && selectedKey) {
+      // 重新设置选中状态，防止取消选择
+      setSelectedKey(selectedKey);
+      return;
+    }
+    
     if (selectedKeys.length === 0) {
       setSelectedKey('');
       setSelectedType('');
@@ -461,16 +540,26 @@ const FinvizDashboard: React.FC = () => {
   };
 
   // 下载文件
-  const handleDownloadFile = (report: ResearchReport) => {
+  const handleDownloadFile = async (report: ResearchReport) => {
     try {
+      logger.logInfo(`开始下载文件: ${report.file_name}`, 'finviz-dashboard');
+      
+      // 使用dashboard API的downloadFile方法，这与AI Analysis download功能相同的方法
+      const blob = await dashboardAPI.downloadFile(report.id);
+      
+      // 创建下载链接
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = `/api/files/${report.id}/download`;
+      link.href = url;
       link.download = report.file_name;
+      link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
       message.success(`Downloading file: ${report.file_name}`);
-      logger.logInfo(`下载文件: ${report.file_name}`, 'finviz-dashboard');
+      logger.logInfo(`下载文件成功: ${report.file_name}`, 'finviz-dashboard');
     } catch (error) {
       logger.logError(`下载文件失败: ${report.file_name}`, 'finviz-dashboard', error);
       message.error('Download failed');
@@ -755,9 +844,12 @@ const FinvizDashboard: React.FC = () => {
           <Col span={8}>
             <div style={{ textAlign: 'right' }}>
               <Space>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  Priority: {selectedStock.priority}
-                </Text>
+                <Tag 
+                  color={getPriorityColor(selectedStock.priority)}
+                  style={{ fontSize: '11px' }}
+                >
+                  Priority: {getPriorityLabel(selectedStock.priority)}
+                </Tag>
                 <Button 
                   type="text" 
                   danger 
@@ -933,7 +1025,7 @@ const FinvizDashboard: React.FC = () => {
                     tab={
                       <span>
                         <FileTextOutlined />
-                        Related News ({contentLoading ? '...' : newsData.length})
+                        Related News
                       </span>
                     } 
                     key="news"
@@ -945,7 +1037,7 @@ const FinvizDashboard: React.FC = () => {
                       tab={
                         <span>
                           <FileTextOutlined />
-                          Research Report ({contentLoading ? '...' : researchReports.length})
+                          Research Report
                         </span>
                       } 
                       key="reports"
