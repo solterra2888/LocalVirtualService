@@ -173,7 +173,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_fundamentals',
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
-      description: 'Get comprehensive company fundamentals data from EODHD API for complete company analysis',
+      description: 'Manually get company fundamentals data from EODHD',
       enabled: true,
       status: 'idle',
       quickActions: [
@@ -346,6 +346,56 @@ const SchedulerPage: React.FC = () => {
         {config.text}
       </Tag>
     );
+  };
+
+  // Get related scheduled tasks for a data source
+  const getRelatedTasks = (sourceId: string) => {
+    return scheduledTasks.filter(task => {
+      const taskType = task.type.toLowerCase();
+      const sourceIdLower = sourceId.toLowerCase();
+      
+      return (
+        (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+        (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+        (sourceIdLower.includes('events') && taskType.includes('events')) ||
+        (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
+        (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
+        (sourceIdLower.includes('fundamentals') && taskType.includes('fundamentals')) ||
+        (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
+      );
+    });
+  };
+
+  // Get cron expression info for a data source
+  const getCronInfo = (sourceId: string) => {
+    const relatedTasks = getRelatedTasks(sourceId);
+    const enabledTasks = relatedTasks.filter(task => task.enabled);
+    
+    if (enabledTasks.length === 0) {
+      return null;
+    }
+    
+    // Get the first enabled task's cron expression
+    const task = enabledTasks[0];
+    const cronExpression = task.cron_expression;
+    
+    if (!cronExpression) {
+      return null;
+    }
+    
+    // Validate cron expression
+    const validation = schedulerAPI.validateCronExpression(cronExpression);
+    
+    // Get human-readable description
+    const description = schedulerAPI.describeCronExpression(cronExpression);
+    
+    return {
+      expression: cronExpression,
+      description: description,
+      timezone: task.timezone,
+      isValid: validation.valid,
+      validationMessage: validation.message
+    };
   };
 
 
@@ -807,6 +857,58 @@ const SchedulerPage: React.FC = () => {
                           <div style={{ marginBottom: '16px' }}>
                             <Text strong>Configuration:</Text>
                           </div>
+
+                          {/* Cron Expression Display */}
+                          {(() => {
+                            const cronInfo = getCronInfo(source.id);
+                            if (cronInfo) {
+                              return (
+                                <div style={{ 
+                                  marginBottom: '16px', 
+                                  padding: '12px', 
+                                  backgroundColor: cronInfo.isValid ? '#f6f8fa' : '#fff2f0', 
+                                  borderRadius: '6px', 
+                                  border: `1px solid ${cronInfo.isValid ? '#e1e4e8' : '#ffccc7'}` 
+                                }}>
+                                  <div style={{ marginBottom: '8px' }}>
+                                    <Space>
+                                      <ScheduleOutlined style={{ color: cronInfo.isValid ? '#1890ff' : '#ff4d4f' }} />
+                                      <Text strong style={{ fontSize: '13px' }}>Current Schedule:</Text>
+                                      {cronInfo.isValid ? (
+                                        <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '12px' }} />
+                                      ) : (
+                                        <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '12px' }} />
+                                      )}
+                                    </Space>
+                                  </div>
+                                  <div style={{ marginBottom: '4px' }}>
+                                    <Text code style={{ 
+                                      fontSize: '12px', 
+                                      backgroundColor: '#fff', 
+                                      padding: '2px 6px', 
+                                      borderRadius: '3px',
+                                      color: cronInfo.isValid ? '#000' : '#ff4d4f'
+                                    }}>
+                                      {cronInfo.expression}
+                                    </Text>
+                                  </div>
+                                  {!cronInfo.isValid && cronInfo.validationMessage && (
+                                    <div style={{ marginBottom: '4px' }}>
+                                      <Text type="danger" style={{ fontSize: '11px' }}>
+                                        {cronInfo.validationMessage}
+                                      </Text>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <Text type="secondary" style={{ fontSize: '11px' }}>
+                                      Timezone: {cronInfo.timezone}
+                                    </Text>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
 
                           <Space direction="vertical" style={{ width: '100%' }}>
                             {source.quickActions.map(action => (

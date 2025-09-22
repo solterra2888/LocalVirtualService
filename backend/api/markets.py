@@ -1457,3 +1457,216 @@ async def search_company_fundamentals(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询公司基本面信息失败: {str(e)}"
         )
+
+
+class CompanyFundamentalsUpdateRequest(BaseModel):
+    """公司基本面数据更新请求模型"""
+    query: str = Field(..., description="股票代码或公司名称")
+    force_update: bool = Field(default=False, description="是否强制更新，即使数据已是最新")
+
+
+class CompanyFundamentalsUpdateResponse(BaseModel):
+    """公司基本面数据更新响应模型"""
+    success: bool
+    message: str
+    company_info: Optional[Dict[str, Any]] = None
+    data_updated: Dict[str, bool] = {}
+    execution_time: Optional[float] = None
+
+
+@router.post("/company/update-fundamentals", response_model=CompanyFundamentalsUpdateResponse)
+async def update_company_fundamentals(
+    request: CompanyFundamentalsUpdateRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    获取或更新单个公司的fundamentals数据
+    
+    参考EODHD Fundamental调度器的实现，为指定公司获取和更新所有基本面数据，包括：
+    - General: 公司基本信息
+    - Financials: 财务报表数据 
+    - Highlights: 关键财务指标
+    - Valuation: 估值数据
+    - Technicals: 技术指标
+    - Holders: 股东数据
+    - outstandingShares: 流通股数据
+    - Earnings: 盈利数据
+    - SharesStats: 股票统计
+    - AnalystRatings: 分析师评级
+    - SplitsDividends: 拆股分红
+    - InsiderTransactions: 内部人交易
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        from backend.database.db_manager import DatabaseManager
+        from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+        
+        info(f"开始更新公司基本面数据", 
+             query=request.query,
+             force_update=request.force_update,
+             user=current_user.username,
+             source="markets_api")
+        
+        # 获取数据库连接参数
+        from config.settings import config
+        db_conn_params = {
+            'db_host': config.get('DB_HOST'),
+            'db_port': config.get('DB_PORT'),
+            'db_name': config.get('DB_NAME'),
+            'db_user': config.get('DB_USER'),
+            'db_password': config.get('DB_PASSWORD')
+        }
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 首先查找公司信息
+        query_sql = """
+        SELECT code, name, exchange, primaryticker, id 
+        FROM companies 
+        WHERE UPPER(code) = UPPER(%s) 
+           OR UPPER(primaryticker) = UPPER(%s) 
+           OR UPPER(name) ILIKE %s
+        ORDER BY 
+            CASE 
+                WHEN UPPER(code) = UPPER(%s) THEN 1
+                WHEN UPPER(primaryticker) = UPPER(%s) THEN 2
+                ELSE 3
+            END
+        LIMIT 1
+        """
+        
+        search_pattern = f"%{request.query}%"
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute(query_sql, (request.query, request.query, search_pattern, request.query, request.query))
+            company_result = cursor.fetchall()
+        
+        if not company_result:
+            return CompanyFundamentalsUpdateResponse(
+                success=False,
+                message=f"未找到公司: {request.query}",
+                execution_time=time.time() - start_time
+            )
+        
+        company = dict(company_result[0])
+        symbol = company['code'] or company['primaryticker']
+        exchange = company['exchange']
+        company_name = company['name']
+        
+        info(f"找到公司", 
+             symbol=symbol,
+             exchange=exchange,
+             company_name=company_name,
+             user=current_user.username)
+        
+        # 检查是否需要更新（如果不是强制更新，检查数据新鲜度）
+        if not request.force_update:
+            # 检查最后更新时间
+            with db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT MAX(updated_at) as last_update 
+                    FROM companies 
+                    WHERE id = %s AND updated_at > NOW() - INTERVAL '1 day'
+                """, (company['id'],))
+                recent_update = cursor.fetchone()
+                
+                if recent_update and recent_update[0]:
+                    info(f"公司数据较新，跳过更新", 
+                         symbol=symbol,
+                         last_update=recent_update[0],
+                         user=current_user.username)
+                    
+                    return CompanyFundamentalsUpdateResponse(
+                        success=True,
+                        message=f" {company_name} ({symbol})Lately updated: {recent_update[0]}",
+                        company_info=company,
+                        execution_time=time.time() - start_time
+                    )
+        
+        # 初始化EODHD基本面数据服务
+        fundamentals_service = EODHDFundamentalsService()
+        
+        # 获取完整的基本面数据
+        info(f"开始从EODHD获取 {symbol} 的完整基本面数据", user=current_user.username)
+        
+        full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+        
+        if not full_data:
+            return CompanyFundamentalsUpdateResponse(
+                success=False,
+                message=f"无法从EODHD获取公司 {company_name} ({symbol}) 的基本面数据",
+                company_info=company,
+                execution_time=time.time() - start_time
+            )
+        
+        # 保存数据到数据库
+        info(f"开始保存 {symbol} 的基本面数据到数据库", user=current_user.username)
+        
+        # 构建保存数据的格式
+        company_data = {
+            'symbol': symbol,
+            'exchange': exchange,
+            'general_data': full_data.get('General', full_data),
+            'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+            'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+            'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+            'full_data': full_data
+        }
+        
+        # 使用批量保存方法
+        save_result = fundamentals_service.batch_save_companies_data([company_data])
+        
+        # 构建响应数据
+        data_updated = {
+            'company_info': save_result.get('companies_saved', 0) > 0,
+            'address': save_result.get('addresses_saved', 0) > 0,
+            'officers': save_result.get('officers_saved', 0) > 0,
+            'financials': save_result.get('financials_saved', 0) > 0,
+            'highlights': save_result.get('highlights_saved', 0) > 0,
+            'valuations': save_result.get('valuations_saved', 0) > 0,
+            'technicals': save_result.get('technicals_saved', 0) > 0,
+            'earnings': save_result.get('earnings_saved', 0) > 0,
+            'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
+            'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
+            'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
+            'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
+        }
+        
+        execution_time = time.time() - start_time
+        
+        # 构建成功消息
+        updated_components = [k for k, v in data_updated.items() if v]
+        success_message = f"成功更新公司 {company_name} ({symbol}) 的基本面数据"
+        if updated_components:
+            success_message += f"，更新了 {len(updated_components)} 个数据组件: {', '.join(updated_components)}"
+        
+        info(f"完成公司基本面数据更新", 
+             symbol=symbol,
+             company_name=company_name,
+             execution_time=execution_time,
+             data_updated=data_updated,
+             user=current_user.username)
+        
+        return CompanyFundamentalsUpdateResponse(
+            success=True,
+            message=success_message,
+            company_info=company,
+            data_updated=data_updated,
+            execution_time=execution_time
+        )
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error(f"更新公司基本面数据失败: {str(e)}", 
+              query=request.query,
+              execution_time=execution_time,
+              user=current_user.username,
+              source="markets_api")
+        
+        return CompanyFundamentalsUpdateResponse(
+            success=False,
+            message=f"更新公司基本面数据失败: {str(e)}",
+            execution_time=execution_time
+        )

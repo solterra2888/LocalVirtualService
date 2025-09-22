@@ -826,33 +826,20 @@ class EODHDNewsService:
             conn.autocommit = False
             
             with conn.cursor() as cursor:
-                # 步骤1: 批量检查已存在的新闻
-                existing_links = self._batch_check_existing_news(cursor, articles)
-                logger.debug(f"发现 {len(existing_links)} 条已存在的新闻")
+                # 直接批量处理所有新闻（UPSERT会自动处理重复键）
+                logger.debug(f"开始处理 {len(articles)} 条新闻")
                 
-                # 步骤2: 过滤出需要插入的新新闻
-                new_articles = []
-                existing_count = 0
-                
-                for article in articles:
-                    link = article.get('link')
-                    if link and link in existing_links:
-                            existing_count += 1
-                            continue
-                    new_articles.append(article)
-                
-                logger.debug(f"需要插入 {len(new_articles)} 条新新闻")
-                
-                # 步骤3: 批量插入新新闻
+                # 批量插入/更新新闻
                 success_count = 0
                 failed_count = 0
+                news_ids, success_count, failed_count = self._batch_insert_new_articles(cursor, articles)
                 
-                if new_articles:
-                    news_ids, success_count, failed_count = self._batch_insert_new_articles(cursor, new_articles)
-                    
-                    # 步骤4: 批量处理symbols和tags
-                    if news_ids:
-                        self._batch_insert_symbols_and_tags(cursor, new_articles, news_ids)
+                # 批量处理symbols和tags
+                if news_ids:
+                    self._batch_insert_symbols_and_tags(cursor, articles, news_ids)
+                
+                # 计算已存在的数量（通过比较总数和成功数）
+                existing_count = len(articles) - success_count - failed_count
                 
                 # 提交事务
                 conn.commit()
@@ -896,7 +883,7 @@ class EODHDNewsService:
         return existing_links
     
     def _batch_insert_new_articles(self, cursor, new_articles: List[Dict[str, Any]]) -> tuple:
-        """批量插入新的新闻文章"""
+        """批量插入新的新闻文章（使用UPSERT处理重复键）"""
         if not new_articles:
             return [], 0, 0
         
@@ -917,16 +904,26 @@ class EODHDNewsService:
             ))
                     
         try:
-            # 使用executemany批量插入，并获取所有插入的ID
+            # 使用UPSERT处理重复键问题
             sql = """
-                        INSERT INTO news (date, title, content, link, source,
-                                        sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
-                                        formatted_text)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
+                INSERT INTO news (date, title, content, link, source,
+                                sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
+                                formatted_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (link) DO UPDATE SET
+                    date = EXCLUDED.date,
+                    title = EXCLUDED.title,
+                    content = EXCLUDED.content,
+                    source = EXCLUDED.source,
+                    sentiment_polarity = EXCLUDED.sentiment_polarity,
+                    sentiment_neg = EXCLUDED.sentiment_neg,
+                    sentiment_neu = EXCLUDED.sentiment_neu,
+                    sentiment_pos = EXCLUDED.sentiment_pos,
+                    formatted_text = EXCLUDED.formatted_text,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id, (xmax = 0) AS inserted
             """
             
-            # PostgreSQL的executemany不直接支持RETURNING，所以我们需要分批处理
             news_ids = []
             success_count = 0
             failed_count = 0
@@ -934,19 +931,26 @@ class EODHDNewsService:
             for i, data in enumerate(news_data):
                 try:
                     cursor.execute(sql, data)
-                    news_id = cursor.fetchone()[0]
+                    result = cursor.fetchone()
+                    news_id, is_inserted = result
                     news_ids.append(news_id)
                     success_count += 1
+                    
+                    if is_inserted:
+                        logger.debug(f"插入第{i+1}条新闻成功 (新记录)")
+                    else:
+                        logger.debug(f"更新第{i+1}条新闻成功 (已存在)")
+                        
                 except Exception as e:
-                    logger.warning(f"插入第{i+1}条新闻失败: {e}")
+                    logger.warning(f"处理第{i+1}条新闻失败: {e}")
                     news_ids.append(None)  # 占位，保持索引一致
                     failed_count += 1
             
-            logger.debug(f"批量插入新闻: 成功{success_count}, 失败{failed_count}")
+            logger.debug(f"批量处理新闻: 成功{success_count}, 失败{failed_count}")
             return news_ids, success_count, failed_count
             
         except Exception as e:
-            logger.error(f"批量插入新闻失败: {e}")
+            logger.error(f"批量处理新闻失败: {e}")
             return [], 0, len(new_articles)
     
     def _batch_insert_symbols_and_tags(self, cursor, articles: List[Dict[str, Any]], news_ids: List[int]):

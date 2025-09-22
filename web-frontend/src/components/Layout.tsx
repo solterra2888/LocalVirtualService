@@ -104,7 +104,7 @@ const Layout: React.FC = () => {
         {
           key: '/files',
           icon: <FileTextOutlined />,
-          label: 'File Processing',
+          label: 'Upload Files',
         },
         {
           key: '/tasks',
@@ -221,7 +221,7 @@ const Layout: React.FC = () => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['dashboard', 'markets', 'fundamentals']}
+          defaultOpenKeys={['dashboard', 'markets', 'ai-agents', 'settings']}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ border: 'none', height: 'calc(100vh - 84px)' }}

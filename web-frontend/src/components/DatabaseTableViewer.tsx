@@ -272,7 +272,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
             const color = parseFloat(rate) >= 80 ? 'green' : parseFloat(rate) >= 60 ? 'orange' : 'red';
             
             return (
-              <Space direction="vertical" size={0}>
+              <Space direction="horizontal" size={4}>
                 <Tag color={color} style={{ fontSize: '11px' }}>
                   {rate}%
                 </Tag>

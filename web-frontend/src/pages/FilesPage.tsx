@@ -1594,10 +1594,10 @@ const FilesPage: React.FC = () => {
       align: 'center' as const,
       render: (_: any, record: TaskExecution) => (
         <Space>
-          <span style={{ color: '#00b96b', fontSize: '14px' }}>
+          <span style={{ color: '#63aef5', fontSize: '14px' }}>
             <CheckCircleOutlined /> {record.files_processed}
           </span>
-          <span style={{ color: '#ff7875', fontSize: '14px' }}>
+          <span style={{ color: '#ff8c00', fontSize: '14px' }}>
             <ExclamationCircleOutlined /> {record.files_failed}
           </span>
         </Space>
@@ -1612,8 +1612,8 @@ const FilesPage: React.FC = () => {
         if (!status) return <span style={{ color: '#bfbfbf', fontSize: '16px' }}><ExclamationCircleOutlined /></span>;
         
         const statusConfig = {
-          success: { color: '#00b96b', icon: <CheckCircleOutlined /> },
-          failed: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
+          success: { color: '#63aef5', icon: <CheckCircleOutlined /> },
+          failed: { color: '#ff8c00', icon: <ExclamationCircleOutlined /> },
           pending: { color: '#40a9ff', icon: <ClockCircleOutlined /> },
           skipped: { color: '#bfbfbf', icon: <ExclamationCircleOutlined /> }
         };

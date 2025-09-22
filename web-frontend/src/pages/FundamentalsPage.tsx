@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Input,
@@ -16,7 +16,10 @@ import {
   Space,
   Divider,
   Empty,
-  Select
+  Select,
+  Alert,
+  List,
+  AutoComplete
 } from 'antd';
 import {
   SearchOutlined,
@@ -40,11 +43,13 @@ import {
   DownloadOutlined,
   SwapOutlined,
   CalendarOutlined,
-  FileOutlined
+  FileOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
-import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction } from '../services/fundamentals';
+import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction, CompanyFundamentalsUpdateResponse } from '../services/fundamentals';
+import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 import { getErrorMessage } from '../utils/errorHandler';
 
 const { Title, Text, Paragraph } = Typography;
@@ -54,6 +59,14 @@ interface FundamentalsPageState {
   loading: boolean;
   searchQuery: string;
   fundamentalsData: CompanyFundamentalsResponse | null;
+  updateResult: CompanyFundamentalsUpdateResponse | null;
+  isUpdating: boolean;
+  autoUpdateEnabled: boolean;
+  isAdmin: boolean;
+  // 模糊搜索相关状态
+  searchResults: StockSearchResult[];
+  searchLoading: boolean;
+  showSearchResults: boolean;
 }
 
 const FundamentalsPage: React.FC = () => {
@@ -61,36 +74,245 @@ const FundamentalsPage: React.FC = () => {
   const [state, setState] = useState<FundamentalsPageState>({
     loading: false,
     searchQuery: '',
-    fundamentalsData: null
+    fundamentalsData: null,
+    updateResult: null,
+    isUpdating: false,
+    autoUpdateEnabled: true, // 默认启用自动更新
+    isAdmin: false, // 需要从用户认证系统获取
+    // 模糊搜索相关状态
+    searchResults: [],
+    searchLoading: false,
+    showSearchResults: false
   });
 
-  // Execute search
+  // Check user permissions on component mount
+  useEffect(() => {
+    const checkUserPermissions = () => {
+      try {
+        // 检查多种可能的用户信息存储位置
+        let userInfo = null;
+        
+        // 1. 检查localStorage中的userInfo
+        const userInfoStr = localStorage.getItem('userInfo');
+        if (userInfoStr) {
+          userInfo = JSON.parse(userInfoStr);
+          console.log('Found userInfo in localStorage:', userInfo);
+        }
+        
+        // 2. 检查localStorage中的user
+        const userStr = localStorage.getItem('user');
+        if (userStr && !userInfo) {
+          userInfo = JSON.parse(userStr);
+          console.log('Found user in localStorage:', userInfo);
+        }
+        
+        // 3. 检查localStorage中的authToken（可能包含用户信息）
+        const authToken = localStorage.getItem('authToken');
+        if (authToken && !userInfo) {
+          try {
+            // 尝试解析JWT token的payload
+            const payload = JSON.parse(atob(authToken.split('.')[1]));
+            userInfo = payload;
+            console.log('Found user info in authToken:', userInfo);
+          } catch (e) {
+            console.log('Could not parse authToken');
+          }
+        }
+        
+        // 4. 检查sessionStorage
+        const sessionUserInfo = sessionStorage.getItem('userInfo');
+        if (sessionUserInfo && !userInfo) {
+          userInfo = JSON.parse(sessionUserInfo);
+          console.log('Found userInfo in sessionStorage:', userInfo);
+        }
+        
+        if (userInfo) {
+          // 检查多种可能的admin标识
+          const isAdmin = userInfo.role === 'admin' || 
+                         userInfo.isAdmin === true || 
+                         userInfo.is_admin === true ||
+                         userInfo.userRole === 'admin' ||
+                         userInfo.permissions?.includes('admin') ||
+                         userInfo.role === 'ADMIN' ||
+                         userInfo.isAdmin === 'true';
+          
+          console.log('User admin status:', isAdmin, 'User info:', userInfo);
+          setState(prev => ({ ...prev, isAdmin }));
+        } else {
+          console.log('No user info found, setting as non-admin');
+          setState(prev => ({ ...prev, isAdmin: false }));
+        }
+      } catch (error) {
+        console.error('Failed to check user permissions:', error);
+        setState(prev => ({ ...prev, isAdmin: false }));
+      }
+    };
+
+    checkUserPermissions();
+  }, []);
+
+  // 搜索股票（用于模糊搜索）
+  const searchStocks = async (query: string) => {
+    if (!query.trim()) {
+      setState(prev => ({ 
+        ...prev, 
+        searchResults: [], 
+        showSearchResults: false 
+      }));
+      return;
+    }
+
+    setState(prev => ({ ...prev, searchLoading: true }));
+    try {
+      const results = await dashboardAPI.searchStocks(query, 10);
+      setState(prev => ({ 
+        ...prev, 
+        searchResults: results, 
+        showSearchResults: true,
+        searchLoading: false 
+      }));
+    } catch (error) {
+      console.error('搜索股票失败:', error);
+      setState(prev => ({ 
+        ...prev, 
+        searchResults: [], 
+        showSearchResults: false,
+        searchLoading: false 
+      }));
+    }
+  };
+
+  // 防抖搜索
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchStocks(state.searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [state.searchQuery]);
+
+  // 选择股票
+  const handleSelectStock = (stock: StockSearchResult) => {
+    setState(prev => ({ 
+      ...prev, 
+      searchQuery: stock.ticker,
+      showSearchResults: false 
+    }));
+  };
+
+  // 处理输入框变化
+  const handleInputChange = (value: string) => {
+    setState(prev => ({ ...prev, searchQuery: value }));
+  };
+
+  // 处理输入框焦点
+  const handleInputFocus = () => {
+    if (state.searchResults.length > 0) {
+      setState(prev => ({ ...prev, showSearchResults: true }));
+    }
+  };
+
+  // 处理输入框失焦
+  const handleInputBlur = () => {
+    // 延迟隐藏搜索结果，以便点击事件能够触发
+    setTimeout(() => {
+      setState(prev => ({ ...prev, showSearchResults: false }));
+    }, 200);
+  };
+
+  // Execute search with optional data update
   const handleSearch = async () => {
     if (!state.searchQuery.trim()) {
       message.warning('Please enter a stock code or company name');
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true }));
+    setState(prev => ({ ...prev, loading: true, isUpdating: state.autoUpdateEnabled, updateResult: null }));
     
     try {
-      const data = await fundamentalsAPI.searchCompany(state.searchQuery.trim());
+      let searchResult: CompanyFundamentalsResponse;
+      let updateResult: CompanyFundamentalsUpdateResponse | null = null;
+
+      if (state.autoUpdateEnabled) {
+        // 启用自动更新：使用搜索并更新API
+        const result = await fundamentalsAPI.searchAndUpdateCompany(
+          state.searchQuery.trim(),
+          false
+        );
+        searchResult = result.searchResult;
+        updateResult = result.updateResult;
+
+        // 显示更新结果消息
+        if (updateResult.success) {
+          const updatedComponents = updateResult.data_updated ? 
+            Object.entries(updateResult.data_updated).filter(([, updated]) => updated).map(([key]) => key) : [];
+          
+          if (updatedComponents.length > 0) {
+            message.success(
+              `Successfully updated ${updateResult.company_info?.name || state.searchQuery} data. ` +
+              `Updated ${updatedComponents.length} components: ${updatedComponents.join(', ')}`
+            );
+          } else {
+            message.info(updateResult.message);
+          }
+        } else {
+          message.warning(`Data update: ${updateResult.message}`);
+        }
+      } else {
+        // 禁用自动更新：仅搜索数据库数据
+        searchResult = await fundamentalsAPI.searchCompany(state.searchQuery.trim());
+        message.info('Search completed (auto-update disabled)');
+      }
+
       setState(prev => ({
         ...prev,
-        fundamentalsData: data,
-        loading: false
+        fundamentalsData: searchResult,
+        updateResult: updateResult,
+        loading: false,
+        isUpdating: false
       }));
     } catch (error) {
       console.error('Failed to query fundamental information:', error);
       const errorMessage = getErrorMessage(error);
-      // Avoid duplicate "no data found" messages
-      if (errorMessage.includes('no data found')) {
-        message.error(errorMessage);
-      } else {
-        message.error(`Query failed: ${errorMessage}`);
+      
+      // Try fallback to search only if update fails
+      try {
+        setState(prev => ({ ...prev, isUpdating: false }));
+        if (state.autoUpdateEnabled) {
+          message.warning('Data update failed, falling back to search only');
+        }
+        
+        const data = await fundamentalsAPI.searchCompany(state.searchQuery.trim());
+        setState(prev => ({
+          ...prev,
+          fundamentalsData: data,
+          loading: false
+        }));
+        
+        message.info('Search completed');
+      } catch (searchError) {
+        console.error('Search fallback also failed:', searchError);
+        const searchErrorMessage = getErrorMessage(searchError);
+        
+        // Avoid duplicate "no data found" messages
+        if (searchErrorMessage.includes('no data found')) {
+          message.error(searchErrorMessage);
+        } else {
+          message.error(`Query failed: ${searchErrorMessage}`);
+        }
+        setState(prev => ({ ...prev, loading: false, isUpdating: false }));
       }
-      setState(prev => ({ ...prev, loading: false }));
     }
+  };
+
+
+  // Toggle auto-update setting
+  const handleToggleAutoUpdate = () => {
+    setState(prev => ({
+      ...prev,
+      autoUpdateEnabled: !prev.autoUpdateEnabled
+    }));
+    message.info(`Auto-update ${!state.autoUpdateEnabled ? 'enabled' : 'disabled'}`);
   };
 
   // Clear results
@@ -98,7 +320,9 @@ const FundamentalsPage: React.FC = () => {
     setState(prev => ({
       ...prev,
       searchQuery: '',
-      fundamentalsData: null
+      fundamentalsData: null,
+      updateResult: null,
+      isUpdating: false
     }));
   };
 
@@ -1398,6 +1622,15 @@ const FundamentalsPage: React.FC = () => {
                   <Text type="secondary" style={{ fontSize: '16px' }}>
                     {company.sector && company.industry ? `${company.sector} • ${company.industry}` : company.sector || company.industry || 'N/A'}
                   </Text>
+                  {state.updateResult && (
+                    <div style={{ marginTop: 8 }}>
+                      <Text type="secondary" style={{ fontSize: '14px' }}>
+                        Last updated: {state.updateResult.message.includes('Lately updated:') 
+                          ? state.updateResult.message.split('Lately updated: ')[1] 
+                          : new Date().toLocaleString()}
+                      </Text>
+                    </div>
+                  )}
                 </div>
               </div>
             </Col>
@@ -2796,20 +3029,111 @@ const FundamentalsPage: React.FC = () => {
 
       {/* Search area */}
       <Card style={{ marginBottom: 24 }}>
-        <Row gutter={16} align="middle">
+        <Row gutter={16} align="top">
           <Col flex="auto">
-            <Input
-              placeholder="Enter stock code or company name to search (e.g., AAPL, Apple, Apple Inc.)"
-              prefix={<SearchOutlined />}
-              value={state.searchQuery}
-              onChange={(e) => setState(prev => ({ ...prev, searchQuery: e.target.value }))}
-              onPressEnter={handleSearch}
-              size="large"
-              style={{ fontSize: '16px' }}
-            />
+            <div style={{ position: 'relative' }}>
+              <AutoComplete
+                value={state.searchQuery}
+                onChange={handleInputChange}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
+                placeholder="Enter stock code or company name to search (e.g., AAPL, Apple, Apple Inc.)"
+                size="large"
+                style={{ fontSize: '16px', width: '100%' }}
+                options={[]}
+                notFoundContent={null}
+                dropdownStyle={{ display: 'none' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch();
+                  }
+                }}
+              />
+              <SearchOutlined 
+                style={{ 
+                  position: 'absolute', 
+                  right: '12px', 
+                  top: '50%', 
+                  transform: 'translateY(-50%)',
+                  color: '#bfbfbf',
+                  pointerEvents: 'none'
+                }} 
+              />
+              
+              {/* 自定义下拉列表 */}
+              {state.showSearchResults && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 1000,
+                  backgroundColor: 'white',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  maxHeight: '300px',
+                  overflowY: 'auto'
+                }}>
+                  <Spin spinning={state.searchLoading}>
+                    {state.searchResults.length === 0 && state.searchQuery ? (
+                      <div style={{ padding: '12px', textAlign: 'center', color: '#999' }}>
+                        No stocks found
+                      </div>
+                    ) : (
+                      <List
+                        dataSource={state.searchResults}
+                        renderItem={(stock) => (
+                          <List.Item
+                            style={{ 
+                              cursor: 'pointer',
+                              padding: '8px 12px',
+                              borderBottom: '1px solid #f0f0f0'
+                            }}
+                            onClick={() => handleSelectStock(stock)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#f5f5f5';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            <List.Item.Meta
+                              title={
+                                <Space>
+                                  <Text strong style={{ color: '#1890ff' }}>{stock.ticker}</Text>
+                                  <Text>{stock.company}</Text>
+                                </Space>
+                              }
+                              description={
+                                <Space>
+                                  <Tag color="blue">{stock.sector}</Tag>
+                                  <Tag color="green">{stock.industry}</Tag>
+                                </Space>
+                              }
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    )}
+                  </Spin>
+                </div>
+              )}
+            </div>
+            {state.isAdmin && (
+              <div style={{ marginTop: 8, fontSize: '12px' }}>
+                <Text type="secondary">
+                  Auto-update: {state.autoUpdateEnabled ? (
+                    <Text type="success">Enabled</Text>
+                  ) : (
+                    <Text type="warning">Disabled</Text>
+                  )}
+                </Text>
+              </div>
+            )}
           </Col>
-          <Col>
-            <Space>
+          <Col style={{ display: 'flex', alignItems: 'flex-start' }}>
+            <Space style={{ marginTop: 0 }}>
               <Button
                 type="primary"
                 icon={<SearchOutlined />}
@@ -2823,9 +3147,20 @@ const FundamentalsPage: React.FC = () => {
                 icon={<ReloadOutlined />}
                 onClick={handleClear}
                 size="large"
+                disabled={state.loading}
               >
                 Clear
               </Button>
+              {state.isAdmin && (
+                <Button
+                  icon={<SettingOutlined />}
+                  onClick={handleToggleAutoUpdate}
+                  size="large"
+                  disabled={state.loading}
+                  type={state.autoUpdateEnabled ? "primary" : "default"}
+                  title={`Auto-update ${state.autoUpdateEnabled ? 'enabled' : 'disabled'}`}
+                />
+              )}
             </Space>
           </Col>
         </Row>
@@ -2837,11 +3172,16 @@ const FundamentalsPage: React.FC = () => {
           <div style={{ textAlign: 'center', padding: '40px' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16 }}>
-              <Text>Querying fundamental information...</Text>
+              <Text>
+                {state.isUpdating 
+                  ? 'Updating fundamental data from EODHD API...' 
+                  : 'Querying fundamental information...'}
+              </Text>
             </div>
           </div>
         </Card>
       )}
+
 
       {state.fundamentalsData && !state.loading && (
         <Tabs defaultActiveKey="overview" size="large">

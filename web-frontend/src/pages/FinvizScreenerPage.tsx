@@ -32,7 +32,7 @@ const FILTER_OPTIONS = {
   // 第1列
   exchange: [
     { label: 'Any', value: '' },
-    { label: 'NASDAQ', value: 'NASDAQ' },
+    { label: 'NASDAQ', value: 'NASD' },
     { label: 'NYSE', value: 'NYSE' },
     { label: 'AMEX', value: 'AMEX' },
     { label: 'CBOE', value: 'CBOE' }
@@ -1101,7 +1101,7 @@ const FinvizScreenerPage: React.FC = () => {
                 Stock Screener
               </Title>
               <Text type="secondary">
-                Find stocks that match your investment criteria
+                Find stocks that match your investment criteria (US market only)
               </Text>
             </div>
 

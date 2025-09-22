@@ -228,8 +228,8 @@ const FundamentalsOverviewModal: React.FC<FundamentalsOverviewModalProps> = ({
           <Col xs={12} sm={8}>
             <Statistic
               title="ROE"
-              value={fundamentalsUtils.formatPercentage(highlights.returnonequity)}
-              valueStyle={{ color: fundamentalsUtils.getRatioColor(highlights.returnonequity), fontSize: '14px' }}
+              value={fundamentalsUtils.formatPercentage(highlights.returnonequityttm)}
+              valueStyle={{ color: fundamentalsUtils.getRatioColor(highlights.returnonequityttm), fontSize: '14px' }}
             />
           </Col>
         </Row>
@@ -389,24 +389,24 @@ const FundamentalsOverviewModal: React.FC<FundamentalsOverviewModalProps> = ({
           <Col xs={12} sm={8}>
             <Statistic
               title="50-Day MA"
-              value={fundamentalsUtils.formatCurrency(technicals['50DayMovingAverage'], company.currencycode)}
+              value={fundamentalsUtils.formatCurrency(technicals['50DayMA'], company.currencycode)}
               valueStyle={{ color: '#1890ff', fontSize: '14px' }}
             />
           </Col>
           <Col xs={12} sm={8}>
             <Statistic
               title="200-Day MA"
-              value={fundamentalsUtils.formatCurrency(technicals['200DayMovingAverage'], company.currencycode)}
+              value={fundamentalsUtils.formatCurrency(technicals['200DayMA'], company.currencycode)}
               valueStyle={{ color: '#722ed1', fontSize: '14px' }}
             />
           </Col>
           <Col xs={12} sm={8}>
             <Statistic
-              title="RSI (14)"
-              value={fundamentalsUtils.formatNumber(technicals.rsi)}
+              title="Short Ratio"
+              value={fundamentalsUtils.formatNumber(technicals.shortratio)}
               valueStyle={{ 
-                color: technicals.rsi && technicals.rsi > 70 ? '#ff4d4f' : 
-                       technicals.rsi && technicals.rsi < 30 ? '#52c41a' : '#1890ff',
+                color: technicals.shortratio && technicals.shortratio > 5 ? '#ff4d4f' : 
+                       technicals.shortratio && technicals.shortratio < 2 ? '#52c41a' : '#1890ff',
                 fontSize: '14px' 
               }}
             />

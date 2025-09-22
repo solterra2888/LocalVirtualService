@@ -347,6 +347,40 @@ export interface CompanySearchRequest {
   query: string;
 }
 
+// 公司数据更新请求接口
+export interface CompanyFundamentalsUpdateRequest {
+  query: string;
+  force_update?: boolean;
+}
+
+// 公司数据更新响应接口
+export interface CompanyFundamentalsUpdateResponse {
+  success: boolean;
+  message: string;
+  company_info?: {
+    code: string;
+    name: string;
+    exchange: string;
+    primaryticker: string;
+    id: number;
+  };
+  data_updated?: {
+    company_info: boolean;
+    address: boolean;
+    officers: boolean;
+    financials: boolean;
+    highlights: boolean;
+    valuations: boolean;
+    technicals: boolean;
+    earnings: boolean;
+    outstanding_shares: boolean;
+    analyst_ratings: boolean;
+    splits_dividends: boolean;
+    insider_transactions: boolean;
+  };
+  execution_time?: number;
+}
+
 // API函数
 export const fundamentalsAPI = {
   // 搜索公司基本面信息
@@ -356,6 +390,32 @@ export const fundamentalsAPI = {
       { query }
     );
     return response.data;
+  },
+
+  // 更新单个公司的基本面数据
+  updateCompanyFundamentals: async (request: CompanyFundamentalsUpdateRequest): Promise<CompanyFundamentalsUpdateResponse> => {
+    const response = await apiClient.post<CompanyFundamentalsUpdateResponse>(
+      '/markets/company/update-fundamentals',
+      request
+    );
+    return response.data;
+  },
+
+  // 搜索公司并自动更新基本面数据
+  searchAndUpdateCompany: async (query: string, forceUpdate: boolean = false): Promise<{
+    searchResult: CompanyFundamentalsResponse;
+    updateResult: CompanyFundamentalsUpdateResponse;
+  }> => {
+    // 首先尝试更新数据
+    const updateResult = await fundamentalsAPI.updateCompanyFundamentals({
+      query,
+      force_update: forceUpdate
+    });
+
+    // 然后搜索最新数据
+    const searchResult = await fundamentalsAPI.searchCompany(query);
+
+    return { searchResult, updateResult };
   }
 };
 
