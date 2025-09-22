@@ -101,6 +101,52 @@ export interface SupportedFileTypesResponse {
   descriptions: Record<string, string>;
 }
 
+export interface SectorOption {
+  value: string;
+  label: string;
+  children: Array<{
+    value: string;
+    label: string;
+  }>;
+}
+
+export interface TickerOption {
+  id: number;
+  code: string;
+  name: string;
+  exchange: string;
+  sector: string;
+  industry: string;
+  label: string;
+  value: string;
+}
+
+export interface FileTag {
+  id: number;
+  file_id: number;
+  sector: string;
+  industry: string;
+  ticker?: string;
+  tagged_by?: number;
+  tagged_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FileTagCreate {
+  file_id: number;
+  sector: string;
+  industry: string;
+  ticker?: string;
+}
+
+export interface FileTagBatchCreate {
+  file_ids: number[];
+  sector: string;
+  industry: string;
+  ticker?: string;
+}
+
 export const filesAPI = {
   // 上传文件
   uploadFiles: async (files: File[]): Promise<FileUploadResponse[]> => {
@@ -158,6 +204,59 @@ export const filesAPI = {
   // 获取处理参数选项
   getProcessingParams: async (): Promise<ProcessingParamsOptions> => {
     return api.get<ProcessingParamsOptions>('/files/processing-params');
+  },
+
+  // 获取行业分类
+  getSectors: async (): Promise<SectorOption[]> => {
+    return api.get<SectorOption[]>('/files/sectors');
+  },
+
+  // 搜索股票代码
+  searchTickers: async (params: {
+    sector?: string;
+    industry?: string;
+    search?: string;
+  }): Promise<TickerOption[]> => {
+    const queryParams = new URLSearchParams();
+    if (params.sector) queryParams.append('sector', params.sector);
+    if (params.industry) queryParams.append('industry', params.industry);
+    if (params.search) queryParams.append('search', params.search);
+    
+    return api.get<TickerOption[]>(`/files/tickers?${queryParams.toString()}`);
+  },
+
+  // 文件标签相关API
+  // 为文件设置标签
+  createFileTag: async (fileId: number, tagData: Omit<FileTagCreate, 'file_id'>): Promise<FileTag> => {
+    return api.post<FileTag>(`/files/${fileId}/tags`, {
+      file_id: fileId,
+      ...tagData
+    });
+  },
+
+  // 获取文件标签
+  getFileTag: async (fileId: number): Promise<FileTag> => {
+    return api.get<FileTag>(`/files/${fileId}/tags`);
+  },
+
+  // 更新文件标签
+  updateFileTag: async (fileId: number, tagData: Omit<FileTagCreate, 'file_id'>): Promise<FileTag> => {
+    return api.put<FileTag>(`/files/${fileId}/tags`, tagData);
+  },
+
+  // 删除文件标签
+  deleteFileTag: async (fileId: number): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/files/${fileId}/tags`);
+  },
+
+  // 批量设置文件标签
+  batchCreateFileTags: async (batchData: FileTagBatchCreate): Promise<{
+    message: string;
+    success_count: number;
+    failed_count: number;
+    failed_files: any[];
+  }> => {
+    return api.post(`/files/batch-tag`, batchData);
   },
 
   // 获取原始文件信息

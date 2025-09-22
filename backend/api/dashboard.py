@@ -721,6 +721,165 @@ async def add_to_watchlist(
             detail=f"Failed to add to watchlist: {str(e)}"
         )
 
+@router.get("/watchlist/{ticker}/research-reports", summary="获取ticker关联的研究报告")
+async def get_ticker_research_reports(
+    ticker: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取与指定ticker关联的上传文件（研究报告）
+    
+    Args:
+        ticker: 股票代码
+        
+    Returns:
+        包含文件信息的列表
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查询与ticker关联的文件
+        # 支持多种ticker格式匹配，类似新闻查询的逻辑
+        query = """
+        SELECT DISTINCT
+            f.id,
+            f.filename,
+            f.original_file_path,
+            f.file_size_mb,
+            f.file_type,
+            f.created_at,
+            f.status,
+            ft.sector,
+            ft.industry,
+            ft.ticker,
+            ft.tagged_at
+        FROM file_processing_details f
+        INNER JOIN file_tags ft ON f.id = ft.file_id
+        WHERE (
+            ft.ticker = %s OR 
+            ft.ticker = %s OR 
+            ft.ticker LIKE %s OR
+            ft.ticker LIKE %s
+        )
+        AND f.status = 'completed'
+        ORDER BY ft.tagged_at DESC, f.created_at DESC
+        """
+        
+        # 尝试多种ticker格式匹配
+        ticker_formats = [
+            ticker,  # 原始ticker
+            f"{ticker}.US",  # 添加.US后缀
+            f"{ticker}%",  # 模糊匹配
+            f"%.{ticker}%"  # 包含ticker的格式
+        ]
+        
+        results = db_manager.fetch_all(query, ticker_formats)
+        
+        research_reports = []
+        for row in results:
+            report = {
+                "id": row[0],
+                "file_name": row[1],
+                "file_path": row[2],
+                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,  # 转换为字节
+                "file_type": row[4],
+                "uploaded_at": row[5].isoformat() if row[5] else None,
+                "status": row[6],
+                "sector": row[7],
+                "industry": row[8],
+                "ticker": row[9],
+                "tagged_at": row[10].isoformat() if row[10] else None
+            }
+            research_reports.append(report)
+        
+        return {
+            "ticker": ticker,
+            "count": len(research_reports),
+            "reports": research_reports
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取研究报告失败: {str(e)}"
+        )
+
+@router.get("/test/research-reports/{ticker}", summary="测试获取ticker关联的研究报告（无需认证）")
+async def test_get_ticker_research_reports(ticker: str):
+    """
+    测试端点：获取与指定ticker关联的上传文件（研究报告）
+    无需认证，用于测试
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查询与ticker关联的文件
+        query = """
+        SELECT DISTINCT
+            f.id,
+            f.filename,
+            f.original_file_path,
+            f.file_size_mb,
+            f.file_type,
+            f.created_at,
+            f.status,
+            ft.sector,
+            ft.industry,
+            ft.ticker,
+            ft.tagged_at
+        FROM file_processing_details f
+        INNER JOIN file_tags ft ON f.id = ft.file_id
+        WHERE (
+            ft.ticker = %s OR 
+            ft.ticker = %s OR 
+            ft.ticker LIKE %s OR
+            ft.ticker LIKE %s
+        )
+        AND f.status = 'completed'
+        ORDER BY ft.tagged_at DESC, f.created_at DESC
+        """
+        
+        # 尝试多种ticker格式匹配
+        ticker_formats = [
+            ticker,  # 原始ticker
+            f"{ticker}.US",  # 添加.US后缀
+            f"{ticker}%",  # 模糊匹配
+            f"%.{ticker}%"  # 包含ticker的格式
+        ]
+        
+        results = db_manager.fetch_all(query, ticker_formats)
+        
+        research_reports = []
+        for row in results:
+            report = {
+                "id": row[0],
+                "file_name": row[1],
+                "file_path": row[2],
+                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,  # 转换为字节
+                "file_type": row[4],
+                "uploaded_at": row[5].isoformat() if row[5] else None,
+                "status": row[6],
+                "sector": row[7],
+                "industry": row[8],
+                "ticker": row[9],
+                "tagged_at": row[10].isoformat() if row[10] else None
+            }
+            research_reports.append(report)
+        
+        return {
+            "ticker": ticker,
+            "count": len(research_reports),
+            "reports": research_reports
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取研究报告失败: {str(e)}"
+        )
+
 @router.delete("/watchlist/{watchlist_id}", summary="Remove stock from watchlist")
 async def remove_from_watchlist(
     watchlist_id: int,

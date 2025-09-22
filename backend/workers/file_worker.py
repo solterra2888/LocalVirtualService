@@ -86,6 +86,8 @@ class FileProcessingWorker:
             处理结果统计
         """
         self.total_files = len(file_paths)
+        # 保存处理参数，用于后续标签设置
+        self.params = params
         
         try:
             self.update_status("initializing", 0.0, log_message="正在初始化处理服务...")
@@ -339,6 +341,7 @@ class FileProcessingWorker:
                  processing_time, ai_time, content_length, status, 
                  total_tokens, cost, content, created_at, task_id, original_file_path)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """, (
                     processing_stats_id,
                     file_info['file_name'],
@@ -355,6 +358,28 @@ class FileProcessingWorker:
                     self.task_id,
                     result['original_file']  # 保存原始文件路径
                 ))
+                
+                # 获取插入的文件ID
+                file_processing_id = cursor.fetchone()[0]
+                
+                # 如果处理参数中包含标签信息，自动设置标签
+                if (hasattr(self, 'params') and self.params and 
+                    self.params.get('sector') and self.params.get('industry')):
+                    try:
+                        cursor.execute("""
+                        INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """, (
+                            file_processing_id,
+                            self.params.get('sector'),
+                            self.params.get('industry'),
+                            self.params.get('ticker'),
+                            getattr(self, 'user_id', None)  # 如果有用户ID
+                        ))
+                        print(f"✅ 已为文件 {file_info['file_name']} 设置标签: {self.params.get('sector')} -> {self.params.get('industry')}")
+                    except Exception as tag_error:
+                        print(f"⚠️ 为文件 {file_info['file_name']} 设置标签失败: {str(tag_error)}")
+                        # 标签设置失败不应该影响文件处理
             
             # 插入失败文件的记录
             for failed_file in failed_files:

@@ -20,7 +20,9 @@ import {
   Table,
   Tooltip,
   Badge,
-  Tabs
+  Tabs,
+  Cascader,
+  AutoComplete
 } from 'antd';
 import {
   InboxOutlined,
@@ -45,10 +47,11 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   RobotOutlined,
-  FolderOutlined
+  FolderOutlined,
+  TagOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/authStore';
-import { filesAPI } from '../services/files';
+import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useGlobalLogger } from '../contexts/LoggerContext';
@@ -68,6 +71,12 @@ interface FileItem {
   type: string;
   status: 'ready' | 'pending' | 'processing' | 'completed' | 'failed';
   error_message?: string;
+  fileId?: number;  // 实际的数据库文件ID
+  tag?: {
+    sector: string;
+    industry: string;
+    ticker?: string;
+  };
 }
 
 interface TaskType {
@@ -111,6 +120,9 @@ interface ProcessingParams {
   use_ai_agent: boolean;
   llamaindex_api_key: string;
   ai_agent_server_url: string;
+  sector?: string;
+  industry?: string;
+  ticker?: string;
 }
 
 interface TaskStatus {
@@ -151,6 +163,18 @@ const FilesPage: React.FC = () => {
   const [stoppingTask, setStoppingTask] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingFiles, setUpdatingFiles] = useState(false);
+  
+  // 行业和股票选择相关状态
+  const [sectors, setSectors] = useState<SectorOption[]>([]);
+  const [selectedSector, setSelectedSector] = useState<string>('');
+  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
+  const [tickerOptions, setTickerOptions] = useState<TickerOption[]>([]);
+  const [selectedTicker, setSelectedTicker] = useState<string>('');
+  const [tickerSearchValue, setTickerSearchValue] = useState<string>('');
+  const [loadingSectors, setLoadingSectors] = useState(false);
+  const [loadingTickers, setLoadingTickers] = useState(false);
+  const [showBatchTagModal, setShowBatchTagModal] = useState(false);
+  const [batchTagging, setBatchTagging] = useState(false);
   
   // 初始化日志系统
   const logger = useGlobalLogger();
@@ -335,6 +359,60 @@ const FilesPage: React.FC = () => {
       clearInterval(refreshInterval);
     };
   }, []);
+
+  // 加载行业分类数据
+  useEffect(() => {
+    const loadSectors = async () => {
+      try {
+        setLoadingSectors(true);
+        const sectorsData = await filesAPI.getSectors();
+        setSectors(sectorsData);
+      } catch (error) {
+        console.error('加载行业分类失败:', error);
+        message.error('加载行业分类失败');
+      } finally {
+        setLoadingSectors(false);
+      }
+    };
+
+    loadSectors();
+  }, []);
+
+  // 当选择行业后加载股票代码
+  useEffect(() => {
+    const loadTickers = async () => {
+      if (!selectedSector || !selectedIndustry) {
+        setTickerOptions([]);
+        return;
+      }
+
+      try {
+        setLoadingTickers(true);
+        const tickers = await filesAPI.searchTickers({
+          sector: selectedSector,
+          industry: selectedIndustry
+        });
+        setTickerOptions(tickers);
+      } catch (error) {
+        console.error('加载股票代码失败:', error);
+        message.error('加载股票代码失败');
+      } finally {
+        setLoadingTickers(false);
+      }
+    };
+
+    loadTickers();
+  }, [selectedSector, selectedIndustry]);
+
+  // 更新处理参数中的行业和股票信息
+  useEffect(() => {
+    setProcessingParams(prev => ({
+      ...prev,
+      sector: selectedSector,
+      industry: selectedIndustry,
+      ticker: selectedTicker
+    }));
+  }, [selectedSector, selectedIndustry, selectedTicker]);
 
   // 自动更新文件状态的函数
   const updateFileStatuses = useCallback(async (taskId: string) => {
@@ -796,10 +874,40 @@ const FilesPage: React.FC = () => {
         path: f.file_path,
         size: f.file_size,
         type: f.file_type,
-        status: 'ready' as const
+        status: 'ready' as const,
+        fileId: (f as any).id // 添加实际的文件ID，用于标签设置
       }));
+      
       setFiles(prev => [...prev, ...newFiles]);
-      message.success(`成功上传 ${uploadedFiles.length} 个文件`);
+      
+      // 如果用户已选择标签，自动为新上传的文件设置标签
+      if (selectedSector && selectedIndustry) {
+        try {
+          // 从响应中获取真实的文件ID
+          const fileIds = uploadedFiles.map((f: any) => f.id).filter(id => id);
+          if (fileIds.length > 0) {
+            await filesAPI.batchCreateFileTags({
+              file_ids: fileIds,
+              sector: selectedSector,
+              industry: selectedIndustry,
+              ticker: selectedTicker || undefined
+            });
+            message.success(`成功上传 ${uploadedFiles.length} 个文件并设置标签`);
+            logger.logInfo(`为 ${fileIds.length} 个文件设置标签: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
+          } else {
+            message.success(`成功上传 ${uploadedFiles.length} 个文件`);
+          }
+        } catch (tagError: any) {
+          console.error('设置文件标签失败:', tagError);
+          const tagErrorMessage = getErrorMessage(tagError, '标签设置失败');
+          message.warning(`文件上传成功，但标签设置失败: ${tagErrorMessage}`);
+          logger.logWarning(`文件标签设置失败: ${tagErrorMessage}`, 'file-processing', tagError);
+        }
+      } else {
+        message.success(`Successfully uploaded ${uploadedFiles.length} files`);
+        logger.logInfo('文件上传成功', 'file-processing');
+      }
+      
     } catch (error: any) {
       console.error('文件上传失败:', error);
       const errorMessage = getErrorMessage(error, '文件上传失败');
@@ -849,6 +957,12 @@ const FilesPage: React.FC = () => {
     if (!selectedTaskType) {
       message.error('请选择RC Agent');
       logger.logWarning('未选择RC Agent', 'file-processing');
+      return;
+    }
+
+    if (!selectedSector || !selectedIndustry) {
+      message.error('请选择行业分类');
+      logger.logWarning('未选择行业分类', 'file-processing');
       return;
     }
     
@@ -963,6 +1077,115 @@ const FilesPage: React.FC = () => {
       setTimeout(() => {
         loadTaskExecutionsFunc();
       }, 1000); // 延迟1秒后刷新，确保状态已更新
+  };
+
+  // 行业选择处理函数
+  const handleSectorIndustryChange = (value: string[]) => {
+    if (value && value.length >= 2) {
+      setSelectedSector(value[0]);
+      setSelectedIndustry(value[1]);
+      
+      // 如果当前选择的ticker不属于新选择的sector/industry，则清空ticker选择
+      if (selectedTicker) {
+        const currentTicker = tickerOptions.find(t => t.value === selectedTicker);
+        if (currentTicker && (currentTicker.sector !== value[0] || currentTicker.industry !== value[1])) {
+          setSelectedTicker('');
+          setTickerSearchValue('');
+        }
+      }
+    } else {
+      setSelectedSector('');
+      setSelectedIndustry('');
+      setSelectedTicker('');
+      setTickerSearchValue('');
+    }
+  };
+
+  // 股票代码搜索处理函数
+  const handleTickerSearch = async (searchValue: string) => {
+    setTickerSearchValue(searchValue);
+    
+    if (!searchValue.trim()) {
+      setTickerOptions([]);
+      return;
+    }
+
+    try {
+      setLoadingTickers(true);
+      // 搜索时不受sector/industry限制，允许全局搜索
+      const tickers = await filesAPI.searchTickers({
+        search: searchValue
+      });
+      setTickerOptions(tickers);
+    } catch (error) {
+      console.error('搜索股票代码失败:', error);
+      message.error('搜索股票代码失败');
+    } finally {
+      setLoadingTickers(false);
+    }
+  };
+
+  // 股票代码选择处理函数
+  const handleTickerSelect = (value: string, option: any) => {
+    setSelectedTicker(value);
+    setTickerSearchValue(option.label);
+    
+    // 从tickerOptions中查找对应的ticker信息
+    const selectedTickerInfo = tickerOptions.find(ticker => ticker.value === value);
+    console.log('Selected ticker info:', selectedTickerInfo);
+    
+    if (selectedTickerInfo && selectedTickerInfo.sector && selectedTickerInfo.industry) {
+      console.log('Setting sector and industry:', selectedTickerInfo.sector, selectedTickerInfo.industry);
+      setSelectedSector(selectedTickerInfo.sector);
+      setSelectedIndustry(selectedTickerInfo.industry);
+      message.success(`已自动选择行业: ${selectedTickerInfo.sector} → ${selectedTickerInfo.industry}`);
+    } else {
+      console.log('No sector/industry info found for ticker:', value);
+    }
+  };
+
+  // 批量标签处理函数
+  const handleBatchTag = async () => {
+    try {
+      setBatchTagging(true);
+      
+      // 获取所有已上传文件的ID
+      const fileIds = files
+        .filter(f => f.fileId)
+        .map(f => f.fileId!)
+        .filter(id => id);
+      
+      if (fileIds.length === 0) {
+        message.warning('没有可以设置标签的文件');
+        return;
+      }
+      
+      await filesAPI.batchCreateFileTags({
+        file_ids: fileIds,
+        sector: selectedSector,
+        industry: selectedIndustry,
+        ticker: selectedTicker || undefined
+      });
+      
+      // 更新本地文件状态
+      setFiles(prev => prev.map(f => ({
+        ...f,
+        tag: f.fileId ? {
+          sector: selectedSector,
+          industry: selectedIndustry,
+          ticker: selectedTicker || undefined
+        } : f.tag
+      })));
+      
+      message.success(`成功为 ${fileIds.length} 个文件设置标签`);
+      setShowBatchTagModal(false);
+      
+    } catch (error: any) {
+      console.error('批量设置标签失败:', error);
+      message.error(`批量设置标签失败: ${error.message || '未知错误'}`);
+    } finally {
+      setBatchTagging(false);
+    }
   };
 
   // 获取当前界面状态
@@ -1282,6 +1505,32 @@ const FilesPage: React.FC = () => {
       dataIndex: 'size',
       key: 'size',
       render: (size: number) => filesAPI.formatFileSize(size)
+    },
+    {
+      title: 'Tags',
+      key: 'tags',
+      render: (text: string, record: FileItem) => {
+        if (record.tag) {
+          return (
+            <div>
+              <Tag color="blue">{record.tag.sector}</Tag>
+              <Tag color="green">{record.tag.industry}</Tag>
+              {record.tag.ticker && <Tag color="orange">{record.tag.ticker}</Tag>}
+            </div>
+          );
+        } else if (selectedSector && selectedIndustry) {
+          return (
+            <div>
+              <Tag color="blue">{selectedSector}</Tag>
+              <Tag color="green">{selectedIndustry}</Tag>
+              {selectedTicker && <Tag color="orange">{selectedTicker}</Tag>}
+              <Text type="secondary" style={{ fontSize: '10px' }}>(will be applied)</Text>
+            </div>
+          );
+        } else {
+          return <Text type="secondary" style={{ fontSize: '12px' }}>No tags</Text>;
+        }
+      }
     },
 
     {
@@ -1936,16 +2185,31 @@ const FilesPage: React.FC = () => {
                     )}
                   </Space>
                 }
-                extra={getUIState() === 'completed' ? (
-                  <Button
-                    icon={<ReloadOutlined />}
-                    onClick={refreshFileStatus}
-                    loading={refreshingStatus}
-                    size="small"
-                  >
-                    Refresh Status
-                  </Button>
-                ) : null}
+                extra={
+                  <Space>
+                    {files.length > 0 && selectedSector && selectedIndustry && (
+                      <Button
+                        icon={<TagOutlined />}
+                        onClick={() => setShowBatchTagModal(true)}
+                        size="small"
+                        type="primary"
+                        ghost
+                      >
+                        Batch Tag
+                      </Button>
+                    )}
+                    {getUIState() === 'completed' && (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={refreshFileStatus}
+                        loading={refreshingStatus}
+                        size="small"
+                      >
+                        Refresh Status
+                      </Button>
+                    )}
+                  </Space>
+                }
                 className="mb-16"
                 size="small"
               >
@@ -1992,6 +2256,71 @@ const FilesPage: React.FC = () => {
           </Col>
 
           <Col span={8}>
+            {/* 行业和股票选择 - 始终显示 */}
+            <Card title="Industry & Ticker Selection" className="mb-12" size="small">
+              <Form layout="vertical" size="small">
+                <Form.Item 
+                  label="Sector & Industry" 
+                  required
+                  tooltip="Select sector and industry for analysis context"
+                >
+                  <Cascader
+                    options={sectors}
+                    value={selectedSector && selectedIndustry ? [selectedSector, selectedIndustry] : []}
+                    onChange={handleSectorIndustryChange}
+                    placeholder="Select sector and industry"
+                    loading={loadingSectors}
+                    disabled={processing}
+                    showSearch={{
+                      filter: (inputValue, path) => {
+                        return path.some(option => 
+                          option.label.toLowerCase().includes(inputValue.toLowerCase())
+                        );
+                      }
+                    }}
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+
+                <Form.Item 
+                  label="Ticker" 
+                  tooltip="Select or search for a specific ticker (optional)"
+                >
+                  <AutoComplete
+                    value={tickerSearchValue}
+                    options={tickerOptions.map(ticker => ({
+                      value: ticker.value,
+                      label: ticker.label,
+                      sector: ticker.sector,
+                      industry: ticker.industry
+                    }))}
+                    onSearch={handleTickerSearch}
+                    onSelect={handleTickerSelect}
+                    placeholder="Search ticker by code or name (global search)"
+                    disabled={processing}
+                    style={{ width: '100%' }}
+                    filterOption={false}
+                    notFoundContent={loadingTickers ? 'Loading...' : 'No tickers found'}
+                  />
+                </Form.Item>
+
+                {(selectedSector && selectedIndustry) && (
+                  <div style={{ 
+                    padding: '8px 12px', 
+                    backgroundColor: '#f6ffed', 
+                    border: '1px solid #b7eb8f',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    color: '#52c41a'
+                  }}>
+                    <strong>Selected:</strong> {selectedSector} → {selectedIndustry}
+                    {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
+                    {!selectedTicker && <><br /><em>No ticker selected (optional)</em></>}
+                  </div>
+                )}
+              </Form>
+            </Card>
+
             {/* AI Agent选择 - 始终显示 */}
             <Card title="AI Agent Selection" className="mb-12" size="small">
               <Form layout="vertical" size="small">
@@ -2039,7 +2368,7 @@ const FilesPage: React.FC = () => {
                       icon={<PlayCircleOutlined />}
                       onClick={handleStartProcessing}
                       loading={processing}
-                      disabled={files.length === 0 || !selectedTaskType}
+                      disabled={files.length === 0 || !selectedTaskType || !selectedSector || !selectedIndustry}
                       block
                     >
                       Start Processing
@@ -2323,6 +2652,48 @@ const FilesPage: React.FC = () => {
               }
             ]}
           />
+        </Modal>
+
+        {/* 批量标签设置模态框 */}
+        <Modal
+          title="Batch Tag Files"
+          open={showBatchTagModal}
+          onOk={handleBatchTag}
+          onCancel={() => setShowBatchTagModal(false)}
+          confirmLoading={batchTagging}
+          centered
+        >
+          <div>
+            <p>将为以下文件设置标签：</p>
+            <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
+              <Space direction="vertical" size="small">
+                <div>
+                  <Text strong>Sector:</Text> <Tag color="blue">{selectedSector}</Tag>
+                </div>
+                <div>
+                  <Text strong>Industry:</Text> <Tag color="green">{selectedIndustry}</Tag>
+                </div>
+                {selectedTicker && (
+                  <div>
+                    <Text strong>Ticker:</Text> <Tag color="orange">{selectedTicker}</Tag>
+                  </div>
+                )}
+              </Space>
+            </div>
+            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: '4px', padding: '8px' }}>
+              {files.filter(f => f.fileId).map(file => (
+                <div key={file.id} style={{ padding: '4px 0', display: 'flex', alignItems: 'center' }}>
+                  {getFileTypeIcon(file.type)}
+                  <Text style={{ marginLeft: 8 }}>{file.name}</Text>
+                </div>
+              ))}
+            </div>
+            {files.filter(f => f.fileId).length === 0 && (
+              <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                没有可以设置标签的文件
+              </div>
+            )}
+          </div>
         </Modal>
       </div>
     </div>

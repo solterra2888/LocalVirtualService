@@ -20,6 +20,14 @@ from backend.schemas.file import (
     FileType,
     ProcessingParamsRequest
 )
+from backend.schemas.file_tag import (
+    FileTagCreate,
+    FileTagUpdate,
+    FileTagResponse,
+    FileTagBatchCreate,
+    FileTagStats,
+    FileWithTag
+)
 from backend.auth.jwt_utils import get_current_user
 from backend.processors.file_processor import FileProcessor
 from backend.processors.task_manager import TaskManager
@@ -507,6 +515,7 @@ async def process_files_background(
                          processing_time, ai_time, content_length, status, 
                          total_tokens, cost, content, created_at, task_id, original_file_path)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
                         """, (
                             processing_stats_id,
                             file_info['file_name'],
@@ -523,6 +532,35 @@ async def process_files_background(
                             task_id,
                             result['original_file']  # 保存原始文件路径
                         ))
+                        
+                        # 获取插入的文件ID
+                        file_processing_id = cursor.fetchone()[0]
+                        
+                        # 如果处理参数中包含标签信息，自动设置标签
+                        if (params.get('sector') and params.get('industry')):
+                            try:
+                                # 获取用户ID
+                                user_id = None
+                                if username:
+                                    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                                    user_result = cursor.fetchone()
+                                    if user_result:
+                                        user_id = user_result[0]
+                                
+                                cursor.execute("""
+                                INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+                                VALUES (%s, %s, %s, %s, %s)
+                                """, (
+                                    file_processing_id,
+                                    params.get('sector'),
+                                    params.get('industry'),
+                                    params.get('ticker'),
+                                    user_id
+                                ))
+                                update_task_status(log_message=f"✅ 已为文件 {file_info['file_name']} 设置标签: {params.get('sector')} -> {params.get('industry')}")
+                            except Exception as tag_error:
+                                update_task_status(log_message=f"⚠️ 为文件 {file_info['file_name']} 设置标签失败: {str(tag_error)}", log_level="warning")
+                                # 标签设置失败不应该影响文件处理
                     except Exception as e:
                         # 如果获取文件信息失败，使用基本信息
                         cursor.execute("""
@@ -531,6 +569,7 @@ async def process_files_background(
                          processing_time, ai_time, content_length, status, 
                          total_tokens, cost, content, created_at, task_id)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
                         """, (
                             processing_stats_id,
                             os.path.basename(result['original_file']),
@@ -546,6 +585,35 @@ async def process_files_background(
                             datetime.now(),
                             task_id
                         ))
+                        
+                        # 获取插入的文件ID
+                        file_processing_id = cursor.fetchone()[0]
+                        
+                        # 如果处理参数中包含标签信息，自动设置标签
+                        if (params.get('sector') and params.get('industry')):
+                            try:
+                                # 获取用户ID
+                                user_id = None
+                                if username:
+                                    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                                    user_result = cursor.fetchone()
+                                    if user_result:
+                                        user_id = user_result[0]
+                                
+                                cursor.execute("""
+                                INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+                                VALUES (%s, %s, %s, %s, %s)
+                                """, (
+                                    file_processing_id,
+                                    params.get('sector'),
+                                    params.get('industry'),
+                                    params.get('ticker'),
+                                    user_id
+                                ))
+                                update_task_status(log_message=f"✅ 已为文件 {os.path.basename(result['original_file'])} 设置标签: {params.get('sector')} -> {params.get('industry')}")
+                            except Exception as tag_error:
+                                update_task_status(log_message=f"⚠️ 为文件 {os.path.basename(result['original_file'])} 设置标签失败: {str(tag_error)}", log_level="warning")
+                                # 标签设置失败不应该影响文件处理
                 
                 # 插入失败的文件记录
                 for failed_file in failed_files:
@@ -900,4 +968,565 @@ async def get_processing_params():
             "llamaindex_api_key": config.get_llama_api_key(),
             "ai_agent_server_url": config.get('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
         }
-    } 
+    }
+
+
+@router.get("/sectors", summary="获取所有行业分类")
+async def get_sectors(current_user=Depends(get_current_user)):
+    """
+    获取所有行业分类（sector）及其包含的子行业（industry）
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查询所有sector和industry的组合
+        query = """
+        SELECT DISTINCT 
+            sector, 
+            industry,
+            COUNT(*) as company_count
+        FROM companies 
+        WHERE sector IS NOT NULL 
+        AND sector != '' 
+        AND industry IS NOT NULL 
+        AND industry != ''
+        AND ticker_active = true
+        GROUP BY sector, industry
+        ORDER BY sector, company_count DESC
+        """
+        
+        results = db_manager.fetch_all(query)
+        
+        # 按sector分组整理数据
+        sectors_dict = {}
+        for row in results:
+            sector = row[0]
+            industry = row[1]
+            company_count = row[2]
+            
+            if sector not in sectors_dict:
+                sectors_dict[sector] = {
+                    "value": sector,
+                    "label": sector,
+                    "children": []
+                }
+            
+            sectors_dict[sector]["children"].append({
+                "value": industry,
+                "label": f"{industry} ({company_count})"
+            })
+        
+        # 转换为列表并按sector名称排序
+        sectors = list(sectors_dict.values())
+        sectors.sort(key=lambda x: x["label"])
+        
+        return sectors
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取行业分类失败: {str(e)}"
+        )
+
+
+@router.get("/tickers", summary="搜索股票代码")
+async def search_tickers(
+    sector: Optional[str] = None,
+    industry: Optional[str] = None,
+    search: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """
+    根据行业分类和搜索关键词搜索股票代码
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 构建查询条件
+        where_conditions = ["ticker_active = true"]
+        params = []
+        
+        if sector:
+            where_conditions.append("sector = %s")
+            params.append(sector)
+        
+        if industry:
+            where_conditions.append("industry = %s")
+            params.append(industry)
+        
+        if search:
+            where_conditions.append("(code ILIKE %s OR name ILIKE %s)")
+            params.extend([f"%{search}%", f"%{search}%"])
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        query = f"""
+        SELECT 
+            id,
+            code,
+            name,
+            exchange,
+            sector,
+            industry
+        FROM companies 
+        WHERE {where_clause}
+        ORDER BY name
+        LIMIT 100
+        """
+        
+        results = db_manager.fetch_all(query, params)
+        
+        tickers = []
+        for row in results:
+            ticker = {
+                "id": row[0],
+                "code": row[1],
+                "name": row[2],
+                "exchange": row[3],
+                "sector": row[4],
+                "industry": row[5],
+                "label": f"{row[1]} - {row[2]} ({row[3]})",
+                "value": row[1]
+            }
+            tickers.append(ticker)
+        
+        return tickers
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索股票代码失败: {str(e)}"
+        )
+
+
+@router.post("/{file_id}/tags", response_model=FileTagResponse, summary="为文件设置标签")
+async def create_file_tag(
+    file_id: int,
+    tag_data: FileTagCreate,
+    current_user=Depends(get_current_user)
+):
+    """
+    为指定文件设置标签
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 检查文件是否存在
+        file_query = "SELECT id FROM files WHERE id = %s"
+        file_result = db_manager.fetch_one(file_query, [file_id])
+        if not file_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
+            )
+        
+        # 检查是否已有标签，如果有则更新，否则创建
+        existing_tag_query = "SELECT id FROM file_tags WHERE file_id = %s"
+        existing_tag = db_manager.fetch_one(existing_tag_query, [file_id])
+        
+        if existing_tag:
+            # 更新现有标签
+            update_query = """
+            UPDATE file_tags 
+            SET sector = %s, industry = %s, ticker = %s, 
+                tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
+                updated_at = CURRENT_TIMESTAMP
+            WHERE file_id = %s
+            RETURNING id, file_id, sector, industry, ticker, 
+                     tagged_by, tagged_at, created_at, updated_at
+            """
+            result = db_manager.fetch_one(update_query, [
+                tag_data.sector, tag_data.industry, tag_data.ticker,
+                current_user.id, file_id
+            ])
+        else:
+            # 创建新标签
+            insert_query = """
+            INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, file_id, sector, industry, ticker, 
+                     tagged_by, tagged_at, created_at, updated_at
+            """
+            result = db_manager.fetch_one(insert_query, [
+                file_id, tag_data.sector, tag_data.industry, 
+                tag_data.ticker, current_user.id
+            ])
+        
+        return FileTagResponse(
+            id=result[0],
+            file_id=result[1],
+            sector=result[2],
+            industry=result[3],
+            ticker=result[4],
+            tagged_by=result[5],
+            tagged_at=result[6],
+            created_at=result[7],
+            updated_at=result[8]
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"设置文件标签失败: {str(e)}"
+        )
+
+
+@router.get("/{file_id}/tags", response_model=FileTagResponse, summary="获取文件标签")
+async def get_file_tag(
+    file_id: int,
+    current_user=Depends(get_current_user)
+):
+    """
+    获取指定文件的标签
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        query = """
+        SELECT id, file_id, sector, industry, ticker, 
+               tagged_by, tagged_at, created_at, updated_at
+        FROM file_tags 
+        WHERE file_id = %s
+        """
+        result = db_manager.fetch_one(query, [file_id])
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件标签不存在"
+            )
+        
+        return FileTagResponse(
+            id=result[0],
+            file_id=result[1],
+            sector=result[2],
+            industry=result[3],
+            ticker=result[4],
+            tagged_by=result[5],
+            tagged_at=result[6],
+            created_at=result[7],
+            updated_at=result[8]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取文件标签失败: {str(e)}"
+        )
+
+
+@router.put("/{file_id}/tags", response_model=FileTagResponse, summary="更新文件标签")
+async def update_file_tag(
+    file_id: int,
+    tag_data: FileTagUpdate,
+    current_user=Depends(get_current_user)
+):
+    """
+    更新指定文件的标签
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 检查标签是否存在
+        check_query = "SELECT id FROM file_tags WHERE file_id = %s"
+        existing = db_manager.fetch_one(check_query, [file_id])
+        
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件标签不存在"
+            )
+        
+        update_query = """
+        UPDATE file_tags 
+        SET sector = %s, industry = %s, ticker = %s, 
+            tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
+            updated_at = CURRENT_TIMESTAMP
+        WHERE file_id = %s
+        RETURNING id, file_id, sector, industry, ticker, 
+                 tagged_by, tagged_at, created_at, updated_at
+        """
+        result = db_manager.fetch_one(update_query, [
+            tag_data.sector, tag_data.industry, tag_data.ticker,
+            current_user.id, file_id
+        ])
+        
+        return FileTagResponse(
+            id=result[0],
+            file_id=result[1],
+            sector=result[2],
+            industry=result[3],
+            ticker=result[4],
+            tagged_by=result[5],
+            tagged_at=result[6],
+            created_at=result[7],
+            updated_at=result[8]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新文件标签失败: {str(e)}"
+        )
+
+
+@router.delete("/{file_id}/tags", summary="删除文件标签")
+async def delete_file_tag(
+    file_id: int,
+    current_user=Depends(get_current_user)
+):
+    """
+    删除指定文件的标签
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 检查标签是否存在
+        check_query = "SELECT id FROM file_tags WHERE file_id = %s"
+        existing = db_manager.fetch_one(check_query, [file_id])
+        
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件标签不存在"
+            )
+        
+        delete_query = "DELETE FROM file_tags WHERE file_id = %s"
+        db_manager.execute(delete_query, [file_id])
+        
+        return {"message": "文件标签删除成功"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"删除文件标签失败: {str(e)}"
+        )
+
+
+@router.post("/batch-tag", summary="批量设置文件标签")
+async def batch_create_file_tags(
+    batch_data: FileTagBatchCreate,
+    current_user=Depends(get_current_user)
+):
+    """
+    批量为多个文件设置相同标签
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        success_count = 0
+        failed_files = []
+        
+        for file_id in batch_data.file_ids:
+            try:
+                # 检查文件是否存在
+                file_query = "SELECT id FROM files WHERE id = %s"
+                file_result = db_manager.fetch_one(file_query, [file_id])
+                if not file_result:
+                    failed_files.append({"file_id": file_id, "reason": "文件不存在"})
+                    continue
+                
+                # 检查是否已有标签
+                existing_tag_query = "SELECT id FROM file_tags WHERE file_id = %s"
+                existing_tag = db_manager.fetch_one(existing_tag_query, [file_id])
+                
+                if existing_tag:
+                    # 更新现有标签
+                    update_query = """
+                    UPDATE file_tags 
+                    SET sector = %s, industry = %s, ticker = %s, 
+                        tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE file_id = %s
+                    """
+                    db_manager.execute(update_query, [
+                        batch_data.sector, batch_data.industry, batch_data.ticker,
+                        current_user.id, file_id
+                    ])
+                else:
+                    # 创建新标签
+                    insert_query = """
+                    INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """
+                    db_manager.execute(insert_query, [
+                        file_id, batch_data.sector, batch_data.industry, 
+                        batch_data.ticker, current_user.id
+                    ])
+                
+                success_count += 1
+                
+            except Exception as e:
+                failed_files.append({"file_id": file_id, "reason": str(e)})
+        
+        return {
+            "message": f"批量标签设置完成",
+            "success_count": success_count,
+            "failed_count": len(failed_files),
+            "failed_files": failed_files
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量设置文件标签失败: {str(e)}"
+        )
+
+
+@router.get("/by-tags", response_model=List[FileWithTag], summary="按标签查询文件")
+async def get_files_by_tags(
+    sector: Optional[str] = None,
+    industry: Optional[str] = None,
+    ticker: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """
+    根据标签查询文件
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if sector:
+            where_conditions.append("ft.sector = %s")
+            params.append(sector)
+        
+        if industry:
+            where_conditions.append("ft.industry = %s")
+            params.append(industry)
+        
+        if ticker:
+            where_conditions.append("ft.ticker = %s")
+            params.append(ticker)
+        
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+        
+        query = f"""
+        SELECT 
+            f.id, f.filename, f.file_path, f.file_size, f.file_type, f.created_at,
+            ft.id as tag_id, ft.sector, ft.industry, ft.ticker, 
+            ft.tagged_by, ft.tagged_at, ft.created_at as tag_created_at, ft.updated_at as tag_updated_at
+        FROM files f
+        LEFT JOIN file_tags ft ON f.id = ft.file_id
+        WHERE {where_clause}
+        ORDER BY f.created_at DESC
+        """
+        
+        results = db_manager.fetch_all(query, params)
+        
+        files_with_tags = []
+        for row in results:
+            file_data = {
+                "id": row[0],
+                "filename": row[1],
+                "file_path": row[2],
+                "file_size": row[3],
+                "file_type": row[4],
+                "created_at": row[5]
+            }
+            
+            tag_data = None
+            if row[6]:  # 如果有标签ID
+                tag_data = {
+                    "id": row[6],
+                    "file_id": row[0],
+                    "sector": row[7],
+                    "industry": row[8],
+                    "ticker": row[9],
+                    "tagged_by": row[10],
+                    "tagged_at": row[11],
+                    "created_at": row[12],
+                    "updated_at": row[13]
+                }
+            
+            files_with_tags.append(FileWithTag(**file_data, tag=tag_data))
+        
+        return files_with_tags
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"按标签查询文件失败: {str(e)}"
+        )
+
+
+@router.get("/tag-stats", response_model=FileTagStats, summary="获取文件标签统计")
+async def get_file_tag_stats(current_user=Depends(get_current_user)):
+    """
+    获取文件标签的统计信息
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 总文件数
+        total_files_query = "SELECT COUNT(*) FROM files"
+        total_files = db_manager.fetch_one(total_files_query)[0]
+        
+        # 已标签文件数
+        tagged_files_query = "SELECT COUNT(DISTINCT file_id) FROM file_tags"
+        tagged_files = db_manager.fetch_one(tagged_files_query)[0]
+        
+        # 未标签文件数
+        untagged_files = total_files - tagged_files
+        
+        # 行业分类统计
+        sectors_query = """
+        SELECT sector, COUNT(*) as count 
+        FROM file_tags 
+        GROUP BY sector 
+        ORDER BY count DESC
+        """
+        sectors_results = db_manager.fetch_all(sectors_query)
+        sectors = [{"name": row[0], "count": row[1]} for row in sectors_results]
+        
+        # 子行业分类统计
+        industries_query = """
+        SELECT industry, COUNT(*) as count 
+        FROM file_tags 
+        GROUP BY industry 
+        ORDER BY count DESC
+        """
+        industries_results = db_manager.fetch_all(industries_query)
+        industries = [{"name": row[0], "count": row[1]} for row in industries_results]
+        
+        # 股票代码统计
+        tickers_query = """
+        SELECT ticker, COUNT(*) as count 
+        FROM file_tags 
+        WHERE ticker IS NOT NULL 
+        GROUP BY ticker 
+        ORDER BY count DESC
+        """
+        tickers_results = db_manager.fetch_all(tickers_query)
+        tickers = [{"name": row[0], "count": row[1]} for row in tickers_results]
+        
+        return FileTagStats(
+            total_files=total_files,
+            tagged_files=tagged_files,
+            untagged_files=untagged_files,
+            sectors=sectors,
+            industries=industries,
+            tickers=tickers
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取文件标签统计失败: {str(e)}"
+        ) 

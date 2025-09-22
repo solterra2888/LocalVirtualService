@@ -36,11 +36,19 @@ import {
   ToolOutlined,
   HomeOutlined,
   LaptopOutlined,
-  SettingOutlined
+  SettingOutlined,
+  DownloadOutlined,
+  EyeOutlined,
+  FilePdfOutlined,
+  FileExcelOutlined,
+  FileWordOutlined,
+  FileImageOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
-import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem } from '../services/dashboard';
+import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport } from '../services/dashboard';
+import { filesAPI } from '../services/files';
 import AddToWatchlistModal from './AddToWatchlistModal';
+import FundamentalsOverviewModal from './FundamentalsOverviewModal';
 import type { DataNode } from 'antd/es/tree';
 
 const { Content, Sider } = Layout;
@@ -106,7 +114,9 @@ const FinvizDashboard: React.FC = () => {
   
   // 右侧内容数据
   const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
+  const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [contentLoading, setContentLoading] = useState<boolean>(false);
+  
   
   // 缓存机制
   const [newsCache, setNewsCache] = useState<Map<string, DashboardNewsItem[]>>(new Map());
@@ -162,6 +172,9 @@ const FinvizDashboard: React.FC = () => {
   
   // 模态框状态
   const [addModalVisible, setAddModalVisible] = useState<boolean>(false);
+  const [fundamentalsModalVisible, setFundamentalsModalVisible] = useState<boolean>(false);
+  const [selectedTickerForFundamentals, setSelectedTickerForFundamentals] = useState<string>('');
+  const [selectedCompanyNameForFundamentals, setSelectedCompanyNameForFundamentals] = useState<string>('');
 
   // 初始化数据
   useEffect(() => {
@@ -316,6 +329,8 @@ const FinvizDashboard: React.FC = () => {
       setSelectedType('');
       setSelectedStock(null);
       setSelectedGroup('');
+      setNewsData([]);
+      setResearchReports([]);
       return;
     }
 
@@ -341,6 +356,7 @@ const FinvizDashboard: React.FC = () => {
       
       setSelectedStock(foundStock);
       setSelectedGroup('');
+      setResearchReports([]); // 清空研究报告数据
       logger.logInfo(`选择了股票: ${foundStock?.custom_name || foundStock?.company} (${foundStock?.symbol})`, 'finviz-dashboard');
     }
   };
@@ -428,6 +444,76 @@ const FinvizDashboard: React.FC = () => {
     }
   };
 
+  // 加载研究报告
+  const loadResearchReports = async (ticker: string) => {
+    try {
+      setContentLoading(true);
+      const result = await dashboardAPI.getTickerResearchReports(ticker);
+      setResearchReports(result.reports);
+      logger.logInfo(`加载研究报告: ${ticker}, ${result.count} 个文件`, 'finviz-dashboard');
+    } catch (error) {
+      logger.logError(`加载研究报告失败: ${ticker}`, 'finviz-dashboard', error);
+      setResearchReports([]);
+      message.error('加载研究报告失败');
+    } finally {
+      setContentLoading(false);
+    }
+  };
+
+  // 下载文件
+  const handleDownloadFile = (report: ResearchReport) => {
+    try {
+      const link = document.createElement('a');
+      link.href = `/api/files/${report.id}/download`;
+      link.download = report.file_name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      message.success(`Downloading file: ${report.file_name}`);
+      logger.logInfo(`下载文件: ${report.file_name}`, 'finviz-dashboard');
+    } catch (error) {
+      logger.logError(`下载文件失败: ${report.file_name}`, 'finviz-dashboard', error);
+      message.error('Download failed');
+    }
+  };
+
+  // 查看文件内容
+  const handleViewFile = async (report: ResearchReport) => {
+    try {
+      const originalFileInfo = await filesAPI.getOriginalFileInfo(report.id);
+      logger.logInfo(`查看文件: ${report.file_name}`, 'finviz-dashboard');
+      
+      const fileType = originalFileInfo.file_type.toLowerCase();
+      
+      if (fileType === 'pdf') {
+        // PDF文件直接在新窗口打开
+        window.open(originalFileInfo.file_url, '_blank');
+      } else {
+        // 非PDF文件显示黄色提示
+        message.warning('Currently only PDF format files are supported for viewing.');
+      }
+    } catch (error) {
+      logger.logError(`获取文件信息失败: ${report.file_name}`, 'finviz-dashboard', error);
+      message.error('获取文件信息失败');
+    }
+  };
+
+  // 获取文件类型图标
+  const getFileTypeIcon = (fileType: string) => {
+    switch (fileType.toLowerCase()) {
+      case 'pdf':
+        return <FilePdfOutlined style={{ color: '#ff4d4f' }} />;
+      case 'excel':
+        return <FileExcelOutlined style={{ color: '#52c41a' }} />;
+      case 'doc':
+        return <FileWordOutlined style={{ color: '#1890ff' }} />;
+      case 'image':
+        return <FileImageOutlined style={{ color: '#fa8c16' }} />;
+      default:
+        return <FileTextOutlined style={{ color: '#8c8c8c' }} />;
+    }
+  };
+
   // 删除watchlist项
   const handleRemoveFromWatchlist = async (watchlistId: number, symbol: string) => {
     try {
@@ -455,6 +541,13 @@ const FinvizDashboard: React.FC = () => {
   // 添加成功后的回调
   const handleAddSuccess = async () => {
     await loadUserWatchlist();
+  };
+
+  // 处理公司名称点击，显示基本面信息
+  const handleCompanyNameClick = (ticker: string, companyName: string) => {
+    setSelectedTickerForFundamentals(ticker);
+    setSelectedCompanyNameForFundamentals(companyName);
+    setFundamentalsModalVisible(true);
   };
 
   const getSentimentColor = (polarity?: number) => {
@@ -549,6 +642,85 @@ const FinvizDashboard: React.FC = () => {
     </div>
   );
 
+  const renderResearchReportsTab = () => (
+    <div>
+      {contentLoading ? (
+        <div>
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Card key={index} style={{ marginBottom: '16px' }}>
+              <Skeleton active paragraph={{ rows: 2 }} />
+            </Card>
+          ))}
+        </div>
+      ) : researchReports.length === 0 ? (
+        <Empty 
+          description="No research reports found for this ticker"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      ) : (
+        <List
+          itemLayout="vertical"
+          dataSource={researchReports}
+          renderItem={report => (
+            <List.Item
+              key={report.id}
+              extra={
+                <Space direction="vertical" align="end">
+                  <Space>
+                    {getFileTypeIcon(report.file_type)}
+                    <Tag color="blue">{report.file_type.toUpperCase()}</Tag>
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    {(report.file_size / 1024 / 1024).toFixed(2)} MB
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    <CalendarOutlined /> {new Date(report.uploaded_at).toLocaleDateString()}
+                  </Text>
+                </Space>
+              }
+            >
+              <List.Item.Meta
+                title={
+                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                    {report.file_name}
+                  </div>
+                }
+                description={
+                  <Space wrap>
+                    <Tag color="green">{report.sector}</Tag>
+                    <Tag color="orange">{report.industry}</Tag>
+                    <Tag color="blue">{report.ticker}</Tag>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      Tagged: {new Date(report.tagged_at).toLocaleDateString()}
+                    </Text>
+                  </Space>
+                }
+              />
+              <div style={{ marginTop: '8px' }}>
+                <Space>
+                  <Button 
+                    type="text" 
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => handleViewFile(report)}
+                    title="查看文件"
+                  />
+                  <Button 
+                    type="text" 
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => handleDownloadFile(report)}
+                    title="下载文件"
+                  />
+                </Space>
+              </div>
+            </List.Item>
+          )}
+        />
+      )}
+    </div>
+  );
+
   const renderStockDetails = () => {
     if (!selectedStock) return null;
 
@@ -559,7 +731,18 @@ const FinvizDashboard: React.FC = () => {
             <div>
               <Text strong style={{ fontSize: '12px' }}>Company</Text>
               <br />
-              <Text style={{ fontSize: '14px' }}>{selectedStock.company || selectedStock.symbol}</Text>
+              <Text 
+                style={{ 
+                  fontSize: '14px', 
+                  cursor: 'pointer', 
+                  color: '#1890ff',
+                  textDecoration: 'underline'
+                }}
+                onClick={() => handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
+                title="Click to view fundamentals overview"
+              >
+                {selectedStock.company || selectedStock.symbol}
+              </Text>
             </div>
           </Col>
           <Col span={8}>
@@ -736,7 +919,14 @@ const FinvizDashboard: React.FC = () => {
 
                 <Tabs 
                   activeKey={activeTab}
-                  onChange={setActiveTab}
+                  onChange={(key) => {
+                    setActiveTab(key);
+                    if (key === 'reports' && selectedStock) {
+                      loadResearchReports(selectedStock.symbol);
+                    } else if (key === 'news') {
+                      loadRelatedNews();
+                    }
+                  }}
                   size="large"
                 >
                   <TabPane 
@@ -750,6 +940,19 @@ const FinvizDashboard: React.FC = () => {
                   >
                     {renderNewsTab()}
                   </TabPane>
+                  {selectedType === 'stock' && (
+                    <TabPane 
+                      tab={
+                        <span>
+                          <FileTextOutlined />
+                          Research Report ({contentLoading ? '...' : researchReports.length})
+                        </span>
+                      } 
+                      key="reports"
+                    >
+                      {renderResearchReportsTab()}
+                    </TabPane>
+                  )}
                 </Tabs>
               </>
             ) : (
@@ -781,6 +984,15 @@ const FinvizDashboard: React.FC = () => {
         onCancel={() => setAddModalVisible(false)}
         onSuccess={handleAddSuccess}
       />
+
+      {/* 基本面信息概览模态框 */}
+      <FundamentalsOverviewModal
+        visible={fundamentalsModalVisible}
+        onCancel={() => setFundamentalsModalVisible(false)}
+        ticker={selectedTickerForFundamentals}
+        companyName={selectedCompanyNameForFundamentals}
+      />
+
     </div>
   );
 };

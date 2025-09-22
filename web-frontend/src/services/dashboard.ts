@@ -82,6 +82,20 @@ export interface StockSearchResult {
   company_id?: number;
 }
 
+export interface ResearchReport {
+  id: number;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  file_type: string;
+  uploaded_at: string;
+  status: string;
+  sector: string;
+  industry: string;
+  ticker: string;
+  tagged_at: string;
+}
+
 // API服务
 export const dashboardAPI = {
   // 获取所有行业信息
@@ -251,6 +265,20 @@ export const dashboardAPI = {
       });
     } catch (error) {
       console.error('搜索股票失败:', error);
+      throw error;
+    }
+  },
+
+  // 获取ticker关联的研究报告
+  getTickerResearchReports: async (ticker: string): Promise<{
+    ticker: string;
+    count: number;
+    reports: ResearchReport[];
+  }> => {
+    try {
+      return await api.get(`/dashboard/watchlist/${ticker}/research-reports`);
+    } catch (error) {
+      console.error('获取研究报告失败:', error);
       throw error;
     }
   }
