@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices';
   dataSourceName: string;
 }
 
@@ -107,6 +107,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 8 * * 1-5',
       defaultName: 'Finviz Screener Data Auto Fetch',
       description: 'Get comprehensive stock screener data from Finviz with technical and fundamental metrics (no parameters required)'
+    },
+    eodhd_stock_prices: {
+      icon: <BarChartOutlined style={{ color: '#1890ff' }} />,
+      params: [],
+      defaultSchedule: '*/5 * * * 1-5',
+      defaultName: 'EODHD Stock Prices Auto Fetch',
+      description: 'Get real-time stock prices for all watchlist stocks from EODHD API (every 5 minutes on weekdays)'
     }
   };
 
@@ -222,6 +229,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             enabled: true
           };
           result = await schedulerAPI.createFinvizScreenerTask(finvizParams);
+        } else if (dataSourceType === 'eodhd_stock_prices') {
+          // EODHD股票价格任务的专用创建逻辑
+          const stockPricesParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true
+          };
+          result = await schedulerAPI.createEODHDStockPricesTask(stockPricesParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 

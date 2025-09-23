@@ -952,6 +952,179 @@ async def test_get_ticker_research_reports(ticker: str):
             detail=f"获取研究报告失败: {str(e)}"
         )
 
+@router.get("/stock-prices", summary="获取股票实时价格数据")
+async def get_stock_prices(
+    symbols: str = Query(..., description="股票代码，多个用逗号分隔，如: AAPL,MSFT,GOOGL"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取股票的实时价格数据
+    
+    从stock_prices_realtime表获取最新的价格信息
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 解析股票代码
+        symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
+        if not symbol_list:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请提供有效的股票代码"
+            )
+        
+        # 构建查询条件
+        placeholders = ','.join(['%s'] * len(symbol_list))
+        query = f"""
+        SELECT 
+            code,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            previous_close,
+            change_amount,
+            change_percent,
+            last_updated,
+            created_at
+        FROM stock_prices_realtime 
+        WHERE code IN ({placeholders})
+        ORDER BY last_updated DESC
+        """
+        
+        results = db_manager.fetch_all(query, symbol_list)
+        
+        # 格式化结果
+        price_data = []
+        for row in results:
+            price_data.append({
+                "code": row[0],
+                "open": row[1],
+                "high": row[2], 
+                "low": row[3],
+                "close": row[4],
+                "volume": row[5],
+                "previous_close": row[6],
+                "change_amount": row[7],
+                "change_percent": row[8],
+                "last_updated": row[9].isoformat() if row[9] else None,
+                "created_at": row[10].isoformat() if row[10] else None
+            })
+        
+        return {
+            "success": True,
+            "data": price_data,
+            "count": len(price_data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取股票价格数据失败: {str(e)}"
+        )
+
+@router.get("/watchlist/prices", summary="获取watchlist股票的实时价格")
+async def get_watchlist_stock_prices(current_user: UserResponse = Depends(get_current_user)):
+    """
+    获取用户watchlist中所有股票的实时价格数据
+    """
+    try:
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 获取用户watchlist中的所有股票代码，优先使用primaryticker
+        watchlist_query = """
+        SELECT DISTINCT 
+            CASE 
+                WHEN primaryticker IS NOT NULL AND primaryticker != '' 
+                THEN primaryticker 
+                ELSE symbol 
+            END as ticker
+        FROM target_tracking_config 
+        WHERE user_id = %s AND enabled = true
+        AND (symbol IS NOT NULL AND symbol != '')
+        """
+        watchlist_results = db_manager.fetch_all(watchlist_query, [current_user.user_id])
+        
+        if not watchlist_results:
+            return {
+                "success": True,
+                "data": [],
+                "count": 0,
+                "message": "No stocks in watchlist"
+            }
+        
+        # 提取股票代码（已经包含正确的交易所后缀）
+        symbols = []
+        for row in watchlist_results:
+            ticker = row[0]
+            if ticker:
+                symbols.append(ticker)
+        
+        # 获取价格数据
+        if symbols:
+            placeholders = ','.join(['%s'] * len(symbols))
+            price_query = f"""
+            SELECT 
+                code,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                previous_close,
+                change_amount,
+                change_percent,
+                last_updated,
+                updated_at
+            FROM stock_prices_realtime 
+            WHERE code IN ({placeholders})
+            ORDER BY last_updated DESC
+            """
+            
+            price_results = db_manager.fetch_all(price_query, symbols)
+            
+            # 格式化结果
+            price_data = []
+            for row in price_results:
+                price_data.append({
+                    "code": row[0],
+                    "open": row[1],
+                    "high": row[2], 
+                    "low": row[3],
+                    "close": row[4],
+                    "volume": row[5],
+                    "previous_close": row[6],
+                    "change_amount": row[7],
+                    "change_percent": row[8],
+                    "last_updated": row[9].isoformat() if row[9] else None,
+                    "updated_at": row[10].isoformat() if row[10] else None
+                })
+            
+            return {
+                "success": True,
+                "data": price_data,
+                "count": len(price_data)
+            }
+        else:
+            return {
+                "success": True,
+                "data": [],
+                "count": 0
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取watchlist股票价格数据失败: {str(e)}"
+        )
+
 @router.delete("/watchlist/{watchlist_id}", summary="Remove stock from watchlist")
 async def remove_from_watchlist(
     watchlist_id: int,

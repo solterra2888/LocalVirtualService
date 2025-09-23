@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -98,6 +98,15 @@ class CreateFinvizScreenerTaskRequest(BaseModel):
     name: str = Field(default="Finviz Screener Data", description="任务名称")
     cron_expression: str = Field(default="0 8 * * 1-5", description="Cron表达式 (工作日8:00AM)")
     timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+
+
+class CreateEODHDStockPricesTaskRequest(BaseModel):
+    """创建EODHD股票价格定时任务请求模型"""
+    name: str = Field(default="EODHD Stock Prices Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="*/5 * * * 1-5", description="Cron表达式（默认工作日每5分钟）")
+    timezone: str = Field(default="America/New_York", description="时区")
+
     enabled: bool = Field(default=True, description="是否启用")
 
 
@@ -568,6 +577,126 @@ async def create_finviz_screener_task(
                     exception=str(e), 
                     user=current_user.username,
                     task_name=request.name)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ============ EODHD股票价格定时任务专用API ============
+
+@router.post("/tasks/eodhd-stock-prices", summary="创建EODHD股票价格定时任务")
+async def create_eodhd_stock_prices_task(
+    request: CreateEODHDStockPricesTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建EODHD股票价格获取定时任务
+    
+    默认配置：
+    - 纽约时间工作日每5分钟执行 (*/5 * * * 1-5)
+    - 获取所有watchlist中的股票实时价格
+    - 自动存储到stock_prices_realtime表
+    """
+    try:
+        logger.info("创建EODHD股票价格定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 股票价格任务不需要参数，传递空字典
+        task_params = {}
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="eodhd_stock_prices",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("EODHD股票价格定时任务创建成功", 
+                       user=current_user.username,
+                       task_name=request.name,
+                       task_id=result['task_id'])
+            
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("EODHD股票价格定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username,
+                        task_name=request.name)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建EODHD股票价格定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username,
+                    task_name=request.name)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/eodhd-stock-prices/default", summary="创建默认EODHD股票价格定时任务")
+async def create_default_eodhd_stock_prices_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的EODHD股票价格定时任务
+    
+    默认配置：
+    - 纽约时间工作日每5分钟执行 (*/5 * * * 1-5)
+    - 获取所有watchlist股票的实时价格
+    """
+    try:
+        logger.info("创建默认EODHD股票价格定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="EODHD Stock Prices Auto Fetch",
+            task_type="eodhd_stock_prices",
+            cron_expression="*/5 * * * 1-5",  # 工作日每5分钟
+            timezone="America/New_York",
+            enabled=True,
+            task_params={},
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认EODHD股票价格定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认EODHD股票价格定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认EODHD股票价格定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 

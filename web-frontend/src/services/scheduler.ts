@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -76,6 +76,13 @@ export interface CreateWatchlistNewsTaskParams {
   max_results?: number;
   recent_days?: number;
   user_id?: number;
+}
+
+export interface CreateEODHDStockPricesTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
 }
 
 export interface CronPreset {
@@ -378,6 +385,26 @@ export class SchedulerAPI {
   }
 
   /**
+   * 创建EODHD股票价格定时任务
+   */
+  async createEODHDStockPricesTask(params: CreateEODHDStockPricesTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/eodhd-stock-prices', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建EODHD股票价格定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建EODHD股票价格定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建EODHD股票价格定时任务失败'
+      };
+    }
+  }
+
+  /**
    * 创建默认EODHD新闻定时任务
    */
   async createDefaultEODHDNewsTask(): Promise<TaskCreateResponse> {
@@ -433,6 +460,26 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认Watchlist新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认EODHD股票价格定时任务
+   */
+  async createDefaultEODHDStockPricesTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/eodhd-stock-prices/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认EODHD股票价格定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认EODHD股票价格定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认EODHD股票价格定时任务失败'
       };
     }
   }

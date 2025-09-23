@@ -63,6 +63,7 @@ export interface WatchlistItem {
   priority: number;
   notes?: string;
   added_at?: string;
+  primaryticker?: string;
   company?: string;
   sector?: string;
   industry?: string;
@@ -94,6 +95,20 @@ export interface ResearchReport {
   industry: string;
   ticker: string;
   tagged_at: string;
+}
+
+export interface StockPriceData {
+  code: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  previous_close?: number;
+  change_amount?: number;
+  change_percent?: number;
+  last_updated?: string;
+  updated_at?: string;
 }
 
 // API服务
@@ -279,6 +294,36 @@ export const dashboardAPI = {
       return await api.get(`/dashboard/watchlist/${ticker}/research-reports`);
     } catch (error) {
       console.error('获取研究报告失败:', error);
+      throw error;
+    }
+  },
+
+  // 获取股票价格数据
+  getStockPrices: async (symbols: string[]): Promise<{
+    success: boolean;
+    data: StockPriceData[];
+    count: number;
+  }> => {
+    try {
+      const symbolsStr = symbols.join(',');
+      return await api.get('/dashboard/stock-prices', { symbols: symbolsStr });
+    } catch (error) {
+      console.error('获取股票价格失败:', error);
+      throw error;
+    }
+  },
+
+  // 获取watchlist股票的价格数据
+  getWatchlistStockPrices: async (): Promise<{
+    success: boolean;
+    data: StockPriceData[];
+    count: number;
+    message?: string;
+  }> => {
+    try {
+      return await api.get('/dashboard/watchlist/prices');
+    } catch (error) {
+      console.error('获取watchlist股票价格失败:', error);
       throw error;
     }
   }

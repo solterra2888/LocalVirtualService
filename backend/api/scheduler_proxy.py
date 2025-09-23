@@ -242,6 +242,31 @@ async def create_default_watchlist_news_task_proxy(request: Request, current_use
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认Watchlist新闻任务代理失败: {str(e)}")
 
+@router.post("/tasks/eodhd-stock-prices", summary="创建EODHD股票价格定时任务")
+async def create_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建EODHD股票价格定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/eodhd-stock-prices", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建EODHD股票价格任务代理失败: {str(e)}")
+
+@router.post("/tasks/eodhd-stock-prices/default", summary="创建默认EODHD股票价格定时任务")
+async def create_default_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认EODHD股票价格定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/eodhd-stock-prices/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认EODHD股票价格任务代理失败: {str(e)}")
+
 @router.post("/tasks/{task_id}/enable", summary="启用定时任务")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""

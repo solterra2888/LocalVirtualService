@@ -16,7 +16,8 @@ import {
   Row,
   Col,
   Button,
-  Skeleton
+  Skeleton,
+  Select
 } from 'antd';
 import {
   SearchOutlined, 
@@ -44,10 +45,11 @@ import {
   FileWordOutlined,
   FileImageOutlined,
   StarFilled,
-  StarOutlined
+  StarOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
-import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport } from '../services/dashboard';
+import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
 import { filesAPI } from '../services/files';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import FundamentalsOverviewModal from './FundamentalsOverviewModal';
@@ -56,9 +58,18 @@ import type { DataNode } from 'antd/es/tree';
 const { Content, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
+const { Option } = Select;
 
 // 缓存配置
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+
+// Priority filter options
+const PRIORITY_FILTER_OPTIONS = [
+  { label: 'All', value: null, stars: null },
+  { label: 'High Priority', value: 3, stars: 3 },
+  { label: 'Medium Priority', value: 2, stars: 2 },
+  { label: 'Low Priority', value: 1, stars: 1 }
+];
 
 // 数据状态类型定义
 interface WatchlistStockInfo extends WatchlistItem {
@@ -149,6 +160,7 @@ const FinvizDashboard: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState<WatchlistStockInfo | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [searchValue, setSearchValue] = useState<string>('');
+  const [priorityFilter, setPriorityFilter] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<string>('news');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   
@@ -161,6 +173,10 @@ const FinvizDashboard: React.FC = () => {
   const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
   const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [contentLoading, setContentLoading] = useState<boolean>(false);
+  
+  // 价格数据
+  const [stockPrices, setStockPrices] = useState<Map<string, StockPriceData>>(new Map());
+  const [pricesLoading, setPricesLoading] = useState<boolean>(false);
   
   
   // 缓存机制
@@ -233,11 +249,18 @@ const FinvizDashboard: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 加载价格数据
+  useEffect(() => {
+    if (watchlistGroups.length > 0) {
+      loadWatchlistPrices();
+    }
+  }, [watchlistGroups]);
+
   // 搜索过滤
   useEffect(() => {
     filterTreeData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchValue, watchlistGroups]);
+  }, [searchValue, priorityFilter, watchlistGroups, stockPrices]);
 
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
@@ -291,12 +314,50 @@ const FinvizDashboard: React.FC = () => {
     }
   };
 
+  const loadWatchlistPrices = async () => {
+    setPricesLoading(true);
+    try {
+      const response = await dashboardAPI.getWatchlistStockPrices();
+      if (response.success && response.data) {
+        // 将价格数据转换为Map，以股票代码为key
+        const pricesMap = new Map<string, StockPriceData>();
+        response.data.forEach(priceData => {
+          // 保存完整的ticker（包含交易所后缀）
+          pricesMap.set(priceData.code, priceData);
+          
+          // 也保存不带交易所后缀的版本，以便匹配watchlist中的symbol
+          const symbolWithoutExchange = priceData.code.split('.')[0];
+          pricesMap.set(symbolWithoutExchange, priceData);
+        });
+        setStockPrices(pricesMap);
+        logger.logInfo(`加载了 ${response.data.length} 个股票的价格数据`, 'finviz-dashboard');
+      }
+    } catch (error) {
+      logger.logError('Failed to load stock prices', 'finviz-dashboard', error);
+      // 不显示错误消息，因为价格数据不是必需的
+    } finally {
+      setPricesLoading(false);
+    }
+  };
+
   const filterTreeData = () => {
     const filteredGroups = watchlistGroups.filter(group => {
+      // First filter by priority if set
+      let filteredItems = group.items;
+      if (priorityFilter !== null) {
+        filteredItems = group.items.filter(item => item.priority === priorityFilter);
+      }
+      
+      // If no items match the priority filter, hide the entire group
+      if (filteredItems.length === 0) {
+        return false;
+      }
+      
+      // Then filter by search value
       if (!searchValue) return true;
       
       const groupMatch = group.group_name.toLowerCase().includes(searchValue.toLowerCase());
-      const stockMatch = group.items.some(item => 
+      const stockMatch = filteredItems.some(item => 
         item.symbol.toLowerCase().includes(searchValue.toLowerCase()) ||
         (item.company && item.company.toLowerCase().includes(searchValue.toLowerCase())) ||
         (item.custom_name && item.custom_name.toLowerCase().includes(searchValue.toLowerCase())) ||
@@ -307,8 +368,24 @@ const FinvizDashboard: React.FC = () => {
     });
 
     const treeNodes: DataNode[] = filteredGroups.map(group => {
-      // 获取分组中股票的主要sector
-      const sectors = group.items
+      // Get filtered items based on priority and search
+      let filteredItems = group.items;
+      if (priorityFilter !== null) {
+        filteredItems = group.items.filter(item => item.priority === priorityFilter);
+      }
+      
+      // Apply search filter to items
+      if (searchValue) {
+        filteredItems = filteredItems.filter(item => 
+          item.symbol.toLowerCase().includes(searchValue.toLowerCase()) ||
+          (item.company && item.company.toLowerCase().includes(searchValue.toLowerCase())) ||
+          (item.custom_name && item.custom_name.toLowerCase().includes(searchValue.toLowerCase())) ||
+          (item.sector && item.sector.toLowerCase().includes(searchValue.toLowerCase()))
+        );
+      }
+      
+      // 获取分组中股票的主要sector (based on filtered items)
+      const sectors = filteredItems
         .map(item => item.sector)
         .filter((sector): sector is string => Boolean(sector))
         .reduce((acc, sector) => {
@@ -326,65 +403,59 @@ const FinvizDashboard: React.FC = () => {
         title: group.group_name,
         key: `group-${group.group_name}`,
         icon: getSectorIcon(dominantSector),
-        children: group.items
-        .filter(item => {
-          if (!searchValue) return true;
-          return item.symbol.toLowerCase().includes(searchValue.toLowerCase()) ||
-                 (item.company && item.company.toLowerCase().includes(searchValue.toLowerCase())) ||
-                 (item.custom_name && item.custom_name.toLowerCase().includes(searchValue.toLowerCase())) ||
-                 (item.sector && item.sector.toLowerCase().includes(searchValue.toLowerCase()));
-        })
-        .map(item => ({
-          title: (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              width: '100%',
-              minHeight: '40px',
-              padding: '4px 0'
-            }}>
-              <StockOutlined style={{ 
-                marginRight: '8px', 
-                color: '#1890ff', 
-                flexShrink: 0,
-                fontSize: '14px'
-              }} />
+        children: filteredItems.map(item => {
+          return {
+            title: (
               <div style={{ 
-                flex: 1, 
-                minWidth: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center'
+                display: 'flex', 
+                alignItems: 'center', 
+                width: '100%',
+                minHeight: '40px',
+                padding: '4px 0'
               }}>
+                <StockOutlined style={{ 
+                  marginRight: '8px', 
+                  color: '#1890ff', 
+                  flexShrink: 0,
+                  fontSize: '14px'
+                }} />
                 <div style={{ 
-                  fontSize: '13px', 
-                  fontWeight: 'bold', 
-                  overflow: 'hidden', 
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  lineHeight: '1.2'
-                }}>
-                  {item.custom_name || item.company || item.symbol}
-                </div>
-                <div style={{ 
-                  fontSize: '11px', 
-                  color: '#666', 
-                  fontFamily: 'monospace', 
-                  letterSpacing: '0.5px',
-                  lineHeight: '1.2',
+                  flex: 1, 
+                  minWidth: 0,
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
+                  flexDirection: 'column',
+                  justifyContent: 'center'
                 }}>
-                  <span>{item.symbol}</span>
-                  {renderStars(item.priority)}
+                  <div style={{ 
+                    fontSize: '13px', 
+                    fontWeight: 'bold', 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: '1.2'
+                  }}>
+                    {item.custom_name || item.company || item.symbol}
+                  </div>
+                  <div style={{ 
+                    fontSize: '11px', 
+                    color: '#666', 
+                    fontFamily: 'monospace', 
+                    letterSpacing: '0.5px',
+                    lineHeight: '1.2',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <span>{item.symbol}</span>
+                    {renderStars(item.priority)}
+                  </div>
                 </div>
               </div>
-            </div>
-          ),
-          key: `stock-${item.watchlist_id}`,
-          isLeaf: true,
-        }))
+            ),
+            key: `stock-${item.watchlist_id}`,
+            isLeaf: true,
+          };
+        })
       };
     });
 
@@ -813,55 +884,119 @@ const FinvizDashboard: React.FC = () => {
   const renderStockDetails = () => {
     if (!selectedStock) return null;
 
+    // 获取该股票的价格数据
+    // 首先尝试直接匹配symbol，然后尝试匹配带交易所后缀的版本
+    let priceData = stockPrices.get(selectedStock.symbol);
+    
+    // 尝试使用primaryticker（如果存在）
+    const stockWithTicker = selectedStock as any;
+    if (!priceData && stockWithTicker.primaryticker) {
+      priceData = stockPrices.get(stockWithTicker.primaryticker);
+    }
+    
+    if (!priceData) {
+      // 尝试常见的交易所后缀
+      const exchanges = ['.US', '.HK', '.SZ', '.SH', '.TW', '.JP'];
+      for (const exchange of exchanges) {
+        priceData = stockPrices.get(`${selectedStock.symbol}${exchange}`);
+        if (priceData) break;
+      }
+    }
+    
+    // 格式化价格变化颜色
+    const getPriceChangeColor = (changePercent?: number) => {
+      if (!changePercent) return '#8c8c8c';
+      return changePercent >= 0 ? '#52c41a' : '#f5222d';
+    };
+
+    // 格式化价格变化显示
+    const formatPriceChange = (changeAmount?: number, changePercent?: number) => {
+      if (!changeAmount || !changePercent) return 'N/A';
+      const sign = changeAmount >= 0 ? '+' : '';
+      return `${sign}$${changeAmount.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`;
+    };
+
     return (
-      <Card size="small" style={{ marginBottom: '16px' }}>
+      <Card size="small" style={{ marginBottom: '16px', position: 'relative' }}>
         <Row gutter={16}>
           <Col span={8}>
             <div>
-              <Text strong style={{ fontSize: '12px' }}>Company</Text>
+              <Text strong style={{ fontSize: '12px' }}>Price</Text>
               <br />
-              <Text 
-                style={{ 
-                  fontSize: '14px', 
-                  cursor: 'pointer', 
-                  color: '#1890ff',
-                  textDecoration: 'underline'
-                }}
-                onClick={() => handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
-                title="Click to view fundamentals overview"
-              >
-                {selectedStock.company || selectedStock.symbol}
-              </Text>
+              {pricesLoading ? (
+                <Skeleton.Input style={{ width: 80, height: 20 }} size="small" />
+              ) : (
+                <Text style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                  {priceData?.close ? `$${priceData.close.toFixed(2)}` : 'N/A'}
+                </Text>
+              )}
             </div>
           </Col>
           <Col span={8}>
             <div>
-              <Text strong style={{ fontSize: '12px' }}>Sector</Text>
+              <Text strong style={{ fontSize: '12px' }}>Price Change %</Text>
               <br />
-              <Text style={{ fontSize: '14px' }}>{selectedStock.sector || 'N/A'}</Text>
+              {pricesLoading ? (
+                <Skeleton.Input style={{ width: 60, height: 20 }} size="small" />
+              ) : (
+                <Text 
+                  style={{ 
+                    fontSize: '14px', 
+                    fontWeight: 'bold',
+                    color: priceData?.change_percent !== undefined ? getPriceChangeColor(priceData.change_percent) : '#8c8c8c'
+                  }}
+                >
+                  {priceData?.change_percent !== undefined 
+                    ? `${priceData.change_percent >= 0 ? '+' : ''}${priceData.change_percent.toFixed(2)}%` 
+                    : 'N/A'
+                  }
+                </Text>
+              )}
             </div>
           </Col>
           <Col span={8}>
-            <div style={{ textAlign: 'right' }}>
-              <Space>
-                <Tag 
-                  color={getPriorityColor(selectedStock.priority)}
-                  style={{ fontSize: '11px' }}
-                >
-                  Priority: {getPriorityLabel(selectedStock.priority)}
-                </Tag>
-                <Button 
-                  type="text" 
-                  danger 
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleRemoveFromWatchlist(selectedStock.watchlist_id, selectedStock.symbol)}
-                  title="Remove from watchlist"
-                />
-              </Space>
+            <div>
+              <Text strong style={{ fontSize: '12px' }}>Volume</Text>
+              <br />
+              {pricesLoading ? (
+                <Skeleton.Input style={{ width: 100, height: 20 }} size="small" />
+              ) : (
+                <Text style={{ fontSize: '12px' }}>
+                  {priceData?.volume ? priceData.volume.toLocaleString() : 'N/A'}
+                </Text>
+              )}
             </div>
           </Col>
         </Row>
+        
+        {/* 操作按钮区域 */}
+        <Row style={{ marginTop: '12px', marginBottom: '20px' }}>
+          <Col span={24} style={{ textAlign: 'right' }}>
+            <Button 
+              type="text" 
+              danger 
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={() => handleRemoveFromWatchlist(selectedStock.watchlist_id, selectedStock.symbol)}
+              title="Remove from watchlist"
+            />
+          </Col>
+        </Row>
+        
+        {/* 更新时间戳 - 右下角 */}
+        {priceData?.updated_at && (
+          <div style={{ 
+            position: 'absolute', 
+            bottom: '8px', 
+            right: '12px',
+            fontSize: '9px',
+            color: '#999',
+            fontStyle: 'italic'
+          }}>
+            Updated at {new Date(priceData.updated_at).toLocaleString()}
+          </div>
+        )}
+        
         {selectedStock.notes && (
           <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
             <Text type="secondary" style={{ fontSize: '12px' }}>Notes: </Text>
@@ -934,15 +1069,26 @@ const FinvizDashboard: React.FC = () => {
               <Title level={4} style={{ margin: 0 }}>
                 <HeartOutlined /> My Watchlist
               </Title>
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />} 
-                size="small"
-                onClick={() => setAddModalVisible(true)}
-                title="Add stock to watchlist"
-              >
-                Add
-              </Button>
+              <Space>
+                <Button 
+                  icon={<ReloadOutlined />} 
+                  size="small"
+                  loading={pricesLoading}
+                  onClick={loadWatchlistPrices}
+                  title="Refresh stock prices"
+                >
+                  Prices
+                </Button>
+                <Button 
+                  type="primary" 
+                  icon={<PlusOutlined />} 
+                  size="small"
+                  onClick={() => setAddModalVisible(true)}
+                  title="Add stock to watchlist"
+                >
+                  Add
+                </Button>
+              </Space>
             </div>
             
             <Input
@@ -950,9 +1096,27 @@ const FinvizDashboard: React.FC = () => {
               prefix={<SearchOutlined />}
               value={searchValue}
               onChange={e => setSearchValue(e.target.value)}
-              style={{ marginBottom: '16px' }}
+              style={{ marginBottom: '12px' }}
               allowClear
             />
+            
+            <Select
+              placeholder="Filter by Priority"
+              value={priorityFilter}
+              onChange={setPriorityFilter}
+              size="small"
+              style={{ width: '100%', marginBottom: '16px' }}
+              allowClear
+            >
+              {PRIORITY_FILTER_OPTIONS.map(option => (
+                <Option key={option.value || 'all'} value={option.value}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                    <span style={{ fontSize: '12px' }}>{option.label}</span>
+                    {option.stars && renderStars(option.stars)}
+                  </div>
+                </Option>
+              ))}
+            </Select>
             
             <Spin spinning={loading}>
               {watchlistGroups.length === 0 && !loading ? (
@@ -992,7 +1156,22 @@ const FinvizDashboard: React.FC = () => {
                 <div style={{ marginBottom: '24px' }}>
                   <Title level={3}>
                     {selectedType === 'stock' 
-                      ? `${selectedStock?.custom_name || selectedStock?.company} (${selectedStock?.symbol})`
+                      ? (
+                        <span>
+                          <span 
+                            style={{ 
+                              cursor: 'pointer', 
+                              color: '#1890ff',
+                              textDecoration: 'underline'
+                            }}
+                            onClick={() => selectedStock && handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
+                            title="Click to view fundamentals overview"
+                          >
+                            {selectedStock?.custom_name || selectedStock?.company}
+                          </span>
+                          {' '}({selectedStock?.symbol})
+                        </span>
+                      )
                       : `${selectedGroup} 分组`
                     }
                   </Title>

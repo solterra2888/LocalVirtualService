@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -131,6 +131,24 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/watchlist-news',
           params: {},
           icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'eodhd_stock_prices',
+      name: 'EODHD Stock Prices',
+      type: 'eodhd_stock_prices',
+      description: 'Get real-time stock prices for watchlist stocks from EODHD API',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_stock_prices_schedule',
+          name: 'Configure Stock Prices Fetch',
+          description: 'Set up periodic real-time stock price fetching for watchlist stocks (every 5 minutes)',
+          endpoint: '/scheduler/tasks/eodhd-stock-prices',
+          params: {},
+          icon: <BarChartOutlined />
         }
       ]
     },
@@ -304,6 +322,7 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+          (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -357,6 +376,7 @@ const SchedulerPage: React.FC = () => {
       return (
         (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+        (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -449,6 +469,7 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+          (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
@@ -560,7 +581,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
