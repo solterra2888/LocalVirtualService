@@ -5,11 +5,11 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-User=kevin
-Group=kevin
-WorkingDirectory=/home/kevin/rcproject
+User=root
+Group=root
+WorkingDirectory=/opt/rcproject
 Environment=PATH=/home/kevin/miniconda3/envs/rc_project/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONPATH=/home/kevin/rcproject
+Environment=PYTHONPATH=/opt/rcproject
 Environment=DB_HOST=localhost
 Environment=DB_PORT=5432
 Environment=DB_NAME=rc_database
@@ -17,7 +17,7 @@ Environment=DB_USER=postgres
 Environment=DB_PASSWORD=1q23l,Sc45+@!
 Environment=SCHEDULER_SERVICE_URL=http://localhost:8001
 Environment=DEPLOYMENT_MODE=unified
-ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python /home/kevin/rcproject/scheduler_main.py
+ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python /opt/rcproject/scheduler_main.py
 Restart=always
 RestartSec=3
 StandardOutput=journal

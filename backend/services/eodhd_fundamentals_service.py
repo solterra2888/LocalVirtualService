@@ -32,6 +32,7 @@ import psycopg2.extras
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
+from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
 from functools import wraps
 from config.settings import config
 
@@ -95,19 +96,8 @@ class EODHDFundamentalsService:
         }
         self.db_manager = DatabaseManager(db_config)
         
-        # 支持的交易所配置
-        # 注意：根据EODHD文档，基本面数据主要支持美国、欧洲等主要市场
-        # 中国股票可能返回"NA"，表示无基本面数据
-        self.supported_exchanges = {
-            'US': ['NYSE', 'NASDAQ', 'AMEX'],  # 美国主要交易所
-            'UK': ['LSE', 'AIM'],              # 英国交易所
-            'EU': ['PA', 'AS', 'BR', 'VX'],    # 欧洲主要交易所
-            'CN': ['SHG', 'SHE'],              # 中国交易所（基本面数据有限）
-            'HK': ['HK'],                      # 香港交易所
-            'JP': ['JP'],                      # 日本交易所
-            'CA': ['TO', 'TSX'],               # 加拿大交易所
-            'AU': ['AU']                       # 澳大利亚交易所
-        }
+        # 使用统一的交易所配置
+        self.supported_exchanges = ExchangeConfig.get_supported_exchanges('fundamentals')
         
         # 请求会话配置
         self.session = self._create_robust_session()
@@ -485,15 +475,8 @@ class EODHDFundamentalsService:
             logger.debug(f"开始获取 {symbol} (交易所: {exchange}) 的完整数据（General + Financials + Highlights + Valuation + Technicals + Holders + outstandingShares + Earnings）")
             
             # 构建API URL - 获取General、Financials、Highlights、Valuation、Technicals、Holders、outstandingShares、Earnings数据
-            # 根据EODHD文档，所有交易所都应使用 {SYMBOL}.{EXCHANGE} 格式
-            # 美国交易所统一使用 .US 后缀
-            us_exchanges = ['NYSE', 'NASDAQ', 'AMEX']
-            if exchange in us_exchanges:
-                symbol_with_exchange = f"{symbol}.US"
-            elif exchange == 'US':
-                symbol_with_exchange = f"{symbol}.US"
-            else:
-                symbol_with_exchange = f"{symbol}.{exchange}"
+            # 使用统一的ExchangeConfig进行ticker格式化
+            symbol_with_exchange = format_ticker_for_eodhd(f"{symbol}.{exchange}")
             
             url = f'https://eodhd.com/api/fundamentals/{symbol_with_exchange}?filter=General,Financials,Highlights,Valuation,Technicals,Holders,outstandingShares,Earnings,SharesStats,AnalystRatings,SplitsDividends,InsiderTransactions&api_token={self.api_key}&fmt=json'
             
@@ -756,12 +739,15 @@ class EODHDFundamentalsService:
             # 准备所有可能的symbol变体
             symbol_variants = []
             for symbol in symbols:
+                # 使用统一的ExchangeConfig生成可能的ticker变体
                 symbol_variants.extend([
                     symbol, 
                     symbol.upper(),
-                    f"{symbol}.US",
-                    f"{symbol}.NASDAQ",
-                    f"{symbol}.NYSE"
+                    format_ticker_for_eodhd(symbol),  # 使用统一格式化
+                    # 添加常见的美国交易所变体（保持向后兼容）
+                    ExchangeConfig.format_ticker_for_eodhd(f"{symbol}.US"),
+                    ExchangeConfig.format_ticker_for_eodhd(f"{symbol}.NASDAQ"),
+                    ExchangeConfig.format_ticker_for_eodhd(f"{symbol}.NYSE")
                 ])
             
             # 批量查询
@@ -1754,8 +1740,8 @@ class EODHDFundamentalsService:
                     logger.error(f"处理公司记录时出错: {company_record}, 错误: {str(e)}")
                     continue
                 
-                # 准备UPSERT数据
-                primary_ticker = f"{symbol}.US" if exchange in ['NASDAQ', 'NYSE', 'AMEX'] else f"{symbol}.{exchange}"
+                # 准备UPSERT数据 - 使用统一的ExchangeConfig生成primary_ticker
+                primary_ticker = format_ticker_for_eodhd(f"{symbol}.{exchange}")
                 code = general_data.get('Code', symbol)
                 
                 # 🚀 去重：跳过同批次中重复的code

@@ -749,55 +749,95 @@ const FinvizDashboard: React.FC = () => {
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         />
       ) : (
-        <List
-          itemLayout="vertical"
-          dataSource={newsData}
-          renderItem={item => (
-            <List.Item
-              key={item.id}
-              extra={
-                <Space direction="vertical" align="end">
-                  <Tag color={getSentimentColor(item.sentiment_polarity)}>
-                    {getSentimentText(item.sentiment_polarity)}
-                  </Tag>
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    <CalendarOutlined /> {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
-                  </Text>
-                </Space>
-              }
-            >
-              <List.Item.Meta
-                title={
-                  <a 
-                    href={item.link} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ fontSize: '14px' }}
-                  >
-                    {item.title}
-                  </a>
-                }
-                description={
-                  <Space>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>{item.source}</Text>
-                    {item.symbols?.slice(0, 3).map(symbol => (
-                      <Tag key={symbol} style={{ fontSize: '10px' }}>{symbol}</Tag>
-                    ))}
-                    {item.symbols && item.symbols.length > 3 && (
-                      <Tag style={{ fontSize: '10px' }}>+{item.symbols.length - 3}</Tag>
-                    )}
-                  </Space>
-                }
+        <div style={{ position: 'relative' }}>
+          {newsData.map((item, index) => (
+            <div key={item.id} style={{ position: 'relative', marginBottom: '24px' }}>
+              {/* Timeline line */}
+              {index < newsData.length - 1 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '40px',
+                    top: '60px',
+                    bottom: '-24px',
+                    width: '2px',
+                    backgroundColor: '#d9d9d9',
+                    zIndex: 1
+                  }}
+                />
+              )}
+              
+              {/* Timeline dot */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '36px',
+                  top: '22px',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: '#1890ff',
+                  border: '1px solid #fff',
+                  boxShadow: '0 0 0 1px #1890ff',
+                  zIndex: 2
+                }}
               />
-              <Paragraph 
-                ellipsis={{ rows: 2, expandable: true }}
-                style={{ fontSize: '13px', marginBottom: '8px' }}
-              >
-                {item.content}
-              </Paragraph>
-            </List.Item>
-          )}
-        />
+              
+              {/* Content */}
+              <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
+                <List.Item
+                  extra={
+                    <Space direction="vertical" align="end">
+                      <Tag color={getSentimentColor(item.sentiment_polarity)}>
+                        {getSentimentText(item.sentiment_polarity)}
+                      </Tag>
+                    </Space>
+                  }
+                >
+                  <List.Item.Meta
+                    avatar={
+                      <Space align="center" style={{ minWidth: '120px' }}>
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          <CalendarOutlined /> {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: '11px' }}>
+                          {item.date ? new Date(item.date).toLocaleTimeString() : 'N/A'}
+                        </Text>
+                      </Space>
+                    }
+                    title={
+                      <a 
+                        href={item.link} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        style={{ fontSize: '14px' }}
+                      >
+                        {item.title}
+                      </a>
+                    }
+                    description={
+                      <Space>
+                        <Text type="secondary" style={{ fontSize: '12px' }}>{item.source}</Text>
+                        {item.symbols?.slice(0, 3).map(symbol => (
+                          <Tag key={symbol} style={{ fontSize: '10px' }}>{symbol}</Tag>
+                        ))}
+                        {item.symbols && item.symbols.length > 3 && (
+                          <Tag style={{ fontSize: '10px' }}>+{item.symbols.length - 3}</Tag>
+                        )}
+                      </Space>
+                    }
+                  />
+                  <Paragraph 
+                    ellipsis={{ rows: 2, expandable: true }}
+                    style={{ fontSize: '13px', marginBottom: '8px' }}
+                  >
+                    {item.content}
+                  </Paragraph>
+                </List.Item>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

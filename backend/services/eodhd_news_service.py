@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
+from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
 from config.settings import config
 
 # 获取日志实例
@@ -507,36 +508,15 @@ class EODHDNewsService:
         """
         格式化股票代码，确保格式正确
         
+        使用统一的ExchangeConfig进行格式化，确保与EODHD官方规范一致
+        
         Args:
             symbol: 原始股票代码
             
         Returns:
             格式化后的股票代码
         """
-        symbol = symbol.strip()
-        
-        # 如果已经有正确的后缀，直接返回
-        if any(symbol.endswith(suffix) for suffix in ['.HK', '.US', '.SHE', '.SHG']):
-            return symbol
-        
-        # 港股代码：4位数字
-        if symbol.isdigit() and len(symbol) == 4:
-            return f"{symbol}.HK"
-        
-        # A股代码：6位数字
-        if symbol.isdigit() and len(symbol) == 6:
-            # 根据代码判断市场
-            if symbol.startswith(('000', '001', '002', '003', '300')):
-                return f"{symbol}.SHE"  # 深交所
-            elif symbol.startswith(('600', '601', '603', '605', '688')):
-                return f"{symbol}.SHG"  # 上交所
-        
-        # 美股代码：通常是字母组合
-        if symbol.isalpha() and len(symbol) <= 5:
-            return f"{symbol}.US"
-        
-        # 其他情况直接返回
-        return symbol
+        return format_ticker_for_eodhd(symbol)
     
     def _extract_news_from_response(self, response) -> List[Dict[str, Any]]:
         """从API响应中提取新闻数组"""
@@ -832,14 +812,13 @@ class EODHDNewsService:
                 # 批量插入/更新新闻
                 success_count = 0
                 failed_count = 0
-                news_ids, success_count, failed_count = self._batch_insert_new_articles(cursor, articles)
+                new_count = 0
+                existing_count = 0
+                news_ids, success_count, failed_count, new_count, existing_count = self._batch_insert_new_articles(cursor, articles)
                 
                 # 批量处理symbols和tags
                 if news_ids:
                     self._batch_insert_symbols_and_tags(cursor, articles, news_ids)
-                
-                # 计算已存在的数量（通过比较总数和成功数）
-                existing_count = len(articles) - success_count - failed_count
                 
                 # 提交事务
                 conn.commit()
@@ -927,6 +906,8 @@ class EODHDNewsService:
             news_ids = []
             success_count = 0
             failed_count = 0
+            new_count = 0
+            existing_count = 0
             
             for i, data in enumerate(news_data):
                 try:
@@ -937,8 +918,10 @@ class EODHDNewsService:
                     success_count += 1
                     
                     if is_inserted:
+                        new_count += 1
                         logger.debug(f"插入第{i+1}条新闻成功 (新记录)")
                     else:
+                        existing_count += 1
                         logger.debug(f"更新第{i+1}条新闻成功 (已存在)")
                         
                 except Exception as e:
@@ -946,12 +929,12 @@ class EODHDNewsService:
                     news_ids.append(None)  # 占位，保持索引一致
                     failed_count += 1
             
-            logger.debug(f"批量处理新闻: 成功{success_count}, 失败{failed_count}")
-            return news_ids, success_count, failed_count
+            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 重复{existing_count}, 失败{failed_count}")
+            return news_ids, success_count, failed_count, new_count, existing_count
             
         except Exception as e:
             logger.error(f"批量处理新闻失败: {e}")
-            return [], 0, len(new_articles)
+            return [], 0, len(new_articles), 0, 0
     
     def _batch_insert_symbols_and_tags(self, cursor, articles: List[Dict[str, Any]], news_ids: List[int]):
         """批量插入symbols、tags和api_tags关联"""

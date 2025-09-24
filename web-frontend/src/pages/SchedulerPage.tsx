@@ -414,7 +414,8 @@ const SchedulerPage: React.FC = () => {
       description: description,
       timezone: task.timezone,
       isValid: validation.valid,
-      validationMessage: validation.message
+      validationMessage: validation.message,
+      params: task.params
     };
   };
 
@@ -903,15 +904,41 @@ const SchedulerPage: React.FC = () => {
                                     </Space>
                                   </div>
                                   <div style={{ marginBottom: '4px' }}>
-                                    <Text code style={{ 
-                                      fontSize: '12px', 
-                                      backgroundColor: '#fff', 
-                                      padding: '2px 6px', 
-                                      borderRadius: '3px',
-                                      color: cronInfo.isValid ? '#000' : '#ff4d4f'
-                                    }}>
-                                      {cronInfo.expression}
-                                    </Text>
+                                    <Space>
+                                      <Text code style={{ 
+                                        fontSize: '12px', 
+                                        backgroundColor: '#fff', 
+                                        padding: '2px 6px', 
+                                        borderRadius: '3px',
+                                        color: cronInfo.isValid ? '#000' : '#ff4d4f'
+                                      }}>
+                                        {cronInfo.expression}
+                                      </Text>
+                                      {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+                                        <Tooltip 
+                                          title={
+                                            <pre style={{ 
+                                              margin: 0, 
+                                              fontSize: '12px', 
+                                              fontFamily: 'monospace',
+                                              whiteSpace: 'pre-wrap',
+                                              maxWidth: '300px'
+                                            }}>
+                                              {JSON.stringify(cronInfo.params, null, 2)}
+                                            </pre>
+                                          }
+                                          placement="top"
+                                        >
+                                          <SettingOutlined 
+                                            style={{ 
+                                              color: '#1890ff', 
+                                              fontSize: '12px',
+                                              cursor: 'pointer'
+                                            }} 
+                                          />
+                                        </Tooltip>
+                                      )}
+                                    </Space>
                                   </div>
                                   {!cronInfo.isValid && cronInfo.validationMessage && (
                                     <div style={{ marginBottom: '4px' }}>

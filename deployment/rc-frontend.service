@@ -5,9 +5,9 @@ Wants=rc-webapp.service
 
 [Service]
 Type=simple
-User=kevin
-Group=kevin
-WorkingDirectory=/home/kevin/rcproject/web-frontend
+User=root
+Group=root
+WorkingDirectory=/opt/rcproject/web-frontend
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=BROWSER=none
 Environment=REACT_APP_API_BASE_URL=http://111.230.48.119/api

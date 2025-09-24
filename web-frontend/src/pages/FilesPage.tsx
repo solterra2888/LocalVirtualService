@@ -303,7 +303,7 @@ const FilesPage: React.FC = () => {
       } else if (error.response?.status >= 500) {
         errorMessage += ' - 服务器内部错误';
       } else if (error.message === 'Network Error') {
-        errorMessage += ' - 网络连接失败，请检查后端服务是否运行';
+        errorMessage += ' - Network connection failed';
       } else {
         errorMessage += ` - ${error.response?.data?.detail || error.message}`;
       }
@@ -579,7 +579,7 @@ const FilesPage: React.FC = () => {
       } else if (error.response?.status >= 500) {
         errorMessage += ' - 服务器内部错误';
       } else if (error.message === 'Network Error') {
-        errorMessage += ' - 网络连接失败，请检查后端服务是否运行';
+        errorMessage += ' - Network connection failed';
       } else {
         errorMessage += ` - ${error.response?.data?.detail || error.message}`;
       }

@@ -8,11 +8,17 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import os
 import urllib.parse
+import asyncio
+import time
 
 from backend.schemas.user import UserResponse
 from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
+from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+from backend.utils.logger import get_logger
 from config.settings import config
+
+logger = get_logger("dashboard_api")
 
 router = APIRouter()
 
@@ -773,11 +779,122 @@ async def add_to_watchlist(
         result = db_manager.fetch_one(insert_query, values)
         
         if result:
+            watchlist_id = result[0]
+            
+            # 异步更新EODHD fundamentals数据
+            fundamentals_update_result = None
+            try:
+                logger.info(f"开始为watchlist中的股票 {symbol} 更新EODHD fundamentals数据", 
+                           user=current_user.username, symbol=symbol)
+                
+                # 检查fundamentals数据是否在24小时内更新过
+                freshness_check_query = """
+                SELECT MAX(updated_at) as last_update 
+                FROM companies 
+                WHERE code = %s AND updated_at > NOW() - INTERVAL '1 day'
+                """
+                freshness_result = db_manager.fetch_one(freshness_check_query, [symbol])
+                
+                if freshness_result and freshness_result[0]:
+                    # 数据在24小时内更新过，跳过EODHD API调用
+                    logger.info(f"公司 {symbol} 的fundamentals数据较新，跳过更新", 
+                               user=current_user.username, symbol=symbol,
+                               last_update=freshness_result[0])
+                    
+                    fundamentals_update_result = {
+                        "success": True,
+                        "message": f"数据较新，跳过更新。最后更新时间: {freshness_result[0]}",
+                        "skipped": True,
+                        "last_update": freshness_result[0].isoformat() if freshness_result[0] else None
+                    }
+                else:
+                    # 数据需要更新，继续执行EODHD API调用
+                    logger.info(f"公司 {symbol} 的fundamentals数据需要更新，开始从EODHD获取数据", 
+                               user=current_user.username, symbol=symbol)
+                    
+                    # 获取公司的exchange信息
+                    exchange_query = "SELECT exchange FROM companies WHERE code = %s"
+                    exchange_result = db_manager.fetch_one(exchange_query, [symbol])
+                    exchange = exchange_result[0] if exchange_result else 'US'
+                    
+                    # 初始化EODHD基本面数据服务
+                    fundamentals_service = EODHDFundamentalsService()
+                    
+                    # 获取完整的基本面数据
+                    full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                    
+                    if full_data:
+                        # 构建保存数据的格式
+                        company_data = {
+                            'symbol': symbol,
+                            'exchange': exchange,
+                            'general_data': full_data.get('General', full_data),
+                            'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                            'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                            'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                            'full_data': full_data
+                        }
+                        
+                        # 使用批量保存方法
+                        save_result = fundamentals_service.batch_save_companies_data([company_data])
+                        
+                        # 构建更新结果
+                        data_updated = {
+                            'company_info': save_result.get('companies_saved', 0) > 0,
+                            'address': save_result.get('addresses_saved', 0) > 0,
+                            'officers': save_result.get('officers_saved', 0) > 0,
+                            'financials': save_result.get('financials_saved', 0) > 0,
+                            'highlights': save_result.get('highlights_saved', 0) > 0,
+                            'valuations': save_result.get('valuations_saved', 0) > 0,
+                            'technicals': save_result.get('technicals_saved', 0) > 0,
+                            'earnings': save_result.get('earnings_saved', 0) > 0,
+                            'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
+                            'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
+                            'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
+                            'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
+                        }
+                        
+                        updated_components = [k for k, v in data_updated.items() if v]
+                        fundamentals_update_result = {
+                            "success": True,
+                            "message": f"成功更新 {symbol} 的基本面数据，更新了 {len(updated_components)} 个组件",
+                            "data_updated": data_updated,
+                            "updated_components": updated_components
+                        }
+                        
+                        logger.info(f"成功为watchlist中的股票 {symbol} 更新EODHD fundamentals数据", 
+                                   user=current_user.username, symbol=symbol, 
+                                   updated_components=updated_components)
+                    else:
+                        fundamentals_update_result = {
+                            "success": False,
+                            "message": f"无法从EODHD获取 {symbol} 的基本面数据"
+                        }
+                        logger.warning(f"无法为watchlist中的股票 {symbol} 获取EODHD fundamentals数据", 
+                                      user=current_user.username, symbol=symbol)
+                    
+            except Exception as e:
+                fundamentals_update_result = {
+                    "success": False,
+                    "message": f"更新 {symbol} 的基本面数据时发生错误: {str(e)}"
+                }
+                logger.error(f"为watchlist中的股票 {symbol} 更新EODHD fundamentals数据失败", 
+                           user=current_user.username, symbol=symbol, error=str(e))
+            
+            # 构建响应消息
+            response_message = f"Successfully added {symbol} to watchlist"
+            if fundamentals_update_result:
+                if fundamentals_update_result["success"]:
+                    response_message += f". {fundamentals_update_result['message']}"
+                else:
+                    response_message += f". Note: {fundamentals_update_result['message']}"
+            
             return {
-                "message": f"Successfully added {symbol} to watchlist",
-                "watchlist_id": result[0],
+                "message": response_message,
+                "watchlist_id": watchlist_id,
                 "symbol": symbol,
-                "company_name": stock_info[1]
+                "company_name": stock_info[1],
+                "fundamentals_update": fundamentals_update_result
             }
         else:
             raise HTTPException(

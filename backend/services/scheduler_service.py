@@ -17,6 +17,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.services.eodhd_news_service import EODHDNewsService
 from backend.services.watchlist_news_service import WatchlistNewsService
+from backend.config.exchange_config import ExchangeConfig
 from config.settings import config
 
 logger = get_logger("scheduler_service")
@@ -549,9 +550,17 @@ class SchedulerService:
                     params.get('keywords')
                 )
             
+            # 计算实际新增的新闻数量
+            new_count = result['success_count'] - result['existing_count']
+            
+            if result['existing_count'] > 0:
+                message = f"成功获取 {result['fetched_count']} 条新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+            else:
+                message = f"成功获取并存储 {result['success_count']} 条新闻"
+            
             return {
                 'success': True,
-                'message': f"成功获取并存储 {result['success_count']} 条新闻",
+                'message': message,
                 'data': result
             }
             
@@ -584,9 +593,17 @@ class SchedulerService:
                     params.get('user_id')  # 可选：指定用户ID，为None时获取所有用户的watchlist
                 )
             
+            # 计算实际新增的新闻数量
+            new_count = result['success_count'] - result['existing_count']
+            
+            if result['existing_count'] > 0:
+                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+            else:
+                message = f"成功获取并存储 {result['success_count']} 条watchlist新闻"
+            
             return {
                 'success': True,
-                'message': f"成功获取并存储 {result['success_count']} 条watchlist新闻",
+                'message': message,
                 'data': result
             }
             
@@ -839,8 +856,8 @@ class SchedulerService:
                 exchanges = [exchanges]
             
             # 验证支持的交易所
-            supported_exchanges = ['NYSE', 'NASDAQ', 'AMEX', 'SHG', 'SHE', 'HK', 'TWO', 'JP', 'LSE', 'AIM']
-            valid_exchanges = [ex for ex in exchanges if ex.upper() in [se.upper() for se in supported_exchanges]]
+            supported_exchanges = ExchangeConfig.get_supported_exchanges('fundamentals')
+            valid_exchanges = [ex for ex in exchanges if ExchangeConfig.is_exchange_supported(ex, 'fundamentals')]
             
             if not valid_exchanges:
                 logger.warning(f"不支持的交易所: {exchanges}，支持的交易所: {supported_exchanges}")

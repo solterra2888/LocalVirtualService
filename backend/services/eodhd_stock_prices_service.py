@@ -25,6 +25,7 @@ import psycopg2.extras
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
+from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
 from config.settings import config
 
 logger = get_logger("eodhd_stock_prices_service")
@@ -152,38 +153,9 @@ class EODHDStockPricesService:
     def format_ticker_for_eodhd(self, ticker: str) -> str:
         """格式化ticker为EODHD API格式
         
-        EODHD API要求格式为 SYMBOL.EXCHANGE
-        如果ticker已经包含交易所后缀，直接返回
-        否则根据ticker特征判断交易所
+        使用统一的ExchangeConfig进行格式化，确保与EODHD官方规范一致
         """
-        # 如果ticker已经包含交易所后缀，直接返回
-        if '.' in ticker:
-            return ticker
-        
-        # 根据ticker特征判断交易所
-        ticker_upper = ticker.upper()
-        
-        # 香港股票：通常以数字开头，如 0700, 9988
-        if ticker.isdigit() and len(ticker) == 4:
-            return f"{ticker}.HK"
-        
-        # 中国A股：通常以数字开头，如 000001, 600036
-        if ticker.isdigit() and len(ticker) == 6:
-            if ticker.startswith(('000', '002', '300')):
-                return f"{ticker}.SZ"  # 深圳
-            elif ticker.startswith(('600', '601', '603', '605', '688')):
-                return f"{ticker}.SH"  # 上海
-        
-        # 台湾股票：通常以数字开头，如 2330
-        if ticker.isdigit() and len(ticker) == 4:
-            return f"{ticker}.TW"
-        
-        # 日本股票：通常以数字开头，如 7203
-        if ticker.isdigit() and len(ticker) == 4:
-            return f"{ticker}.JP"
-        
-        # 默认为美国交易所
-        return f"{ticker}.US"
+        return format_ticker_for_eodhd(ticker)
     
     def fetch_stock_prices_batch(self, tickers: List[str]) -> List[Dict[str, Any]]:
         """批量获取股票价格数据

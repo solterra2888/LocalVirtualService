@@ -332,6 +332,10 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             <Text style={{ fontSize: '11px', color: '#52c41a' }}>
               {log.result_message || 'Execution successful'}
             </Text>
+          ) : log.status === 'running' ? (
+            <Text style={{ fontSize: '11px', color: '#1890ff' }}>
+              {log.result_message || 'Task is running...'}
+            </Text>
           ) : (
             <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
               {log.error_message || 'Execution failed'}

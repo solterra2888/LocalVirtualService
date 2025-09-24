@@ -413,9 +413,17 @@ async def fetch_news_from_eodhd(
                    failed_count=result['failed_count'],
                    total_count=result['total_count'])
         
+        # 计算实际新增的新闻数量
+        new_count = result['success_count'] - result['existing_count']
+        
+        if result['existing_count'] > 0:
+            message = f"成功获取 {result['fetched_count']} 条新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+        else:
+            message = f"成功获取并存储 {result['success_count']} 条新闻"
+        
         return {
             "success": True,
-            "message": f"成功获取并存储 {result['success_count']} 条新闻",
+            "message": message,
             "data": result
         }
         
