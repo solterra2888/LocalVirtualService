@@ -46,7 +46,9 @@ import {
   FileImageOutlined,
   StarFilled,
   StarOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
@@ -65,11 +67,37 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
 
 // Priority filter options
 const PRIORITY_FILTER_OPTIONS = [
-  { label: 'All', value: null, stars: null },
+  { label: 'All Priorities', value: 'all', stars: null },
   { label: 'High Priority', value: 3, stars: 3 },
   { label: 'Medium Priority', value: 2, stars: 2 },
   { label: 'Low Priority', value: 1, stars: 1 }
 ];
+
+// Helper function to get unique exchanges from watchlist data
+const getUniqueExchanges = (watchlistGroups: WatchlistGroup[]): string[] => {
+  const exchanges = new Set<string>();
+  watchlistGroups.forEach(group => {
+    group.items.forEach(item => {
+      if (item.exchange) {
+        exchanges.add(item.exchange);
+      }
+    });
+  });
+  return Array.from(exchanges).sort();
+};
+
+// Helper function to get unique sectors from watchlist data
+const getUniqueSectors = (watchlistGroups: WatchlistGroup[]): string[] => {
+  const sectors = new Set<string>();
+  watchlistGroups.forEach(group => {
+    group.items.forEach(item => {
+      if (item.sector) {
+        sectors.add(item.sector);
+      }
+    });
+  });
+  return Array.from(sectors).sort();
+};
 
 // 数据状态类型定义
 interface WatchlistStockInfo extends WatchlistItem {
@@ -160,9 +188,12 @@ const FinvizDashboard: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState<WatchlistStockInfo | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [searchValue, setSearchValue] = useState<string>('');
-  const [priorityFilter, setPriorityFilter] = useState<number | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<number | string>('all');
+  const [exchangeFilter, setExchangeFilter] = useState<string>('all');
+  const [sectorFilter, setSectorFilter] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<string>('news');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [watchlistCollapsed, setWatchlistCollapsed] = useState<boolean>(false);
   
   // 数据状态
   const [watchlistGroups, setWatchlistGroups] = useState<WatchlistGroup[]>([]);
@@ -174,10 +205,18 @@ const FinvizDashboard: React.FC = () => {
   const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [contentLoading, setContentLoading] = useState<boolean>(false);
   
+  // 分页相关状态
+  const [newsOffset, setNewsOffset] = useState<number>(0);
+  const [hasMoreNews, setHasMoreNews] = useState<boolean>(true);
+  const [loadingMoreNews, setLoadingMoreNews] = useState<boolean>(false);
+  const NEWS_PAGE_SIZE = 10; // 每页加载10条新闻
+  
   // 价格数据
   const [stockPrices, setStockPrices] = useState<Map<string, StockPriceData>>(new Map());
   const [pricesLoading, setPricesLoading] = useState<boolean>(false);
   
+  // 自动刷新相关状态
+  const [isPageVisible, setIsPageVisible] = useState<boolean>(true);
   
   // 缓存机制
   const [newsCache, setNewsCache] = useState<Map<string, DashboardNewsItem[]>>(new Map());
@@ -249,18 +288,56 @@ const FinvizDashboard: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 页面可见性检测
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   // 加载价格数据
   useEffect(() => {
     if (watchlistGroups.length > 0) {
       loadWatchlistPrices();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlistGroups]);
+
+  // 自动刷新价格数据
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    
+    if (watchlistGroups.length > 0 && isPageVisible) {
+      // 固定使用1分钟刷新间隔
+      const intervalMs = 60000; // 1分钟
+      
+      intervalId = setInterval(() => {
+        // 只有在页面可见时才执行刷新
+        if (!document.hidden) {
+          loadWatchlistPrices();
+        }
+      }, intervalMs);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistGroups, isPageVisible]);
 
   // 搜索过滤
   useEffect(() => {
     filterTreeData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchValue, priorityFilter, watchlistGroups, stockPrices]);
+  }, [searchValue, priorityFilter, exchangeFilter, sectorFilter, watchlistGroups, stockPrices]);
 
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
@@ -279,6 +356,29 @@ const FinvizDashboard: React.FC = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, selectedType, activeTab, selectedStock]);
+
+  // 滚动检测和自动加载更多新闻
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!hasMoreNews || loadingMoreNews || activeTab !== 'news') return;
+      
+      const scrollContainer = document.querySelector('.ant-layout-content');
+      if (!scrollContainer) return;
+      
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+      const threshold = 200; // 距离底部200px时触发加载
+      
+      if (scrollTop + clientHeight >= scrollHeight - threshold) {
+        loadMoreNews();
+      }
+    };
+
+    const scrollContainer = document.querySelector('.ant-layout-content');
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', handleScroll);
+      return () => scrollContainer.removeEventListener('scroll', handleScroll);
+    }
+  }, [hasMoreNews, loadingMoreNews, activeTab, selectedKey, selectedType, selectedStock, selectedGroup]);
 
   const loadUserWatchlist = async () => {
     setLoading(true);
@@ -342,13 +442,25 @@ const FinvizDashboard: React.FC = () => {
 
   const filterTreeData = () => {
     const filteredGroups = watchlistGroups.filter(group => {
-      // First filter by priority if set
+      // Apply all filters to items
       let filteredItems = group.items;
-      if (priorityFilter !== null) {
-        filteredItems = group.items.filter(item => item.priority === priorityFilter);
+      
+      // Filter by priority
+      if (priorityFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.priority === priorityFilter);
       }
       
-      // If no items match the priority filter, hide the entire group
+      // Filter by exchange
+      if (exchangeFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.exchange === exchangeFilter);
+      }
+      
+      // Filter by sector
+      if (sectorFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.sector === sectorFilter);
+      }
+      
+      // If no items match the filters, hide the entire group
       if (filteredItems.length === 0) {
         return false;
       }
@@ -368,10 +480,20 @@ const FinvizDashboard: React.FC = () => {
     });
 
     const treeNodes: DataNode[] = filteredGroups.map(group => {
-      // Get filtered items based on priority and search
+      // Get filtered items based on all filters
       let filteredItems = group.items;
-      if (priorityFilter !== null) {
-        filteredItems = group.items.filter(item => item.priority === priorityFilter);
+      
+      // Apply all filters
+      if (priorityFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.priority === priorityFilter);
+      }
+      
+      if (exchangeFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.exchange === exchangeFilter);
+      }
+      
+      if (sectorFilter !== 'all') {
+        filteredItems = filteredItems.filter(item => item.sector === sectorFilter);
       }
       
       // Apply search filter to items
@@ -514,6 +636,10 @@ const FinvizDashboard: React.FC = () => {
   const loadRelatedNews = async () => {
     if (!selectedKey) return;
     
+    // 重置分页状态
+    setNewsOffset(0);
+    setHasMoreNews(true);
+    
     // 生成缓存键
     const cacheKey = selectedType === 'stock' && selectedStock 
       ? getCacheKey('stock', selectedStock.symbol)
@@ -526,6 +652,8 @@ const FinvizDashboard: React.FC = () => {
       const cachedNews = getCachedNews(cacheKey);
       if (cachedNews) {
         setNewsData(cachedNews);
+        setNewsOffset(NEWS_PAGE_SIZE);
+        setHasMoreNews(cachedNews.length === NEWS_PAGE_SIZE);
         logger.logInfo(`使用缓存数据: ${cacheKey}`, 'finviz-dashboard');
         return;
       }
@@ -534,9 +662,9 @@ const FinvizDashboard: React.FC = () => {
     setContentLoading(true);
     try {
       if (selectedType === 'stock' && selectedStock) {
-        await loadStockNews(selectedStock.symbol, cacheKey);
+        await loadStockNews(selectedStock.symbol, cacheKey, true);
       } else if (selectedType === 'group' && selectedGroup) {
-        await loadGroupNews(selectedGroup, cacheKey);
+        await loadGroupNews(selectedGroup, cacheKey, true);
       }
     } catch (error) {
       message.error('Failed to load related news');
@@ -546,24 +674,40 @@ const FinvizDashboard: React.FC = () => {
     }
   };
 
-  const loadStockNews = async (ticker: string, cacheKey?: string | null) => {
+  const loadStockNews = async (ticker: string, cacheKey?: string | null, reset: boolean = true) => {
     try {
-      const news = await dashboardAPI.getCompanyNews(ticker, { limit: 20 });
-      setNewsData(news);
+      const offset = reset ? 0 : newsOffset;
+      const news = await dashboardAPI.getCompanyNews(ticker, { 
+        limit: NEWS_PAGE_SIZE, 
+        offset: offset 
+      });
       
-      // 缓存数据
-      if (cacheKey) {
+      if (reset) {
+        setNewsData(news);
+        setNewsOffset(NEWS_PAGE_SIZE);
+      } else {
+        setNewsData(prev => [...prev, ...news]);
+        setNewsOffset(prev => prev + NEWS_PAGE_SIZE);
+      }
+      
+      // 检查是否还有更多数据
+      setHasMoreNews(news.length === NEWS_PAGE_SIZE);
+      
+      // 缓存数据（仅在重置时缓存）
+      if (cacheKey && reset) {
         setCachedNews(cacheKey, news);
       }
       
-      logger.logInfo(`加载股票新闻: ${ticker}, ${news.length} 条`, 'finviz-dashboard');
+      logger.logInfo(`加载股票新闻: ${ticker}, ${news.length} 条 (offset: ${offset})`, 'finviz-dashboard');
     } catch (error) {
       logger.logError(`加载股票新闻失败: ${ticker}`, 'finviz-dashboard', error);
-      setNewsData([]);
+      if (reset) {
+        setNewsData([]);
+      }
     }
   };
 
-  const loadGroupNews = async (groupName: string, cacheKey?: string | null) => {
+  const loadGroupNews = async (groupName: string, cacheKey?: string | null, reset: boolean = true) => {
     try {
       // 获取该分组下所有股票的新闻
       const group = watchlistGroups.find(g => g.group_name === groupName);
@@ -576,21 +720,56 @@ const FinvizDashboard: React.FC = () => {
       // 实际应用中可能需要合并多个股票的新闻
       const firstStock = group.items[0];
       if (firstStock.sector) {
-        const news = await dashboardAPI.getSectorNews(firstStock.sector, { limit: 20 });
-        setNewsData(news);
+        const offset = reset ? 0 : newsOffset;
+        const news = await dashboardAPI.getSectorNews(firstStock.sector, { 
+          limit: NEWS_PAGE_SIZE, 
+          offset: offset 
+        });
         
-        // 缓存数据
-        if (cacheKey) {
+        if (reset) {
+          setNewsData(news);
+          setNewsOffset(NEWS_PAGE_SIZE);
+        } else {
+          setNewsData(prev => [...prev, ...news]);
+          setNewsOffset(prev => prev + NEWS_PAGE_SIZE);
+        }
+        
+        // 检查是否还有更多数据
+        setHasMoreNews(news.length === NEWS_PAGE_SIZE);
+        
+        // 缓存数据（仅在重置时缓存）
+        if (cacheKey && reset) {
           setCachedNews(cacheKey, news);
         }
         
-        logger.logInfo(`加载分组新闻: ${groupName}, ${news.length} 条`, 'finviz-dashboard');
+        logger.logInfo(`加载分组新闻: ${groupName}, ${news.length} 条 (offset: ${offset})`, 'finviz-dashboard');
       } else {
         setNewsData([]);
       }
     } catch (error) {
       logger.logError(`加载分组新闻失败: ${groupName}`, 'finviz-dashboard', error);
-      setNewsData([]);
+      if (reset) {
+        setNewsData([]);
+      }
+    }
+  };
+
+  // 加载更多新闻
+  const loadMoreNews = async () => {
+    if (!hasMoreNews || loadingMoreNews || !selectedKey) return;
+    
+    setLoadingMoreNews(true);
+    try {
+      if (selectedType === 'stock' && selectedStock) {
+        await loadStockNews(selectedStock.symbol, null, false);
+      } else if (selectedType === 'group' && selectedGroup) {
+        await loadGroupNews(selectedGroup, null, false);
+      }
+    } catch (error) {
+      logger.logError('Failed to load more news', 'finviz-dashboard', error);
+      message.error('Failed to load more news');
+    } finally {
+      setLoadingMoreNews(false);
     }
   };
 
@@ -837,6 +1016,27 @@ const FinvizDashboard: React.FC = () => {
               </div>
             </div>
           ))}
+          
+          {/* 加载更多按钮 */}
+          {hasMoreNews && (
+            <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
+              <Button 
+                type="primary" 
+                loading={loadingMoreNews}
+                onClick={loadMoreNews}
+                disabled={loadingMoreNews}
+              >
+                {loadingMoreNews ? 'Loading...' : 'Load More News'}
+              </Button>
+            </div>
+          )}
+          
+          {/* 没有更多数据提示 */}
+          {!hasMoreNews && newsData.length > 0 && (
+            <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
+              <Text type="secondary">All news loaded</Text>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -957,7 +1157,10 @@ const FinvizDashboard: React.FC = () => {
     };
 
     return (
-      <Card size="small" style={{ marginBottom: '16px', position: 'relative' }}>
+      <Card 
+        size="small" 
+        style={{ marginBottom: '16px', position: 'relative' }}
+      >
         <Row gutter={16}>
           <Col span={8}>
             <div>
@@ -1096,7 +1299,7 @@ const FinvizDashboard: React.FC = () => {
       <Layout style={{ height: '100%' }}>
         {/* 左侧选择器 */}
         <Sider 
-          width={350} 
+          width={watchlistCollapsed ? 80 : 350} 
           style={{ 
             background: '#fff', 
             borderRight: '1px solid #f0f0f0',
@@ -1104,21 +1307,34 @@ const FinvizDashboard: React.FC = () => {
             overflowY: 'auto'
           }}
         >
-          <div style={{ padding: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <Title level={4} style={{ margin: 0 }}>
-                <HeartOutlined /> My Watchlist
+          <div style={{ padding: watchlistCollapsed ? '16px 8px' : '16px' }}>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginBottom: '16px',
+              flexDirection: watchlistCollapsed ? 'column' : 'row',
+              gap: watchlistCollapsed ? '8px' : '0'
+            }}>
+              <Title 
+                level={watchlistCollapsed ? 5 : 4} 
+                style={{ 
+                  margin: 0,
+                  textAlign: watchlistCollapsed ? 'center' : 'left',
+                  fontSize: watchlistCollapsed ? '14px' : '20px',
+                  cursor: watchlistCollapsed ? 'pointer' : 'default'
+                }}
+                onClick={watchlistCollapsed ? () => setWatchlistCollapsed(false) : undefined}
+              >
+                {watchlistCollapsed ? (
+                  <HeartOutlined />
+                ) : (
+                  <>
+                    <HeartOutlined /> My Watchlist
+                  </>
+                )}
               </Title>
-              <Space>
-                <Button 
-                  icon={<ReloadOutlined />} 
-                  size="small"
-                  loading={pricesLoading}
-                  onClick={loadWatchlistPrices}
-                  title="Refresh stock prices"
-                >
-                  Prices
-                </Button>
+              {!watchlistCollapsed && (
                 <Button 
                   type="primary" 
                   icon={<PlusOutlined />} 
@@ -1128,63 +1344,148 @@ const FinvizDashboard: React.FC = () => {
                 >
                   Add
                 </Button>
-              </Space>
-            </div>
-            
-            <Input
-              placeholder="Search groups, stocks, or sectors..."
-              prefix={<SearchOutlined />}
-              value={searchValue}
-              onChange={e => setSearchValue(e.target.value)}
-              style={{ marginBottom: '12px' }}
-              allowClear
-            />
-            
-            <Select
-              placeholder="Filter by Priority"
-              value={priorityFilter}
-              onChange={setPriorityFilter}
-              size="small"
-              style={{ width: '100%', marginBottom: '16px' }}
-              allowClear
-            >
-              {PRIORITY_FILTER_OPTIONS.map(option => (
-                <Option key={option.value || 'all'} value={option.value}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                    <span style={{ fontSize: '12px' }}>{option.label}</span>
-                    {option.stars && renderStars(option.stars)}
-                  </div>
-                </Option>
-              ))}
-            </Select>
-            
-            <Spin spinning={loading}>
-              {watchlistGroups.length === 0 && !loading ? (
-                <Empty 
-                  description="No stocks in your watchlist"
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  style={{ margin: '40px 0' }}
-                >
-                  <Button 
-                    type="primary" 
-                    icon={<PlusOutlined />}
-                    onClick={() => setAddModalVisible(true)}
-                  >
-                    Add First Stock
-                  </Button>
-                </Empty>
-              ) : (
-                <Tree
-                  showIcon
-                  selectedKeys={selectedKey ? [selectedKey] : []}
-                  expandedKeys={expandedKeys}
-                  onExpand={setExpandedKeys}
-                  treeData={treeData}
-                  onSelect={handleTreeSelect}
-                  style={{ background: 'transparent' }}
+              )}
+              {!watchlistCollapsed && (
+                <Button
+                  type="text"
+                  icon={<MenuFoldOutlined />}
+                  onClick={() => setWatchlistCollapsed(true)}
+                  style={{
+                    fontSize: '16px',
+                    width: 32,
+                    height: 32,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="收缩Watchlist"
                 />
               )}
-            </Spin>
+            </div>
+            
+            {!watchlistCollapsed && (
+              <>
+                <Input
+                  placeholder="Search groups, stocks, or sectors..."
+                  prefix={<SearchOutlined />}
+                  value={searchValue}
+                  onChange={e => setSearchValue(e.target.value)}
+                  style={{ marginBottom: '12px' }}
+                  allowClear
+                />
+                
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                  <Select
+                    placeholder="Priority"
+                    value={priorityFilter}
+                    onChange={setPriorityFilter}
+                    size="small"
+                    style={{ flex: 1, border: 'none' }}
+                    bordered={false}
+                  >
+                    {PRIORITY_FILTER_OPTIONS.map(option => (
+                      <Option key={option.value} value={option.value}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {option.stars ? renderStars(option.stars) : <span style={{ fontSize: '12px' }}>All Priorities</span>}
+                        </div>
+                      </Option>
+                    ))}
+                  </Select>
+                  
+                  <Select
+                    placeholder="Exchange"
+                    value={exchangeFilter}
+                    onChange={setExchangeFilter}
+                    size="small"
+                    style={{ flex: 1, border: 'none' }}
+                    bordered={false}
+                  >
+                    <Option key="all" value="all">
+                      <span style={{ fontSize: '12px' }}>All</span>
+                    </Option>
+                    {getUniqueExchanges(watchlistGroups).map(exchange => (
+                      <Option key={exchange} value={exchange}>
+                        <span style={{ fontSize: '12px' }}>{exchange}</span>
+                      </Option>
+                    ))}
+                  </Select>
+                  
+                  <Select
+                    placeholder="Sector"
+                    value={sectorFilter}
+                    onChange={setSectorFilter}
+                    size="small"
+                    style={{ flex: 1, border: 'none' }}
+                    bordered={false}
+                  >
+                    <Option key="all" value="all">
+                      <span style={{ fontSize: '12px' }}>Sectors</span>
+                    </Option>
+                    {getUniqueSectors(watchlistGroups).map(sector => (
+                      <Option key={sector} value={sector}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                          {getSectorIcon(sector)}
+                          <span style={{ fontSize: '12px' }}>{sector}</span>
+                        </div>
+                      </Option>
+                    ))}
+                  </Select>
+                </div>
+              </>
+            )}
+            
+            {!watchlistCollapsed && (
+              <Spin spinning={loading}>
+                {watchlistGroups.length === 0 && !loading ? (
+                  <Empty 
+                    description="No stocks in your watchlist"
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    style={{ margin: '40px 0' }}
+                  >
+                    <Button 
+                      type="primary" 
+                      icon={<PlusOutlined />}
+                      onClick={() => setAddModalVisible(true)}
+                    >
+                      Add First Stock
+                    </Button>
+                  </Empty>
+                ) : (
+                  <Tree
+                    showIcon
+                    selectedKeys={selectedKey ? [selectedKey] : []}
+                    expandedKeys={expandedKeys}
+                    onExpand={setExpandedKeys}
+                    treeData={treeData}
+                    onSelect={handleTreeSelect}
+                    style={{ background: 'transparent' }}
+                  />
+                )}
+              </Spin>
+            )}
+            
+            {watchlistCollapsed && (
+              <div style={{ 
+                padding: '16px 8px', 
+                borderTop: '1px solid #f0f0f0',
+                textAlign: 'center'
+              }}>
+                <Button
+                  type="text"
+                  icon={<MenuUnfoldOutlined />}
+                  onClick={() => setWatchlistCollapsed(false)}
+                  title="展开Watchlist"
+                  style={{
+                    fontSize: '16px',
+                    width: 32,
+                    height: 32,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                />
+              </div>
+            )}
           </div>
         </Sider>
 

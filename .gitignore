@@ -31,6 +31,8 @@ logs/
 venv/
 # Other files and folders
 .settings/
+说明/
+development/.dev_pids
 
 # Executables
 *.swf

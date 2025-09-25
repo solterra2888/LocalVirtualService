@@ -53,38 +53,9 @@ const Layout: React.FC = () => {
   // 菜单项配置
   const menuItems = [
     {
-      key: 'dashboard',
-      icon: <HomeOutlined />,
-      label: 'UG Dashboard',
-      children: [
-        {
-          key: '/dashboard',
-          icon: <HomeOutlined />,
-          label: 'Target Tracking',
-        },
-        {
-          key: '/fundamentals/screener',
-          icon: <AppstoreOutlined />,
-          label: 'Stock Screener',
-        },
-      ],
-    },
-    {
-      key: 'markets',
+      key: '/dashboard',
       icon: <StockOutlined />,
-      label: 'Markets',
-      children: [
-        {
-          key: '/markets/economic-events',
-          icon: <NotificationOutlined />,
-          label: 'Economic Events',
-        },
-        {
-          key: '/markets/macro-indicators',
-          icon: <CodeOutlined />,
-          label: 'Macro Indicators',
-        },
-      ],
+      label: 'Target Tracking',
     },
     {
       key: '/news',
@@ -92,9 +63,31 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
-      key: '/fundamentals',
+      key: '/markets/economic-events',
+      icon: <ThunderboltOutlined />,
+      label: 'Economic Events',
+    },
+    {
+      key: 'ug-data',
       icon: <FileTextOutlined />,
-      label: 'Company Query',
+      label: 'UG Data',
+      children: [
+        {
+          key: '/fundamentals',
+          icon: <FileTextOutlined />,
+          label: 'Company Query',
+        },
+        {
+          key: '/fundamentals/screener',
+          icon: <AppstoreOutlined />,
+          label: 'Stock Screener',
+        },
+        {
+          key: '/markets/macro-indicators',
+          icon: <CodeOutlined />,
+          label: 'Macro Indicators',
+        },
+      ],
     },
     {
       key: 'ai-agents',
@@ -204,48 +197,76 @@ const Layout: React.FC = () => {
         <div style={{ 
           padding: collapsed ? '16px 8px' : '24px 16px', 
           borderBottom: '1px solid #f0f0f0',
-          textAlign: collapsed ? 'center' : 'left'
+          textAlign: collapsed ? 'center' : 'left',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'space-between'
         }}>
           <Title 
             level={collapsed ? 5 : 4} 
             style={{ 
               margin: 0, 
               textAlign: collapsed ? 'center' : 'left',
-              fontSize: collapsed ? '14px' : '20px'
+              fontSize: collapsed ? '14px' : '20px',
+              cursor: collapsed ? 'pointer' : 'default'
             }}
+            onClick={collapsed ? () => setCollapsed(false) : undefined}
           >
             {collapsed ? 'UG' : 'Universal Glance'}
           </Title>
-        </div>
-        
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          defaultOpenKeys={['dashboard', 'markets', 'ai-agents', 'settings']}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{ border: 'none', height: 'calc(100vh - 84px)' }}
-          inlineCollapsed={collapsed}
-        />
-      </Sider>
-
-      <AntLayout className="main-content-layout">
-        <Header className="layout-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {!collapsed && (
             <Button
               type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              className="collapse-button"
+              icon={<MenuFoldOutlined />}
+              onClick={() => setCollapsed(true)}
               style={{
                 fontSize: '16px',
-                width: 64,
-                height: 64,
+                width: 32,
+                height: 32,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             />
+          )}
+        </div>
+        
+        <Menu
+          mode="inline"
+          selectedKeys={[location.pathname]}
+          defaultOpenKeys={['ug-data', 'ai-agents', 'settings']}
+          items={menuItems}
+          onClick={handleMenuClick}
+          style={{ border: 'none', height: collapsed ? 'calc(100vh - 120px)' : 'calc(100vh - 120px)' }}
+          inlineCollapsed={collapsed}
+        />
+        {collapsed && (
+          <div style={{ 
+            padding: '16px 8px', 
+            borderTop: '1px solid #f0f0f0',
+            textAlign: 'center'
+          }}>
+            <Button
+              type="text"
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => setCollapsed(false)}
+              title="展开导航栏"
+              style={{
+                fontSize: '16px',
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            />
+          </div>
+        )}
+      </Sider>
+
+      <AntLayout className="main-content-layout">
+        <Header className="layout-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div style={{ fontSize: 16, fontWeight: 500 }}>
               {getCurrentPageTitle()}
             </div>

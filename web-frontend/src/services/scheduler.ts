@@ -85,6 +85,14 @@ export interface CreateEODHDStockPricesTaskParams {
   enabled?: boolean;
 }
 
+export interface CreateEODHDEODStockPricesTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  days_back?: number;
+}
+
 export interface CronPreset {
   name: string;
   expression: string;
@@ -400,6 +408,26 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建EODHD股票价格定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建EODHD历史股价定时任务
+   */
+  async createEODHDEODStockPricesTask(params: CreateEODHDEODStockPricesTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/eodhd-eod-stock-prices', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建EODHD历史股价定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建EODHD历史股价定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建EODHD历史股价定时任务失败'
       };
     }
   }

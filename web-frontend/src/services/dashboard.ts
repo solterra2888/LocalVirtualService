@@ -67,6 +67,7 @@ export interface WatchlistItem {
   company?: string;
   sector?: string;
   industry?: string;
+  exchange?: string;
   company_id?: number;
 }
 
@@ -144,7 +145,7 @@ export const dashboardAPI = {
   },
 
   // 获取公司相关新闻
-  getCompanyNews: async (ticker: string, params?: { limit?: number }): Promise<DashboardNewsItem[]> => {
+  getCompanyNews: async (ticker: string, params?: { limit?: number; offset?: number }): Promise<DashboardNewsItem[]> => {
     try {
       return await api.get<DashboardNewsItem[]>(`/dashboard/companies/${ticker}/news`, params);
     } catch (error) {
@@ -154,7 +155,7 @@ export const dashboardAPI = {
   },
 
   // 获取行业相关新闻
-  getSectorNews: async (sector: string, params?: { limit?: number }): Promise<DashboardNewsItem[]> => {
+  getSectorNews: async (sector: string, params?: { limit?: number; offset?: number }): Promise<DashboardNewsItem[]> => {
     try {
       return await api.get<DashboardNewsItem[]>(`/dashboard/sectors/${sector}/news`, params);
     } catch (error) {

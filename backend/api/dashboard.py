@@ -16,9 +16,60 @@ from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
 from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
 from backend.utils.logger import get_logger
+from backend.config.exchange_config import ExchangeConfig
 from config.settings import config
 
 logger = get_logger("dashboard_api")
+
+def get_smart_ticker_formats(ticker: str) -> List[str]:
+    """
+    基于exchange_config.py的智能ticker格式匹配
+    
+    这个函数解决了1810.HK和1810.US被错误关联的问题：
+    - 优先精确匹配
+    - 基于交易所配置进行智能扩展
+    - 避免模糊匹配导致的误匹配
+    
+    Args:
+        ticker: 输入的ticker，如 "1810.HK" 或 "1810"
+        
+    Returns:
+        匹配格式列表，按优先级排序
+    """
+    if not ticker:
+        return []
+    
+    ticker = ticker.strip().upper()
+    formats = [ticker]  # 精确匹配优先
+    
+    # 如果ticker已经包含交易所后缀，只进行精确匹配
+    if '.' in ticker:
+        symbol, exchange = ticker.split('.', 1)
+        
+        # 验证交易所是否有效
+        exchange_info = ExchangeConfig.get_exchange_info(exchange)
+        if exchange_info:
+            # 只返回精确匹配，避免模糊匹配
+            return [ticker]
+        else:
+            # 如果交易所无效，尝试常见格式
+            return [ticker, f"{symbol}.US", f"{symbol}.HK"]
+    
+    # 如果ticker没有交易所后缀，基于数字特征智能添加
+    if ticker.isdigit():
+        # 基于exchange_config.py中的TICKER_PATTERNS进行智能匹配
+        detected_exchange = ExchangeConfig._detect_exchange_by_ticker(ticker)
+        if detected_exchange:
+            # 只添加检测到的交易所，避免添加所有可能的交易所
+            formats.append(f"{ticker}.{detected_exchange}")
+        else:
+            # 如果无法检测，添加最常见的交易所
+            formats.extend([f"{ticker}.US", f"{ticker}.HK"])
+    else:
+        # 非数字ticker，添加常见交易所后缀
+        formats.extend([f"{ticker}.US", f"{ticker}.HK"])
+    
+    return formats
 
 router = APIRouter()
 
@@ -213,6 +264,7 @@ async def get_company_info(
 async def get_company_news(
     ticker: str,
     limit: Optional[int] = Query(20, description="返回新闻数量限制"),
+    offset: Optional[int] = Query(0, description="偏移量，用于分页"),
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
@@ -232,14 +284,9 @@ async def get_company_news(
             FROM news n
             JOIN news_symbols ns ON n.id = ns.news_id
             JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-            WHERE (
-                nsd.symbol_code = %s OR 
-                nsd.symbol_code = %s OR 
-                nsd.symbol_code LIKE %s OR
-                nsd.symbol_code LIKE %s
-            )
+            WHERE nsd.symbol_code = ANY(%s)
             ORDER BY n.date DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
         )
         SELECT 
             nd.id, nd.title, nd.content, nd.date, nd.source, nd.link,
@@ -262,15 +309,10 @@ async def get_company_news(
         ORDER BY nd.date DESC
         """
         
-        # 尝试多种ticker格式匹配
-        ticker_formats = [
-            ticker,  # 原始ticker
-            f"{ticker}.US",  # 添加.US后缀
-            f"{ticker}%",  # 模糊匹配
-            f"%.{ticker}%"  # 包含ticker的格式
-        ]
+        # 使用智能ticker格式匹配
+        ticker_formats = get_smart_ticker_formats(ticker)
         
-        results = db_manager.fetch_all(query, ticker_formats + [limit])
+        results = db_manager.fetch_all(query, [ticker_formats, limit, offset])
         
         news_items = []
         for row in results:
@@ -301,6 +343,7 @@ async def get_company_news(
 async def get_sector_news(
     sector: str,
     limit: Optional[int] = Query(20, description="返回新闻数量限制"),
+    offset: Optional[int] = Query(0, description="偏移量，用于分页"),
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
@@ -328,7 +371,7 @@ async def get_sector_news(
             WHERE f.sector = %s
             AND f.snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
             ORDER BY n.date DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
         )
         SELECT 
             sn.id, sn.title, sn.content, sn.date, sn.source, sn.link,
@@ -351,7 +394,7 @@ async def get_sector_news(
         ORDER BY sn.date DESC
         """
         
-        results = db_manager.fetch_all(query, [sector, limit])
+        results = db_manager.fetch_all(query, [sector, limit, offset])
         
         news_items = []
         for row in results:
@@ -653,6 +696,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
             c.name as company,
             c.sector,
             c.industry,
+            c.exchange,
             c.id as company_id
         FROM target_tracking_config ttc
         LEFT JOIN companies c ON ttc.symbol = c.code
@@ -683,7 +727,8 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
                 "company": row[8],
                 "sector": row[9],
                 "industry": row[10],
-                "company_id": row[11]
+                "exchange": row[11],
+                "company_id": row[12]
             }
             
             watchlist_dict[group_name]["items"].append(item)
@@ -945,25 +990,15 @@ async def get_ticker_research_reports(
             ft.tagged_at
         FROM file_processing_details f
         INNER JOIN file_tags ft ON f.id = ft.file_id
-        WHERE (
-            ft.ticker = %s OR 
-            ft.ticker = %s OR 
-            ft.ticker LIKE %s OR
-            ft.ticker LIKE %s
-        )
+        WHERE ft.ticker = ANY(%s)
         AND f.status = 'completed'
         ORDER BY ft.tagged_at DESC, f.created_at DESC
         """
         
-        # 尝试多种ticker格式匹配
-        ticker_formats = [
-            ticker,  # 原始ticker
-            f"{ticker}.US",  # 添加.US后缀
-            f"{ticker}%",  # 模糊匹配
-            f"%.{ticker}%"  # 包含ticker的格式
-        ]
+        # 使用智能ticker格式匹配
+        ticker_formats = get_smart_ticker_formats(ticker)
         
-        results = db_manager.fetch_all(query, ticker_formats)
+        results = db_manager.fetch_all(query, [ticker_formats])
         
         research_reports = []
         for row in results:
@@ -1020,25 +1055,15 @@ async def test_get_ticker_research_reports(ticker: str):
             ft.tagged_at
         FROM file_processing_details f
         INNER JOIN file_tags ft ON f.id = ft.file_id
-        WHERE (
-            ft.ticker = %s OR 
-            ft.ticker = %s OR 
-            ft.ticker LIKE %s OR
-            ft.ticker LIKE %s
-        )
+        WHERE ft.ticker = ANY(%s)
         AND f.status = 'completed'
         ORDER BY ft.tagged_at DESC, f.created_at DESC
         """
         
-        # 尝试多种ticker格式匹配
-        ticker_formats = [
-            ticker,  # 原始ticker
-            f"{ticker}.US",  # 添加.US后缀
-            f"{ticker}%",  # 模糊匹配
-            f"%.{ticker}%"  # 包含ticker的格式
-        ]
+        # 使用智能ticker格式匹配
+        ticker_formats = get_smart_ticker_formats(ticker)
         
-        results = db_manager.fetch_all(query, ticker_formats)
+        results = db_manager.fetch_all(query, [ticker_formats])
         
         research_reports = []
         for row in results:

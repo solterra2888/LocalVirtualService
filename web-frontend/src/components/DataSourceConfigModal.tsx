@@ -26,7 +26,7 @@ import {
   QuestionCircleOutlined,
   DatabaseOutlined
 } from '@ant-design/icons';
-import { schedulerAPI, CreateEODHDNewsTaskParams, CreateWatchlistNewsTaskParams, TimezoneOption } from '../services/scheduler';
+import { schedulerAPI, CreateEODHDNewsTaskParams, CreateWatchlistNewsTaskParams, CreateEODHDEODStockPricesTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
 
 const { Title, Text } = Typography;
@@ -36,7 +36,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices';
   dataSourceName: string;
 }
 
@@ -114,6 +114,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '*/5 * * * 1-5',
       defaultName: 'EODHD Stock Prices Auto Fetch',
       description: 'Get real-time stock prices for all watchlist stocks from EODHD API (every 5 minutes on weekdays)'
+    },
+    eodhd_eod_stock_prices: {
+      icon: <BarChartOutlined style={{ color: '#52c41a' }} />,
+      params: ['days_back'],
+      defaultSchedule: '0 9 * * 1-5',
+      defaultName: 'EODHD EOD Stock Prices Auto Fetch',
+      description: 'Get historical end-of-day stock prices for all watchlist stocks from EODHD API (daily on weekdays)'
     }
   };
 
@@ -238,6 +245,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             enabled: true
           };
           result = await schedulerAPI.createEODHDStockPricesTask(stockPricesParams);
+        } else if (dataSourceType === 'eodhd_eod_stock_prices') {
+          // EODHD历史股价任务的专用创建逻辑
+          const eodStockPricesParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            days_back: data.taskParams?.days_back || 60
+          };
+          result = await schedulerAPI.createEODHDEODStockPricesTask(eodStockPricesParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -913,6 +930,33 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   </Option>
                 </Select>
               </Form.Item>
+            </>
+          );
+          
+        case 'eodhd_eod_stock_prices':
+          return (
+            <>
+              <Form.Item
+                label="Days Back"
+                name={['taskParams', 'days_back']}
+                extra="Number of days to look back for historical price data (1-365 days)"
+                initialValue={60}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={365} 
+                  placeholder="60" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Alert
+                message="Historical Price Data"
+                description="This scheduler will automatically fetch historical end-of-day price data for all stocks in your watchlist. Data includes open, high, low, close prices, volume, and adjusted close prices."
+                type="info"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
             </>
           );
           

@@ -110,6 +110,15 @@ class CreateEODHDStockPricesTaskRequest(BaseModel):
     enabled: bool = Field(default=True, description="是否启用")
 
 
+class CreateEODHDEODStockPricesTaskRequest(BaseModel):
+    """创建EODHD历史股价定时任务请求模型"""
+    name: str = Field(default="EODHD EOD Stock Prices Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="0 9 * * 1-5", description="Cron表达式（默认工作日每天9点）")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    days_back: int = Field(default=60, description="回溯天数", ge=1, le=365)
+
+
 # ============ 定时任务管理API ============
 
 @router.post("/tasks/cron", summary="创建Cron定时任务")
@@ -695,6 +704,125 @@ async def create_default_eodhd_stock_prices_task(
         raise
     except Exception as e:
         logger.error("创建默认EODHD股票价格定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ============ EODHD历史股价定时任务专用API ============
+
+@router.post("/tasks/eodhd-eod-stock-prices", summary="创建EODHD历史股价定时任务")
+async def create_eodhd_eod_stock_prices_task(
+    request: CreateEODHDEODStockPricesTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建EODHD历史股价数据获取定时任务
+    
+    默认配置：
+    - 纽约时间工作日每天执行 (0 9 * * 1-5)
+    - 获取所有watchlist中的股票历史价格数据
+    - 自动存储到stock_prices_eod表
+    """
+    try:
+        logger.info("创建EODHD历史股价定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 历史股价任务参数
+        task_params = {
+            'days_back': request.days_back
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="eodhd_eod_stock_prices",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("EODHD历史股价定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("EODHD历史股价定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建EODHD历史股价定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/eodhd-eod-stock-prices/default", summary="创建默认EODHD历史股价定时任务")
+async def create_default_eodhd_eod_stock_prices_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的EODHD历史股价定时任务
+    
+    默认配置：
+    - 纽约时间工作日每天执行 (0 9 * * 1-5)
+    - 获取所有watchlist股票的历史价格数据
+    - 回溯30天数据
+    """
+    try:
+        logger.info("创建默认EODHD历史股价定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="EODHD EOD Stock Prices Auto Fetch",
+            task_type="eodhd_eod_stock_prices",
+            cron_expression="0 9 * * 1-5",  # 工作日每天9点
+            timezone="America/New_York",
+            enabled=True,
+            task_params={'days_back': 60},
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认EODHD历史股价定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认EODHD历史股价定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认EODHD历史股价定时任务失败", 
                     exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")

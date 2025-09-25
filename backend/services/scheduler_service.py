@@ -58,7 +58,8 @@ class SchedulerService:
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
             'finviz_screener': self._execute_finviz_screener_task,
-            'eodhd_stock_prices': self._execute_eodhd_stock_prices_task
+            'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
+            'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task
         }
         
         # 添加事件监听器
@@ -1089,6 +1090,57 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"EODHD股票价格获取任务执行失败: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
+    
+    async def _execute_eodhd_eod_stock_prices_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行EODHD历史股价数据获取任务"""
+        try:
+            logger.info("执行EODHD历史股价数据获取任务", params=params)
+            
+            # 导入历史股价服务
+            from backend.services.eodhd_eod_stock_prices_service import create_eodhd_eod_stock_prices_service
+            
+            # 创建服务实例
+            eod_stock_prices_service = create_eodhd_eod_stock_prices_service()
+            
+            # 获取参数
+            days_back = params.get('days_back', 60)  # 默认回溯60天
+            
+            # 在线程池中执行耗时的历史价格获取操作，避免阻塞事件循环
+            import asyncio
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    eod_stock_prices_service.fetch_and_store_watchlist_eod_prices,
+                    days_back
+                )
+            
+            if result.get('error'):
+                error_msg = f"EODHD历史股价数据获取失败: {result['error']}"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': result
+                }
+            else:
+                success_msg = f"EODHD历史股价数据获取成功: 处理了{result['total_tickers']}个ticker，成功{result['success_count']}个，失败{result['failed_count']}个，存储了{result['total_records']}条记录，耗时{result['execution_time']:.2f}秒"
+                logger.info(success_msg)
+                return {
+                    'success': True,
+                    'message': success_msg,
+                    'data': result
+                }
+                
+        except Exception as e:
+            error_msg = f"EODHD历史股价数据获取任务执行失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,
