@@ -327,6 +327,33 @@ export const dashboardAPI = {
       console.error('获取watchlist股票价格失败:', error);
       throw error;
     }
+  },
+
+  // 获取股票历史数据用于蜡烛图
+  getStockHistoricalData: async (symbol: string, days: number = 365): Promise<{
+    success: boolean;
+    data: Array<{
+      date: string;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    }>;
+    count: number;
+    symbol: string;
+    date_range: {
+      start: string;
+      end: string;
+    };
+  }> => {
+    try {
+      // 临时使用不需要认证的测试端点
+      return await api.get(`/dashboard/test-stock-historical-data/${symbol}`, { days });
+    } catch (error) {
+      console.error('获取股票历史数据失败:', error);
+      throw error;
+    }
   }
 };
 

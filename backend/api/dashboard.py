@@ -1267,6 +1267,163 @@ async def get_watchlist_stock_prices(current_user: UserResponse = Depends(get_cu
             detail=f"获取watchlist股票价格数据失败: {str(e)}"
         )
 
+@router.get("/test-stock-historical-data/{symbol}", summary="Test historical stock data (no auth)")
+async def test_stock_historical_data(
+    symbol: str,
+    days: int = Query(365, ge=30, le=3650, description="Number of days of historical data (30-3650)")
+):
+    """Test endpoint without authentication"""
+    try:
+        print(f"Getting historical data for symbol: {symbol}, days: {days}")
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # Calculate date range
+        from datetime import datetime, timedelta
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        print(f"Date range: {start_date} to {end_date}")
+        
+        # Query historical data from stock_prices_eod table
+        query = """
+        SELECT 
+            date,
+            open,
+            high,
+            low,
+            close,
+            volume
+        FROM stock_prices_eod 
+        WHERE code = %s 
+        AND date >= %s 
+        AND date <= %s
+        ORDER BY date ASC
+        """
+        
+        results = db_manager.fetch_all(query, [symbol, start_date, end_date])
+        print(f"Found {len(results)} records for symbol {symbol}")
+        
+        # If no results and symbol doesn't have .US suffix, try adding it
+        if len(results) == 0 and not symbol.endswith('.US'):
+            print(f"No results for {symbol}, trying with .US suffix")
+            symbol_with_us = f"{symbol}.US"
+            results = db_manager.fetch_all(query, [symbol_with_us, start_date, end_date])
+            print(f"Found {len(results)} records for symbol {symbol_with_us}")
+        
+        # Format results for chart
+        historical_data = []
+        for row in results:
+            historical_data.append({
+                "date": row[0].strftime('%Y-%m-%d'),
+                "open": float(row[1]) if row[1] else 0,
+                "high": float(row[2]) if row[2] else 0,
+                "low": float(row[3]) if row[3] else 0,
+                "close": float(row[4]) if row[4] else 0,
+                "volume": int(row[5]) if row[5] else 0
+            })
+        
+        return {
+            "success": True,
+            "data": historical_data,
+            "count": len(historical_data),
+            "symbol": symbol,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "data": [],
+            "count": 0
+        }
+
+@router.get("/stock-historical-data/{symbol}", summary="Get historical stock data for candlestick chart")
+async def get_stock_historical_data(
+    symbol: str,
+    days: int = Query(365, ge=30, le=3650, description="Number of days of historical data (30-3650)"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get historical stock data for candlestick chart
+    
+    Returns OHLCV data for the specified symbol over the given time period
+    """
+    try:
+        print(f"Getting historical data for symbol: {symbol}, days: {days}")
+        db_conn_params = get_db_conn_params()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # Calculate date range
+        from datetime import datetime, timedelta
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        print(f"Date range: {start_date} to {end_date}")
+        
+        # Query historical data from stock_prices_eod table
+        # Try exact match first, then try with .US suffix
+        query = """
+        SELECT 
+            date,
+            open,
+            high,
+            low,
+            close,
+            volume
+        FROM stock_prices_eod 
+        WHERE code = %s 
+        AND date >= %s 
+        AND date <= %s
+        ORDER BY date ASC
+        """
+        
+        results = db_manager.fetch_all(query, [symbol, start_date, end_date])
+        print(f"Found {len(results)} records for symbol {symbol}")
+        
+        # If no results and symbol doesn't have .US suffix, try adding it
+        if len(results) == 0 and not symbol.endswith('.US'):
+            print(f"No results for {symbol}, trying with .US suffix")
+            symbol_with_us = f"{symbol}.US"
+            results = db_manager.fetch_all(query, [symbol_with_us, start_date, end_date])
+            print(f"Found {len(results)} records for symbol {symbol_with_us}")
+        
+        # Format results for chart
+        historical_data = []
+        for row in results:
+            historical_data.append({
+                "date": row[0].strftime('%Y-%m-%d'),
+                "open": float(row[1]) if row[1] else 0,
+                "high": float(row[2]) if row[2] else 0,
+                "low": float(row[3]) if row[3] else 0,
+                "close": float(row[4]) if row[4] else 0,
+                "volume": int(row[5]) if row[5] else 0
+            })
+        
+        return {
+            "success": True,
+            "data": historical_data,
+            "count": len(historical_data),
+            "symbol": symbol,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch historical data: {str(e)}"
+        )
+
 @router.delete("/watchlist/{watchlist_id}", summary="Remove stock from watchlist")
 async def remove_from_watchlist(
     watchlist_id: int,

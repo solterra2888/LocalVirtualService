@@ -55,6 +55,7 @@ import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type Watchli
 import { filesAPI } from '../services/files';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import FundamentalsOverviewModal from './FundamentalsOverviewModal';
+import StockChart from './StockChart';
 import type { DataNode } from 'antd/es/tree';
 
 const { Content, Sider } = Layout;
@@ -1157,96 +1158,30 @@ const FinvizDashboard: React.FC = () => {
     };
 
     return (
-      <Card 
-        size="small" 
-        style={{ marginBottom: '16px', position: 'relative' }}
-      >
-        <Row gutter={16}>
-          <Col span={8}>
-            <div>
-              <Text strong style={{ fontSize: '12px' }}>Price</Text>
-              <br />
-              {pricesLoading ? (
-                <Skeleton.Input style={{ width: 80, height: 20 }} size="small" />
-              ) : (
-                <Text style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                  {priceData?.close ? `$${priceData.close.toFixed(2)}` : 'N/A'}
-                </Text>
-              )}
-            </div>
-          </Col>
-          <Col span={8}>
-            <div>
-              <Text strong style={{ fontSize: '12px' }}>Price Change %</Text>
-              <br />
-              {pricesLoading ? (
-                <Skeleton.Input style={{ width: 60, height: 20 }} size="small" />
-              ) : (
-                <Text 
-                  style={{ 
-                    fontSize: '14px', 
-                    fontWeight: 'bold',
-                    color: priceData?.change_percent !== undefined ? getPriceChangeColor(priceData.change_percent) : '#8c8c8c'
-                  }}
-                >
-                  {priceData?.change_percent !== undefined 
-                    ? `${priceData.change_percent >= 0 ? '+' : ''}${priceData.change_percent.toFixed(2)}%` 
-                    : 'N/A'
-                  }
-                </Text>
-              )}
-            </div>
-          </Col>
-          <Col span={8}>
-            <div>
-              <Text strong style={{ fontSize: '12px' }}>Volume</Text>
-              <br />
-              {pricesLoading ? (
-                <Skeleton.Input style={{ width: 100, height: 20 }} size="small" />
-              ) : (
-                <Text style={{ fontSize: '12px' }}>
-                  {priceData?.volume ? priceData.volume.toLocaleString() : 'N/A'}
-                </Text>
-              )}
-            </div>
-          </Col>
-        </Row>
-        
-        {/* 操作按钮区域 */}
-        <Row style={{ marginTop: '12px', marginBottom: '20px' }}>
-          <Col span={24} style={{ textAlign: 'right' }}>
-            <Button 
-              type="text" 
-              danger 
-              size="small"
-              icon={<DeleteOutlined />}
-              onClick={() => handleRemoveFromWatchlist(selectedStock.watchlist_id, selectedStock.symbol)}
-              title="Remove from watchlist"
-            />
-          </Col>
-        </Row>
-        
-        {/* 更新时间戳 - 右下角 */}
-        {priceData?.updated_at && (
-          <div style={{ 
-            position: 'absolute', 
-            bottom: '8px', 
-            right: '12px',
-            fontSize: '9px',
-            color: '#999',
-            fontStyle: 'italic'
-          }}>
-            Updated at {new Date(priceData.updated_at).toLocaleString()}
-          </div>
-        )}
-        
+      <div>
+        {/* Notes */}
         {selectedStock.notes && (
-          <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
+          <div style={{ marginBottom: '16px', padding: '8px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
             <Text type="secondary" style={{ fontSize: '12px' }}>Notes: </Text>
             <Text style={{ fontSize: '12px' }}>{selectedStock.notes}</Text>
           </div>
         )}
-      </Card>
+      
+      {/* Candlestick Chart */}
+      <StockChart 
+        symbol={selectedStock.symbol}
+        companyName={selectedStock.custom_name || selectedStock.company}
+        primaryTicker={selectedStock.primaryticker}
+        realTimePriceData={priceData}
+        onRefreshPrice={loadWatchlistPrices}
+        priceLoading={pricesLoading}
+        onRemoveFromWatchlist={() => handleRemoveFromWatchlist(selectedStock.watchlist_id, selectedStock.symbol)}
+        sector={selectedStock.sector}
+        industry={selectedStock.industry}
+        exchange={selectedStock.exchange}
+        onCompanyNameClick={() => handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
+      />
+    </div>
     );
   };
 
@@ -1494,36 +1429,13 @@ const FinvizDashboard: React.FC = () => {
           <div style={{ padding: '24px', height: '100%' }}>
             {selectedKey ? (
               <>
-                <div style={{ marginBottom: '24px' }}>
-                  <Title level={3}>
-                    {selectedType === 'stock' 
-                      ? (
-                        <span>
-                          <span 
-                            style={{ 
-                              cursor: 'pointer', 
-                              color: '#1890ff',
-                              textDecoration: 'underline'
-                            }}
-                            onClick={() => selectedStock && handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
-                            title="Click to view fundamentals overview"
-                          >
-                            {selectedStock?.custom_name || selectedStock?.company}
-                          </span>
-                          {' '}({selectedStock?.symbol})
-                        </span>
-                      )
-                      : `${selectedGroup} 分组`
-                    }
-                  </Title>
-                  
-                  {selectedType === 'stock' && selectedStock && (
-                    <Space size="large" style={{ marginBottom: '16px' }}>
-                      <Tag color="blue">{selectedStock.sector}</Tag>
-                      <Tag color="green">{selectedStock.industry}</Tag>
-                    </Space>
-                  )}
-                </div>
+                {selectedType === 'group' && (
+                  <div style={{ marginBottom: '24px' }}>
+                    <Title level={3}>
+                      {selectedGroup} 分组
+                    </Title>
+                  </div>
+                )}
 
                 {/* 详细信息卡片 */}
                 {selectedType === 'stock' && renderStockDetails()}

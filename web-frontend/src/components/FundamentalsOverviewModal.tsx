@@ -428,7 +428,7 @@ const FundamentalsOverviewModal: React.FC<FundamentalsOverviewModalProps> = ({
       onCancel={onCancel}
       footer={null}
       width={800}
-      style={{ top: 20 }}
+      centered
       destroyOnClose
     >
       <Spin spinning={loading}>
