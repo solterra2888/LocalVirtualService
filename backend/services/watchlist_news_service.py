@@ -29,15 +29,10 @@ class WatchlistNewsService:
         logger.info("开始初始化Watchlist新闻服务")
         
         try:
-            # 数据库连接配置
+            # 获取标准化数据库连接配置
+            from backend.utils.database_config import get_database_config
             logger.info("准备数据库连接配置")
-            db_config = {
-                'db_host': config.get('DB_HOST', 'localhost'),
-                'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'targettracking'),
-                'db_user': config.get('DB_USER', 'postgres'),
-                'db_password': config.get('DB_PASSWORD', '')
-            }
+            db_config = get_database_config()
             logger.info("数据库配置准备完成", 
                         host=db_config['db_host'], 
                         port=db_config['db_port'],

@@ -378,17 +378,10 @@ def get_chart_events_service():
     global _chart_events_service
     if _chart_events_service is None:
         from backend.database.db_manager import DatabaseManager
-        from config.settings import config
+        from backend.utils.database_config import get_database_config
         
-        # 获取数据库连接参数
-        db_conn_params = {
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'targettracking'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        }
-        
+        # 获取标准化数据库连接参数
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         _chart_events_service = ChartEventsService(db_manager)
     return _chart_events_service

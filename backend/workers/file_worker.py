@@ -9,6 +9,9 @@ import os
 from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime
 
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
+
 from backend.core.llama_service import LlamaService
 from backend.core.rc_agent_service import RCAgentService
 from backend.processors.file_processor import FileProcessor

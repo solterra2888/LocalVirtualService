@@ -4,6 +4,7 @@
 """
 
 import hashlib
+import os
 import secrets
 import psycopg2
 from datetime import datetime
@@ -203,7 +204,13 @@ class UserAuth:
             # 如果没有用户，创建默认管理员
             if user_count == 0:
                 print("创建默认管理员账户(PostgreSQL)...")
-                admin_config = config.get_default_admin_config()
+                admin_config = {
+                    'user': os.getenv('DEFAULT_ADMIN_USER', 'admin'),
+                    'password': os.getenv('DEFAULT_ADMIN_PASSWORD')
+                }
+                
+                if not admin_config['password']:
+                    raise ValueError("DEFAULT_ADMIN_PASSWORD 环境变量未设置，无法创建默认管理员账户")
                 admin_pass, admin_salt = UserAuth.hash_password(admin_config['password'])
                 cursor.execute("""
                 INSERT INTO users (username, password_hash, salt, is_admin) 

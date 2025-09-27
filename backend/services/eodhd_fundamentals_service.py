@@ -34,7 +34,8 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
 from functools import wraps
-from config.settings import config
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 logger = get_logger("eodhd_fundamentals_service")
 
@@ -82,18 +83,13 @@ class EODHDFundamentalsService:
         logger.info("开始初始化EODHD基本面数据服务")
         
         # 获取API密钥
-        self.api_key = config.get('EODHD_API_TOKEN') or os.getenv('EODHD_API_TOKEN')
+        self.api_key = os.getenv('EODHD_API_TOKEN')
         if not self.api_key:
-            raise ValueError("EODHD_API_TOKEN未设置。请在配置文件或环境变量中设置API密钥。")
+            raise ValueError("EODHD_API_TOKEN未设置。请在环境变量中设置API密钥。")
         
-        # 数据库连接配置
-        db_config = {
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'rc_database'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        }
+        # 获取标准化数据库连接配置
+        from backend.utils.database_config import get_database_config
+        db_config = get_database_config()
         self.db_manager = DatabaseManager(db_config)
         
         # 使用统一的交易所配置
@@ -145,11 +141,11 @@ class EODHDFundamentalsService:
         
         # 生产环境配置
         # 优先使用环境变量，然后根据环境判断，最后使用默认值
-        environment = config.get('ENVIRONMENT', 'development').lower()
+        environment = os.getenv('ENVIRONMENT', 'development').lower()
         is_production = environment in ['production', 'prod']
         
         # 批处理大小优先级：环境变量 > 环境判断 > 默认值
-        batch_size = config.get('EODHD_BATCH_SIZE')
+        batch_size = os.getenv('EODHD_BATCH_SIZE')
         if batch_size:
             try:
                 batch_size = int(batch_size)
@@ -168,17 +164,17 @@ class EODHDFundamentalsService:
                 batch_size = self.api_limits['test_batch_size']
         
         # 🚀 检查是否启用超速模式
-        turbo_mode = config.get('EODHD_TURBO_MODE', 'false').lower() == 'true'
+        turbo_mode = os.getenv('EODHD_TURBO_MODE', 'false').lower() == 'true'
         
         self.production_config = {
-            'enable_full_processing': config.get('EODHD_ENABLE_FULL_PROCESSING', is_production),
+            'enable_full_processing': os.getenv('EODHD_ENABLE_FULL_PROCESSING', str(is_production)).lower() == 'true',
             'batch_size': batch_size,
-            'request_delay': float(config.get('EODHD_REQUEST_DELAY', self.api_limits['request_interval_seconds'])),
-            'enable_rate_limit_monitoring': config.get('EODHD_ENABLE_RATE_LIMIT_MONITORING', True),
-            'max_retries_on_rate_limit': int(config.get('EODHD_MAX_RETRIES_ON_RATE_LIMIT', 3)),
-            'rate_limit_backoff_factor': int(config.get('EODHD_RATE_LIMIT_BACKOFF_FACTOR', 2)),
+            'request_delay': float(os.getenv('EODHD_REQUEST_DELAY', str(self.api_limits['request_interval_seconds']))),
+            'enable_rate_limit_monitoring': os.getenv('EODHD_ENABLE_RATE_LIMIT_MONITORING', 'true').lower() == 'true',
+            'max_retries_on_rate_limit': int(os.getenv('EODHD_MAX_RETRIES_ON_RATE_LIMIT', '3')),
+            'rate_limit_backoff_factor': int(os.getenv('EODHD_RATE_LIMIT_BACKOFF_FACTOR', '2')),
             'turbo_mode': turbo_mode,
-            'max_workers': int(config.get('EODHD_MAX_WORKERS', 100 if turbo_mode else 80)),  # 🚀 增加并发线程数
+            'max_workers': int(os.getenv('EODHD_MAX_WORKERS', str(100 if turbo_mode else 80))),  # 🚀 增加并发线程数
         }
         
         # 🚀 超速模式配置

@@ -3,6 +3,7 @@
 JWT认证工具
 """
 
+import os
 from jose import jwt
 from datetime import datetime, timedelta
 from typing import Optional
@@ -21,7 +22,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 # JWT配置
-SECRET_KEY = config.get("JWT_SECRET_KEY", "your-secret-key-here")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8小时
 

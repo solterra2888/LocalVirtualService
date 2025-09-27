@@ -1009,14 +1009,8 @@ async def search_company_fundamentals(
              source="markets_api")
         
         # 获取数据库连接参数
-        from config.settings import config
-        db_conn_params = {
-            'db_host': config.get('DB_HOST'),
-            'db_port': config.get('DB_PORT'),
-            'db_name': config.get('DB_NAME'),
-            'db_user': config.get('DB_USER'),
-            'db_password': config.get('DB_PASSWORD')
-        }
+        from backend.utils.database_config import get_database_config
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询公司基本信息
@@ -1510,14 +1504,8 @@ async def update_company_fundamentals(
              source="markets_api")
         
         # 获取数据库连接参数
-        from config.settings import config
-        db_conn_params = {
-            'db_host': config.get('DB_HOST'),
-            'db_port': config.get('DB_PORT'),
-            'db_name': config.get('DB_NAME'),
-            'db_user': config.get('DB_USER'),
-            'db_password': config.get('DB_PASSWORD')
-        }
+        from backend.utils.database_config import get_database_config
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 首先查找公司信息

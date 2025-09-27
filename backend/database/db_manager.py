@@ -8,7 +8,7 @@ import psycopg2
 import json
 import time
 import contextlib
-from config.settings import config, get_app_config_path
+from config.settings import config
 from backend.auth.user_auth import UserAuth
 
 

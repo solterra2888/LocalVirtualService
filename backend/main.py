@@ -21,6 +21,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
+from backend.utils.database_config import get_database_config
 from config.settings import config
 
 # 安全认证
@@ -39,13 +40,7 @@ async def lifespan(app: FastAPI):
     # 启动时初始化数据库
     try:
         # 获取数据库连接参数
-        db_conn_params = {
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'targettracking'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        }
+        db_conn_params = get_database_config()
         
         db_manager = DatabaseManager(db_conn_params)
         if db_manager.ensure_schema():
@@ -133,13 +128,7 @@ async def health_check():
         # 数据库连接检查
         try:
             # 获取数据库连接参数
-            db_conn_params = {
-                'db_host': config.get('DB_HOST', 'localhost'),
-                'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'targettracking'),
-                'db_user': config.get('DB_USER', 'postgres'),
-                'db_password': config.get('DB_PASSWORD', '')
-            }
+            db_conn_params = get_database_config()
             
             db_manager = DatabaseManager(db_conn_params)
             conn = db_manager.get_connection()
@@ -156,8 +145,8 @@ async def health_check():
         # 配置检查
         try:
             config_status = {
-                "has_jwt_secret": bool(config.get("JWT_SECRET_KEY")),
-                "has_db_config": bool(config.get("DB_HOST")),
+                "has_jwt_secret": bool(os.getenv("JWT_SECRET_KEY")),
+                "has_db_config": bool(os.getenv("DB_HOST")),
             }
             health_status["config"] = config_status
         except Exception as e:
@@ -179,14 +168,14 @@ async def debug_config(current_user=Depends(get_current_user)):
     
     return {
         "database": {
-            "host": config.get("DB_HOST", "未配置"),
-            "port": config.get("DB_PORT", "未配置"),
-            "name": config.get("DB_NAME", "未配置"),
-            "user": config.get("DB_USER", "未配置"),
-            "password_set": bool(config.get("DB_PASSWORD"))
+            "host": os.getenv("DB_HOST", "未配置"),
+            "port": os.getenv("DB_PORT", "未配置"),
+            "name": os.getenv("DB_NAME", "未配置"),
+            "user": os.getenv("DB_USER", "未配置"),
+            "password_set": bool(os.getenv("DB_PASSWORD"))
         },
         "jwt": {
-            "secret_key_set": bool(config.get("JWT_SECRET_KEY"))
+            "secret_key_set": bool(os.getenv("JWT_SECRET_KEY"))
         }
     }
 

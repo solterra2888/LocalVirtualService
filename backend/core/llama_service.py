@@ -13,8 +13,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import platform
 from pathlib import Path
-from dotenv import load_dotenv
-from config.settings import get_app_config_path
+
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 from backend.utils.logger import get_logger
 
 
@@ -32,9 +33,7 @@ class LlamaService:
             polling_interval (int, optional): 轮询间隔（秒）
             log_callback (callable, optional): 日志回调函数
         """
-        # 加载配置
-        config_path = get_app_config_path()
-        load_dotenv(dotenv_path=config_path)
+        # 配置已经在应用启动时从项目 .env 文件加载，这里直接使用环境变量
         
         # 设置API密钥
         self.api_key = api_key or os.environ.get('LLAMA_CLOUD_API_KEY', '')

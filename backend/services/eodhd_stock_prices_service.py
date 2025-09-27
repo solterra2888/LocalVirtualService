@@ -26,7 +26,8 @@ import psycopg2.extras
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
-from config.settings import config
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 logger = get_logger("eodhd_stock_prices_service")
 
@@ -40,7 +41,7 @@ class EODHDStockPricesService:
         
         try:
             # 获取API密钥
-            self.api_token = config.get('EODHD_API_TOKEN')
+            self.api_token = os.getenv('EODHD_API_TOKEN')
             if not self.api_token:
                 logger.error("EODHD_API_TOKEN 未在环境变量中设置")
                 raise ValueError("EODHD_API_TOKEN 未在环境变量中设置")
@@ -49,21 +50,16 @@ class EODHDStockPricesService:
             self.base_url = "https://eodhd.com/api/real-time"
             logger.info("设置API基础URL", base_url=self.base_url)
             
-            # 数据库连接配置
-            db_config = {
-                'db_host': config.get('DB_HOST', 'localhost'),
-                'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'rc_database'),
-                'db_user': config.get('DB_USER', 'postgres'),
-                'db_password': config.get('DB_PASSWORD', '')
-            }
+            # 获取标准化数据库连接配置
+            from backend.utils.database_config import get_database_config
+            db_config = get_database_config()
             self.db_manager = DatabaseManager(db_config)
             logger.info("数据库管理器配置完成")
             
             # 配置参数
-            self.batch_size = int(config.get('EODHD_BATCH_SIZE', 50))  # 每次批量请求的股票数量
-            self.request_delay = float(config.get('EODHD_REQUEST_DELAY', 0.1))  # 请求间隔
-            self.max_retries = int(config.get('EODHD_MAX_RETRIES_ON_RATE_LIMIT', 3))
+            self.batch_size = int(os.getenv('EODHD_BATCH_SIZE', '50'))  # 每次批量请求的股票数量
+            self.request_delay = float(os.getenv('EODHD_REQUEST_DELAY', '0.1'))  # 请求间隔
+            self.max_retries = int(os.getenv('EODHD_MAX_RETRIES_ON_RATE_LIMIT', '3'))
             
             # 创建优化的HTTP会话
             self.session = self._create_robust_session()

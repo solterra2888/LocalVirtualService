@@ -14,20 +14,11 @@ from backend.schemas.user import (
 from backend.auth.jwt_utils import get_current_user, get_current_admin_user, get_password_hash
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 router = APIRouter()
 
 
-def get_db_conn_params():
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 
 @router.get("/", response_model=List[UserResponse], summary="获取用户列表")
@@ -42,7 +33,7 @@ async def get_users(
     - **page**: 页码
     - **page_size**: 每页大小
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     # 获取用户列表
@@ -73,7 +64,7 @@ async def create_user(
     - **password**: 密码
     - **is_admin**: 是否为管理员
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     # 检查用户名是否已存在
@@ -121,7 +112,7 @@ async def get_user(
     
     - **user_id**: 用户ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     user_info = user_auth.get_user_by_id(user_id)
@@ -153,7 +144,7 @@ async def update_user(
     - **password**: 新密码（可选）
     - **is_admin**: 是否为管理员（可选）
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     # 检查用户是否存在
@@ -234,7 +225,7 @@ async def delete_user(
     
     - **user_id**: 用户ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     # 检查用户是否存在
@@ -288,7 +279,7 @@ async def change_password(
             detail="权限不足，只能修改自己的密码"
         )
     
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     # 检查用户是否存在

@@ -15,20 +15,11 @@ from backend.schemas.task import (
 from backend.auth.jwt_utils import get_current_user, get_current_admin_user
 from backend.processors.task_manager import TaskManager
 from backend.database.db_manager import DatabaseManager
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 router = APIRouter()
 
 
-def get_db_conn_params():
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 
 @router.get("/types", response_model=List[TaskTypeResponse], summary="获取RC Agent列表")
@@ -36,7 +27,7 @@ async def get_task_types(current_user=Depends(get_current_user)):
     """
     获取RC Agent列表
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
     
     # 加载AGENT凭据
@@ -73,7 +64,7 @@ async def create_task_type(
     - **remarks**: 备注
     - **input_fields**: 自定义输入字段
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
     
     # 加载AGENT凭据
@@ -131,7 +122,7 @@ async def update_task_type(
     - **remarks**: 备注
     - **input_fields**: 自定义输入字段
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
     
     # 加载AGENT凭据
@@ -194,7 +185,7 @@ async def delete_task_type(
     
     - **task_id**: 任务ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
     
     # 加载AGENT凭据
@@ -238,7 +229,7 @@ async def get_task_executions(
     - **page**: 页码
     - **page_size**: 每页大小
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     # 获取任务执行历史
@@ -306,7 +297,7 @@ async def get_task_execution(
     
     - **execution_id**: 任务执行ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     conn = db_manager.get_connection()
@@ -371,7 +362,7 @@ async def delete_task_execution(
     
     - **execution_id**: 任务执行ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     conn = db_manager.get_connection()
@@ -427,7 +418,7 @@ async def get_task_execution_details(
     
     - **execution_id**: 任务执行ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     conn = db_manager.get_connection()

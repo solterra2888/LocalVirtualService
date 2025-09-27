@@ -40,14 +40,9 @@ class SchedulerService:
             }
         )
         
-        # 数据库连接配置
-        db_config = {
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'targettracking'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        }
+        # 获取标准化数据库连接配置
+        from backend.utils.database_config import get_database_config
+        db_config = get_database_config()
         self.db_manager = DatabaseManager(db_config)
         
         # 注册任务类型和执行函数

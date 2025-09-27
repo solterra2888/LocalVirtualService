@@ -5,6 +5,7 @@ EOD Fetch Service - 独立的EOD数据获取服务
 """
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import requests
@@ -14,7 +15,10 @@ from urllib3.util.retry import Retry
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import format_ticker_for_eodhd
-from config.settings import config
+from backend.utils.database_config import get_database_config
+
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 logger = get_logger("eod_fetch_service")
 
@@ -24,21 +28,14 @@ class EODFetchService:
     
     def __init__(self):
         """初始化EOD获取服务"""
-        self.api_token = config.get('EODHD_API_TOKEN')
+        self.api_token = os.getenv('EODHD_API_TOKEN')
         if not self.api_token:
             raise ValueError("EODHD_API_TOKEN not configured")
             
         self.base_url = "https://eodhd.com/api/eod"
         
-        # 数据库连接参数
-        self.db_conn_params = {
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'targettracking'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        }
-        
+        # 获取标准化数据库连接参数
+        self.db_conn_params = get_database_config()
         self.db_manager = DatabaseManager(self.db_conn_params)
         
         # 创建会话

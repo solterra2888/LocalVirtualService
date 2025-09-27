@@ -148,7 +148,7 @@ async def fetch_eod_data(
                 fetched_records=0,  # 后台处理
                 stored_records=len(existing_data),
                 message=f"返回已存储的数据，正在后台更新最新数据",
-                warning="数据正在后台更新，请稍后刷新获取最新数据",
+                warning="Data is being updated in the background, please refresh later to get the latest data",
                 ticker=request.ticker,
                 period=request.period,
                 date_range=date_range

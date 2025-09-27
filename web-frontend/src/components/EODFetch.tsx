@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Form,
@@ -54,6 +54,11 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
 
   // Period options from service
   const periodOptions = eodApiService.getPeriodOptions();
+
+  // Initialize selectedPeriod to match form's initial value
+  useEffect(() => {
+    setSelectedPeriod('d');
+  }, []);
 
   // Disable future dates
   const disabledDate: RangePickerProps['disabledDate'] = (current) => {
@@ -288,11 +293,6 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
           initialValues={{
             period: 'd'
           }}
-          onValuesChange={(changedValues) => {
-            if (changedValues.period) {
-              setSelectedPeriod(changedValues.period);
-            }
-          }}
         >
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={24} md={8}>
@@ -326,6 +326,11 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
                   style={{ width: '100%', display: 'flex' }}
                   optionType="button"
                   buttonStyle="solid"
+                  value={selectedPeriod}
+                  onChange={(e) => {
+                    setSelectedPeriod(e.target.value);
+                    form.setFieldsValue({ period: e.target.value });
+                  }}
                 >
                   {periodOptions.map(option => (
                     <Radio.Button 

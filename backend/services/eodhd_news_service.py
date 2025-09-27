@@ -8,14 +8,15 @@ import requests
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
-from config.settings import config
 
 # 获取日志实例
 logger = get_logger("eodhd_service")
@@ -29,9 +30,8 @@ class EODHDNewsService:
         logger.info("开始初始化EODHD新闻服务")
         
         try:
-            # 加载环境变量
-            logger.info("加载环境变量")
-            load_dotenv()
+            # 环境变量已通过 env_loader 自动加载
+            logger.info("初始化EODHD新闻服务")
             logger.info("环境变量加载完成")
             
             # 获取API密钥
@@ -50,15 +50,10 @@ class EODHDNewsService:
             self.session = self._create_robust_session()
             logger.info("HTTP会话创建完成")
             
-            # 数据库连接配置
+            # 获取标准化数据库连接配置
+            from backend.utils.database_config import get_database_config
             logger.info("准备数据库连接配置")
-            db_config = {
-                'db_host': config.get('DB_HOST', 'localhost'),
-                'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'rc_database'),
-                'db_user': config.get('DB_USER', 'postgres'),
-                'db_password': config.get('DB_PASSWORD', '')
-            }
+            db_config = get_database_config()
             logger.info("数据库配置准备完成", 
                         host=db_config['db_host'], 
                         port=db_config['db_port'],
@@ -1323,13 +1318,8 @@ class NewsThemeService:
     
     def __init__(self):
         """初始化主题管理服务"""
-        self.db_manager = DatabaseManager({
-            'db_host': config.get('DB_HOST', 'localhost'),
-            'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'targettracking'),
-            'db_user': config.get('DB_USER', 'postgres'),
-            'db_password': config.get('DB_PASSWORD', '')
-        })
+        from backend.utils.database_config import get_database_config
+        self.db_manager = DatabaseManager(get_database_config())
     
     def get_all_themes(self) -> List[Dict[str, Any]]:
         """获取所有主题及其关键词"""

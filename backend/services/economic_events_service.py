@@ -16,7 +16,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from backend.utils.logger import info, error, warning, get_logger
-from config.settings import config
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 
 class EconomicEventsService:
@@ -33,9 +34,10 @@ class EconomicEventsService:
         self.base_url = "https://eodhd.com/api"
         
         # 获取API密钥
-        self.api_token = api_token or config.get("EODHD_API_TOKEN") or config.get("API_KEY", "demo")
-        if self.api_token == "demo":
-            warning("使用演示API密钥，数据可能受限", source="economic_events")
+        self.api_token = api_token or os.getenv('EODHD_API_TOKEN')
+        if not self.api_token:
+            warning("EODHD_API_TOKEN未设置，数据可能受限", source="economic_events")
+            self.api_token = "demo"
         
         # 设置默认请求参数
         self.session = self.create_robust_session()

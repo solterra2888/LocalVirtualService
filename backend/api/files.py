@@ -36,7 +36,10 @@ from backend.core.llama_service import LlamaService
 from backend.core.rc_agent_service import RCAgentService
 from backend.workers.file_worker import FileProcessingWorker
 from backend.utils.logger import info, error, warning, debug
-from config.settings import config
+from backend.utils.database_config import get_database_config
+
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 router = APIRouter()
 
@@ -98,15 +101,6 @@ def get_file_type(filename: str) -> FileType:
         return FileType.OTHER
 
 
-def get_db_conn_params():
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 
 @router.post("/upload", response_model=List[FileUploadResponse], summary="上传文件")
@@ -235,7 +229,7 @@ async def process_files(
         )
     
     # 获取数据库连接参数
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     
     # 获取任务信息
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
@@ -322,7 +316,7 @@ async def process_files_background(
         update_task_status("initializing", 0.0, log_message="正在初始化处理服务...")
         
         # 获取API密钥 - 优先使用用户提供的密钥，否则使用配置中的默认密钥
-        api_key = params.get('llamaindex_api_key') or config.get_llama_api_key()
+        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
         if not api_key:
             update_task_status("failed", log_message="LlamaIndex API密钥未配置")
             return
@@ -751,7 +745,7 @@ async def get_task_files(
     
     - **task_id**: 任务ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     conn = db_manager.get_connection()
@@ -808,7 +802,7 @@ async def get_original_file_info(
     
     - **file_id**: 文件详情ID
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     
     conn = db_manager.get_connection()
@@ -854,15 +848,15 @@ async def get_original_file_info(
             # 检查是否为开发环境
             # 开发环境特征：DEBUG=True 或 ENVIRONMENT=development
             is_development = (
-                config.get('DEBUG', 'false').lower() == 'true' or
-                config.get('ENVIRONMENT', 'production').lower() == 'development' or
-                config.get('APP_ENV', 'production').lower() == 'development'
+                os.getenv('DEBUG', 'false').lower() == 'true' or
+                os.getenv('ENVIRONMENT', 'production').lower() == 'development' or
+                os.getenv('APP_ENV', 'production').lower() == 'development'
             )
             
             if is_development:
                 # 开发环境：需要包含后端服务器地址
-                backend_host = config.get('BACKEND_HOST', 'localhost')
-                backend_port = config.get('BACKEND_PORT', '8000')
+                backend_host = os.getenv('BACKEND_HOST', 'localhost')
+                backend_port = os.getenv('BACKEND_PORT', '8000')
                 return f"http://{backend_host}:{backend_port}/uploads/{relative_path}"
             else:
                 # 生产环境：相对路径即可
@@ -965,8 +959,8 @@ async def get_processing_params():
             {"key": "llamaindex_api_key", "label": "LlamaIndex API密钥", "type": "password"}
         ],
         "defaults": {
-            "llamaindex_api_key": config.get_llama_api_key(),
-            "ai_agent_server_url": config.get('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
+            "llamaindex_api_key": os.getenv('LLAMA_CLOUD_API_KEY'),
+            "ai_agent_server_url": os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
         }
     }
 
@@ -977,7 +971,7 @@ async def get_sectors(current_user=Depends(get_current_user)):
     获取所有行业分类（sector）及其包含的子行业（industry）
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询所有sector和industry的组合
@@ -1040,7 +1034,7 @@ async def search_tickers(
     根据行业分类和搜索关键词搜索股票代码
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 构建查询条件
@@ -1109,7 +1103,7 @@ async def create_file_tag(
     为指定文件设置标签
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 检查文件是否存在
@@ -1181,7 +1175,7 @@ async def get_file_tag(
     获取指定文件的标签
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -1229,7 +1223,7 @@ async def update_file_tag(
     更新指定文件的标签
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 检查标签是否存在
@@ -1286,7 +1280,7 @@ async def delete_file_tag(
     删除指定文件的标签
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 检查标签是否存在
@@ -1322,7 +1316,7 @@ async def batch_create_file_tags(
     批量为多个文件设置相同标签
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         success_count = 0
@@ -1395,7 +1389,7 @@ async def get_files_by_tags(
     根据标签查询文件
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 构建查询条件
@@ -1471,7 +1465,7 @@ async def get_file_tag_stats(current_user=Depends(get_current_user)):
     获取文件标签的统计信息
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 总文件数

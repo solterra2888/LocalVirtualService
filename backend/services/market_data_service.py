@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 
 from backend.utils.logger import info, error, warning, get_logger
 from backend.database.db_manager import DatabaseManager
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 
 class MarketDataService:
@@ -30,14 +30,8 @@ class MarketDataService:
     def _init_database(self):
         """初始化数据库连接"""
         try:
-            # 获取数据库连接参数
-            db_conn_params = {
-                'db_host': config.get('DB_HOST', 'localhost'),
-                'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'targettracking'),
-                'db_user': config.get('DB_USER', 'postgres'),
-                'db_password': config.get('DB_PASSWORD', '')
-            }
+            # 获取标准化数据库连接参数
+            db_conn_params = get_database_config()
             self.db_manager = DatabaseManager(db_conn_params)
             info("市场数据数据库连接初始化完成", source="market_data")
         except Exception as e:

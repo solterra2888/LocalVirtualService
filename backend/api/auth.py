@@ -17,20 +17,10 @@ from backend.auth.jwt_utils import (
 )
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 router = APIRouter()
 
-# 获取数据库连接参数
-def get_db_conn_params() -> Dict[str, Any]:
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 
 @router.post("/login", response_model=LoginResponse, summary="用户登录")
@@ -41,7 +31,7 @@ async def login(login_request: UserLoginRequest):
     - **username**: 用户名
     - **password**: 密码
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     
     # 认证用户
     user_info = authenticate_user(
@@ -89,7 +79,7 @@ async def get_current_user_info(current_user=Depends(get_current_user)):
     """
     获取当前登录用户的信息
     """
-    db_conn_params = get_db_conn_params()
+    db_conn_params = get_database_config()
     user_auth = UserAuth(db_conn_params)
     
     user_info = user_auth.get_user_info(current_user.username)

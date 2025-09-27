@@ -9,7 +9,7 @@ from datetime import datetime, date
 import logging
 
 from ..database.db_manager import DatabaseManager
-from config.settings import config
+from ..utils.database_config import get_database_config
 from ..schemas.user import TokenData
 from ..auth.jwt_utils import get_current_user
 
@@ -19,13 +19,7 @@ router = APIRouter(prefix="/screener", tags=["screener"])
 
 def get_db_connection():
     """获取数据库连接"""
-    db_conn_params = {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'rc_database'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
+    db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
     return db_manager.get_connection()
 

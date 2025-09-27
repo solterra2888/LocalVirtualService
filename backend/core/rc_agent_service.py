@@ -8,9 +8,11 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from config.settings import config
 from backend.utils.logger import get_logger
 import os
+
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 
 class RCAgentService:

@@ -17,7 +17,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 logger = get_logger("dashboard_api")
 
@@ -73,16 +73,6 @@ def get_smart_ticker_formats(ticker: str) -> List[str]:
 
 router = APIRouter()
 
-# 获取数据库连接参数
-def get_db_conn_params() -> Dict[str, Any]:
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 @router.get("/sectors", summary="获取所有行业信息")
 async def get_sectors(current_user: UserResponse = Depends(get_current_user)):
@@ -90,7 +80,7 @@ async def get_sectors(current_user: UserResponse = Depends(get_current_user)):
     获取所有行业信息及其包含的公司数量（基于finviz_screener表）
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询行业信息，包含每个行业的公司列表
@@ -157,7 +147,7 @@ async def get_companies(
     获取公司信息列表，支持按行业筛选和关键词搜索
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 构建查询条件
@@ -218,7 +208,7 @@ async def get_company_info(
     根据股票代码获取特定公司的详细信息
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -272,7 +262,7 @@ async def get_company_news(
     优化版本：使用单次查询获取所有数据，避免N+1查询问题
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 优化后的单次查询，一次性获取新闻及其标签和符号
@@ -351,7 +341,7 @@ async def get_sector_news(
     优化版本：使用单次查询获取所有数据，避免N+1查询问题
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 优化后的单次查询，一次性获取新闻及其标签和符号
@@ -431,7 +421,7 @@ async def get_company_analysis(
     获取特定公司的AI分析结果
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -479,7 +469,7 @@ async def get_sector_analysis(
     获取特定行业的AI分析结果
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -527,7 +517,7 @@ async def search_companies(
     根据关键词搜索公司
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -575,7 +565,7 @@ async def get_file_content(
     获取指定文件的内容
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """
@@ -612,7 +602,7 @@ async def download_file(
     下载指定文件
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询文件信息，从 file_processing_details 表获取
@@ -679,7 +669,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
     获取当前用户的watchlist（关注的股票列表）
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询用户的watchlist，只关联companies表获取基础信息
@@ -759,7 +749,7 @@ async def add_to_watchlist(
     - notes: 备注 (可选)
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         symbol = request.get('symbol')
@@ -970,7 +960,7 @@ async def get_ticker_research_reports(
         包含文件信息的列表
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询与ticker关联的文件
@@ -1036,7 +1026,7 @@ async def test_get_ticker_research_reports(ticker: str):
     无需认证，用于测试
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 查询与ticker关联的文件
@@ -1105,7 +1095,7 @@ async def get_stock_prices(
     从stock_prices_realtime表获取最新的价格信息
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 解析股票代码
@@ -1175,7 +1165,7 @@ async def get_watchlist_stock_prices(current_user: UserResponse = Depends(get_cu
     获取用户watchlist中所有股票的实时价格数据
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 获取用户watchlist中的所有股票代码，优先使用primaryticker
@@ -1275,7 +1265,7 @@ async def test_stock_historical_data(
     """Test endpoint without authentication"""
     try:
         print(f"Getting historical data for symbol: {symbol}, days: {days}")
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # Calculate date range
@@ -1356,7 +1346,7 @@ async def get_stock_historical_data(
     """
     try:
         print(f"Getting historical data for symbol: {symbol}, days: {days}")
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # Calculate date range
@@ -1433,7 +1423,7 @@ async def remove_from_watchlist(
     Remove stock from user's watchlist
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         # 检查该watchlist项是否属于当前用户
@@ -1502,7 +1492,7 @@ async def search_stocks(
     搜索股票，用于添加到watchlist时的股票选择
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
         query = """

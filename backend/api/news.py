@@ -18,7 +18,7 @@ from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
 from backend.services.eodhd_news_service import EODHDNewsService, NewsThemeService
 from backend.utils.logger import get_logger
-from config.settings import config
+from backend.utils.database_config import get_database_config
 
 # 获取日志实例
 logger = get_logger("news_api")
@@ -26,15 +26,6 @@ logger = get_logger("news_api")
 router = APIRouter()
 
 
-def get_db_conn_params() -> Dict[str, Any]:
-    """获取数据库连接参数"""
-    return {
-        'db_host': config.get('DB_HOST', 'localhost'),
-        'db_port': config.get('DB_PORT', '5432'),
-        'db_name': config.get('DB_NAME', 'targettracking'),
-        'db_user': config.get('DB_USER', 'postgres'),
-        'db_password': config.get('DB_PASSWORD', '')
-    }
 
 
 class NewsService:
@@ -297,7 +288,7 @@ async def get_news_list(
             except ValueError:
                 raise HTTPException(status_code=400, detail="结束日期格式错误，请使用 YYYY-MM-DD")
         
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         news_service = NewsService(db_conn_params)
         
         result = news_service.get_news_list(
@@ -324,7 +315,7 @@ async def get_news_topics(current_user=Depends(get_current_user)):
     获取所有激活的新闻主题
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         news_service = NewsService(db_conn_params)
         topics = news_service.get_news_topics()
         return topics
@@ -341,7 +332,7 @@ async def get_news_symbols(current_user=Depends(get_current_user)):
     获取新闻中涉及的股票代码列表，按新闻数量排序
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         news_service = NewsService(db_conn_params)
         symbols = news_service.get_news_symbols()
         return symbols
@@ -765,7 +756,7 @@ async def get_news_detail(
     获取指定ID的新闻详情
     """
     try:
-        db_conn_params = get_db_conn_params()
+        db_conn_params = get_database_config()
         news_service = NewsService(db_conn_params)
         
         conn = news_service.db_manager.get_connection()

@@ -19,7 +19,8 @@ from contextlib import contextmanager
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
-from config.settings import config
+# 统一的环境变量加载
+from backend.utils.env_loader import load_project_env
 
 logger = get_logger("finviz_screener_service")
 
@@ -32,18 +33,13 @@ class FinvizScreenerService:
         logger.info("开始初始化Finviz筛选数据服务")
         
         # 获取API密钥
-        self.api_key = config.get('finviz_api_key') or os.getenv('finviz_api_key')
+        self.api_key = os.getenv('finviz_api_key')
         if not self.api_key:
             logger.warning("finviz_api_key未设置。某些功能可能不可用。")
         
-        # 数据库连接配置
-        self.db_config = {
-            'host': config.get('DB_HOST', 'localhost'),
-            'port': config.get('DB_PORT', '5432'),
-            'database': config.get('DB_NAME', 'rc_database'),
-            'user': config.get('DB_USER', 'postgres'),
-            'password': config.get('DB_PASSWORD', '')
-        }
+        # 获取标准化数据库连接配置
+        from backend.utils.database_config import get_psycopg2_config
+        self.db_config = get_psycopg2_config()
         
         # 初始化连接池
         try:
