@@ -1101,7 +1101,7 @@ const FinvizScreenerPage: React.FC = () => {
                 Stock Screener
               </Title>
               <Text type="secondary">
-                Find stocks that match your investment criteria (US market only)
+                Find stocks that match your investment criteria (US market only) 注意：因为该需求非优先级需求，所以筛选功能没有进行优化，请谨慎使用。
               </Text>
             </div>
 

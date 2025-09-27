@@ -97,6 +97,14 @@ app.include_router(scheduler_proxy.router, prefix="/api", tags=["定时任务调
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
+# 图表事件API
+from backend.api import chart_events
+app.include_router(chart_events.router, prefix="/api/chart-events", tags=["图表事件"])
+
+# EOD Fetch API
+from backend.api import eod_fetch
+app.include_router(eod_fetch.router, prefix="/api", tags=["EOD数据获取"])
+
 # 静态文件服务
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):

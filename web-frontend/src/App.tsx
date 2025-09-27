@@ -18,6 +18,7 @@ import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
 import FinvizScreenerPage from './pages/FinvizScreenerPage';
 import FundamentalsPage from './pages/FundamentalsPage';
+import EODFetchPage from './pages/EODFetchPage';
 import './App.css';
 
 // 私有路由组件
@@ -119,6 +120,7 @@ const App: React.FC = () => {
                 <Route path="news" element={<NewsPage />} />
                 <Route path="fundamentals" element={<FundamentalsPage />} />
                 <Route path="fundamentals/screener" element={<FinvizScreenerPage />} />
+                <Route path="eod-fetch" element={<EODFetchPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />
                 <Route path="diagnostic" element={<DiagnosticPage />} />
                 

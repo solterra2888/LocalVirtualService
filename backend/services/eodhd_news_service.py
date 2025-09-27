@@ -55,7 +55,7 @@ class EODHDNewsService:
             db_config = {
                 'db_host': config.get('DB_HOST', 'localhost'),
                 'db_port': config.get('DB_PORT', '5432'),
-                'db_name': config.get('DB_NAME', 'targettracking'),
+                'db_name': config.get('DB_NAME', 'rc_database'),
                 'db_user': config.get('DB_USER', 'postgres'),
                 'db_password': config.get('DB_PASSWORD', '')
             }

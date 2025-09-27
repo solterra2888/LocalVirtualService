@@ -445,6 +445,35 @@ class DatabaseManager:
             # 更新现有表的约束（如果表已存在）
             self._update_task_scheduling_constraints(cursor)
             
+            # 创建图表事件表
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chart_events (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                event_date DATE NOT NULL,
+                event_type VARCHAR(50) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                position VARCHAR(20) DEFAULT 'middle',
+                related_url TEXT,
+                related_file_id VARCHAR(255),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                
+                CONSTRAINT valid_position CHECK (position IN ('top', 'middle', 'bottom')),
+                CONSTRAINT valid_event_type CHECK (event_type IN ('news', 'earnings', 'dividend', 'split', 'merger', 'research', 'custom', 'file'))
+            )
+            """)
+            
+            # 创建图表事件索引
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chart_events_user_symbol ON chart_events(user_id, symbol);
+            CREATE INDEX IF NOT EXISTS idx_chart_events_date ON chart_events(event_date);
+            CREATE INDEX IF NOT EXISTS idx_chart_events_type ON chart_events(event_type);
+            CREATE INDEX IF NOT EXISTS idx_chart_events_created_at ON chart_events(created_at);
+            """)
+            
             # 创建任务执行日志表
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS task_execution_logs (

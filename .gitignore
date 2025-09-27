@@ -34,6 +34,9 @@ venv/
 说明/
 development/.dev_pids
 
+# Markdown files
+*.md
+
 # Executables
 *.swf
 *.air
