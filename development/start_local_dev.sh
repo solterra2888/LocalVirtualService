@@ -47,6 +47,14 @@ if ! check_port 3000 "前端应用"; then
     echo -e "${RED}❌ 前端应用端口已占用${NC}"
 fi
 
+if ! check_port 6379 "Redis服务"; then
+    echo -e "${RED}❌ Redis端口已占用${NC}"
+fi
+
+if ! check_port 5555 "Flower监控"; then
+    echo -e "${RED}❌ Flower监控端口已占用${NC}"
+fi
+
 # 询问是否继续
 echo ""
 read -p "是否继续启动开发环境？(y/N): " -n 1 -r
@@ -204,6 +212,69 @@ fi
 
 echo -e "${GREEN}🎉 调度器状态检查完成，所有组件正常工作！${NC}"
 echo "   调度器不需要启动，系统将使用独立的调度器服务"
+echo ""
+
+# 检查Redis服务
+echo ""
+echo -e "${BLUE}========================================${NC}"
+echo -e "${PURPLE}🔍 步骤 1.5/4: 检查Redis服务${NC}"
+echo -e "${BLUE}========================================${NC}"
+
+echo "正在检查Redis服务状态..."
+
+# 检查Redis连接
+echo "🔍 测试Redis连接..."
+if /Users/kevinliu/anaconda3/envs/rcTool/bin/python -c "
+import redis
+try:
+    r = redis.Redis(host='localhost', port=6379, db=0)
+    result = r.ping()
+    if result:
+        print('✅ Redis连接成功')
+    else:
+        print('❌ Redis ping失败')
+        exit(1)
+except Exception as e:
+    print(f'❌ Redis连接失败: {e}')
+    exit(1)
+" 2>/dev/null; then
+    echo -e "${GREEN}✅ Redis服务正常${NC}"
+else
+    echo -e "${RED}❌ Redis服务不可用${NC}"
+    echo "请先启动Redis服务:"
+    echo "   brew services start redis"
+    echo "   或: redis-server"
+    echo ""
+    read -p "是否继续启动其他服务？(y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}启动已取消${NC}"
+        exit 0
+    fi
+fi
+
+# 检查Celery配置
+echo "🔍 测试Celery配置..."
+if /Users/kevinliu/anaconda3/envs/rcTool/bin/python -c "
+import sys
+sys.path.insert(0, '$PROJECT_ROOT')
+try:
+    from backend.celery_app import app as celery_app
+    from backend.celery_config import broker_url, result_backend
+    print(f'✅ Celery配置正常 - Broker: {broker_url}')
+except Exception as e:
+    print(f'❌ Celery配置错误: {e}')
+    exit(1)
+" 2>/dev/null; then
+    echo -e "${GREEN}✅ Celery配置正常${NC}"
+else
+    echo -e "${RED}❌ Celery配置错误${NC}"
+    echo "请检查Celery相关依赖是否已安装"
+fi
+
+echo -e "${GREEN}🎉 Redis和Celery检查完成！${NC}"
+echo "   如需启动Celery Worker，请运行: ./development/start_celery_worker_dev.sh"
+echo "   如需启动Flower监控，请运行: ./development/start_flower_dev.sh"
 echo ""
 
 # 启动Web应用

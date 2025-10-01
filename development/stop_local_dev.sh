@@ -90,6 +90,7 @@ echo -e "${BLUE}🔍 检查并停止端口上的进程...${NC}"
 # 停止各个端口上的进程
 stop_process_by_port 3000 "前端应用"
 stop_process_by_port 8000 "Web应用"
+stop_process_by_port 5555 "Flower监控"
 
 # 清理可能的Node.js进程
 echo ""
@@ -123,6 +124,34 @@ if [ -n "$PYTHON_PIDS" ]; then
     echo -e "${GREEN}✅ Python进程已清理${NC}"
 fi
 
+# 查找并停止Celery Worker进程
+CELERY_PIDS=$(pgrep -f "celery.*worker" 2>/dev/null || true)
+if [ -n "$CELERY_PIDS" ]; then
+    echo -e "${YELLOW}🔄 停止Celery Worker进程...${NC}"
+    echo "$CELERY_PIDS" | xargs kill 2>/dev/null || true
+    sleep 2
+    # 强制停止仍在运行的进程
+    CELERY_PIDS=$(pgrep -f "celery.*worker" 2>/dev/null || true)
+    if [ -n "$CELERY_PIDS" ]; then
+        echo "$CELERY_PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✅ Celery Worker进程已清理${NC}"
+fi
+
+# 查找并停止Flower监控进程
+FLOWER_PIDS=$(pgrep -f "celery.*flower" 2>/dev/null || true)
+if [ -n "$FLOWER_PIDS" ]; then
+    echo -e "${YELLOW}🔄 停止Flower监控进程...${NC}"
+    echo "$FLOWER_PIDS" | xargs kill 2>/dev/null || true
+    sleep 2
+    # 强制停止仍在运行的进程
+    FLOWER_PIDS=$(pgrep -f "celery.*flower" 2>/dev/null || true)
+    if [ -n "$FLOWER_PIDS" ]; then
+        echo "$FLOWER_PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✅ Flower监控进程已清理${NC}"
+fi
+
 # 清理日志文件（可选）
 LOGS_DIR="$SCRIPT_DIR/logs"
 if [ -d "$LOGS_DIR" ]; then
@@ -154,6 +183,7 @@ check_port_status() {
 
 check_port_status 3000 "前端应用"
 check_port_status 8000 "Web应用"
+check_port_status 5555 "Flower监控"
 
 echo ""
 echo -e "${GREEN}🎉 开发服务已停止!${NC}"

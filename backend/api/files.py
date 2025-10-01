@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-文件处理API
+文件处理API - 使用Celery异步任务队列
 """
 
 import os
 import uuid
-import asyncio
 import json
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, BackgroundTasks
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends
 
 from backend.schemas.file import (
     FileUploadResponse,
@@ -32,11 +31,13 @@ from backend.auth.jwt_utils import get_current_user
 from backend.processors.file_processor import FileProcessor
 from backend.processors.task_manager import TaskManager
 from backend.database.db_manager import DatabaseManager
-from backend.core.llama_service import LlamaService
-from backend.core.rc_agent_service import RCAgentService
-from backend.workers.file_worker import FileProcessingWorker
 from backend.utils.logger import info, error, warning, debug
 from backend.utils.database_config import get_database_config
+
+# Celery相关导入
+from celery.result import AsyncResult
+from backend.celery_app import app as celery_app
+from backend.tasks.file_tasks import process_files_task
 
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
@@ -44,63 +45,18 @@ from backend.utils.env_loader import load_project_env
 router = APIRouter()
 
 # 上传文件目录
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# 全局任务状态存储
-task_statuses = {}
 
 
 def safe_file_type_conversion(file_type_str: str) -> FileType:
     """
-    安全地将文件类型字符串转换为FileType枚举
-    
-    Args:
-        file_type_str: 文件类型字符串
-        
-    Returns:
-        FileType枚举值
+    安全地将字符串转换为FileType枚举
     """
-    if not file_type_str:
+    try:
+        return FileType(file_type_str)
+    except ValueError:
         return FileType.OTHER
-    
-    # 转换为小写进行匹配
-    file_type_lower = file_type_str.lower()
-    
-    # 创建映射字典
-    type_mapping = {
-        'pdf': FileType.PDF,
-        'excel': FileType.EXCEL,
-        'xlsx': FileType.EXCEL,
-        'xls': FileType.EXCEL,
-        'doc': FileType.DOC,
-        'docx': FileType.DOC,
-        'image': FileType.IMAGE,
-        'jpg': FileType.IMAGE,
-        'jpeg': FileType.IMAGE,
-        'png': FileType.IMAGE,
-        'gif': FileType.IMAGE,
-        'bmp': FileType.IMAGE,
-    }
-    
-    return type_mapping.get(file_type_lower, FileType.OTHER)
-
-
-def get_file_type(filename: str) -> FileType:
-    """根据文件名获取文件类型"""
-    ext = filename.lower().split('.')[-1]
-    if ext == 'pdf':
-        return FileType.PDF
-    elif ext in ['xlsx', 'xls']:
-        return FileType.EXCEL
-    elif ext in ['doc', 'docx']:
-        return FileType.DOC
-    elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp']:
-        return FileType.IMAGE
-    else:
-        return FileType.OTHER
-
-
 
 
 @router.post("/upload", response_model=List[FileUploadResponse], summary="上传文件")
@@ -109,7 +65,7 @@ async def upload_files(
     current_user=Depends(get_current_user)
 ):
     """
-    上传文件
+    上传文件到服务器
     
     - **files**: 要上传的文件列表
     """
@@ -121,43 +77,61 @@ async def upload_files(
     
     file_processor = FileProcessor()
     uploaded_files = []
+    failed_files = []
     
     for file in files:
-        if not file.filename:
-            continue
+        try:
+            if not file.filename:
+                failed_files.append({"filename": "未知文件", "error": "文件名为空"})
+                continue
             
-        # 检查文件类型
-        if not file_processor.is_supported_file(file.filename):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"不支持的文件类型: {file.filename}"
-            )
-        
-        # 生成唯一文件名
-        file_id = str(uuid.uuid4())[:8]  # 只取前8位
-        # 分离文件名和扩展名
-        name, ext = os.path.splitext(file.filename)
-        filename = f"{name}_{file_id}{ext}"
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        
-        # 保存文件
-        with open(file_path, "wb") as buffer:
+            # 检查文件类型
+            if not file_processor.is_supported_file(file.filename):
+                failed_files.append({
+                    "filename": file.filename, 
+                    "error": f"不支持的文件类型: {os.path.splitext(file.filename)[1]}"
+                })
+                continue
+            
+            # 生成唯一文件名
+            file_id = str(uuid.uuid4())[:8]  # 只取前8位
+            # 分离文件名和扩展名
+            name, ext = os.path.splitext(file.filename)
+            filename = f"{name}_{file_id}{ext}"
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            
+            # 保存文件
             content = await file.read()
-            buffer.write(content)
-        
-        # 获取文件信息
-        file_info = file_processor.get_file_info(file_path)
-        file_size = len(content)
-        file_type = get_file_type(file.filename)
-        
-        uploaded_files.append(
-            FileUploadResponse(
+            with open(file_path, "wb") as buffer:
+                buffer.write(content)
+            
+            # 获取文件信息
+            file_info = file_processor.get_file_info(file_path)
+            file_size = len(content)
+            file_type = safe_file_type_conversion(file_info["file_type"])
+            
+            uploaded_files.append(FileUploadResponse(
                 filename=file.filename,
                 file_path=file_path,
                 file_size=file_size,
                 file_type=file_type,
                 upload_time=datetime.now()
-            )
+            ))
+            
+            info(f"文件上传成功: {file.filename} -> {file_path}", source="api", user=current_user.username)
+            
+        except Exception as e:
+            error(f"文件上传失败: {file.filename}, 错误: {str(e)}", source="api", user=current_user.username)
+            failed_files.append({
+                "filename": file.filename,
+                "error": str(e)
+            })
+    
+    # 如果有失败的文件，返回错误信息
+    if failed_files and not uploaded_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"所有文件上传失败: {[f['filename'] for f in failed_files]}"
         )
     
     return uploaded_files
@@ -201,14 +175,13 @@ async def validate_files(
 @router.post("/process", response_model=FileProcessResponse, summary="处理文件")
 async def process_files(
     request: FileProcessRequest,
-    background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user)
 ):
     """
-    处理文件
+    提交文件处理任务到队列（异步处理）
     
     - **file_paths**: 文件路径列表
-    - **task_type**: RC Agent
+    - **task_type**: RC Agent类型
     - **custom_inputs**: 自定义输入参数
     - **params**: 处理参数
     """
@@ -218,7 +191,7 @@ async def process_files(
             detail="请选择要处理的文件"
         )
     
-    # 验证文件存在
+    # 验证文件存在（快速验证，保留在API层）
     file_processor = FileProcessor()
     valid_files, invalid_files = file_processor.validate_files(request.file_paths)
     
@@ -231,7 +204,7 @@ async def process_files(
     # 获取数据库连接参数
     db_conn_params = get_database_config()
     
-    # 获取任务信息
+    # 获取任务信息（快速验证）
     task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
     task_manager.load_agent_credentials()
     
@@ -247,447 +220,30 @@ async def process_files(
             detail=message
         )
     
-    # 生成任务ID
-    task_id = str(uuid.uuid4())
-    
-    # 初始化任务状态
-    task_statuses[task_id] = {
-        "status": "starting",
-        "progress": 0.0,
-        "current_file": None,
-        "files_processed": 0,
-        "files_failed": 0,
-        "total_files": len(valid_files),
-        "logs": [],
-        "start_time": time.time()
-    }
-    
-    # 创建后台任务处理文件
-    background_tasks.add_task(
-        process_files_background,
-        task_id=task_id,
-        file_paths=valid_files,
-        task_info=task_info,
-        custom_inputs=request.custom_inputs,
-        params=request.params,
-        username=current_user.username,
-        db_conn_params=db_conn_params
-    )
-    
-    return FileProcessResponse(
-        task_id=task_id,
-        message="文件处理任务已启动",
-        files_count=len(valid_files)
-    )
-
-
-async def process_files_background(
-    task_id: str,
-    file_paths: List[str],
-    task_info: dict,
-    custom_inputs: dict,
-    params: dict,
-    username: str,
-    db_conn_params: dict
-):
-    """后台处理文件"""
-    def update_task_status(status: str = None, progress: float = None, 
-                          current_file: str = None, log_message: str = None, 
-                          log_level: str = "info"):
-        """更新任务状态"""
-        if task_id in task_statuses:
-            if status:
-                task_statuses[task_id]["status"] = status
-            if progress is not None:
-                task_statuses[task_id]["progress"] = progress
-            if current_file:
-                task_statuses[task_id]["current_file"] = current_file
-            if log_message:
-                task_statuses[task_id]["logs"].append({
-                    "timestamp": datetime.now().isoformat(),
-                    "level": log_level,
-                    "message": log_message
-                })
-                # 同时写入统一日志系统
-                log_func = {"debug": debug, "info": info, "warning": warning, "error": error}.get(log_level, info)
-                log_func(log_message, source="task", task_id=task_id)
-    
     try:
-        update_task_status("initializing", 0.0, log_message="正在初始化处理服务...")
-        
-        # 获取API密钥 - 优先使用用户提供的密钥，否则使用配置中的默认密钥
-        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
-        if not api_key:
-            update_task_status("failed", log_message="LlamaIndex API密钥未配置")
-            return
-        
-        # 初始化服务
-        llama_service = LlamaService(
-            api_key=api_key, 
-            polling_interval=params.get('polling_interval', 10),
-            log_callback=update_task_status
+        # 🚀 提交到Celery任务队列（立即返回）
+        task = process_files_task.delay(
+            file_paths=valid_files,
+            task_info=task_info,
+            custom_inputs=request.custom_inputs,
+            params=request.params,
+            username=current_user.username
         )
         
-        use_ai_agent = params.get('use_ai_agent', True)
-        rc_agent_service = None
-        if use_ai_agent and task_info.get('token'):
-            token = task_info.get('token')
-            base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
-            # update_task_status(log_message=f"🔑 使用RC Agent Token: {token[:20]}... (长度: {len(token)})")
-            # update_task_status(log_message=f"🌐 使用RC Agent服务器地址: {base_url}")
-            rc_agent_service = RCAgentService(rc_agent_token=token, base_url=base_url, log_callback=update_task_status)
+        info(f"文件处理任务已提交到队列: {task.id}", source="api", user=current_user.username)
         
-        update_task_status("processing", 5.0, log_message="开始处理文件...")
-        
-        # 处理文件
-        successful_results = []
-        failed_files = []
-        
-        for i, file_path in enumerate(file_paths):
-            try:
-                file_name = os.path.basename(file_path)
-                update_task_status(
-                    current_file=file_name,
-                    progress=10.0 + (i / len(file_paths)) * 70.0,
-                    # log_message=f"正在处理文件: {file_name}"
-                )
-                
-                # 使用LlamaService处理文件
-                llama_params = {
-                    "language": params.get('language', ['ch_sim', 'en']),
-                    "fast_mode": params.get('fast_mode', False),
-                    "disable_ocr": params.get('disable_ocr', False),
-                    "max_pages": params.get('max_pages', 10),
-                    "target_pages": params.get('target_pages', ''),
-                    "skip_diagonal_text": params.get('skip_diagonal_text', False),
-                    "skip_table_extraction": params.get('skip_table_extraction', False),
-                    "extract_images": params.get('extract_images', False),
-                    "use_vendor_multimodal_model": params.get('use_vendor_multimodal_model', False),
-                    "vendor_multimodal_api_key": params.get('vendor_multimodal_api_key', ''),
-                    "polling_interval": params.get('polling_interval', 10)
-                }
-                
-                # 创建临时的结果收集器
-                results_collector = []
-                file_failed_files = []
-                
-                result_info, processing_time = await llama_service.process_file(
-                    file_path, results_collector, file_failed_files, llama_params
-                )
-                
-                if result_info and result_info.get('is_success', False):
-                    successful_results.extend(results_collector)
-                    task_statuses[task_id]["files_processed"] += 1
-                    update_task_status(log_message=f"文件 {file_name} 处理成功")
-                else:
-                    error_message = result_info.get('error', '处理失败') if result_info else '处理失败'
-                    failed_files.append({"file_path": file_path, "error": error_message})
-                    task_statuses[task_id]["files_failed"] += 1
-                    update_task_status(log_message=f"文件 {file_name} 处理失败: {error_message}", log_level="error")
-                    
-            except Exception as e:
-                error_message = str(e)
-                failed_files.append({"file_path": file_path, "error": error_message})
-                task_statuses[task_id]["files_failed"] += 1
-                update_task_status(log_message=f"文件 {os.path.basename(file_path)} 处理出错: {error_message}", log_level="error")
-        
-        # 如果有成功的结果，发送到RC Agent
-        final_report = None
-        file_ai_times = []
-        rc_agent_success = True  # 跟踪RC Agent处理是否成功
-        
-        if successful_results and rc_agent_service:
-            try:
-                update_task_status("ai_processing", 80.0, log_message="正在发送到RC Agent处理...")
-                agent_type = task_info.get('agent_type', 'chatbot')
-                final_report, file_ai_times = rc_agent_service.process_all_contents(successful_results, custom_inputs, agent_type)
-                update_task_status(log_message="RC Agent处理完成")
-            except Exception as e:
-                rc_agent_success = False
-                update_task_status(log_message=f"RC Agent处理失败: {str(e)}")
-                # 确保在失败时也有默认值
-                final_report = None
-                file_ai_times = []
-        
-        # 保存处理结果到数据库
-        update_task_status("saving", 95.0, log_message="正在保存处理结果...")
-        
-        # 确定RC Agent状态
-        if not successful_results or not rc_agent_service:
-            # 没有成功的文件或没有RC Agent服务，跳过RC Agent处理
-            rc_status = 'skipped'
-        elif rc_agent_success and final_report:
-            # RC Agent处理成功且有报告
-            rc_status = 'success'
-        elif not rc_agent_success:
-            # RC Agent处理失败
-            rc_status = 'failed'
-        else:
-            # 其他情况（如部分成功）
-            rc_status = 'failed'
-        
-        try:
-            # 保存处理结果到数据库
-            db_manager = DatabaseManager(db_conn_params)
-            conn = db_manager.get_connection()
-            
-            if conn:
-                cursor = conn.cursor()
-                
-                # 计算总时间
-                total_time = time.time() - task_statuses[task_id]["start_time"]
-                
-                # 计算文件处理时间和AI处理时间
-                total_file_processing_time = sum(
-                    result.get('processing_time', 0) for result in successful_results
-                )
-                
-                total_ai_time = sum(
-                    file_time.get('ai_time', 0) for file_time in (file_ai_times or [])
-                )
-                
-                # 计算总tokens和总费用
-                total_tokens = sum(
-                    file_time.get('total_tokens', 0) for file_time in (file_ai_times or [])
-                )
-                
-                total_price = sum(
-                    file_time.get('total_price', 0) for file_time in (file_ai_times or [])
-                )
-                
-                # 准备上传参数
-                upload_params = {
-                    "task_type": task_info.get('name', ''),
-                    "custom_inputs": custom_inputs,
-                    "processing_params": params
-                }
-                
-                # 插入处理统计记录
-                cursor.execute("""
-                INSERT INTO processing_stats 
-                (timestamp, files_processed, files_failed, total_time, 
-                 total_file_processing_time, total_ai_time, task_name, 
-                 "user", total_tokens, total_price, upload_params, 
-                 final_report, rc_agent_status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """, (
-                    datetime.now().isoformat(),
-                    len(successful_results),
-                    len(failed_files),
-                    total_time,
-                    total_file_processing_time,
-                    total_ai_time,
-                    task_info.get('name', ''),
-                    username,
-                    total_tokens,
-                    total_price,
-                    json.dumps(upload_params, ensure_ascii=False),
-                    final_report or "",
-                    rc_status
-                ))
-                
-                processing_stats_id = cursor.fetchone()[0]
-                
-                # 插入文件处理详情
-                file_processor = FileProcessor()
-                for result in successful_results:
-                    try:
-                        file_info = file_processor.get_file_info(result['original_file'])
-                        
-                        # 查找对应的AI时间信息
-                        ai_info = None
-                        if file_ai_times:
-                            ai_info = next(
-                                (ft for ft in file_ai_times if ft['file_path'] == result['original_file']),
-                                None
-                            )
-                        
-                        cursor.execute("""
-                        INSERT INTO file_processing_details 
-                        (processing_stats_id, filename, file_type, file_size_mb, 
-                         processing_time, ai_time, content_length, status, 
-                         total_tokens, cost, content, created_at, task_id, original_file_path)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
-                        """, (
-                            processing_stats_id,
-                            file_info['file_name'],
-                            file_info['file_type'],
-                            file_info['file_size_mb'],
-                            result.get('processing_time', 0),
-                            ai_info.get('ai_time', 0) if ai_info else 0,
-                            len(result.get('content', '')),
-                            'completed',
-                            ai_info.get('total_tokens', 0) if ai_info else 0,
-                            ai_info.get('total_price', 0) if ai_info else 0,
-                            result.get('content', ''),
-                            datetime.now(),
-                            task_id,
-                            result['original_file']  # 保存原始文件路径
-                        ))
-                        
-                        # 获取插入的文件ID
-                        file_processing_id = cursor.fetchone()[0]
-                        
-                        # 如果处理参数中包含标签信息，自动设置标签
-                        if (params.get('sector') and params.get('industry')):
-                            try:
-                                # 获取用户ID
-                                user_id = None
-                                if username:
-                                    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-                                    user_result = cursor.fetchone()
-                                    if user_result:
-                                        user_id = user_result[0]
-                                
-                                cursor.execute("""
-                                INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
-                                VALUES (%s, %s, %s, %s, %s)
-                                """, (
-                                    file_processing_id,
-                                    params.get('sector'),
-                                    params.get('industry'),
-                                    params.get('ticker'),
-                                    user_id
-                                ))
-                                update_task_status(log_message=f"✅ 已为文件 {file_info['file_name']} 设置标签: {params.get('sector')} -> {params.get('industry')}")
-                            except Exception as tag_error:
-                                update_task_status(log_message=f"⚠️ 为文件 {file_info['file_name']} 设置标签失败: {str(tag_error)}", log_level="warning")
-                                # 标签设置失败不应该影响文件处理
-                    except Exception as e:
-                        # 如果获取文件信息失败，使用基本信息
-                        cursor.execute("""
-                        INSERT INTO file_processing_details 
-                        (processing_stats_id, filename, file_type, file_size_mb, 
-                         processing_time, ai_time, content_length, status, 
-                         total_tokens, cost, content, created_at, task_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
-                        """, (
-                            processing_stats_id,
-                            os.path.basename(result['original_file']),
-                            'unknown',
-                            0,
-                            result.get('processing_time', 0),
-                            0,
-                            len(result.get('content', '')),
-                            'completed',
-                            0,
-                            0,
-                            result.get('content', ''),
-                            datetime.now(),
-                            task_id
-                        ))
-                        
-                        # 获取插入的文件ID
-                        file_processing_id = cursor.fetchone()[0]
-                        
-                        # 如果处理参数中包含标签信息，自动设置标签
-                        if (params.get('sector') and params.get('industry')):
-                            try:
-                                # 获取用户ID
-                                user_id = None
-                                if username:
-                                    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-                                    user_result = cursor.fetchone()
-                                    if user_result:
-                                        user_id = user_result[0]
-                                
-                                cursor.execute("""
-                                INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
-                                VALUES (%s, %s, %s, %s, %s)
-                                """, (
-                                    file_processing_id,
-                                    params.get('sector'),
-                                    params.get('industry'),
-                                    params.get('ticker'),
-                                    user_id
-                                ))
-                                update_task_status(log_message=f"✅ 已为文件 {os.path.basename(result['original_file'])} 设置标签: {params.get('sector')} -> {params.get('industry')}")
-                            except Exception as tag_error:
-                                update_task_status(log_message=f"⚠️ 为文件 {os.path.basename(result['original_file'])} 设置标签失败: {str(tag_error)}", log_level="warning")
-                                # 标签设置失败不应该影响文件处理
-                
-                # 插入失败的文件记录
-                for failed_file in failed_files:
-                    try:
-                        file_info = file_processor.get_file_info(failed_file['file_path'])
-                        cursor.execute("""
-                        INSERT INTO file_processing_details 
-                        (processing_stats_id, filename, file_type, file_size_mb, 
-                         processing_time, ai_time, content_length, status, 
-                         total_tokens, cost, error_message, created_at, task_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            processing_stats_id,
-                            file_info['file_name'],
-                            file_info['file_type'],
-                            file_info['file_size_mb'],
-                            0,
-                            0,
-                            0,
-                            'failed',
-                            0,
-                            0,
-                            failed_file.get('error', ''),
-                            datetime.now(),
-                            task_id
-                        ))
-                    except Exception as e:
-                        # 如果获取文件信息失败，使用基本信息
-                        cursor.execute("""
-                        INSERT INTO file_processing_details 
-                        (processing_stats_id, filename, file_type, file_size_mb, 
-                         processing_time, ai_time, content_length, status, 
-                         total_tokens, cost, error_message, created_at, task_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            processing_stats_id,
-                            os.path.basename(failed_file['file_path']),
-                            'unknown',
-                            0,
-                            0,
-                            0,
-                            0,
-                            'failed',
-                            0,
-                            0,
-                            failed_file.get('error', ''),
-                            datetime.now(),
-                            task_id
-                        ))
-                
-                conn.commit()
-                update_task_status(log_message="处理结果已保存到数据库")
-                
-            else:
-                update_task_status(log_message="无法连接到数据库，跳过保存结果")
-                
-        except Exception as e:
-            update_task_status(log_message=f"保存处理结果时出错: {str(e)}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-        
-        # 根据处理结果决定最终状态
-        if not rc_agent_success:
-            # RC Agent处理失败
-            update_task_status("failed", 100.0, log_message="任务处理失败：RC Agent处理出错")
-        elif successful_results and rc_agent_service and not final_report:
-            # 有成功的LlamaIndex结果，需要RC Agent处理，但未获得报告内容
-            update_task_status("failed", 100.0, log_message="任务处理失败：RC Agent未返回有效结果")
-        elif failed_files and not successful_results:
-            # 所有文件都处理失败
-            update_task_status("failed", 100.0, log_message="任务处理失败：所有文件处理失败")
-        else:
-            # 任务成功完成
-            update_task_status("completed", 100.0, log_message="文件处理完成")
+        return FileProcessResponse(
+            task_id=task.id,  # 使用Celery任务ID
+            message="文件处理任务已提交到队列，正在异步处理",
+            files_count=len(valid_files)
+        )
         
     except Exception as e:
-        update_task_status("failed", log_message=f"处理过程中发生错误: {str(e)}")
+        error(f"提交任务到队列失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="任务提交失败，请稍后重试"
+        )
 
 
 @router.get("/tasks/{task_id}/status", summary="获取任务状态")
@@ -696,43 +252,91 @@ async def get_task_status(
     current_user=Depends(get_current_user)
 ):
     """
-    获取任务处理状态
+    获取任务执行状态（从Redis读取）
     
-    - **task_id**: 任务ID
+    - **task_id**: Celery任务ID
     """
-    if task_id not in task_statuses:
+    try:
+        # 从Redis获取任务状态
+        task_result = AsyncResult(task_id, app=celery_app)
+        
+        if task_result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "status": "pending",
+                "progress": 0,
+                "message": "任务等待处理中...",
+                "current_file": None,
+                "files_processed": 0,
+                "total_files": 0
+            }
+        elif task_result.state == 'PROGRESS':
+            info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": info.get("status", "processing"),
+                "progress": info.get("progress", 0),
+                "message": info.get("message", "正在处理..."),
+                "current_file": info.get("current_file"),
+                "files_processed": info.get("files_processed", 0),
+                "files_failed": info.get("files_failed", 0),
+                "total_files": info.get("total_files", 0)
+            }
+        elif task_result.state == 'SUCCESS':
+            result = task_result.result or {}
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "progress": 100,
+                "message": "处理完成",
+                "files_processed": result.get("files_processed", 0),
+                "files_failed": result.get("files_failed", 0),
+                "total_files": result.get("total_files", 0),
+                "processing_time": result.get("processing_time", 0),
+                "result": result
+            }
+        else:  # FAILURE or other states
+            info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "progress": 0,
+                "message": str(info.get("error", "处理失败")),
+                "files_processed": info.get("files_processed", 0),
+                "files_failed": info.get("files_failed", 0),
+                "total_files": info.get("total_files", 0)
+            }
+            
+    except Exception as e:
+        error(f"获取任务状态失败: {str(e)}", source="api", task_id=task_id)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任务不存在"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取任务状态失败"
         )
-    
-    return task_statuses[task_id]
 
 
-@router.post("/tasks/{task_id}/stop", summary="停止任务")
-async def stop_task(
+@router.post("/tasks/{task_id}/cancel", summary="取消任务")
+async def cancel_task(
     task_id: str,
     current_user=Depends(get_current_user)
 ):
     """
-    停止正在执行的任务
+    取消正在执行的任务
     
-    - **task_id**: 任务ID
+    - **task_id**: Celery任务ID
     """
-    if task_id not in task_statuses:
+    try:
+        celery_app.control.revoke(task_id, terminate=True)
+        info(f"任务 {task_id} 已被用户 {current_user.username} 取消", source="api")
+        
+        return {"message": f"任务 {task_id} 已被取消"}
+        
+    except Exception as e:
+        error(f"取消任务失败: {str(e)}", source="api", task_id=task_id)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任务不存在"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="取消任务失败"
         )
-    
-    task_statuses[task_id]["status"] = "stopped"
-    task_statuses[task_id]["logs"].append({
-        "timestamp": datetime.now().isoformat(),
-        "level": "info",
-        "message": "用户请求停止任务"
-    })
-    
-    return {"message": "任务已停止"}
 
 
 @router.get("/tasks/{task_id}/files", response_model=List[FileDetailResponse], summary="获取任务文件详情")
@@ -741,139 +345,413 @@ async def get_task_files(
     current_user=Depends(get_current_user)
 ):
     """
-    获取任务的文件处理详情
+    获取任务处理的文件详情
     
-    - **task_id**: 任务ID
+    - **task_id**: 任务ID (Celery任务ID)
     """
-    db_conn_params = get_database_config()
-    db_manager = DatabaseManager(db_conn_params)
-    
-    conn = db_manager.get_connection()
-    if not conn:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="无法连接到数据库"
-        )
-    
-    cursor = conn.cursor()
     try:
+        # 从数据库获取文件处理详情
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 查询文件处理详情
         cursor.execute("""
         SELECT id, filename, file_type, file_size_mb, processing_time,
                ai_time, content_length, status, total_tokens, cost,
-               error_message, created_at, original_file_path
+               content, created_at, original_file_path
         FROM file_processing_details 
         WHERE task_id = %s
-        ORDER BY id
+        ORDER BY created_at DESC
         """, (task_id,))
         
-        files_data = cursor.fetchall()
+        files = []
+        for row in cursor.fetchall():
+            files.append(FileDetailResponse(
+                id=row[0],
+                task_id=task_id,  # 添加缺失的task_id字段
+                filename=row[1],
+                file_type=safe_file_type_conversion(row[2]),
+                file_size=row[3],  # 修正字段名：file_size_mb -> file_size
+                processing_time=row[4],
+                ai_time=row[5],
+                content_length=row[6],
+                status=row[7],
+                total_tokens=row[8],
+                cost=row[9],
+                error_message=row[10],  # 修正字段名：content -> error_message
+                created_at=row[11]
+            ))
         
-        return [
-            FileDetailResponse(
-                id=file_data[0],
-                task_id=task_id,
-                filename=file_data[1],
-                file_type=safe_file_type_conversion(file_data[2]),
-                file_size=file_data[3] or 0,
-                processing_time=file_data[4],
-                ai_time=file_data[5],
-                content_length=file_data[6],
-                status=file_data[7] or 'pending',
-                total_tokens=file_data[8],
-                cost=file_data[9],
-                error_message=file_data[10],
-                created_at=file_data[11],
-                original_file_path=file_data[12] if len(file_data) > 12 else None
-            )
-            for file_data in files_data
-        ]
-        
-    finally:
         conn.close()
 
+        return files
+        
+    except Exception as e:
+        error(f"获取任务文件详情失败: {str(e)}", source="api", task_id=task_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取文件详情失败"
+        )
 
-@router.get("/original/{file_id}", summary="获取原始文件信息")
-async def get_original_file_info(
-    file_id: int,
+
+@router.get("/list", response_model=List[FileDetailResponse], summary="获取文件列表")
+async def get_files(
+    skip: int = 0,
+    limit: int = 100,
+    file_type: Optional[str] = None,
     current_user=Depends(get_current_user)
 ):
     """
-    获取原始文件信息
+    获取文件处理历史列表
     
-    - **file_id**: 文件详情ID
+    - **skip**: 跳过记录数
+    - **limit**: 限制返回记录数
+    - **file_type**: 文件类型过滤
     """
-    db_conn_params = get_database_config()
-    db_manager = DatabaseManager(db_conn_params)
-    
-    conn = db_manager.get_connection()
-    if not conn:
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 构建查询条件
+        where_clause = "WHERE 1=1"
+        params = []
+        
+        if file_type:
+            where_clause += " AND file_type = %s"
+            params.append(file_type)
+        
+        # 查询文件列表
+        query = f"""
+            SELECT id, filename, file_type, file_size_mb, processing_time, 
+                   ai_time, content_length, status, total_tokens, cost, 
+                   content, created_at, original_file_path
+            FROM file_processing_details 
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([limit, skip])
+        
+        cursor.execute(query, params)
+        
+        files = []
+        for row in cursor.fetchall():
+            files.append(FileDetailResponse(
+                id=row[0],
+                filename=row[1],
+                file_type=safe_file_type_conversion(row[2]),
+                file_size_mb=row[3],
+                processing_time=row[4],
+                ai_time=row[5],
+                content_length=row[6],
+                status=row[7],
+                total_tokens=row[8],
+                cost=row[9],
+                content=row[10],
+                created_at=row[11],
+                original_file_path=row[12]
+            ))
+        
+        conn.close()
+
+        return files
+        
+    except Exception as e:
+        error(f"获取文件列表失败: {str(e)}", source="api")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="无法连接到数据库"
+            detail="获取文件列表失败"
         )
-    
-    cursor = conn.cursor()
+
+
+@router.get("/stats", summary="获取处理统计")
+async def get_processing_stats(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取文件处理统计信息
+    """
     try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 查询统计信息
         cursor.execute("""
-        SELECT filename, file_type, original_file_path, file_size_mb
-        FROM file_processing_details 
-        WHERE id = %s
-        """, (file_id,))
+        SELECT 
+                COUNT(*) as total_files,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_files,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_files,
+                AVG(processing_time) as avg_processing_time,
+                AVG(ai_time) as avg_ai_time,
+                SUM(total_tokens) as total_tokens,
+                SUM(cost) as total_cost
+            FROM file_processing_details
+        """)
         
-        result = cursor.fetchone()
+        stats = cursor.fetchone()
         
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件记录未找到"
-            )
-        
-        filename, file_type, original_file_path, file_size_mb = result
-        
-        if not original_file_path or not os.path.exists(original_file_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="原始文件不存在"
-            )
-        
-        # 构建可访问的URL - 根据环境动态调整
-        def build_file_url(file_path: str) -> str:
-            """根据部署环境构建正确的文件URL"""
-            # 获取相对文件名
-            if file_path.startswith("uploads/"):
-                relative_path = file_path[8:]  # 去掉 "uploads/" 前缀
-            else:
-                relative_path = os.path.basename(file_path)
-            
-            # 检查是否为开发环境
-            # 开发环境特征：DEBUG=True 或 ENVIRONMENT=development
-            is_development = (
-                os.getenv('DEBUG', 'false').lower() == 'true' or
-                os.getenv('ENVIRONMENT', 'production').lower() == 'development' or
-                os.getenv('APP_ENV', 'production').lower() == 'development'
-            )
-            
-            if is_development:
-                # 开发环境：需要包含后端服务器地址
-                backend_host = os.getenv('BACKEND_HOST', 'localhost')
-                backend_port = os.getenv('BACKEND_PORT', '8000')
-                return f"http://{backend_host}:{backend_port}/uploads/{relative_path}"
-            else:
-                # 生产环境：相对路径即可
-                return f"/uploads/{relative_path}"
-        
-        file_url = build_file_url(original_file_path)
+        conn.close()
         
         return {
-            "filename": filename,
-            "file_type": file_type,
-            "file_size_mb": file_size_mb,
-            "original_file_path": original_file_path,
-            "file_url": file_url
+            "total_files": stats[0] or 0,
+            "completed_files": stats[1] or 0,
+            "failed_files": stats[2] or 0,
+            "avg_processing_time": float(stats[3]) if stats[3] else 0,
+            "avg_ai_time": float(stats[4]) if stats[4] else 0,
+            "total_tokens": stats[5] or 0,
+            "total_cost": float(stats[6]) if stats[6] else 0
         }
         
-    finally:
+    except Exception as e:
+        error(f"获取处理统计失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取统计信息失败"
+        )
+
+
+# 文件标签相关API
+@router.post("/tags", response_model=FileTagResponse, summary="创建文件标签")
+async def create_file_tag(
+    tag: FileTagCreate,
+    current_user=Depends(get_current_user)
+):
+    """
+    为文件创建标签
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 插入标签
+        cursor.execute("""
+            INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, file_id, sector, industry, ticker, tagged_by, created_at
+        """, (
+            tag.file_id,
+            tag.sector,
+            tag.industry,
+            tag.ticker,
+            current_user.username
+        ))
+        
+        result = cursor.fetchone()
+        conn.commit()
         conn.close()
+        
+        return FileTagResponse(
+            id=result[0],
+            file_id=result[1],
+            sector=result[2],
+            industry=result[3],
+            ticker=result[4],
+            tagged_by=result[5],
+            created_at=result[6]
+        )
+        
+    except Exception as e:
+        error(f"创建文件标签失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="创建标签失败"
+        )
+
+
+@router.get("/tags/stats", response_model=FileTagStats, summary="获取标签统计")
+async def get_tag_stats(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取文件标签统计信息
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 查询标签统计
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_tags,
+                COUNT(DISTINCT sector) as unique_sectors,
+                COUNT(DISTINCT industry) as unique_industries,
+                COUNT(DISTINCT ticker) as unique_tickers
+            FROM file_tags
+        """)
+        
+        stats = cursor.fetchone()
+        
+        conn.close()
+        
+        return FileTagStats(
+            total_tags=stats[0] or 0,
+            unique_sectors=stats[1] or 0,
+            unique_industries=stats[2] or 0,
+            unique_tickers=stats[3] or 0
+        )
+        
+    except Exception as e:
+        error(f"获取标签统计失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取标签统计失败"
+        )
+
+
+@router.get("/tags/files", response_model=List[FileWithTag], summary="获取带标签的文件")
+async def get_files_with_tags(
+    sector: Optional[str] = None,
+    industry: Optional[str] = None,
+    ticker: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """
+    获取带标签的文件列表
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 构建查询条件
+        where_clause = "WHERE 1=1"
+        params = []
+        
+        if sector:
+            where_clause += " AND ft.sector = %s"
+            params.append(sector)
+        if industry:
+            where_clause += " AND ft.industry = %s"
+            params.append(industry)
+        if ticker:
+            where_clause += " AND ft.ticker = %s"
+            params.append(ticker)
+        
+        # 查询带标签的文件
+        query = f"""
+            SELECT 
+                fpd.id, fpd.filename, fpd.file_type, fpd.file_size_mb,
+                fpd.processing_time, fpd.ai_time, fpd.content_length,
+                fpd.status, fpd.total_tokens, fpd.cost, fpd.created_at,
+                ft.sector, ft.industry, ft.ticker, ft.tagged_by
+            FROM file_processing_details fpd
+            JOIN file_tags ft ON fpd.id = ft.file_id
+            {where_clause}
+            ORDER BY fpd.created_at DESC
+        """
+        
+        cursor.execute(query, params)
+        
+        files = []
+        for row in cursor.fetchall():
+            files.append(FileWithTag(
+                id=row[0],
+                filename=row[1],
+                file_type=safe_file_type_conversion(row[2]),
+                file_size_mb=row[3],
+                processing_time=row[4],
+                ai_time=row[5],
+                content_length=row[6],
+                status=row[7],
+                total_tokens=row[8],
+                cost=row[9],
+                created_at=row[10],
+                sector=row[11],
+                industry=row[12],
+                ticker=row[13],
+                tagged_by=row[14]
+            ))
+        
+        conn.close()
+        
+        return files
+        
+    except Exception as e:
+        error(f"获取带标签文件失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取带标签文件失败"
+        )
+
+
+@router.get("/processing-params", summary="获取处理参数选项")
+async def get_processing_params():
+    """获取文件处理的参数选项和默认值"""
+    return {
+        "language_options": [
+            {"value": ["ch_sim", "en"], "label": "中文简体和英文"},
+            {"value": ["ch_sim"], "label": "仅中文简体"},
+            {"value": ["en"], "label": "仅英文"},
+            {"value": ["ch_tra"], "label": "仅中文繁体"}
+        ],
+        "default_language": ["ch_sim", "en"],
+        "fast_mode_options": [
+            {"value": True, "label": "快速模式"},
+            {"value": False, "label": "标准模式"}
+        ],
+        "default_fast_mode": False,
+        "max_pages_options": [
+            {"value": 5, "label": "5页"},
+            {"value": 10, "label": "10页"},
+            {"value": 20, "label": "20页"},
+            {"value": 50, "label": "50页"},
+            {"value": 100, "label": "100页"}
+        ],
+        "default_max_pages": 10
+    }
 
 
 @router.delete("/uploads/{filename}", summary="删除上传的文件")
@@ -886,83 +764,81 @@ async def delete_uploaded_file(
     
     - **filename**: 文件名
     """
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文件不存在"
-        )
-    
     try:
-        os.remove(file_path)
-        return {"message": "文件删除成功"}
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            info(f"文件删除成功: {filename}", source="api", user=current_user.username)
+            return {"message": f"文件 {filename} 已删除"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
+            )
+                
     except Exception as e:
+        error(f"删除文件失败: {str(e)}", source="api", user=current_user.username)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文件删除失败: {str(e)}"
+            detail="删除文件失败"
         )
 
 
-@router.post("/reorder", summary="重新排序文件")
-async def reorder_files(
-    file_paths: List[str],
+@router.get("/original/{file_id}", summary="获取原始文件信息")
+async def get_original_file_info(
+    file_id: str,
     current_user=Depends(get_current_user)
 ):
     """
-    重新排序文件列表
+    获取原始文件信息
     
-    - **file_paths**: 重新排序后的文件路径列表
+    - **file_id**: 文件ID
     """
-    # 验证文件存在
-    file_processor = FileProcessor()
-    valid_files, invalid_files = file_processor.validate_files(file_paths)
-    
-    if invalid_files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"存在无效文件: {[f['path'] for f in invalid_files]}"
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 查询文件信息
+        cursor.execute("""
+            SELECT filename, file_type, file_size_mb, original_file_path, created_at
+            FROM file_processing_details 
+            WHERE id = %s
+        """, (file_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return {
+                "file_id": file_id,
+                "filename": result[0],
+                "file_type": result[1],
+                "file_size_mb": result[2],
+                "original_file_path": result[3],
+                "created_at": result[4]
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
         )
-    
-    return {
-        "message": "文件排序成功",
-        "ordered_files": valid_files
-    }
-
-
-@router.get("/processing-params", summary="获取处理参数选项")
-async def get_processing_params():
-    """获取文件处理的参数选项和默认值"""
-    return {
-        "language_options": [
-            {"value": ["ch_sim", "en"], "label": "中文简体和英文"},
-            {"value": ["ch_sim"], "label": "仅中文简体"},
-            {"value": ["en"], "label": "仅英文"},
-            {"value": ["ch_tra", "en"], "label": "中文繁体和英文"},
-            {"value": ["ch_tra"], "label": "仅中文繁体"}
-        ],
-        "boolean_options": [
-            {"key": "fast_mode", "label": "快速模式", "default": False},
-            {"key": "disable_ocr", "label": "禁用OCR", "default": False},
-            {"key": "skip_diagonal_text", "label": "跳过对角线文本", "default": False},
-            {"key": "skip_table_extraction", "label": "跳过表格提取", "default": False},
-            {"key": "extract_images", "label": "提取图像", "default": False},
-            {"key": "use_vendor_multimodal_model", "label": "使用供应商多模态模型", "default": False}
-        ],
-        "numeric_options": [
-            {"key": "max_pages", "label": "最大页数", "default": 10, "min": 1, "max": 1000},
-            {"key": "polling_interval", "label": "轮询间隔(秒)", "default": 10, "min": 1, "max": 60}
-        ],
-        "text_options": [
-            {"key": "target_pages", "label": "目标页面", "placeholder": "例如: 0,1,2 或 0-2,6-22"},
-            {"key": "vendor_multimodal_api_key", "label": "供应商多模态API密钥", "type": "password"},
-            {"key": "llamaindex_api_key", "label": "LlamaIndex API密钥", "type": "password"}
-        ],
-        "defaults": {
-            "llamaindex_api_key": os.getenv('LLAMA_CLOUD_API_KEY'),
-            "ai_agent_server_url": os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages')
-        }
-    }
+        
+    except Exception as e:
+        error(f"获取文件信息失败: {str(e)}", source="api", file_id=file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取文件信息失败"
+        )
 
 
 @router.get("/sectors", summary="获取所有行业分类")
@@ -1016,11 +892,9 @@ async def get_sectors(current_user=Depends(get_current_user)):
         sectors.sort(key=lambda x: x["label"])
         
         return sectors
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取行业分类失败: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"获取行业分类失败: {str(e)}")
 
 
 @router.get("/tickers", summary="搜索股票代码")
@@ -1091,436 +965,3 @@ async def search_tickers(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"搜索股票代码失败: {str(e)}"
         )
-
-
-@router.post("/{file_id}/tags", response_model=FileTagResponse, summary="为文件设置标签")
-async def create_file_tag(
-    file_id: int,
-    tag_data: FileTagCreate,
-    current_user=Depends(get_current_user)
-):
-    """
-    为指定文件设置标签
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        # 检查文件是否存在
-        file_query = "SELECT id FROM files WHERE id = %s"
-        file_result = db_manager.fetch_one(file_query, [file_id])
-        if not file_result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件不存在"
-            )
-        
-        # 检查是否已有标签，如果有则更新，否则创建
-        existing_tag_query = "SELECT id FROM file_tags WHERE file_id = %s"
-        existing_tag = db_manager.fetch_one(existing_tag_query, [file_id])
-        
-        if existing_tag:
-            # 更新现有标签
-            update_query = """
-            UPDATE file_tags 
-            SET sector = %s, industry = %s, ticker = %s, 
-                tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
-                updated_at = CURRENT_TIMESTAMP
-            WHERE file_id = %s
-            RETURNING id, file_id, sector, industry, ticker, 
-                     tagged_by, tagged_at, created_at, updated_at
-            """
-            result = db_manager.fetch_one(update_query, [
-                tag_data.sector, tag_data.industry, tag_data.ticker,
-                current_user.id, file_id
-            ])
-        else:
-            # 创建新标签
-            insert_query = """
-            INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id, file_id, sector, industry, ticker, 
-                     tagged_by, tagged_at, created_at, updated_at
-            """
-            result = db_manager.fetch_one(insert_query, [
-                file_id, tag_data.sector, tag_data.industry, 
-                tag_data.ticker, current_user.id
-            ])
-        
-        return FileTagResponse(
-            id=result[0],
-            file_id=result[1],
-            sector=result[2],
-            industry=result[3],
-            ticker=result[4],
-            tagged_by=result[5],
-            tagged_at=result[6],
-            created_at=result[7],
-            updated_at=result[8]
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"设置文件标签失败: {str(e)}"
-        )
-
-
-@router.get("/{file_id}/tags", response_model=FileTagResponse, summary="获取文件标签")
-async def get_file_tag(
-    file_id: int,
-    current_user=Depends(get_current_user)
-):
-    """
-    获取指定文件的标签
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        query = """
-        SELECT id, file_id, sector, industry, ticker, 
-               tagged_by, tagged_at, created_at, updated_at
-        FROM file_tags 
-        WHERE file_id = %s
-        """
-        result = db_manager.fetch_one(query, [file_id])
-        
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件标签不存在"
-            )
-        
-        return FileTagResponse(
-            id=result[0],
-            file_id=result[1],
-            sector=result[2],
-            industry=result[3],
-            ticker=result[4],
-            tagged_by=result[5],
-            tagged_at=result[6],
-            created_at=result[7],
-            updated_at=result[8]
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取文件标签失败: {str(e)}"
-        )
-
-
-@router.put("/{file_id}/tags", response_model=FileTagResponse, summary="更新文件标签")
-async def update_file_tag(
-    file_id: int,
-    tag_data: FileTagUpdate,
-    current_user=Depends(get_current_user)
-):
-    """
-    更新指定文件的标签
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        # 检查标签是否存在
-        check_query = "SELECT id FROM file_tags WHERE file_id = %s"
-        existing = db_manager.fetch_one(check_query, [file_id])
-        
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件标签不存在"
-            )
-        
-        update_query = """
-        UPDATE file_tags 
-        SET sector = %s, industry = %s, ticker = %s, 
-            tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
-            updated_at = CURRENT_TIMESTAMP
-        WHERE file_id = %s
-        RETURNING id, file_id, sector, industry, ticker, 
-                 tagged_by, tagged_at, created_at, updated_at
-        """
-        result = db_manager.fetch_one(update_query, [
-            tag_data.sector, tag_data.industry, tag_data.ticker,
-            current_user.id, file_id
-        ])
-        
-        return FileTagResponse(
-            id=result[0],
-            file_id=result[1],
-            sector=result[2],
-            industry=result[3],
-            ticker=result[4],
-            tagged_by=result[5],
-            tagged_at=result[6],
-            created_at=result[7],
-            updated_at=result[8]
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新文件标签失败: {str(e)}"
-        )
-
-
-@router.delete("/{file_id}/tags", summary="删除文件标签")
-async def delete_file_tag(
-    file_id: int,
-    current_user=Depends(get_current_user)
-):
-    """
-    删除指定文件的标签
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        # 检查标签是否存在
-        check_query = "SELECT id FROM file_tags WHERE file_id = %s"
-        existing = db_manager.fetch_one(check_query, [file_id])
-        
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件标签不存在"
-            )
-        
-        delete_query = "DELETE FROM file_tags WHERE file_id = %s"
-        db_manager.execute(delete_query, [file_id])
-        
-        return {"message": "文件标签删除成功"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除文件标签失败: {str(e)}"
-        )
-
-
-@router.post("/batch-tag", summary="批量设置文件标签")
-async def batch_create_file_tags(
-    batch_data: FileTagBatchCreate,
-    current_user=Depends(get_current_user)
-):
-    """
-    批量为多个文件设置相同标签
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        success_count = 0
-        failed_files = []
-        
-        for file_id in batch_data.file_ids:
-            try:
-                # 检查文件是否存在
-                file_query = "SELECT id FROM files WHERE id = %s"
-                file_result = db_manager.fetch_one(file_query, [file_id])
-                if not file_result:
-                    failed_files.append({"file_id": file_id, "reason": "文件不存在"})
-                    continue
-                
-                # 检查是否已有标签
-                existing_tag_query = "SELECT id FROM file_tags WHERE file_id = %s"
-                existing_tag = db_manager.fetch_one(existing_tag_query, [file_id])
-                
-                if existing_tag:
-                    # 更新现有标签
-                    update_query = """
-                    UPDATE file_tags 
-                    SET sector = %s, industry = %s, ticker = %s, 
-                        tagged_by = %s, tagged_at = CURRENT_TIMESTAMP, 
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE file_id = %s
-                    """
-                    db_manager.execute(update_query, [
-                        batch_data.sector, batch_data.industry, batch_data.ticker,
-                        current_user.id, file_id
-                    ])
-                else:
-                    # 创建新标签
-                    insert_query = """
-                    INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """
-                    db_manager.execute(insert_query, [
-                        file_id, batch_data.sector, batch_data.industry, 
-                        batch_data.ticker, current_user.id
-                    ])
-                
-                success_count += 1
-                
-            except Exception as e:
-                failed_files.append({"file_id": file_id, "reason": str(e)})
-        
-        return {
-            "message": f"批量标签设置完成",
-            "success_count": success_count,
-            "failed_count": len(failed_files),
-            "failed_files": failed_files
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量设置文件标签失败: {str(e)}"
-        )
-
-
-@router.get("/by-tags", response_model=List[FileWithTag], summary="按标签查询文件")
-async def get_files_by_tags(
-    sector: Optional[str] = None,
-    industry: Optional[str] = None,
-    ticker: Optional[str] = None,
-    current_user=Depends(get_current_user)
-):
-    """
-    根据标签查询文件
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        # 构建查询条件
-        where_conditions = []
-        params = []
-        
-        if sector:
-            where_conditions.append("ft.sector = %s")
-            params.append(sector)
-        
-        if industry:
-            where_conditions.append("ft.industry = %s")
-            params.append(industry)
-        
-        if ticker:
-            where_conditions.append("ft.ticker = %s")
-            params.append(ticker)
-        
-        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-        
-        query = f"""
-        SELECT 
-            f.id, f.filename, f.file_path, f.file_size, f.file_type, f.created_at,
-            ft.id as tag_id, ft.sector, ft.industry, ft.ticker, 
-            ft.tagged_by, ft.tagged_at, ft.created_at as tag_created_at, ft.updated_at as tag_updated_at
-        FROM files f
-        LEFT JOIN file_tags ft ON f.id = ft.file_id
-        WHERE {where_clause}
-        ORDER BY f.created_at DESC
-        """
-        
-        results = db_manager.fetch_all(query, params)
-        
-        files_with_tags = []
-        for row in results:
-            file_data = {
-                "id": row[0],
-                "filename": row[1],
-                "file_path": row[2],
-                "file_size": row[3],
-                "file_type": row[4],
-                "created_at": row[5]
-            }
-            
-            tag_data = None
-            if row[6]:  # 如果有标签ID
-                tag_data = {
-                    "id": row[6],
-                    "file_id": row[0],
-                    "sector": row[7],
-                    "industry": row[8],
-                    "ticker": row[9],
-                    "tagged_by": row[10],
-                    "tagged_at": row[11],
-                    "created_at": row[12],
-                    "updated_at": row[13]
-                }
-            
-            files_with_tags.append(FileWithTag(**file_data, tag=tag_data))
-        
-        return files_with_tags
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"按标签查询文件失败: {str(e)}"
-        )
-
-
-@router.get("/tag-stats", response_model=FileTagStats, summary="获取文件标签统计")
-async def get_file_tag_stats(current_user=Depends(get_current_user)):
-    """
-    获取文件标签的统计信息
-    """
-    try:
-        db_conn_params = get_database_config()
-        db_manager = DatabaseManager(db_conn_params)
-        
-        # 总文件数
-        total_files_query = "SELECT COUNT(*) FROM files"
-        total_files = db_manager.fetch_one(total_files_query)[0]
-        
-        # 已标签文件数
-        tagged_files_query = "SELECT COUNT(DISTINCT file_id) FROM file_tags"
-        tagged_files = db_manager.fetch_one(tagged_files_query)[0]
-        
-        # 未标签文件数
-        untagged_files = total_files - tagged_files
-        
-        # 行业分类统计
-        sectors_query = """
-        SELECT sector, COUNT(*) as count 
-        FROM file_tags 
-        GROUP BY sector 
-        ORDER BY count DESC
-        """
-        sectors_results = db_manager.fetch_all(sectors_query)
-        sectors = [{"name": row[0], "count": row[1]} for row in sectors_results]
-        
-        # 子行业分类统计
-        industries_query = """
-        SELECT industry, COUNT(*) as count 
-        FROM file_tags 
-        GROUP BY industry 
-        ORDER BY count DESC
-        """
-        industries_results = db_manager.fetch_all(industries_query)
-        industries = [{"name": row[0], "count": row[1]} for row in industries_results]
-        
-        # 股票代码统计
-        tickers_query = """
-        SELECT ticker, COUNT(*) as count 
-        FROM file_tags 
-        WHERE ticker IS NOT NULL 
-        GROUP BY ticker 
-        ORDER BY count DESC
-        """
-        tickers_results = db_manager.fetch_all(tickers_query)
-        tickers = [{"name": row[0], "count": row[1]} for row in tickers_results]
-        
-        return FileTagStats(
-            total_files=total_files,
-            tagged_files=tagged_files,
-            untagged_files=untagged_files,
-            sectors=sectors,
-            industries=industries,
-            tickers=tickers
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取文件标签统计失败: {str(e)}"
-        ) 

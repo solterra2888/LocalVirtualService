@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -99,6 +99,9 @@ app.include_router(chart_events.router, prefix="/api/chart-events", tags=["图�
 # EOD Fetch API
 from backend.api import eod_fetch
 app.include_router(eod_fetch.router, prefix="/api", tags=["EOD数据获取"])
+
+# LLM配置API
+app.include_router(llm_config.router, prefix="/api", tags=["LLM配置"])
 
 # 静态文件服务
 # 为上传的文件提供静态文件访问

@@ -19,6 +19,7 @@ import SchedulerPage from './pages/SchedulerPage';
 import FinvizScreenerPage from './pages/FinvizScreenerPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
+import LLMConfigPage from './pages/LLMConfigPage';
 import './App.css';
 
 // 私有路由组件
@@ -130,6 +131,14 @@ const App: React.FC = () => {
                   element={
                     <AdminRoute>
                       <UsersPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="llm-config"
+                  element={
+                    <AdminRoute>
+                      <LLMConfigPage />
                     </AdminRoute>
                   }
                 />

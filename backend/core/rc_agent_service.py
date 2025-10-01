@@ -62,12 +62,12 @@ class RCAgentService:
         if "🔄 RC Agent步骤" in message:
             # 只通过callback发送给前端
             if self.log_callback:
-                self.log_callback(log_message=message, log_level=level)
+                self.log_callback(log_message=message)
         else:
             # 其他日志同时在后端记录和发送给前端
             self.logger.log_rc_agent_service(message, level)
             if self.log_callback:
-                self.log_callback(log_message=message, log_level=level)
+                self.log_callback(log_message=message)
     
     def send_to_rc_agent(self, content, conversation_id=None, custom_inputs=None, current_file_name=None, agent_type="chatbot"):
         """

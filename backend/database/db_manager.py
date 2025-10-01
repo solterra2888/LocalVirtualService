@@ -368,6 +368,9 @@ class DatabaseManager:
             # 创建宏观指标相关表
             self._create_macro_indicators_tables(conn)
             
+            # 创建LLM配置相关表
+            self._create_llm_config_tables(conn)
+            
             conn.commit()
             conn.close()
             return True
@@ -845,6 +848,506 @@ class DatabaseManager:
             return results
         except Exception as e:
             print(f"获取查询结果时出错: {str(e)}")
+            if conn:
+                conn.close()
+            return []
+    
+    def _create_llm_config_tables(self, conn):
+        """创建LLM配置相关表"""
+        cursor = conn.cursor()
+        
+        try:
+            # 创建LLM提供商配置表
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS llm_provider_configs (
+                id SERIAL PRIMARY KEY,
+                provider_id VARCHAR(50) NOT NULL UNIQUE,
+                provider_name VARCHAR(100) NOT NULL,
+                display_name VARCHAR(100) NOT NULL,
+                
+                -- API配置
+                api_key TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                
+                -- 模型配置
+                enabled BOOLEAN DEFAULT false,
+                default_model VARCHAR(100),
+                available_models JSONB,
+                
+                -- 参数配置
+                max_tokens INTEGER DEFAULT 2000,
+                temperature DECIMAL(3,2) DEFAULT 0.7,
+                top_p DECIMAL(3,2) DEFAULT 0.8,
+                timeout INTEGER DEFAULT 30,
+                
+                -- 元数据
+                description TEXT,
+                icon VARCHAR(10),
+                
+                -- 管理字段
+                created_by VARCHAR(255) NOT NULL,
+                updated_by VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                -- 使用统计
+                total_requests INTEGER DEFAULT 0,
+                total_tokens BIGINT DEFAULT 0,
+                total_cost DECIMAL(10,4) DEFAULT 0.0,
+                last_used_at TIMESTAMP,
+                
+                -- 故障转移配置
+                is_default_provider BOOLEAN DEFAULT false,
+                fallback_priority INTEGER DEFAULT 999,
+                
+                CONSTRAINT chk_temperature CHECK (temperature >= 0 AND temperature <= 2),
+                CONSTRAINT chk_top_p CHECK (top_p >= 0 AND top_p <= 1)
+            )
+            """)
+            
+            # 创建索引
+            cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_provider_id 
+                ON llm_provider_configs(provider_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_enabled 
+                ON llm_provider_configs(enabled);
+            CREATE INDEX IF NOT EXISTS idx_llm_default_provider 
+                ON llm_provider_configs(is_default_provider);
+            CREATE INDEX IF NOT EXISTS idx_llm_fallback_priority 
+                ON llm_provider_configs(fallback_priority);
+            """)
+            
+            # 创建LLM全局配置表
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS llm_global_settings (
+                id SERIAL PRIMARY KEY,
+                setting_key VARCHAR(100) NOT NULL UNIQUE,
+                setting_value JSONB NOT NULL,
+                description TEXT,
+                updated_by VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                CONSTRAINT chk_valid_setting_key CHECK (
+                    setting_key IN (
+                        'default_provider',
+                        'fallback_enabled',
+                        'fallback_order',
+                        'global_timeout',
+                        'global_retry_count',
+                        'enable_logging',
+                        'enable_monitoring'
+                    )
+                )
+            )
+            """)
+            
+            # 创建LLM使用日志表（可选，用于统计和监控）
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS llm_usage_logs (
+                id SERIAL PRIMARY KEY,
+                provider_id VARCHAR(50) NOT NULL,
+                model VARCHAR(100) NOT NULL,
+                user_id VARCHAR(255),
+                
+                -- 请求信息
+                request_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                response_time_ms INTEGER,
+                
+                -- Token统计
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                
+                -- 成本统计
+                cost DECIMAL(10,6),
+                currency VARCHAR(10) DEFAULT 'RMB',
+                
+                -- 状态
+                status VARCHAR(20) NOT NULL,
+                error_message TEXT,
+                
+                -- 关联信息
+                request_id VARCHAR(100),
+                trace_id VARCHAR(100),
+                
+                CONSTRAINT chk_usage_status CHECK (status IN ('success', 'failed', 'timeout'))
+            )
+            """)
+            
+            # 创建使用日志索引
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_provider 
+                ON llm_usage_logs(provider_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_time 
+                ON llm_usage_logs(request_time);
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_user 
+                ON llm_usage_logs(user_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_status 
+                ON llm_usage_logs(status);
+            """)
+            
+            # 插入默认的全局配置（如果不存在）
+            cursor.execute("""
+            INSERT INTO llm_global_settings (setting_key, setting_value, description, updated_by)
+            VALUES 
+                ('default_provider', '"qwen"', '默认LLM提供商', 'system'),
+                ('fallback_enabled', 'true', '是否启用故障转移', 'system'),
+                ('fallback_order', '["qwen", "doubao", "glm"]', '故障转移顺序', 'system'),
+                ('global_timeout', '30', '全局请求超时时间（秒）', 'system'),
+                ('global_retry_count', '3', '全局重试次数', 'system'),
+                ('enable_logging', 'true', '是否启用详细日志', 'system'),
+                ('enable_monitoring', 'true', '是否启用性能监控', 'system')
+            ON CONFLICT (setting_key) DO NOTHING
+            """)
+            
+            # 插入默认的提供商配置（如果不存在）
+            cursor.execute("""
+            INSERT INTO llm_provider_configs (
+                provider_id, provider_name, display_name, api_key, base_url,
+                enabled, default_model, available_models, max_tokens, temperature,
+                top_p, timeout, description, icon, created_by, updated_by,
+                is_default_provider, fallback_priority
+            ) VALUES 
+                ('qwen', 'qwen', '通义千问', '', 'https://dashscope.aliyuncs.com',
+                 false, 'qwen-turbo', '["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"]',
+                 2000, 0.7, 0.8, 30, '阿里云通义千问大语言模型，支持多种规格', '🔷',
+                 'system', 'system', true, 1),
+                ('doubao', 'doubao', '豆包', '', 'https://ark.cn-beijing.volces.com',
+                 false, 'doubao-seed-1-6-250615', '["doubao-seed-1-6-250615"]',
+                 4000, 0.7, 0.9, 30, '字节跳动豆包大模型，强大的中文理解能力', '🫘',
+                 'system', 'system', false, 2),
+                ('glm', 'glm', '智谱GLM', '', 'https://open.bigmodel.cn',
+                 false, 'glm-4.6', '["glm-4.6", "glm-4", "glm-4-flash"]',
+                 8000, 0.7, 0.8, 30, '清华智谱AI大语言模型', '🧠',
+                 'system', 'system', false, 3)
+            ON CONFLICT (provider_id) DO NOTHING
+            """)
+            
+            print("✅ LLM配置相关表创建/更新完成")
+            print("   - 已插入默认的3个提供商配置（API密钥为空，需要手动配置）")
+        except Exception as e:
+            print(f"❌ 创建LLM配置表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+    
+    # LLM配置相关的数据库操作方法
+    
+    def get_llm_provider_configs(self, enabled_only=False):
+        """获取LLM提供商配置列表"""
+        conn = self.get_connection()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            if enabled_only:
+                cursor.execute("""
+                SELECT id, provider_id, provider_name, display_name, api_key, 
+                       base_url, enabled, default_model, available_models,
+                       max_tokens, temperature, top_p, timeout, description, icon,
+                       created_by, updated_by, created_at, updated_at,
+                       total_requests, total_tokens, total_cost, last_used_at,
+                       is_default_provider, fallback_priority
+                FROM llm_provider_configs
+                WHERE enabled = true
+                ORDER BY fallback_priority ASC, provider_id ASC
+                """)
+            else:
+                cursor.execute("""
+                SELECT id, provider_id, provider_name, display_name, api_key, 
+                       base_url, enabled, default_model, available_models,
+                       max_tokens, temperature, top_p, timeout, description, icon,
+                       created_by, updated_by, created_at, updated_at,
+                       total_requests, total_tokens, total_cost, last_used_at,
+                       is_default_provider, fallback_priority
+                FROM llm_provider_configs
+                ORDER BY fallback_priority ASC, provider_id ASC
+                """)
+            
+            results = cursor.fetchall()
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"获取LLM提供商配置失败: {str(e)}")
+            if conn:
+                conn.close()
+            return []
+    
+    def get_llm_provider_config(self, provider_id):
+        """获取单个LLM提供商配置"""
+        conn = self.get_connection()
+        if not conn:
+            return None
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT id, provider_id, provider_name, display_name, api_key, 
+                   base_url, enabled, default_model, available_models,
+                   max_tokens, temperature, top_p, timeout, description, icon,
+                   created_by, updated_by, created_at, updated_at,
+                   total_requests, total_tokens, total_cost, last_used_at,
+                   is_default_provider, fallback_priority
+            FROM llm_provider_configs
+            WHERE provider_id = %s
+            """, (provider_id,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            return result
+        except Exception as e:
+            print(f"获取LLM提供商配置失败: {str(e)}")
+            if conn:
+                conn.close()
+            return None
+    
+    def save_llm_provider_config(self, config_data, username):
+        """保存或更新LLM提供商配置"""
+        conn = self.get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 检查是否已存在
+            cursor.execute(
+                "SELECT id FROM llm_provider_configs WHERE provider_id = %s",
+                (config_data['provider_id'],)
+            )
+            existing = cursor.fetchone()
+            
+            if existing:
+                # 更新现有配置
+                cursor.execute("""
+                UPDATE llm_provider_configs
+                SET provider_name = %s, display_name = %s, api_key = %s,
+                    base_url = %s, enabled = %s, default_model = %s,
+                    available_models = %s, max_tokens = %s, temperature = %s,
+                    top_p = %s, timeout = %s, description = %s, icon = %s,
+                    updated_by = %s, updated_at = CURRENT_TIMESTAMP,
+                    is_default_provider = %s, fallback_priority = %s
+                WHERE provider_id = %s
+                """, (
+                    config_data['provider_name'],
+                    config_data['display_name'],
+                    config_data['api_key'],
+                    config_data['base_url'],
+                    config_data.get('enabled', False),
+                    config_data.get('default_model'),
+                    config_data.get('available_models'),
+                    config_data.get('max_tokens', 2000),
+                    config_data.get('temperature', 0.7),
+                    config_data.get('top_p', 0.8),
+                    config_data.get('timeout', 30),
+                    config_data.get('description'),
+                    config_data.get('icon'),
+                    username,
+                    config_data.get('is_default_provider', False),
+                    config_data.get('fallback_priority', 999),
+                    config_data['provider_id']
+                ))
+            else:
+                # 插入新配置
+                cursor.execute("""
+                INSERT INTO llm_provider_configs (
+                    provider_id, provider_name, display_name, api_key,
+                    base_url, enabled, default_model, available_models,
+                    max_tokens, temperature, top_p, timeout,
+                    description, icon, created_by, updated_by,
+                    is_default_provider, fallback_priority
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    config_data['provider_id'],
+                    config_data['provider_name'],
+                    config_data['display_name'],
+                    config_data['api_key'],
+                    config_data['base_url'],
+                    config_data.get('enabled', False),
+                    config_data.get('default_model'),
+                    config_data.get('available_models'),
+                    config_data.get('max_tokens', 2000),
+                    config_data.get('temperature', 0.7),
+                    config_data.get('top_p', 0.8),
+                    config_data.get('timeout', 30),
+                    config_data.get('description'),
+                    config_data.get('icon'),
+                    username,
+                    username,
+                    config_data.get('is_default_provider', False),
+                    config_data.get('fallback_priority', 999)
+                ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"保存LLM提供商配置失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return False
+    
+    def get_llm_global_settings(self):
+        """获取LLM全局配置"""
+        conn = self.get_connection()
+        if not conn:
+            return {}
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT setting_key, setting_value, description, updated_by, updated_at
+            FROM llm_global_settings
+            ORDER BY setting_key
+            """)
+            
+            results = cursor.fetchall()
+            conn.close()
+            
+            # 转换为字典格式
+            settings = {}
+            for row in results:
+                settings[row[0]] = {
+                    'value': row[1],
+                    'description': row[2],
+                    'updated_by': row[3],
+                    'updated_at': row[4]
+                }
+            return settings
+        except Exception as e:
+            print(f"获取LLM全局配置失败: {str(e)}")
+            if conn:
+                conn.close()
+            return {}
+    
+    def update_llm_global_setting(self, setting_key, setting_value, username):
+        """更新LLM全局配置"""
+        conn = self.get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE llm_global_settings
+            SET setting_value = %s, updated_by = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE setting_key = %s
+            """, (setting_value, username, setting_key))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"更新LLM全局配置失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return False
+    
+    def log_llm_usage(self, usage_data):
+        """记录LLM使用日志"""
+        conn = self.get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO llm_usage_logs (
+                provider_id, model, user_id, response_time_ms,
+                prompt_tokens, completion_tokens, total_tokens,
+                cost, currency, status, error_message,
+                request_id, trace_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                usage_data['provider_id'],
+                usage_data['model'],
+                usage_data.get('user_id'),
+                usage_data.get('response_time_ms'),
+                usage_data.get('prompt_tokens', 0),
+                usage_data.get('completion_tokens', 0),
+                usage_data.get('total_tokens', 0),
+                usage_data.get('cost', 0),
+                usage_data.get('currency', 'RMB'),
+                usage_data['status'],
+                usage_data.get('error_message'),
+                usage_data.get('request_id'),
+                usage_data.get('trace_id')
+            ))
+            
+            # 同时更新提供商统计信息
+            if usage_data['status'] == 'success':
+                cursor.execute("""
+                UPDATE llm_provider_configs
+                SET total_requests = total_requests + 1,
+                    total_tokens = total_tokens + %s,
+                    total_cost = total_cost + %s,
+                    last_used_at = CURRENT_TIMESTAMP
+                WHERE provider_id = %s
+                """, (
+                    usage_data.get('total_tokens', 0),
+                    usage_data.get('cost', 0),
+                    usage_data['provider_id']
+                ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"记录LLM使用日志失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return False
+    
+    def get_llm_usage_stats(self, provider_id=None, days=30):
+        """获取LLM使用统计"""
+        conn = self.get_connection()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            
+            if provider_id:
+                cursor.execute("""
+                SELECT 
+                    provider_id,
+                    COUNT(*) as total_requests,
+                    COUNT(CASE WHEN status = 'success' THEN 1 END) as success_count,
+                    ROUND(COUNT(CASE WHEN status = 'success' THEN 1 END)::NUMERIC / COUNT(*)::NUMERIC * 100, 2) as success_rate,
+                    AVG(response_time_ms) as avg_response_time,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost) as total_cost,
+                    MAX(currency) as currency
+                FROM llm_usage_logs
+                WHERE provider_id = %s
+                  AND request_time >= CURRENT_TIMESTAMP - INTERVAL '%s days'
+                GROUP BY provider_id
+                """, (provider_id, days))
+            else:
+                cursor.execute("""
+                SELECT 
+                    provider_id,
+                    COUNT(*) as total_requests,
+                    COUNT(CASE WHEN status = 'success' THEN 1 END) as success_count,
+                    ROUND(COUNT(CASE WHEN status = 'success' THEN 1 END)::NUMERIC / COUNT(*)::NUMERIC * 100, 2) as success_rate,
+                    AVG(response_time_ms) as avg_response_time,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(cost) as total_cost,
+                    MAX(currency) as currency
+                FROM llm_usage_logs
+                WHERE request_time >= CURRENT_TIMESTAMP - INTERVAL '%s days'
+                GROUP BY provider_id
+                ORDER BY total_requests DESC
+                """, (days,))
+            
+            results = cursor.fetchall()
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"获取LLM使用统计失败: {str(e)}")
             if conn:
                 conn.close()
             return [] 

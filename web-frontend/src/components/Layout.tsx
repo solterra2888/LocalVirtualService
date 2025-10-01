@@ -127,11 +127,18 @@ const Layout: React.FC = () => {
           icon: <BugOutlined />,
           label: 'System Diagnostics',
         },
-        ...(user?.is_admin ? [{
-          key: '/users',
-          icon: <TeamOutlined />,
-          label: 'User Management',
-        }] : []),
+        ...(user?.is_admin ? [
+          {
+            key: '/users',
+            icon: <TeamOutlined />,
+            label: 'User Management',
+          },
+          {
+            key: '/llm-config',
+            icon: <RobotOutlined />,
+            label: 'LLM Configuration',
+          }
+        ] : []),
       ],
     },
   ];

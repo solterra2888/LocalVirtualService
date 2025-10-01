@@ -6,6 +6,7 @@
 import asyncio
 import time
 import os
+import json
 from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime
 
@@ -142,10 +143,14 @@ class FileProcessingWorker:
                     }
                     
                     # 使用LlamaService处理文件
-                    result = await llama_service.process_file(file_path, llama_params)
+                    result = await llama_service.process_file(file_path, successful_results, failed_files, llama_params)
                     
                     if result:
-                        successful_results.append(result)
+                        # LlamaService返回的是元组 (file_info, processing_time)
+                        file_info, processing_time = result
+                        
+                        # LlamaService已经将结果添加到successful_results中，
+                        # 这里只需要更新计数器和状态
                         self.files_processed += 1
                         self.update_status(log_message=f"文件 {file_name} 处理成功")
                     else:
@@ -172,10 +177,25 @@ class FileProcessingWorker:
                         custom_inputs,
                         agent_type
                     )
-                    self.update_status(log_message="RC Agent处理完成")
+                    
+                    # 检查RC Agent是否真的返回了结果
+                    if final_report and file_ai_times:
+                        self.update_status(log_message="RC Agent处理完成")
+                    else:
+                        rc_agent_success = False
+                        self.update_status(log_message="RC Agent处理完成但未返回有效结果")
+                        
                 except Exception as e:
                     rc_agent_success = False
-                    self.update_status(log_message=f"RC Agent处理失败: {str(e)}")
+                    error_msg = str(e)
+                    self.update_status(log_message=f"RC Agent处理失败: {error_msg}")
+                    
+                    # 如果是认证错误，提供更友好的错误信息
+                    if "401" in error_msg or "unauthorized" in error_msg.lower():
+                        self.update_status(log_message="RC Agent认证失败，请检查token配置")
+                    elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
+                        self.update_status(log_message="RC Agent服务器连接失败，请检查网络连接")
+                    
                     # 确保在失败时也有默认值
                     final_report = None
                     file_ai_times = []
@@ -214,11 +234,11 @@ class FileProcessingWorker:
             else:
                 # 根据处理结果决定最终状态
                 if not rc_agent_success:
-                    # RC Agent处理失败
-                    self.update_status("failed", 100.0, log_message="任务处理失败：RC Agent处理出错")
+                    # RC Agent处理失败，但文件处理成功，标记为部分成功
+                    self.update_status("completed", 100.0, log_message="文件处理成功，但AI Agent处理失败")
                 elif successful_results and rc_agent_service and not final_report:
                     # 有成功的LlamaIndex结果，需要RC Agent处理，但未获得报告内容
-                    self.update_status("failed", 100.0, log_message="任务处理失败：RC Agent未返回有效结果")
+                    self.update_status("completed", 100.0, log_message="文件处理成功，但AI Agent未返回有效结果")
                 elif failed_files and not successful_results:
                     # 所有文件都处理失败
                     self.update_status("failed", 100.0, log_message="任务处理失败：所有文件处理失败")
@@ -292,12 +312,12 @@ class FileProcessingWorker:
                 file_time.get('total_price', 0) for file_time in (file_ai_times or [])
             )
             
-            # 准备上传参数
-            upload_params = {
+            # 准备上传参数（转换为JSON字符串）
+            upload_params = json.dumps({
                 "task_type": task_info.get('name', ''),
                 "custom_inputs": custom_inputs,
                 "processing_params": params
-            }
+            })
             
             # 插入处理统计记录
             cursor.execute("""

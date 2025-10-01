@@ -325,7 +325,10 @@ class LlamaService:
                 response.raise_for_status()
                 data = response.json()
                 status = data.get('status')
-                print(f"任务 {job_id} 当前状态 (第{poll_count}次轮询): {status}")
+                if poll_count == 1:
+                    print(f"🔄 监控任务状态: {status}")
+                elif status in ['SUCCESS', 'ERROR', 'PARTIAL_SUCCESS', 'CANCELLED']:
+                    print(f"✅ 任务完成: {status} (轮询{poll_count}次)")
                 
                 # 重置连续失败计数
                 consecutive_failures = 0
@@ -533,10 +536,8 @@ class LlamaService:
 
 
         # 步骤2: 轮询任务状态
-        self.log(f"使用轮询方式监控任务状态...")
         status_data, poll_count = await self.poll_job_status(job_id)
         final_status = status_data.get('status') if status_data else "未知 (监听失败)"
-        self.log(f"文件 {os.path.basename(file_path)} (任务ID: {job_id}) 处理完成, 总计轮询 {poll_count} 次")
 
         # 步骤3: 如果成功，获取结果
         if final_status == 'SUCCESS':
@@ -557,7 +558,7 @@ class LlamaService:
                     'content_length': content_length,
                     'processing_time': file_total_time
                 })
-                self.log(f"文件处理完成: {os.path.basename(file_path)}, 耗时: {file_total_time:.2f} 秒, 轮询次数: {poll_count}次")
+                self.log(f"✅ 文件处理完成: {os.path.basename(file_path)} ({file_total_time:.1f}s)")
                 
                 # 返回成功文件信息
                 file_info = {
