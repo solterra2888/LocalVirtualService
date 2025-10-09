@@ -19,7 +19,7 @@ import {
   CalendarOutlined
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
-import { marketsAPI, EconomicEvent, MarketStats, CountryInfo } from '../services/markets';
+import { marketsAPI, EconomicEvent, CountryInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
 import CountryFlag from '../components/CountryFlag';
 

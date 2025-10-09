@@ -20,7 +20,6 @@ import {
   Table,
   Tooltip,
   Badge,
-  Tabs,
   Cascader,
   AutoComplete
 } from 'antd';
@@ -44,13 +43,10 @@ import {
   ExclamationCircleOutlined,
   ClearOutlined,
   DownloadOutlined,
-  InfoCircleOutlined,
-  WarningOutlined,
   RobotOutlined,
   FolderOutlined,
   TagOutlined
 } from '@ant-design/icons';
-import { useAuthStore } from '../store/authStore';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -58,10 +54,9 @@ import { useGlobalLogger } from '../contexts/LoggerContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Dragger } = Upload;
 const { Option } = Select;
-const { TabPane } = Tabs;
 
 interface FileItem {
   id: string;
@@ -226,7 +221,6 @@ const FilesPage: React.FC = () => {
   // 文件内容查看相关状态
   const [fileContentVisible, setFileContentVisible] = useState(false);
   const [selectedFileContent, setSelectedFileContent] = useState<any>(null);
-  const [fileContentLoading, setFileContentLoading] = useState(false);
   
   // 文件选择相关状态
   const [fileSelectionVisible, setFileSelectionVisible] = useState(false);
@@ -248,36 +242,8 @@ const FilesPage: React.FC = () => {
     use_ai_agent: true,
     llamaindex_api_key: '', // 将通过API加载默认值
     ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://111.230.48.119:81/v1/chat-messages'
-  });
-  const [form] = Form.useForm();
-
-  // 获取日志级别图标
-  const getLogLevelIcon = (level: string) => {
-    switch (level.toLowerCase()) {
-      case 'error':
-        return <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />;
-      case 'warning':
-        return <WarningOutlined style={{ color: '#faad14' }} />;
-      case 'info':
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />;
-      default:
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />;
-    }
-  };
-
-  // 获取日志级别背景色
-  const getLogLevelColor = (level: string) => {
-    switch (level.toLowerCase()) {
-      case 'error':
-        return '#ffebe6';
-      case 'warning':
-        return '#fff7e6';
-      case 'info':
-        return '#e6f7ff';
-      default:
-        return '#f5f5f5';
-    }
-  };
+    });
+    const [form] = Form.useForm();
 
   // 自动滚动到底部
   useEffect(() => {
@@ -287,7 +253,7 @@ const FilesPage: React.FC = () => {
   }, [logger.logs, logger.autoScroll]);
 
   // 加载任务执行历史的函数
-  const loadTaskExecutionsFunc = async () => {
+  const loadTaskExecutionsFunc = useCallback(async () => {
     try {
       console.log('开始加载任务执行历史...');
       const executions = await tasksAPI.getTaskExecutions();
@@ -314,10 +280,10 @@ const FilesPage: React.FC = () => {
       }
       logger.logError(errorMessage, 'file-processing', error);
     }
-  };
+  }, [logger, setTaskExecutions]);
 
   // 加载API密钥等关键配置
-  const loadDefaultConfig = async () => {
+  const loadDefaultConfig = useCallback(async () => {
     try {
       const response = await filesAPI.getProcessingParams();
       if (response.defaults) {
@@ -331,7 +297,42 @@ const FilesPage: React.FC = () => {
       console.error('加载默认配置失败:', error);
       logger.logWarning('加载默认配置失败，使用硬编码默认值', 'file-processing');
     }
-  };
+  }, [logger, setProcessingParams]);
+
+  // loadTaskTypes 函数定义需要移到这里
+  const loadTaskTypes = useCallback(async () => {
+    try {
+      console.log('开始加载RC Agent...');
+      const types = await tasksAPI.getTaskTypes();
+      setTaskTypes(types);
+      // 设置默认RC Agent
+      const defaultTask = types.find(t => t.is_default);
+      if (defaultTask) {
+        setSelectedTaskType(defaultTask.id);
+      }
+    } catch (error: any) {
+      console.error('加载RC Agent失败:', error);
+      
+      // 显示详细的错误信息
+      let errorMessage = '加载RC Agent失败';
+      if (error.response?.status === 401) {
+        errorMessage += ' - 认证失败，请重新登录';
+      } else if (error.response?.status === 403) {
+        errorMessage += ' - 权限不足';
+      } else if (error.response?.status === 404) {
+        errorMessage += ' - API端点不存在';
+      } else if (error.response?.status >= 500) {
+        errorMessage += ' - 服务器内部错误';
+      } else if (error.message === 'Network Error') {
+        errorMessage += ' - Network connection failed';
+      } else {
+        errorMessage += ` - ${error.response?.data?.detail || error.message}`;
+      }
+      
+      message.error(errorMessage);
+      logger.logError(errorMessage, 'file-processing', error);
+    }
+  }, [logger, setSelectedTaskType, setTaskTypes]);
 
   // 加载RC Agent和执行历史
   useEffect(() => {
@@ -341,24 +342,16 @@ const FilesPage: React.FC = () => {
     
     // 设置定时刷新执行历史列表
     const refreshInterval = setInterval(() => {
-      // 添加标记，避免自动刷新时显示错误消息
-      const originalError = Error.prototype.toString;
-      Error.prototype.toString = function() {
-        return this.message + ' - auto-refresh';
-      };
-      
-      loadTaskExecutionsFunc();
-      
-      // 恢复原始错误处理
-      setTimeout(() => {
-        Error.prototype.toString = originalError;
-      }, 100);
+      // 静默刷新，不显示错误消息
+      loadTaskExecutionsFunc().catch(() => {
+        // 静默处理错误，避免在自动刷新时显示错误消息
+      });
     }, 30000); // 每30秒自动刷新一次执行历史列表
     
     return () => {
       clearInterval(refreshInterval);
     };
-  }, []);
+  }, [loadDefaultConfig, loadTaskExecutionsFunc, loadTaskTypes]);
 
   // 加载行业分类数据
   useEffect(() => {
@@ -554,49 +547,6 @@ const FilesPage: React.FC = () => {
       logger.actions.setShowFloating(true);
     }
   }, [processing, logger.showFloating, logger.actions]);
-
-  const loadTaskTypes = async () => {
-    try {
-      console.log('开始加载RC Agent...');
-      const types = await tasksAPI.getTaskTypes();
-      setTaskTypes(types);
-      // 设置默认RC Agent
-      const defaultTask = types.find(t => t.is_default);
-      if (defaultTask) {
-        setSelectedTaskType(defaultTask.id);
-      }
-    } catch (error: any) {
-      console.error('加载RC Agent失败:', error);
-      
-      // 显示详细的错误信息
-      let errorMessage = '加载RC Agent失败';
-      if (error.response?.status === 401) {
-        errorMessage += ' - 认证失败，请重新登录';
-      } else if (error.response?.status === 403) {
-        errorMessage += ' - 权限不足';
-      } else if (error.response?.status === 404) {
-        errorMessage += ' - API端点不存在';
-      } else if (error.response?.status >= 500) {
-        errorMessage += ' - 服务器内部错误';
-      } else if (error.message === 'Network Error') {
-        errorMessage += ' - Network connection failed';
-      } else {
-        errorMessage += ` - ${error.response?.data?.detail || error.message}`;
-      }
-      
-      message.error(errorMessage);
-      logger.logError(errorMessage, 'file-processing', error);
-      
-      // 在控制台输出详细错误信息
-      console.error('详细错误信息:', {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        config: error.config,
-        message: error.message
-      });
-    }
-  };
 
 
 
@@ -862,7 +812,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 处理批量文件上传
-  const processPendingFiles = async (filesToUpload: File[]) => {
+  const processPendingFiles = useCallback(async (filesToUpload: File[]) => {
     if (filesToUpload.length === 0) return;
     
     setUploadingFiles(true);
@@ -916,7 +866,7 @@ const FilesPage: React.FC = () => {
     } finally {
       setUploadingFiles(false);
     }
-  };
+  }, [logger, setFiles, setUploadingFiles, selectedSector, selectedIndustry, selectedTicker]);
 
   // 当有新文件添加到待上传列表时，延迟处理以支持批量上传
   useEffect(() => {
@@ -928,7 +878,7 @@ const FilesPage: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [pendingFiles]);
+  }, [pendingFiles, processPendingFiles]);
 
   const handleRemoveFile = (fileId: string) => {
     const fileName = files.find(f => f.id === fileId)?.name;
@@ -1424,22 +1374,6 @@ const FilesPage: React.FC = () => {
       </Row>
     </Form>
   );
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'ready':
-      case 'pending':
-        return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
-      case 'completed':
-        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
-      case 'failed':
-        return <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />;
-      case 'processing':
-        return <ClockCircleOutlined style={{ color: '#1890ff' }} />;
-      default:
-        return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
-    }
-  };
 
   const getStatusText = (status: string) => {
     switch (status) {

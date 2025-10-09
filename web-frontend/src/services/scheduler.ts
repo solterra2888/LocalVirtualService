@@ -50,6 +50,12 @@ export interface CreateEODHDNewsTaskParams {
   topic_filter?: string;
   keywords?: string;
   recent_days?: number;
+  // LLM 新闻分析相关参数
+  auto_analyze?: boolean;
+  use_celery?: boolean;
+  analysis_template?: string;
+  analysis_batch_size?: number;
+  max_concurrent?: number;
 }
 
 export interface CreateEODHDFundamentalsTaskParams {
@@ -76,6 +82,12 @@ export interface CreateWatchlistNewsTaskParams {
   max_results?: number;
   recent_days?: number;
   user_id?: number;
+  // LLM 新闻分析相关参数
+  auto_analyze?: boolean;
+  use_celery?: boolean;
+  analysis_template?: string;
+  analysis_batch_size?: number;
+  max_concurrent?: number;
 }
 
 export interface CreateEODHDStockPricesTaskParams {

@@ -16,7 +16,9 @@ import {
   Badge,
   Divider,
   Tooltip,
-  Empty
+  Empty,
+  Alert,
+  Form
 } from 'antd';
 import {
   SearchOutlined,
@@ -24,11 +26,12 @@ import {
   EyeOutlined,
   LinkOutlined,
   ClearOutlined,
-
-  SettingOutlined
+  SettingOutlined,
+  DeleteOutlined,
+  WarningOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 
 import { newsAPI, newsUtils } from '../services/news';
 import {
@@ -40,6 +43,7 @@ import {
 } from '../types/news';
 
 import ThemeManagementModal from '../components/ThemeManagementModal';
+import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
 
@@ -55,8 +59,11 @@ interface NewsPageState {
   searchParams: NewsSearchParams;
   selectedNews: NewsItem | null;
   detailModalVisible: boolean;
-
   themeManagementModalVisible: boolean;
+  deleteModalVisible: boolean;
+  deleteLoading: boolean;
+  deleteStartDate: string | null;
+  deleteEndDate: string | null;
 }
 
 const NewsPage: React.FC = () => {
@@ -72,8 +79,11 @@ const NewsPage: React.FC = () => {
     },
     selectedNews: null,
     detailModalVisible: false,
-
-    themeManagementModalVisible: false
+    themeManagementModalVisible: false,
+    deleteModalVisible: false,
+    deleteLoading: false,
+    deleteStartDate: null,
+    deleteEndDate: null
   });
 
   // 加载新闻数据
@@ -162,6 +172,73 @@ const NewsPage: React.FC = () => {
     const resetParams = { page: 1, page_size: 20 };
     setState(prev => ({ ...prev, searchParams: resetParams }));
     loadNewsData(resetParams);
+  };
+
+  // 打开删除新闻弹窗
+  const openDeleteModal = () => {
+    setState(prev => ({
+      ...prev,
+      deleteModalVisible: true,
+      deleteStartDate: null,
+      deleteEndDate: null
+    }));
+  };
+
+  // 关闭删除新闻弹窗
+  const closeDeleteModal = () => {
+    setState(prev => ({
+      ...prev,
+      deleteModalVisible: false,
+      deleteStartDate: null,
+      deleteEndDate: null
+    }));
+  };
+
+  // 处理日期范围变化
+  const handleDateRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
+    if (dates && dates[0] && dates[1]) {
+      setState(prev => ({
+        ...prev,
+        deleteStartDate: dates[0]!.format('YYYY-MM-DD'),
+        deleteEndDate: dates[1]!.format('YYYY-MM-DD')
+      }));
+    } else {
+      setState(prev => ({
+        ...prev,
+        deleteStartDate: null,
+        deleteEndDate: null
+      }));
+    }
+  };
+
+  // 执行删除新闻
+  const handleDeleteNews = async () => {
+    if (!state.deleteStartDate || !state.deleteEndDate) {
+      message.error('请选择日期范围');
+      return;
+    }
+
+    setState(prev => ({ ...prev, deleteLoading: true }));
+    try {
+      const response = await newsAPI.deleteNewsByDateRange({
+        start_date: state.deleteStartDate,
+        end_date: state.deleteEndDate
+      });
+
+      if (response.success) {
+        message.success(response.message);
+        closeDeleteModal();
+        loadNewsData(); // 刷新新闻列表
+        loadMetadata(); // 刷新元数据
+      } else {
+        message.error(response.message || '删除失败');
+      }
+    } catch (error) {
+      console.error('删除新闻失败:', error);
+      message.error(`删除新闻失败: ${getErrorMessage(error)}`);
+    } finally {
+      setState(prev => ({ ...prev, deleteLoading: false }));
+    }
   };
 
   // 处理分页
@@ -807,7 +884,14 @@ const NewsPage: React.FC = () => {
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
           <Text strong style={{ fontSize: '14px' }}>News List</Text>
           <Space>
-
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={openDeleteModal}
+              size="small"
+            >
+              Delete News
+            </Button>
             <Button
               icon={<SettingOutlined />}
               onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
@@ -950,16 +1034,102 @@ const NewsPage: React.FC = () => {
 
             {/* News Content */}
             <div>
-              <Text strong>Content: </Text>
-              <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                {state.selectedNews.content || 'No detailed content available'}
-              </Paragraph>
+              {state.selectedNews.analysis_result ? (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <Text strong>AI Analysis: </Text>
+                    <Tag color="blue" style={{ marginLeft: 8 }}>
+                      {state.selectedNews.analysis_result.template_code || 'AI Analysis'}
+                    </Tag>
+                  </div>
+                  <Card 
+                    title="Analysis Content" 
+                    size="small"
+                    headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
+                    style={{ marginBottom: 16 }}
+                  >
+                    <MarkdownRenderer 
+                      content={state.selectedNews.analysis_result.content}
+                      style={{
+                        fontSize: '14px',
+                        lineHeight: '1.6'
+                      }}
+                    />
+                  </Card>
+                  
+                  {state.selectedNews.content && (
+                    <div>
+                      <Text strong>Original Content: </Text>
+                      <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                        {state.selectedNews.content}
+                      </Paragraph>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div>
+                  <Text strong>Content: </Text>
+                  <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                    {state.selectedNews.content || 'No detailed content available'}
+                  </Paragraph>
+                </div>
+              )}
             </div>
           </div>
         )}
       </Modal>
 
-
+      {/* 删除新闻弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <WarningOutlined style={{ color: '#ff4d4f' }} />
+            <Text>按日期范围删除新闻</Text>
+          </Space>
+        }
+        open={state.deleteModalVisible}
+        onCancel={closeDeleteModal}
+        onOk={handleDeleteNews}
+        okText="确认删除"
+        cancelText="取消"
+        okButtonProps={{ 
+          danger: true, 
+          loading: state.deleteLoading,
+          disabled: !state.deleteStartDate || !state.deleteEndDate
+        }}
+        width={500}
+      >
+        <Alert
+          message="警告"
+          description="此操作将永久删除选定日期范围内的新闻及所有相关数据（包括 news_auto_tags_relations、news_symbols、news_tags 等），此操作不可撤销！"
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        
+        <Form layout="vertical">
+          <Form.Item label="选择日期范围" required>
+            <RangePicker
+              style={{ width: '100%' }}
+              onChange={handleDateRangeChange}
+              format="YYYY-MM-DD"
+              placeholder={['开始日期', '结束日期']}
+            />
+          </Form.Item>
+          
+          {state.deleteStartDate && state.deleteEndDate && (
+            <Alert
+              message={
+                <Text>
+                  您即将删除 {state.deleteStartDate} 至 {state.deleteEndDate} 之间的新闻
+                </Text>
+              }
+              type="info"
+              showIcon
+            />
+          )}
+        </Form>
+      </Modal>
 
       {/* 主题管理模态框 */}
       <ThemeManagementModal

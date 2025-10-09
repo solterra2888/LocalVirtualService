@@ -23,7 +23,6 @@ import {
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 
 const { Text } = Typography;
-const { Option } = Select;
 
 // 渲染星星图标的辅助函数
 const renderStars = (count: number, filled: boolean = true) => {

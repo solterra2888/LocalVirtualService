@@ -31,10 +31,6 @@ export interface EODFetchResponse {
 class EODApiService {
   private baseUrl = '/eod-fetch'; // Backend API endpoint (without /api prefix since api client adds it)
 
-  constructor() {
-    // API token is handled by the authenticated api client
-  }
-
   /**
    * Fetch EOD data for a given ticker
    * @param params - Fetch parameters

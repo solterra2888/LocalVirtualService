@@ -86,8 +86,7 @@ const StockChart: React.FC<StockChartProps> = ({
     events,
     loading: eventsLoading,
     addEvent,
-    updateEvent,
-    deleteEvent
+    updateEvent
   } = useChartEvents(eventSymbol);
 
   const fetchHistoricalData = useCallback(async () => {

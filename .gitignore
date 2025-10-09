@@ -24,7 +24,7 @@ build/
 .env.production.local
 .env.development
 .env.test
-.env.production
+.env.productionc
 env.example
 __pycache__/
 logs/

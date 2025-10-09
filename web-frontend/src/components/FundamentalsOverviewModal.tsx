@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
   Card,
@@ -9,9 +9,7 @@ import {
   message,
   Statistic,
   Tag,
-  Space,
   Divider,
-  Progress,
   Empty
 } from 'antd';
 import {
@@ -29,7 +27,7 @@ import {
 import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse } from '../services/fundamentals';
 import { getErrorMessage } from '../utils/errorHandler';
 
-const { Title, Text, Paragraph } = Typography;
+const { Text, Paragraph } = Typography;
 
 interface FundamentalsOverviewModalProps {
   visible: boolean;
@@ -48,7 +46,7 @@ const FundamentalsOverviewModal: React.FC<FundamentalsOverviewModalProps> = ({
   const [fundamentalsData, setFundamentalsData] = useState<CompanyFundamentalsResponse | null>(null);
 
   // 获取基本面数据
-  const fetchFundamentalsData = async () => {
+  const fetchFundamentalsData = useCallback(async () => {
     if (!ticker) return;
     
     setLoading(true);
@@ -62,13 +60,13 @@ const FundamentalsOverviewModal: React.FC<FundamentalsOverviewModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [ticker]);
 
   useEffect(() => {
     if (visible && ticker) {
       fetchFundamentalsData();
     }
-  }, [visible, ticker]);
+  }, [visible, ticker, fetchFundamentalsData]);
 
   const renderBasicInformation = () => {
     if (!fundamentalsData?.company) return null;

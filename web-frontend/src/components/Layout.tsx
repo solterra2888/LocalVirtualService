@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge } from 'antd';
 import {
-  HomeOutlined,
   FileTextOutlined,
   AppstoreOutlined,
   UserOutlined,
@@ -109,6 +108,11 @@ const Layout: React.FC = () => {
           key: '/tasks',
           icon: <AppstoreOutlined />,
           label: 'AI Agent Management',
+        },
+        {
+          key: '/prompt-templates',
+          icon: <BuildOutlined />,
+          label: 'Prompt Templates',
         },
       ],
     },

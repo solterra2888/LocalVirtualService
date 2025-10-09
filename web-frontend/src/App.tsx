@@ -20,6 +20,7 @@ import FinvizScreenerPage from './pages/FinvizScreenerPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
+import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import './App.css';
 
 // 私有路由组件
@@ -124,6 +125,7 @@ const App: React.FC = () => {
                 <Route path="eod-fetch" element={<EODFetchPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />
                 <Route path="diagnostic" element={<DiagnosticPage />} />
+                <Route path="prompt-templates" element={<PromptTemplatesPage />} />
                 
                 {/* 管理员路由 */}
                 <Route

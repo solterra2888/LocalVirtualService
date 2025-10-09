@@ -157,7 +157,7 @@ export const useChartEvents = (symbol: string) => {
     } finally {
       setLoading(false);
     }
-  }, [loadEvents]);
+  }, [loadEvents, symbol]);
 
   // Load events when component mounts
   useEffect(() => {

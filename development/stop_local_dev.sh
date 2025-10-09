@@ -91,6 +91,7 @@ echo -e "${BLUE}🔍 检查并停止端口上的进程...${NC}"
 stop_process_by_port 3000 "前端应用"
 stop_process_by_port 8000 "Web应用"
 stop_process_by_port 5555 "Flower监控"
+stop_process_by_port 6379 "Redis服务"
 
 # 清理可能的Node.js进程
 echo ""
@@ -152,6 +153,34 @@ if [ -n "$FLOWER_PIDS" ]; then
     echo -e "${GREEN}✅ Flower监控进程已清理${NC}"
 fi
 
+# 停止Redis服务
+echo ""
+echo -e "${BLUE}🔴 停止Redis服务...${NC}"
+
+# 检查Redis是否通过brew services运行
+if brew services list | grep -q "redis.*started" 2>/dev/null; then
+    echo -e "${YELLOW}🔄 停止Redis服务 (brew services)...${NC}"
+    brew services stop redis 2>/dev/null || true
+    sleep 2
+    echo -e "${GREEN}✅ Redis服务已通过brew停止${NC}"
+else
+    # 查找并停止Redis进程
+    REDIS_PIDS=$(pgrep -f "redis-server" 2>/dev/null || true)
+    if [ -n "$REDIS_PIDS" ]; then
+        echo -e "${YELLOW}🔄 停止Redis进程...${NC}"
+        echo "$REDIS_PIDS" | xargs kill 2>/dev/null || true
+        sleep 2
+        # 强制停止仍在运行的进程
+        REDIS_PIDS=$(pgrep -f "redis-server" 2>/dev/null || true)
+        if [ -n "$REDIS_PIDS" ]; then
+            echo "$REDIS_PIDS" | xargs kill -9 2>/dev/null || true
+        fi
+        echo -e "${GREEN}✅ Redis进程已清理${NC}"
+    else
+        echo -e "${CYAN}ℹ️  没有发现Redis进程${NC}"
+    fi
+fi
+
 # 清理日志文件（可选）
 LOGS_DIR="$SCRIPT_DIR/logs"
 if [ -d "$LOGS_DIR" ]; then
@@ -184,12 +213,14 @@ check_port_status() {
 check_port_status 3000 "前端应用"
 check_port_status 8000 "Web应用"
 check_port_status 5555 "Flower监控"
+check_port_status 6379 "Redis服务"
 
 echo ""
 echo -e "${GREEN}🎉 开发服务已停止!${NC}"
 echo "=============================================="
 echo -e "${CYAN}💡 提示:${NC}"
 echo "   - 重新启动: ./development/start_local_dev.sh"
-echo "   - 查看状态: ps aux | grep -E 'uvicorn.*main:app|npm'"
+echo "   - 查看状态: ps aux | grep -E 'uvicorn.*main:app|npm|redis-server'"
+echo "   - 启动Redis: brew services start redis"
 echo "   - 调度器独立运行，不受此脚本管理"
 echo "=============================================="

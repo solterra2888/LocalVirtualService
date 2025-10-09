@@ -54,7 +54,8 @@ class SchedulerService:
             'eodhd_fundamentals': self._execute_fundamentals_task,
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
-            'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task
+            'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
+            'news_analysis': self._execute_news_analysis_task  # 新增：新闻LLM分析任务
         }
         
         # 添加事件监听器
@@ -554,10 +555,118 @@ class SchedulerService:
             else:
                 message = f"成功获取并存储 {result['success_count']} 条新闻"
             
+            # ========== 新增：获取新闻后自动分析 ==========
+            auto_analyze = params.get('auto_analyze', False)
+            use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
+            analysis_result = None
+            
+            if auto_analyze and new_count > 0:
+                logger.info(f"启用自动分析，开始分析 {new_count} 条新增新闻，use_celery={use_celery}")
+                
+                try:
+                    if use_celery:
+                        # ========== 方案B：使用Celery（推荐多用户场景）==========
+                        logger.info("使用Celery异步处理分析任务")
+                        
+                        from backend.tasks.news_tasks import analyze_unanalyzed_news_task
+                        
+                        # 准备symbols参数
+                        analysis_symbols = None
+                        if params.get('symbols'):
+                            if isinstance(params['symbols'], str):
+                                analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
+                            else:
+                                analysis_symbols = params['symbols']
+                        
+                        # 提交Celery任务（立即返回，不阻塞）
+                        task = analyze_unanalyzed_news_task.delay(
+                            limit=min(params.get('analysis_batch_size', new_count), new_count),
+                            template_code=params.get('analysis_template', 'news_summary_v1'),
+                            symbols=analysis_symbols,
+                            start_date=start_date,
+                            end_date=end_date,
+                            max_concurrent=params.get('max_concurrent', 5)
+                        )
+                        
+                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {new_count} 条新闻")
+                        
+                        analysis_result = {
+                            'status': 'submitted_to_celery',
+                            'celery_task_id': task.id,
+                            'news_count': new_count,
+                            'estimated_time': '10-20秒'
+                        }
+                        
+                        message += f"，已提交Celery任务分析 {new_count} 条新闻 (Task ID: {task.id})"
+                        
+                    else:
+                        # ========== 方案A：直接分析（仅适合小团队）==========
+                        logger.info("使用同步方式分析（适合小团队，多用户场景请启用use_celery）")
+                        
+                        # 导入新闻分析服务
+                        from backend.services.news_analysis_service import NewsAnalysisService
+                        from backend.utils.database_config import get_database_config
+                        
+                        # 创建分析服务
+                        db_config = get_database_config()
+                        news_analysis_service = NewsAnalysisService(db_config)
+                        
+                        # 获取分析参数
+                        analysis_template = params.get('analysis_template', 'news_summary_v1')
+                        analysis_batch_size = params.get('analysis_batch_size', new_count)
+                        use_concurrent = params.get('use_concurrent', True)
+                        max_concurrent = params.get('max_concurrent', 5)
+                        
+                        # 准备筛选条件
+                        analysis_symbols = None
+                        if params.get('symbols'):
+                            if isinstance(params['symbols'], str):
+                                analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
+                            else:
+                                analysis_symbols = params['symbols']
+                        
+                        # 执行批量分析
+                        logger.info(f"分析参数: template={analysis_template}, batch_size={analysis_batch_size}, "
+                                   f"concurrent={use_concurrent}, max_concurrent={max_concurrent}")
+                        
+                        analysis_result = await news_analysis_service.batch_analyze_news(
+                            limit=min(analysis_batch_size, new_count),
+                            template_code=analysis_template,
+                            symbols=analysis_symbols,
+                            start_date=start_date,
+                            end_date=end_date,
+                            use_concurrent=use_concurrent,
+                            max_concurrent=max_concurrent
+                        )
+                        
+                        # 更新消息
+                        if analysis_result['total'] > 0:
+                            analysis_msg = f"，已分析 {analysis_result['success']} 条新闻"
+                            if analysis_result['failed'] > 0:
+                                analysis_msg += f"（失败 {analysis_result['failed']} 条）"
+                            message += analysis_msg
+                            
+                            logger.info(f"新闻分析完成: {analysis_result}")
+                    
+                except Exception as e:
+                    logger.error(f"自动分析新闻失败: {str(e)}")
+                    analysis_result = {
+                        'error': str(e),
+                        'total': 0,
+                        'success': 0,
+                        'failed': 0,
+                        'status': 'failed'
+                    }
+            
+            # 返回结果（包含分析结果）
+            return_data = result.copy()
+            if analysis_result:
+                return_data['analysis'] = analysis_result
+            
             return {
                 'success': True,
                 'message': message,
-                'data': result
+                'data': return_data
             }
             
         except Exception as e:
@@ -572,6 +681,26 @@ class SchedulerService:
         """执行Watchlist新闻获取任务"""
         try:
             logger.info("执行Watchlist新闻获取任务", params=params)
+            
+            # 处理recent_days参数，计算日期范围
+            start_date = None
+            end_date = None
+            
+            if params.get('recent_days') is not None:
+                from datetime import datetime, timedelta
+                
+                # 获取当前日期
+                current_date = datetime.now()
+                recent_days = params.get('recent_days')
+                
+                # 计算开始日期和结束日期
+                end_date = current_date.strftime('%Y-%m-%d')
+                start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
+                
+                logger.info("根据recent_days参数计算日期范围", 
+                           recent_days=recent_days,
+                           start_date=start_date, 
+                           end_date=end_date)
             
             # 创建Watchlist新闻服务实例
             watchlist_service = WatchlistNewsService()
@@ -597,10 +726,111 @@ class SchedulerService:
             else:
                 message = f"成功获取并存储 {result['success_count']} 条watchlist新闻"
             
+            # ========== 新增：获取新闻后自动分析 ==========
+            auto_analyze = params.get('auto_analyze', False)
+            use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
+            analysis_result = None
+            
+            if auto_analyze and new_count > 0:
+                logger.info(f"启用自动分析，开始分析 {new_count} 条新增watchlist新闻，use_celery={use_celery}")
+                
+                try:
+                    if use_celery:
+                        # ========== 使用Celery（推荐多用户场景）==========
+                        logger.info("使用Celery异步处理分析任务")
+                        
+                        from backend.tasks.news_tasks import analyze_unanalyzed_news_task
+                        
+                        # 获取watchlist的股票列表作为筛选条件
+                        analysis_symbols = None
+                        if result.get('tickers'):
+                            analysis_symbols = result['tickers']
+                            logger.info(f"使用watchlist股票列表进行筛选，共 {len(analysis_symbols)} 个股票")
+                        
+                        # 提交Celery任务（添加日期和股票参数）
+                        task = analyze_unanalyzed_news_task.delay(
+                            limit=min(params.get('analysis_batch_size', new_count), new_count),
+                            template_code=params.get('analysis_template', 'news_summary_v1'),
+                            symbols=analysis_symbols,  # 使用watchlist的股票列表
+                            start_date=start_date,     # 添加开始日期
+                            end_date=end_date,         # 添加结束日期
+                            max_concurrent=params.get('max_concurrent', 5)
+                        )
+                        
+                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {new_count} 条新闻")
+                        
+                        analysis_result = {
+                            'status': 'submitted_to_celery',
+                            'celery_task_id': task.id,
+                            'news_count': new_count,
+                            'estimated_time': '10-20秒'
+                        }
+                        
+                        message += f"，已提交Celery任务分析 {new_count} 条新闻 (Task ID: {task.id})"
+                        
+                    else:
+                        # ========== 直接分析（仅适合小团队）==========
+                        logger.info("使用同步方式分析（适合小团队，多用户场景请启用use_celery）")
+                        
+                        # 导入新闻分析服务
+                        from backend.services.news_analysis_service import NewsAnalysisService
+                        from backend.utils.database_config import get_database_config
+                        
+                        # 创建分析服务
+                        db_config = get_database_config()
+                        news_analysis_service = NewsAnalysisService(db_config)
+                        
+                        # 获取分析参数
+                        analysis_template = params.get('analysis_template', 'news_summary_v1')
+                        analysis_batch_size = params.get('analysis_batch_size', new_count)
+                        use_concurrent = params.get('use_concurrent', True)
+                        max_concurrent = params.get('max_concurrent', 5)
+                        
+                        # 获取watchlist的股票列表作为筛选条件
+                        analysis_symbols = None
+                        if result.get('tickers'):
+                            analysis_symbols = result['tickers']
+                            logger.info(f"使用watchlist股票列表进行筛选，共 {len(analysis_symbols)} 个股票")
+                        
+                        # 执行批量分析（添加日期和股票参数）
+                        analysis_result = await news_analysis_service.batch_analyze_news(
+                            limit=min(analysis_batch_size, new_count),
+                            template_code=analysis_template,
+                            symbols=analysis_symbols,  # 添加股票列表
+                            start_date=start_date,     # 添加开始日期
+                            end_date=end_date,         # 添加结束日期
+                            use_concurrent=use_concurrent,
+                            max_concurrent=max_concurrent
+                        )
+                        
+                        # 更新消息
+                        if analysis_result['total'] > 0:
+                            analysis_msg = f"，已分析 {analysis_result['success']} 条新闻"
+                            if analysis_result['failed'] > 0:
+                                analysis_msg += f"（失败 {analysis_result['failed']} 条）"
+                            message += analysis_msg
+                            
+                            logger.info(f"新闻分析完成: {analysis_result}")
+                    
+                except Exception as e:
+                    logger.error(f"自动分析新闻失败: {str(e)}")
+                    analysis_result = {
+                        'error': str(e),
+                        'total': 0,
+                        'success': 0,
+                        'failed': 0,
+                        'status': 'failed'
+                    }
+            
+            # 返回结果（包含分析结果）
+            return_data = result.copy()
+            if analysis_result:
+                return_data['analysis'] = analysis_result
+            
             return {
                 'success': True,
                 'message': message,
-                'data': result
+                'data': return_data
             }
             
         except Exception as e:
@@ -1136,6 +1366,92 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"EODHD历史股价数据获取任务执行失败: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
+    
+    async def _execute_news_analysis_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行新闻LLM分析任务
+        
+        Args:
+            params: 任务参数
+                - template_code: Prompt模板代码（默认: news_summary_v1）
+                - batch_size: 每次分析的新闻数量（默认: 10）
+                - symbols: 筛选特定股票代码的新闻（可选）
+                - start_date: 开始日期（可选）
+                - end_date: 结束日期（可选）
+                - use_concurrent: 是否使用并发（默认: False）
+                - max_concurrent: 最大并发数（默认: 3）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行新闻LLM分析任务", params=params)
+            
+            # 导入新闻分析服务
+            from backend.services.news_analysis_service import NewsAnalysisService
+            from backend.utils.database_config import get_database_config
+            
+            # 创建服务实例
+            db_config = get_database_config()
+            news_analysis_service = NewsAnalysisService(db_config)
+            
+            # 获取参数
+            template_code = params.get('template_code', 'news_summary_v1')
+            batch_size = params.get('batch_size', 10)
+            symbols = params.get('symbols')  # 可以是逗号分隔的字符串或列表
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+            use_concurrent = params.get('use_concurrent', False)
+            max_concurrent = params.get('max_concurrent', 3)
+            
+            # 处理symbols参数
+            if symbols and isinstance(symbols, str):
+                symbols = [s.strip() for s in symbols.split(',') if s.strip()]
+            
+            # 执行批量分析
+            result = await news_analysis_service.batch_analyze_news(
+                limit=batch_size,
+                template_code=template_code,
+                symbols=symbols,
+                start_date=start_date,
+                end_date=end_date,
+                use_concurrent=use_concurrent,
+                max_concurrent=max_concurrent
+            )
+            
+            if result['total'] == 0:
+                info_msg = "没有需要分析的新闻"
+                logger.info(info_msg)
+                return {
+                    'success': True,
+                    'message': info_msg,
+                    'data': result
+                }
+            elif result['failed'] > 0:
+                warning_msg = f"新闻分析部分成功: 成功{result['success']}条，失败{result['failed']}条"
+                logger.warning(warning_msg)
+                return {
+                    'success': True,
+                    'message': warning_msg,
+                    'data': result
+                }
+            else:
+                success_msg = f"新闻分析全部成功: 分析了{result['total']}条新闻"
+                logger.info(success_msg)
+                return {
+                    'success': True,
+                    'message': success_msg,
+                    'data': result
+                }
+                
+        except Exception as e:
+            error_msg = f"新闻分析任务执行失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,

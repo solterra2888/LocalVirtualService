@@ -23,8 +23,6 @@ import {
 import { 
   SettingOutlined, 
   RobotOutlined,
-  CheckCircleOutlined, 
-  CloseCircleOutlined, 
   ExclamationCircleOutlined,
   ExperimentOutlined,
   SaveOutlined,
@@ -241,19 +239,6 @@ const LLMConfigPage: React.FC = () => {
       message.error(`测试失败: ${error?.response?.data?.detail || error.message || '网络错误'}`);
     } finally {
       setTestingGlobal(false);
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'connected':
-        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
-      case 'testing':
-        return <ReloadOutlined spin style={{ color: '#1890ff' }} />;
-      case 'error':
-        return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
-      default:
-        return <CloseCircleOutlined style={{ color: '#d9d9d9' }} />;
     }
   };
 

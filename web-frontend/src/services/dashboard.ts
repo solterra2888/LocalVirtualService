@@ -21,6 +21,14 @@ export interface SectorInfo {
   companies: CompanyInfo[];
 }
 
+export interface NewsAnalysisResult {
+  content: string;
+  template_code?: string;
+  provider?: string;
+  model?: string;
+  tokens?: number;
+}
+
 export interface DashboardNewsItem {
   id: number;
   title: string;
@@ -34,6 +42,7 @@ export interface DashboardNewsItem {
   sentiment_neu?: number;
   symbols: string[];
   tags: string[];
+  analysis_result?: NewsAnalysisResult;
 }
 
 export interface DashboardAnalysisResult {

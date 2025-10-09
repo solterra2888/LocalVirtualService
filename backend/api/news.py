@@ -745,6 +745,102 @@ async def reset_theme_to_default(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重置主题失败: {str(e)}")
 
+
+# ============ 新闻删除API ============
+
+@router.delete("/delete-by-date-range", summary="按日期范围删除新闻")
+async def delete_news_by_date_range(
+    start_date: str = Query(..., description="开始日期 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="结束日期 (YYYY-MM-DD)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    按日期范围删除新闻及其关联数据（包括news_auto_tags_relations、news_symbols、news_tags等）
+    注意：此操作不可逆，请谨慎使用
+    """
+    try:
+        # 解析日期参数
+        try:
+            start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+            end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
+            # 设置end_datetime为当天的最后一刻
+            from datetime import timedelta
+            end_datetime = end_datetime + timedelta(days=1) - timedelta(seconds=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="日期格式错误，请使用 YYYY-MM-DD")
+        
+        # 验证日期范围
+        if start_datetime > end_datetime:
+            raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
+        
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 先查询要删除的新闻数量
+            count_query = """
+                SELECT COUNT(*) 
+                FROM news 
+                WHERE date >= %s AND date <= %s
+            """
+            cursor.execute(count_query, (start_datetime, end_datetime))
+            count_result = cursor.fetchone()
+            delete_count = count_result[0] if count_result else 0
+            
+            if delete_count == 0:
+                return {
+                    "success": True,
+                    "message": "指定日期范围内没有新闻数据",
+                    "data": {
+                        "deleted_count": 0,
+                        "start_date": start_date,
+                        "end_date": end_date
+                    }
+                }
+            
+            # 删除新闻（由于外键设置了ON DELETE CASCADE，相关表的数据会自动删除）
+            # 包括：news_auto_tags_relations、news_symbols、news_tags
+            delete_query = """
+                DELETE FROM news 
+                WHERE date >= %s AND date <= %s
+            """
+            cursor.execute(delete_query, (start_datetime, end_datetime))
+            conn.commit()
+            
+            logger.info(
+                f"User {current_user.username if current_user else 'unknown'} deleted {delete_count} news items "
+                f"from {start_date} to {end_date}"
+            )
+            
+            return {
+                "success": True,
+                "message": f"成功删除 {delete_count} 条新闻及其关联数据",
+                "data": {
+                    "deleted_count": delete_count,
+                    "start_date": start_date,
+                    "end_date": end_date
+                }
+            }
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to delete news by date range: {str(e)}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除新闻失败: {str(e)}")
+
 # ============ 新闻详情API (参数化路由，必须在最后) ============
 
 @router.get("/{news_id}", response_model=NewsResponse, summary="获取新闻详情")

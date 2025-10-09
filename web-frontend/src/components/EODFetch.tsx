@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   DatePicker,
-  Select,
   Button,
   Space,
   Typography,
@@ -30,7 +29,6 @@ import dayjs, { Dayjs } from 'dayjs';
 import { eodApiService, EODData, EODFetchParams } from '../services/eodApi';
 
 const { Title, Text, Paragraph } = Typography;
-const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 interface EODFetchProps {

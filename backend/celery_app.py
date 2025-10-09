@@ -20,6 +20,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入任务模块失败: {e}")
 
+try:
+    from backend.tasks import news_tasks
+    print(f"✅ 成功导入新闻分析任务模块: {news_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入新闻分析任务模块失败: {e}")
+
 # 调试信息
 if __name__ == '__main__':
     app.start()

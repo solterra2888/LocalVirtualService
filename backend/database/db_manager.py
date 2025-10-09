@@ -437,7 +437,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener', 'news_analysis')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -543,16 +543,58 @@ class DatabaseManager:
             SELECT constraint_name FROM information_schema.table_constraints 
             WHERE table_name = 'task_scheduling' AND constraint_name = 'valid_task_type'
             """)
+            constraint_exists = cursor.fetchone()
             
-            if not cursor.fetchone():
+            # 获取现有的所有任务类型
+            cursor.execute("""
+                SELECT DISTINCT type FROM task_scheduling WHERE type IS NOT NULL
+            """)
+            existing_types = [row[0] for row in cursor.fetchall()]
+            
+            # 定义完整的任务类型列表（包括所有可能的类型）
+            all_task_types = [
+                'eodhd_news', 
+                'watchlist_news', 
+                'economic_events', 
+                'macro_indicators', 
+                'eodhd_fundamentals', 
+                'finviz_screener',
+                'eodhd_stock_prices',
+                'eodhd_eod_stock_prices',
+                'news_analysis'
+            ]
+            
+            # 合并现有类型和新类型（去重）
+            merged_types = list(set(existing_types + all_task_types))
+            types_str = "', '".join(merged_types)
+            
+            if not constraint_exists:
                 try:
-                    cursor.execute("""
+                    cursor.execute(f"""
                     ALTER TABLE task_scheduling 
-                    ADD CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener'))
+                    ADD CONSTRAINT valid_task_type CHECK (type IN ('{types_str}'))
                     """)
-                    print("已添加valid_task_type约束")
+                    print(f"已添加valid_task_type约束，支持类型: {merged_types}")
                 except Exception as e:
                     print(f"添加valid_task_type约束时出错: {e}")
+            else:
+                # 约束已存在，尝试更新
+                try:
+                    # 使用savepoint避免影响整个事务
+                    cursor.execute("SAVEPOINT before_constraint_update")
+                    cursor.execute("""
+                    ALTER TABLE task_scheduling DROP CONSTRAINT IF EXISTS valid_task_type
+                    """)
+                    cursor.execute(f"""
+                    ALTER TABLE task_scheduling 
+                    ADD CONSTRAINT valid_task_type CHECK (type IN ('{types_str}'))
+                    """)
+                    cursor.execute("RELEASE SAVEPOINT before_constraint_update")
+                    print(f"已更新valid_task_type约束，支持类型: {merged_types}")
+                except Exception as e:
+                    cursor.execute("ROLLBACK TO SAVEPOINT before_constraint_update")
+                    print(f"更新valid_task_type约束时出错: {e}")
+                    print(f"将保留原有约束，继续执行")
             
             # 3. 检查cron_or_interval约束
             cursor.execute("""

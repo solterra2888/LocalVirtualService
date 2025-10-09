@@ -782,6 +782,136 @@ class LLMService:
             name: provider.get_provider_info() 
             for name, provider in self.providers.items()
         }
+    
+    async def chat_completion_with_template(
+        self, 
+        template_id: Optional[int] = None,
+        template_code: Optional[str] = None,
+        variables: Dict[str, Any] = None,
+        user_id: Optional[int] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        **kwargs
+    ) -> LLMResponse:
+        """
+        使用模板进行对话补全
+        
+        Args:
+            template_id: 模板ID
+            template_code: 模板代码（template_id和template_code至少提供一个）
+            variables: 模板变量值
+            user_id: 用户ID（用于获取用户偏好）
+            provider: LLM提供商（可选，覆盖模板推荐）
+            model: 模型（可选，覆盖模板推荐）
+            **kwargs: 其他LLM参数
+        
+        Returns:
+            LLM响应对象，包含parsed_data字段
+        
+        流程：
+        1. 从PromptRenderer获取渲染后的prompt
+        2. 使用模板推荐的配置（可被参数覆盖）
+        3. 调用chat_completion
+        4. 记录使用日志
+        5. 根据模板的output_format解析响应
+        """
+        if variables is None:
+            variables = {}
+        
+        # 导入必要的模块
+        from backend.core.prompt_renderer import PromptRenderer
+        from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+        
+        # 1. 渲染prompt
+        renderer = PromptRenderer()
+        try:
+            rendered = renderer.render(
+                template_id=template_id,
+                template_code=template_code,
+                variables_data=variables,
+                user_id=user_id
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to render template: {str(e)}")
+            raise Exception(f"模板渲染失败: {str(e)}")
+        
+        # 2. 构建消息
+        messages = []
+        if rendered.system_prompt:
+            messages.append(LLMMessage(role="system", content=rendered.system_prompt))
+        messages.append(LLMMessage(role="user", content=rendered.user_prompt))
+        
+        # 3. 使用推荐配置（可被参数覆盖）
+        provider = provider or rendered.recommended_config.get('provider')
+        model = model or rendered.recommended_config.get('model')
+        temperature = kwargs.pop('temperature', rendered.recommended_config.get('temperature'))
+        max_tokens = kwargs.pop('max_tokens', rendered.recommended_config.get('max_tokens'))
+        
+        # 4. 调用LLM
+        import time
+        start_time = time.time()
+        
+        try:
+            response = await self.chat_completion(
+                messages, 
+                provider=provider,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        except Exception as e:
+            # 记录失败日志
+            response_time_ms = int((time.time() - start_time) * 1000)
+            service = LLMPromptTemplateService()
+            service.log_template_usage(
+                template_id=rendered.template_id,
+                user_id=user_id,
+                rendered_prompt=f"System: {rendered.system_prompt}\n\nUser: {rendered.user_prompt}",
+                variables_data=rendered.variables_used,
+                response_content="",
+                provider=provider or "unknown",
+                model=model or "unknown",
+                tokens_used=0,
+                cost=0.0,
+                response_time_ms=response_time_ms,
+                success=False,
+                error_message=str(e)
+            )
+            raise
+        
+        response_time_ms = int((time.time() - start_time) * 1000)
+        
+        # 5. 解析响应（如果模板定义了output_format）
+        parsed_output = renderer.parse_output(rendered.template_id, response.content)
+        response.parsed_data = parsed_output
+        
+        # 6. 记录使用日志
+        service = LLMPromptTemplateService()
+        service.log_template_usage(
+            template_id=rendered.template_id,
+            user_id=user_id,
+            rendered_prompt=f"System: {rendered.system_prompt}\n\nUser: {rendered.user_prompt}",
+            variables_data=rendered.variables_used,
+            response_content=response.content,
+            provider=response.provider,
+            model=response.model,
+            tokens_used=response.usage.get('total_tokens', 0),
+            cost=response.cost,
+            response_time_ms=response_time_ms,
+            success=True
+        )
+        
+        self.logger.info(
+            f"Template completion successful",
+            template_id=rendered.template_id,
+            template_code=rendered.template_code,
+            provider=response.provider,
+            model=response.model,
+            tokens=response.usage.get('total_tokens', 0)
+        )
+        
+        return response
 
 
 # 全局LLM服务实例

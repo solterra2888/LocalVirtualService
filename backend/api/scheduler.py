@@ -70,6 +70,12 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     topic_filter: Optional[str] = Field(default=None, description="主题过滤器")
     keywords: Optional[str] = Field(default=None, description="关键词，逗号分隔")
     recent_days: Optional[int] = Field(default=None, ge=1, le=365, description="最近天数，用于限制新闻日期范围")
+    # 新闻分析相关参数
+    auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
+    use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
+    analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
+    analysis_batch_size: int = Field(default=50, ge=1, le=500, description="每次分析的最大新闻数量")
+    max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
 
 class CreateWatchlistNewsTaskRequest(BaseModel):
@@ -81,6 +87,12 @@ class CreateWatchlistNewsTaskRequest(BaseModel):
     max_results: int = Field(default=100, ge=1, le=1000, description="最大结果数")
     recent_days: Optional[int] = Field(default=None, ge=1, le=365, description="最近天数，用于限制新闻日期范围")
     user_id: Optional[int] = Field(default=None, description="用户ID，不指定则获取所有用户的watchlist")
+    # 新闻分析相关参数
+    auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
+    use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
+    analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
+    analysis_batch_size: int = Field(default=50, ge=1, le=500, description="每次分析的最大新闻数量")
+    max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
 
 class CreateEODHDFundamentalsTaskRequest(BaseModel):
@@ -385,7 +397,13 @@ async def create_eodhd_news_task(
             'topic': request.topic,
             'topic_filter': request.topic_filter,
             'keywords': request.keywords.split(',') if request.keywords else None,
-            'recent_days': request.recent_days
+            'recent_days': request.recent_days,
+            # 新闻分析相关参数
+            'auto_analyze': request.auto_analyze,
+            'use_celery': request.use_celery,
+            'analysis_template': request.analysis_template,
+            'analysis_batch_size': request.analysis_batch_size,
+            'max_concurrent': request.max_concurrent
         }
         
         result = await scheduler_service.create_cron_task(
@@ -897,7 +915,13 @@ async def create_watchlist_news_task(
         task_params = {
             'max_results': request.max_results,
             'recent_days': request.recent_days,
-            'user_id': request.user_id
+            'user_id': request.user_id,
+            # 新闻分析相关参数
+            'auto_analyze': request.auto_analyze,
+            'use_celery': request.use_celery,
+            'analysis_template': request.analysis_template,
+            'analysis_batch_size': request.analysis_batch_size,
+            'max_concurrent': request.max_concurrent
         }
         
         result = await scheduler_service.create_cron_task(

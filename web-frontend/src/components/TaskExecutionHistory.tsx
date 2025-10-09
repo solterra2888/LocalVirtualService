@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -65,24 +65,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   const [detailVisible, setDetailVisible] = useState(false);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
 
-  useEffect(() => {
-    loadExecutionLogs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskId, dateRange, statusFilter]);
-
-  useEffect(() => {
-    loadTasks();
-  }, []);
-
-  // Refresh data when refreshTrigger changes
-  useEffect(() => {
-    if (refreshTrigger !== undefined) {
-      loadExecutionLogs();
-      loadTasks();
-    }
-  }, [refreshTrigger]);
-
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     try {
       const response = await schedulerAPI.getTasks();
       if (response.success && response.data) {
@@ -95,9 +78,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       console.error('Failed to get task list:', error);
       message.error('Failed to get task list');
     }
-  };
+  }, []);
 
-  const loadExecutionLogs = async () => {
+  const loadExecutionLogs = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -140,7 +123,23 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedTaskId, statusFilter, dateRange]);
+
+  useEffect(() => {
+    loadExecutionLogs();
+  }, [selectedTaskId, dateRange, statusFilter, loadExecutionLogs]);
+
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
+
+  // Refresh data when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger !== undefined) {
+      loadExecutionLogs();
+      loadTasks();
+    }
+  }, [refreshTrigger, loadExecutionLogs, loadTasks]);
 
   const getStatusIcon = (status: string) => {
     const statusConfig = {

@@ -1,5 +1,13 @@
 // 新闻相关的类型定义
 
+export interface NewsAnalysisResult {
+  content: string;
+  template_code?: string;
+  provider?: string;
+  model?: string;
+  tokens?: number;
+}
+
 export interface NewsItem {
   id: number;
   date?: string;
@@ -16,6 +24,7 @@ export interface NewsItem {
   symbols: string[];
   tags: string[];          // 用户自定义的topic tags
   auto_tags: string[];     // API原始tags
+  analysis_result?: NewsAnalysisResult;  // AI分析结果
 }
 
 export interface NewsListResponse {
@@ -134,6 +143,22 @@ export interface UpdateThemeParams {
 export interface ThemeKeywordParams {
   keywords: string;
   weights?: string;
+}
+
+// 删除新闻相关类型
+export interface DeleteNewsByDateRangeParams {
+  start_date: string;  // YYYY-MM-DD格式
+  end_date: string;    // YYYY-MM-DD格式
+}
+
+export interface DeleteNewsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    deleted_count: number;
+    start_date: string;
+    end_date: string;
+  };
 }
 
 // API测试相关类型

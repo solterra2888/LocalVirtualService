@@ -4,16 +4,16 @@ import {
   NewsListResponse,
   NewsTopic,
   NewsSymbol,
-  NewsTag,
   NewsSearchParams,
-  NewsTopicKeyword,
   FetchNewsParams,
   FetchNewsResponse,
   EODHDTestResponse,
   NewsTheme,
   CreateThemeParams,
   UpdateThemeParams,
-  ThemeKeywordParams
+  ThemeKeywordParams,
+  DeleteNewsByDateRangeParams,
+  DeleteNewsResponse
 } from '../types/news';
 
 // 新闻API服务
@@ -184,6 +184,18 @@ export const newsAPI = {
   // 重置主题到默认状态
   resetThemeToDefault: async (themeId: number): Promise<{ success: boolean; message: string; data: any }> => {
     return api.post(`/news/themes/${themeId}/reset`);
+  },
+
+  // ============ 新闻删除API ============
+
+  // 按日期范围删除新闻
+  deleteNewsByDateRange: async (params: DeleteNewsByDateRangeParams): Promise<DeleteNewsResponse> => {
+    const queryParams = new URLSearchParams();
+    
+    queryParams.append('start_date', params.start_date);
+    queryParams.append('end_date', params.end_date);
+
+    return api.delete(`/news/delete-by-date-range?${queryParams.toString()}`);
   }
 };
 

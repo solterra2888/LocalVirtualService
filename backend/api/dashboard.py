@@ -270,7 +270,8 @@ async def get_company_news(
         WITH news_data AS (
             SELECT DISTINCT
                 n.id, n.title, n.content, n.date, n.source, n.link,
-                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
+                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu,
+                n.analysis_result
             FROM news n
             JOIN news_symbols ns ON n.id = ns.news_id
             JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
@@ -281,6 +282,7 @@ async def get_company_news(
         SELECT 
             nd.id, nd.title, nd.content, nd.date, nd.source, nd.link,
             nd.sentiment_polarity, nd.sentiment_pos, nd.sentiment_neg, nd.sentiment_neu,
+            nd.analysis_result,
             COALESCE(
                 ARRAY_AGG(DISTINCT ntd.tag_name) FILTER (WHERE ntd.tag_name IS NOT NULL),
                 ARRAY[]::text[]
@@ -295,7 +297,8 @@ async def get_company_news(
         LEFT JOIN news_symbols ns2 ON nd.id = ns2.news_id
         LEFT JOIN news_symbols_dict nsd2 ON ns2.symbol_id = nsd2.id
         GROUP BY nd.id, nd.title, nd.content, nd.date, nd.source, nd.link,
-                 nd.sentiment_polarity, nd.sentiment_pos, nd.sentiment_neg, nd.sentiment_neu
+                 nd.sentiment_polarity, nd.sentiment_pos, nd.sentiment_neg, nd.sentiment_neu,
+                 nd.analysis_result
         ORDER BY nd.date DESC
         """
         
@@ -317,8 +320,9 @@ async def get_company_news(
                 "sentiment_pos": float(row[7]) if row[7] is not None else None,
                 "sentiment_neg": float(row[8]) if row[8] is not None else None,
                 "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "symbols": row[11] if row[11] else [],  # 直接从查询结果获取
-                "tags": row[10] if row[10] else []  # 直接从查询结果获取
+                "analysis_result": row[10] if row[10] else None,  # 分析结果
+                "tags": row[11] if row[11] else [],  # 直接从查询结果获取
+                "symbols": row[12] if row[12] else []  # 直接从查询结果获取
             }
             news_items.append(news_item)
         
@@ -349,7 +353,8 @@ async def get_sector_news(
         WITH sector_news AS (
             SELECT DISTINCT
                 n.id, n.title, n.content, n.date, n.source, n.link,
-                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu
+                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu,
+                n.analysis_result
             FROM news n
             JOIN news_symbols ns ON n.id = ns.news_id
             JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
@@ -366,6 +371,7 @@ async def get_sector_news(
         SELECT 
             sn.id, sn.title, sn.content, sn.date, sn.source, sn.link,
             sn.sentiment_polarity, sn.sentiment_pos, sn.sentiment_neg, sn.sentiment_neu,
+            sn.analysis_result,
             COALESCE(
                 ARRAY_AGG(DISTINCT ntd.tag_name) FILTER (WHERE ntd.tag_name IS NOT NULL),
                 ARRAY[]::text[]
@@ -380,7 +386,8 @@ async def get_sector_news(
         LEFT JOIN news_symbols ns2 ON sn.id = ns2.news_id
         LEFT JOIN news_symbols_dict nsd2 ON ns2.symbol_id = nsd2.id
         GROUP BY sn.id, sn.title, sn.content, sn.date, sn.source, sn.link,
-                 sn.sentiment_polarity, sn.sentiment_pos, sn.sentiment_neg, sn.sentiment_neu
+                 sn.sentiment_polarity, sn.sentiment_pos, sn.sentiment_neg, sn.sentiment_neu,
+                 sn.analysis_result
         ORDER BY sn.date DESC
         """
         
@@ -399,8 +406,9 @@ async def get_sector_news(
                 "sentiment_pos": float(row[7]) if row[7] is not None else None,
                 "sentiment_neg": float(row[8]) if row[8] is not None else None,
                 "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "symbols": row[11] if row[11] else [],  # 直接从查询结果获取
-                "tags": row[10] if row[10] else []  # 直接从查询结果获取
+                "analysis_result": row[10] if row[10] else None,  # 分析结果
+                "tags": row[11] if row[11] else [],  # 直接从查询结果获取
+                "symbols": row[12] if row[12] else []  # 直接从查询结果获取
             }
             news_items.append(news_item)
         

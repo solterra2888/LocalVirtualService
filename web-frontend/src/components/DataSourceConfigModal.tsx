@@ -14,7 +14,8 @@ import {
   Col,
   InputNumber,
   Tooltip,
-  message
+  message,
+  Switch
 } from 'antd';
 import {
   ClockCircleOutlined,
@@ -26,7 +27,7 @@ import {
   QuestionCircleOutlined,
   DatabaseOutlined
 } from '@ant-design/icons';
-import { schedulerAPI, CreateEODHDNewsTaskParams, CreateWatchlistNewsTaskParams, CreateEODHDEODStockPricesTaskParams, TimezoneOption } from '../services/scheduler';
+import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
 
 const { Title, Text } = Typography;
@@ -222,9 +223,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             cron_expression: data.cronExpression!,
             timezone: data.timezone!,
             enabled: true,
-            max_results: data.taskParams?.max_results || 100,
-            recent_days: data.taskParams?.recent_days,
-            user_id: data.taskParams?.user_id
+            ...data.taskParams  // ✅ 展开所有参数，包括 LLM 分析参数
           };
           result = await schedulerAPI.createWatchlistNewsTask(watchlistParams);
         } else if (dataSourceType === 'finviz_screener') {
@@ -422,6 +421,14 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'eodhd_news':
           return (
             <>
+              <Alert
+                message="News Fetching Parameters"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Configure news data source and filtering parameters"
+              />
+              
               <Form.Item
                 label="Max Results"
                 name={['taskParams', 'max_results']}
@@ -476,12 +483,95 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               >
                 <Input placeholder="AI,blockchain,cryptocurrency" />
               </Form.Item>
+              
+              <Alert
+                message="🤖 LLM News Analysis (Automatic)"
+                type="success"
+                showIcon
+                style={{ marginTop: 24, marginBottom: 16 }}
+                description="Enable automatic LLM analysis for newly fetched news. Analysis happens immediately after news acquisition using Celery workers."
+              />
+              
+              <Form.Item
+                label="Enable Auto Analysis"
+                name={['taskParams', 'auto_analyze']}
+                valuePropName="checked"
+                extra="Automatically analyze news with LLM immediately after fetching. Recommended for real-time news analysis."
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Enabled" 
+                  unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Use Celery (Async Processing)"
+                name={['taskParams', 'use_celery']}
+                valuePropName="checked"
+                extra="Use Celery for async processing (STRONGLY RECOMMENDED for multi-user cloud applications to avoid blocking)"
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Celery" 
+                  unCheckedChildren="Direct" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Analysis Template"
+                name={['taskParams', 'analysis_template']}
+                extra="Prompt template code for LLM analysis"
+                initialValue="news_summary_v1"
+              >
+                <Select placeholder="Select analysis template">
+                  <Option value="news_summary_v1">News Summary v1 (Default)</Option>
+                  <Option value="news_sentiment_analysis">News Sentiment Analysis</Option>
+                  <Option value="news_classification">News Classification</Option>
+                </Select>
+              </Form.Item>
+              
+              <Form.Item
+                label="Analysis Batch Size"
+                name={['taskParams', 'analysis_batch_size']}
+                extra="Maximum number of news items to analyze per batch. Leave empty to analyze all new items."
+                initialValue={100}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={1000} 
+                  placeholder="100" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Max Concurrent"
+                name={['taskParams', 'max_concurrent']}
+                extra="Number of concurrent LLM API calls (1-10). Higher values = faster but more API load."
+                initialValue={8}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={10} 
+                  placeholder="8" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
             </>
           );
           
         case 'watchlist_news':
           return (
             <>
+              <Alert
+                message="Stock symbols are automatically fetched from your watchlist"
+                description="This scheduler will automatically get news for all stocks in your watchlist based on the primaryticker field from target_tracking_config table."
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+              
               <Form.Item
                 label="Max Results"
                 name={['taskParams', 'max_results']}
@@ -509,12 +599,79 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <Alert
-                message="Stock symbols are automatically fetched from your watchlist"
-                description="This scheduler will automatically get news for all stocks in your watchlist based on the primaryticker field from target_tracking_config table."
-                type="info"
+                message="🤖 LLM News Analysis (Automatic)"
+                type="success"
                 showIcon
-                style={{ marginTop: 16 }}
+                style={{ marginTop: 24, marginBottom: 16 }}
+                description="Enable automatic LLM analysis for newly fetched news. Analysis happens immediately after news acquisition using Celery workers."
               />
+              
+              <Form.Item
+                label="Enable Auto Analysis"
+                name={['taskParams', 'auto_analyze']}
+                valuePropName="checked"
+                extra="Automatically analyze news with LLM immediately after fetching. Recommended for real-time news analysis."
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Enabled" 
+                  unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Use Celery (Async Processing)"
+                name={['taskParams', 'use_celery']}
+                valuePropName="checked"
+                extra="Use Celery for async processing (STRONGLY RECOMMENDED for multi-user cloud applications to avoid blocking)"
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Celery" 
+                  unCheckedChildren="Direct" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Analysis Template"
+                name={['taskParams', 'analysis_template']}
+                extra="Prompt template code for LLM analysis"
+                initialValue="news_summary_v1"
+              >
+                <Select placeholder="Select analysis template">
+                  <Option value="news_summary_v1">News Summary v1 (Default)</Option>
+                  <Option value="news_sentiment_analysis">News Sentiment Analysis</Option>
+                  <Option value="news_classification">News Classification</Option>
+                </Select>
+              </Form.Item>
+              
+              <Form.Item
+                label="Analysis Batch Size"
+                name={['taskParams', 'analysis_batch_size']}
+                extra="Maximum number of news items to analyze per batch. Leave empty to analyze all new items."
+                initialValue={100}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={1000} 
+                  placeholder="100" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Max Concurrent"
+                name={['taskParams', 'max_concurrent']}
+                extra="Number of concurrent LLM API calls (1-10). Higher values = faster but more API load."
+                initialValue={8}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={10} 
+                  placeholder="8" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
             </>
           );
           

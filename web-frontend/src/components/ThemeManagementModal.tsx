@@ -17,7 +17,8 @@ import {
   Alert,
   Card,
   ColorPicker,
-  Divider
+  Divider,
+  DatePicker
 } from 'antd';
 import {
   SettingOutlined,
@@ -27,8 +28,10 @@ import {
   TagOutlined,
   ReloadOutlined,
   BulbOutlined,
-  RedoOutlined
+  RedoOutlined,
+  WarningOutlined
 } from '@ant-design/icons';
+import { Dayjs } from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 
 import { newsAPI } from '../services/news';
@@ -36,6 +39,7 @@ import type { NewsTheme, CreateThemeParams, UpdateThemeParams } from '../types/n
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
+const { RangePicker } = DatePicker;
 
 interface ThemeManagementModalProps {
   open: boolean;
@@ -50,6 +54,10 @@ interface ThemeManagementState {
   drawerVisible: boolean;
   drawerMode: 'create' | 'edit' | 'keywords';
   keywordsList: string[];
+  deleteModalVisible: boolean;
+  deleteLoading: boolean;
+  deleteStartDate: string | null;
+  deleteEndDate: string | null;
 }
 
 const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCancel, onSuccess }) => {
@@ -61,7 +69,11 @@ const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCan
     selectedTheme: null,
     drawerVisible: false,
     drawerMode: 'create',
-    keywordsList: []
+    keywordsList: [],
+    deleteModalVisible: false,
+    deleteLoading: false,
+    deleteStartDate: null,
+    deleteEndDate: null
   });
 
   // Load theme data
@@ -209,6 +221,72 @@ const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCan
     } catch (error) {
       console.error('Failed to remove keywords:', error);
       message.error('Failed to remove keywords');
+    }
+  };
+
+  // Open delete news modal
+  const openDeleteModal = () => {
+    setState(prev => ({
+      ...prev,
+      deleteModalVisible: true,
+      deleteStartDate: null,
+      deleteEndDate: null
+    }));
+  };
+
+  // Close delete news modal
+  const closeDeleteModal = () => {
+    setState(prev => ({
+      ...prev,
+      deleteModalVisible: false,
+      deleteStartDate: null,
+      deleteEndDate: null
+    }));
+  };
+
+  // Handle date range change
+  const handleDateRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
+    if (dates && dates[0] && dates[1]) {
+      setState(prev => ({
+        ...prev,
+        deleteStartDate: dates[0]!.format('YYYY-MM-DD'),
+        deleteEndDate: dates[1]!.format('YYYY-MM-DD')
+      }));
+    } else {
+      setState(prev => ({
+        ...prev,
+        deleteStartDate: null,
+        deleteEndDate: null
+      }));
+    }
+  };
+
+  // Delete news by date range
+  const handleDeleteNews = async () => {
+    if (!state.deleteStartDate || !state.deleteEndDate) {
+      message.error('Please select date range');
+      return;
+    }
+
+    setState(prev => ({ ...prev, deleteLoading: true }));
+    try {
+      const response = await newsAPI.deleteNewsByDateRange({
+        start_date: state.deleteStartDate,
+        end_date: state.deleteEndDate
+      });
+
+      if (response.success) {
+        message.success(response.message);
+        closeDeleteModal();
+        onSuccess(); // Notify parent to refresh news list
+      } else {
+        message.error(response.message || 'Delete failed');
+      }
+    } catch (error) {
+      console.error('Failed to delete news:', error);
+      message.error('Failed to delete news');
+    } finally {
+      setState(prev => ({ ...prev, deleteLoading: false }));
     }
   };
 
@@ -620,6 +698,15 @@ const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCan
             >
               Refresh
             </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={openDeleteModal}
+              size="small"
+              style={{ fontSize: '11px' }}
+            >
+              Delete News
+            </Button>
           </Space>
         </div>
 
@@ -660,6 +747,62 @@ const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCan
       >
         {renderDrawerContent()}
       </Drawer>
+
+      {/* Delete News Modal */}
+      <Modal
+        title={
+          <Space>
+            <WarningOutlined style={{ color: '#ff4d4f' }} />
+            <Text style={{ fontSize: '14px' }}>Delete News by Date Range</Text>
+          </Space>
+        }
+        open={state.deleteModalVisible}
+        onCancel={closeDeleteModal}
+        onOk={handleDeleteNews}
+        okText="Confirm Delete"
+        cancelText="Cancel"
+        okButtonProps={{ 
+          danger: true, 
+          loading: state.deleteLoading,
+          disabled: !state.deleteStartDate || !state.deleteEndDate
+        }}
+        width={500}
+      >
+        <Alert
+          message="Warning"
+          description="This action will permanently delete news and all related data (including news_auto_tags_relations, news_symbols, news_tags, etc.) within the selected date range. This operation cannot be undone!"
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16, fontSize: '11px' }}
+        />
+        
+        <Form layout="vertical">
+          <Form.Item 
+            label={<Text style={{ fontSize: '11px' }}>Select Date Range</Text>}
+            required
+          >
+            <RangePicker
+              style={{ width: '100%' }}
+              onChange={handleDateRangeChange}
+              format="YYYY-MM-DD"
+              placeholder={['Start Date', 'End Date']}
+            />
+          </Form.Item>
+          
+          {state.deleteStartDate && state.deleteEndDate && (
+            <Alert
+              message={
+                <Text style={{ fontSize: '11px' }}>
+                  You are about to delete news from {state.deleteStartDate} to {state.deleteEndDate}
+                </Text>
+              }
+              type="info"
+              showIcon
+              style={{ fontSize: '11px' }}
+            />
+          )}
+        </Form>
+      </Modal>
     </>
   );
 };

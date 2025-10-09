@@ -18,7 +18,6 @@ import {
   Tabs,
   Row,
   Col,
-  Divider,
   Select
 } from 'antd';
 import {
@@ -26,11 +25,9 @@ import {
   EditOutlined,
   DeleteOutlined,
   EyeOutlined,
-  SettingOutlined,
   StarOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
-import { useAuthStore } from '../store/authStore';
 import { tasksAPI } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 
@@ -66,7 +63,6 @@ interface TaskFormData {
 }
 
 const TasksPage: React.FC = () => {
-  const { user } = useAuthStore();
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskFormVisible, setTaskFormVisible] = useState(false);

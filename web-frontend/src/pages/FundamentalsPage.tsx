@@ -17,7 +17,6 @@ import {
   Divider,
   Empty,
   Select,
-  Alert,
   List,
   AutoComplete
 } from 'antd';
@@ -273,7 +272,7 @@ const FundamentalsPage: React.FC = () => {
       }));
     } catch (error) {
       console.error('Failed to query fundamental information:', error);
-      const errorMessage = getErrorMessage(error);
+      getErrorMessage(error);
       
       // Try fallback to search only if update fails
       try {

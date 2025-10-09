@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, 
   Tree, 
@@ -17,15 +17,17 @@ import {
   Col,
   Button,
   Skeleton,
-  Select
+  Select,
+  Modal,
+  Descriptions
 } from 'antd';
+import MarkdownRenderer from './MarkdownRenderer';
 import {
   SearchOutlined, 
   StockOutlined, 
   FileTextOutlined,
   CalendarOutlined,
   PlusOutlined,
-  DeleteOutlined,
   HeartOutlined,
   ExperimentOutlined,
   PhoneOutlined,
@@ -46,9 +48,9 @@ import {
   FileImageOutlined,
   StarFilled,
   StarOutlined,
-  ReloadOutlined,
   MenuFoldOutlined,
-  MenuUnfoldOutlined
+  MenuUnfoldOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
@@ -137,34 +139,6 @@ const getSectorIcon = (sector: string) => {
   }
 };
 
-// Priority级别映射函数
-const getPriorityLabel = (priority: number) => {
-  switch (priority) {
-    case 1:
-      return 'Low';
-    case 2:
-      return 'Medium';
-    case 3:
-      return 'High';
-    default:
-      return `Level ${priority}`;
-  }
-};
-
-// Priority级别颜色映射函数
-const getPriorityColor = (priority: number) => {
-  switch (priority) {
-    case 1:
-      return '#52c41a'; // Green for Low
-    case 2:
-      return '#faad14'; // Orange for Medium
-    case 3:
-      return '#f5222d'; // Red for High
-    default:
-      return '#8c8c8c'; // Gray for unknown
-  }
-};
-
 // 渲染星星图标的辅助函数
 const renderStars = (count: number, filled: boolean = true) => {
   const stars = [];
@@ -241,10 +215,10 @@ const FinvizDashboard: React.FC = () => {
     return null;
   };
   
-  const setCachedNews = (cacheKey: string, news: DashboardNewsItem[]) => {
+  const setCachedNews = useCallback((cacheKey: string, news: DashboardNewsItem[]) => {
     setNewsCache(prev => new Map(prev).set(cacheKey, news));
     setCacheTimestamps(prev => new Map(prev).set(cacheKey, Date.now()));
-  };
+  }, []);
   
   // 清理过期缓存
   const cleanupExpiredCache = () => {
@@ -276,6 +250,8 @@ const FinvizDashboard: React.FC = () => {
   const [fundamentalsModalVisible, setFundamentalsModalVisible] = useState<boolean>(false);
   const [selectedTickerForFundamentals, setSelectedTickerForFundamentals] = useState<string>('');
   const [selectedCompanyNameForFundamentals, setSelectedCompanyNameForFundamentals] = useState<string>('');
+  const [analysisModalVisible, setAnalysisModalVisible] = useState<boolean>(false);
+  const [selectedNewsForAnalysis, setSelectedNewsForAnalysis] = useState<DashboardNewsItem | null>(null);
 
   // 初始化数据
   useEffect(() => {
@@ -357,29 +333,6 @@ const FinvizDashboard: React.FC = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, selectedType, activeTab, selectedStock]);
-
-  // 滚动检测和自动加载更多新闻
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!hasMoreNews || loadingMoreNews || activeTab !== 'news') return;
-      
-      const scrollContainer = document.querySelector('.ant-layout-content');
-      if (!scrollContainer) return;
-      
-      const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-      const threshold = 200; // 距离底部200px时触发加载
-      
-      if (scrollTop + clientHeight >= scrollHeight - threshold) {
-        loadMoreNews();
-      }
-    };
-
-    const scrollContainer = document.querySelector('.ant-layout-content');
-    if (scrollContainer) {
-      scrollContainer.addEventListener('scroll', handleScroll);
-      return () => scrollContainer.removeEventListener('scroll', handleScroll);
-    }
-  }, [hasMoreNews, loadingMoreNews, activeTab, selectedKey, selectedType, selectedStock, selectedGroup]);
 
   const loadUserWatchlist = async () => {
     setLoading(true);
@@ -675,7 +628,7 @@ const FinvizDashboard: React.FC = () => {
     }
   };
 
-  const loadStockNews = async (ticker: string, cacheKey?: string | null, reset: boolean = true) => {
+  const loadStockNews = useCallback(async (ticker: string, cacheKey?: string | null, reset: boolean = true) => {
     try {
       const offset = reset ? 0 : newsOffset;
       const news = await dashboardAPI.getCompanyNews(ticker, { 
@@ -706,9 +659,9 @@ const FinvizDashboard: React.FC = () => {
         setNewsData([]);
       }
     }
-  };
+  }, [newsOffset, NEWS_PAGE_SIZE, setCachedNews, logger]);
 
-  const loadGroupNews = async (groupName: string, cacheKey?: string | null, reset: boolean = true) => {
+  const loadGroupNews = useCallback(async (groupName: string, cacheKey?: string | null, reset: boolean = true) => {
     try {
       // 获取该分组下所有股票的新闻
       const group = watchlistGroups.find(g => g.group_name === groupName);
@@ -753,10 +706,10 @@ const FinvizDashboard: React.FC = () => {
         setNewsData([]);
       }
     }
-  };
+  }, [watchlistGroups, newsOffset, NEWS_PAGE_SIZE, setCachedNews, logger]);
 
   // 加载更多新闻
-  const loadMoreNews = async () => {
+  const loadMoreNews = useCallback(async () => {
     if (!hasMoreNews || loadingMoreNews || !selectedKey) return;
     
     setLoadingMoreNews(true);
@@ -772,7 +725,30 @@ const FinvizDashboard: React.FC = () => {
     } finally {
       setLoadingMoreNews(false);
     }
-  };
+  }, [hasMoreNews, loadingMoreNews, selectedKey, selectedType, selectedStock, selectedGroup, loadGroupNews, loadStockNews, logger]);
+
+  // 滚动检测和自动加载更多新闻
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!hasMoreNews || loadingMoreNews || activeTab !== 'news') return;
+      
+      const scrollContainer = document.querySelector('.ant-layout-content');
+      if (!scrollContainer) return;
+      
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+      const threshold = 200; // 距离底部200px时触发加载
+      
+      if (scrollTop + clientHeight >= scrollHeight - threshold) {
+        loadMoreNews();
+      }
+    };
+
+    const scrollContainer = document.querySelector('.ant-layout-content');
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', handleScroll);
+      return () => scrollContainer.removeEventListener('scroll', handleScroll);
+    }
+  }, [hasMoreNews, loadingMoreNews, activeTab, loadMoreNews]);
 
   // 加载研究报告
   const loadResearchReports = async (ticker: string) => {
@@ -968,9 +944,16 @@ const FinvizDashboard: React.FC = () => {
                 <List.Item
                   extra={
                     <Space direction="vertical" align="end">
-                      <Tag color={getSentimentColor(item.sentiment_polarity)}>
-                        {getSentimentText(item.sentiment_polarity)}
-                      </Tag>
+                      <Space>
+                        <Tag color={getSentimentColor(item.sentiment_polarity)}>
+                          {getSentimentText(item.sentiment_polarity)}
+                        </Tag>
+                        {item.analysis_result && (
+                          <Tag color="blue" icon={<RobotOutlined />} style={{ fontSize: '11px' }}>
+                            AI分析
+                          </Tag>
+                        )}
+                      </Space>
                     </Space>
                   }
                 >
@@ -986,33 +969,67 @@ const FinvizDashboard: React.FC = () => {
                       </Space>
                     }
                     title={
-                      <a 
-                        href={item.link} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        style={{ fontSize: '14px' }}
-                      >
-                        {item.title}
-                      </a>
-                    }
-                    description={
                       <Space>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>{item.source}</Text>
-                        {item.symbols?.slice(0, 3).map(symbol => (
-                          <Tag key={symbol} style={{ fontSize: '10px' }}>{symbol}</Tag>
-                        ))}
-                        {item.symbols && item.symbols.length > 3 && (
-                          <Tag style={{ fontSize: '10px' }}>+{item.symbols.length - 3}</Tag>
-                        )}
+                        <span 
+                          style={{ 
+                            fontSize: '14px', 
+                            cursor: 'pointer',
+                            color: '#1890ff',
+                            textDecoration: 'underline',
+                            maxWidth: '800px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            display: 'inline-block'
+                          }}
+                          title={item.title}
+                          onClick={() => {
+                            setSelectedNewsForAnalysis(item);
+                            setAnalysisModalVisible(true);
+                          }}
+                        >
+                          {item.title}
+                        </span>
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          - {item.source}
+                        </Text>
                       </Space>
                     }
+                    description={null}
                   />
-                  <Paragraph 
-                    ellipsis={{ rows: 2, expandable: true }}
-                    style={{ fontSize: '13px', marginBottom: '8px' }}
-                  >
-                    {item.content}
-                  </Paragraph>
+                  <div style={{ fontSize: '13px', marginBottom: '8px' }}>
+                    {item.analysis_result?.content ? (
+                      <div style={{ 
+                        maxHeight: '60px', 
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}>
+                        <MarkdownRenderer 
+                          content={item.analysis_result.content}
+                          style={{
+                            fontSize: '13px',
+                            lineHeight: '1.4'
+                          }}
+                        />
+                        <div style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          height: '20px',
+                          background: 'linear-gradient(transparent, white)',
+                          pointerEvents: 'none'
+                        }} />
+                      </div>
+                    ) : (
+                      <Typography.Paragraph 
+                        ellipsis={{ rows: 2, expandable: true }}
+                        style={{ fontSize: '13px', marginBottom: 0 }}
+                      >
+                        {item.content}
+                      </Typography.Paragraph>
+                    )}
+                  </div>
                 </List.Item>
               </div>
             </div>
@@ -1143,19 +1160,6 @@ const FinvizDashboard: React.FC = () => {
         if (priceData) break;
       }
     }
-    
-    // 格式化价格变化颜色
-    const getPriceChangeColor = (changePercent?: number) => {
-      if (!changePercent) return '#8c8c8c';
-      return changePercent >= 0 ? '#52c41a' : '#f5222d';
-    };
-
-    // 格式化价格变化显示
-    const formatPriceChange = (changeAmount?: number, changePercent?: number) => {
-      if (!changeAmount || !changePercent) return 'N/A';
-      const sign = changeAmount >= 0 ? '+' : '';
-      return `${sign}$${changeAmount.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`;
-    };
 
     return (
       <div>
@@ -1516,6 +1520,135 @@ const FinvizDashboard: React.FC = () => {
         ticker={selectedTickerForFundamentals}
         companyName={selectedCompanyNameForFundamentals}
       />
+
+      {/* AI分析详情模态框 */}
+      <Modal
+        title={
+          <Space>
+            <RobotOutlined style={{ color: '#1890ff' }} />
+            <span>{selectedNewsForAnalysis?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
+          </Space>
+        }
+        open={analysisModalVisible}
+        onCancel={() => {
+          setAnalysisModalVisible(false);
+          setSelectedNewsForAnalysis(null);
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setAnalysisModalVisible(false);
+            setSelectedNewsForAnalysis(null);
+          }}>
+            Close
+          </Button>,
+          selectedNewsForAnalysis?.link && (
+            <Button 
+              key="original" 
+              type="primary"
+              onClick={() => window.open(selectedNewsForAnalysis.link, '_blank')}
+            >
+              View Original
+            </Button>
+          )
+        ]}
+        width={800}
+      >
+        {selectedNewsForAnalysis && (
+          <>
+            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f5f5f5' }}>
+              <Typography.Title level={5} style={{ marginBottom: '12px' }}>
+                {selectedNewsForAnalysis.title}
+              </Typography.Title>
+              <Space size="small" wrap>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  <CalendarOutlined /> {selectedNewsForAnalysis.date ? new Date(selectedNewsForAnalysis.date).toLocaleString() : 'N/A'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Source: {selectedNewsForAnalysis.source || 'N/A'}
+                </Text>
+                {selectedNewsForAnalysis.symbols?.map(symbol => (
+                  <Tag key={symbol} style={{ fontSize: '10px' }}>{symbol}</Tag>
+                ))}
+              </Space>
+            </Card>
+
+            {selectedNewsForAnalysis.analysis_result ? (
+              <>
+                <Descriptions 
+                  bordered 
+                  column={2} 
+                  size="small"
+                  style={{ marginBottom: '16px' }}
+                >
+                  {selectedNewsForAnalysis.analysis_result.template_code && (
+                    <Descriptions.Item label="Template Code" span={2}>
+                      <Tag color="blue">{selectedNewsForAnalysis.analysis_result.template_code}</Tag>
+                    </Descriptions.Item>
+                  )}
+                  {selectedNewsForAnalysis.analysis_result.provider && (
+                    <Descriptions.Item label="AI Provider">
+                      {selectedNewsForAnalysis.analysis_result.provider}
+                    </Descriptions.Item>
+                  )}
+                  {selectedNewsForAnalysis.analysis_result.model && (
+                    <Descriptions.Item label="Model">
+                      {selectedNewsForAnalysis.analysis_result.model}
+                    </Descriptions.Item>
+                  )}
+                  {selectedNewsForAnalysis.analysis_result.tokens && (
+                    <Descriptions.Item label="Token Usage" span={2}>
+                      {selectedNewsForAnalysis.analysis_result.tokens.toLocaleString()}
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
+
+                <Card 
+                  title="AI Analysis Content" 
+                  size="small"
+                  headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
+                >
+                  <MarkdownRenderer 
+                    content={selectedNewsForAnalysis.analysis_result.content}
+                    style={{
+                      fontSize: '14px',
+                      lineHeight: '1.6'
+                    }}
+                  />
+                </Card>
+
+                {selectedNewsForAnalysis.content && (
+                  <Card 
+                    title="Original Content" 
+                    size="small"
+                    style={{ marginTop: '16px' }}
+                    headStyle={{ backgroundColor: '#f5f5f5' }}
+                  >
+                    <Paragraph 
+                      ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
+                      style={{ fontSize: '13px', color: '#666' }}
+                    >
+                      {selectedNewsForAnalysis.content}
+                    </Paragraph>
+                  </Card>
+                )}
+              </>
+            ) : (
+              <Card 
+                title="News Content" 
+                size="small"
+                headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
+              >
+                <Paragraph 
+                  ellipsis={{ rows: 10, expandable: true, symbol: 'Expand' }}
+                  style={{ fontSize: '14px' }}
+                >
+                  {selectedNewsForAnalysis.content || 'No content available'}
+                </Paragraph>
+              </Card>
+            )}
+          </>
+        )}
+      </Modal>
 
     </div>
   );

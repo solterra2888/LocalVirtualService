@@ -107,7 +107,13 @@ echo ""
 echo "🚀 Flower 监控启动配置:"
 echo "   - 监控地址: http://localhost:${FLOWER_PORT:-5555}"
 echo "   - Redis地址: $REDIS_URL"
-echo "   - 认证: ${FLOWER_AUTH:-无}"
+if [ -n "$FLOWER_AUTH" ]; then
+    echo "   - 认证: 已启用 (${FLOWER_AUTH%:*}:****)"
+    echo "   ⚠️  注意: Flower 2.0.1的basic_auth存在已知bug，可能导致404页面"
+    echo "   建议: 开发环境建议不使用认证，或升级Flower到2.1+版本"
+else
+    echo "   - 认证: 无认证（开发模式）"
+fi
 echo ""
 
 # 启动Flower监控
@@ -116,8 +122,12 @@ echo "   按 Ctrl+C 停止服务"
 echo ""
 
 # 使用celery命令启动Flower
-exec $PYTHON_CMD -m celery -A backend.celery_app flower \
-    --port=${FLOWER_PORT:-5555} \
-    --broker=$REDIS_URL \
-    --basic_auth=${FLOWER_AUTH:-} \
-    --url_prefix=flower
+# 如果设置了认证信息，则添加认证参数
+if [ -n "$FLOWER_AUTH" ]; then
+    exec $PYTHON_CMD -m celery -A backend.celery_app --broker="$REDIS_URL" flower \
+        --port="${FLOWER_PORT:-5555}" \
+        --basic_auth="$FLOWER_AUTH"
+else
+    exec $PYTHON_CMD -m celery -A backend.celery_app --broker="$REDIS_URL" flower \
+        --port="${FLOWER_PORT:-5555}"
+fi

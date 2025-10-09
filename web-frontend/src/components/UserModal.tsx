@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
-import { Modal, Form, Input, Switch, message, Space } from 'antd';
+import { Modal, Form, Input, Switch, message } from 'antd';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
-import { getErrorMessage } from '../utils/errorHandler';
 
 interface UserModalProps {
   visible: boolean;
