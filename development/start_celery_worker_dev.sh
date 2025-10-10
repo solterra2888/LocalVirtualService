@@ -31,15 +31,18 @@ echo ""
 echo "🔍 检查Python环境..."
 
 # 检查conda环境
-CONDA_ENV_PATH="/Users/kevinliu/anaconda3/envs/rcTool/bin/python"
+CONDA_ENV_PATH="/opt/anaconda3/envs/rcTool/bin/python"
 if [ -f "$CONDA_ENV_PATH" ]; then
     PYTHON_CMD="$CONDA_ENV_PATH"
     echo "✅ 使用conda环境rcTool: $PYTHON_CMD"
 else
-    # 回退到系统Python
-    if command -v python3 &> /dev/null; then
+    # 回退到当前激活的Python
+    if command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+        echo "✅ 使用当前激活的Python: $PYTHON_CMD"
+    elif command -v python3 &> /dev/null; then
         PYTHON_CMD="python3"
-        echo "⚠️  conda环境rcTool不存在，使用系统Python: $PYTHON_CMD"
+        echo "⚠️  使用系统Python: $PYTHON_CMD"
     else
         echo "❌ Python未安装"
         exit 1

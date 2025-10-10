@@ -226,7 +226,7 @@ const FundamentalsPage: React.FC = () => {
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true, isUpdating: state.autoUpdateEnabled, updateResult: null }));
+    setState(prev => ({ ...prev, loading: true, isUpdating: state.autoUpdateEnabled, updateResult: null, showSearchResults: false }));
     
     try {
       let searchResult: CompanyFundamentalsResponse;

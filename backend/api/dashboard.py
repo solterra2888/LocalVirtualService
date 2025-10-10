@@ -534,12 +534,24 @@ async def search_companies(
             gicsector, gicindustry, gicsubindustry, market_cap, country
         FROM companies 
         WHERE companyname ILIKE %s OR primaryticker ILIKE %s
-        ORDER BY companyname
+        ORDER BY 
+            CASE 
+                WHEN UPPER(primaryticker) = UPPER(%s) THEN 1
+                WHEN UPPER(companyname) = UPPER(%s) THEN 2
+                WHEN UPPER(primaryticker) LIKE UPPER(%s) THEN 3
+                WHEN UPPER(companyname) LIKE UPPER(%s) THEN 4
+                ELSE 5
+            END,
+            companyname
         LIMIT 50
         """
         
         search_term = f"%{q}%"
-        results = db_manager.fetch_all(query, [search_term, search_term])
+        exact_match = q.upper()
+        results = db_manager.fetch_all(query, [
+            search_term, search_term,  # WHERE conditions
+            exact_match, exact_match, search_term, search_term  # ORDER BY conditions
+        ])
         
         companies = []
         for row in results:
@@ -1518,12 +1530,26 @@ async def search_stocks(
             c.sector ILIKE %s OR
             c.industry ILIKE %s
         )
-        ORDER BY c.name
+        ORDER BY 
+            CASE 
+                WHEN UPPER(c.code) = UPPER(%s) THEN 1
+                WHEN UPPER(c.code) LIKE UPPER(%s) THEN 2
+                WHEN UPPER(c.name) LIKE UPPER(%s) THEN 3
+                WHEN UPPER(c.sector) LIKE UPPER(%s) THEN 4
+                WHEN UPPER(c.industry) LIKE UPPER(%s) THEN 5
+                ELSE 6
+            END,
+            c.name
         LIMIT %s
         """
         
         search_term = f"%{q}%"
-        results = db_manager.fetch_all(query, [search_term, search_term, search_term, search_term, limit])
+        exact_match = q.upper()
+        results = db_manager.fetch_all(query, [
+            search_term, search_term, search_term, search_term,  # WHERE conditions
+            exact_match, search_term, search_term, search_term, search_term,  # ORDER BY conditions
+            limit
+        ])
         
         stocks = []
         for row in results:

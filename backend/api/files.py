@@ -929,6 +929,22 @@ async def search_tickers(
         
         where_clause = " AND ".join(where_conditions)
         
+        # 添加排序逻辑
+        order_by_clause = "ORDER BY name"
+        if search:
+            order_by_clause = f"""
+            ORDER BY 
+                CASE 
+                    WHEN UPPER(code) = UPPER(%s) THEN 1
+                    WHEN UPPER(name) = UPPER(%s) THEN 2
+                    WHEN UPPER(code) LIKE UPPER(%s) THEN 3
+                    WHEN UPPER(name) LIKE UPPER(%s) THEN 4
+                    ELSE 5
+                END,
+                name
+            """
+            params.extend([search.upper(), search.upper(), f"%{search}%", f"%{search}%"])
+        
         query = f"""
         SELECT 
             id,
@@ -939,7 +955,7 @@ async def search_tickers(
             industry
         FROM companies 
         WHERE {where_clause}
-        ORDER BY name
+        {order_by_clause}
         LIMIT 100
         """
         
