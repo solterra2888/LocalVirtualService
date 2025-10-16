@@ -3,6 +3,8 @@
 Celery应用实例
 """
 from celery import Celery
+from celery.signals import worker_init, worker_shutdown, task_prerun, task_postrun, task_failure, task_retry
+import os
 
 # 创建Celery应用
 app = Celery('universal_glance')
@@ -25,6 +27,70 @@ try:
     print(f"✅ 成功导入新闻分析任务模块: {news_tasks.__name__}")
 except ImportError as e:
     print(f"❌ 导入新闻分析任务模块失败: {e}")
+
+# 设置Celery日志
+@worker_init.connect
+def setup_worker_logging(sender=None, **kwargs):
+    """Worker初始化时设置日志"""
+    try:
+        from backend.utils.celery_logger import setup_celery_logging
+        setup_celery_logging(
+            log_dir='logs',
+            worker_log_file='celery_worker.log',
+            task_log_file='celery_tasks.log',
+            log_level='INFO'
+        )
+        print("✅ Celery日志系统初始化完成")
+    except Exception as e:
+        print(f"❌ Celery日志系统初始化失败: {e}")
+
+@worker_shutdown.connect
+def worker_shutdown_handler(sender=None, **kwargs):
+    """Worker关闭时的处理"""
+    print("🔄 Celery Worker正在关闭...")
+
+@task_prerun.connect
+def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
+    """任务开始前的处理"""
+    try:
+        from backend.utils.celery_logger import get_celery_logger
+        logger = get_celery_logger()
+        logger.log_task_started(task_id, task.name)
+    except Exception as e:
+        print(f"任务开始日志记录失败: {e}")
+
+@task_postrun.connect
+def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kwds):
+    """任务完成后的处理"""
+    try:
+        from backend.utils.celery_logger import get_celery_logger
+        logger = get_celery_logger()
+        if state == 'SUCCESS':
+            logger.log_task_succeeded(task_id, task.name, retval)
+        else:
+            logger.log_task_failed(task_id, task.name, f"状态: {state}")
+    except Exception as e:
+        print(f"任务完成日志记录失败: {e}")
+
+@task_failure.connect
+def task_failure_handler(sender=None, task_id=None, exception=None, traceback=None, einfo=None, **kwargs):
+    """任务失败时的处理"""
+    try:
+        from backend.utils.celery_logger import get_celery_logger
+        logger = get_celery_logger()
+        logger.log_task_failed(task_id, sender.name, str(exception), str(traceback))
+    except Exception as e:
+        print(f"任务失败日志记录失败: {e}")
+
+@task_retry.connect
+def task_retry_handler(sender=None, task_id=None, reason=None, einfo=None, **kwargs):
+    """任务重试时的处理"""
+    try:
+        from backend.utils.celery_logger import get_celery_logger
+        logger = get_celery_logger()
+        logger.log_task_retry(task_id, sender.name, str(reason))
+    except Exception as e:
+        print(f"任务重试日志记录失败: {e}")
 
 # 调试信息
 if __name__ == '__main__':

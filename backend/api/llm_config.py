@@ -37,22 +37,22 @@ def _get_default_providers():
     """获取默认的提供商配置"""
     provider_definitions = {
         "qwen": {
-            "displayName": "通义千问",
-            "description": "阿里云通义千问大语言模型，支持多种规格",
+            "displayName": "Qwen",
+            "description": "Alibaba Cloud Qwen large language model with multiple specifications",
             "icon": "🔷",
             "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
             "baseUrl": "https://dashscope.aliyuncs.com"
         },
         "doubao": {
-            "displayName": "豆包",
-            "description": "字节跳动豆包大模型，强大的中文理解能力",
+            "displayName": "Doubao",
+            "description": "ByteDance Doubao large language model with strong Chinese understanding",
             "icon": "🫘",
             "models": ["doubao-seed-1-6-250615"],
             "baseUrl": "https://ark.cn-beijing.volces.com"
         },
         "glm": {
-            "displayName": "智谱GLM",
-            "description": "清华智谱AI大语言模型",
+            "displayName": "GLM",
+            "description": "Tsinghua Zhipu AI large language model",
             "icon": "🧠",
             "models": ["glm-4.6", "glm-4", "glm-4-flash"],
             "baseUrl": "https://open.bigmodel.cn"
@@ -647,21 +647,40 @@ async def test_global_settings(current_user: TokenData = Depends(get_current_adm
                 # 创建测试消息
                 test_messages = [LLMMessage(role="user", content="测试全局设置")]
                 
-                # 尝试使用LLM服务进行实际调用测试
-                response = await llm_service.chat_completion(test_messages)
-                
-                test_results.append({
-                    "test": "实际调用测试",
-                    "status": "success",
-                    "message": f"成功通过 {response.provider} 提供商获得响应",
-                    "details": f"响应时间: {response.response_time:.2f}秒, 使用模型: {response.model}"
-                })
+                # 尝试使用LLM服务进行实际调用测试（带超时）
+                import asyncio
+                try:
+                    response = await asyncio.wait_for(
+                        llm_service.chat_completion(test_messages),
+                        timeout=30.0  # 30秒超时
+                    )
+                    
+                    test_results.append({
+                        "test": "实际调用测试",
+                        "status": "success",
+                        "message": f"成功通过 {response.provider} 提供商获得响应",
+                        "details": f"响应时间: {response.response_time:.2f}秒, 使用模型: {response.model}"
+                    })
+                except asyncio.TimeoutError:
+                    test_results.append({
+                        "test": "实际调用测试",
+                        "status": "warning",
+                        "message": "调用测试超时（30秒）",
+                        "details": "提供商响应较慢，但配置可能正常"
+                    })
+                except Exception as e:
+                    test_results.append({
+                        "test": "实际调用测试",
+                        "status": "error",
+                        "message": f"调用测试失败: {str(e)}",
+                        "details": "请检查提供商配置和API密钥是否正确"
+                    })
             except Exception as e:
                 test_results.append({
                     "test": "实际调用测试",
                     "status": "error",
-                    "message": f"调用测试失败: {str(e)}",
-                    "details": "请检查提供商配置和API密钥是否正确"
+                    "message": f"测试初始化失败: {str(e)}",
+                    "details": "无法创建测试环境"
                 })
         
         # 计算整体状态

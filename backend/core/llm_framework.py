@@ -68,7 +68,8 @@ class LLMConfig:
     max_tokens: int = 2000
     temperature: float = 0.7
     top_p: float = 0.8
-    timeout: int = 30
+    timeout: int = 90  # 读取超时增加到90秒，适应长文本分析和内容审查
+    connect_timeout: int = 15  # 连接超时15秒
     retry_count: int = 3
     enabled: bool = True
 
@@ -136,7 +137,7 @@ class LLMProvider(ABC):
 
 
 class QwenProvider(LLMProvider):
-    """通义千问提供商实现"""
+    """Qwen provider implementation"""
     
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -149,7 +150,7 @@ class QwenProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> LLMResponse:
-        """通义千问聊天补全实现（使用OpenAI兼容格式）"""
+        """Qwen chat completion implementation (using OpenAI compatible format)"""
         start_time = time.time()
         
         model = model or self.config.default_model
@@ -205,17 +206,17 @@ class QwenProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> AsyncIterator[LLMResponse]:
-        """通义千问流式响应实现"""
+        """Qwen streaming response implementation"""
         # TODO: 实现流式响应
         # 目前先返回普通响应
         response = await self.chat_completion(messages, model, **kwargs)
         yield response
     
     async def test_connection(self) -> bool:
-        """测试通义千问连接"""
+        """Test Qwen connection"""
         try:
             self.status = LLMModelStatus.TESTING
-            self.logger.info(f"开始测试通义千问连接，API URL: {self.api_url}")
+            self.logger.info(f"Starting Qwen connection test, API URL: {self.api_url}")
             self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
             self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
             self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
@@ -229,17 +230,17 @@ class QwenProvider(LLMProvider):
             
             if response.content:
                 self.status = LLMModelStatus.CONNECTED
-                self.logger.info(f"通义千问连接测试成功，响应: {response.content[:50]}...")
+                self.logger.info(f"Qwen connection test successful, response: {response.content[:50]}...")
                 self.logger.info(f"实际使用模型: {response.model}")
                 self.logger.info(f"响应时间: {response.response_time:.2f}秒")
                 return True
             else:
                 self.status = LLMModelStatus.ERROR
-                self.logger.error(f"通义千问连接测试失败：响应内容为空")
+                self.logger.error(f"Qwen connection test failed: empty response content")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"通义千问连接测试失败: {str(e)}")
+            self.logger.error(f"Qwen connection test failed: {str(e)}")
             import traceback
             self.logger.error(f"错误堆栈: {traceback.format_exc()}")
             self.status = LLMModelStatus.ERROR
@@ -249,13 +250,14 @@ class QwenProvider(LLMProvider):
     async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
         """发送异步请求"""
         loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, 'connect_timeout', 15)
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(30, self.config.timeout)
+                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
             )
         )
     
@@ -267,7 +269,7 @@ class QwenProvider(LLMProvider):
 
 
 class DoubaoProvider(LLMProvider):
-    """豆包提供商实现"""
+    """Doubao provider implementation"""
     
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -279,7 +281,7 @@ class DoubaoProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> LLMResponse:
-        """豆包聊天补全实现"""
+        """Doubao chat completion implementation"""
         start_time = time.time()
         
         model = model or self.config.default_model
@@ -334,16 +336,16 @@ class DoubaoProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> AsyncIterator[LLMResponse]:
-        """豆包流式响应实现"""
+        """Doubao streaming response implementation"""
         # TODO: 实现流式响应
         response = await self.chat_completion(messages, model, **kwargs)
         yield response
     
     async def test_connection(self) -> bool:
-        """测试豆包连接"""
+        """Test Doubao connection"""
         try:
             self.status = LLMModelStatus.TESTING
-            self.logger.info(f"开始测试豆包连接，API URL: {self.api_url}")
+            self.logger.info(f"Starting Doubao connection test, API URL: {self.api_url}")
             self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
             self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
             self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
@@ -357,17 +359,17 @@ class DoubaoProvider(LLMProvider):
             
             if response.content:
                 self.status = LLMModelStatus.CONNECTED
-                self.logger.info(f"豆包连接测试成功，响应: {response.content[:50]}...")
+                self.logger.info(f"Doubao connection test successful, response: {response.content[:50]}...")
                 self.logger.info(f"实际使用模型: {response.model}")
                 self.logger.info(f"响应时间: {response.response_time:.2f}秒")
                 return True
             else:
                 self.status = LLMModelStatus.ERROR
-                self.logger.error(f"豆包连接测试失败：响应内容为空")
+                self.logger.error(f"Doubao connection test failed: empty response content")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"豆包连接测试失败: {str(e)}")
+            self.logger.error(f"Doubao connection test failed: {str(e)}")
             import traceback
             self.logger.error(f"错误堆栈: {traceback.format_exc()}")
             self.status = LLMModelStatus.ERROR
@@ -376,13 +378,14 @@ class DoubaoProvider(LLMProvider):
     async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
         """发送异步请求"""
         loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, 'connect_timeout', 15)
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(30, self.config.timeout)
+                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
             )
         )
     
@@ -395,7 +398,7 @@ class DoubaoProvider(LLMProvider):
 
 
 class GLMProvider(LLMProvider):
-    """智谱GLM提供商实现"""
+    """GLM provider implementation"""
     
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -407,7 +410,7 @@ class GLMProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> LLMResponse:
-        """智谱GLM聊天补全实现"""
+        """GLM chat completion implementation"""
         start_time = time.time()
         
         model = model or self.config.default_model
@@ -462,16 +465,16 @@ class GLMProvider(LLMProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> AsyncIterator[LLMResponse]:
-        """智谱GLM流式响应实现"""
+        """GLM streaming response implementation"""
         # TODO: 实现流式响应
         response = await self.chat_completion(messages, model, **kwargs)
         yield response
     
     async def test_connection(self) -> bool:
-        """测试智谱GLM连接"""
+        """Test GLM connection"""
         try:
             self.status = LLMModelStatus.TESTING
-            self.logger.info(f"开始测试智谱GLM连接，API URL: {self.api_url}")
+            self.logger.info(f"Starting GLM connection test, API URL: {self.api_url}")
             self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
             self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
             self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
@@ -485,17 +488,17 @@ class GLMProvider(LLMProvider):
             
             if response.content:
                 self.status = LLMModelStatus.CONNECTED
-                self.logger.info(f"智谱GLM连接测试成功，响应: {response.content[:50]}...")
+                self.logger.info(f"GLM connection test successful, response: {response.content[:50]}...")
                 self.logger.info(f"实际使用模型: {response.model}")
                 self.logger.info(f"响应时间: {response.response_time:.2f}秒")
                 return True
             else:
                 self.status = LLMModelStatus.ERROR
-                self.logger.error(f"智谱GLM连接测试失败：响应内容为空")
+                self.logger.error(f"GLM connection test failed: empty response content")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"智谱GLM连接测试失败: {str(e)}")
+            self.logger.error(f"GLM connection test failed: {str(e)}")
             import traceback
             self.logger.error(f"错误堆栈: {traceback.format_exc()}")
             self.status = LLMModelStatus.ERROR
@@ -504,13 +507,14 @@ class GLMProvider(LLMProvider):
     async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
         """发送异步请求"""
         loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, 'connect_timeout', 15)
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(30, self.config.timeout)
+                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
             )
         )
     
@@ -668,7 +672,7 @@ class LLMService:
             self.logger.warning("配置重新加载失败，保持现有配置")
     
     def _load_qwen_config(self):
-        """加载通义千问配置"""
+        """Load Qwen configuration"""
         api_key = os.getenv('QWEN_API_KEY')
         if api_key and os.getenv('QWEN_ENABLED', 'false').lower() == 'true':
             config = LLMConfig(
@@ -682,10 +686,10 @@ class LLMService:
                 top_p=float(os.getenv('QWEN_TOP_P', '0.8'))
             )
             self.providers['qwen'] = QwenProvider(config)
-            self.logger.info(f"已加载提供商: qwen (通义千问)")
+            self.logger.info(f"已加载提供商: qwen (Qwen)")
     
     def _load_doubao_config(self):
-        """加载豆包配置"""
+        """Load Doubao configuration"""
         api_key = os.getenv('DOUBAO_API_KEY')
         if api_key and os.getenv('DOUBAO_ENABLED', 'false').lower() == 'true':
             config = LLMConfig(
@@ -702,7 +706,7 @@ class LLMService:
     
     
     def _load_glm_config(self):
-        """加载智谱GLM配置"""
+        """Load GLM configuration"""
         api_key = os.getenv('GLM_API_KEY')
         if api_key and os.getenv('GLM_ENABLED', 'false').lower() == 'true':
             config = LLMConfig(
@@ -716,7 +720,7 @@ class LLMService:
                 top_p=float(os.getenv('GLM_TOP_P', '0.8'))
             )
             self.providers['glm'] = GLMProvider(config)
-            self.logger.info(f"已加载提供商: glm (智谱GLM)")
+            self.logger.info(f"已加载提供商: glm (GLM)")
     
     async def chat_completion(
         self, 
@@ -755,7 +759,9 @@ class LLMService:
             if provider_name != failed_provider and provider_name in self.providers:
                 try:
                     self.logger.info(f"Trying fallback provider: {provider_name}")
-                    return await self.providers[provider_name].chat_completion(messages, model, **kwargs)
+                    # Fallback时不传递原始model，让provider使用自己的default_model
+                    # 因为不同provider支持的模型不同
+                    return await self.providers[provider_name].chat_completion(messages, model=None, **kwargs)
                 except Exception as e:
                     self.logger.error(f"Fallback provider {provider_name} also failed: {str(e)}")
                     continue

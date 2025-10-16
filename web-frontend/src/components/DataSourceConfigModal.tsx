@@ -535,12 +535,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 label="Analysis Batch Size"
                 name={['taskParams', 'analysis_batch_size']}
                 extra="Maximum number of news items to analyze per batch. Leave empty to analyze all new items."
-                initialValue={100}
+                initialValue={1000}
               >
                 <InputNumber 
                   min={1} 
-                  max={1000} 
-                  placeholder="100" 
+                  max={5000} 
+                  placeholder="1000" 
                   style={{ width: '100%' }}
                 />
               </Form.Item>
@@ -649,12 +649,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 label="Analysis Batch Size"
                 name={['taskParams', 'analysis_batch_size']}
                 extra="Maximum number of news items to analyze per batch. Leave empty to analyze all new items."
-                initialValue={100}
+                initialValue={1000}
               >
                 <InputNumber 
                   min={1} 
-                  max={1000} 
-                  placeholder="100" 
+                  max={5000} 
+                  placeholder="1000" 
                   style={{ width: '100%' }}
                 />
               </Form.Item>

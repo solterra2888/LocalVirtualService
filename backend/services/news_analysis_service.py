@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from backend.database.db_manager import DatabaseManager
@@ -25,7 +26,51 @@ class NewsAnalysisService:
             db_config: 数据库配置
         """
         self.db_manager = DatabaseManager(db_config)
+        # 内容审查失败统计
+        self.content_filter_stats = {
+            'total': 0,
+            'input_blocked': 0,
+            'output_blocked': 0,
+            'all_providers_failed': 0
+        }
         logger.info("新闻分析服务初始化完成")
+    
+    def _is_content_filter_error(self, error_msg: str) -> Dict[str, Any]:
+        """
+        检测是否为内容审查错误
+        
+        Returns:
+            包含错误类型信息的字典
+        """
+        error_lower = error_msg.lower()
+        
+        result = {
+            'is_filter_error': False,
+            'filter_type': None,
+            'retryable': False
+        }
+        
+        # 检测各种内容审查错误
+        if 'data_inspection_failed' in error_lower or 'inappropriate content' in error_lower:
+            result['is_filter_error'] = True
+            if 'input' in error_lower:
+                result['filter_type'] = 'input'
+                result['retryable'] = False  # 输入内容问题，重试也无效
+            elif 'output' in error_lower:
+                result['filter_type'] = 'output'
+                result['retryable'] = True  # 输出内容问题，可能重试成功
+        
+        elif '不安全或敏感内容' in error_msg or 'contentFilter' in error_msg:
+            result['is_filter_error'] = True
+            result['filter_type'] = 'content_safety'
+            result['retryable'] = False
+        
+        elif 'all providers failed' in error_lower:
+            result['is_filter_error'] = True
+            result['filter_type'] = 'all_failed'
+            result['retryable'] = False
+        
+        return result
     
     def get_unanalyzed_news(
         self, 
@@ -202,74 +247,138 @@ class NewsAnalysisService:
             if template_code == "news_summary_v1":
                 variables["max_length"] = 100
             
-            # 4. 调用LLM分析
+            # 4. 调用LLM分析（带智能重试和模板切换）
             logger.info(f"调用LLM分析新闻", news_id=news_id, template_code=template_code)
             
-            try:
-                response = await llm_service.chat_completion_with_template(
-                    template_code=template_code,
-                    variables=variables,
-                    user_id=user_id
-                )
-                
-                # 5. 保存分析结果
-                import json
-                # 将分析结果封装为JSON对象
-                analysis_data = {
-                    "content": response.content,
-                    "template_code": template_code,
-                    "provider": response.provider if hasattr(response, 'provider') else None,
-                    "model": response.model if hasattr(response, 'model') else None,
-                    "tokens": response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else None
-                }
-                
-                cursor.execute("""
-                    UPDATE news 
-                    SET 
-                        analysis_result = %s::jsonb,
-                        analyzed_at = %s,
-                        analysis_template_code = %s,
-                        analysis_status = 'completed',
-                        analysis_error = NULL,
-                        is_analyzed = TRUE
-                    WHERE id = %s
-                """, (
-                    json.dumps(analysis_data),
-                    datetime.now(),
-                    template_code,
-                    news_id
-                ))
-                conn.commit()
-                
-                logger.info(f"新闻分析完成", news_id=news_id, success=True)
-                
-                return {
-                    "success": True,
-                    "news_id": news_id,
-                    "analysis": response.content,
-                    "parsed_data": response.parsed_data if hasattr(response, 'parsed_data') else None
-                }
-                
-            except Exception as llm_error:
-                # LLM调用失败
-                error_msg = str(llm_error)
-                logger.error(f"LLM分析失败", news_id=news_id, error=error_msg)
-                
-                # 更新状态为failed
-                cursor.execute("""
-                    UPDATE news 
-                    SET 
-                        analysis_status = 'failed',
-                        analysis_error = %s
-                    WHERE id = %s
-                """, (error_msg, news_id))
-                conn.commit()
-                
-                return {
-                    "success": False,
-                    "news_id": news_id,
-                    "error": error_msg
-                }
+            max_retries = 2  # 最多重试2次
+            retry_delay = 1  # 重试延迟（秒）
+            current_template = template_code
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    if attempt > 0:
+                        logger.info(f"重试分析新闻", news_id=news_id, attempt=attempt, template=current_template)
+                        await asyncio.sleep(retry_delay * attempt)  # 递增延迟
+                    
+                    response = await llm_service.chat_completion_with_template(
+                        template_code=current_template,
+                        variables=variables,
+                        user_id=user_id
+                    )
+                    
+                    # 5. 保存分析结果
+                    # 将分析结果封装为JSON对象
+                    analysis_data = {
+                        "content": response.content,
+                        "template_code": template_code,
+                        "provider": response.provider if hasattr(response, 'provider') else None,
+                        "model": response.model if hasattr(response, 'model') else None,
+                        "tokens": response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else None,
+                        "retry_count": attempt
+                    }
+                    
+                    cursor.execute("""
+                        UPDATE news 
+                        SET 
+                            analysis_result = %s::jsonb,
+                            analyzed_at = %s,
+                            analysis_template_code = %s,
+                            analysis_status = 'completed',
+                            analysis_error = NULL,
+                            is_analyzed = TRUE
+                        WHERE id = %s
+                    """, (
+                        json.dumps(analysis_data),
+                        datetime.now(),
+                        template_code,
+                        news_id
+                    ))
+                    conn.commit()
+                    
+                    logger.info(f"新闻分析完成", news_id=news_id, success=True, retry_count=attempt)
+                    
+                    return {
+                        "success": True,
+                        "news_id": news_id,
+                        "analysis": response.content,
+                        "parsed_data": response.parsed_data if hasattr(response, 'parsed_data') else None,
+                        "retry_count": attempt
+                    }
+                    
+                except Exception as llm_error:
+                    error_msg = str(llm_error)
+                    
+                    # 检测是否为内容审查错误
+                    filter_info = self._is_content_filter_error(error_msg)
+                    
+                    if filter_info['is_filter_error']:
+                        # 更新统计
+                        self.content_filter_stats['total'] += 1
+                        if filter_info['filter_type'] == 'input':
+                            self.content_filter_stats['input_blocked'] += 1
+                        elif filter_info['filter_type'] == 'output':
+                            self.content_filter_stats['output_blocked'] += 1
+                        elif filter_info['filter_type'] == 'all_failed':
+                            self.content_filter_stats['all_providers_failed'] += 1
+                        
+                        logger.warning(
+                            f"内容审查失败",
+                            news_id=news_id,
+                            filter_type=filter_info['filter_type'],
+                            attempt=attempt,
+                            template=current_template
+                        )
+                        
+                        # 智能模板切换策略
+                        if attempt == 1 and current_template == 'news_summary_v1':
+                            # 第二次尝试时切换到保守模板
+                            current_template = 'news_summary_safe_v1'
+                            logger.info(
+                                f"切换到保守模板",
+                                news_id=news_id,
+                                new_template=current_template
+                            )
+                            continue  # 继续重试，不退出循环
+                        
+                        # 如果不可重试或已达到最大重试次数，直接失败
+                        if not filter_info['retryable'] or attempt >= max_retries:
+                            break
+                    else:
+                        # 非内容审查错误，记录并判断是否重试
+                        logger.error(f"LLM分析失败", news_id=news_id, error=error_msg, attempt=attempt)
+                        
+                        # 如果是最后一次尝试，退出循环
+                        if attempt >= max_retries:
+                            break
+                    
+                    # 保存最后一次的错误信息
+                    last_error = error_msg
+            
+            # 所有重试都失败了
+            logger.error(f"新闻分析最终失败", news_id=news_id, error=last_error, total_attempts=max_retries + 1)
+            
+            # 保存错误信息到数据库
+            error_detail = {
+                'error': last_error,
+                'filter_info': self._is_content_filter_error(last_error),
+                'total_attempts': max_retries + 1
+            }
+            
+            cursor.execute("""
+                UPDATE news 
+                SET 
+                    analysis_status = 'failed',
+                    analysis_error = %s
+                WHERE id = %s
+            """, (json.dumps(error_detail), news_id))
+            conn.commit()
+            
+            return {
+                "success": False,
+                "news_id": news_id,
+                "error": last_error,
+                "filter_info": error_detail['filter_info']
+            }
             
         except Exception as e:
             logger.error(f"分析新闻失败", news_id=news_id, exception=str(e))
@@ -363,8 +472,12 @@ class NewsAnalysisService:
             # 顺序分析（更安全）
             logger.info("使用顺序模式分析")
             
-            for news in unanalyzed_news:
+            for i, news in enumerate(unanalyzed_news):
                 try:
+                    # 记录进度
+                    progress = int((i + 1) / len(unanalyzed_news) * 100)
+                    logger.info(f"🔄 分析进度: {i+1}/{len(unanalyzed_news)} ({progress}%) - 新闻ID: {news['id']}")
+                    
                     result = await self.analyze_news(
                         news_id=news['id'],
                         template_code=template_code,
@@ -374,8 +487,10 @@ class NewsAnalysisService:
                     
                     if result.get('success'):
                         success_count += 1
+                        logger.info(f"✅ 新闻 {news['id']} 分析成功")
                     else:
                         failed_count += 1
+                        logger.warning(f"❌ 新闻 {news['id']} 分析失败: {result.get('error', 'unknown')}")
                         
                     # 添加延迟，避免API限流
                     await asyncio.sleep(0.5)
@@ -397,7 +512,39 @@ class NewsAnalysisService:
             "results": results
         }
         
-        logger.info(f"批量分析完成", **{k: v for k, v in summary.items() if k != 'results'})
+        # 记录详细的批量分析完成摘要
+        success_rate = (summary['success'] / summary['total'] * 100) if summary['total'] > 0 else 0
+        
+        logger.info(f"📊 [news_analysis_service] 批量分析完成:")
+        logger.info(f"   📈 处理统计: 总计 {summary['total']} 条新闻")
+        logger.info(f"   ✅ 成功分析: {summary['success']} 条 ({success_rate:.1f}%)")
+        logger.info(f"   ❌ 分析失败: {summary['failed']} 条")
+        logger.info(f"   🔧 使用模板: {summary['template_code']}")
+        
+        # 如果有失败的分析，记录失败原因统计
+        if summary['failed'] > 0:
+            failed_results = [r for r in summary['results'] if not r.get('success', False)]
+            error_types = {}
+            for failed_result in failed_results:
+                error_msg = failed_result.get('error', 'unknown')
+                if 'content_filter' in error_msg.lower() or 'inappropriate' in error_msg.lower():
+                    error_types['内容审查'] = error_types.get('内容审查', 0) + 1
+                elif 'timeout' in error_msg.lower():
+                    error_types['超时'] = error_types.get('超时', 0) + 1
+                elif 'rate limit' in error_msg.lower():
+                    error_types['限流'] = error_types.get('限流', 0) + 1
+                elif 'all providers failed' in error_msg.lower():
+                    error_types['所有提供商失败'] = error_types.get('所有提供商失败', 0) + 1
+                elif 'data_inspection_failed' in error_msg.lower():
+                    error_types['数据检查失败'] = error_types.get('数据检查失败', 0) + 1
+                else:
+                    error_types['其他'] = error_types.get('其他', 0) + 1
+            
+            if error_types:
+                logger.info(f"   🔍 失败原因统计: {error_types}")
+                
+            # 将失败原因统计添加到summary中
+            summary['error_types'] = error_types
         return summary
     
     def get_analysis_statistics(self) -> Dict[str, Any]:
@@ -431,8 +578,42 @@ class NewsAnalysisService:
                 "processing": row[1],
                 "completed": row[2],
                 "failed": row[3],
-                "total": row[4]
+                "total": row[4],
+                "content_filter_stats": self.content_filter_stats.copy()
             }
+            
+            # 获取失败新闻的错误类型统计
+            cursor.execute("""
+                SELECT 
+                    analysis_error,
+                    COUNT(*) as count
+                FROM news
+                WHERE analysis_status = 'failed'
+                  AND analysis_error IS NOT NULL
+                GROUP BY analysis_error
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            
+            error_stats = []
+            for row in cursor.fetchall():
+                try:
+                    error_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                    if isinstance(error_data, dict):
+                        filter_type = error_data.get('filter_info', {}).get('filter_type', 'unknown')
+                    else:
+                        filter_type = 'legacy_error'
+                    error_stats.append({
+                        'filter_type': filter_type,
+                        'count': row[1]
+                    })
+                except:
+                    error_stats.append({
+                        'filter_type': 'parse_error',
+                        'count': row[1]
+                    })
+            
+            stats['failed_error_types'] = error_stats
             
             cursor.close()
             conn.close()
@@ -444,5 +625,70 @@ class NewsAnalysisService:
             if conn:
                 conn.close()
             return {}
+    
+    def get_failed_news_for_retry(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        获取可重试的失败新闻
+        
+        Args:
+            limit: 最大返回数量
+            
+        Returns:
+            失败新闻列表
+        """
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT id, date, title, analysis_error
+                FROM news
+                WHERE analysis_status = 'failed'
+                ORDER BY date DESC
+                LIMIT %s
+            """
+            
+            cursor.execute(query, (limit,))
+            rows = cursor.fetchall()
+            
+            failed_news = []
+            for row in rows:
+                news_item = {
+                    'id': row[0],
+                    'date': row[1].isoformat() if row[1] else None,
+                    'title': row[2],
+                    'error': row[3]
+                }
+                
+                # 解析错误信息，判断是否可重试
+                try:
+                    if isinstance(row[3], str):
+                        error_data = json.loads(row[3])
+                        filter_info = error_data.get('filter_info', {})
+                        news_item['retryable'] = filter_info.get('retryable', False)
+                        news_item['filter_type'] = filter_info.get('filter_type', 'unknown')
+                    else:
+                        news_item['retryable'] = False
+                        news_item['filter_type'] = 'unknown'
+                except:
+                    news_item['retryable'] = False
+                    news_item['filter_type'] = 'parse_error'
+                
+                failed_news.append(news_item)
+            
+            cursor.close()
+            conn.close()
+            
+            logger.info(f"获取到 {len(failed_news)} 条失败的新闻")
+            return failed_news
+            
+        except Exception as e:
+            logger.error(f"获取失败新闻失败: {str(e)}")
+            if conn:
+                conn.close()
+            return []
 
 

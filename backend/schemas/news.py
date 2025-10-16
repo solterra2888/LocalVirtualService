@@ -22,6 +22,7 @@ class NewsResponse(BaseModel):
     sentiment_pos: Optional[float] = Field(None, description="正面情感")
     created_at: Optional[str] = Field(None, description="创建时间")
     updated_at: Optional[str] = Field(None, description="更新时间")
+    scheduler_source: Optional[str] = Field(None, description="调度器来源")
     symbols: List[str] = Field(default_factory=list, description="相关股票代码")
     tags: List[str] = Field(default_factory=list, description="用户自定义标签")
     auto_tags: List[str] = Field(default_factory=list, description="API原始标签")

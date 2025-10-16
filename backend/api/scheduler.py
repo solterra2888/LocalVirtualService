@@ -74,7 +74,7 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
     use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
     analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
-    analysis_batch_size: int = Field(default=50, ge=1, le=500, description="每次分析的最大新闻数量")
+    analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
 
@@ -91,7 +91,7 @@ class CreateWatchlistNewsTaskRequest(BaseModel):
     auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
     use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
     analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
-    analysis_batch_size: int = Field(default=50, ge=1, le=500, description="每次分析的最大新闻数量")
+    analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
 
@@ -1447,3 +1447,84 @@ async def get_table_structure(
     except Exception as e:
         logger.error("查看表结构失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"查看表结构失败: {str(e)}")
+
+
+@router.get("/running-tasks", summary="获取调度器中实际运行的任务")
+async def get_running_tasks(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取调度器内存中实际运行的任务列表
+    用于检查调度器实际状态（而非仅数据库配置）
+    """
+    try:
+        logger.info("获取调度器运行任务列表", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        running_tasks = await scheduler_service.get_running_tasks()
+        
+        return {
+            "success": True,
+            "message": f"成功获取{len(running_tasks)}个运行中的任务",
+            "data": {
+                "running_tasks": running_tasks,
+                "count": len(running_tasks)
+            }
+        }
+        
+    except Exception as e:
+        logger.error("获取运行任务列表失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"获取运行任务列表失败: {str(e)}")
+
+
+@router.post("/sync", summary="手动同步任务状态")
+async def sync_task_states(
+    current_user=Depends(get_current_user)
+):
+    """
+    手动触发任务状态同步
+    同步数据库配置与调度器内存状态
+    
+    用途：
+    - 修复数据库显示禁用但调度器仍在运行的问题
+    - 修复数据库显示启用但调度器未运行的问题
+    - 清理孤立任务（数据库中不存在但调度器中仍在运行）
+    """
+    try:
+        logger.info("手动触发任务状态同步", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        result = await scheduler_service.sync_task_states()
+        
+        if result['success']:
+            stats = result['stats']
+            logger.info(
+                "任务状态同步成功",
+                removed=len(stats['removed_jobs']),
+                added=len(stats['added_jobs']),
+                skipped=len(stats['skipped']),
+                user=current_user.username
+            )
+            
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "stats": stats,
+                    "summary": {
+                        "total_db_tasks": stats['total_db_tasks'],
+                        "total_scheduler_jobs": stats['total_scheduler_jobs'],
+                        "removed_count": len(stats['removed_jobs']),
+                        "added_count": len(stats['added_jobs']),
+                        "skipped_count": len(stats['skipped'])
+                    }
+                }
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result['message'])
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("任务状态同步失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"任务状态同步失败: {str(e)}")

@@ -130,6 +130,12 @@ else
     exit 1
 fi
 
+# 创建日志目录
+echo ""
+echo "📁 创建日志目录..."
+mkdir -p "$PROJECT_ROOT/logs"
+echo "✅ 日志目录已创建: $PROJECT_ROOT/logs"
+
 # 显示启动配置
 echo ""
 echo "🚀 新闻分析 Celery Worker 启动配置:"
@@ -138,6 +144,8 @@ echo "   - 日志级别: ${CELERY_LOG_LEVEL:-info}"
 echo "   - Redis地址: $REDIS_URL"
 echo "   - 专用队列: ai_processing"
 echo "   - 处理任务: analyze_news_batch, analyze_unanalyzed_news"
+echo "   - Worker日志: logs/celery_news_worker.log"
+echo "   - 任务日志: logs/celery_tasks.log"
 echo ""
 
 # 启动新闻分析专用Celery Worker
@@ -145,10 +153,12 @@ echo "🔄 启动新闻分析 Celery Worker..."
 echo "   按 Ctrl+C 停止服务"
 echo ""
 
-# 使用celery命令启动专门处理AI任务的Worker
+# 使用celery命令启动专门处理AI任务的Worker，添加日志文件配置
 exec $PYTHON_CMD -m celery -A backend.celery_app worker \
     --loglevel=${CELERY_LOG_LEVEL:-info} \
     --concurrency=${CELERY_CONCURRENCY:-1} \
     --queues=ai_processing \
     --hostname=news-worker@%h \
-    --prefetch-multiplier=1
+    --prefetch-multiplier=1 \
+    --logfile="$PROJECT_ROOT/logs/celery_news_worker.log" \
+    --pidfile="$PROJECT_ROOT/logs/celery_news_worker.pid"

@@ -231,7 +231,8 @@ class WatchlistNewsService:
                 end_date=end_date,
                 max_results=max_results,
                 topic_filter=None,  # watchlist模式不使用topic_filter
-                keywords=None  # watchlist模式不使用keywords
+                keywords=None,  # watchlist模式不使用keywords
+                scheduler_source='watchlist_news'  # 设置调度器来源
             )
             
             # 添加watchlist特有的统计信息

@@ -52,4 +52,24 @@ task_soft_time_limit = 3000  # 50分钟软限制
 # 结果过期时间
 result_expires = 3600  # 1小时后过期
 
+# 日志配置
+worker_log_format = '[%(asctime)s: %(levelname)s/%(processName)s] %(message)s'
+worker_task_log_format = '[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s'
+
+# 日志文件配置
+worker_log_file = 'logs/celery_worker.log'
+worker_logfile = worker_log_file
+
+# 任务日志配置
+task_log_file = 'logs/celery_tasks.log'
+task_logfile = task_log_file
+
+# 日志级别
+worker_log_level = 'INFO'
+task_log_level = 'INFO'
+
+# 日志轮转配置
+worker_log_max_bytes = 10 * 1024 * 1024  # 10MB
+worker_log_backup_count = 5
+
 

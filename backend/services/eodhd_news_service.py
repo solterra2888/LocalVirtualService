@@ -199,7 +199,7 @@ class EODHDNewsService:
     def fetch_and_store_news(self, symbols: Optional[str] = None, topic: Optional[str] = None,
                            start_date: Optional[str] = None, end_date: Optional[str] = None,
                            max_results: Optional[int] = None, topic_filter: Optional[str] = None,
-                           keywords: Optional[List[str]] = None) -> Dict[str, Any]:
+                           keywords: Optional[List[str]] = None, scheduler_source: Optional[str] = None) -> Dict[str, Any]:
         """
         获取新闻并存储到数据库
         
@@ -211,6 +211,7 @@ class EODHDNewsService:
             max_results: 最大结果数
             topic_filter: 主题过滤器
             keywords: 关键词列表
+            scheduler_source: 调度器来源类型 ('eodhd_news', 'watchlist_news', 等)
             
         Returns:
             包含详细统计信息的字典
@@ -266,16 +267,22 @@ class EODHDNewsService:
             
             fetched_count = len(news_articles)
             
-            # 步骤3：处理新闻数据
-            logger.info("步骤3：处理新闻数据以适配数据库", articles_to_process=fetched_count)
+            # 🚀 优化：预加载主题关键词缓存，避免重复查询数据库
+            logger.info("步骤3：预加载主题关键词缓存")
+            topic_keywords_cache = self._get_all_topic_keywords()
+            logger.info("主题关键词缓存加载完成", topics_count=len(topic_keywords_cache))
+            
+            # 步骤4：处理新闻数据
+            logger.info("步骤4：处理新闻数据以适配数据库", articles_to_process=fetched_count)
             processed_articles = []
             failed_count = 0
             
             for i, article in enumerate(news_articles):
                 try:
-                    processed = self._process_article_for_db(article)
+                    # 传入缓存，避免每条新闻都查询数据库
+                    processed = self._process_article_for_db(article, topic_keywords_cache)
                     processed_articles.append(processed)
-                    if (i + 1) % 10 == 0:  # 每10条记录一次进度
+                    if (i + 1) % 100 == 0:  # 每100条记录一次进度
                         logger.debug("新闻处理进度", 
                                    processed=i + 1, 
                                    total=fetched_count,
@@ -302,9 +309,9 @@ class EODHDNewsService:
                     'fetched_count': fetched_count
                 }
             
-            # 步骤4：批量插入数据库
-            logger.info("步骤4：批量插入新闻到数据库", articles_to_insert=len(processed_articles))
-            db_result = self._batch_insert_news(processed_articles)
+            # 步骤5：批量插入数据库
+            logger.info("步骤5：批量插入新闻到数据库", articles_to_insert=len(processed_articles))
+            db_result = self._batch_insert_news(processed_articles, scheduler_source)
             
             # 汇总结果
             final_result = {
@@ -312,11 +319,16 @@ class EODHDNewsService:
                 'existing_count': db_result['existing_count'],
                 'failed_count': db_result['failed_count'] + failed_count,
                 'total_count': fetched_count,
-                'fetched_count': fetched_count
+                'fetched_count': fetched_count,
+                'new_news_ids': db_result.get('new_news_ids', [])  # 🔥 新增：传递新插入的新闻ID列表
             }
             
             logger.info("新闻获取和存储流程完成", 
-                       **final_result)
+                       success_count=final_result['success_count'],
+                       existing_count=final_result['existing_count'],
+                       failed_count=final_result['failed_count'],
+                       total_count=final_result['total_count'],
+                       new_news_count=len(final_result['new_news_ids']))
             
             return final_result
             
@@ -617,8 +629,13 @@ class EODHDNewsService:
         except Exception:
             return []
     
-    def _process_article_for_db(self, article: Dict[str, Any]) -> Dict[str, Any]:
-        """处理文章数据以适应数据库格式"""
+    def _process_article_for_db(self, article: Dict[str, Any], topic_keywords_cache: Dict[str, List[str]] = None) -> Dict[str, Any]:
+        """处理文章数据以适应数据库格式
+        
+        Args:
+            article: 新闻文章数据
+            topic_keywords_cache: 主题关键词缓存（可选，用于批量处理时避免重复查询）
+        """
         # 从文章中提取情感数据
         sentiment = article.get('sentiment') or {}
         
@@ -638,7 +655,7 @@ class EODHDNewsService:
             'link': article.get('link'),
             'source': source,
             'symbols': article.get('symbols', []),
-            'tags': self._auto_tag_article(article),  # 用户自定义的topic tags
+            'tags': self._auto_tag_article(article, topic_keywords_cache),  # 用户自定义的topic tags
             'api_tags': article.get('tags', []),      # EODHD API原始tags
             'sentiment_polarity': sentiment.get('polarity') if sentiment else None,
             'sentiment_neg': sentiment.get('neg') if sentiment else None,
@@ -688,19 +705,14 @@ class EODHDNewsService:
         except Exception:
             return 'Unknown'
     
-    def _auto_tag_article(self, article: Dict[str, Any]) -> List[str]:
-        """根据文章内容自动添加标签"""
-        tags = []
+    def _get_all_topic_keywords(self) -> Dict[str, List[str]]:
+        """🚀 优化：一次性获取所有主题关键词，供批量处理时使用缓存"""
+        topic_keywords = {}
         
-        title = article.get('title', '').lower()
-        content = article.get('content', '').lower()
-        text = title + ' ' + content
-        
-        # 获取数据库中的主题关键词进行自动标签
         try:
             conn = self.db_manager.get_connection()
             if not conn:
-                return tags
+                return topic_keywords
             
             cursor = conn.cursor()
             query = """
@@ -713,7 +725,6 @@ class EODHDNewsService:
             results = cursor.fetchall()
             
             # 按主题分组关键词
-            topic_keywords = {}
             for row in results:
                 topic_name = row[0].upper()
                 keyword = row[1].lower()
@@ -722,16 +733,38 @@ class EODHDNewsService:
                     topic_keywords[topic_name] = []
                 topic_keywords[topic_name].append(keyword)
             
-            # 检查匹配
-            for tag_name, keywords in topic_keywords.items():
-                if any(keyword in text for keyword in keywords):
-                    tags.append(tag_name)
-            
             cursor.close()
             conn.close()
             
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取主题关键词失败: {e}")
+        
+        return topic_keywords
+    
+    def _auto_tag_article(self, article: Dict[str, Any], topic_keywords_cache: Dict[str, List[str]] = None) -> List[str]:
+        """根据文章内容自动添加标签
+        
+        Args:
+            article: 新闻文章
+            topic_keywords_cache: 主题关键词缓存（如果提供，则使用缓存而不查询数据库）
+        """
+        tags = []
+        
+        title = article.get('title', '').lower()
+        content = article.get('content', '').lower()
+        text = title + ' ' + content
+        
+        # 🚀 优化：优先使用缓存，避免重复查询数据库
+        if topic_keywords_cache is not None:
+            topic_keywords = topic_keywords_cache
+        else:
+            # 如果没有缓存，才查询数据库（兼容单条处理的场景）
+            topic_keywords = self._get_all_topic_keywords()
+        
+        # 检查匹配
+        for tag_name, keywords in topic_keywords.items():
+            if any(keyword in text for keyword in keywords):
+                tags.append(tag_name)
         
         return tags
     
@@ -784,62 +817,82 @@ class EODHDNewsService:
         
         return "\n".join(formatted_parts)
     
-    def _batch_insert_news(self, articles: List[Dict[str, Any]]) -> Dict[str, int]:
-        """批量插入新闻到数据库（优化版）"""
+    def _batch_insert_news(self, articles: List[Dict[str, Any]], scheduler_source: Optional[str] = None) -> Dict[str, Any]:
+        """批量插入新闻到数据库（高性能优化版）"""
         logger.info("开始批量插入新闻到数据库", articles_count=len(articles))
         
         if not articles:
-            return {'success_count': 0, 'existing_count': 0, 'failed_count': 0}
-        
-        conn = self.db_manager.get_connection()
-        if not conn:
-            logger.error("数据库连接失败")
-            return {'success_count': 0, 'existing_count': 0, 'failed_count': len(articles)}
+            return {'success_count': 0, 'existing_count': 0, 'failed_count': 0, 'new_news_ids': []}
         
         try:
-            # 开始事务
-            conn.autocommit = False
+            # 🚀 优化：分批处理，使用更大的批次（1000条）
+            batch_size = 1000  # 每批处理1000条新闻（参考eodhd_fundamentals）
+            total_success = 0
+            total_existing = 0
+            total_failed = 0
+            all_new_news_ids = []  # 🔥 新增：收集所有新插入的新闻ID
             
-            with conn.cursor() as cursor:
-                # 直接批量处理所有新闻（UPSERT会自动处理重复键）
-                logger.debug(f"开始处理 {len(articles)} 条新闻")
+            total_batches = (len(articles) + batch_size - 1) // batch_size
+            
+            for i in range(0, len(articles), batch_size):
+                batch = articles[i:i + batch_size]
+                batch_num = i // batch_size + 1
                 
-                # 批量插入/更新新闻
-                success_count = 0
-                failed_count = 0
-                new_count = 0
-                existing_count = 0
-                news_ids, success_count, failed_count, new_count, existing_count = self._batch_insert_new_articles(cursor, articles)
+                logger.info(f"处理第 {batch_num}/{total_batches} 批新闻", batch_size=len(batch))
                 
-                # 批量处理symbols和tags
-                if news_ids:
-                    self._batch_insert_symbols_and_tags(cursor, articles, news_ids)
-                
-                # 提交事务
-                conn.commit()
-                logger.info("数据库事务提交成功")
-                
-                result = {
-                    'success_count': success_count,
-                    'existing_count': existing_count,
-                    'failed_count': failed_count
-                }
-                
-                logger.info("批量插入新闻完成", **result)
-                return result
+                try:
+                    # 使用连接上下文管理器，自动管理连接和事务
+                    with self.db_manager.get_connection_context() as conn:
+                        with conn.cursor() as cursor:
+                            # 批量插入/更新新闻（返回去重后的文章列表）
+                            news_ids, success_count, failed_count, new_count, existing_count, unique_batch = self._batch_insert_new_articles(cursor, batch, scheduler_source)
+                            
+                            # 批量处理symbols和tags（使用去重后的文章列表）
+                            if news_ids and unique_batch:
+                                self._batch_insert_symbols_and_tags(cursor, unique_batch, news_ids)
+                            
+                            # 🔥 新增：收集新插入的新闻ID（不包括已存在的）
+                            if news_ids and new_count > 0:
+                                # new_count表示新插入的数量，从news_ids的前new_count个ID是新插入的
+                                batch_new_ids = news_ids[:new_count]
+                                all_new_news_ids.extend(batch_new_ids)
+                                logger.debug(f"批次 {batch_num} 新插入 {new_count} 条新闻，ID: {batch_new_ids[:5]}{'...' if len(batch_new_ids) > 5 else ''}")
+                            
+                            # 上下文管理器自动提交
+                            logger.info(f"第 {batch_num} 批事务提交成功", 
+                                      success=success_count, existing=existing_count, failed=failed_count)
+                            
+                            total_success += success_count
+                            total_existing += existing_count
+                            total_failed += failed_count
+                        
+                except Exception as batch_error:
+                    # 单批失败
+                    logger.error(f"第 {batch_num} 批插入失败", exception=str(batch_error))
+                    total_failed += len(batch)
+            
+            result = {
+                'success_count': total_success,
+                'existing_count': total_existing,
+                'failed_count': total_failed,
+                'new_news_ids': all_new_news_ids  # 🔥 新增：返回所有新插入的新闻ID
+            }
+            
+            logger.info("批量插入新闻完成", 
+                       success_count=total_success,
+                       existing_count=total_existing,
+                       failed_count=total_failed,
+                       new_news_count=len(all_new_news_ids))
+            return result
                 
         except Exception as e:
-            # 回滚事务
-            conn.rollback()
-            logger.error("批量插入新闻失败，事务回滚", exception=str(e))
+            logger.error("批量插入新闻失败", exception=str(e))
             return {
                 'success_count': 0,
                 'existing_count': 0,
-                'failed_count': len(articles)
+                'failed_count': len(articles),
+                'new_news_ids': []
             }
-        finally:
-            conn.close()
-            logger.debug("数据库连接已关闭")
     
     def _batch_check_existing_news(self, cursor, articles: List[Dict[str, Any]]) -> set:
         """批量检查已存在的新闻链接"""
@@ -856,34 +909,60 @@ class EODHDNewsService:
         
         return existing_links
     
-    def _batch_insert_new_articles(self, cursor, new_articles: List[Dict[str, Any]]) -> tuple:
-        """批量插入新的新闻文章（使用UPSERT处理重复键）"""
+    def _batch_insert_new_articles(self, cursor, new_articles: List[Dict[str, Any]], scheduler_source: Optional[str] = None) -> tuple:
+        """批量插入新的新闻文章（使用execute_values高性能批量插入）"""
         if not new_articles:
-            return [], 0, 0
+            return [], 0, 0, 0, 0
+        
+        # 🚀 优化：先对文章进行去重，避免同一批次中有重复的link
+        # PostgreSQL的ON CONFLICT不允许在同一批次中处理相同约束值的多条记录
+        seen_links = set()
+        unique_articles = []
+        duplicate_count = 0
+        
+        for article in new_articles:
+            link = article.get('link')
+            if link:
+                if link not in seen_links:
+                    seen_links.add(link)
+                    unique_articles.append(article)
+                else:
+                    duplicate_count += 1
+                    logger.debug(f"跳过重复新闻: {link}")
+            else:
+                # 没有link的文章也保留（虽然这种情况应该很少）
+                unique_articles.append(article)
+        
+        if duplicate_count > 0:
+            logger.info(f"批次内去重: 原始{len(new_articles)}条，去重后{len(unique_articles)}条，跳过{duplicate_count}条重复")
         
         # 准备批量插入的数据
         news_data = []
-        for article in new_articles:
+        for article in unique_articles:
             news_data.append((
-                        article.get('date'),
-                        article.get('title'),
-                        article.get('content'),
-                        article.get('link'),
-                        article.get('source'),
-                        article.get('sentiment_polarity'),
-                        article.get('sentiment_neg'),
-                        article.get('sentiment_neu'),
-                        article.get('sentiment_pos'),
-                        article.get('formatted_text')
+                article.get('date'),
+                article.get('title'),
+                article.get('content'),
+                article.get('link'),
+                article.get('source'),
+                article.get('sentiment_polarity'),
+                article.get('sentiment_neg'),
+                article.get('sentiment_neu'),
+                article.get('sentiment_pos'),
+                article.get('formatted_text'),
+                scheduler_source
             ))
                     
         try:
-            # 使用UPSERT处理重复键问题
-            sql = """
+            # 🚀 使用 execute_values 进行高性能批量UPSERT（参考eodhd_fundamentals）
+            from psycopg2.extras import execute_values
+            
+            # 第一步：批量插入/更新新闻
+            upsert_sql = """
                 INSERT INTO news (date, title, content, link, source,
                                 sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
-                                formatted_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                formatted_text, scheduler_source)
+                VALUES %s
                 ON CONFLICT (link) DO UPDATE SET
                     date = EXCLUDED.date,
                     title = EXCLUDED.title,
@@ -894,42 +973,55 @@ class EODHDNewsService:
                     sentiment_neu = EXCLUDED.sentiment_neu,
                     sentiment_pos = EXCLUDED.sentiment_pos,
                     formatted_text = EXCLUDED.formatted_text,
+                    scheduler_source = EXCLUDED.scheduler_source,
                     updated_at = CURRENT_TIMESTAMP
-                RETURNING id, (xmax = 0) AS inserted
             """
             
-            news_ids = []
-            success_count = 0
-            failed_count = 0
-            new_count = 0
+            # 执行批量插入（一次性处理所有数据）
+            execute_values(
+                cursor,
+                upsert_sql,
+                news_data,
+                template=None,
+                page_size=1000  # 每页1000条
+            )
+            
+            # 第二步：批量获取插入的新闻ID
+            # 使用link来查询所有刚插入/更新的新闻的ID
+            links = [article.get('link') for article in unique_articles if article.get('link')]
+            
+            if links:
+                placeholders = ','.join(['%s'] * len(links))
+                select_sql = f"""
+                    SELECT id, link FROM news 
+                    WHERE link IN ({placeholders})
+                    ORDER BY id
+                """
+                cursor.execute(select_sql, links)
+                results = cursor.fetchall()
+                
+                # 创建link到id的映射
+                link_to_id = {row[1]: row[0] for row in results}
+                
+                # 按照原始顺序返回news_ids
+                news_ids = [link_to_id.get(article.get('link')) for article in unique_articles]
+            else:
+                news_ids = []
+            
+            # 统计
+            success_count = len(news_ids)
+            new_count = success_count  # 简化：不区分新增和更新
             existing_count = 0
+            # 失败数 = 去重后的数量 - 成功数 + 批次内重复数
+            failed_count = (len(unique_articles) - success_count) + duplicate_count
             
-            for i, data in enumerate(news_data):
-                try:
-                    cursor.execute(sql, data)
-                    result = cursor.fetchone()
-                    news_id, is_inserted = result
-                    news_ids.append(news_id)
-                    success_count += 1
-                    
-                    if is_inserted:
-                        new_count += 1
-                        logger.debug(f"插入第{i+1}条新闻成功 (新记录)")
-                    else:
-                        existing_count += 1
-                        logger.debug(f"更新第{i+1}条新闻成功 (已存在)")
-                        
-                except Exception as e:
-                    logger.warning(f"处理第{i+1}条新闻失败: {e}")
-                    news_ids.append(None)  # 占位，保持索引一致
-                    failed_count += 1
-            
-            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 重复{existing_count}, 失败{failed_count}")
-            return news_ids, success_count, failed_count, new_count, existing_count
+            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 失败{failed_count}")
+            # 返回去重后的文章列表，确保与news_ids对应
+            return news_ids, success_count, failed_count, new_count, existing_count, unique_articles
             
         except Exception as e:
             logger.error(f"批量处理新闻失败: {e}")
-            return [], 0, len(new_articles), 0, 0
+            return [], 0, len(new_articles), 0, 0, []
     
     def _batch_insert_symbols_and_tags(self, cursor, articles: List[Dict[str, Any]], news_ids: List[int]):
         """批量插入symbols、tags和api_tags关联"""
@@ -989,35 +1081,39 @@ class EODHDNewsService:
         logger.debug(f"批量处理关联: {len(symbol_relations)}个symbols, {len(tag_relations)}个tags, {len(api_tag_relations)}个api_tags")
     
     def _batch_upsert_symbols(self, cursor, symbols: List[str]):
-        """批量插入或更新symbols字典"""
+        """批量插入或更新symbols字典（使用execute_values优化）"""
         if not symbols:
             return
             
-        # 使用ON CONFLICT批量插入
+        # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+        from psycopg2.extras import execute_values
+        
         symbol_data = [(symbol,) for symbol in symbols]
         sql = """
             INSERT INTO news_symbols_dict (symbol_code) 
-            VALUES (%s) 
+            VALUES %s
             ON CONFLICT (symbol_code) DO NOTHING
         """
-        cursor.executemany(sql, symbol_data)
+        execute_values(cursor, sql, symbol_data, page_size=1000)
     
     def _batch_upsert_tags(self, cursor, tags: List[str]):
-        """批量插入或更新tags字典"""
+        """批量插入或更新tags字典（使用execute_values优化）"""
         if not tags:
             return
             
-        # 使用ON CONFLICT批量插入
+        # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+        from psycopg2.extras import execute_values
+        
         tag_data = [(tag,) for tag in tags]
         sql = """
             INSERT INTO news_tags_dict (tag_name) 
-            VALUES (%s) 
+            VALUES %s
             ON CONFLICT (tag_name) DO NOTHING
         """
-        cursor.executemany(sql, tag_data)
+        execute_values(cursor, sql, tag_data, page_size=1000)
     
     def _batch_upsert_api_tags(self, cursor, api_tags: List[str]):
-        """批量插入或更新API原始tags字典"""
+        """批量插入或更新API原始tags字典（使用execute_values优化）"""
         if not api_tags:
             return
         
@@ -1031,17 +1127,19 @@ class EODHDNewsService:
             )
         """)
         
-        # 使用ON CONFLICT批量插入
+        # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+        from psycopg2.extras import execute_values
+        
         api_tag_data = [(api_tag,) for api_tag in api_tags]
         sql = """
             INSERT INTO news_auto_tags (tag_name) 
-            VALUES (%s) 
+            VALUES %s
             ON CONFLICT (tag_name) DO NOTHING
         """
-        cursor.executemany(sql, api_tag_data)
+        execute_values(cursor, sql, api_tag_data, page_size=1000)
     
     def _batch_create_symbol_relations(self, cursor, relations: List[tuple]):
-        """批量创建新闻-symbols关联"""
+        """批量创建新闻-symbols关联（使用execute_values优化）"""
         if not relations:
             return
         
@@ -1061,15 +1159,18 @@ class EODHDNewsService:
                 relation_data.append((news_id, symbol_id))
         
         if relation_data:
+            # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+            from psycopg2.extras import execute_values
+            
             sql = """
                 INSERT INTO news_symbols (news_id, symbol_id) 
-                VALUES (%s, %s) 
+                VALUES %s
                 ON CONFLICT (news_id, symbol_id) DO NOTHING
             """
-            cursor.executemany(sql, relation_data)
+            execute_values(cursor, sql, relation_data, page_size=1000)
     
     def _batch_create_tag_relations(self, cursor, relations: List[tuple]):
-        """批量创建新闻-tags关联"""
+        """批量创建新闻-tags关联（使用execute_values优化）"""
         if not relations:
             return
         
@@ -1089,15 +1190,18 @@ class EODHDNewsService:
                 relation_data.append((news_id, tag_id))
         
         if relation_data:
+            # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+            from psycopg2.extras import execute_values
+            
             sql = """
                 INSERT INTO news_tags (news_id, tag_id) 
-                VALUES (%s, %s) 
+                VALUES %s
                 ON CONFLICT (news_id, tag_id) DO NOTHING
             """
-            cursor.executemany(sql, relation_data)
+            execute_values(cursor, sql, relation_data, page_size=1000)
     
     def _batch_create_api_tag_relations(self, cursor, relations: List[tuple]):
-        """批量创建新闻-API原始tags关联"""
+        """批量创建新闻-API原始tags关联（使用execute_values优化）"""
         if not relations:
             return
         
@@ -1129,20 +1233,24 @@ class EODHDNewsService:
                 relation_data.append((news_id, api_tag_id))
         
         if relation_data:
+            # 🚀 使用 execute_values 批量插入（参考eodhd_fundamentals）
+            from psycopg2.extras import execute_values
+            
             sql = """
                 INSERT INTO news_auto_tags_relations (news_id, auto_tag_id) 
-                VALUES (%s, %s) 
+                VALUES %s
                 ON CONFLICT (news_id, auto_tag_id) DO NOTHING
             """
-            cursor.executemany(sql, relation_data)
+            execute_values(cursor, sql, relation_data, page_size=1000)
     
-    def upsert_news_batch(self, articles: List[Dict[str, Any]]) -> Dict[str, int]:
+    def upsert_news_batch(self, articles: List[Dict[str, Any]], scheduler_source: Optional[str] = None) -> Dict[str, int]:
         """
         高性能新闻批量 UPSERT 操作
         使用临时表和MERGE语法实现最高性能
         
         Args:
             articles: 新闻文章列表
+            scheduler_source: 调度器来源类型 ('eodhd_news', 'watchlist_news', 等)
             
         Returns:
             Dict[str, int]: 操作结果统计
@@ -1181,14 +1289,15 @@ class EODHDNewsService:
                         article.get('sentiment_neg'),
                         article.get('sentiment_neu'),
                         article.get('sentiment_pos'),
-                        article.get('formatted_text')
+                        article.get('formatted_text'),
+                        scheduler_source
                     ))
                 
                 temp_sql = """
                     INSERT INTO temp_news 
                     (date, title, content, link, source, sentiment_polarity, 
-                     sentiment_neg, sentiment_neu, sentiment_pos, formatted_text)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     sentiment_neg, sentiment_neu, sentiment_pos, formatted_text, scheduler_source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 cursor.executemany(temp_sql, temp_data)
                 
@@ -1196,10 +1305,10 @@ class EODHDNewsService:
                 upsert_sql = """
                     INSERT INTO news 
                     (date, title, content, link, source, sentiment_polarity, 
-                     sentiment_neg, sentiment_neu, sentiment_pos, formatted_text)
+                     sentiment_neg, sentiment_neu, sentiment_pos, formatted_text, scheduler_source)
                     SELECT DISTINCT t.date, t.title, t.content, t.link, t.source,
                            t.sentiment_polarity, t.sentiment_neg, t.sentiment_neu, 
-                           t.sentiment_pos, t.formatted_text
+                           t.sentiment_pos, t.formatted_text, t.scheduler_source
                     FROM temp_news t
                     WHERE NOT EXISTS (
                         SELECT 1 FROM news n WHERE n.link = t.link AND t.link IS NOT NULL

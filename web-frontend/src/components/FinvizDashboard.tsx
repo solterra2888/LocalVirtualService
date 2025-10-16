@@ -197,6 +197,24 @@ const FinvizDashboard: React.FC = () => {
   const [newsCache, setNewsCache] = useState<Map<string, DashboardNewsItem[]>>(new Map());
   const [cacheTimestamps, setCacheTimestamps] = useState<Map<string, number>>(new Map());
   
+  // 新闻展开状态管理
+  const [expandedNewsItems, setExpandedNewsItems] = useState<Set<number>>(new Set());
+  
+  // 新闻展开/收缩功能
+  const toggleNewsExpansion = (newsId: number) => {
+    setExpandedNewsItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(newsId)) {
+        newSet.delete(newsId);
+      } else {
+        newSet.add(newsId);
+      }
+      return newSet;
+    });
+  };
+  
+  const isNewsExpanded = (newsId: number) => expandedNewsItems.has(newsId);
+  
   // 缓存工具函数
   const getCacheKey = (type: 'stock' | 'group', identifier: string) => {
     return `${type}:${identifier}`;
@@ -999,35 +1017,68 @@ const FinvizDashboard: React.FC = () => {
                   />
                   <div style={{ fontSize: '13px', marginBottom: '8px' }}>
                     {item.analysis_result?.content ? (
-                      <div style={{ 
-                        maxHeight: '60px', 
-                        overflow: 'hidden',
-                        position: 'relative'
-                      }}>
-                        <MarkdownRenderer 
-                          content={item.analysis_result.content}
-                          style={{
-                            fontSize: '13px',
-                            lineHeight: '1.4'
+                      <div>
+                        <div style={{ 
+                          maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
+                          overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
+                          position: 'relative'
+                        }}>
+                          <MarkdownRenderer 
+                            content={item.analysis_result.content}
+                            style={{
+                              fontSize: '13px',
+                              lineHeight: '1.4'
+                            }}
+                          />
+                          {!isNewsExpanded(item.id) && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: '20px',
+                              background: 'linear-gradient(transparent, white)',
+                              pointerEvents: 'none'
+                            }} />
+                          )}
+                        </div>
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => toggleNewsExpansion(item.id)}
+                          style={{ 
+                            padding: '4px 0', 
+                            fontSize: '12px',
+                            height: 'auto'
                           }}
-                        />
-                        <div style={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          height: '20px',
-                          background: 'linear-gradient(transparent, white)',
-                          pointerEvents: 'none'
-                        }} />
+                        >
+                          {isNewsExpanded(item.id) ? '收起' : '展开'}
+                        </Button>
                       </div>
                     ) : (
-                      <Typography.Paragraph 
-                        ellipsis={{ rows: 2, expandable: true }}
-                        style={{ fontSize: '13px', marginBottom: 0 }}
-                      >
-                        {item.content}
-                      </Typography.Paragraph>
+                      <div>
+                        <Typography.Paragraph 
+                          ellipsis={{ 
+                            rows: isNewsExpanded(item.id) ? 0 : 2, 
+                            expandable: false 
+                          }}
+                          style={{ fontSize: '13px', marginBottom: 0 }}
+                        >
+                          {item.content}
+                        </Typography.Paragraph>
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => toggleNewsExpansion(item.id)}
+                          style={{ 
+                            padding: '4px 0', 
+                            fontSize: '12px',
+                            height: 'auto'
+                          }}
+                        >
+                          {isNewsExpanded(item.id) ? '收起' : '展开'}
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </List.Item>

@@ -67,10 +67,26 @@ class SchedulerService:
         """启动调度器"""
         try:
             logger.info("启动定时任务调度器")
+            
+            # 先清理所有现有任务，确保状态同步
+            await self._cleanup_existing_jobs()
+            
+            # 启动调度器
             self.scheduler.start()
             
             # 加载已保存的任务
             await self._load_saved_tasks()
+            
+            # 添加定期状态同步任务（每5分钟同步一次）
+            # 这样可以自动修复数据库与调度器状态不一致的问题
+            self.scheduler.add_job(
+                self.sync_task_states,
+                trigger=IntervalTrigger(minutes=5),
+                id='_sync_task_states',
+                name='Task State Sync',
+                replace_existing=True
+            )
+            logger.info("✓ 已添加定期状态同步任务（每5分钟）")
             
             logger.info("定时任务调度器启动成功")
         except Exception as e:
@@ -331,39 +347,81 @@ class SchedulerService:
     async def enable_task(self, task_id: str) -> Dict[str, Any]:
         """启用任务"""
         try:
-            # 获取任务配置
+            logger.info(f"开始启用任务: {task_id}")
+            
+            # 获取任务配置（从数据库获取最新配置）
             task_config = await self._get_task_config(task_id)
             if not task_config:
+                logger.error(f"任务不存在: {task_id}")
                 return {'success': False, 'message': '任务不存在'}
             
-            # 更新启用状态
+            # 先检查调度器中是否已存在该任务，如果存在先移除
+            if self.scheduler.get_job(task_id):
+                logger.warning(f"任务 {task_id} 已在调度器中，先移除旧任务")
+                self.scheduler.remove_job(task_id)
+            
+            # 更新数据库启用状态
             await self._update_task_config(task_id, {'enabled': True})
+            logger.info(f"已更新数据库，任务 {task_id} 状态: enabled=True")
+            
+            # 重新获取配置确保是最新的
+            task_config = await self._get_task_config(task_id)
+            task_config['enabled'] = True  # 确保启用标志已设置
             
             # 添加到调度器
             await self._add_job_to_scheduler(task_config)
+            
+            # 验证任务已添加到调度器
+            if self.scheduler.get_job(task_id):
+                logger.info(f"✓ 任务已成功添加到调度器: {task_id}")
+            else:
+                logger.error(f"✗ 任务未能添加到调度器: {task_id}")
+                return {'success': False, 'message': '任务未能添加到调度器'}
             
             logger.info(f"任务已启用: {task_id}")
             return {'success': True, 'message': '任务已启用'}
             
         except Exception as e:
-            logger.error(f"启用任务失败: {str(e)}")
+            logger.error(f"启用任务失败: {task_id}, 错误: {str(e)}")
             return {'success': False, 'message': f'启用任务失败: {str(e)}'}
     
     async def disable_task(self, task_id: str) -> Dict[str, Any]:
-        """禁用任务"""
+        """禁用任务 - 确保从调度器内存中移除"""
         try:
-            # 更新启用状态
-            await self._update_task_config(task_id, {'enabled': False})
+            logger.info(f"开始禁用任务: {task_id}")
             
-            # 从调度器移除
+            # 重要：先从调度器移除（内存操作），再更新数据库
+            # 这样即使数据库更新失败，至少任务已经停止运行
+            job_existed = False
             if self.scheduler.get_job(task_id):
                 self.scheduler.remove_job(task_id)
+                job_existed = True
+                logger.info(f"✓ 已从调度器移除任务: {task_id}")
+            else:
+                logger.warning(f"任务 {task_id} 不在调度器中（可能已经停止或从未启动）")
             
+            # 更新数据库状态
+            success = await self._update_task_config(task_id, {'enabled': False})
+            if success:
+                logger.info(f"✓ 已更新数据库，任务 {task_id} 状态: enabled=False")
+            else:
+                logger.error(f"✗ 更新数据库失败，但任务已从调度器移除: {task_id}")
+            
+            # 二次验证：确保任务确实不在调度器中
+            if self.scheduler.get_job(task_id):
+                logger.error(f"✗ 警告：任务 {task_id} 仍在调度器中！")
+                # 再次尝试移除
+                self.scheduler.remove_job(task_id)
+                logger.info(f"已进行二次移除: {task_id}")
+            else:
+                logger.info(f"✓ 确认任务 {task_id} 不在调度器中")
+            
+            status_msg = "任务已禁用" + (" (从调度器移除)" if job_existed else " (仅更新数据库)")
             logger.info(f"任务已禁用: {task_id}")
-            return {'success': True, 'message': '任务已禁用'}
+            return {'success': True, 'message': status_msg}
             
         except Exception as e:
-            logger.error(f"禁用任务失败: {str(e)}")
+            logger.error(f"禁用任务失败: {task_id}, 错误: {str(e)}")
             return {'success': False, 'message': f'禁用任务失败: {str(e)}'}
     
     async def delete_task(self, task_id: str) -> Dict[str, Any]:
@@ -384,6 +442,116 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"删除任务失败: {str(e)}")
             return {'success': False, 'message': f'删除任务失败: {str(e)}'}
+    
+    async def get_running_tasks(self) -> List[Dict[str, Any]]:
+        """
+        获取调度器中实际运行的任务列表
+        用于检查调度器内存状态
+        
+        Returns:
+            List[Dict]: 运行中任务的列表
+        """
+        try:
+            running_tasks = []
+            scheduler_jobs = self.scheduler.get_jobs()
+            
+            for job in scheduler_jobs:
+                # 跳过内部同步任务
+                if job.id.startswith('_'):
+                    continue
+                
+                running_tasks.append({
+                    'id': job.id,
+                    'name': job.name,
+                    'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
+                    'trigger': str(job.trigger)
+                })
+            
+            logger.info(f"调度器中运行的任务数量: {len(running_tasks)}")
+            return running_tasks
+            
+        except Exception as e:
+            logger.error(f"获取运行任务列表失败: {str(e)}")
+            return []
+    
+    async def sync_task_states(self) -> Dict[str, Any]:
+        """
+        同步调度器内存状态与数据库状态
+        修复状态不一致问题
+        
+        Returns:
+            Dict: 同步结果统计
+        """
+        try:
+            logger.info("开始同步调度器状态与数据库...")
+            
+            # 获取数据库中的所有任务
+            db_tasks = await self._get_all_tasks()
+            
+            # 获取调度器中的所有任务ID
+            scheduler_job_ids = {job.id for job in self.scheduler.get_jobs() if not job.id.startswith('_')}
+            
+            # 统计信息
+            stats = {
+                'total_db_tasks': len(db_tasks),
+                'total_scheduler_jobs': len(scheduler_job_ids),
+                'removed_jobs': [],
+                'added_jobs': [],
+                'skipped': []
+            }
+            
+            # 遍历数据库任务，同步状态
+            for task in db_tasks:
+                task_id = task['id']
+                enabled = task['enabled']
+                
+                # 情况1: 数据库显示禁用，但调度器中还在运行
+                if not enabled and task_id in scheduler_job_ids:
+                    try:
+                        self.scheduler.remove_job(task_id)
+                        stats['removed_jobs'].append(task_id)
+                        logger.warning(f"同步修复: 从调度器移除已禁用的任务 {task_id}")
+                    except Exception as e:
+                        logger.error(f"移除任务失败 {task_id}: {str(e)}")
+                        stats['skipped'].append(f"{task_id} (移除失败)")
+                
+                # 情况2: 数据库显示启用，但调度器中没有
+                elif enabled and task_id not in scheduler_job_ids:
+                    try:
+                        await self._add_job_to_scheduler(task)
+                        stats['added_jobs'].append(task_id)
+                        logger.warning(f"同步修复: 添加缺失的启用任务到调度器 {task_id}")
+                    except Exception as e:
+                        logger.error(f"添加任务失败 {task_id}: {str(e)}")
+                        stats['skipped'].append(f"{task_id} (添加失败)")
+            
+            # 检查是否有调度器中的任务不在数据库中（孤立任务）
+            db_task_ids = {task['id'] for task in db_tasks}
+            orphan_jobs = scheduler_job_ids - db_task_ids
+            
+            for orphan_id in orphan_jobs:
+                try:
+                    self.scheduler.remove_job(orphan_id)
+                    stats['removed_jobs'].append(orphan_id)
+                    logger.warning(f"同步修复: 移除数据库中不存在的孤立任务 {orphan_id}")
+                except Exception as e:
+                    logger.error(f"移除孤立任务失败 {orphan_id}: {str(e)}")
+            
+            logger.info(f"任务状态同步完成: 移除{len(stats['removed_jobs'])}个, 添加{len(stats['added_jobs'])}个, 跳过{len(stats['skipped'])}个")
+            
+            return {
+                'success': True,
+                'message': '任务状态同步完成',
+                'stats': stats
+            }
+            
+        except Exception as e:
+            logger.error(f"任务状态同步失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f'任务状态同步失败: {str(e)}',
+                'stats': {}
+            }
     
     async def create_default_eodhd_news_task(self, created_by: str = "system") -> Dict[str, Any]:
         """创建默认的EODHD新闻获取任务（纽约时间每15分钟）"""
@@ -544,60 +712,109 @@ class SchedulerService:
                     end_date,
                     params.get('max_results'),
                     params.get('topic_filter'),
-                    params.get('keywords')
+                    params.get('keywords'),
+                    'eodhd_news'  # scheduler_source参数
                 )
             
             # 计算实际新增的新闻数量
             new_count = result['success_count'] - result['existing_count']
             
+            # 详细的统计信息
+            stats_summary = {
+                'task_type': 'eodhd_news',
+                'fetched_count': result['fetched_count'],
+                'deduplicated_count': result['success_count'],
+                'new_count': new_count,
+                'existing_count': result['existing_count'],
+                'failed_count': result.get('failed_count', 0)
+            }
+            
             if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
             else:
-                message = f"成功获取并存储 {result['success_count']} 条新闻"
+                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，全部为新增"
+            
+            logger.info(f"📊 EODHD新闻获取统计: {stats_summary}")
             
             # ========== 新增：获取新闻后自动分析 ==========
             auto_analyze = params.get('auto_analyze', False)
             use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
             analysis_result = None
             
-            if auto_analyze and new_count > 0:
-                logger.info(f"启用自动分析，开始分析 {new_count} 条新增新闻，use_celery={use_celery}")
+            # 🔥 优化：使用新插入的新闻ID列表进行分析，避免时序问题
+            if auto_analyze:
+                logger.info(f"启用自动分析，新增 {new_count} 条新闻，use_celery={use_celery}")
                 
                 try:
                     if use_celery:
                         # ========== 方案B：使用Celery（推荐多用户场景）==========
                         logger.info("使用Celery异步处理分析任务")
                         
-                        from backend.tasks.news_tasks import analyze_unanalyzed_news_task
+                        # 🔥 新方案：优先使用新插入的新闻ID列表
+                        new_news_ids = result.get('new_news_ids', [])
                         
-                        # 准备symbols参数
-                        analysis_symbols = None
-                        if params.get('symbols'):
-                            if isinstance(params['symbols'], str):
-                                analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
-                            else:
-                                analysis_symbols = params['symbols']
-                        
-                        # 提交Celery任务（立即返回，不阻塞）
-                        task = analyze_unanalyzed_news_task.delay(
-                            limit=min(params.get('analysis_batch_size', new_count), new_count),
-                            template_code=params.get('analysis_template', 'news_summary_v1'),
-                            symbols=analysis_symbols,
-                            start_date=start_date,
-                            end_date=end_date,
-                            max_concurrent=params.get('max_concurrent', 5)
-                        )
-                        
-                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {new_count} 条新闻")
-                        
-                        analysis_result = {
-                            'status': 'submitted_to_celery',
-                            'celery_task_id': task.id,
-                            'news_count': new_count,
-                            'estimated_time': '10-20秒'
-                        }
-                        
-                        message += f"，已提交Celery任务分析 {new_count} 条新闻 (Task ID: {task.id})"
+                        if new_news_ids:
+                            # 🔥 使用新的任务：直接分析指定ID的新闻
+                            from backend.tasks.news_tasks import analyze_news_by_ids_task
+                            
+                            logger.info(f"使用新闻ID列表分析，共 {len(new_news_ids)} 条新闻")
+                            
+                            # 提交Celery任务（立即返回，不阻塞）
+                            task = analyze_news_by_ids_task.delay(
+                                news_ids=new_news_ids,
+                                template_code=params.get('analysis_template', 'news_summary_v1'),
+                                max_concurrent=params.get('max_concurrent', 8)
+                            )
+                            
+                            logger.info(f"已提交Celery分析任务（按ID）: {task.id}, 将分析 {len(new_news_ids)} 条新闻")
+                            
+                            analysis_result = {
+                                'status': 'submitted_to_celery',
+                                'celery_task_id': task.id,
+                                'news_count': len(new_news_ids),
+                                'method': 'by_ids',
+                                'estimated_time': f'预计 {len(new_news_ids) * 3} 秒'
+                            }
+                            
+                            message += f"，已提交Celery任务分析 {len(new_news_ids)} 条新闻 (Task ID: {task.id})"
+                        else:
+                            # 🔥 降级方案：如果没有新闻ID列表，使用传统方式查询未分析新闻
+                            from backend.tasks.news_tasks import analyze_unanalyzed_news_task
+                            
+                            logger.warning("未获取到新闻ID列表，降级使用查询未分析新闻方式")
+                            
+                            # 准备symbols参数
+                            analysis_symbols = None
+                            if params.get('symbols'):
+                                if isinstance(params['symbols'], str):
+                                    analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
+                                else:
+                                    analysis_symbols = params['symbols']
+                            
+                            # 修复：使用analysis_batch_size作为limit，默认值应该合理（如1000）
+                            analysis_limit = params.get('analysis_batch_size', 1000)
+                            
+                            # 提交Celery任务（立即返回，不阻塞）
+                            task = analyze_unanalyzed_news_task.delay(
+                                limit=analysis_limit,
+                                template_code=params.get('analysis_template', 'news_summary_v1'),
+                                symbols=analysis_symbols,
+                                start_date=start_date,
+                                end_date=end_date,
+                                max_concurrent=params.get('max_concurrent', 10)
+                            )
+                            
+                            logger.info(f"已提交Celery分析任务（查询方式）: {task.id}, 预计分析 {min(analysis_limit, new_count)} 条新闻")
+                            
+                            analysis_result = {
+                                'status': 'submitted_to_celery',
+                                'celery_task_id': task.id,
+                                'news_count': analysis_limit,
+                                'method': 'by_query',
+                                'estimated_time': '根据未分析新闻数量而定'
+                            }
+                            
+                            message += f"，已提交Celery任务分析新闻 (Task ID: {task.id})"
                         
                     else:
                         # ========== 方案A：直接分析（仅适合小团队）==========
@@ -613,9 +830,10 @@ class SchedulerService:
                         
                         # 获取分析参数
                         analysis_template = params.get('analysis_template', 'news_summary_v1')
-                        analysis_batch_size = params.get('analysis_batch_size', new_count)
+                        # 修复：使用合理的默认值，而不是限制为new_count
+                        analysis_batch_size = params.get('analysis_batch_size', 1000)
                         use_concurrent = params.get('use_concurrent', True)
-                        max_concurrent = params.get('max_concurrent', 5)
+                        max_concurrent = params.get('max_concurrent', 10)
                         
                         # 准备筛选条件
                         analysis_symbols = None
@@ -630,7 +848,7 @@ class SchedulerService:
                                    f"concurrent={use_concurrent}, max_concurrent={max_concurrent}")
                         
                         analysis_result = await news_analysis_service.batch_analyze_news(
-                            limit=min(analysis_batch_size, new_count),
+                            limit=analysis_batch_size,  # 修复：不再限制为new_count
                             template_code=analysis_template,
                             symbols=analysis_symbols,
                             start_date=start_date,
@@ -646,7 +864,14 @@ class SchedulerService:
                                 analysis_msg += f"（失败 {analysis_result['failed']} 条）"
                             message += analysis_msg
                             
-                            logger.info(f"新闻分析完成: {analysis_result}")
+                            # 只记录统计信息，不包含详细的results
+                            analysis_summary = {
+                                'total': analysis_result['total'],
+                                'success': analysis_result['success'],
+                                'failed': analysis_result['failed'],
+                                'template_code': analysis_result.get('template_code', 'unknown')
+                            }
+                            logger.info(f"新闻分析完成: {analysis_summary}")
                     
                 except Exception as e:
                     logger.error(f"自动分析新闻失败: {str(e)}")
@@ -721,18 +946,33 @@ class SchedulerService:
             # 计算实际新增的新闻数量
             new_count = result['success_count'] - result['existing_count']
             
+            # 详细的统计信息
+            stats_summary = {
+                'task_type': 'watchlist_news',
+                'fetched_count': result['fetched_count'],
+                'deduplicated_count': result['success_count'],
+                'new_count': new_count,
+                'existing_count': result['existing_count'],
+                'failed_count': result.get('failed_count', 0),
+                'tickers_count': len(result.get('tickers', []))
+            }
+            
             if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
             else:
-                message = f"成功获取并存储 {result['success_count']} 条watchlist新闻"
+                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，全部为新增"
+            
+            logger.info(f"📊 Watchlist新闻获取统计: {stats_summary}")
             
             # ========== 新增：获取新闻后自动分析 ==========
             auto_analyze = params.get('auto_analyze', False)
             use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
             analysis_result = None
             
-            if auto_analyze and new_count > 0:
-                logger.info(f"启用自动分析，开始分析 {new_count} 条新增watchlist新闻，use_celery={use_celery}")
+            # 修复：应该分析所有未分析的新闻，而不仅仅是新增的
+            # 之前的逻辑导致每次只分析1条新闻，造成大量新闻堆积
+            if auto_analyze:
+                logger.info(f"启用自动分析，新增 {new_count} 条watchlist新闻，use_celery={use_celery}")
                 
                 try:
                     if use_celery:
@@ -747,26 +987,36 @@ class SchedulerService:
                             analysis_symbols = result['tickers']
                             logger.info(f"使用watchlist股票列表进行筛选，共 {len(analysis_symbols)} 个股票")
                         
+                        # 修复：使用analysis_batch_size作为limit，默认值应该合理（如1000）
+                        # 而不是限制为new_count，这样可以分析所有未分析的历史新闻
+                        analysis_limit = params.get('analysis_batch_size', 1000)
+                        
                         # 提交Celery任务（添加日期和股票参数）
                         task = analyze_unanalyzed_news_task.delay(
-                            limit=min(params.get('analysis_batch_size', new_count), new_count),
+                            limit=analysis_limit,
                             template_code=params.get('analysis_template', 'news_summary_v1'),
                             symbols=analysis_symbols,  # 使用watchlist的股票列表
                             start_date=start_date,     # 添加开始日期
                             end_date=end_date,         # 添加结束日期
-                            max_concurrent=params.get('max_concurrent', 5)
+                            max_concurrent=params.get('max_concurrent', 10)
                         )
                         
-                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {new_count} 条新闻")
+                        # 更新统计信息
+                        stats_summary['analysis_status'] = 'submitted_to_celery'
+                        stats_summary['celery_task_id'] = task.id
+                        stats_summary['analysis_limit'] = analysis_limit
+                        stats_summary['estimated_analysis_count'] = min(analysis_limit, new_count)
+                        
+                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {min(analysis_limit, new_count)} 条新闻")
                         
                         analysis_result = {
                             'status': 'submitted_to_celery',
                             'celery_task_id': task.id,
-                            'news_count': new_count,
-                            'estimated_time': '10-20秒'
+                            'news_count': analysis_limit,
+                            'estimated_time': '根据未分析新闻数量而定'
                         }
                         
-                        message += f"，已提交Celery任务分析 {new_count} 条新闻 (Task ID: {task.id})"
+                        message += f"，已提交Celery任务分析新闻 (Task ID: {task.id})"
                         
                     else:
                         # ========== 直接分析（仅适合小团队）==========
@@ -782,9 +1032,10 @@ class SchedulerService:
                         
                         # 获取分析参数
                         analysis_template = params.get('analysis_template', 'news_summary_v1')
-                        analysis_batch_size = params.get('analysis_batch_size', new_count)
+                        # 修复：使用合理的默认值，而不是限制为new_count
+                        analysis_batch_size = params.get('analysis_batch_size', 1000)
                         use_concurrent = params.get('use_concurrent', True)
-                        max_concurrent = params.get('max_concurrent', 5)
+                        max_concurrent = params.get('max_concurrent', 10)
                         
                         # 获取watchlist的股票列表作为筛选条件
                         analysis_symbols = None
@@ -794,7 +1045,7 @@ class SchedulerService:
                         
                         # 执行批量分析（添加日期和股票参数）
                         analysis_result = await news_analysis_service.batch_analyze_news(
-                            limit=min(analysis_batch_size, new_count),
+                            limit=analysis_batch_size,  # 修复：不再限制为new_count
                             template_code=analysis_template,
                             symbols=analysis_symbols,  # 添加股票列表
                             start_date=start_date,     # 添加开始日期
@@ -810,7 +1061,14 @@ class SchedulerService:
                                 analysis_msg += f"（失败 {analysis_result['failed']} 条）"
                             message += analysis_msg
                             
-                            logger.info(f"新闻分析完成: {analysis_result}")
+                            # 只记录统计信息，不包含详细的results
+                            analysis_summary = {
+                                'total': analysis_result['total'],
+                                'success': analysis_result['success'],
+                                'failed': analysis_result['failed'],
+                                'template_code': analysis_result.get('template_code', 'unknown')
+                            }
+                            logger.info(f"新闻分析完成: {analysis_summary}")
                     
                 except Exception as e:
                     logger.error(f"自动分析新闻失败: {str(e)}")
@@ -1465,6 +1723,26 @@ class SchedulerService:
             logger.error(f"任务执行出错: {event.job_id}, 异常: {event.exception}")
         else:
             logger.info(f"任务执行完成: {event.job_id}")
+    
+    async def _cleanup_existing_jobs(self):
+        """清理所有现有任务，确保状态同步"""
+        try:
+            logger.info("清理现有任务，确保状态同步")
+            
+            # 获取所有任务
+            tasks = await self._get_all_tasks()
+            
+            # 移除所有任务
+            for task in tasks:
+                task_id = task['id']
+                if self.scheduler.get_job(task_id):
+                    self.scheduler.remove_job(task_id)
+                    logger.info(f"已移除任务: {task_id}")
+            
+            logger.info(f"已清理 {len(tasks)} 个任务")
+            
+        except Exception as e:
+            logger.error(f"清理现有任务失败: {str(e)}")
     
     async def _load_saved_tasks(self):
         """加载已保存的任务"""

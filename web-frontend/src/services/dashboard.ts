@@ -42,6 +42,7 @@ export interface DashboardNewsItem {
   sentiment_neu?: number;
   symbols: string[];
   tags: string[];
+  scheduler_source?: string;  // 调度器来源
   analysis_result?: NewsAnalysisResult;
 }
 

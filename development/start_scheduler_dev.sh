@@ -41,7 +41,7 @@ echo ""
 echo -e "${BLUE}🔍 检查Python环境...${NC}"
 
 # 检查conda环境
-CONDA_ENV_PATH="/Users/kevinliu/anaconda3/envs/rcTool/bin/python"
+CONDA_ENV_PATH="/opt/anaconda3/envs/rcTool/bin/python"
 if [ -f "$CONDA_ENV_PATH" ]; then
     PYTHON_CMD="$CONDA_ENV_PATH"
     echo -e "${GREEN}✅ 使用conda环境rcTool: $PYTHON_CMD${NC}"

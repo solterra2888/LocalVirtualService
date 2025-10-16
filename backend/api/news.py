@@ -56,7 +56,7 @@ class NewsService:
             base_query = """
                 SELECT n.id, n.date, n.title, n.content, n.link, n.source,
                        n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,
-                       n.created_at, n.updated_at
+                       n.created_at, n.updated_at, n.scheduler_source
                 FROM news n
             """
             
@@ -101,7 +101,7 @@ class NewsService:
             
             # 计算总数
             count_query = base_query.replace(
-                "SELECT n.id, n.date, n.title, n.content, n.link, n.source,\n                       n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,\n                       n.created_at, n.updated_at",
+                "SELECT n.id, n.date, n.title, n.content, n.link, n.source,\n                       n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,\n                       n.created_at, n.updated_at, n.scheduler_source",
                 "SELECT COUNT(n.id)"
             )
             cursor.execute(count_query, params)
@@ -129,6 +129,7 @@ class NewsService:
                     'sentiment_pos': row[9],
                     'created_at': row[10].isoformat() if row[10] else None,
                     'updated_at': row[11].isoformat() if row[11] else None,
+                    'scheduler_source': row[12],
                     'symbols': [],
                     'tags': [],
                     'auto_tags': []
@@ -804,13 +805,46 @@ async def delete_news_by_date_range(
                     }
                 }
             
-            # 删除新闻（由于外键设置了ON DELETE CASCADE，相关表的数据会自动删除）
-            # 包括：news_auto_tags_relations、news_symbols、news_tags
-            delete_query = """
-                DELETE FROM news 
+            # 获取要删除的新闻ID列表
+            cursor.execute("""
+                SELECT id FROM news 
                 WHERE date >= %s AND date <= %s
-            """
-            cursor.execute(delete_query, (start_datetime, end_datetime))
+            """, (start_datetime, end_datetime))
+            news_ids = [row[0] for row in cursor.fetchall()]
+            
+            if news_ids:
+                # 显式删除关联表数据（避免孤立记录）
+                # 1. 删除新闻-API标签关联
+                cursor.execute("""
+                    DELETE FROM news_auto_tags_relations 
+                    WHERE news_id = ANY(%s)
+                """, (news_ids,))
+                deleted_auto_tags_relations = cursor.rowcount
+                logger.debug(f"删除了 {deleted_auto_tags_relations} 条 news_auto_tags_relations 记录")
+                
+                # 2. 删除新闻-股票代码关联
+                cursor.execute("""
+                    DELETE FROM news_symbols 
+                    WHERE news_id = ANY(%s)
+                """, (news_ids,))
+                deleted_symbols = cursor.rowcount
+                logger.debug(f"删除了 {deleted_symbols} 条 news_symbols 记录")
+                
+                # 3. 删除新闻-用户标签关联
+                cursor.execute("""
+                    DELETE FROM news_tags 
+                    WHERE news_id = ANY(%s)
+                """, (news_ids,))
+                deleted_tags = cursor.rowcount
+                logger.debug(f"删除了 {deleted_tags} 条 news_tags 记录")
+                
+                # 4. 最后删除新闻主表数据
+                delete_query = """
+                    DELETE FROM news 
+                    WHERE date >= %s AND date <= %s
+                """
+                cursor.execute(delete_query, (start_datetime, end_datetime))
+            
             conn.commit()
             
             logger.info(

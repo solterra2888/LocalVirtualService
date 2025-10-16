@@ -1050,17 +1050,17 @@ class DatabaseManager:
                 top_p, timeout, description, icon, created_by, updated_by,
                 is_default_provider, fallback_priority
             ) VALUES 
-                ('qwen', 'qwen', '通义千问', '', 'https://dashscope.aliyuncs.com',
+                ('qwen', 'qwen', 'Qwen', '', 'https://dashscope.aliyuncs.com',
                  false, 'qwen-turbo', '["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"]',
-                 2000, 0.7, 0.8, 30, '阿里云通义千问大语言模型，支持多种规格', '🔷',
+                 2000, 0.7, 0.8, 30, 'Alibaba Cloud Qwen large language model with multiple specifications', '🔷',
                  'system', 'system', true, 1),
-                ('doubao', 'doubao', '豆包', '', 'https://ark.cn-beijing.volces.com',
+                ('doubao', 'doubao', 'Doubao', '', 'https://ark.cn-beijing.volces.com',
                  false, 'doubao-seed-1-6-250615', '["doubao-seed-1-6-250615"]',
-                 4000, 0.7, 0.9, 30, '字节跳动豆包大模型，强大的中文理解能力', '🫘',
+                 4000, 0.7, 0.9, 30, 'ByteDance Doubao large language model with strong Chinese understanding', '🫘',
                  'system', 'system', false, 2),
-                ('glm', 'glm', '智谱GLM', '', 'https://open.bigmodel.cn',
+                ('glm', 'glm', 'GLM', '', 'https://open.bigmodel.cn',
                  false, 'glm-4.6', '["glm-4.6", "glm-4", "glm-4-flash"]',
-                 8000, 0.7, 0.8, 30, '清华智谱AI大语言模型', '🧠',
+                 8000, 0.7, 0.8, 30, 'Tsinghua Zhipu AI large language model', '🧠',
                  'system', 'system', false, 3)
             ON CONFLICT (provider_id) DO NOTHING
             """)

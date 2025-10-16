@@ -372,14 +372,27 @@ class PromptRenderer:
             return None
         
         output_format = template.get('output_format', {})
-        format_type = output_format.get('type', 'text')
+        format_type = output_format.get('type', 'text') if output_format else 'text'
+        
+        # 标准化格式类型（去除空格，转小写）
+        if format_type:
+            format_type = str(format_type).strip().lower()
         
         if format_type == 'json':
             return self._parse_json_output(llm_response, output_format)
         elif format_type == 'text':
             return {'content': llm_response}
+        elif format_type == 'structured_text':
+            # structured_text 格式类似于 text，但表明输出应该有结构
+            # 目前将其作为纯文本处理，返回完整内容
+            return {'content': llm_response}
         else:
-            logger.warning(f"Unknown output format type: {format_type}")
+            # 对于未知格式，记录详细信息并作为文本处理
+            logger.warning(
+                f"Unknown output format type: '{format_type}' "
+                f"(template_id={template_id}). Treating as text. "
+                f"output_format={output_format}"
+            )
             return {'content': llm_response}
     
     def _parse_json_output(self, response: str, output_format: Dict) -> Optional[Dict[str, Any]]:

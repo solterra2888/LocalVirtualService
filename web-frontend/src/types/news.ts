@@ -21,6 +21,7 @@ export interface NewsItem {
   sentiment_pos?: number;
   created_at?: string;
   updated_at?: string;
+  scheduler_source?: string;  // 调度器来源
   symbols: string[];
   tags: string[];          // 用户自定义的topic tags
   auto_tags: string[];     // API原始tags

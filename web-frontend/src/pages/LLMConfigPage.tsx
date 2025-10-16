@@ -18,7 +18,8 @@ import {
   Alert,
   Tag,
   Statistic,
-  Spin
+  Spin,
+  Tooltip
 } from 'antd';
 import { 
   SettingOutlined, 
@@ -29,14 +30,104 @@ import {
   ReloadOutlined,
   EyeInvisibleOutlined,
   EyeTwoTone,
-  WarningOutlined
+  WarningOutlined,
+  DragOutlined,
+  PlayCircleOutlined
 } from '@ant-design/icons';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { llmConfigService, LLMConfig, LLMUsageStats } from '../services/llmConfigService';
 import { api } from '../services/api';
 
 const { Title, Paragraph, Text } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
+
+// 可拖拽的排序项组件
+interface SortableItemProps {
+  id: string;
+  provider: LLMProvider;
+  index: number;
+}
+
+const SortableItem: React.FC<SortableItemProps> = ({ id, provider, index }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+    >
+      <Card
+        size="small"
+        style={{
+          marginBottom: 8,
+          cursor: 'grab',
+          border: isDragging ? '2px dashed #1890ff' : '1px solid #d9d9d9',
+        }}
+        bodyStyle={{ padding: '12px 16px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <DragOutlined style={{ marginRight: 8, color: '#999' }} />
+            <Badge 
+              count={index + 1} 
+              style={{ backgroundColor: '#52c41a', marginRight: 12 }}
+            />
+            <span style={{ fontSize: '16px', marginRight: 8 }}>{provider.icon}</span>
+            <div>
+              <Text strong>{provider.displayName}</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                {provider.description}
+              </Text>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Badge 
+              status={provider.enabled ? 'success' : 'default'} 
+              text={provider.enabled ? 'Enabled' : 'Disabled'} 
+            />
+            {provider.id === 'qwen' && (
+              <Tag color="blue">Default</Tag>
+            )}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+};
 
 interface LLMProvider {
   id: string;
@@ -64,6 +155,17 @@ const LLMConfigPage: React.FC = () => {
   const [testingGlobal, setTestingGlobal] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  
+  // 拖拽排序相关状态
+  const [fallbackOrder, setFallbackOrder] = useState<string[]>([]);
+  
+  // 拖拽传感器
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   // 加载配置数据
   useEffect(() => {
@@ -87,10 +189,12 @@ const LLMConfigPage: React.FC = () => {
       };
       
       setConfig(configWithStatus);
+      // 初始化故障转移顺序
+      setFallbackOrder(data.fallbackOrder || []);
     } catch (error: any) {
-      console.error('加载配置失败:', error);
-      setLoadError(error?.response?.data?.detail || error.message || '加载配置失败');
-      message.error('加载配置失败，请检查网络连接');
+      console.error('Failed to load configuration:', error);
+      setLoadError(error?.response?.data?.detail || error.message || 'Failed to load configuration');
+      message.error('Failed to load configuration, please check network connection');
     } finally {
       setLoading(false);
     }
@@ -101,8 +205,8 @@ const LLMConfigPage: React.FC = () => {
       const stats = await llmConfigService.getUsageStats('30d');
       setUsageStats(stats);
     } catch (error) {
-      console.error('加载使用统计失败:', error);
-      // 不显示错误消息，统计数据是次要的
+      console.error('Failed to load usage statistics:', error);
+      // Don't show error message, statistics are secondary
     }
   };
 
@@ -119,9 +223,173 @@ const LLMConfigPage: React.FC = () => {
       };
     });
     
-    // 标记有未保存的更改（除了status字段）
+    // Mark as having unsaved changes (except status field)
     if (!updates.status) {
       setHasUnsavedChanges(true);
+    }
+  };
+
+  // Handle drag and drop sorting
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+
+    if (active.id !== over.id) {
+      setFallbackOrder((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        setHasUnsavedChanges(true);
+        return newOrder;
+      });
+    }
+  };
+
+  // Reset fallback order
+  const resetFallbackOrder = () => {
+    if (!config) return;
+    const defaultOrder = ['qwen', 'doubao', 'glm'];
+    setFallbackOrder(defaultOrder);
+    setHasUnsavedChanges(true);
+  };
+
+  // Test fallback order
+  const testFallbackOrder = async () => {
+    if (!config) return;
+    
+    setTestingGlobal(true);
+    try {
+      console.log('Testing fallback order:', fallbackOrder);
+      console.log('Available providers:', config.providers.map(p => ({ id: p.id, enabled: p.enabled })));
+      
+      // Test each provider in the fallback order
+      const testResults = [];
+      
+      if (fallbackOrder.length === 0) {
+        message.warning('No fallback order configured. Please configure providers first.');
+        return;
+      }
+      
+      for (let i = 0; i < fallbackOrder.length; i++) {
+        const providerId = fallbackOrder[i];
+        const provider = config.providers.find(p => p.id === providerId);
+        
+        if (!provider) {
+          testResults.push({
+            provider: providerId,
+            priority: i + 1,
+            status: 'error',
+            message: 'Provider not found'
+          });
+          continue;
+        }
+        
+        if (!provider.enabled) {
+          testResults.push({
+            provider: provider.displayName,
+            priority: i + 1,
+            status: 'warning',
+            message: 'Provider is disabled'
+          });
+          continue;
+        }
+        
+        if (!provider.apiKey) {
+          testResults.push({
+            provider: provider.displayName,
+            priority: i + 1,
+            status: 'error',
+            message: 'API key not configured'
+          });
+          continue;
+        }
+        
+        try {
+          console.log(`Testing provider ${i + 1}/${fallbackOrder.length}: ${provider.displayName}`);
+          
+          // Test the provider connection with timeout
+          const testPromise = llmConfigService.testProvider(
+            providerId,
+            provider.apiKey,
+            provider.baseUrl,
+            provider.defaultModel,
+            provider.maxTokens,
+            provider.temperature,
+            provider.topP
+          );
+          
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Test timeout after 30 seconds')), 30000)
+          );
+          
+          const result = await Promise.race([testPromise, timeoutPromise]) as any;
+          
+          testResults.push({
+            provider: provider.displayName,
+            priority: i + 1,
+            status: result.success ? 'success' : 'error',
+            message: result.success ? 'Connection successful' : (result.error || 'Connection failed')
+          });
+          
+          console.log(`Provider ${provider.displayName} test completed:`, result.success ? 'success' : 'failed');
+        } catch (error: any) {
+          console.error(`Provider ${provider.displayName} test failed:`, error);
+          testResults.push({
+            provider: provider.displayName,
+            priority: i + 1,
+            status: 'error',
+            message: error?.response?.data?.detail || error.message || 'Test failed'
+          });
+        }
+      }
+      
+      // Display test results
+      const resultMessages = testResults.map(result => {
+        const icon = result.status === 'success' ? '✅' : 
+                    result.status === 'warning' ? '⚠️' : '❌';
+        return `${icon} Priority ${result.priority}: ${result.provider} - ${result.message}`;
+      }).join('\n');
+      
+      const successCount = testResults.filter(r => r.status === 'success').length;
+      const warningCount = testResults.filter(r => r.status === 'warning').length;
+      const errorCount = testResults.filter(r => r.status === 'error').length;
+      
+      if (errorCount === 0 && warningCount === 0) {
+        message.success(
+          `Fallback order test completed successfully! (${successCount}/${testResults.length} providers working)\n\n${resultMessages}`,
+          8
+        );
+      } else if (errorCount === 0) {
+        message.warning(
+          `Fallback order test completed with warnings (${successCount}/${testResults.length} providers working):\n\n${resultMessages}`,
+          10
+        );
+      } else {
+        message.error(
+          `Fallback order test found issues (${successCount}/${testResults.length} providers working):\n\n${resultMessages}`,
+          10
+        );
+      }
+      
+    } catch (error: any) {
+      console.error('Fallback order test failed:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      
+      let errorMessage = 'Test failed, please check configuration';
+      if (error.response?.status === 401) {
+        errorMessage = 'Authentication required. Please login first.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Permission denied. Admin access required.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      message.error(errorMessage);
+    } finally {
+      setTestingGlobal(false);
     }
   };
 
@@ -135,7 +403,7 @@ const LLMConfigPage: React.FC = () => {
       const provider = config.providers.find(p => p.id === providerId);
       if (!provider?.apiKey) {
         updateProvider(providerId, { status: 'error' });
-        message.error('API密钥不能为空');
+        message.error('API key cannot be empty');
         setTestingProvider(null);
         return;
       }
@@ -153,20 +421,20 @@ const LLMConfigPage: React.FC = () => {
       if (result.success) {
         updateProvider(providerId, { status: 'connected' });
         message.success(
-          `${provider.displayName} 连接测试成功！请点击右上角"保存配置"按钮保存到数据库`,
+          `${provider.displayName} connection test successful! Please click the "Save Configuration" button in the top right to save to database`,
           5
         );
       } else {
         updateProvider(providerId, { status: 'error' });
         message.error(
-          `${provider.displayName} 连接测试失败: ${result.error || '未知错误'}`,
+          `${provider.displayName} connection test failed: ${result.error || 'Unknown error'}`,
           5
         );
       }
     } catch (error: any) {
       updateProvider(providerId, { status: 'error' });
       message.error(
-        `连接测试失败: ${error?.response?.data?.detail || error.message || '网络错误'}`,
+        `Connection test failed: ${error?.response?.data?.detail || error.message || 'Network error'}`,
         5
       );
     } finally {
@@ -179,25 +447,31 @@ const LLMConfigPage: React.FC = () => {
     
     setSaveStatus('saving');
     try {
-      await llmConfigService.saveConfig(config);
+      // 创建包含故障转移顺序的配置对象
+      const configToSave = {
+        ...config,
+        fallbackOrder: fallbackOrder
+      };
+      
+      await llmConfigService.saveConfig(configToSave);
       setSaveStatus('saved');
       message.success(
-        '配置保存成功，部分更改可能需要重启服务才能生效',
+        'Configuration saved successfully, some changes may require service restart to take effect',
         4
       );
       
-      // 2秒后重置保存状态
+      // Reset save status after 2 seconds
       setTimeout(() => setSaveStatus('idle'), 2000);
       
-      // 重新加载配置以确保数据同步
+      // Reload configuration to ensure data synchronization
       await loadConfig();
       
-      // 清除未保存标记
+      // Clear unsaved changes flag
       setHasUnsavedChanges(false);
     } catch (error: any) {
       setSaveStatus('error');
       message.error(
-        `配置保存失败: ${error?.response?.data?.detail || error.message || '请重试'}`,
+        `Configuration save failed: ${error?.response?.data?.detail || error.message || 'Please try again'}`,
         5
       );
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -207,8 +481,17 @@ const LLMConfigPage: React.FC = () => {
   const testGlobalSettings = async () => {
     setTestingGlobal(true);
     try {
-      console.log('开始测试全局设置...');
-      const result = await api.post('/llm/test-global');
+      console.log('Starting global settings test...');
+      console.log('API Base URL:', process.env.REACT_APP_API_BASE_URL || '/api');
+      console.log('Token:', localStorage.getItem('access_token'));
+      
+      // Add timeout to prevent hanging
+      const testPromise = api.post('/llm/test-global');
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Test timeout after 60 seconds')), 60000)
+      );
+      
+      const result = await Promise.race([testPromise, timeoutPromise]) as any;
       
       // 显示测试结果
       const resultMessages = result.test_results.map((test: any) => {
@@ -220,23 +503,43 @@ const LLMConfigPage: React.FC = () => {
 
       if (result.overall_status === 'success') {
         message.success(
-          `全局设置测试通过！\n\n${resultMessages}`,
+          `Global settings test passed!\n\n${resultMessages}`,
           8
         );
       } else if (result.overall_status === 'warning') {
         message.warning(
-          `全局设置测试完成，但有警告：\n\n${resultMessages}`,
+          `Global settings test completed with warnings:\n\n${resultMessages}`,
           10
         );
       } else {
         message.error(
-          `全局设置测试发现问题：\n\n${resultMessages}`,
+          `Global settings test found issues:\n\n${resultMessages}`,
           10
         );
       }
     } catch (error: any) {
-      console.error('全局设置测试失败:', error);
-      message.error(`测试失败: ${error?.response?.data?.detail || error.message || '网络错误'}`);
+      console.error('Global settings test failed:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      
+      let errorMessage = 'Test failed';
+      if (error.response?.status === 401) {
+        errorMessage = 'Authentication required. Please login first.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Permission denied. Admin access required.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'API endpoint not found. Please check backend configuration.';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      message.error(`Test failed: ${errorMessage}`);
     } finally {
       setTestingGlobal(false);
     }
@@ -245,13 +548,13 @@ const LLMConfigPage: React.FC = () => {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'connected':
-        return '已连接';
+        return 'Connected';
       case 'testing':
-        return '测试中...';
+        return 'Testing...';
       case 'error':
-        return '连接失败';
+        return 'Connection Failed';
       default:
-        return '未连接';
+        return 'Not Connected';
     }
   };
 
@@ -297,9 +600,9 @@ const LLMConfigPage: React.FC = () => {
       <Row gutter={16}>
         <Col span={12}>
           <div style={{ marginBottom: 16 }}>
-            <Text strong>API密钥</Text>
+            <Text strong>API Key</Text>
             <Input.Password
-              placeholder="请输入API密钥"
+              placeholder="Please enter API key"
               value={provider.apiKey}
               onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
               style={{ marginTop: 4, fontFamily: 'monospace' }}
@@ -309,9 +612,9 @@ const LLMConfigPage: React.FC = () => {
         </Col>
         <Col span={12}>
           <div style={{ marginBottom: 16 }}>
-            <Text strong>API端点</Text>
+            <Text strong>API Endpoint</Text>
             <Input
-              placeholder="API基础URL"
+              placeholder="API Base URL"
               value={provider.baseUrl}
               onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
               style={{ marginTop: 4, fontFamily: 'monospace' }}
@@ -323,7 +626,7 @@ const LLMConfigPage: React.FC = () => {
       <Row gutter={16}>
         <Col span={8}>
           <div style={{ marginBottom: 16 }}>
-            <Text strong>默认模型</Text>
+            <Text strong>Default Model</Text>
             <Select
               value={provider.defaultModel}
               onChange={(value) => updateProvider(provider.id, { defaultModel: value })}
@@ -339,7 +642,7 @@ const LLMConfigPage: React.FC = () => {
         </Col>
         <Col span={8}>
           <div style={{ marginBottom: 16 }}>
-            <Text strong>温度值 ({provider.temperature})</Text>
+            <Text strong>Temperature ({provider.temperature})</Text>
             <Slider
               min={0}
               max={2}
@@ -352,7 +655,7 @@ const LLMConfigPage: React.FC = () => {
         </Col>
         <Col span={8}>
           <div style={{ marginBottom: 16 }}>
-            <Text strong>最大Token</Text>
+            <Text strong>Max Tokens</Text>
             <InputNumber
               min={100}
               max={32000}
@@ -377,7 +680,7 @@ const LLMConfigPage: React.FC = () => {
           onClick={() => testConnection(provider.id)}
           disabled={!provider.apiKey || testingProvider === provider.id}
         >
-          {testingProvider === provider.id ? '测试中...' : '测试连接'}
+          {testingProvider === provider.id ? 'Testing...' : 'Test Connection'}
         </Button>
       </div>
     </Card>
@@ -408,7 +711,7 @@ const LLMConfigPage: React.FC = () => {
         gap: 16
       }}>
         <Spin size="large" />
-        <Text type="secondary">正在加载配置...</Text>
+        <Text type="secondary">Loading configuration...</Text>
       </div>
     );
   }
@@ -418,14 +721,14 @@ const LLMConfigPage: React.FC = () => {
     return (
       <div style={{ padding: '24px' }}>
         <Alert
-          message="加载配置失败"
-          description={loadError || '无法获取配置数据'}
+          message="Failed to load configuration"
+          description={loadError || 'Unable to get configuration data'}
           type="error"
           showIcon
           icon={<WarningOutlined />}
           action={
             <Button size="small" onClick={loadConfig}>
-              重新加载
+              Reload
             </Button>
           }
         />
@@ -441,9 +744,9 @@ const LLMConfigPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <RobotOutlined style={{ fontSize: '32px', color: '#1890ff', marginRight: '12px' }} />
             <div>
-              <Title level={2} style={{ margin: 0 }}>大语言模型配置</Title>
+              <Title level={2} style={{ margin: 0 }}>Large Language Model Configuration</Title>
               <Paragraph style={{ margin: 0, color: '#666' }}>
-                配置和管理中国主流大语言模型接入
+                Configure and manage Chinese mainstream large language model integration
               </Paragraph>
             </div>
           </div>
@@ -455,7 +758,7 @@ const LLMConfigPage: React.FC = () => {
                 loadUsageStats();
               }}
             >
-              刷新
+              Refresh
             </Button>
             <Button
               type="primary"
@@ -464,7 +767,7 @@ const LLMConfigPage: React.FC = () => {
               loading={saveStatus === 'saving'}
               size="large"
             >
-              {saveStatus === 'saving' ? '保存中...' : '保存配置'}
+              {saveStatus === 'saving' ? 'Saving...' : 'Save Configuration'}
             </Button>
           </Space>
         </div>
@@ -473,8 +776,8 @@ const LLMConfigPage: React.FC = () => {
       {/* Unsaved Changes Alert */}
       {hasUnsavedChanges && (
         <Alert
-          message="您有未保存的配置修改"
-          description='请点击右上角的"保存配置"按钮将修改保存到数据库'
+          message="You have unsaved configuration changes"
+          description='Please click the "Save Configuration" button in the top right to save changes to database'
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
@@ -486,8 +789,8 @@ const LLMConfigPage: React.FC = () => {
       {/* Save Status Alert */}
       {saveStatus === 'saved' && (
         <Alert
-          message="配置已成功保存"
-          description="配置已保存到数据库，部分更改可能需要重启服务才能生效"
+          message="Configuration saved successfully"
+          description="Configuration has been saved to database, some changes may require service restart to take effect"
           type="success"
           showIcon
           style={{ marginBottom: 16 }}
@@ -498,8 +801,8 @@ const LLMConfigPage: React.FC = () => {
 
       {saveStatus === 'error' && (
         <Alert
-          message="保存配置失败"
-          description="请检查网络连接后重试"
+          message="Failed to save configuration"
+          description="Please check network connection and try again"
           type="error"
           showIcon
           style={{ marginBottom: 16 }}
@@ -513,7 +816,7 @@ const LLMConfigPage: React.FC = () => {
           tab={
             <span>
               <RobotOutlined />
-              模型提供商
+              Model Providers
             </span>
           } 
           key="providers"
@@ -527,7 +830,7 @@ const LLMConfigPage: React.FC = () => {
           tab={
             <span>
               <SettingOutlined />
-              全局设置
+              Global Settings
             </span>
           } 
           key="global"
@@ -535,7 +838,7 @@ const LLMConfigPage: React.FC = () => {
           <Card title={
             <span>
               <SettingOutlined style={{ marginRight: 8 }} />
-              全局配置
+              Global Configuration
             </span>
           }
           extra={
@@ -546,13 +849,13 @@ const LLMConfigPage: React.FC = () => {
               onClick={testGlobalSettings}
               loading={testingGlobal}
             >
-              测试全局设置
+              Test Global Settings
             </Button>
           }>
             <Row gutter={24}>
               <Col span={12}>
                 <div style={{ marginBottom: 24 }}>
-                  <Text strong>默认模型提供商</Text>
+                  <Text strong>Default Model Provider</Text>
                   <Select
                     value={config.defaultProvider}
                     onChange={(value) => setConfig(prev => prev ? { ...prev, defaultProvider: value } : prev)}
@@ -569,10 +872,10 @@ const LLMConfigPage: React.FC = () => {
                 <div style={{ marginBottom: 24 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <Text strong>启用故障转移</Text>
+                      <Text strong>Enable Fallback</Text>
                       <br />
                       <Text type="secondary" style={{ fontSize: '12px' }}>
-                        当主要模型不可用时自动切换
+                        Automatically switch when primary model is unavailable
                       </Text>
                     </div>
                     <Switch
@@ -581,11 +884,86 @@ const LLMConfigPage: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                {/* 故障转移顺序配置 */}
+                {config.fallbackEnabled && (
+                  <div style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div>
+                        <Text strong>Fallback Order</Text>
+                        <br />
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          Drag to adjust provider priority, smaller numbers have higher priority
+                        </Text>
+                      </div>
+                      <Space>
+                        <Tooltip title="Reset to default order">
+                          <Button 
+                            size="small" 
+                            onClick={resetFallbackOrder}
+                            icon={<ReloadOutlined />}
+                          >
+                            Reset
+                          </Button>
+                        </Tooltip>
+                        <Tooltip title="Test fallback order">
+                          <Button 
+                            size="small" 
+                            onClick={testFallbackOrder}
+                            loading={testingGlobal}
+                            icon={<PlayCircleOutlined />}
+                          >
+                            Test
+                          </Button>
+                        </Tooltip>
+                      </Space>
+                    </div>
+                    
+                    <Alert
+                      message="Drag Instructions"
+                      description="Drag the drag icon on the left to adjust order. Number 1 indicates highest priority. When the main provider fails, other providers will be tried in order."
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                    />
+                    
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext items={fallbackOrder} strategy={verticalListSortingStrategy}>
+                        {fallbackOrder.map((providerId, index) => {
+                          const provider = config.providers.find(p => p.id === providerId);
+                          if (!provider) return null;
+                          
+                          return (
+                            <SortableItem
+                              key={providerId}
+                              id={providerId}
+                              provider={provider}
+                              index={index}
+                            />
+                          );
+                        })}
+                      </SortableContext>
+                    </DndContext>
+                    
+                    {fallbackOrder.length === 0 && (
+                      <Alert
+                        message="No configured providers"
+                        description="Please enable at least one provider in the 'Provider Configuration' tab first"
+                        type="warning"
+                        showIcon
+                      />
+                    )}
+                  </div>
+                )}
               </Col>
 
               <Col span={12}>
                 <div style={{ marginBottom: 24 }}>
-                  <Text strong>请求超时时间 (秒)</Text>
+                  <Text strong>Request Timeout (seconds)</Text>
                   <InputNumber
                     min={5}
                     max={300}
@@ -602,7 +980,7 @@ const LLMConfigPage: React.FC = () => {
                 </div>
 
                 <div style={{ marginBottom: 24 }}>
-                  <Text strong>重试次数</Text>
+                  <Text strong>Retry Count</Text>
                   <InputNumber
                     min={0}
                     max={10}
@@ -622,15 +1000,15 @@ const LLMConfigPage: React.FC = () => {
 
             <Divider />
 
-            <Title level={4}>监控与日志</Title>
+            <Title level={4}>Monitoring & Logging</Title>
             <Row gutter={24}>
               <Col span={12}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div>
-                    <Text strong>启用详细日志</Text>
+                    <Text strong>Enable Detailed Logging</Text>
                     <br />
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      记录API调用和响应详情
+                      Record API call and response details
                     </Text>
                   </div>
                   <Switch
@@ -649,10 +1027,10 @@ const LLMConfigPage: React.FC = () => {
               <Col span={12}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div>
-                    <Text strong>启用性能监控</Text>
+                    <Text strong>Enable Performance Monitoring</Text>
                     <br />
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      监控响应时间和成功率
+                      Monitor response time and success rate
                     </Text>
                   </div>
                   <Switch
@@ -675,7 +1053,7 @@ const LLMConfigPage: React.FC = () => {
           tab={
             <span>
               <ExclamationCircleOutlined />
-              监控统计
+              Monitoring Statistics
             </span>
           } 
           key="monitoring"
@@ -684,54 +1062,54 @@ const LLMConfigPage: React.FC = () => {
             <Col span={8}>
               <Card>
                 <Statistic
-                  title="总请求数"
+                  title="Total Requests"
                   value={totalStats.totalRequests}
-                  suffix="次"
+                  suffix="times"
                 />
-                <Text type="secondary">过去30天</Text>
+                <Text type="secondary">Past 30 days</Text>
               </Card>
             </Col>
             <Col span={8}>
               <Card>
                 <Statistic
-                  title="平均响应时间"
+                  title="Average Response Time"
                   value={avgResponseTime}
-                  suffix="秒"
+                  suffix="seconds"
                   precision={2}
                 />
-                <Text type="secondary">过去30天</Text>
+                <Text type="secondary">Past 30 days</Text>
               </Card>
             </Col>
             <Col span={8}>
               <Card>
                 <Statistic
-                  title="平均成功率"
+                  title="Average Success Rate"
                   value={avgSuccessRate}
                   suffix="%"
                   precision={1}
                   valueStyle={{ color: avgSuccessRate > 95 ? '#3f8600' : '#ff4d4f' }}
                 />
-                <Text type="secondary">过去30天</Text>
+                <Text type="secondary">Past 30 days</Text>
               </Card>
             </Col>
           </Row>
 
           <Card 
-            title="模型使用统计" 
+            title="Model Usage Statistics" 
             extra={
               <Button 
                 size="small" 
                 icon={<ReloadOutlined />}
                 onClick={loadUsageStats}
               >
-                刷新统计
+                Refresh Statistics
               </Button>
             }
           >
             {usageStats.length === 0 ? (
               <Alert
-                message="暂无使用统计数据"
-                description="开始使用LLM服务后，这里将显示详细的使用统计信息"
+                message="No usage statistics available"
+                description="Detailed usage statistics will be displayed here after starting to use LLM services"
                 type="info"
                 showIcon
               />
@@ -753,21 +1131,21 @@ const LLMConfigPage: React.FC = () => {
                     <Row gutter={16}>
                       <Col span={6}>
                         <Statistic
-                          title="请求数"
+                          title="Requests"
                           value={stat.totalRequests}
                         />
                       </Col>
                       <Col span={6}>
                         <Statistic
-                          title="响应时间"
+                          title="Response Time"
                           value={stat.avgResponseTime}
-                          suffix="秒"
+                          suffix="seconds"
                           precision={2}
                         />
                       </Col>
                       <Col span={6}>
                         <Statistic
-                          title="成功率"
+                          title="Success Rate"
                           value={stat.successRate}
                           suffix="%"
                           precision={1}
@@ -776,7 +1154,7 @@ const LLMConfigPage: React.FC = () => {
                       </Col>
                       <Col span={6}>
                         <Statistic
-                          title="总成本"
+                          title="Total Cost"
                           value={stat.totalCost}
                           suffix={stat.currency}
                           precision={2}

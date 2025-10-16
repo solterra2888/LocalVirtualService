@@ -474,9 +474,9 @@ const PromptTemplatesPage: React.FC = () => {
               name="recommended_provider"
             >
               <Select placeholder="选择LLM提供商" allowClear>
-                <Option value="qwen">通义千问</Option>
-                <Option value="doubao">豆包</Option>
-                <Option value="glm">智谱GLM</Option>
+                <Option value="qwen">Qwen</Option>
+                <Option value="doubao">Doubao</Option>
+                <Option value="glm">GLM</Option>
               </Select>
             </Form.Item>
           </Col>

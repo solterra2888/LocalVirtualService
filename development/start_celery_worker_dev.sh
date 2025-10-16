@@ -134,6 +134,12 @@ else
     exit 1
 fi
 
+# 创建日志目录
+echo ""
+echo "📁 创建日志目录..."
+mkdir -p "$PROJECT_ROOT/logs"
+echo "✅ 日志目录已创建: $PROJECT_ROOT/logs"
+
 # 显示启动配置
 echo ""
 echo "🚀 Celery Worker 启动配置:"
@@ -141,6 +147,8 @@ echo "   - Worker数量: ${CELERY_CONCURRENCY:-2}"
 echo "   - 日志级别: ${CELERY_LOG_LEVEL:-info}"
 echo "   - Redis地址: $REDIS_URL"
 echo "   - 队列: file_processing, ai_processing"
+echo "   - Worker日志: logs/celery_worker.log"
+echo "   - 任务日志: logs/celery_tasks.log"
 echo ""
 
 # 启动Celery Worker
@@ -148,9 +156,11 @@ echo "🔄 启动Celery Worker..."
 echo "   按 Ctrl+C 停止服务"
 echo ""
 
-# 使用celery命令启动Worker
+# 使用celery命令启动Worker，添加日志文件配置
 exec $PYTHON_CMD -m celery -A backend.celery_app worker \
     --loglevel=${CELERY_LOG_LEVEL:-info} \
     --concurrency=${CELERY_CONCURRENCY:-2} \
     --queues=file_processing,ai_processing \
-    --hostname=dev-worker@%h
+    --hostname=dev-worker@%h \
+    --logfile="$PROJECT_ROOT/logs/celery_worker.log" \
+    --pidfile="$PROJECT_ROOT/logs/celery_worker.pid"
