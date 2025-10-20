@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -156,17 +156,35 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_eod_stock_prices',
       name: 'EODHD EOD Stock Prices',
       type: 'eodhd_eod_stock_prices',
-      description: 'Get historical end-of-day stock prices for watchlist stocks from EODHD API',
+      description: 'Get historical EOD (End of Day) stock prices for watchlist stocks from EODHD API',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_eod_stock_prices_schedule',
           name: 'Configure EOD Stock Prices Fetch',
-          description: 'Set up periodic historical stock price fetching for watchlist stocks (daily)',
+          description: 'Set up periodic historical stock price fetching for watchlist stocks (daily at 9 AM)',
           endpoint: '/scheduler/tasks/eodhd-eod-stock-prices',
           params: {},
           icon: <BarChartOutlined />
+        }
+      ]
+    },
+    {
+      id: 'futu_themes',
+      name: 'Futu Investment Themes',
+      type: 'futu_themes',
+      description: 'Get investment themes and related stocks from Futu website (HK and US markets)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_futu_themes_schedule',
+          name: 'Configure Futu Themes Fetch',
+          description: 'Set up periodic investment themes fetching from Futu (daily at 2 AM HKT)',
+          endpoint: '/scheduler/tasks/futu-themes',
+          params: {},
+          icon: <GlobalOutlined />
         }
       ]
     },
@@ -603,7 +621,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1051,7 +1069,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes'}
           dataSourceName={selectedDataSource.name}
         />
       )}

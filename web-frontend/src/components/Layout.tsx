@@ -12,7 +12,6 @@ import {
   StockOutlined,
   RobotOutlined,
   SettingOutlined,
-  BugOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   NotificationOutlined,
@@ -33,7 +32,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const globalLogger = useGlobalLogger();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -63,9 +62,19 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
+      key: '/investment-themes',
+      icon: <ThunderboltOutlined />,
+      label: 'Investment Themes',
+    },
+    {
       key: '/markets/economic-events',
       icon: <ThunderboltOutlined />,
       label: 'Economic Events',
+    },
+    {
+      key: '/markets/macro-indicators',
+      icon: <CodeOutlined />,
+      label: 'Macro Indicators',
     },
     {
       key: 'ug-data',
@@ -76,16 +85,6 @@ const Layout: React.FC = () => {
           key: '/fundamentals',
           icon: <FileTextOutlined />,
           label: 'Company Query',
-        },
-        {
-          key: '/fundamentals/screener',
-          icon: <AppstoreOutlined />,
-          label: 'Stock Screener',
-        },
-        {
-          key: '/markets/macro-indicators',
-          icon: <CodeOutlined />,
-          label: 'Macro Indicators',
         },
         {
           key: '/eod-fetch',
@@ -114,29 +113,7 @@ const Layout: React.FC = () => {
           icon: <BuildOutlined />,
           label: 'Prompt Templates',
         },
-      ],
-    },
-    {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: 'Settings',
-      children: [
-        {
-          key: '/scheduler',
-          icon: <ThunderboltOutlined />,
-          label: 'Data Source Management',
-        },
-        {
-          key: '/diagnostic',
-          icon: <BugOutlined />,
-          label: 'System Diagnostics',
-        },
         ...(user?.is_admin ? [
-          {
-            key: '/users',
-            icon: <TeamOutlined />,
-            label: 'User Management',
-          },
           {
             key: '/llm-config',
             icon: <RobotOutlined />,
@@ -145,7 +122,33 @@ const Layout: React.FC = () => {
         ] : []),
       ],
     },
-  ];
+    {
+      key: 'settings',
+      icon: <SettingOutlined />,
+      label: 'Settings',
+      children: [
+        ...(user?.is_admin ? [
+          {
+            key: '/scheduler',
+            icon: <ThunderboltOutlined />,
+            label: 'Data Source Management',
+          },
+          {
+            key: '/users',
+            icon: <TeamOutlined />,
+            label: 'User Management',
+          }
+        ] : []),
+      ],
+    },
+  ].filter(item => {
+    // 如果菜单项有子菜单，检查是否有可见的子菜单项
+    if (item.children) {
+      return item.children.length > 0;
+    }
+    // 如果没有子菜单，直接显示
+    return true;
+  });
 
   // 用户菜单配置
   const userMenuItems = [
@@ -251,7 +254,7 @@ const Layout: React.FC = () => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['ug-data', 'ai-agents', 'settings']}
+          defaultOpenKeys={[]}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ border: 'none', height: collapsed ? 'calc(100vh - 120px)' : 'calc(100vh - 120px)' }}

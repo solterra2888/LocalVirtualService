@@ -18,10 +18,17 @@ import {
   Button,
   Skeleton,
   Select,
-  Modal,
-  Descriptions
+  Modal
 } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
+import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
+import { 
+  getClassificationFromAnalysis, 
+  getClassificationTags, 
+  hasValidClassification,
+  getClassificationSummary,
+  getRelatedSectors
+} from '../utils/newsClassificationHelper';
 import {
   SearchOutlined, 
   StockOutlined, 
@@ -214,6 +221,41 @@ const FinvizDashboard: React.FC = () => {
   };
   
   const isNewsExpanded = (newsId: number) => expandedNewsItems.has(newsId);
+  
+  // 渲染新闻分类标签
+  const renderClassificationTags = (analysisResult: any) => {
+    const classification = getClassificationFromAnalysis(analysisResult);
+    
+    if (!classification || !hasValidClassification(classification)) {
+      return null;
+    }
+
+    const tags = getClassificationTags(classification);
+    
+    if (tags.length === 0) {
+      return null;
+    }
+
+    return (
+      <Space size={[4, 4]} wrap>
+        {tags.map(({ key, config, value, displayValue }) => (
+          <Tag 
+            key={key} 
+            style={{ 
+              fontSize: '9px', 
+              margin: 0,
+              color: '#666',
+              borderColor: '#d9d9d9',
+              backgroundColor: 'transparent'
+            }}
+            title={`${config.label}: ${displayValue}`}
+          >
+            {displayValue}
+          </Tag>
+        ))}
+      </Space>
+    );
+  };
   
   // 缓存工具函数
   const getCacheKey = (type: 'stock' | 'group', identifier: string) => {
@@ -962,12 +1004,20 @@ const FinvizDashboard: React.FC = () => {
                 <List.Item
                   extra={
                     <Space direction="vertical" align="end">
-                      <Space>
-                        <Tag color={getSentimentColor(item.sentiment_polarity)}>
+                      <Space size={[4, 4]} wrap>
+                        {/* 情感标签 */}
+                        <Tag 
+                          color={getSentimentColor(item.sentiment_polarity)}
+                          style={{ fontSize: '8px', margin: 0 }}
+                        >
                           {getSentimentText(item.sentiment_polarity)}
                         </Tag>
-                        {item.analysis_result && (
-                          <Tag color="blue" icon={<RobotOutlined />} style={{ fontSize: '11px' }}>
+                        {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
+                          <Tag 
+                            color="blue" 
+                            icon={<RobotOutlined />} 
+                            style={{ fontSize: '8px', margin: 0 }}
+                          >
                             AI分析
                           </Tag>
                         )}
@@ -1016,31 +1066,33 @@ const FinvizDashboard: React.FC = () => {
                     description={null}
                   />
                   <div style={{ fontSize: '13px', marginBottom: '8px' }}>
-                    {item.analysis_result?.content ? (
-                      <div>
-                        <div style={{ 
-                          maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
-                          overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
-                          position: 'relative'
-                        }}>
-                          <MarkdownRenderer 
-                            content={item.analysis_result.content}
-                            style={{
-                              fontSize: '13px',
-                              lineHeight: '1.4'
-                            }}
-                          />
-                          {!isNewsExpanded(item.id) && (
-                            <div style={{
-                              position: 'absolute',
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              height: '20px',
-                              background: 'linear-gradient(transparent, white)',
-                              pointerEvents: 'none'
-                            }} />
-                          )}
+                    {(() => {
+                      const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
+                      return displayContent ? (
+                        <div>
+                          <div style={{ 
+                            maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
+                            overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
+                            position: 'relative'
+                          }}>
+                            <MarkdownRenderer 
+                              content={displayContent}
+                              style={{
+                                fontSize: '13px',
+                                lineHeight: '1.4'
+                              }}
+                            />
+                            {!isNewsExpanded(item.id) && (
+                              <div style={{
+                                position: 'absolute',
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                height: '20px',
+                                background: 'linear-gradient(transparent, white)',
+                                pointerEvents: 'none'
+                              }} />
+                            )}
                         </div>
                         <Button
                           type="link"
@@ -1052,34 +1104,11 @@ const FinvizDashboard: React.FC = () => {
                             height: 'auto'
                           }}
                         >
-                          {isNewsExpanded(item.id) ? '收起' : '展开'}
+                          {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
                         </Button>
                       </div>
-                    ) : (
-                      <div>
-                        <Typography.Paragraph 
-                          ellipsis={{ 
-                            rows: isNewsExpanded(item.id) ? 0 : 2, 
-                            expandable: false 
-                          }}
-                          style={{ fontSize: '13px', marginBottom: 0 }}
-                        >
-                          {item.content}
-                        </Typography.Paragraph>
-                        <Button
-                          type="link"
-                          size="small"
-                          onClick={() => toggleNewsExpansion(item.id)}
-                          style={{ 
-                            padding: '4px 0', 
-                            fontSize: '12px',
-                            height: 'auto'
-                          }}
-                        >
-                          {isNewsExpanded(item.id) ? '收起' : '展开'}
-                        </Button>
-                      </div>
-                    )}
+                    ) : null;
+                    })()}
                   </div>
                 </List.Item>
               </div>
@@ -1617,86 +1646,236 @@ const FinvizDashboard: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: '12px' }}>
                   Source: {selectedNewsForAnalysis.source || 'N/A'}
                 </Text>
-                {selectedNewsForAnalysis.symbols?.map(symbol => (
-                  <Tag key={symbol} style={{ fontSize: '10px' }}>{symbol}</Tag>
-                ))}
               </Space>
             </Card>
 
-            {selectedNewsForAnalysis.analysis_result ? (
-              <>
-                <Descriptions 
-                  bordered 
-                  column={2} 
-                  size="small"
-                  style={{ marginBottom: '16px' }}
-                >
-                  {selectedNewsForAnalysis.analysis_result.template_code && (
-                    <Descriptions.Item label="Template Code" span={2}>
-                      <Tag color="blue">{selectedNewsForAnalysis.analysis_result.template_code}</Tag>
-                    </Descriptions.Item>
-                  )}
-                  {selectedNewsForAnalysis.analysis_result.provider && (
-                    <Descriptions.Item label="AI Provider">
-                      {selectedNewsForAnalysis.analysis_result.provider}
-                    </Descriptions.Item>
-                  )}
-                  {selectedNewsForAnalysis.analysis_result.model && (
-                    <Descriptions.Item label="Model">
-                      {selectedNewsForAnalysis.analysis_result.model}
-                    </Descriptions.Item>
-                  )}
-                  {selectedNewsForAnalysis.analysis_result.tokens && (
-                    <Descriptions.Item label="Token Usage" span={2}>
-                      {selectedNewsForAnalysis.analysis_result.tokens.toLocaleString()}
-                    </Descriptions.Item>
-                  )}
-                </Descriptions>
 
-                <Card 
-                  title="AI Analysis Content" 
-                  size="small"
-                  headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
-                >
-                  <MarkdownRenderer 
-                    content={selectedNewsForAnalysis.analysis_result.content}
-                    style={{
-                      fontSize: '14px',
-                      lineHeight: '1.6'
-                    }}
-                  />
-                </Card>
+            {(() => {
+              const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
+              const hasAnyAnalysis = Object.keys(allResults).length > 0;
+              const summaryResult = getAnalysisContent(selectedNewsForAnalysis.analysis_result, 'news_summary_v1');
 
-                {selectedNewsForAnalysis.content && (
+              if (hasAnyAnalysis) {
+                return (
+                  <>
+
+                    {/* 优先显示 news_summary_v1 的结果 */}
+                    {summaryResult && typeof summaryResult.content === 'string' && (
+                      <>
+                        <Card 
+                          title="AI Analysis (Summary)" 
+                          size="small"
+                          headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
+                        >
+                          <MarkdownRenderer 
+                            content={summaryResult.content}
+                            style={{
+                              fontSize: '12px',
+                              lineHeight: '1.6'
+                            }}
+                          />
+                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                            <Space size="small">
+                              {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
+                              {summaryResult.model && <span>Model: {summaryResult.model}</span>}
+                              {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
+                            </Space>
+                          </div>
+                        </Card>
+
+                        {selectedNewsForAnalysis.content && (
+                          <Card 
+                            title="Original Content" 
+                            size="small"
+                            style={{ marginTop: '16px' }}
+                            headStyle={{ backgroundColor: '#f5f5f5' }}
+                          >
+                            <Paragraph 
+                              ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
+                              style={{ fontSize: '13px', color: '#666' }}
+                            >
+                              {selectedNewsForAnalysis.content}
+                            </Paragraph>
+                          </Card>
+                        )}
+
+                        {/* Tags Card */}
+                        <Card 
+                          title="Tags" 
+                          size="small"
+                          style={{ marginTop: '16px' }}
+                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
+                        >
+                              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                                {/* Related Tickers */}
+                                {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
+                                  <div>
+                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Tickers:</Text>
+                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                      {selectedNewsForAnalysis.symbols.map(symbol => (
+                                        <Tag key={symbol} color="default" style={{ fontSize: '9px' }}>
+                                          {symbol}
+                                        </Tag>
+                                      ))}
+                                    </Space>
+                                  </div>
+                                )}
+
+                                {/* Classification Tags */}
+                                {(() => {
+                                  const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
+                                  if (!classification || !hasValidClassification(classification)) {
+                                    return null;
+                                  }
+
+                                  const tags = getClassificationTags(classification);
+                                  const relatedSectors = getRelatedSectors(classification);
+
+                                  return (
+                                    <>
+                                      {/* 主要分类标签 */}
+                                      <div>
+                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Classification Tags:</Text>
+                                        <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                          {tags.map(({ key, config, value, displayValue }) => (
+                                            <Tag 
+                                              key={key} 
+                                              color={config.color} 
+                                              style={{ fontSize: '9px' }}
+                                              title={`${config.label}: ${displayValue}`}
+                                            >
+                                              {displayValue}
+                                            </Tag>
+                                          ))}
+                                        </Space>
+                                      </div>
+
+                                      {/* 相关行业 */}
+                                      {relatedSectors.length > 0 && (
+                                        <div>
+                                          <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Sectors:</Text>
+                                          <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                            {relatedSectors.map(sector => (
+                                              <Tag key={sector} color="purple" style={{ fontSize: '9px' }}>
+                                                {sector}
+                                              </Tag>
+                                            ))}
+                                          </Space>
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+
+                                {/* Analysis Template Tags */}
+                                {(() => {
+                                  const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
+                                  const templateCodes = Object.keys(allResults);
+                                  
+                                  if (templateCodes.length > 0) {
+                                    return (
+                                      <div>
+                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Analysis Template:</Text>
+                                        <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                          {templateCodes.map(templateCode => (
+                                            <Tag key={templateCode} color="green" style={{ fontSize: '9px' }}>
+                                              {templateCode}
+                                            </Tag>
+                                          ))}
+                                        </Space>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+
+                                {/* Confidence Information */}
+                                {(() => {
+                                  const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
+                                  if (!classification || !hasValidClassification(classification)) {
+                                    return null;
+                                  }
+
+                                  const summary = getClassificationSummary(classification);
+                                  
+                                  if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
+                                    return (
+                                      <div>
+                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Confidence:</Text>
+                                        <Space size="small" style={{ marginTop: '4px' }}>
+                                          {summary.confidence.theme > 0 && (
+                                            <Text style={{ fontSize: '9px' }}>
+                                              Theme: {(summary.confidence.theme * 100).toFixed(0)}%
+                                            </Text>
+                                          )}
+                                          {summary.confidence.event > 0 && (
+                                            <Text style={{ fontSize: '9px' }}>
+                                              Event: {(summary.confidence.event * 100).toFixed(0)}%
+                                            </Text>
+                                          )}
+                                        </Space>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </Space>
+                            </Card>
+                      </>
+                    )}
+
+                    {/* 显示其他模板的结果 */}
+                    {Object.entries(allResults).map(([templateCode, result]) => {
+                      if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null; // 已经显示过了
+                      if (templateCode === 'news_classification') return null; // 不显示新闻分类分析
+                      
+                      return (
+                        <Card 
+                          key={templateCode}
+                          title={`AI Analysis (${templateCode})`} 
+                          size="small"
+                          style={{ marginTop: '16px' }}
+                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
+                        >
+                          <pre style={{ 
+                            fontSize: '12px', 
+                            whiteSpace: 'pre-wrap', 
+                            wordBreak: 'break-word',
+                            margin: 0
+                          }}>
+                            {typeof result.content === 'string' 
+                              ? result.content 
+                              : JSON.stringify(result.content, null, 2)}
+                          </pre>
+                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                            <Space size="small">
+                              {result.provider && <span>Provider: {result.provider}</span>}
+                              {result.model && <span>Model: {result.model}</span>}
+                              {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
+                            </Space>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              } else {
+                return (
                   <Card 
-                    title="Original Content" 
+                    title="News Content" 
                     size="small"
-                    style={{ marginTop: '16px' }}
-                    headStyle={{ backgroundColor: '#f5f5f5' }}
+                    headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
                   >
                     <Paragraph 
-                      ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
-                      style={{ fontSize: '13px', color: '#666' }}
+                      ellipsis={{ rows: 10, expandable: true, symbol: 'Expand' }}
+                      style={{ fontSize: '14px' }}
                     >
-                      {selectedNewsForAnalysis.content}
+                      {selectedNewsForAnalysis.content || 'No content available'}
                     </Paragraph>
                   </Card>
-                )}
-              </>
-            ) : (
-              <Card 
-                title="News Content" 
-                size="small"
-                headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
-              >
-                <Paragraph 
-                  ellipsis={{ rows: 10, expandable: true, symbol: 'Expand' }}
-                  style={{ fontSize: '14px' }}
-                >
-                  {selectedNewsForAnalysis.content || 'No content available'}
-                </Paragraph>
-              </Card>
-            )}
+                );
+              }
+            })()}
           </>
         )}
       </Modal>

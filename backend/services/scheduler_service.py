@@ -55,7 +55,8 @@ class SchedulerService:
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
-            'news_analysis': self._execute_news_analysis_task  # 新增：新闻LLM分析任务
+             'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
+            'futu_themes': self._execute_futu_themes_task  # 新增：富途投资主题数据获取任务
         }
         
         # 添加事件监听器
@@ -655,6 +656,20 @@ class SchedulerService:
                 await self._increment_fail_count(task_id)
                 logger.error(f"任务执行失败: {task_id}, 错误: {result.get('message', '未知错误')}")
             
+        except asyncio.CancelledError:
+            # 🔄 任务被取消（通常是因为应用重新加载）
+            finished_at = datetime.now(tz=timezone.utc)
+            duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+            
+            if execution_log_id:
+                await self._log_task_execution_finish(
+                    execution_log_id, finished_at, duration_ms, 'cancelled',
+                    error_message='任务被取消（应用重新加载或手动停止）'
+                )
+            
+            logger.warning(f"任务被取消: {task_id}（通常是因为应用重新加载或手动停止）")
+            raise  # 重新抛出，让调度器知道任务被取消
+            
         except Exception as e:
             # 记录异常执行结果
             finished_at = datetime.now(tz=timezone.utc)
@@ -742,8 +757,18 @@ class SchedulerService:
             analysis_result = None
             
             # 🔥 优化：使用新插入的新闻ID列表进行分析，避免时序问题
+            # 🔥 新功能：支持多模板并行分析
             if auto_analyze:
                 logger.info(f"启用自动分析，新增 {new_count} 条新闻，use_celery={use_celery}")
+                
+                # 获取模板列表（向后兼容）
+                templates = params.get('analysis_templates')
+                if not templates:
+                    # 兼容旧的单模板配置
+                    single_template = params.get('analysis_template', 'news_summary_v1')
+                    templates = [single_template]
+                
+                logger.info(f"将使用 {len(templates)} 个模板进行分析: {templates}")
                 
                 try:
                     if use_celery:
@@ -759,24 +784,32 @@ class SchedulerService:
                             
                             logger.info(f"使用新闻ID列表分析，共 {len(new_news_ids)} 条新闻")
                             
-                            # 提交Celery任务（立即返回，不阻塞）
-                            task = analyze_news_by_ids_task.delay(
-                                news_ids=new_news_ids,
-                                template_code=params.get('analysis_template', 'news_summary_v1'),
-                                max_concurrent=params.get('max_concurrent', 8)
-                            )
-                            
-                            logger.info(f"已提交Celery分析任务（按ID）: {task.id}, 将分析 {len(new_news_ids)} 条新闻")
+                            # 🔥 多模板并行：为每个模板提交独立的Celery任务
+                            celery_tasks = []
+                            for template_code in templates:
+                                task = analyze_news_by_ids_task.delay(
+                                    news_ids=new_news_ids,
+                                    template_code=template_code,
+                                    max_concurrent=params.get('max_concurrent', 8)
+                                )
+                                celery_tasks.append({
+                                    'template': template_code,
+                                    'task_id': task.id,
+                                    'news_count': len(new_news_ids)
+                                })
+                                logger.info(f"✓ 已提交 {template_code} 分析任务: {task.id}")
                             
                             analysis_result = {
                                 'status': 'submitted_to_celery',
-                                'celery_task_id': task.id,
+                                'tasks': celery_tasks,
+                                'total_templates': len(templates),
                                 'news_count': len(new_news_ids),
                                 'method': 'by_ids',
-                                'estimated_time': f'预计 {len(new_news_ids) * 3} 秒'
+                                'estimated_time': f'预计 {len(new_news_ids) * 3} 秒/模板'
                             }
                             
-                            message += f"，已提交Celery任务分析 {len(new_news_ids)} 条新闻 (Task ID: {task.id})"
+                            task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
+                            message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
                         else:
                             # 🔥 降级方案：如果没有新闻ID列表，使用传统方式查询未分析新闻
                             from backend.tasks.news_tasks import analyze_unanalyzed_news_task
@@ -794,27 +827,35 @@ class SchedulerService:
                             # 修复：使用analysis_batch_size作为limit，默认值应该合理（如1000）
                             analysis_limit = params.get('analysis_batch_size', 1000)
                             
-                            # 提交Celery任务（立即返回，不阻塞）
-                            task = analyze_unanalyzed_news_task.delay(
-                                limit=analysis_limit,
-                                template_code=params.get('analysis_template', 'news_summary_v1'),
-                                symbols=analysis_symbols,
-                                start_date=start_date,
-                                end_date=end_date,
-                                max_concurrent=params.get('max_concurrent', 10)
-                            )
-                            
-                            logger.info(f"已提交Celery分析任务（查询方式）: {task.id}, 预计分析 {min(analysis_limit, new_count)} 条新闻")
+                            # 🔥 多模板并行：为每个模板提交独立的Celery任务
+                            celery_tasks = []
+                            for template_code in templates:
+                                task = analyze_unanalyzed_news_task.delay(
+                                    limit=analysis_limit,
+                                    template_code=template_code,
+                                    symbols=analysis_symbols,
+                                    start_date=start_date,
+                                    end_date=end_date,
+                                    max_concurrent=params.get('max_concurrent', 10)
+                                )
+                                celery_tasks.append({
+                                    'template': template_code,
+                                    'task_id': task.id,
+                                    'limit': analysis_limit
+                                })
+                                logger.info(f"✓ 已提交 {template_code} 分析任务（查询方式）: {task.id}")
                             
                             analysis_result = {
                                 'status': 'submitted_to_celery',
-                                'celery_task_id': task.id,
+                                'tasks': celery_tasks,
+                                'total_templates': len(templates),
                                 'news_count': analysis_limit,
                                 'method': 'by_query',
                                 'estimated_time': '根据未分析新闻数量而定'
                             }
                             
-                            message += f"，已提交Celery任务分析新闻 (Task ID: {task.id})"
+                            task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
+                            message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
                         
                     else:
                         # ========== 方案A：直接分析（仅适合小团队）==========
@@ -971,8 +1012,18 @@ class SchedulerService:
             
             # 修复：应该分析所有未分析的新闻，而不仅仅是新增的
             # 之前的逻辑导致每次只分析1条新闻，造成大量新闻堆积
+            # 🔥 新功能：支持多模板并行分析
             if auto_analyze:
                 logger.info(f"启用自动分析，新增 {new_count} 条watchlist新闻，use_celery={use_celery}")
+                
+                # 获取模板列表（向后兼容）
+                templates = params.get('analysis_templates')
+                if not templates:
+                    # 兼容旧的单模板配置
+                    single_template = params.get('analysis_template', 'news_summary_v1')
+                    templates = [single_template]
+                
+                logger.info(f"将使用 {len(templates)} 个模板进行分析: {templates}")
                 
                 try:
                     if use_celery:
@@ -991,32 +1042,41 @@ class SchedulerService:
                         # 而不是限制为new_count，这样可以分析所有未分析的历史新闻
                         analysis_limit = params.get('analysis_batch_size', 1000)
                         
-                        # 提交Celery任务（添加日期和股票参数）
-                        task = analyze_unanalyzed_news_task.delay(
-                            limit=analysis_limit,
-                            template_code=params.get('analysis_template', 'news_summary_v1'),
-                            symbols=analysis_symbols,  # 使用watchlist的股票列表
-                            start_date=start_date,     # 添加开始日期
-                            end_date=end_date,         # 添加结束日期
-                            max_concurrent=params.get('max_concurrent', 10)
-                        )
+                        # 🔥 多模板并行：为每个模板提交独立的Celery任务
+                        celery_tasks = []
+                        for template_code in templates:
+                            task = analyze_unanalyzed_news_task.delay(
+                                limit=analysis_limit,
+                                template_code=template_code,
+                                symbols=analysis_symbols,  # 使用watchlist的股票列表
+                                start_date=start_date,     # 添加开始日期
+                                end_date=end_date,         # 添加结束日期
+                                max_concurrent=params.get('max_concurrent', 10)
+                            )
+                            celery_tasks.append({
+                                'template': template_code,
+                                'task_id': task.id,
+                                'limit': analysis_limit
+                            })
+                            logger.info(f"✓ 已提交 {template_code} 分析任务: {task.id}")
                         
                         # 更新统计信息
                         stats_summary['analysis_status'] = 'submitted_to_celery'
-                        stats_summary['celery_task_id'] = task.id
+                        stats_summary['celery_tasks'] = celery_tasks
+                        stats_summary['total_templates'] = len(templates)
                         stats_summary['analysis_limit'] = analysis_limit
                         stats_summary['estimated_analysis_count'] = min(analysis_limit, new_count)
                         
-                        logger.info(f"已提交Celery分析任务: {task.id}, 预计分析 {min(analysis_limit, new_count)} 条新闻")
-                        
                         analysis_result = {
                             'status': 'submitted_to_celery',
-                            'celery_task_id': task.id,
+                            'tasks': celery_tasks,
+                            'total_templates': len(templates),
                             'news_count': analysis_limit,
                             'estimated_time': '根据未分析新闻数量而定'
                         }
                         
-                        message += f"，已提交Celery任务分析新闻 (Task ID: {task.id})"
+                        task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
+                        message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
                         
                     else:
                         # ========== 直接分析（仅适合小团队）==========
@@ -1710,6 +1770,79 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"新闻分析任务执行失败: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
+    
+    async def _execute_futu_themes_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行富途投资主题数据获取任务
+        
+        Args:
+            params: 任务参数
+                - markets: 市场列表，如 ['HK', 'US']（可选，默认爬取所有市场）
+                - max_pages: 每个市场最大爬取页数（可选，默认爬取所有页面）
+                - scrape_stocks: 是否爬取股票列表（默认: True）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行富途投资主题数据获取任务", params=params)
+            
+            # 导入富途主题服务
+            from backend.services.futu_themes_service import create_futu_themes_service
+            
+            # 创建服务实例
+            futu_service = create_futu_themes_service()
+            
+            # 获取参数
+            markets = params.get('markets')  # 可以是 ['HK', 'US'] 或 None
+            max_pages = params.get('max_pages')  # 每个市场最大爬取页数
+            scrape_stocks = params.get('scrape_stocks', True)  # 是否爬取股票列表
+            
+            # 在线程池中执行耗时的爬取操作，避免阻塞事件循环
+            import asyncio
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    futu_service.fetch_and_store_themes,
+                    markets,
+                    max_pages,
+                    scrape_stocks
+                )
+            
+            if result.get('error'):
+                error_msg = f"富途投资主题数据获取失败: {result['error']}"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': result
+                }
+            else:
+                success_msg = (
+                    f"富途投资主题数据获取成功: "
+                    f"处理了{result['total_themes']}个主题，"
+                    f"成功{result['success_count']}个，"
+                    f"失败{result['failed_count']}个，"
+                    f"共{result['total_stocks']}只股票，"
+                    f"耗时{result['execution_time']:.2f}秒"
+                )
+                logger.info(success_msg)
+                return {
+                    'success': True,
+                    'message': success_msg,
+                    'data': result
+                }
+                
+        except Exception as e:
+            error_msg = f"富途投资主题数据获取任务执行失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,

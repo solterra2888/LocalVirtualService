@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { NewsAnalysisResult } from '../types/news';
 
 // 类型定义
 export interface CompanyInfo {
@@ -19,14 +20,6 @@ export interface SectorInfo {
   sector: string;
   company_count: number;
   companies: CompanyInfo[];
-}
-
-export interface NewsAnalysisResult {
-  content: string;
-  template_code?: string;
-  provider?: string;
-  model?: string;
-  tokens?: number;
 }
 
 export interface DashboardNewsItem {

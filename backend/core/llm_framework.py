@@ -143,6 +143,8 @@ class QwenProvider(LLMProvider):
         super().__init__(config)
         # 使用OpenAI兼容模式端点
         self.api_url = f"{self.config.base_url}/compatible-mode/v1/chat/completions"
+        # Embedding API 端点
+        self.embedding_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
     
     async def chat_completion(
         self, 
@@ -266,6 +268,104 @@ class QwenProvider(LLMProvider):
         # 简化的成本计算，实际应根据模型定价
         total_tokens = usage.get("total_tokens", 0)
         return total_tokens * 0.00001  # 示例价格
+    
+    async def generate_embeddings(
+        self, 
+        texts: List[str],
+        model: str = "text-embedding-v3",
+        text_type: str = "document"
+    ) -> List[List[float]]:
+        """
+        生成文本向量（Embedding）
+        
+        Args:
+            texts: 文本列表（最多25条）
+            model: embedding模型名称，默认 text-embedding-v3
+            text_type: 文本类型，"document" 或 "query"
+            
+        Returns:
+            向量列表，每个向量是1024维的浮点数列表
+            
+        Raises:
+            Exception: API调用失败
+            
+        Example:
+            embeddings = await qwen_provider.generate_embeddings(
+                texts=["新闻标题1", "新闻标题2"],
+                text_type="document"
+            )
+        """
+        if not texts or len(texts) == 0:
+            raise ValueError("texts参数不能为空")
+        
+        if len(texts) > 25:
+            self.logger.warning(f"文本数量超过25条，将只处理前25条")
+            texts = texts[:25]
+        
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": model,
+            "input": {
+                "texts": texts
+            },
+            "parameters": {
+                "text_type": text_type
+            }
+        }
+        
+        try:
+            start_time = time.time()
+            response = await self._make_embedding_request(headers, data)
+            response_time = time.time() - start_time
+            
+            if response.status_code == 200:
+                result = response.json()
+                embeddings = []
+                
+                # 解析响应
+                output = result.get("output", {})
+                embedding_list = output.get("embeddings", [])
+                
+                for item in embedding_list:
+                    embedding = item.get("embedding")
+                    if embedding:
+                        embeddings.append(embedding)
+                
+                # 记录使用情况
+                usage = result.get("usage", {})
+                total_tokens = usage.get("total_tokens", 0)
+                
+                self.logger.info(
+                    f"Generated embeddings for {len(texts)} texts, "
+                    f"tokens: {total_tokens}, time: {response_time:.2f}s"
+                )
+                
+                return embeddings
+            else:
+                error_msg = f"Embedding API failed: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            self.logger.error(f"Generate embeddings failed: {str(e)}")
+            raise
+    
+    async def _make_embedding_request(self, headers: Dict, data: Dict) -> requests.Response:
+        """发送Embedding API请求"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            lambda: self.session.post(
+                self.embedding_url, 
+                headers=headers, 
+                json=data,
+                timeout=(10, 30)  # 连接超时10秒，读取超时30秒
+            )
+        )
 
 
 class DoubaoProvider(LLMProvider):

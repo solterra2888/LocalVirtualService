@@ -2,6 +2,7 @@
 """
 新闻LLM分析服务
 用于自动分析新闻内容，调用Prompt模板和LLM
+支持基于向量检索的投资主题匹配
 """
 
 import asyncio
@@ -33,7 +34,20 @@ class NewsAnalysisService:
             'output_blocked': 0,
             'all_providers_failed': 0
         }
+        # 初始化投资主题向量服务
+        self.theme_embedding_service = None
+        self._init_theme_service(db_config)
+        
         logger.info("新闻分析服务初始化完成")
+    
+    def _init_theme_service(self, db_config: Dict[str, Any]):
+        """初始化主题向量服务"""
+        try:
+            from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
+            self.theme_embedding_service = InvestmentThemeEmbeddingService(db_config)
+            logger.info("投资主题向量服务已启用")
+        except Exception as e:
+            logger.warning(f"投资主题向量服务初始化失败: {str(e)}, 将不支持主题匹配功能")
     
     def _is_content_filter_error(self, error_msg: str) -> Dict[str, Any]:
         """
@@ -179,7 +193,8 @@ class NewsAnalysisService:
         self, 
         news_id: int,
         template_code: str = "news_summary_v1",
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        enable_theme_matching: bool = True
     ) -> Dict[str, Any]:
         """
         分析单条新闻
@@ -188,11 +203,12 @@ class NewsAnalysisService:
             news_id: 新闻ID
             template_code: Prompt模板代码
             user_id: 用户ID（可选）
+            enable_theme_matching: 是否启用投资主题匹配（基于向量检索）
             
         Returns:
-            分析结果
+            分析结果，包含主题匹配信息
         """
-        logger.info(f"开始分析新闻", news_id=news_id, template_code=template_code)
+        logger.info(f"开始分析新闻", news_id=news_id, template_code=template_code, enable_theme_matching=enable_theme_matching)
         
         conn = self.db_manager.get_connection()
         if not conn:
@@ -266,16 +282,44 @@ class NewsAnalysisService:
                         user_id=user_id
                     )
                     
-                    # 5. 保存分析结果
-                    # 将分析结果封装为JSON对象
-                    analysis_data = {
+                    # 5. 保存分析结果（支持多模板合并）
+                    # 🔥 新逻辑：先读取现有的 analysis_result，然后合并新结果
+                    cursor.execute("""
+                        SELECT analysis_result, analysis_template_code
+                        FROM news
+                        WHERE id = %s
+                    """, (news_id,))
+                    existing_row = cursor.fetchone()
+                    existing_result = existing_row[0] if existing_row and existing_row[0] else {}
+                    existing_templates = existing_row[1] if existing_row and existing_row[1] else None
+                    
+                    # 如果 existing_result 是旧格式（非字典），转换为新格式
+                    if existing_result and not isinstance(existing_result, dict):
+                        existing_result = {}
+                    
+                    # 如果 existing_result 是旧的单模板格式（有 'content' 字段），转换为多模板格式
+                    if 'content' in existing_result and 'template_code' in existing_result:
+                        old_template = existing_result.get('template_code', 'unknown')
+                        old_data = existing_result.copy()
+                        existing_result = {old_template: old_data}
+                    
+                    # 构建当前模板的分析数据
+                    current_analysis_data = {
                         "content": response.content,
                         "template_code": template_code,
                         "provider": response.provider if hasattr(response, 'provider') else None,
                         "model": response.model if hasattr(response, 'model') else None,
                         "tokens": response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else None,
-                        "retry_count": attempt
+                        "retry_count": attempt,
+                        "analyzed_at": datetime.now().isoformat()
                     }
+                    
+                    # 🔥 合并：将当前模板的结果添加到字典中
+                    existing_result[template_code] = current_analysis_data
+                    
+                    # 🔥 更新 analysis_template_code 为所有已分析的模板列表
+                    analyzed_templates = list(existing_result.keys())
+                    template_code_str = ','.join(analyzed_templates)  # 存储为逗号分隔的字符串
                     
                     cursor.execute("""
                         UPDATE news 
@@ -288,21 +332,62 @@ class NewsAnalysisService:
                             is_analyzed = TRUE
                         WHERE id = %s
                     """, (
-                        json.dumps(analysis_data),
+                        json.dumps(existing_result),
                         datetime.now(),
-                        template_code,
+                        template_code_str,
                         news_id
                     ))
                     conn.commit()
                     
                     logger.info(f"新闻分析完成", news_id=news_id, success=True, retry_count=attempt)
                     
+                    # 🔥 新增：投资主题匹配（基于向量检索）
+                    theme_matches = []
+                    if enable_theme_matching and self.theme_embedding_service:
+                        try:
+                            # 构建新闻文本（标题 + 内容摘要）
+                            news_text = news_data['title']
+                            if news_data['content']:
+                                # 取前500个字符作为摘要
+                                content_preview = news_data['content'][:500]
+                                news_text = f"{news_data['title']}. {content_preview}"
+                            
+                            # 从股票代码提取市场信息
+                            market = self.theme_embedding_service.extract_market_from_symbols(symbols)
+                            
+                            logger.info(f"开始投资主题匹配", news_id=news_id, market=market)
+                            
+                            # 执行向量检索
+                            theme_matches = await self.theme_embedding_service.match_news_to_themes(
+                                news_text=news_text,
+                                news_id=news_id,
+                                market=market,
+                                top_k=5,
+                                min_similarity=0.60,
+                                save_to_db=True  # 保存匹配结果到数据库
+                            )
+                            
+                            if theme_matches:
+                                logger.info(
+                                    f"投资主题匹配完成", 
+                                    news_id=news_id, 
+                                    matches_count=len(theme_matches),
+                                    top_theme=theme_matches[0]['theme_name'] if theme_matches else None
+                                )
+                            else:
+                                logger.info(f"未找到匹配的投资主题", news_id=news_id)
+                                
+                        except Exception as theme_error:
+                            logger.error(f"投资主题匹配失败", news_id=news_id, error=str(theme_error))
+                            # 主题匹配失败不影响整体分析结果
+                    
                     return {
                         "success": True,
                         "news_id": news_id,
                         "analysis": response.content,
                         "parsed_data": response.parsed_data if hasattr(response, 'parsed_data') else None,
-                        "retry_count": attempt
+                        "retry_count": attempt,
+                        "theme_matches": theme_matches  # 返回匹配的主题
                     }
                     
                 except Exception as llm_error:

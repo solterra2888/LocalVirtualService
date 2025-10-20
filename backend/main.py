@@ -110,6 +110,10 @@ app.include_router(llm_prompt_templates.router, prefix="/api", tags=["Prompt模�
 from backend.api import news_analysis
 app.include_router(news_analysis.router, prefix="/api", tags=["新闻分析"])
 
+# 投资主题向量化API
+from backend.api import investment_themes
+app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"])
+
 # 静态文件服务
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):

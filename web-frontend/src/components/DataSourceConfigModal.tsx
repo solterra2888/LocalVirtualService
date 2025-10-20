@@ -37,7 +37,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes';
   dataSourceName: string;
 }
 
@@ -122,6 +122,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 9 * * 1-5',
       defaultName: 'EODHD EOD Stock Prices Auto Fetch',
       description: 'Get historical end-of-day stock prices for all watchlist stocks from EODHD API (daily on weekdays)'
+    },
+    futu_themes: {
+      icon: <DatabaseOutlined style={{ color: '#eb2f96' }} />,
+      params: ['markets', 'max_pages', 'scrape_stocks'],
+      defaultSchedule: '0 2 * * *',
+      defaultName: 'Futu Themes Auto Fetch',
+      description: 'Get investment themes and related stocks from Futu website (HK and US markets, daily at 2 AM HKT)'
     }
   };
 
@@ -254,6 +261,18 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             days_back: data.taskParams?.days_back || 60
           };
           result = await schedulerAPI.createEODHDEODStockPricesTask(eodStockPricesParams);
+        } else if (dataSourceType === 'futu_themes') {
+          // Futu投资主题任务的专用创建逻辑
+          const futuThemesParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            markets: data.taskParams?.markets,
+            max_pages: data.taskParams?.max_pages,
+            scrape_stocks: data.taskParams?.scrape_stocks !== undefined ? data.taskParams.scrape_stocks : true
+          };
+          result = await schedulerAPI.createFutuThemesTask(futuThemesParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -484,14 +503,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 <Input placeholder="AI,blockchain,cryptocurrency" />
               </Form.Item>
               
-              <Alert
-                message="🤖 LLM News Analysis (Automatic)"
-                type="success"
-                showIcon
-                style={{ marginTop: 24, marginBottom: 16 }}
-                description="Enable automatic LLM analysis for newly fetched news. Analysis happens immediately after news acquisition using Celery workers."
-              />
-              
               <Form.Item
                 label="Enable Auto Analysis"
                 name={['taskParams', 'auto_analyze']}
@@ -519,12 +530,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <Form.Item
-                label="Analysis Template"
-                name={['taskParams', 'analysis_template']}
-                extra="Prompt template code for LLM analysis"
-                initialValue="news_summary_v1"
+                label="Analysis Templates"
+                name={['taskParams', 'analysis_templates']}
+                extra="Select one or more prompt templates for LLM analysis (multiple templates will run in parallel)"
+                initialValue={["news_summary_v1"]}
               >
-                <Select placeholder="Select analysis template">
+                <Select 
+                  mode="multiple"
+                  placeholder="Select one or more analysis templates"
+                  maxTagCount="responsive"
+                >
                   <Option value="news_summary_v1">News Summary v1 (Default)</Option>
                   <Option value="news_sentiment_analysis">News Sentiment Analysis</Option>
                   <Option value="news_classification">News Classification</Option>
@@ -598,14 +613,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 />
               </Form.Item>
               
-              <Alert
-                message="🤖 LLM News Analysis (Automatic)"
-                type="success"
-                showIcon
-                style={{ marginTop: 24, marginBottom: 16 }}
-                description="Enable automatic LLM analysis for newly fetched news. Analysis happens immediately after news acquisition using Celery workers."
-              />
-              
               <Form.Item
                 label="Enable Auto Analysis"
                 name={['taskParams', 'auto_analyze']}
@@ -633,12 +640,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <Form.Item
-                label="Analysis Template"
-                name={['taskParams', 'analysis_template']}
-                extra="Prompt template code for LLM analysis"
-                initialValue="news_summary_v1"
+                label="Analysis Templates"
+                name={['taskParams', 'analysis_templates']}
+                extra="Select one or more prompt templates for LLM analysis (multiple templates will run in parallel)"
+                initialValue={["news_summary_v1"]}
               >
-                <Select placeholder="Select analysis template">
+                <Select 
+                  mode="multiple"
+                  placeholder="Select one or more analysis templates"
+                  maxTagCount="responsive"
+                >
                   <Option value="news_summary_v1">News Summary v1 (Default)</Option>
                   <Option value="news_sentiment_analysis">News Sentiment Analysis</Option>
                   <Option value="news_classification">News Classification</Option>
@@ -1114,6 +1125,60 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 showIcon
                 style={{ marginTop: 16 }}
               />
+            </>
+          );
+          
+        case 'futu_themes':
+          return (
+            <>
+              <Alert
+                message="Futu Investment Themes Scraper"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically scrape investment themes and related stocks from Futu website. Supports HK and US markets with daily full updates."
+              />
+              
+              <Form.Item
+                label="Markets"
+                name={['taskParams', 'markets']}
+                extra="Select markets to scrape. Leave empty to scrape all available markets (HK, US)."
+              >
+                <Select 
+                  mode="multiple"
+                  placeholder="Select markets (leave empty for all)"
+                  allowClear
+                >
+                  <Option value="HK">🇭🇰 Hong Kong (HK)</Option>
+                  <Option value="US">🇺🇸 United States (US)</Option>
+                </Select>
+              </Form.Item>
+              
+              <Form.Item
+                label="Max Pages Per Market"
+                name={['taskParams', 'max_pages']}
+                extra="Maximum number of pages to scrape per market (1-50). Leave empty to scrape all pages."
+              >
+                <InputNumber 
+                  min={1} 
+                  max={50} 
+                  placeholder="Leave empty for all pages" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Scrape Stocks"
+                name={['taskParams', 'scrape_stocks']}
+                valuePropName="checked"
+                extra="Enable to scrape detailed stock list for each theme. Disable to only fetch theme metadata."
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Enabled" 
+                  unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
             </>
           );
           

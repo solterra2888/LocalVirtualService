@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -103,6 +103,16 @@ export interface CreateEODHDEODStockPricesTaskParams {
   timezone?: string;
   enabled?: boolean;
   days_back?: number;
+}
+
+export interface CreateFutuThemesTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  markets?: string[];
+  max_pages?: number;
+  scrape_stocks?: boolean;
 }
 
 export interface CronPreset {
@@ -520,6 +530,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认EODHD股票价格定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建Futu投资主题定时任务
+   */
+  async createFutuThemesTask(params: CreateFutuThemesTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/futu-themes', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建Futu投资主题定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建Futu投资主题定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建Futu投资主题定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认Futu投资主题定时任务
+   */
+  async createDefaultFutuThemesTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/futu-themes/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认Futu投资主题定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认Futu投资主题定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认Futu投资主题定时任务失败'
       };
     }
   }

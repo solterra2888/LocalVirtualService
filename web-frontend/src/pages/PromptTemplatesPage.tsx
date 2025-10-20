@@ -50,7 +50,7 @@ const { TextArea } = Input;
 const { Panel } = Collapse;
 
 const PromptTemplatesPage: React.FC = () => {
-  // 状态管理
+  // State management
   const [categories, setCategories] = useState<PromptCategory[]>([]);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -59,7 +59,7 @@ const PromptTemplatesPage: React.FC = () => {
   const [searchText, setSearchText] = useState<string>('');
   const [scopeFilter, setScopeFilter] = useState<string>('all');
 
-  // 模态框状态
+  // Modal states
   const [isEditorVisible, setIsEditorVisible] = useState<boolean>(false);
   const [isTestVisible, setIsTestVisible] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplateDetail | null>(null);
@@ -69,7 +69,7 @@ const PromptTemplatesPage: React.FC = () => {
   const [form] = Form.useForm();
   const [testForm] = Form.useForm();
 
-  // 加载模板列表
+  // Load template list
   const loadTemplates = useCallback(async () => {
     try {
       const params: any = {};
@@ -80,11 +80,11 @@ const PromptTemplatesPage: React.FC = () => {
       const templatesData = await promptTemplateService.listTemplates(params);
       setTemplates(templatesData);
     } catch (error: any) {
-      message.error('加载模板失败: ' + (error.message || '未知错误'));
+      message.error('Failed to load templates: ' + (error.message || 'Unknown error'));
     }
   }, [selectedCategory, searchText, scopeFilter]);
 
-  // 加载数据
+  // Load data
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -95,7 +95,7 @@ const PromptTemplatesPage: React.FC = () => {
       setCategories(categoriesData);
       setTemplates(templatesData);
     } catch (error: any) {
-      message.error('加载数据失败: ' + (error.message || '未知错误'));
+      message.error('Failed to load data: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -111,7 +111,7 @@ const PromptTemplatesPage: React.FC = () => {
     }
   }, [selectedCategory, searchText, scopeFilter, loadTemplates]);
 
-  // 创建/编辑模板
+  // Create/Edit template
   const handleCreateTemplate = () => {
     setEditingTemplate(null);
     form.resetFields();
@@ -139,55 +139,55 @@ const PromptTemplatesPage: React.FC = () => {
       });
       setIsEditorVisible(true);
     } catch (error: any) {
-      message.error('加载模板详情失败: ' + (error.message || '未知错误'));
+      message.error('Failed to load template details: ' + (error.message || 'Unknown error'));
     }
   };
 
   const handleSaveTemplate = async (values: any) => {
     try {
       if (editingTemplate) {
-        // 更新
+        // Update
         await promptTemplateService.updateTemplate(editingTemplate.id, values);
-        message.success('模板更新成功');
+        message.success('Template updated successfully');
       } else {
-        // 创建
+        // Create
         await promptTemplateService.createTemplate(values as TemplateCreateData);
-        message.success('模板创建成功');
+        message.success('Template created successfully');
       }
       setIsEditorVisible(false);
       loadTemplates();
     } catch (error: any) {
-      message.error('保存失败: ' + (error.message || '未知错误'));
+      message.error('Save failed: ' + (error.message || 'Unknown error'));
     }
   };
 
-  // 删除模板
+  // Delete template
   const handleDeleteTemplate = (template: PromptTemplate) => {
     Modal.confirm({
-      title: '确认删除',
-      content: `确定要删除模板 "${template.template_name}" 吗？`,
-      okText: '删除',
+      title: 'Confirm Delete',
+      content: `Are you sure you want to delete template "${template.template_name}"?`,
+      okText: 'Delete',
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: 'Cancel',
       onOk: async () => {
         try {
           await promptTemplateService.deleteTemplate(template.id);
-          message.success('模板删除成功');
+          message.success('Template deleted successfully');
           loadTemplates();
         } catch (error: any) {
-          message.error('删除失败: ' + (error.message || '未知错误'));
+          message.error('Delete failed: ' + (error.message || 'Unknown error'));
         }
       }
     });
   };
 
-  // 测试模板
+  // Test template
   const handleTestTemplate = async (template: PromptTemplate) => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
       setSelectedTemplate(detail);
       
-      // 为测试表单设置默认值
+      // Set default values for test form
       const defaultValues: any = {};
       Object.entries(detail.variables || {}).forEach(([key, varDef]) => {
         if (varDef.default !== undefined) {
@@ -199,7 +199,7 @@ const PromptTemplatesPage: React.FC = () => {
       setTestResult(null);
       setIsTestVisible(true);
     } catch (error: any) {
-      message.error('加载模板详情失败: ' + (error.message || '未知错误'));
+      message.error('Failed to load template details: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -215,31 +215,31 @@ const PromptTemplatesPage: React.FC = () => {
       setTestResult(result);
       
       if (result.success) {
-        message.success('测试成功');
+        message.success('Test successful');
       } else {
-        message.error('测试失败: ' + result.error);
+        message.error('Test failed: ' + result.error);
       }
     } catch (error: any) {
-      message.error('测试失败: ' + (error.message || '未知错误'));
+      message.error('Test failed: ' + (error.message || 'Unknown error'));
     } finally {
       setTesting(false);
     }
   };
 
-  // 导出模板
+  // Export template
   const handleExportTemplate = async (template: PromptTemplate) => {
     try {
       await promptTemplateService.downloadTemplateExport(template.id, template.template_code);
-      message.success('导出成功');
+      message.success('Export successful');
     } catch (error: any) {
-      message.error('导出失败: ' + (error.message || '未知错误'));
+      message.error('Export failed: ' + (error.message || 'Unknown error'));
     }
   };
 
-  // 渲染分类列表
+  // Render category list
   const renderCategories = () => (
     <Card 
-      title="模板分类" 
+      title="Template Categories" 
       size="small"
       extra={
         <Button 
@@ -250,7 +250,7 @@ const PromptTemplatesPage: React.FC = () => {
             loadTemplates();
           }}
         >
-          全部
+          All
         </Button>
       }
     >
@@ -283,7 +283,7 @@ const PromptTemplatesPage: React.FC = () => {
     </Card>
   );
 
-  // 渲染模板列表
+  // Render template list
   const renderTemplateList = () => {
     const filteredTemplates = templates.filter(t => {
       if (searchText && !t.template_name.toLowerCase().includes(searchText.toLowerCase()) && 
@@ -302,16 +302,16 @@ const PromptTemplatesPage: React.FC = () => {
               size="small"
               hoverable
               actions={[
-                <Tooltip title="编辑">
+                <Tooltip title="Edit">
                   <EditOutlined onClick={() => handleEditTemplate(template)} />
                 </Tooltip>,
-                <Tooltip title="测试">
+                <Tooltip title="Test">
                   <ExperimentOutlined onClick={() => handleTestTemplate(template)} />
                 </Tooltip>,
-                <Tooltip title="导出">
+                <Tooltip title="Export">
                   <DownloadOutlined onClick={() => handleExportTemplate(template)} />
                 </Tooltip>,
-                <Tooltip title="删除">
+                <Tooltip title="Delete">
                   <DeleteOutlined onClick={() => handleDeleteTemplate(template)} />
                 </Tooltip>
               ]}
@@ -326,18 +326,18 @@ const PromptTemplatesPage: React.FC = () => {
                         template.scope === 'system' ? 'blue' :
                         template.scope === 'user' ? 'green' : 'orange'
                       }>
-                        {template.scope === 'system' ? '系统' : 
-                         template.scope === 'user' ? '私有' : '共享'}
+                        {template.scope === 'system' ? 'System' : 
+                         template.scope === 'user' ? 'Private' : 'Shared'}
                       </Tag>
                     </Space>
-                    <Text type="secondary">{template.description}</Text>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>{template.description}</Text>
                     <Space size="small">
                       <Text type="secondary" style={{ fontSize: '12px' }}>
-                        模板代码: {template.template_code}
+                        Template Code: {template.template_code}
                       </Text>
                       <Divider type="vertical" />
                       <Text type="secondary" style={{ fontSize: '12px' }}>
-                        分类: {template.category_name}
+                        Category: {template.category_name}
                       </Text>
                     </Space>
                   </Space>
@@ -345,13 +345,13 @@ const PromptTemplatesPage: React.FC = () => {
                 <Col span={6} style={{ textAlign: 'right' }}>
                   <Space direction="vertical" size="small" align="end">
                     <Statistic 
-                      title="使用次数" 
+                      title="Usage Count" 
                       value={template.usage_count} 
                       valueStyle={{ fontSize: '16px' }}
                     />
                     {template.success_rate !== undefined && template.success_rate !== null && (
                       <Tag color={template.success_rate >= 90 ? 'success' : 'warning'}>
-                        成功率: {template.success_rate.toFixed(1)}%
+                        Success Rate: {template.success_rate.toFixed(1)}%
                       </Tag>
                     )}
                     {template.recommended_model && (
@@ -363,56 +363,70 @@ const PromptTemplatesPage: React.FC = () => {
             </Card>
           ))}
           {filteredTemplates.length === 0 && (
-            <Empty description="暂无模板" />
+            <Empty description="No templates available" />
           )}
         </Space>
       </div>
     );
   };
 
-  // 渲染编辑器
+  // Render editor
   const renderEditor = () => (
     <Modal
-      title={editingTemplate ? '编辑模板' : '创建模板'}
+      title={editingTemplate ? 'Edit Template' : 'Create Template'}
       open={isEditorVisible}
       onCancel={() => setIsEditorVisible(false)}
-      width={900}
+      width={700}
       footer={null}
     >
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSaveTemplate}
+        size="small"
       >
-        <Row gutter={16}>
+        <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label="模板名称"
+              label={<Text style={{ fontSize: '12px' }}>Template Name</Text>}
               name="template_name"
-              rules={[{ required: true, message: '请输入模板名称' }]}
+              rules={[{ required: true, message: 'Please enter template name' }]}
             >
-              <Input placeholder="例如：新闻摘要生成" />
+              <Input 
+                placeholder="e.g.: News Summary Generation" 
+                style={{ fontSize: '12px' }}
+                size="small"
+              />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
-              label="模板代码"
+              label={<Text style={{ fontSize: '12px' }}>Template Code</Text>}
               name="template_code"
-              rules={[{ required: true, message: '请输入模板代码' }]}
+              rules={[{ required: true, message: 'Please enter template code' }]}
             >
-              <Input placeholder="例如：news_summary_v1" disabled={!!editingTemplate} />
+              <Input 
+                placeholder="e.g.: news_summary_v1" 
+                disabled={!!editingTemplate}
+                style={{ fontSize: '12px' }}
+                size="small"
+              />
             </Form.Item>
           </Col>
         </Row>
 
-        <Row gutter={16}>
+        <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label="所属分类"
+              label={<Text style={{ fontSize: '12px' }}>Category</Text>}
               name="category_id"
-              rules={[{ required: true, message: '请选择分类' }]}
+              rules={[{ required: true, message: 'Please select a category' }]}
             >
-              <Select placeholder="选择分类">
+              <Select 
+                placeholder="Select category"
+                size="small"
+                style={{ fontSize: '12px' }}
+              >
                 {categories.map(cat => (
                   <Option key={cat.id} value={cat.id}>
                     {cat.icon} {cat.category_name}
@@ -423,57 +437,71 @@ const PromptTemplatesPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label="范围"
+              label={<Text style={{ fontSize: '12px' }}>Scope</Text>}
               name="scope"
               initialValue="user"
             >
-              <Select>
-                <Option value="user">私有</Option>
-                <Option value="shared">共享</Option>
-                <Option value="system">系统</Option>
+              <Select size="small" style={{ fontSize: '12px' }}>
+                <Option value="user">Private</Option>
+                <Option value="shared">Shared</Option>
+                <Option value="system">System</Option>
               </Select>
             </Form.Item>
           </Col>
         </Row>
 
         <Form.Item
-          label="描述"
+          label={<Text style={{ fontSize: '12px' }}>Description</Text>}
           name="description"
         >
-          <TextArea rows={2} placeholder="简要描述这个模板的用途" />
+          <TextArea 
+            rows={6} 
+            placeholder="Briefly describe the purpose of this template"
+            style={{ fontSize: '12px' }}
+            size="small"
+          />
         </Form.Item>
 
         <Form.Item
-          label="系统提示词 (可选)"
+          label={<Text style={{ fontSize: '12px' }}>System Prompt (Optional)</Text>}
           name="system_prompt"
         >
           <TextArea 
-            rows={4} 
-            placeholder="定义AI的角色和行为，例如：你是一个专业的财经分析师..." 
+            rows={6} 
+            placeholder="Define AI's role and behavior, e.g.: You are a professional financial analyst..."
+            style={{ fontSize: '12px' }}
+            size="small"
           />
         </Form.Item>
 
         <Form.Item
-          label="用户提示词模板"
+          label={<Text style={{ fontSize: '12px' }}>User Prompt Template</Text>}
           name="user_prompt_template"
-          rules={[{ required: true, message: '请输入用户提示词模板' }]}
-          extra="使用 {{variable_name}} 格式定义变量"
+          rules={[{ required: true, message: 'Please enter user prompt template' }]}
+          extra="Use {{variable_name}} format to define variables"
         >
           <TextArea 
-            rows={8} 
-            placeholder="请分析以下新闻：\n\n标题：{{title}}\n内容：{{content}}" 
+            rows={6} 
+            placeholder="Please analyze the following news:\n\nTitle: {{title}}\nContent: {{content}}"
+            style={{ fontSize: '12px' }}
+            size="small"
           />
         </Form.Item>
 
-        <Divider>推荐配置</Divider>
+        <Divider style={{ fontSize: '12px', margin: '12px 0' }}>Recommended Configuration</Divider>
 
-        <Row gutter={16}>
+        <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label="推荐提供商"
+              label={<Text style={{ fontSize: '12px' }}>Recommended Provider</Text>}
               name="recommended_provider"
             >
-              <Select placeholder="选择LLM提供商" allowClear>
+              <Select 
+                placeholder="Select LLM provider" 
+                allowClear
+                size="small"
+                style={{ fontSize: '12px' }}
+              >
                 <Option value="qwen">Qwen</Option>
                 <Option value="doubao">Doubao</Option>
                 <Option value="glm">GLM</Option>
@@ -482,58 +510,79 @@ const PromptTemplatesPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label="推荐模型"
+              label={<Text style={{ fontSize: '12px' }}>Recommended Model</Text>}
               name="recommended_model"
             >
-              <Input placeholder="例如：qwen-plus" />
+              <Input 
+                placeholder="e.g.: qwen-plus"
+                style={{ fontSize: '12px' }}
+                size="small"
+              />
             </Form.Item>
           </Col>
         </Row>
 
-        <Row gutter={16}>
+        <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label="Temperature"
+              label={<Text style={{ fontSize: '12px' }}>Temperature</Text>}
               name="temperature"
               initialValue={0.7}
             >
-              <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
+              <InputNumber 
+                min={0} 
+                max={2} 
+                step={0.1} 
+                style={{ width: '100%', fontSize: '12px' }}
+                size="small"
+              />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
-              label="Max Tokens"
+              label={<Text style={{ fontSize: '12px' }}>Max Tokens</Text>}
               name="max_tokens"
               initialValue={2000}
             >
-              <InputNumber min={100} max={10000} step={100} style={{ width: '100%' }} />
+              <InputNumber 
+                min={100} 
+                max={10000} 
+                step={100} 
+                style={{ width: '100%', fontSize: '12px' }}
+                size="small"
+              />
             </Form.Item>
           </Col>
         </Row>
 
         <Form.Item
-          label="标签"
+          label={<Text style={{ fontSize: '12px' }}>Tags</Text>}
           name="tags"
         >
-          <Select mode="tags" placeholder="添加标签，回车确认" />
+          <Select 
+            mode="tags" 
+            placeholder="Add tags, press Enter to confirm"
+            size="small"
+            style={{ fontSize: '12px' }}
+          />
         </Form.Item>
 
         <Form.Item
-          label="公开分享"
+          label={<Text style={{ fontSize: '12px' }}>Public Sharing</Text>}
           name="is_public"
           valuePropName="checked"
           initialValue={false}
         >
-          <Switch />
+          <Switch size="small" />
         </Form.Item>
 
-        <Form.Item>
-          <Space>
-            <Button type="primary" htmlType="submit">
-              保存
+        <Form.Item style={{ marginBottom: 0 }}>
+          <Space size="small">
+            <Button type="primary" htmlType="submit" size="small">
+              Save
             </Button>
-            <Button onClick={() => setIsEditorVisible(false)}>
-              取消
+            <Button onClick={() => setIsEditorVisible(false)} size="small">
+              Cancel
             </Button>
           </Space>
         </Form.Item>
@@ -541,13 +590,13 @@ const PromptTemplatesPage: React.FC = () => {
     </Modal>
   );
 
-  // 渲染测试面板
+  // Render test panel
   const renderTestPanel = () => {
     if (!selectedTemplate) return null;
 
     return (
       <Drawer
-        title={`测试模板: ${selectedTemplate.template_name}`}
+        title={`Test Template: ${selectedTemplate.template_name}`}
         placement="right"
         width={720}
         open={isTestVisible}
@@ -555,21 +604,21 @@ const PromptTemplatesPage: React.FC = () => {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <Alert
-            message="测试说明"
-            description="填入测试变量值，点击运行测试查看LLM响应效果"
+            message="Test Instructions"
+            description="Fill in test variable values, click run test to view LLM response effects"
             type="info"
             showIcon
           />
 
-          <Card title="模板信息" size="small">
+          <Card title="Template Information" size="small">
             <Paragraph>
-              <Text strong>模板代码:</Text> {selectedTemplate.template_code}
+              <Text strong>Template Code:</Text> {selectedTemplate.template_code}
             </Paragraph>
             <Paragraph>
-              <Text strong>推荐提供商:</Text> {selectedTemplate.recommended_provider || '未设置'}
+              <Text strong>Recommended Provider:</Text> {selectedTemplate.recommended_provider || 'Not set'}
             </Paragraph>
             <Paragraph>
-              <Text strong>推荐模型:</Text> {selectedTemplate.recommended_model || '未设置'}
+              <Text strong>Recommended Model:</Text> {selectedTemplate.recommended_model || 'Not set'}
             </Paragraph>
           </Card>
 
@@ -578,31 +627,31 @@ const PromptTemplatesPage: React.FC = () => {
             layout="vertical"
             onFinish={handleRunTest}
           >
-            <Card title="测试变量" size="small">
+            <Card title="Test Variables" size="small">
               {Object.entries(selectedTemplate.variables || {}).map(([varName, varDef]) => (
                 <Form.Item
                   key={varName}
                   label={
                     <Space>
                       <Text>{varName}</Text>
-                      {varDef.required && <Tag color="red">必需</Tag>}
+                      {varDef.required && <Tag color="red">Required</Tag>}
                       <Tag>{varDef.type}</Tag>
                     </Space>
                   }
                   name={varName}
                   rules={[
-                    { required: varDef.required, message: `${varName} 是必需的` }
+                    { required: varDef.required, message: `${varName} is required` }
                   ]}
                   extra={varDef.description}
                 >
                   {varDef.type === 'string' ? (
-                    <TextArea rows={3} placeholder={`输入 ${varName}`} />
+                    <TextArea rows={3} placeholder={`Enter ${varName}`} />
                   ) : varDef.type === 'integer' || varDef.type === 'float' ? (
                     <InputNumber style={{ width: '100%' }} />
                   ) : varDef.type === 'boolean' ? (
                     <Switch />
                   ) : (
-                    <Input placeholder={`输入 ${varName}`} />
+                    <Input placeholder={`Enter ${varName}`} />
                   )}
                 </Form.Item>
               ))}
@@ -616,7 +665,7 @@ const PromptTemplatesPage: React.FC = () => {
                 loading={testing}
                 block
               >
-                运行测试
+                Run Test
               </Button>
             </Form.Item>
           </Form>
@@ -626,7 +675,7 @@ const PromptTemplatesPage: React.FC = () => {
               <Card 
                 title={
                   <Space>
-                    <Text>测试结果</Text>
+                    <Text>Test Result</Text>
                     {testResult.success ? (
                       <CheckCircleOutlined style={{ color: '#52c41a' }} />
                     ) : (
@@ -641,13 +690,13 @@ const PromptTemplatesPage: React.FC = () => {
                     <Row gutter={16}>
                       <Col span={8}>
                         <Statistic 
-                          title="Tokens使用" 
+                          title="Tokens Used" 
                           value={testResult.tokens_used || 0} 
                         />
                       </Col>
                       <Col span={8}>
                         <Statistic 
-                          title="成本" 
+                          title="Cost" 
                           value={testResult.cost || 0} 
                           precision={4}
                           prefix="¥"
@@ -655,26 +704,26 @@ const PromptTemplatesPage: React.FC = () => {
                       </Col>
                       <Col span={8}>
                         <Statistic 
-                          title="响应时间" 
+                          title="Response Time" 
                           value={testResult.response_time || 0} 
                           precision={2}
-                          suffix="秒"
+                          suffix="s"
                         />
                       </Col>
                     </Row>
                   </>
                 )}
                 {testResult.error && (
-                  <Alert message="错误" description={testResult.error} type="error" />
+                  <Alert message="Error" description={testResult.error} type="error" />
                 )}
               </Card>
 
               {testResult.rendered_prompt && (
                 <Collapse defaultActiveKey={['1']}>
-                  <Panel header="渲染后的Prompt" key="1">
+                  <Panel header="Rendered Prompt" key="1">
                     {testResult.rendered_prompt.system_prompt && (
                       <>
-                        <Text strong>系统提示词:</Text>
+                        <Text strong>System Prompt:</Text>
                         <Paragraph>
                           <pre style={{ 
                             background: '#f5f5f5', 
@@ -687,7 +736,7 @@ const PromptTemplatesPage: React.FC = () => {
                         </Paragraph>
                       </>
                     )}
-                    <Text strong>用户提示词:</Text>
+                    <Text strong>User Prompt:</Text>
                     <Paragraph>
                       <pre style={{ 
                         background: '#f5f5f5', 
@@ -703,7 +752,7 @@ const PromptTemplatesPage: React.FC = () => {
               )}
 
               {testResult.llm_response && (
-                <Card title="LLM响应" size="small">
+                <Card title="LLM Response" size="small">
                   <Paragraph>
                     <pre style={{ 
                       background: '#f5f5f5', 
@@ -718,7 +767,7 @@ const PromptTemplatesPage: React.FC = () => {
               )}
 
               {testResult.parsed_output && (
-                <Card title="解析后的输出" size="small">
+                <Card title="Parsed Output" size="small">
                   <Paragraph>
                     <pre style={{ 
                       background: '#f5f5f5', 
@@ -741,28 +790,28 @@ const PromptTemplatesPage: React.FC = () => {
   return (
     <div style={{ padding: '24px' }}>
       <Title level={2}>
-        <FileTextOutlined /> Prompt模板管理
+        <FileTextOutlined /> Prompt Template Management
       </Title>
       <Paragraph type="secondary">
-        管理和优化你的LLM Prompt模板，支持变量化、版本控制和在线测试
+        Manage and optimize your LLM Prompt templates with support for variables, version control, and online testing
       </Paragraph>
 
       <Spin spinning={loading}>
         <Row gutter={[16, 16]}>
-          {/* 左侧：分类列表 */}
+          {/* Left: Category list */}
           <Col xs={24} md={6}>
             {renderCategories()}
           </Col>
 
-          {/* 右侧：模板列表和操作 */}
+          {/* Right: Template list and operations */}
           <Col xs={24} md={18}>
             <Card>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                {/* 工具栏 */}
+                {/* Toolbar */}
                 <Row gutter={[16, 16]} align="middle">
                   <Col flex="auto">
                     <Input
-                      placeholder="搜索模板名称或描述..."
+                      placeholder="Search template name or description..."
                       prefix={<SearchOutlined />}
                       value={searchText}
                       onChange={e => setSearchText(e.target.value)}
@@ -775,10 +824,10 @@ const PromptTemplatesPage: React.FC = () => {
                       value={scopeFilter}
                       onChange={setScopeFilter}
                     >
-                      <Option value="all">全部范围</Option>
-                      <Option value="system">系统模板</Option>
-                      <Option value="user">我的模板</Option>
-                      <Option value="shared">共享模板</Option>
+                      <Option value="all">All Scopes</Option>
+                      <Option value="system">System Templates</Option>
+                      <Option value="user">My Templates</Option>
+                      <Option value="shared">Shared Templates</Option>
                     </Select>
                   </Col>
                   <Col>
@@ -787,12 +836,12 @@ const PromptTemplatesPage: React.FC = () => {
                       icon={<PlusOutlined />}
                       onClick={handleCreateTemplate}
                     >
-                      创建模板
+                      Create Template
                     </Button>
                   </Col>
                 </Row>
 
-                {/* 模板列表 */}
+                {/* Template list */}
                 {renderTemplateList()}
               </Space>
             </Card>
@@ -800,10 +849,10 @@ const PromptTemplatesPage: React.FC = () => {
         </Row>
       </Spin>
 
-      {/* 编辑器模态框 */}
+      {/* Editor modal */}
       {renderEditor()}
 
-      {/* 测试面板 */}
+      {/* Test panel */}
       {renderTestPanel()}
     </div>
   );

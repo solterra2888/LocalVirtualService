@@ -39,13 +39,15 @@ import {
   NewsListResponse,
   NewsTopic,
   NewsSymbol,
-  NewsSearchParams
+  NewsSearchParams,
+  NewsThemeMatch
 } from '../types/news';
 
 import ThemeManagementModal from '../components/ThemeManagementModal';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
+import { MARKET_COLORS, formatSimilarity } from '../types/investmentThemes';
 
 const { Text, Title, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
@@ -563,6 +565,89 @@ const NewsPage: React.FC = () => {
       )
     },
     {
+      title: 'Investment Themes',
+      dataIndex: 'theme_matches',
+      key: 'theme_matches',
+      width: 220,
+      render: (themeMatches: NewsThemeMatch[], record: NewsItem) => {
+        // 直接使用传入的主题匹配数据，不在这里使用 hooks
+        const displayThemes = themeMatches || [];
+
+        if (!displayThemes || displayThemes.length === 0) {
+          return <Text type="secondary" style={{ fontSize: '11px' }}>-</Text>;
+        }
+
+        return (
+          <Tooltip 
+            title={
+              <div>
+                <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Matched Investment Themes:</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {displayThemes.map((theme, index) => (
+                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Tag color={MARKET_COLORS[theme.market]} style={{ fontSize: '11px', margin: 0, minWidth: '35px', textAlign: 'center' }}>
+                        {theme.market}
+                      </Tag>
+                      <span style={{ flex: 1 }}>{theme.theme_name}</span>
+                      <Badge 
+                        count={formatSimilarity(theme.similarity)} 
+                        style={{ backgroundColor: theme.confidence >= 0.8 ? '#52c41a' : theme.confidence >= 0.7 ? '#1890ff' : '#faad14', fontSize: '10px' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            }
+            placement="topLeft"
+            mouseEnterDelay={0.3}
+          >
+            <div style={{ 
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              overflow: 'hidden'
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                gap: '4px',
+                overflow: 'hidden',
+                flex: 1
+              }}>
+                {displayThemes.slice(0, 2).map((theme, index) => (
+                  <Tag 
+                    key={index} 
+                    color={MARKET_COLORS[theme.market]} 
+                    style={{ 
+                      fontSize: '11px', 
+                      margin: 0, 
+                      flexShrink: 0,
+                      maxWidth: '90px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {theme.theme_name}
+                  </Tag>
+                ))}
+              </div>
+              {displayThemes.length > 2 && (
+                <span style={{ 
+                  fontSize: '10px', 
+                  margin: 0, 
+                  flexShrink: 0,
+                  color: '#52c41a',
+                  fontWeight: 'bold'
+                }}>
+                  +{displayThemes.length - 2}
+                </span>
+              )}
+            </div>
+          </Tooltip>
+        );
+      }
+    },
+    {
       title: 'Actions',
       key: 'action',
       width: 100,
@@ -1039,7 +1124,13 @@ const NewsPage: React.FC = () => {
                   <div style={{ marginBottom: 16 }}>
                     <Text strong>AI Analysis: </Text>
                     <Tag color="blue" style={{ marginLeft: 8 }}>
-                      {state.selectedNews.analysis_result.template_code || 'AI Analysis'}
+                      {(() => {
+                        const result = state.selectedNews.analysis_result;
+                        if (typeof result === 'object' && result && 'template_code' in result) {
+                          return (result as any).template_code || 'AI Analysis';
+                        }
+                        return 'AI Analysis';
+                      })()}
                     </Tag>
                   </div>
                   <Card 

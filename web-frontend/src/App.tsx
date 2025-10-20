@@ -13,14 +13,13 @@ import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
 import FilesPage from './pages/FilesPage';
 import TasksPage from './pages/TasksPage';
 import UsersPage from './pages/UsersPage';
-import DiagnosticPage from './pages/DiagnosticPage';
 import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
-import FinvizScreenerPage from './pages/FinvizScreenerPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
 import PromptTemplatesPage from './pages/PromptTemplatesPage';
+import InvestmentThemesPage from './pages/InvestmentThemesPage';
 import './App.css';
 
 // 私有路由组件
@@ -121,11 +120,10 @@ const App: React.FC = () => {
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="news" element={<NewsPage />} />
                 <Route path="fundamentals" element={<FundamentalsPage />} />
-                <Route path="fundamentals/screener" element={<FinvizScreenerPage />} />
                 <Route path="eod-fetch" element={<EODFetchPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />
-                <Route path="diagnostic" element={<DiagnosticPage />} />
                 <Route path="prompt-templates" element={<PromptTemplatesPage />} />
+                <Route path="investment-themes" element={<InvestmentThemesPage />} />
                 
                 {/* 管理员路由 */}
                 <Route

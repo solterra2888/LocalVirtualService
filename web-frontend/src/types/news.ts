@@ -1,11 +1,32 @@
 // 新闻相关的类型定义
 
-export interface NewsAnalysisResult {
-  content: string;
-  template_code?: string;
+// 单个模板的分析结果
+export interface SingleTemplateAnalysisResult {
+  content: any;  // 可以是string或object（如classification的结构化数据）
+  template_code: string;
   provider?: string;
   model?: string;
   tokens?: number;
+  retry_count?: number;
+  analyzed_at?: string;
+}
+
+// 多模板分析结果（新格式）
+export interface MultiTemplateAnalysisResult {
+  [templateCode: string]: SingleTemplateAnalysisResult;
+}
+
+// 兼容旧格式和新格式的分析结果类型
+export type NewsAnalysisResult = SingleTemplateAnalysisResult | MultiTemplateAnalysisResult | any;
+
+// 投资主题匹配结果（从investmentThemes.ts导入）
+export interface NewsThemeMatch {
+  theme_id: string;
+  theme_name: string;
+  market: 'HK' | 'US' | 'CN';
+  similarity: number;
+  confidence: number;
+  rank: number;
 }
 
 export interface NewsItem {
@@ -26,6 +47,7 @@ export interface NewsItem {
   tags: string[];          // 用户自定义的topic tags
   auto_tags: string[];     // API原始tags
   analysis_result?: NewsAnalysisResult;  // AI分析结果
+  theme_matches?: NewsThemeMatch[];  // 投资主题匹配结果
 }
 
 export interface NewsListResponse {

@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -73,7 +73,8 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     # 新闻分析相关参数
     auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
     use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
-    analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
+    analysis_template: Optional[str] = Field(default=None, description="分析使用的Prompt模板代码（单个，已废弃，请使用analysis_templates）")
+    analysis_templates: Optional[List[str]] = Field(default=None, description="分析使用的Prompt模板代码列表（支持多个模板并行）")
     analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
@@ -90,7 +91,8 @@ class CreateWatchlistNewsTaskRequest(BaseModel):
     # 新闻分析相关参数
     auto_analyze: bool = Field(default=False, description="是否自动分析新闻")
     use_celery: bool = Field(default=True, description="是否使用Celery异步处理分析任务")
-    analysis_template: str = Field(default="news_summary_v1", description="分析使用的Prompt模板代码")
+    analysis_template: Optional[str] = Field(default=None, description="分析使用的Prompt模板代码（单个，已废弃，请使用analysis_templates）")
+    analysis_templates: Optional[List[str]] = Field(default=None, description="分析使用的Prompt模板代码列表（支持多个模板并行）")
     analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
 
@@ -129,6 +131,17 @@ class CreateEODHDEODStockPricesTaskRequest(BaseModel):
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     days_back: int = Field(default=60, description="回溯天数", ge=1, le=365)
+
+
+class CreateFutuThemesTaskRequest(BaseModel):
+    """创建Futu投资主题定时任务请求模型"""
+    name: str = Field(default="Futu Themes Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="0 2 * * *", description="Cron表达式（默认每天凌晨2点）")
+    timezone: str = Field(default="Asia/Hong_Kong", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    markets: Optional[List[str]] = Field(default=None, description="市场列表，如['HK', 'US']，不指定则爬取所有市场")
+    max_pages: Optional[int] = Field(default=None, description="每个市场最大爬取页数，不指定则爬取所有页面", ge=1, le=50)
+    scrape_stocks: bool = Field(default=True, description="是否爬取股票列表")
 
 
 # ============ 定时任务管理API ============
@@ -390,7 +403,16 @@ async def create_eodhd_news_task(
         
         scheduler_service = await get_scheduler_service()
         
-        # 构建任务参数
+        # 构建任务参数（向后兼容处理）
+        # 如果提供了 analysis_templates，使用它；否则使用 analysis_template 并转换为数组
+        analysis_templates_list = request.analysis_templates
+        if not analysis_templates_list and request.analysis_template:
+            # 向后兼容：单个模板转换为数组
+            analysis_templates_list = [request.analysis_template]
+        elif not analysis_templates_list:
+            # 默认值
+            analysis_templates_list = ["news_summary_v1"]
+        
         task_params = {
             'max_results': request.max_results,
             'symbols': request.symbols,
@@ -401,7 +423,7 @@ async def create_eodhd_news_task(
             # 新闻分析相关参数
             'auto_analyze': request.auto_analyze,
             'use_celery': request.use_celery,
-            'analysis_template': request.analysis_template,
+            'analysis_templates': analysis_templates_list,  # 使用新的数组格式
             'analysis_batch_size': request.analysis_batch_size,
             'max_concurrent': request.max_concurrent
         }
@@ -846,6 +868,132 @@ async def create_default_eodhd_eod_stock_prices_task(
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
+# ============ Futu投资主题定时任务专用API ============
+
+@router.post("/tasks/futu-themes", summary="创建Futu投资主题定时任务")
+async def create_futu_themes_task(
+    request: CreateFutuThemesTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建Futu投资主题数据获取定时任务
+    
+    默认配置：
+    - 香港时间每天凌晨2点执行 (0 2 * * *)
+    - 爬取港股和美股市场的投资主题
+    - 包含每个主题下的股票列表
+    """
+    try:
+        logger.info("创建Futu投资主题定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # Futu主题任务参数
+        task_params = {
+            'markets': request.markets,
+            'max_pages': request.max_pages,
+            'scrape_stocks': request.scrape_stocks
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="futu_themes",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("Futu投资主题定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("Futu投资主题定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建Futu投资主题定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/futu-themes/default", summary="创建默认Futu投资主题定时任务")
+async def create_default_futu_themes_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的Futu投资主题定时任务
+    
+    默认配置：
+    - 香港时间每天凌晨2点执行 (0 2 * * *)
+    - 爬取所有市场（港股和美股）
+    - 爬取所有页面
+    - 包含股票列表
+    """
+    try:
+        logger.info("创建默认Futu投资主题定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="Futu Themes Auto Fetch",
+            task_type="futu_themes",
+            cron_expression="0 2 * * *",  # 每天凌晨2点
+            timezone="Asia/Hong_Kong",
+            enabled=True,
+            task_params={
+                'markets': None,  # 爬取所有市场
+                'max_pages': None,  # 爬取所有页面
+                'scrape_stocks': True  # 包含股票列表
+            },
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认Futu投资主题定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认Futu投资主题定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认Futu投资主题定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
 @router.post("/tasks/eodhd-news/default", summary="创建默认EODHD新闻定时任务")
 async def create_default_eodhd_news_task(
     current_user=Depends(get_current_user)
@@ -911,7 +1059,16 @@ async def create_watchlist_news_task(
         
         scheduler_service = await get_scheduler_service()
         
-        # 构建任务参数
+        # 构建任务参数（向后兼容处理）
+        # 如果提供了 analysis_templates，使用它；否则使用 analysis_template 并转换为数组
+        analysis_templates_list = request.analysis_templates
+        if not analysis_templates_list and request.analysis_template:
+            # 向后兼容：单个模板转换为数组
+            analysis_templates_list = [request.analysis_template]
+        elif not analysis_templates_list:
+            # 默认值
+            analysis_templates_list = ["news_summary_v1"]
+        
         task_params = {
             'max_results': request.max_results,
             'recent_days': request.recent_days,
@@ -919,7 +1076,7 @@ async def create_watchlist_news_task(
             # 新闻分析相关参数
             'auto_analyze': request.auto_analyze,
             'use_celery': request.use_celery,
-            'analysis_template': request.analysis_template,
+            'analysis_templates': analysis_templates_list,  # 使用新的数组格式
             'analysis_batch_size': request.analysis_batch_size,
             'max_concurrent': request.max_concurrent
         }
