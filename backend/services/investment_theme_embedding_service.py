@@ -28,7 +28,84 @@ class InvestmentThemeEmbeddingService:
         self.db_manager = DatabaseManager(db_config)
         self.embedding_model = "text-embedding-v3"
         self.embedding_dimension = 1024
+        self.use_pgvector = None  # 自动检测：True=pgvector, False=JSONB
         logger.info("投资主题向量化服务初始化完成")
+    
+    def _detect_database_mode(self, cursor) -> bool:
+        """
+        检测数据库使用的向量存储模式
+        
+        Args:
+            cursor: 数据库游标
+            
+        Returns:
+            True: 使用pgvector (embedding_vector列)
+            False: 使用JSONB (embedding_data列)
+        """
+        if self.use_pgvector is not None:
+            return self.use_pgvector
+        
+        try:
+            # 检查表结构
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'investment_theme_embeddings'
+                AND column_name IN ('embedding_vector', 'embedding_data')
+            """)
+            
+            result = cursor.fetchone()
+            if result:
+                column_name = result[0]
+                self.use_pgvector = (column_name == 'embedding_vector')
+                logger.info(f"检测到数据库模式: {'pgvector' if self.use_pgvector else 'JSONB'}")
+                return self.use_pgvector
+            else:
+                # 默认使用JSONB模式
+                logger.warning("未找到向量列，默认使用JSONB模式")
+                self.use_pgvector = False
+                return False
+                
+        except Exception as e:
+            logger.error(f"检测数据库模式失败: {str(e)}")
+            # 默认使用JSONB模式
+            self.use_pgvector = False
+            return False
+    
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        计算两个向量的余弦相似度
+        
+        Args:
+            vec1: 向量1
+            vec2: 向量2
+            
+        Returns:
+            余弦相似度 (0-1)
+        """
+        try:
+            import numpy as np
+            
+            # 转换为numpy数组
+            v1 = np.array(vec1)
+            v2 = np.array(vec2)
+            
+            # 计算余弦相似度
+            dot_product = np.dot(v1, v2)
+            norm_v1 = np.linalg.norm(v1)
+            norm_v2 = np.linalg.norm(v2)
+            
+            if norm_v1 == 0 or norm_v2 == 0:
+                return 0.0
+            
+            similarity = dot_product / (norm_v1 * norm_v2)
+            
+            # 确保结果在 [0, 1] 范围内
+            return max(0.0, min(1.0, float(similarity)))
+            
+        except Exception as e:
+            logger.error(f"计算余弦相似度失败: {str(e)}")
+            return 0.0
     
     async def initialize_all_theme_embeddings(self, force_update: bool = False) -> Dict[str, Any]:
         """
@@ -97,8 +174,11 @@ class InvestmentThemeEmbeddingService:
                     "skipped": total_themes
                 }
             
-            # 3. 批量生成向量（每次25个，Qwen API限制）
-            batch_size = 25
+            # 3. 检测数据库模式
+            use_pgvector = self._detect_database_mode(cursor)
+            
+            # 4. 批量生成向量（每次10个，Qwen API限制）
+            batch_size = 10  # Qwen API要求批次大小不超过10
             processed_count = 0
             failed_count = 0
             
@@ -129,7 +209,7 @@ class InvestmentThemeEmbeddingService:
                         text_type="document"
                     )
                     
-                    # 4. 存储向量到数据库
+                    # 5. 存储向量到数据库
                     for j, (theme_id, theme_name, market) in enumerate(batch):
                         if j >= len(embeddings):
                             logger.warning(f"主题 {theme_id} 未获得向量")
@@ -146,17 +226,33 @@ class InvestmentThemeEmbeddingService:
                             failed_count += 1
                             continue
                         
-                        # 插入或更新向量
-                        cursor.execute("""
-                            INSERT INTO investment_theme_embeddings 
-                            (theme_id, theme_name, market, embedding_vector, embedding_model)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (theme_id) 
-                            DO UPDATE SET 
-                                embedding_vector = EXCLUDED.embedding_vector,
-                                embedding_model = EXCLUDED.embedding_model,
-                                updated_at = NOW()
-                        """, (theme_id, theme_name, market, embedding, self.embedding_model))
+                        # 根据数据库模式选择不同的插入语句
+                        if use_pgvector:
+                            # pgvector模式：使用 embedding_vector 列
+                            cursor.execute("""
+                                INSERT INTO investment_theme_embeddings 
+                                (theme_id, theme_name, market, embedding_vector, embedding_model)
+                                VALUES (%s, %s, %s, %s, %s)
+                                ON CONFLICT (theme_id) 
+                                DO UPDATE SET 
+                                    embedding_vector = EXCLUDED.embedding_vector,
+                                    embedding_model = EXCLUDED.embedding_model,
+                                    updated_at = NOW()
+                            """, (theme_id, theme_name, market, embedding, self.embedding_model))
+                        else:
+                            # JSONB模式：使用 embedding_data 列
+                            import json
+                            embedding_json = json.dumps(embedding)
+                            cursor.execute("""
+                                INSERT INTO investment_theme_embeddings 
+                                (theme_id, theme_name, market, embedding_data, embedding_model)
+                                VALUES (%s, %s, %s, %s::jsonb, %s)
+                                ON CONFLICT (theme_id) 
+                                DO UPDATE SET 
+                                    embedding_data = EXCLUDED.embedding_data,
+                                    embedding_model = EXCLUDED.embedding_model,
+                                    updated_at = NOW()
+                            """, (theme_id, theme_name, market, embedding_json, self.embedding_model))
                         
                         processed_count += 1
                     
@@ -258,51 +354,129 @@ class InvestmentThemeEmbeddingService:
             
             cursor = conn.cursor()
             
-            # 构建市场过滤条件
-            market_filter = ""
-            params = [news_vector, news_vector, top_k]
+            # 检测数据库模式
+            use_pgvector = self._detect_database_mode(cursor)
             
-            if market:
-                market_filter = "AND market = %s"
-                params.insert(2, market)
-            
-            # 使用pgvector的余弦相似度操作符 <=>
-            # 1 - (v1 <=> v2) = 余弦相似度
-            query = f"""
-                SELECT 
-                    theme_id,
-                    theme_name,
-                    market,
-                    1 - (embedding_vector <=> %s::vector) as similarity
-                FROM investment_theme_embeddings
-                WHERE 1=1 {market_filter}
-                ORDER BY embedding_vector <=> %s::vector
-                LIMIT %s
-            """
-            
-            cursor.execute(query, params)
+            # 根据数据库模式选择不同的查询方式
+            if use_pgvector:
+                # pgvector模式：使用向量操作符
+                market_filter = ""
+                params = [news_vector, news_vector, top_k]
+                
+                if market:
+                    market_filter = "AND market = %s"
+                    params.insert(2, market)
+                
+                # 使用pgvector的余弦相似度操作符 <=>
+                # 1 - (v1 <=> v2) = 余弦相似度
+                query = f"""
+                    SELECT 
+                        theme_id,
+                        theme_name,
+                        market,
+                        1 - (embedding_vector <=> %s::vector) as similarity
+                    FROM investment_theme_embeddings
+                    WHERE 1=1 {market_filter}
+                    ORDER BY embedding_vector <=> %s::vector
+                    LIMIT %s
+                """
+                
+                cursor.execute(query, params)
+            else:
+                # JSONB模式：先获取所有主题，然后在Python中计算相似度
+                import json
+                import numpy as np
+                
+                market_filter = ""
+                params = []
+                
+                if market:
+                    market_filter = "WHERE market = %s"
+                    params.append(market)
+                
+                query = f"""
+                    SELECT 
+                        theme_id,
+                        theme_name,
+                        market,
+                        embedding_data
+                    FROM investment_theme_embeddings
+                    {market_filter}
+                """
+                
+                cursor.execute(query, params)
+                
+                # 在Python中计算余弦相似度
+                theme_similarities = []
+                for row in cursor.fetchall():
+                    theme_id = row[0]
+                    theme_name = row[1]
+                    theme_market = row[2]
+                    embedding_data = row[3]
+                    
+                    # 解析JSONB向量
+                    if isinstance(embedding_data, str):
+                        theme_vector = json.loads(embedding_data)
+                    else:
+                        theme_vector = embedding_data
+                    
+                    # 计算余弦相似度
+                    similarity = self._cosine_similarity(news_vector, theme_vector)
+                    
+                    theme_similarities.append({
+                        'theme_id': theme_id,
+                        'theme_name': theme_name,
+                        'market': theme_market,
+                        'similarity': similarity
+                    })
+                
+                # 按相似度排序并取Top-K
+                theme_similarities.sort(key=lambda x: x['similarity'], reverse=True)
+                theme_similarities = theme_similarities[:top_k]
             
             results = []
-            for idx, row in enumerate(cursor.fetchall()):
-                theme_id = row[0]
-                theme_name = row[1]
-                theme_market = row[2]
-                similarity = float(row[3])
-                
-                # 过滤低于阈值的结果
-                if similarity < min_similarity:
-                    continue
-                
-                match_result = {
-                    'theme_id': theme_id,
-                    'theme_name': theme_name,
-                    'market': theme_market,
-                    'similarity': round(similarity, 4),
-                    'confidence': round(similarity, 2),
-                    'rank': idx + 1
-                }
-                
-                results.append(match_result)
+            
+            if use_pgvector:
+                # 处理pgvector查询结果
+                for idx, row in enumerate(cursor.fetchall()):
+                    theme_id = row[0]
+                    theme_name = row[1]
+                    theme_market = row[2]
+                    similarity = float(row[3])
+                    
+                    # 过滤低于阈值的结果
+                    if similarity < min_similarity:
+                        continue
+                    
+                    match_result = {
+                        'theme_id': theme_id,
+                        'theme_name': theme_name,
+                        'market': theme_market,
+                        'similarity': round(similarity, 4),
+                        'confidence': round(similarity, 2),
+                        'rank': idx + 1
+                    }
+                    
+                    results.append(match_result)
+            else:
+                # 处理JSONB模式的结果
+                for idx, theme in enumerate(theme_similarities):
+                    similarity = theme['similarity']
+                    
+                    # 过滤低于阈值的结果
+                    if similarity < min_similarity:
+                        continue
+                    
+                    match_result = {
+                        'theme_id': theme['theme_id'],
+                        'theme_name': theme['theme_name'],
+                        'market': theme['market'],
+                        'similarity': round(similarity, 4),
+                        'confidence': round(similarity, 2),
+                        'rank': idx + 1
+                    }
+                    
+                    results.append(match_result)
             
             logger.info(f"找到 {len(results)} 个匹配主题（阈值: {min_similarity}）")
             
@@ -496,18 +670,41 @@ class InvestmentThemeEmbeddingService:
                 return False
             
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO investment_theme_embeddings 
-                (theme_id, theme_name, market, embedding_vector, embedding_model)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (theme_id) 
-                DO UPDATE SET 
-                    theme_name = EXCLUDED.theme_name,
-                    market = EXCLUDED.market,
-                    embedding_vector = EXCLUDED.embedding_vector,
-                    embedding_model = EXCLUDED.embedding_model,
-                    updated_at = NOW()
-            """, (theme_id, theme_name, market, embedding, self.embedding_model))
+            
+            # 检测数据库模式
+            use_pgvector = self._detect_database_mode(cursor)
+            
+            # 根据数据库模式选择不同的插入语句
+            if use_pgvector:
+                # pgvector模式
+                cursor.execute("""
+                    INSERT INTO investment_theme_embeddings 
+                    (theme_id, theme_name, market, embedding_vector, embedding_model)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (theme_id) 
+                    DO UPDATE SET 
+                        theme_name = EXCLUDED.theme_name,
+                        market = EXCLUDED.market,
+                        embedding_vector = EXCLUDED.embedding_vector,
+                        embedding_model = EXCLUDED.embedding_model,
+                        updated_at = NOW()
+                """, (theme_id, theme_name, market, embedding, self.embedding_model))
+            else:
+                # JSONB模式
+                import json
+                embedding_json = json.dumps(embedding)
+                cursor.execute("""
+                    INSERT INTO investment_theme_embeddings 
+                    (theme_id, theme_name, market, embedding_data, embedding_model)
+                    VALUES (%s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT (theme_id) 
+                    DO UPDATE SET 
+                        theme_name = EXCLUDED.theme_name,
+                        market = EXCLUDED.market,
+                        embedding_data = EXCLUDED.embedding_data,
+                        embedding_model = EXCLUDED.embedding_model,
+                        updated_at = NOW()
+                """, (theme_id, theme_name, market, embedding_json, self.embedding_model))
             
             conn.commit()
             cursor.close()
