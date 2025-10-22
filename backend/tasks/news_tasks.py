@@ -176,7 +176,8 @@ def analyze_news_by_ids_task(
     self,
     news_ids: list,
     template_code: str = "news_summary_v1",
-    max_concurrent: int = 8
+    max_concurrent: int = 8,
+    enable_theme_matching: bool = True
 ):
     """
     🔥 新任务：分析指定ID的新闻列表（解决时序问题的最佳方案）
@@ -226,7 +227,8 @@ def analyze_news_by_ids_task(
                 async with semaphore:
                     return await news_analysis_service.analyze_news(
                         news_id=news_id,
-                        template_code=template_code
+                        template_code=template_code,
+                        enable_theme_matching=enable_theme_matching
                     )
             
             tasks = [analyze_with_semaphore(news_id) for news_id in news_ids]
@@ -274,7 +276,8 @@ def analyze_unanalyzed_news_task(
     symbols: list = None,
     start_date: str = None,
     end_date: str = None,
-    max_concurrent: int = 5
+    max_concurrent: int = 5,
+    enable_theme_matching: bool = True
 ):
     """
     Celery任务：分析所有未分析的新闻
@@ -313,7 +316,8 @@ def analyze_unanalyzed_news_task(
                     start_date=start_date,
                     end_date=end_date,
                     use_concurrent=True,  # Celery任务中使用并发
-                    max_concurrent=max_concurrent
+                    max_concurrent=max_concurrent,
+                    enable_theme_matching=enable_theme_matching
                 )
             )
         finally:

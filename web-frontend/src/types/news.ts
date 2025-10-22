@@ -7,6 +7,7 @@ export interface SingleTemplateAnalysisResult {
   provider?: string;
   model?: string;
   tokens?: number;
+  temperature?: number;
   retry_count?: number;
   analyzed_at?: string;
 }

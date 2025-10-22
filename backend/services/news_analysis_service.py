@@ -91,7 +91,8 @@ class NewsAnalysisService:
         limit: int = 10,
         symbols: Optional[List[str]] = None,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        template_code: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         获取未分析的新闻
@@ -101,6 +102,7 @@ class NewsAnalysisService:
             symbols: 筛选特定股票代码的新闻
             start_date: 开始日期
             end_date: 结束日期
+            template_code: 模板代码，用于筛选该模板尚未分析的新闻
             
         Returns:
             未分析的新闻列表
@@ -113,9 +115,23 @@ class NewsAnalysisService:
         try:
             cursor = conn.cursor()
             
-            # 构建查询条件
-            where_clauses = ["(analysis_status = 'pending' OR analysis_status IS NULL)"]
-            params = []
+            # 🔥 修复：支持多模板分析
+            # 如果指定了template_code，需要查找：
+            # 1. 完全未分析的新闻（analysis_status = pending/NULL）
+            # 2. 或者该模板尚未分析的新闻（analysis_result中不包含该template_code）
+            if template_code:
+                where_clauses = [
+                    """(
+                        (analysis_status = 'pending' OR analysis_status IS NULL)
+                        OR 
+                        (analysis_result IS NULL OR NOT analysis_result ? %s)
+                    )"""
+                ]
+                params = [template_code]
+            else:
+                # 没有指定模板时，使用原来的逻辑
+                where_clauses = ["(analysis_status = 'pending' OR analysis_status IS NULL)"]
+                params = []
             
             # 添加股票代码筛选
             if symbols:
@@ -135,7 +151,9 @@ class NewsAnalysisService:
                 params.append(start_date)
             
             if end_date:
-                where_clauses.append("date <= %s")
+                # 🔥 修复：使用 date::date 将timestamp转换为date后再比较
+                # 这样可以正确匹配当天的所有时间点
+                where_clauses.append("date::date <= %s::date")
                 params.append(end_date)
             
             where_sql = " AND ".join(where_clauses)
@@ -180,7 +198,11 @@ class NewsAnalysisService:
             cursor.close()
             conn.close()
             
-            logger.info(f"获取到 {len(news_list)} 条未分析的新闻")
+            # 🔥 改进日志：显示针对特定模板的未分析新闻数量
+            if template_code:
+                logger.info(f"获取到 {len(news_list)} 条未分析的新闻（针对模板: {template_code}）")
+            else:
+                logger.info(f"获取到 {len(news_list)} 条未分析的新闻")
             return news_list
             
         except Exception as e:
@@ -208,7 +230,9 @@ class NewsAnalysisService:
         Returns:
             分析结果，包含主题匹配信息
         """
-        logger.info(f"开始分析新闻", news_id=news_id, template_code=template_code, enable_theme_matching=enable_theme_matching)
+        # 🎯 日志改进：添加明显的开始标记
+        logger.info("=" * 80)
+        logger.info(f"📰 开始分析新闻 | ID: {news_id} | 模板: {template_code} | 主题匹配: {'启用' if enable_theme_matching else '禁用'}")
         
         conn = self.db_manager.get_connection()
         if not conn:
@@ -244,6 +268,11 @@ class NewsAnalysisService:
             symbols = [s[0] for s in cursor.fetchall()]
             symbols_str = ', '.join(symbols) if symbols else ''
             
+            # 🎯 日志改进：显示新闻基本信息
+            logger.info(f"  📌 标题: {news_data['title'][:80]}{'...' if len(news_data['title']) > 80 else ''}")
+            logger.info(f"  📊 股票: {symbols_str if symbols_str else '无'}")
+            logger.info(f"  🏷️  来源: {news_data['source']}")
+            
             # 2. 更新状态为processing
             cursor.execute("""
                 UPDATE news 
@@ -264,7 +293,7 @@ class NewsAnalysisService:
                 variables["max_length"] = 100
             
             # 4. 调用LLM分析（带智能重试和模板切换）
-            logger.info(f"调用LLM分析新闻", news_id=news_id, template_code=template_code)
+            logger.info(f"  🤖 调用LLM分析...")
             
             max_retries = 2  # 最多重试2次
             retry_delay = 1  # 重试延迟（秒）
@@ -273,7 +302,7 @@ class NewsAnalysisService:
             for attempt in range(max_retries + 1):
                 try:
                     if attempt > 0:
-                        logger.info(f"重试分析新闻", news_id=news_id, attempt=attempt, template=current_template)
+                        logger.info(f"  🔄 重试第 {attempt} 次（模板: {current_template}）")
                         await asyncio.sleep(retry_delay * attempt)  # 递增延迟
                     
                     response = await llm_service.chat_completion_with_template(
@@ -303,6 +332,12 @@ class NewsAnalysisService:
                         old_data = existing_result.copy()
                         existing_result = {old_template: old_data}
                     
+                    # 获取模板配置以获取temperature
+                    from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+                    template_service = LLMPromptTemplateService()
+                    template_config = template_service.get_template_by_code(current_template)
+                    template_temperature = template_config.get('temperature', 0.7) if template_config else 0.7
+                    
                     # 构建当前模板的分析数据
                     current_analysis_data = {
                         "content": response.content,
@@ -310,6 +345,7 @@ class NewsAnalysisService:
                         "provider": response.provider if hasattr(response, 'provider') else None,
                         "model": response.model if hasattr(response, 'model') else None,
                         "tokens": response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else None,
+                        "temperature": template_temperature,
                         "retry_count": attempt,
                         "analyzed_at": datetime.now().isoformat()
                     }
@@ -339,7 +375,10 @@ class NewsAnalysisService:
                     ))
                     conn.commit()
                     
-                    logger.info(f"新闻分析完成", news_id=news_id, success=True, retry_count=attempt)
+                    # 🎯 日志改进：显示分析成功
+                    tokens_used = response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else 0
+                    provider_model = f"{response.provider}/{response.model}" if hasattr(response, 'provider') and hasattr(response, 'model') else "未知"
+                    logger.info(f"  ✅ LLM分析成功 | 模型: {provider_model} | Tokens: {tokens_used} | 重试: {attempt}次")
                     
                     # 🔥 新增：投资主题匹配（基于向量检索）
                     theme_matches = []
@@ -355,31 +394,33 @@ class NewsAnalysisService:
                             # 从股票代码提取市场信息
                             market = self.theme_embedding_service.extract_market_from_symbols(symbols)
                             
-                            logger.info(f"开始投资主题匹配", news_id=news_id, market=market)
+                            logger.info(f"  🎯 开始投资主题匹配 | 市场: {market if market else '全市场'}")
                             
                             # 执行向量检索
+                            # 🔧 优化：降低阈值以提高匹配率（从0.60降至0.45）
+                            # 原因：当前主题向量文本较简短，0.60阈值过于严格
                             theme_matches = await self.theme_embedding_service.match_news_to_themes(
                                 news_text=news_text,
                                 news_id=news_id,
                                 market=market,
-                                top_k=5,
-                                min_similarity=0.60,
+                                top_k=2,  # 增加候选数量
+                                min_similarity=0.5,  # 降低阈值提高匹配率
                                 save_to_db=True  # 保存匹配结果到数据库
                             )
                             
                             if theme_matches:
-                                logger.info(
-                                    f"投资主题匹配完成", 
-                                    news_id=news_id, 
-                                    matches_count=len(theme_matches),
-                                    top_theme=theme_matches[0]['theme_name'] if theme_matches else None
-                                )
+                                top_themes = ', '.join([f"{m['theme_name']}({m['similarity']:.2f})" for m in theme_matches[:3]])
+                                logger.info(f"  ✅ 主题匹配完成 | 匹配数: {len(theme_matches)} | Top3: {top_themes}")
                             else:
-                                logger.info(f"未找到匹配的投资主题", news_id=news_id)
+                                logger.info(f"  ℹ️  未找到匹配的投资主题")
                                 
                         except Exception as theme_error:
-                            logger.error(f"投资主题匹配失败", news_id=news_id, error=str(theme_error))
+                            logger.error(f"  ❌ 主题匹配失败: {str(theme_error)}")
                             # 主题匹配失败不影响整体分析结果
+                    
+                    # 🎯 日志改进：添加成功完成标记
+                    logger.info(f"✅ 新闻分析完成 | ID: {news_id} | 模板: {template_code}")
+                    logger.info("=" * 80)
                     
                     return {
                         "success": True,
@@ -406,23 +447,13 @@ class NewsAnalysisService:
                         elif filter_info['filter_type'] == 'all_failed':
                             self.content_filter_stats['all_providers_failed'] += 1
                         
-                        logger.warning(
-                            f"内容审查失败",
-                            news_id=news_id,
-                            filter_type=filter_info['filter_type'],
-                            attempt=attempt,
-                            template=current_template
-                        )
+                        logger.warning(f"  ⚠️  内容审查失败 | 类型: {filter_info['filter_type']} | 尝试: {attempt+1}/{max_retries+1}")
                         
                         # 智能模板切换策略
                         if attempt == 1 and current_template == 'news_summary_v1':
                             # 第二次尝试时切换到保守模板
                             current_template = 'news_summary_safe_v1'
-                            logger.info(
-                                f"切换到保守模板",
-                                news_id=news_id,
-                                new_template=current_template
-                            )
+                            logger.info(f"  🔧 切换到保守模板: {current_template}")
                             continue  # 继续重试，不退出循环
                         
                         # 如果不可重试或已达到最大重试次数，直接失败
@@ -430,7 +461,7 @@ class NewsAnalysisService:
                             break
                     else:
                         # 非内容审查错误，记录并判断是否重试
-                        logger.error(f"LLM分析失败", news_id=news_id, error=error_msg, attempt=attempt)
+                        logger.error(f"  ❌ LLM分析失败 | 尝试: {attempt+1}/{max_retries+1} | 错误: {error_msg[:100]}")
                         
                         # 如果是最后一次尝试，退出循环
                         if attempt >= max_retries:
@@ -440,7 +471,9 @@ class NewsAnalysisService:
                     last_error = error_msg
             
             # 所有重试都失败了
-            logger.error(f"新闻分析最终失败", news_id=news_id, error=last_error, total_attempts=max_retries + 1)
+            logger.error(f"❌ 新闻分析最终失败 | ID: {news_id} | 尝试: {max_retries + 1}次")
+            logger.error(f"  错误: {last_error[:200]}")
+            logger.info("=" * 80)
             
             # 保存错误信息到数据库
             error_detail = {
@@ -466,7 +499,8 @@ class NewsAnalysisService:
             }
             
         except Exception as e:
-            logger.error(f"分析新闻失败", news_id=news_id, exception=str(e))
+            logger.error(f"❌ 新闻分析异常 | ID: {news_id} | 异常: {str(e)}")
+            logger.info("=" * 80)
             return {
                 "success": False,
                 "news_id": news_id,
@@ -485,7 +519,8 @@ class NewsAnalysisService:
         end_date: Optional[str] = None,
         user_id: Optional[int] = None,
         use_concurrent: bool = False,
-        max_concurrent: int = 3
+        max_concurrent: int = 3,
+        enable_theme_matching: bool = True
     ) -> Dict[str, Any]:
         """
         批量分析新闻
@@ -499,31 +534,37 @@ class NewsAnalysisService:
             user_id: 用户ID
             use_concurrent: 是否使用并发（注意LLM API限流）
             max_concurrent: 最大并发数
+            enable_theme_matching: 是否启用投资主题匹配
             
         Returns:
             批量分析结果统计
         """
-        logger.info(f"开始批量分析新闻", 
-                   limit=limit, 
-                   template_code=template_code,
-                   use_concurrent=use_concurrent)
+        # 🎯 日志改进：批量任务开始标记
+        logger.info("🚀 " + "=" * 78)
+        logger.info(f"🚀 开始批量分析任务 | 模板: {template_code} | 并发: {'是' if use_concurrent else '否'} | 限制: {limit}条")
+        logger.info("🚀 " + "=" * 78)
         
-        # 1. 获取未分析的新闻
+        # 1. 获取未分析的新闻（🔥 传递template_code以支持多模板分析）
         unanalyzed_news = self.get_unanalyzed_news(
             limit=limit,
             symbols=symbols,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            template_code=template_code
         )
         
         if not unanalyzed_news:
-            logger.info("没有需要分析的新闻")
+            logger.info("ℹ️  没有需要分析的新闻")
+            logger.info("🏁 " + "=" * 78)
             return {
                 "total": 0,
                 "success": 0,
                 "failed": 0,
                 "results": []
             }
+        
+        logger.info(f"📊 找到 {len(unanalyzed_news)} 条待分析新闻")
+        logger.info("")  # 空行分隔
         
         # 2. 批量分析
         results = []
@@ -532,7 +573,7 @@ class NewsAnalysisService:
         
         if use_concurrent:
             # 并发分析（注意API限流）
-            logger.info(f"使用并发模式分析，最大并发数: {max_concurrent}")
+            logger.info(f"⚡ 使用并发模式分析，最大并发数: {max_concurrent}")
             
             semaphore = asyncio.Semaphore(max_concurrent)
             
@@ -541,7 +582,8 @@ class NewsAnalysisService:
                     return await self.analyze_news(
                         news_id=news['id'],
                         template_code=template_code,
-                        user_id=user_id
+                        user_id=user_id,
+                        enable_theme_matching=enable_theme_matching
                     )
             
             tasks = [analyze_with_semaphore(news) for news in unanalyzed_news]
@@ -566,7 +608,8 @@ class NewsAnalysisService:
                     result = await self.analyze_news(
                         news_id=news['id'],
                         template_code=template_code,
-                        user_id=user_id
+                        user_id=user_id,
+                        enable_theme_matching=enable_theme_matching
                     )
                     results.append(result)
                     
@@ -597,14 +640,16 @@ class NewsAnalysisService:
             "results": results
         }
         
-        # 记录详细的批量分析完成摘要
+        # 🎯 日志改进：批量任务完成摘要
         success_rate = (summary['success'] / summary['total'] * 100) if summary['total'] > 0 else 0
         
-        logger.info(f"📊 [news_analysis_service] 批量分析完成:")
-        logger.info(f"   📈 处理统计: 总计 {summary['total']} 条新闻")
-        logger.info(f"   ✅ 成功分析: {summary['success']} 条 ({success_rate:.1f}%)")
-        logger.info(f"   ❌ 分析失败: {summary['failed']} 条")
-        logger.info(f"   🔧 使用模板: {summary['template_code']}")
+        logger.info("")  # 空行分隔
+        logger.info("🏁 " + "=" * 78)
+        logger.info(f"🏁 批量分析任务完成 | 模板: {summary['template_code']}")
+        logger.info("🏁 " + "-" * 78)
+        logger.info(f"   📊 总计: {summary['total']} 条")
+        logger.info(f"   ✅ 成功: {summary['success']} 条 ({success_rate:.1f}%)")
+        logger.info(f"   ❌ 失败: {summary['failed']} 条")
         
         # 如果有失败的分析，记录失败原因统计
         if summary['failed'] > 0:
@@ -626,10 +671,12 @@ class NewsAnalysisService:
                     error_types['其他'] = error_types.get('其他', 0) + 1
             
             if error_types:
-                logger.info(f"   🔍 失败原因统计: {error_types}")
-                
-            # 将失败原因统计添加到summary中
-            summary['error_types'] = error_types
+                logger.info(f"   🔍 失败原因: {error_types}")
+                # 将失败原因统计添加到summary中
+                summary['error_types'] = error_types
+        
+        logger.info("🏁 " + "=" * 78)
+        
         return summary
     
     def get_analysis_statistics(self) -> Dict[str, Any]:

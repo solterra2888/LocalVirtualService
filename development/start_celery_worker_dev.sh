@@ -13,17 +13,19 @@ echo "=============================================="
 echo "📂 项目根目录: $PROJECT_ROOT"
 echo ""
 
-# 加载开发环境变量
-ENV_FILE="$SCRIPT_DIR/env.development"
+# 加载环境变量（从项目根目录的 .env 文件）
+ENV_FILE="$PROJECT_ROOT/.env"
 if [ -f "$ENV_FILE" ]; then
-    echo "📝 加载开发环境配置: $ENV_FILE"
+    echo "📝 加载环境配置: $ENV_FILE"
     set -a  # 自动导出变量
     source "$ENV_FILE"
     set +a  # 关闭自动导出
     echo "✅ 环境变量加载完成"
 else
     echo "⚠️  环境配置文件不存在: $ENV_FILE"
-    echo "   使用默认配置"
+    echo "   请确保项目根目录有 .env 文件"
+    echo "   可以从 example.env 复制: cp example.env .env"
+    exit 1
 fi
 
 # 检查Python环境

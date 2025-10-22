@@ -34,15 +34,16 @@ import {
   SearchOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import promptTemplateService, {
   PromptCategory,
-  PromptTemplate,
   PromptTemplateDetail,
   TemplateCreateData,
   TestTemplateResponse
 } from '../services/promptTemplateService';
+import VariableHelper from '../components/VariableHelper';
 
 const { Title, Paragraph, Text } = Typography;
 const { Option } = Select;
@@ -52,7 +53,7 @@ const { Panel } = Collapse;
 const PromptTemplatesPage: React.FC = () => {
   // State management
   const [categories, setCategories] = useState<PromptCategory[]>([]);
-  const [templates, setTemplates] = useState<PromptTemplate[]>([]);
+  const [templates, setTemplates] = useState<PromptTemplateDetail[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplateDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -62,6 +63,7 @@ const PromptTemplatesPage: React.FC = () => {
   // Modal states
   const [isEditorVisible, setIsEditorVisible] = useState<boolean>(false);
   const [isTestVisible, setIsTestVisible] = useState<boolean>(false);
+  const [isVariableHelperVisible, setIsVariableHelperVisible] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplateDetail | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestTemplateResponse | null>(null);
@@ -78,7 +80,29 @@ const PromptTemplatesPage: React.FC = () => {
       if (scopeFilter !== 'all') params.scope = scopeFilter;
 
       const templatesData = await promptTemplateService.listTemplates(params);
-      setTemplates(templatesData);
+      // 获取完整的模板详情
+      const detailedTemplates = await Promise.all(
+        templatesData.map(async (template) => {
+          try {
+            return await promptTemplateService.getTemplate(template.id);
+          } catch (error) {
+            console.warn(`Failed to load details for template ${template.id}:`, error);
+            // 返回基本信息，转换为 PromptTemplateDetail 类型
+            return {
+              ...template,
+              user_prompt_template: '',
+              variables: {},
+              output_format: { type: 'text' },
+              tags: [],
+              example_input: {},
+              example_output: '',
+              is_public: false,
+              parent_template_id: undefined
+            } as PromptTemplateDetail;
+          }
+        })
+      );
+      setTemplates(detailedTemplates);
     } catch (error: any) {
       message.error('Failed to load templates: ' + (error.message || 'Unknown error'));
     }
@@ -93,7 +117,30 @@ const PromptTemplatesPage: React.FC = () => {
         promptTemplateService.listTemplates()
       ]);
       setCategories(categoriesData);
-      setTemplates(templatesData);
+      
+      // 获取完整的模板详情
+      const detailedTemplates = await Promise.all(
+        templatesData.map(async (template) => {
+          try {
+            return await promptTemplateService.getTemplate(template.id);
+          } catch (error) {
+            console.warn(`Failed to load details for template ${template.id}:`, error);
+            // 返回基本信息，转换为 PromptTemplateDetail 类型
+            return {
+              ...template,
+              user_prompt_template: '',
+              variables: {},
+              output_format: { type: 'text' },
+              tags: [],
+              example_input: {},
+              example_output: '',
+              is_public: false,
+              parent_template_id: undefined
+            } as PromptTemplateDetail;
+          }
+        })
+      );
+      setTemplates(detailedTemplates);
     } catch (error: any) {
       message.error('Failed to load data: ' + (error.message || 'Unknown error'));
     } finally {
@@ -118,7 +165,7 @@ const PromptTemplatesPage: React.FC = () => {
     setIsEditorVisible(true);
   };
 
-  const handleEditTemplate = async (template: PromptTemplate) => {
+  const handleEditTemplate = async (template: PromptTemplateDetail) => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
       setEditingTemplate(detail);
@@ -162,7 +209,7 @@ const PromptTemplatesPage: React.FC = () => {
   };
 
   // Delete template
-  const handleDeleteTemplate = (template: PromptTemplate) => {
+  const handleDeleteTemplate = (template: PromptTemplateDetail) => {
     Modal.confirm({
       title: 'Confirm Delete',
       content: `Are you sure you want to delete template "${template.template_name}"?`,
@@ -182,7 +229,7 @@ const PromptTemplatesPage: React.FC = () => {
   };
 
   // Test template
-  const handleTestTemplate = async (template: PromptTemplate) => {
+  const handleTestTemplate = async (template: PromptTemplateDetail) => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
       setSelectedTemplate(detail);
@@ -227,12 +274,34 @@ const PromptTemplatesPage: React.FC = () => {
   };
 
   // Export template
-  const handleExportTemplate = async (template: PromptTemplate) => {
+  const handleExportTemplate = async (template: PromptTemplateDetail) => {
     try {
       await promptTemplateService.downloadTemplateExport(template.id, template.template_code);
       message.success('Export successful');
     } catch (error: any) {
       message.error('Export failed: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  // Handle variable insertion
+  const handleVariableInsert = (variableText: string) => {
+    const userPromptField = form.getFieldInstance('user_prompt_template');
+    if (userPromptField) {
+      const textarea = userPromptField.resizableTextArea?.textArea;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const currentValue = form.getFieldValue('user_prompt_template') || '';
+        const newValue = currentValue.slice(0, start) + variableText + currentValue.slice(end);
+        
+        form.setFieldValue('user_prompt_template', newValue);
+        
+        // Focus back to textarea
+        setTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(start + variableText.length, start + variableText.length);
+        }, 0);
+      }
     }
   };
 
@@ -376,15 +445,17 @@ const PromptTemplatesPage: React.FC = () => {
       title={editingTemplate ? 'Edit Template' : 'Create Template'}
       open={isEditorVisible}
       onCancel={() => setIsEditorVisible(false)}
-      width={700}
+      width={1200}
       footer={null}
     >
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSaveTemplate}
-        size="small"
-      >
+      <Row gutter={16}>
+        <Col span={16}>
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSaveTemplate}
+            size="small"
+          >
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
@@ -475,7 +546,19 @@ const PromptTemplatesPage: React.FC = () => {
         </Form.Item>
 
         <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>User Prompt Template</Text>}
+          label={
+            <Space>
+              <Text style={{ fontSize: '12px' }}>User Prompt Template</Text>
+              <Button 
+                type="link" 
+                size="small"
+                icon={<InfoCircleOutlined />}
+                onClick={() => setIsVariableHelperVisible(true)}
+              >
+                变量助手
+              </Button>
+            </Space>
+          }
           name="user_prompt_template"
           rules={[{ required: true, message: 'Please enter user prompt template' }]}
           extra="Use {{variable_name}} format to define variables"
@@ -586,7 +669,17 @@ const PromptTemplatesPage: React.FC = () => {
             </Button>
           </Space>
         </Form.Item>
-      </Form>
+          </Form>
+        </Col>
+        
+        <Col span={8}>
+          <VariableHelper
+            categories={categories}
+            templates={templates}
+            onVariableInsert={handleVariableInsert}
+          />
+        </Col>
+      </Row>
     </Modal>
   );
 
@@ -854,6 +947,24 @@ const PromptTemplatesPage: React.FC = () => {
 
       {/* Test panel */}
       {renderTestPanel()}
+
+      {/* Variable Helper Drawer */}
+      <Drawer
+        title="变量助手"
+        placement="right"
+        width={600}
+        open={isVariableHelperVisible}
+        onClose={() => setIsVariableHelperVisible(false)}
+      >
+        <VariableHelper
+          categories={categories}
+          templates={templates}
+          onVariableInsert={(variableText) => {
+            handleVariableInsert(variableText);
+            setIsVariableHelperVisible(false);
+          }}
+        />
+      </Drawer>
     </div>
   );
 };

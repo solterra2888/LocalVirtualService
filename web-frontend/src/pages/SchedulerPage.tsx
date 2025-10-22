@@ -510,6 +510,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
+          (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
@@ -882,6 +883,7 @@ const SchedulerPage: React.FC = () => {
                                       return (
                                         (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
                                         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+                                        (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
                                         (sourceIdLower.includes('events') && taskType.includes('events')) ||
                                         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
                                       );

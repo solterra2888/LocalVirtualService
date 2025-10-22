@@ -786,11 +786,13 @@ class SchedulerService:
                             
                             # 🔥 多模板并行：为每个模板提交独立的Celery任务
                             celery_tasks = []
+                            enable_theme_matching = params.get('enable_theme_matching', True)
                             for template_code in templates:
                                 task = analyze_news_by_ids_task.delay(
                                     news_ids=new_news_ids,
                                     template_code=template_code,
-                                    max_concurrent=params.get('max_concurrent', 8)
+                                    max_concurrent=params.get('max_concurrent', 8),
+                                    enable_theme_matching=enable_theme_matching
                                 )
                                 celery_tasks.append({
                                     'template': template_code,
@@ -829,6 +831,7 @@ class SchedulerService:
                             
                             # 🔥 多模板并行：为每个模板提交独立的Celery任务
                             celery_tasks = []
+                            enable_theme_matching = params.get('enable_theme_matching', True)
                             for template_code in templates:
                                 task = analyze_unanalyzed_news_task.delay(
                                     limit=analysis_limit,
@@ -836,7 +839,8 @@ class SchedulerService:
                                     symbols=analysis_symbols,
                                     start_date=start_date,
                                     end_date=end_date,
-                                    max_concurrent=params.get('max_concurrent', 10)
+                                    max_concurrent=params.get('max_concurrent', 10),
+                                    enable_theme_matching=enable_theme_matching
                                 )
                                 celery_tasks.append({
                                     'template': template_code,
@@ -1044,6 +1048,7 @@ class SchedulerService:
                         
                         # 🔥 多模板并行：为每个模板提交独立的Celery任务
                         celery_tasks = []
+                        enable_theme_matching = params.get('enable_theme_matching', True)
                         for template_code in templates:
                             task = analyze_unanalyzed_news_task.delay(
                                 limit=analysis_limit,
@@ -1051,7 +1056,8 @@ class SchedulerService:
                                 symbols=analysis_symbols,  # 使用watchlist的股票列表
                                 start_date=start_date,     # 添加开始日期
                                 end_date=end_date,         # 添加结束日期
-                                max_concurrent=params.get('max_concurrent', 10)
+                                max_concurrent=params.get('max_concurrent', 10),
+                                enable_theme_matching=enable_theme_matching
                             )
                             celery_tasks.append({
                                 'template': template_code,

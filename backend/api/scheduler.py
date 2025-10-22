@@ -77,6 +77,8 @@ class CreateEODHDNewsTaskRequest(BaseModel):
     analysis_templates: Optional[List[str]] = Field(default=None, description="分析使用的Prompt模板代码列表（支持多个模板并行）")
     analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
+    # 投资主题匹配相关参数
+    enable_theme_matching: bool = Field(default=True, description="是否启用投资主题向量匹配（推荐启用，成本极低）")
 
 
 class CreateWatchlistNewsTaskRequest(BaseModel):
@@ -95,6 +97,8 @@ class CreateWatchlistNewsTaskRequest(BaseModel):
     analysis_templates: Optional[List[str]] = Field(default=None, description="分析使用的Prompt模板代码列表（支持多个模板并行）")
     analysis_batch_size: int = Field(default=1000, ge=1, le=5000, description="每次分析的最大新闻数量")
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
+    # 投资主题匹配相关参数
+    enable_theme_matching: bool = Field(default=True, description="是否启用投资主题向量匹配（推荐启用，成本极低）")
 
 
 class CreateEODHDFundamentalsTaskRequest(BaseModel):
@@ -264,23 +268,21 @@ async def create_interval_task(
 
 
 @router.get("/tasks", summary="获取所有定时任务")
-async def get_tasks(
-    current_user=Depends(get_current_user)
-) -> List[TaskConfigResponse]:
+async def get_tasks() -> List[TaskConfigResponse]:
     """
     获取所有定时任务列表
     """
     try:
-        logger.info("获取定时任务列表请求", user=current_user.username)
+        logger.info("获取定时任务列表请求")
         
         scheduler_service = await get_scheduler_service()
         tasks = await scheduler_service.get_tasks()
         
-        logger.info(f"成功获取 {len(tasks)} 个定时任务", user=current_user.username)
+        logger.info(f"成功获取 {len(tasks)} 个定时任务")
         return tasks
         
     except Exception as e:
-        logger.error("获取定时任务列表失败", exception=str(e), user=current_user.username)
+        logger.error("获取定时任务列表失败", exception=str(e))
         raise HTTPException(status_code=500, detail=f"获取定时任务列表失败: {str(e)}")
 
 
@@ -425,7 +427,9 @@ async def create_eodhd_news_task(
             'use_celery': request.use_celery,
             'analysis_templates': analysis_templates_list,  # 使用新的数组格式
             'analysis_batch_size': request.analysis_batch_size,
-            'max_concurrent': request.max_concurrent
+            'max_concurrent': request.max_concurrent,
+            # 投资主题匹配相关参数
+            'enable_theme_matching': request.enable_theme_matching
         }
         
         result = await scheduler_service.create_cron_task(
@@ -1078,7 +1082,9 @@ async def create_watchlist_news_task(
             'use_celery': request.use_celery,
             'analysis_templates': analysis_templates_list,  # 使用新的数组格式
             'analysis_batch_size': request.analysis_batch_size,
-            'max_concurrent': request.max_concurrent
+            'max_concurrent': request.max_concurrent,
+            # 投资主题匹配相关参数
+            'enable_theme_matching': request.enable_theme_matching
         }
         
         result = await scheduler_service.create_cron_task(

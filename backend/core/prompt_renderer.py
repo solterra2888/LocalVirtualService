@@ -378,7 +378,14 @@ class PromptRenderer:
         if format_type:
             format_type = str(format_type).strip().lower()
         
-        if format_type == 'json':
+        # 如果output_format包含JSON Schema字段（properties、required等），
+        # 即使type不是'json'，也应该作为JSON处理
+        has_json_schema = output_format and any(
+            key in output_format for key in ['properties', 'required', 'schema']
+        )
+        
+        if format_type == 'json' or format_type == 'object' or has_json_schema:
+            # 'object' 是JSON Schema的标准类型，应该作为JSON处理
             return self._parse_json_output(llm_response, output_format)
         elif format_type == 'text':
             return {'content': llm_response}

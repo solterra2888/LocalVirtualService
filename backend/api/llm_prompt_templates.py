@@ -251,6 +251,24 @@ async def get_template(
         raise HTTPException(status_code=500, detail=f"获取模板详情失败: {str(e)}")
 
 
+@router.get("/variables/library", summary="获取变量库")
+async def get_variables_library(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """获取所有模板中使用的变量信息"""
+    try:
+        service = LLMPromptTemplateService()
+        variables = service.get_variables_library()
+        
+        return {
+            "success": True,
+            "variables": variables
+        }
+    except Exception as e:
+        logger.error(f"Failed to get variables library: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取变量库失败: {str(e)}")
+
+
 @router.post("/templates", summary="创建新模板")
 async def create_template(
     template_data: TemplateCreate,

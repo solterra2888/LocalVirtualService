@@ -1679,6 +1679,7 @@ const FinvizDashboard: React.FC = () => {
                               {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
                               {summaryResult.model && <span>Model: {summaryResult.model}</span>}
                               {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
+                              {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
                             </Space>
                           </div>
                         </Card>
@@ -1852,6 +1853,7 @@ const FinvizDashboard: React.FC = () => {
                               {result.provider && <span>Provider: {result.provider}</span>}
                               {result.model && <span>Model: {result.model}</span>}
                               {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
+                              {result.temperature && <span>Temperature: {result.temperature}</span>}
                             </Space>
                           </div>
                         </Card>

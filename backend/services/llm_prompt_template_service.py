@@ -326,6 +326,92 @@ class LLMPromptTemplateService:
             conn.close()
             return None
     
+    def get_template_by_code(self, template_code: str) -> Optional[Dict[str, Any]]:
+        """
+        根据模板代码获取模板信息
+        
+        Args:
+            template_code: 模板代码
+        
+        Returns:
+            模板信息字典，如果未找到则返回None
+        """
+        conn = self.db_manager.get_connection()
+        if not conn:
+            logger.error("Database connection failed")
+            return None
+        
+        try:
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT t.id, t.template_code, t.template_name, t.category_id,
+                       t.system_prompt, t.user_prompt_template, t.variables,
+                       t.output_format, t.description, t.scope, t.is_active,
+                       t.is_default, t.is_public, t.usage_count, t.success_rate,
+                       t.avg_cost, t.recommended_provider, t.recommended_model,
+                       t.temperature, t.max_tokens, t.version, t.parent_template_id,
+                       t.tags, t.example_input, t.example_output, t.created_by,
+                       t.created_at, t.updated_at, c.category_name, c.category_code,
+                       u.username as created_by_name
+                FROM llm_prompt_templates t
+                LEFT JOIN llm_prompt_categories c ON t.category_id = c.id
+                LEFT JOIN users u ON t.created_by = u.id
+                WHERE t.template_code = %s AND t.is_active = true
+            """
+            
+            cursor.execute(query, (template_code,))
+            row = cursor.fetchone()
+            
+            if not row:
+                cursor.close()
+                conn.close()
+                return None
+            
+            template = {
+                'id': row[0],
+                'template_code': row[1],
+                'template_name': row[2],
+                'category_id': row[3],
+                'system_prompt': row[4],
+                'user_prompt_template': row[5],
+                'variables': row[6] if row[6] else {},
+                'output_format': row[7] if row[7] else {},
+                'description': row[8],
+                'scope': row[9],
+                'is_active': row[10],
+                'is_default': row[11],
+                'is_public': row[12],
+                'usage_count': row[13] or 0,
+                'success_rate': float(row[14]) if row[14] else None,
+                'avg_cost': float(row[15]) if row[15] else None,
+                'recommended_provider': row[16],
+                'recommended_model': row[17],
+                'temperature': float(row[18]) if row[18] else 0.7,
+                'max_tokens': row[19] or 2000,
+                'version': row[20],
+                'parent_template_id': row[21],
+                'tags': row[22] if row[22] else [],
+                'example_input': row[23] if row[23] else {},
+                'example_output': row[24],
+                'created_by': row[25],
+                'created_at': row[26].isoformat() if row[26] else None,
+                'updated_at': row[27].isoformat() if row[27] else None,
+                'category_name': row[28],
+                'category_code': row[29],
+                'created_by_name': row[30]
+            }
+            
+            cursor.close()
+            conn.close()
+            
+            return template
+            
+        except Exception as e:
+            logger.error(f"Failed to get template by code: {str(e)}")
+            conn.close()
+            return None
+    
     def create_template(self, template_data: Dict[str, Any], user_id: Optional[int] = None) -> Optional[int]:
         """
         创建新模板
@@ -796,4 +882,122 @@ class LLMPromptTemplateService:
             logger.error(f"Failed to get popular templates: {str(e)}")
             conn.close()
             return []
+
+    def get_variables_library(self) -> List[Dict[str, Any]]:
+        """
+        获取所有模板中使用的变量信息
+        
+        Returns:
+            变量信息列表
+        """
+        conn = self.db_manager.get_connection()
+        if not conn:
+            logger.error("Database connection failed")
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    t.template_code,
+                    t.template_name,
+                    c.category_name,
+                    t.variables
+                FROM llm_prompt_templates t
+                LEFT JOIN llm_prompt_categories c ON t.category_id = c.id
+                WHERE t.is_active = true
+                AND t.variables IS NOT NULL
+                AND t.variables != '{}'::jsonb
+                ORDER BY c.category_name, t.template_name
+            """
+            
+            cursor.execute(query)
+            results = cursor.fetchall()
+            
+            variables_library = []
+            variable_map = {}
+            
+            for row in results:
+                template_code, template_name, category_name, variables_json = row
+                
+                if variables_json:
+                    try:
+                        variables = json.loads(variables_json) if isinstance(variables_json, str) else variables_json
+                        
+                        for var_name, var_def in variables.items():
+                            if var_name not in variable_map:
+                                variable_map[var_name] = {
+                                    'name': var_name,
+                                    'type': var_def.get('type', 'string'),
+                                    'description': var_def.get('description', ''),
+                                    'required': var_def.get('required', False),
+                                    'default': var_def.get('default'),
+                                    'examples': self._generate_variable_examples(var_name, var_def.get('type', 'string')),
+                                    'used_in_templates': [],
+                                    'categories': set()
+                                }
+                            
+                            variable_map[var_name]['used_in_templates'].append({
+                                'template_code': template_code,
+                                'template_name': template_name,
+                                'category_name': category_name
+                            })
+                            variable_map[var_name]['categories'].add(category_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse variables for template {template_code}: {str(e)}")
+                        continue
+            
+            # 转换set为list并排序
+            for var_info in variable_map.values():
+                var_info['categories'] = sorted(list(var_info['categories']))
+                variables_library.append(var_info)
+            
+            # 按变量名排序
+            variables_library.sort(key=lambda x: x['name'])
+            
+            cursor.close()
+            conn.close()
+            
+            return variables_library
+            
+        except Exception as e:
+            logger.error(f"Failed to get variables library: {str(e)}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def _generate_variable_examples(self, var_name: str, var_type: str) -> List[str]:
+        """生成变量示例"""
+        examples_map = {
+            'title': ['新闻标题', '公司公告标题', '市场报告标题'],
+            'content': ['新闻正文内容', '详细描述', '完整文本'],
+            'symbols': ['AAPL,MSFT,GOOGL', '股票代码列表', '相关证券代码'],
+            'max_length': ['100', '200', '500'],
+            'date': ['2024-01-15', '今天', '最近一周'],
+            'language': ['中文', 'English', 'zh-CN'],
+            'format': ['JSON', 'Markdown', 'Plain Text'],
+            'temperature': ['0.7', '0.3', '1.0'],
+            'model': ['qwen-plus', 'doubao-seed', 'glm-4'],
+            'provider': ['qwen', 'doubao', 'glm'],
+            'description': ['详细描述', '简要说明', '功能描述'],
+            'keywords': ['关键词1,关键词2', '标签列表', '搜索词'],
+            'categories': ['分类1,分类2', '类别列表', '分组信息']
+        }
+        
+        if var_name in examples_map:
+            return examples_map[var_name]
+        
+        # 根据类型生成通用示例
+        type_examples = {
+            'string': [f'示例{var_name}值1', f'示例{var_name}值2'],
+            'integer': ['1', '10', '100'],
+            'float': ['0.5', '1.0', '2.5'],
+            'boolean': ['true', 'false'],
+            'array': ['["item1", "item2"]', '["value1", "value2"]'],
+            'object': ['{"key": "value"}', '{"field": "data"}']
+        }
+        
+        return type_examples.get(var_type, [f'示例{var_name}值'])
 

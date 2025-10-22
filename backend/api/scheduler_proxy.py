@@ -4,6 +4,7 @@
 """
 
 import httpx
+import requests
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from typing import Any, Dict, Optional
@@ -16,7 +17,7 @@ logger = get_logger("scheduler_proxy")
 router = APIRouter(prefix="/scheduler", tags=["Scheduler Proxy"])
 
 # 调度器服务配置
-SCHEDULER_SERVICE_HOST = 'localhost'  # 调度器服务在本地运行
+SCHEDULER_SERVICE_HOST = '127.0.0.1'  # 调度器服务在本地运行，使用IP地址避免DNS问题
 SCHEDULER_SERVICE_PORT = 8001
 SCHEDULER_BASE_URL = f"http://{SCHEDULER_SERVICE_HOST}:{SCHEDULER_SERVICE_PORT}/api"
 
@@ -31,13 +32,20 @@ class SchedulerServiceClient:
         """发起HTTP请求到调度器服务"""
         url = f"{self.base_url}{endpoint}"
         
+        # 合并请求头
+        request_headers = headers or {}
+        
+        # 调试：记录认证头信息
+        if 'authorization' in request_headers:
+            logger.info(f"转发认证头: {request_headers['authorization'][:20]}...")
+        else:
+            logger.warning("未找到认证头")
+        
+        logger.info(f"代理请求到调度器服务: {method} {url}")
+        
+        # 首先尝试使用httpx
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                logger.info(f"代理请求到调度器服务: {method} {url}")
-                
-                # 合并请求头
-                request_headers = headers or {}
-                
                 response = await client.request(method, url, headers=request_headers, **kwargs)
                 
                 # 处理响应
@@ -57,18 +65,48 @@ class SchedulerServiceClient:
                     # 如果不是JSON响应，返回文本
                     return {"content": response.text, "status_code": response.status_code}
                     
-        except httpx.ConnectError:
-            logger.error(f"无法连接到调度器服务: {url}")
-            raise HTTPException(
-                status_code=503,
-                detail="调度器服务不可用，请确保调度器服务正在运行"
-            )
-        except httpx.TimeoutException:
-            logger.error(f"调度器服务请求超时: {url}")
-            raise HTTPException(
-                status_code=504,
-                detail="调度器服务请求超时"
-            )
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning(f"httpx连接失败，尝试使用requests: {str(e)}")
+            
+            # 如果httpx失败，使用requests作为备选方案
+            try:
+                # 在线程池中运行requests
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: requests.request(
+                        method=method,
+                        url=url,
+                        headers=request_headers,
+                        timeout=self.timeout,
+                        **kwargs
+                    )
+                )
+                
+                # 处理响应
+                if response.status_code >= 400:
+                    logger.error(f"调度器服务请求失败: {response.status_code} - {response.text}")
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"调度器服务错误: {response.text}"
+                    )
+                
+                # 尝试解析JSON响应
+                try:
+                    result = response.json()
+                    logger.info(f"调度器服务响应成功: {response.status_code}")
+                    return result
+                except:
+                    # 如果不是JSON响应，返回文本
+                    return {"content": response.text, "status_code": response.status_code}
+                    
+            except requests.exceptions.RequestException as req_e:
+                logger.error(f"requests连接也失败: {str(req_e)}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="调度器服务不可用，请确保调度器服务正在运行"
+                )
+                
         except Exception as e:
             logger.error(f"调度器服务请求异常: {str(e)}")
             raise HTTPException(

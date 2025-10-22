@@ -282,6 +282,14 @@ class PromptTemplateService {
     
     return variables;
   }
+
+  /**
+   * 获取变量库
+   */
+  async getVariablesLibrary(): Promise<any[]> {
+    const response = await api.get('/llm/prompts/variables/library');
+    return response.data.variables || [];
+  }
   
   /**
    * 验证变量值是否符合定义

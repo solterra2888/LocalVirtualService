@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import os
 import re
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
@@ -29,7 +30,112 @@ class InvestmentThemeEmbeddingService:
         self.embedding_model = "text-embedding-v3"
         self.embedding_dimension = 1024
         self.use_pgvector = None  # 自动检测：True=pgvector, False=JSONB
-        logger.info("投资主题向量化服务初始化完成")
+        
+        # 🌟 新增：是否使用LLM生成主题描述（从环境变量读取，默认启用）
+        self.use_llm_description = os.getenv('USE_LLM_THEME_DESCRIPTION', 'true').lower() == 'true'
+        self.llm_template_code = 'theme_description_generator_v1'
+        
+        logger.info(f"投资主题向量化服务初始化完成 | LLM描述生成: {'启用' if self.use_llm_description else '禁用'}")
+    
+    async def _generate_enriched_theme_text(self, cursor, theme_id: str, theme_name: str, market: str, db_theme_id: int = None) -> str:
+        """
+        生成增强版主题文本描述
+        🌟 支持两种模式：
+        1. LLM模式（默认）：使用Prompt模板调用LLM生成详细描述
+        2. 简单模式：使用模板拼接（作为降级方案）
+        
+        Args:
+            cursor: 数据库游标
+            theme_id: 主题ID（字符串，如 BK1232）
+            theme_name: 主题名称
+            market: 市场代码
+            db_theme_id: 数据库主题ID（整数）
+            
+        Returns:
+            增强版主题文本描述
+        """
+        try:
+            # 如果没有提供 db_theme_id，先查询
+            if db_theme_id is None:
+                cursor.execute("""
+                    SELECT id FROM futu_investment_themes
+                    WHERE theme_id = %s AND market = %s
+                    LIMIT 1
+                """, (theme_id, market))
+                
+                result = cursor.fetchone()
+                if result:
+                    db_theme_id = result[0]
+                else:
+                    # 找不到主题记录，使用简化版本
+                    return f"Investment theme: {theme_name}. Market: {market} market. Investment category focusing on {theme_name.lower()} sector."
+            
+            # 从 futu_theme_stocks 表获取该主题下的股票列表
+            cursor.execute("""
+                SELECT DISTINCT symbol, stock_name
+                FROM futu_theme_stocks
+                WHERE theme_id = %s AND market = %s
+                ORDER BY symbol
+                LIMIT 20
+            """, (db_theme_id, market))
+            
+            stocks = cursor.fetchall()
+            
+            # 准备股票信息
+            stock_symbols = [s[0] for s in stocks[:10]] if stocks else []
+            stock_symbols_str = ', '.join(stock_symbols) if stock_symbols else 'Not available'
+            
+            stock_names = [s[1] for s in stocks[:5] if s[1]] if stocks else []
+            stock_names_str = ', '.join(stock_names) if stock_names else 'Not available'
+            
+            # 🌟 模式1：使用LLM生成描述（推荐）
+            if self.use_llm_description:
+                try:
+                    logger.debug(f"🤖 使用LLM生成主题描述: {theme_name}")
+                    
+                    response = await llm_service.chat_completion_with_template(
+                        template_code=self.llm_template_code,
+                        variables={
+                            'theme_name': theme_name,
+                            'market': market,
+                            'stock_symbols': stock_symbols_str,
+                            'company_names': stock_names_str
+                        }
+                    )
+                    
+                    description = response.content.strip()
+                    
+                    # 验证生成的描述不为空
+                    if description and len(description) > 50:
+                        logger.info(f"✅ LLM生成描述成功: {theme_name} ({len(description)} chars)")
+                        return description
+                    else:
+                        logger.warning(f"LLM生成的描述过短，降级使用简单模板: {theme_name}")
+                        
+                except Exception as llm_error:
+                    logger.warning(f"LLM生成描述失败，降级使用简单模板: {str(llm_error)}")
+                    # 降级到简单模板
+            
+            # 🔧 模式2：简单模板（降级方案）
+            if stocks and len(stocks) > 0:
+                # 格式1：包含股票代码和公司名称
+                text = f"Investment theme: {theme_name}. Market: {market}. Related stocks include: {stock_symbols_str}."
+                
+                if stock_names:
+                    text += f" Companies: {stock_names_str}."
+                
+                logger.debug(f"使用简单模板: {theme_name} -> {len(stocks)} 个股票")
+            else:
+                # 格式2：没有股票时的描述
+                text = f"Investment theme: {theme_name}. Market: {market} market. Investment category focusing on {theme_name.lower()} sector."
+                logger.debug(f"无股票数据，使用简化描述: {theme_name}")
+            
+            return text
+            
+        except Exception as e:
+            # 如果出错，返回最简化版本
+            logger.warning(f"生成增强文本失败，使用最简版本: {str(e)}")
+            return f"{theme_name} ({market} market)"
     
     def _detect_database_mode(self, cursor) -> bool:
         """
@@ -128,9 +234,9 @@ class InvestmentThemeEmbeddingService:
         try:
             cursor = conn.cursor()
             
-            # 1. 获取所有Futu主题（去重）
+            # 1. 获取所有Futu主题（去重，同时获取数据库ID）
             cursor.execute("""
-                SELECT DISTINCT theme_id, theme_name, market
+                SELECT DISTINCT id, theme_id, theme_name, market
                 FROM futu_investment_themes
                 ORDER BY market, theme_name
             """)
@@ -153,7 +259,7 @@ class InvestmentThemeEmbeddingService:
             else:
                 # 只处理未生成向量的主题
                 for theme in themes:
-                    theme_id = theme[0]
+                    theme_id = theme[1]  # 注意：现在是第2个字段（theme_id字符串）
                     cursor.execute("""
                         SELECT id FROM investment_theme_embeddings 
                         WHERE theme_id = %s
@@ -184,19 +290,24 @@ class InvestmentThemeEmbeddingService:
             
             for i in range(0, len(themes_to_process), batch_size):
                 batch = themes_to_process[i:i+batch_size]
-                batch_theme_ids = [theme[0] for theme in batch]
-                batch_theme_names = [theme[1] for theme in batch]
-                batch_markets = [theme[2] for theme in batch]
+                # 现在每个 theme 是 (id, theme_id, theme_name, market)
+                batch_db_ids = [theme[0] for theme in batch]
+                batch_theme_ids = [theme[1] for theme in batch]
+                batch_theme_names = [theme[2] for theme in batch]
+                batch_markets = [theme[3] for theme in batch]
                 
-                # 构建更丰富的文本描述（提高向量质量）
+                # 🔥 优化：构建增强版文本描述（包含股票信息）
                 batch_texts = []
-                for theme_name, market in zip(batch_theme_names, batch_markets):
-                    # 格式：主题名称 (市场)
-                    # 例如："Electric Vehicles (US market)"
-                    text = f"{theme_name} ({market} market)"
+                for db_id, theme_id, theme_name, market in zip(batch_db_ids, batch_theme_ids, batch_theme_names, batch_markets):
+                    # 使用新的增强文本生成方法，传入数据库ID
+                    text = await self._generate_enriched_theme_text(cursor, theme_id, theme_name, market, db_id)
                     batch_texts.append(text)
                 
                 logger.info(f"处理批次 {i//batch_size + 1}/{(len(themes_to_process) + batch_size - 1)//batch_size}")
+                
+                # 显示第一个批次的示例文本（用于验证）
+                if i == 0 and len(batch_texts) > 0:
+                    logger.info(f"📝 增强文本示例: {batch_texts[0][:150]}...")
                 
                 try:
                     # 调用Qwen Embedding API
@@ -210,12 +321,15 @@ class InvestmentThemeEmbeddingService:
                     )
                     
                     # 5. 存储向量到数据库
-                    for j, (theme_id, theme_name, market) in enumerate(batch):
+                    for j in range(len(batch)):
                         if j >= len(embeddings):
-                            logger.warning(f"主题 {theme_id} 未获得向量")
+                            logger.warning(f"主题 {batch_theme_ids[j]} 未获得向量")
                             failed_count += 1
                             continue
                         
+                        theme_id = batch_theme_ids[j]
+                        theme_name = batch_theme_names[j]
+                        market = batch_markets[j]
                         embedding = embeddings[j]
                         
                         # 验证向量维度
@@ -430,9 +544,8 @@ class InvestmentThemeEmbeddingService:
                         'similarity': similarity
                     })
                 
-                # 按相似度排序并取Top-K
+                # 按相似度排序
                 theme_similarities.sort(key=lambda x: x['similarity'], reverse=True)
-                theme_similarities = theme_similarities[:top_k]
             
             results = []
             
@@ -454,13 +567,17 @@ class InvestmentThemeEmbeddingService:
                         'market': theme_market,
                         'similarity': round(similarity, 4),
                         'confidence': round(similarity, 2),
-                        'rank': idx + 1
+                        'rank': len(results) + 1  # 使用results长度+1作为排名
                     }
                     
                     results.append(match_result)
+                    
+                    # 限制结果数量为top_k
+                    if len(results) >= top_k:
+                        break
             else:
                 # 处理JSONB模式的结果
-                for idx, theme in enumerate(theme_similarities):
+                for theme in theme_similarities:
                     similarity = theme['similarity']
                     
                     # 过滤低于阈值的结果
@@ -473,10 +590,14 @@ class InvestmentThemeEmbeddingService:
                         'market': theme['market'],
                         'similarity': round(similarity, 4),
                         'confidence': round(similarity, 2),
-                        'rank': idx + 1
+                        'rank': len(results) + 1  # 使用results长度+1作为排名
                     }
                     
                     results.append(match_result)
+                    
+                    # 限制结果数量为top_k
+                    if len(results) >= top_k:
+                        break
             
             logger.info(f"找到 {len(results)} 个匹配主题（阈值: {min_similarity}）")
             
