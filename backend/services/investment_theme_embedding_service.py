@@ -37,12 +37,23 @@ class InvestmentThemeEmbeddingService:
         
         logger.info(f"投资主题向量化服务初始化完成 | LLM描述生成: {'启用' if self.use_llm_description else '禁用'}")
     
-    async def _generate_enriched_theme_text(self, cursor, theme_id: str, theme_name: str, market: str, db_theme_id: int = None) -> str:
+    async def _generate_enriched_theme_text(
+        self, 
+        cursor, 
+        theme_id: str, 
+        theme_name: str, 
+        market: str, 
+        db_theme_id: int = None,
+        force_regenerate: bool = False
+    ) -> str:
         """
         生成增强版主题文本描述
-        🌟 支持两种模式：
-        1. LLM模式（默认）：使用Prompt模板调用LLM生成详细描述
-        2. 简单模式：使用模板拼接（作为降级方案）
+        
+        🌟 优化后的缓存策略：
+        1. 优先使用数据库中已缓存的 description
+        2. 如果缓存不存在或 force_regenerate=True，则调用 LLM 生成
+        3. 生成成功后保存到数据库缓存
+        4. LLM 失败时降级使用简单模板
         
         Args:
             cursor: 数据库游标
@@ -50,27 +61,45 @@ class InvestmentThemeEmbeddingService:
             theme_name: 主题名称
             market: 市场代码
             db_theme_id: 数据库主题ID（整数）
+            force_regenerate: 是否强制重新生成（忽略缓存）
             
         Returns:
             增强版主题文本描述
         """
         try:
-            # 如果没有提供 db_theme_id，先查询
+            # 步骤1: 获取数据库主题ID和检查缓存的描述
             if db_theme_id is None:
                 cursor.execute("""
-                    SELECT id FROM futu_investment_themes
+                    SELECT id, description, description_source 
+                    FROM futu_investment_themes
                     WHERE theme_id = %s AND market = %s
                     LIMIT 1
                 """, (theme_id, market))
                 
                 result = cursor.fetchone()
                 if result:
-                    db_theme_id = result[0]
+                    db_theme_id, cached_description, description_source = result
                 else:
                     # 找不到主题记录，使用简化版本
+                    logger.warning(f"主题不存在: {theme_id} ({market})")
                     return f"Investment theme: {theme_name}. Market: {market} market. Investment category focusing on {theme_name.lower()} sector."
+            else:
+                # 如果提供了 db_theme_id，查询缓存的描述
+                cursor.execute("""
+                    SELECT description, description_source
+                    FROM futu_investment_themes
+                    WHERE id = %s
+                """, (db_theme_id,))
+                
+                result = cursor.fetchone()
+                cached_description, description_source = result if result else (None, None)
             
-            # 从 futu_theme_stocks 表获取该主题下的股票列表
+            # 步骤2: 如果有缓存的描述且不强制重新生成，直接返回
+            if cached_description and not force_regenerate:
+                logger.debug(f"✅ 使用缓存描述: {theme_name} (来源: {description_source or 'unknown'})")
+                return cached_description
+            
+            # 步骤3: 获取股票信息（用于生成描述）
             cursor.execute("""
                 SELECT DISTINCT symbol, stock_name
                 FROM futu_theme_stocks
@@ -88,10 +117,13 @@ class InvestmentThemeEmbeddingService:
             stock_names = [s[1] for s in stocks[:5] if s[1]] if stocks else []
             stock_names_str = ', '.join(stock_names) if stock_names else 'Not available'
             
-            # 🌟 模式1：使用LLM生成描述（推荐）
+            generated_description = None
+            description_source_new = None
+            
+            # 步骤4: 尝试使用 LLM 生成描述
             if self.use_llm_description:
                 try:
-                    logger.debug(f"🤖 使用LLM生成主题描述: {theme_name}")
+                    logger.debug(f"🤖 调用LLM生成描述: {theme_name}")
                     
                     response = await llm_service.chat_completion_with_template(
                         template_code=self.llm_template_code,
@@ -103,38 +135,60 @@ class InvestmentThemeEmbeddingService:
                         }
                     )
                     
-                    description = response.content.strip()
+                    generated_description = response.content.strip()
                     
-                    # 验证生成的描述不为空
-                    if description and len(description) > 50:
-                        logger.info(f"✅ LLM生成描述成功: {theme_name} ({len(description)} chars)")
-                        return description
+                    # 验证生成的描述
+                    if generated_description and len(generated_description) > 50:
+                        description_source_new = 'llm_generated'
+                        logger.info(f"✅ LLM生成成功: {theme_name} ({len(generated_description)} chars)")
                     else:
-                        logger.warning(f"LLM生成的描述过短，降级使用简单模板: {theme_name}")
+                        logger.warning(f"LLM生成的描述过短: {theme_name}")
+                        generated_description = None
                         
                 except Exception as llm_error:
-                    logger.warning(f"LLM生成描述失败，降级使用简单模板: {str(llm_error)}")
-                    # 降级到简单模板
+                    logger.warning(f"LLM生成失败: {theme_name} - {str(llm_error)}")
+                    generated_description = None
             
-            # 🔧 模式2：简单模板（降级方案）
-            if stocks and len(stocks) > 0:
-                # 格式1：包含股票代码和公司名称
-                text = f"Investment theme: {theme_name}. Market: {market}. Related stocks include: {stock_symbols_str}."
+            # 步骤5: 如果 LLM 生成失败，使用简单模板
+            if not generated_description:
+                if stocks and len(stocks) > 0:
+                    generated_description = f"Investment theme: {theme_name}. Market: {market}. Related stocks include: {stock_symbols_str}."
+                    if stock_names:
+                        generated_description += f" Companies: {stock_names_str}."
+                    logger.debug(f"使用简单模板: {theme_name} ({len(stocks)} stocks)")
+                else:
+                    generated_description = f"Investment theme: {theme_name}. Market: {market} market. Investment category focusing on {theme_name.lower()} sector."
+                    logger.debug(f"使用最简模板: {theme_name} (无股票数据)")
                 
-                if stock_names:
-                    text += f" Companies: {stock_names_str}."
-                
-                logger.debug(f"使用简单模板: {theme_name} -> {len(stocks)} 个股票")
-            else:
-                # 格式2：没有股票时的描述
-                text = f"Investment theme: {theme_name}. Market: {market} market. Investment category focusing on {theme_name.lower()} sector."
-                logger.debug(f"无股票数据，使用简化描述: {theme_name}")
+                description_source_new = 'simple_template'
             
-            return text
+            # 步骤6: 保存生成的描述到数据库缓存
+            if generated_description and db_theme_id:
+                try:
+                    cursor.execute("""
+                        UPDATE futu_investment_themes
+                        SET 
+                            description = %s,
+                            description_source = %s,
+                            description_updated_at = NOW()
+                        WHERE id = %s
+                    """, (generated_description, description_source_new, db_theme_id))
+                    
+                    # 提交更新（如果在事务中）
+                    if cursor.connection:
+                        cursor.connection.commit()
+                    
+                    logger.debug(f"💾 描述已缓存: {theme_name} (来源: {description_source_new})")
+                    
+                except Exception as db_error:
+                    logger.warning(f"保存描述到数据库失败: {theme_name} - {str(db_error)}")
+                    # 即使保存失败，也返回生成的描述
+            
+            return generated_description
             
         except Exception as e:
             # 如果出错，返回最简化版本
-            logger.warning(f"生成增强文本失败，使用最简版本: {str(e)}")
+            logger.error(f"生成主题描述失败: {theme_name} - {str(e)}")
             return f"{theme_name} ({market} market)"
     
     def _detect_database_mode(self, cursor) -> bool:
@@ -297,10 +351,15 @@ class InvestmentThemeEmbeddingService:
                 batch_markets = [theme[3] for theme in batch]
                 
                 # 🔥 优化：构建增强版文本描述（包含股票信息）
+                # 🌟 支持缓存：如果 force_update=True，强制重新生成描述
                 batch_texts = []
                 for db_id, theme_id, theme_name, market in zip(batch_db_ids, batch_theme_ids, batch_theme_names, batch_markets):
                     # 使用新的增强文本生成方法，传入数据库ID
-                    text = await self._generate_enriched_theme_text(cursor, theme_id, theme_name, market, db_id)
+                    # force_regenerate=force_update 确保强制更新时重新生成描述
+                    text = await self._generate_enriched_theme_text(
+                        cursor, theme_id, theme_name, market, db_id, 
+                        force_regenerate=force_update
+                    )
                     batch_texts.append(text)
                 
                 logger.info(f"处理批次 {i//batch_size + 1}/{(len(themes_to_process) + batch_size - 1)//batch_size}")
