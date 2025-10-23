@@ -1,5 +1,5 @@
 /**
- * 投资主题向量检索API服务
+ * Investment Theme Vector Retrieval API Service
  */
 
 import axios from 'axios';
@@ -15,7 +15,7 @@ import {
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
 
 /**
- * 匹配新闻到投资主题
+ * Match news to investment themes
  */
 export async function matchNewsToThemes(
   request: ThemeMatchRequest
@@ -28,7 +28,7 @@ export async function matchNewsToThemes(
 }
 
 /**
- * 初始化投资主题向量
+ * Initialize investment theme vectors
  */
 export async function initializeThemeEmbeddings(
   forceUpdate: boolean = false
@@ -41,7 +41,7 @@ export async function initializeThemeEmbeddings(
 }
 
 /**
- * 获取投资主题统计信息
+ * Get investment theme statistics
  */
 export async function getThemeStatistics(): Promise<ThemeStatistics> {
   const response = await axios.get<{ success: boolean; statistics: ThemeStatistics }>(
@@ -51,7 +51,7 @@ export async function getThemeStatistics(): Promise<ThemeStatistics> {
 }
 
 /**
- * 获取新闻的匹配主题
+ * Get matched themes for news
  */
 export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
   const response = await axios.get<NewsThemesResponse>(
@@ -61,7 +61,7 @@ export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
 }
 
 /**
- * 列出所有投资主题
+ * List all investment themes
  */
 export async function listThemes(
   market?: string,
@@ -81,7 +81,7 @@ export async function listThemes(
 }
 
 /**
- * 更新单个主题向量
+ * Update single theme vector
  */
 export async function updateThemeEmbedding(
   themeId: string,
@@ -93,6 +93,23 @@ export async function updateThemeEmbedding(
     {
       theme_id: themeId,
       theme_name: themeName,
+      market,
+    }
+  );
+  return response.data;
+}
+
+/**
+ * Batch fill theme descriptions (using LLM generation)
+ */
+export async function fillThemeDescriptions(
+  forceRegenerate: boolean = false,
+  market?: string
+): Promise<{ success: boolean; message: string; statistics: any }> {
+  const response = await axios.post(
+    `${API_BASE_URL}/investment-themes/fill-descriptions`,
+    {
+      force_regenerate: forceRegenerate,
       market,
     }
   );

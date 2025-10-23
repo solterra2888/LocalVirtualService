@@ -1,9 +1,9 @@
 /**
- * 投资主题管理页面
- * 展示和管理投资主题向量检索功能
+ * Investment Themes Management Page
+ * Display and manage investment theme vector retrieval functionality
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Table,
@@ -20,15 +20,22 @@ import {
   Select,
   Divider,
   Progress,
-  Tooltip
+  Tooltip,
+  Dropdown,
+  Menu,
+  Alert
 } from 'antd';
 import {
   ReloadOutlined,
-  RocketOutlined,
   BarChartOutlined,
   SearchOutlined,
   SyncOutlined,
-  ThunderboltOutlined
+  FundOutlined,
+  SettingOutlined,
+  ExperimentOutlined,
+  WarningOutlined,
+  InfoCircleOutlined,
+  DownOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -36,14 +43,16 @@ import {
   getThemeStatistics,
   listThemes,
   initializeThemeEmbeddings,
-  matchNewsToThemes
+  matchNewsToThemes,
+  fillThemeDescriptions
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
   ThemeStatistics,
   MARKET_COLORS,
   MARKET_LABELS,
-  ThemeMatch
+  ThemeMatch,
+  getDescriptionSourceLabel
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
 
@@ -84,68 +93,271 @@ const InvestmentThemesPage: React.FC = () => {
     testLoading: false
   });
 
-  // 加载统计信息
-  const loadStatistics = useCallback(async () => {
+  // Load statistics
+  const loadStatistics = async () => {
     try {
       const stats = await getThemeStatistics();
       setState(prev => ({ ...prev, statistics: stats }));
     } catch (error) {
-      message.error(`加载统计信息失败: ${getErrorMessage(error)}`);
+      message.error(`Failed to load statistics: ${getErrorMessage(error)}`);
     }
-  }, []);
+  };
 
-  // 加载主题列表
-  const loadThemes = useCallback(async (page: number = state.currentPage, market?: string) => {
+  // Load theme list
+  const loadThemes = async (page?: number, market?: string) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
+      const currentPage = page || state.currentPage;
       const response = await listThemes(
         market,
         state.pageSize,
-        (page - 1) * state.pageSize
+        (currentPage - 1) * state.pageSize
       );
       
       setState(prev => ({
         ...prev,
         themes: response.themes,
         total: response.total,
-        currentPage: page,
+        currentPage: currentPage,
         loading: false
       }));
     } catch (error) {
-      message.error(`加载主题列表失败: ${getErrorMessage(error)}`);
+      message.error(`Failed to load theme list: ${getErrorMessage(error)}`);
       setState(prev => ({ ...prev, loading: false }));
     }
-  }, [state.currentPage, state.pageSize]);
+  };
 
-  // 初始化主题向量
-  const handleInitialize = async (forceUpdate: boolean = false) => {
+  // 🌟 Sync Theme Data (merged functionality - replacing original handleInitialize)
+  const handleSyncThemes = async () => {
+    const coverageRate = state.statistics?.description_statistics?.coverage_rate || 0;
+    const missingDescCount = (state.statistics?.description_statistics?.total || 0) - 
+                             (state.statistics?.description_statistics?.with_description || 0);
+    
     Modal.confirm({
-      title: forceUpdate ? '强制更新所有主题向量' : '初始化主题向量',
-      content: forceUpdate 
-        ? '这将重新生成所有主题的向量，可能需要几分钟时间。确认继续？'
-        : '这将为新主题生成向量。已有向量的主题将被跳过。确认继续？',
-      okText: '确认',
-      cancelText: '取消',
+      title: '🔄 Sync Theme Data',
+      icon: <SyncOutlined />,
+      width: 600,
+      content: (
+        <div>
+          <Alert
+            message="This operation will complete the following tasks"
+            description={
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ marginBottom: '8px' }}>
+                  ✅ Generate detailed descriptions for <Text strong>{missingDescCount}</Text> new themes (using LLM)
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  ✅ Generate vectors for new themes (incremental update, skip existing)
+                </div>
+                <div>
+                  ✅ Update statistics
+                </div>
+              </div>
+            }
+            type="info"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+          <Paragraph>
+            <Text strong>Current Description Coverage:</Text>
+            <Tag color={coverageRate >= 90 ? 'green' : 'orange'}>
+              {coverageRate.toFixed(1)}%
+            </Tag>
+          </Paragraph>
+          <Paragraph type="secondary">
+            📌 Estimated Time: {missingDescCount > 20 ? '5-10' : '2-5'} minutes (background async execution)
+          </Paragraph>
+        </div>
+      ),
+      okText: 'Start Sync',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          // Step 1: Fill descriptions
+          message.loading({ content: 'Step 1/2: Generating theme descriptions...', key: 'sync', duration: 0 });
+          const descResult = await fillThemeDescriptions(false, state.selectedMarket);
+          
+          if (descResult.success) {
+            // Step 2: Initialize vectors
+            message.loading({ content: 'Step 2/2: Generating theme vectors...', key: 'sync', duration: 0 });
+            const vectorResult = await initializeThemeEmbeddings(false);
+            
+            message.destroy('sync');
+            
+            if (vectorResult.success) {
+              message.success({
+                content: `🎉 Sync completed! Descriptions: ${descResult.statistics.total || 0}, Vectors: ${vectorResult.statistics.processed}`,
+                duration: 6,
+              });
+              
+              // Refresh data
+              setTimeout(() => {
+                loadStatistics();
+                loadThemes();
+              }, 2000);
+            } else {
+              message.warning(`Descriptions generated, but vector generation failed: ${vectorResult.message}`);
+            }
+          } else {
+            message.destroy('sync');
+            message.error(`Sync failed: ${descResult.message}`);
+          }
+        } catch (error) {
+          message.destroy('sync');
+          message.error(`Sync failed: ${getErrorMessage(error)}`);
+        }
+      }
+    });
+  };
+
+  // 🌟 Optimize: Enhance Description Quality (fill descriptions only)
+  const handleOptimizeDescriptions = async () => {
+    const coverageRate = state.statistics?.description_statistics?.coverage_rate || 0;
+    const missingCount = (state.statistics?.description_statistics?.total || 0) - 
+                         (state.statistics?.description_statistics?.with_description || 0);
+    const simpleTemplateCount = state.statistics?.description_statistics?.source_breakdown?.simple_template || 0;
+    
+    Modal.confirm({
+      title: '✨ Optimize Description Quality',
+      icon: <ExperimentOutlined />,
+      width: 600,
+      content: (
+        <div>
+          <Alert
+            message="Use LLM to enhance theme description quality"
+            description={
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ marginBottom: '8px' }}>
+                  📝 Missing Descriptions: <Text strong>{missingCount}</Text>
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  🔄 Simple Template Descriptions: <Text strong>{simpleTemplateCount}</Text> (can be optimized)
+                </div>
+                <div>
+                  ✅ Upgrade all to LLM-generated detailed descriptions
+                </div>
+              </div>
+            }
+            type="success"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+          <Paragraph>
+            <Text strong>Current Coverage:</Text>
+            <Tag color={coverageRate >= 90 ? 'green' : 'orange'}>
+              {coverageRate.toFixed(1)}%
+            </Tag>
+            <Text type="secondary" style={{ marginLeft: '8px' }}>
+              → Expected 100% after optimization
+            </Text>
+          </Paragraph>
+          <Paragraph type="secondary">
+            💡 Use Case: When description coverage &lt; 90% or many simple template descriptions
+          </Paragraph>
+        </div>
+      ),
+      okText: 'Start Optimization',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          message.loading({ content: 'Optimizing theme descriptions...', key: 'optimize', duration: 0 });
+          const result = await fillThemeDescriptions(false, state.selectedMarket);
+          
+          message.destroy('optimize');
+          
+          if (result.success) {
+            message.success({
+              content: result.message,
+              duration: 5,
+            });
+            
+            // Remind user to refresh later
+            setTimeout(() => {
+              message.info('Optimization task is running in background, please refresh later to see results', 3);
+            }, 2000);
+          } else {
+            message.error(`Optimization failed: ${result.message}`);
+          }
+        } catch (error) {
+          message.destroy('optimize');
+          message.error(`Optimization failed: ${getErrorMessage(error)}`);
+        }
+      }
+    });
+  };
+
+  // 🚨 Dangerous Operation: Force Update All Vectors
+  const handleForceUpdateVectors = async () => {
+    Modal.confirm({
+      title: '⚠️ Warning: Force Update All Vectors',
+      icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+      width: 650,
+      content: (
+        <div>
+          <Alert
+            message="This is a high-risk, high-cost operation"
+            description={
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  ⚠️ Will regenerate vectors for <Text strong style={{ color: '#ff4d4f' }}>all themes</Text> (150+)
+                </div>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  ⏱️ Estimated Time: <Text strong>20-30 minutes</Text>
+                </div>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  💰 Will repeatedly call LLM to generate descriptions (consuming large API quota)
+                </div>
+              </div>
+            }
+            type="error"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+          <Divider />
+          <Paragraph>
+            <Text strong>✅ Applicable Scenarios:</Text>
+          </Paragraph>
+          <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
+            <li>Embedding model upgrade (e.g., text-embedding-v2 → v3)</li>
+            <li>Vector dimension change</li>
+          </ul>
+          <Paragraph style={{ marginTop: '12px' }}>
+            <Text strong>❌ Not Applicable Scenarios:</Text>
+          </Paragraph>
+          <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
+            <li>Daily maintenance (please use "Sync Theme Data")</li>
+            <li>Adding few new themes (please use "Sync Theme Data")</li>
+          </ul>
+          <Alert
+            message="Are you sure you want to continue?"
+            type="warning"
+            showIcon
+            style={{ marginTop: '16px' }}
+          />
+        </div>
+      ),
+      okText: 'Yes, I am sure',
+      okType: 'danger',
+      cancelText: 'Cancel',
       onOk: async () => {
         setState(prev => ({ ...prev, initializing: true }));
         try {
-          const result = await initializeThemeEmbeddings(forceUpdate);
+          const result = await initializeThemeEmbeddings(true);
           
           if (result.success) {
             message.success(
-              `初始化完成！处理: ${result.statistics.processed}, ` +
-              `跳过: ${result.statistics.skipped}, ` +
-              `失败: ${result.statistics.failed}`
+              `Force update completed! Processed: ${result.statistics.processed}, ` +
+              `Failed: ${result.statistics.failed}`
             );
             
-            // 刷新数据
+            // Refresh data
             await loadStatistics();
             await loadThemes();
           } else {
-            message.error(`初始化失败: ${result.message}`);
+            message.error(`Update failed: ${result.message}`);
           }
         } catch (error) {
-          message.error(`初始化失败: ${getErrorMessage(error)}`);
+          message.error(`Update failed: ${getErrorMessage(error)}`);
         } finally {
           setState(prev => ({ ...prev, initializing: false }));
         }
@@ -153,10 +365,90 @@ const InvestmentThemesPage: React.FC = () => {
     });
   };
 
-  // 测试主题匹配
+  // 🚨 Dangerous Operation: Regenerate All Descriptions
+  const handleForceRegenerateDescriptions = async () => {
+    Modal.confirm({
+      title: '⚠️ Warning: Regenerate All Descriptions',
+      icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+      width: 650,
+      content: (
+        <div>
+          <Alert
+            message="This is a high-cost operation"
+            description={
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  ⚠️ Will call LLM to regenerate <Text strong style={{ color: '#ff4d4f' }}>all descriptions</Text> (150+)
+                </div>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  ⏱️ Estimated Time: <Text strong>15-25 minutes</Text>
+                </div>
+                <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
+                  💰 LLM API calling cost is high
+                </div>
+              </div>
+            }
+            type="error"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+          <Divider />
+          <Paragraph>
+            <Text strong>✅ Applicable Scenarios:</Text>
+          </Paragraph>
+          <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
+            <li>After major Prompt Template optimization</li>
+            <li>Found historical description quality is generally poor</li>
+          </ul>
+          <Paragraph style={{ marginTop: '12px' }}>
+            <Text strong>❌ Not Applicable Scenarios:</Text>
+          </Paragraph>
+          <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
+            <li>Only few descriptions missing (please use "Optimize Description Quality")</li>
+            <li>Daily maintenance (please use "Optimize Description Quality")</li>
+          </ul>
+          <Alert
+            message="Are you sure you want to continue?"
+            type="warning"
+            showIcon
+            style={{ marginTop: '16px' }}
+          />
+        </div>
+      ),
+      okText: 'Yes, I am sure',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          message.loading({ content: 'Regenerating all descriptions...', key: 'forceRegen', duration: 0 });
+          const result = await fillThemeDescriptions(true, state.selectedMarket);
+          
+          message.destroy('forceRegen');
+          
+          if (result.success) {
+            message.success({
+              content: result.message,
+              duration: 5,
+            });
+            
+            setTimeout(() => {
+              message.info('Task is running in background, please refresh later to see results', 3);
+            }, 2000);
+          } else {
+            message.error(`Operation failed: ${result.message}`);
+          }
+        } catch (error) {
+          message.destroy('forceRegen');
+          message.error(`Operation failed: ${getErrorMessage(error)}`);
+        }
+      }
+    });
+  };
+
+  // Test theme matching
   const handleTestMatch = async () => {
     if (!state.testNewsText.trim()) {
-      message.warning('请输入新闻文本');
+      message.warning('Please enter news text');
       return;
     }
 
@@ -176,33 +468,66 @@ const InvestmentThemesPage: React.FC = () => {
       }));
 
       if (results.length === 0) {
-        message.info('未找到匹配的主题（相似度 < 0.5）');
+        message.info('No matching themes found (similarity < 0.5)');
       } else {
-        message.success(`找到 ${results.length} 个匹配主题`);
+        message.success(`Found ${results.length} matching themes`);
       }
     } catch (error) {
-      message.error(`匹配失败: ${getErrorMessage(error)}`);
+      message.error(`Matching failed: ${getErrorMessage(error)}`);
       setState(prev => ({ ...prev, testLoading: false }));
     }
   };
 
-  // 初始加载
+  // Initial load (execute only once)
   useEffect(() => {
     loadStatistics();
     loadThemes();
-  }, [loadStatistics, loadThemes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // 表格列定义
+  // View description details
+  const showDescriptionModal = (theme: InvestmentTheme) => {
+    const sourceLabel = getDescriptionSourceLabel(theme.description_source);
+    Modal.info({
+      title: `${theme.theme_name} Theme Description`,
+      width: 800,
+      content: (
+        <div>
+          <Paragraph>
+            <Text strong>Market:</Text>
+            <Tag color={MARKET_COLORS[theme.market]}>{MARKET_LABELS[theme.market]}</Tag>
+          </Paragraph>
+          <Paragraph>
+            <Text strong>Description Source:</Text>
+            <Tag color={sourceLabel.color}>{sourceLabel.text}</Tag>
+          </Paragraph>
+          {theme.description_updated_at && (
+            <Paragraph>
+              <Text strong>Updated At:</Text>
+              <Text type="secondary">{new Date(theme.description_updated_at).toLocaleString('en-US')}</Text>
+            </Paragraph>
+          )}
+          <Divider />
+          <Paragraph style={{ fontSize: '14px', lineHeight: '1.8' }}>
+            {theme.description || <Text type="secondary">No description available</Text>}
+          </Paragraph>
+        </div>
+      ),
+    });
+  };
+
+  // Table column definitions
   const columns: ColumnsType<InvestmentTheme> = [
     {
-      title: '主题名称',
+      title: 'Theme Name',
       dataIndex: 'theme_name',
       key: 'theme_name',
-      width: 250,
+      width: 200,
+      fixed: 'left',
       render: (name: string) => <Text strong>{name}</Text>
     },
     {
-      title: '市场',
+      title: 'Market',
       dataIndex: 'market',
       key: 'market',
       width: 80,
@@ -213,29 +538,50 @@ const InvestmentThemesPage: React.FC = () => {
       )
     },
     {
-      title: '主题ID',
-      dataIndex: 'theme_id',
-      key: 'theme_id',
-      width: 200,
-      render: (id: string) => <Text type="secondary" style={{ fontSize: '12px' }}>{id}</Text>
+      title: 'Description Preview',
+      dataIndex: 'description',
+      key: 'description',
+      width: 300,
+      ellipsis: true,
+      render: (text: string, record: InvestmentTheme) => (
+        <Tooltip title={text || 'No description'}>
+          <Text 
+            ellipsis 
+            style={{ cursor: text ? 'pointer' : 'default', color: text ? undefined : '#999' }}
+            onClick={() => text && showDescriptionModal(record)}
+          >
+            {text || 'Not generated'}
+          </Text>
+        </Tooltip>
+      )
     },
     {
-      title: 'Embedding模型',
+      title: 'Description Source',
+      dataIndex: 'description_source',
+      key: 'description_source',
+      width: 120,
+      render: (source: string) => {
+        const label = getDescriptionSourceLabel(source);
+        return <Tag color={label.color}>{label.text}</Tag>;
+      }
+    },
+    {
+      title: 'Embedding Model',
       dataIndex: 'embedding_model',
       key: 'embedding_model',
       width: 150,
       render: (model: string) => <Tag color="blue">{model || 'text-embedding-v3'}</Tag>
     },
     {
-      title: '更新时间',
+      title: 'Updated At',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 180,
-      render: (date: string) => date ? new Date(date).toLocaleString('zh-CN') : '-'
+      width: 160,
+      render: (date: string) => date ? new Date(date).toLocaleString('en-US') : '-'
     }
   ];
 
-  // 市场筛选变化
+  // Market filter change
   const handleMarketChange = (market: string | undefined) => {
     setState(prev => ({ ...prev, selectedMarket: market, currentPage: 1 }));
     loadThemes(1, market);
@@ -243,22 +589,22 @@ const InvestmentThemesPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      {/* 页面标题 */}
+      {/* Page Title */}
       <div style={{ marginBottom: '24px' }}>
         <Title level={2}>
-          <ThunderboltOutlined /> 投资主题向量检索
+          <FundOutlined /> Investment Themes Vector Retrieval
         </Title>
         <Paragraph type="secondary">
-          基于Qwen Embedding的智能主题匹配系统，自动将新闻与150+投资主题进行语义关联
+          Intelligent theme matching system based on Qwen Embedding, automatically associating news with 150+ investment themes through semantic analysis
         </Paragraph>
       </div>
 
-      {/* 统计卡片 */}
+      {/* Statistics Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="主题总数"
+              title="Total Themes"
               value={state.statistics?.total_themes || 0}
               prefix={<BarChartOutlined />}
               valueStyle={{ color: '#1890ff' }}
@@ -268,7 +614,30 @@ const InvestmentThemesPage: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="HK市场主题"
+              title="Description Coverage"
+              value={state.statistics?.description_statistics?.coverage_rate || 0}
+              suffix="%"
+              precision={1}
+              valueStyle={{ 
+                color: (state.statistics?.description_statistics?.coverage_rate || 0) >= 90 ? '#52c41a' : '#faad14'
+              }}
+            />
+            <Progress
+              percent={state.statistics?.description_statistics?.coverage_rate || 0}
+              status={
+                (state.statistics?.description_statistics?.coverage_rate || 0) === 100 
+                  ? 'success' 
+                  : 'active'
+              }
+              size="small"
+              showInfo={false}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="HK Market Themes"
               value={
                 state.statistics?.market_breakdown.find(m => m.market === 'HK')?.count || 0
               }
@@ -279,7 +648,7 @@ const InvestmentThemesPage: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="US市场主题"
+              title="US Market Themes"
               value={
                 state.statistics?.market_breakdown.find(m => m.market === 'US')?.count || 0
               }
@@ -287,33 +656,64 @@ const InvestmentThemesPage: React.FC = () => {
             />
           </Card>
         </Col>
+      </Row>
+      
+      {/* Second Row Statistics */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="已匹配新闻"
-              value={state.statistics?.match_statistics.news_with_themes || 0}
+              title="LLM Generated"
+              value={state.statistics?.description_statistics?.source_breakdown?.llm_generated || 0}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Simple Template"
+              value={state.statistics?.description_statistics?.source_breakdown?.simple_template || 0}
               valueStyle={{ color: '#faad14' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Manual"
+              value={state.statistics?.description_statistics?.source_breakdown?.manual || 0}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Matched News"
+              value={state.statistics?.match_statistics.news_with_themes || 0}
+              valueStyle={{ color: '#722ed1' }}
             />
           </Card>
         </Col>
       </Row>
 
-      {/* 性能指标 */}
+      {/* Performance Metrics */}
       {state.statistics && (
         <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
           <Col span={24}>
-            <Card title="系统性能" size="small">
+            <Card title="System Performance" size="small">
               <Row gutter={16}>
                 <Col span={8}>
-                  <Text type="secondary">Embedding模型:</Text>{' '}
+                  <Text type="secondary">Embedding Model:</Text>{' '}
                   <Tag color="blue">{state.statistics.embedding_model}</Tag>
                 </Col>
                 <Col span={8}>
-                  <Text type="secondary">向量维度:</Text>{' '}
+                  <Text type="secondary">Vector Dimension:</Text>{' '}
                   <Tag color="purple">{state.statistics.embedding_dimension}</Tag>
                 </Col>
                 <Col span={8}>
-                  <Text type="secondary">平均相似度:</Text>{' '}
+                  <Text type="secondary">Avg Similarity:</Text>{' '}
                   <Tag color="green">
                     {(state.statistics.match_statistics.avg_similarity * 100).toFixed(1)}%
                   </Tag>
@@ -324,62 +724,151 @@ const InvestmentThemesPage: React.FC = () => {
         </Row>
       )}
 
-      {/* 操作按钮 */}
+      {/* Action Buttons - Optimized Layout */}
       <Card style={{ marginBottom: '24px' }}>
-        <Space size="middle" wrap>
-          <Button
-            type="primary"
-            icon={<RocketOutlined />}
-            onClick={() => handleInitialize(false)}
-            loading={state.initializing}
-          >
-            初始化主题向量
-          </Button>
-          <Button
-            icon={<SyncOutlined />}
-            onClick={() => handleInitialize(true)}
-            loading={state.initializing}
-          >
-            强制更新所有向量
-          </Button>
-          <Button
-            icon={<SearchOutlined />}
-            onClick={() => setState(prev => ({ ...prev, testModalVisible: true }))}
-          >
-            测试主题匹配
-          </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              loadStatistics();
-              loadThemes();
-            }}
-          >
-            刷新
-          </Button>
-        </Space>
+        {/* Operation Guide */}
+        <Alert
+          message={
+            <div>
+              <InfoCircleOutlined style={{ marginRight: '8px' }} />
+              <Text strong>Operation Guide:</Text>
+              <Text type="secondary" style={{ marginLeft: '8px' }}>
+                Recommended daily use: "Sync Theme Data" and "Test Match", use advanced maintenance operations with caution
+              </Text>
+            </div>
+          }
+          type="info"
+          showIcon={false}
+          style={{ marginBottom: '16px' }}
+        />
+
+        {/* Common Operations */}
+        <div style={{ marginBottom: '16px' }}>
+          <Text strong style={{ marginBottom: '8px', display: 'block' }}>📌 Common Operations</Text>
+          <Space size="middle" wrap>
+            <Tooltip title="Generate descriptions and vectors for new themes, suitable after Futu crawler adds new themes">
+              <Button
+                type="primary"
+                icon={<SyncOutlined />}
+                onClick={handleSyncThemes}
+                size="large"
+              >
+                🔄 Sync Theme Data
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title="Use LLM to enhance description quality, recommended when coverage < 90%">
+              <Button
+                type="default"
+                icon={<ExperimentOutlined />}
+                onClick={handleOptimizeDescriptions}
+                size="large"
+                style={{ 
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  border: 'none'
+                }}
+              >
+                ✨ Optimize Descriptions
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title="Enter news text to test theme matching in real-time">
+              <Button
+                icon={<SearchOutlined />}
+                onClick={() => setState(prev => ({ ...prev, testModalVisible: true }))}
+                size="large"
+              >
+                🧪 Test Match
+              </Button>
+            </Tooltip>
+            
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                loadStatistics();
+                loadThemes();
+              }}
+            >
+              Refresh Stats
+            </Button>
+          </Space>
+        </div>
 
         <Divider />
 
-        {/* 市场筛选 */}
-        <Space>
-          <Text>市场筛选:</Text>
-          <Select
-            style={{ width: 120 }}
-            placeholder="全部市场"
-            allowClear
-            value={state.selectedMarket}
-            onChange={handleMarketChange}
-          >
-            <Option value="HK">香港 (HK)</Option>
-            <Option value="US">美国 (US)</Option>
-            <Option value="CN">中国 (CN)</Option>
-          </Select>
-        </Space>
+        {/* Advanced Options and Market Filter */}
+        <Row justify="space-between" align="middle">
+          <Col>
+            {/* Advanced Options Dropdown Menu */}
+            <Dropdown
+              overlay={
+                <Menu>
+                  <Menu.Item
+                    key="force-vectors"
+                    icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
+                    onClick={handleForceUpdateVectors}
+                    danger
+                  >
+                    <Text type="danger">Force Update All Vectors</Text>
+                    <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                      ⚠️ Only for model upgrade (20-30 mins)
+                    </div>
+                  </Menu.Item>
+                  <Menu.Item
+                    key="force-descriptions"
+                    icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
+                    onClick={handleForceRegenerateDescriptions}
+                    danger
+                  >
+                    <Text type="danger">Regenerate All Descriptions</Text>
+                    <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                      ⚠️ Only after Prompt optimization (15-25 mins)
+                    </div>
+                  </Menu.Item>
+                  <Menu.Divider />
+                  <Menu.Item
+                    key="logs"
+                    icon={<InfoCircleOutlined />}
+                    disabled
+                  >
+                    View Execution Logs (In Development)
+                  </Menu.Item>
+                </Menu>
+              }
+              trigger={['click']}
+            >
+              <Button
+                icon={<SettingOutlined />}
+                style={{ color: '#999' }}
+              >
+                ⚙️ Advanced Options <DownOutlined />
+              </Button>
+            </Dropdown>
+          </Col>
+
+          <Col>
+            {/* Market Filter */}
+            <Space>
+              <Text>Market Filter:</Text>
+              <Select
+                style={{ width: 120 }}
+                placeholder="All Markets"
+                allowClear
+                value={state.selectedMarket}
+                onChange={handleMarketChange}
+              >
+                <Option value="HK">Hong Kong (HK)</Option>
+                <Option value="US">United States (US)</Option>
+                <Option value="CN">China (CN)</Option>
+              </Select>
+            </Space>
+          </Col>
+        </Row>
       </Card>
 
-      {/* 主题列表表格 */}
-      <Card title="投资主题列表" extra={<Text type="secondary">Total: {state.total}</Text>}>
+      {/* Theme List Table */}
+      <Card title="Investment Themes List" extra={<Text type="secondary">Total: {state.total}</Text>}>
         <Table
           columns={columns}
           dataSource={state.themes}
@@ -391,7 +880,7 @@ const InvestmentThemesPage: React.FC = () => {
             total: state.total,
             showSizeChanger: true,
             showQuickJumper: true,
-            showTotal: (total) => `共 ${total} 个主题`,
+            showTotal: (total) => `Total ${total} themes`,
             onChange: (page, pageSize) => {
               setState(prev => ({ ...prev, currentPage: page, pageSize: pageSize || 20 }));
               loadThemes(page, state.selectedMarket);
@@ -401,9 +890,9 @@ const InvestmentThemesPage: React.FC = () => {
         />
       </Card>
 
-      {/* 测试匹配模态框 */}
+      {/* Test Match Modal */}
       <Modal
-        title="测试主题匹配"
+        title="Test Theme Matching"
         open={state.testModalVisible}
         onCancel={() => setState(prev => ({
           ...prev,
@@ -416,10 +905,10 @@ const InvestmentThemesPage: React.FC = () => {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <div>
-            <Text strong>输入新闻文本:</Text>
+            <Text strong>Enter News Text:</Text>
             <TextArea
               rows={4}
-              placeholder="请输入新闻标题和内容..."
+              placeholder="Please enter news title and content..."
               value={state.testNewsText}
               onChange={(e) => setState(prev => ({ ...prev, testNewsText: e.target.value }))}
               style={{ marginTop: '8px' }}
@@ -427,15 +916,15 @@ const InvestmentThemesPage: React.FC = () => {
           </div>
 
           <div>
-            <Text strong>选择市场:</Text>
+            <Text strong>Select Market:</Text>
             <Select
               style={{ width: '100%', marginTop: '8px' }}
               value={state.testMarket || ''}
               onChange={(value: string) => setState(prev => ({ ...prev, testMarket: value === '' ? undefined : value as 'HK' | 'US' | 'CN' }))}
             >
-              <Option value="HK">香港 (HK)</Option>
-              <Option value="US">美国 (US)</Option>
-              <Option value="">全部市场</Option>
+              <Option value="HK">Hong Kong (HK)</Option>
+              <Option value="US">United States (US)</Option>
+              <Option value="">All Markets</Option>
             </Select>
           </div>
 
@@ -446,14 +935,14 @@ const InvestmentThemesPage: React.FC = () => {
             loading={state.testLoading}
             block
           >
-            匹配主题
+            Match Themes
           </Button>
 
-          {/* 匹配结果 */}
+          {/* Match Results */}
           {state.testResults.length > 0 && (
             <div>
               <Divider />
-              <Title level={5}>匹配结果 (Top {state.testResults.length}):</Title>
+              <Title level={5}>Match Results (Top {state.testResults.length}):</Title>
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 {state.testResults.map((result, index) => (
                   <Card key={index} size="small">
@@ -468,7 +957,7 @@ const InvestmentThemesPage: React.FC = () => {
                         <Tag color={MARKET_COLORS[result.market]}>{result.market}</Tag>
                       </Col>
                       <Col span={8}>
-                        <Tooltip title={`相似度: ${result.similarity.toFixed(4)}`}>
+                        <Tooltip title={`Similarity: ${result.similarity.toFixed(4)}`}>
                           <Progress
                             percent={result.confidence * 100}
                             size="small"

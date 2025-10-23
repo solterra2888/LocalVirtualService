@@ -18,7 +18,10 @@ import {
   Empty,
   Select,
   List,
-  AutoComplete
+  AutoComplete,
+  Modal,
+  Form,
+  DatePicker
 } from 'antd';
 import {
   SearchOutlined,
@@ -47,7 +50,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
-import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction, CompanyFundamentalsUpdateResponse } from '../services/fundamentals';
+import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction, CompanyFundamentalsUpdateResponse, FinancialStatementsExportRequest } from '../services/fundamentals';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 import { getErrorMessage } from '../utils/errorHandler';
 
@@ -83,6 +86,11 @@ const FundamentalsPage: React.FC = () => {
     searchLoading: false,
     showSearchResults: false
   });
+
+  // Export dialog state
+  const [exportDialogVisible, setExportDialogVisible] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [form] = Form.useForm();
 
   // Check user permissions on component mount
   useEffect(() => {
@@ -2435,6 +2443,55 @@ const FundamentalsPage: React.FC = () => {
     message.success('Data exported successfully');
   };
 
+  // Export all financial statements to Excel
+  const handleExportAllData = async () => {
+    if (!state.fundamentalsData?.company) {
+      message.error('No company data available for export');
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      const formValues = await form.validateFields();
+      
+      const exportRequest: FinancialStatementsExportRequest = {
+        query: state.fundamentalsData.company.code || state.fundamentalsData.company.name,
+        year_range: formValues.yearRange ? [formValues.yearRange[0].year(), formValues.yearRange[1].year()] : undefined,
+        period_type: formValues.periodType,
+        display_unit: formValues.displayUnit || 'original'
+      };
+
+      const blob = await fundamentalsAPI.exportFinancialStatements(exportRequest);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // Generate filename
+      const companyCode = state.fundamentalsData.company.code || 'company';
+      const periodSuffix = formValues.periodType === 'quarterly' ? 'quarterly' : 'yearly';
+      const yearSuffix = formValues.yearRange 
+        ? `_${formValues.yearRange[0].year()}-${formValues.yearRange[1].year()}`
+        : '';
+      
+      a.download = `${companyCode}_financial_statements_${periodSuffix}${yearSuffix}.xlsx`;
+      
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      message.success('Financial statements exported successfully!');
+      setExportDialogVisible(false);
+    } catch (error) {
+      message.error('Failed to export financial statements. Please try again.');
+      console.error('Export error:', error);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   // Render financial statements tables
   const renderFinancialStatements = () => {
     if (!state.fundamentalsData) return null;
@@ -2521,7 +2578,7 @@ const FundamentalsPage: React.FC = () => {
         {/* Financial Data Controls */}
         <Card style={{ marginBottom: 16 }}>
           <Row gutter={[16, 16]} align="middle">
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={6}>
               <div>
                 <Text strong>Period Type:</Text>
                 <Select
@@ -2534,7 +2591,7 @@ const FundamentalsPage: React.FC = () => {
                 </Select>
               </div>
             </Col>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={6}>
               <div>
                 <Text strong>Search:</Text>
                 <Input
@@ -2546,7 +2603,7 @@ const FundamentalsPage: React.FC = () => {
                 />
               </div>
             </Col>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={6}>
               <div>
                 <Text strong>Display Unit:</Text>
                 <Select
@@ -2558,6 +2615,20 @@ const FundamentalsPage: React.FC = () => {
                   <Select.Option value="thousands">Thousands</Select.Option>
                   <Select.Option value="millions">Millions</Select.Option>
                 </Select>
+              </div>
+            </Col>
+            <Col xs={24} sm={6}>
+              <div>
+                <Text strong>Export:</Text>
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={() => setExportDialogVisible(true)}
+                  style={{ width: '100%', marginTop: 4 }}
+                  disabled={!state.fundamentalsData}
+                >
+                  Export All Data
+                </Button>
               </div>
             </Col>
           </Row>
@@ -3237,6 +3308,70 @@ const FundamentalsPage: React.FC = () => {
           />
         </Card>
       )}
+
+      {/* Export Dialog */}
+      <Modal
+        title="Export All Financial Statements"
+        open={exportDialogVisible}
+        onOk={handleExportAllData}
+        onCancel={() => setExportDialogVisible(false)}
+        confirmLoading={exportLoading}
+        width={600}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            periodType: 'yearly',
+            displayUnit: 'original'
+          }}
+        >
+          <Form.Item
+            label="Year Range"
+            name="yearRange"
+            tooltip="Select the year range for export. Leave empty to export all available data."
+          >
+            <DatePicker.RangePicker
+              picker="year"
+              style={{ width: '100%' }}
+              placeholder={['Start Year', 'End Year']}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="Period Type"
+            name="periodType"
+            rules={[{ required: true, message: 'Please select period type' }]}
+          >
+            <Select>
+              <Select.Option value="yearly">Yearly</Select.Option>
+              <Select.Option value="quarterly">Quarterly</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="Display Unit"
+            name="displayUnit"
+            rules={[{ required: true, message: 'Please select display unit' }]}
+          >
+            <Select>
+              <Select.Option value="original">Original</Select.Option>
+              <Select.Option value="thousands">Thousands</Select.Option>
+              <Select.Option value="millions">Millions</Select.Option>
+              <Select.Option value="billions">Billions</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 6 }}>
+            <Text strong>Export will include:</Text>
+            <ul style={{ marginTop: 8, marginBottom: 0 }}>
+              <li>Sheet 1: Balance Sheet ({form.getFieldValue('periodType') || 'yearly'})</li>
+              <li>Sheet 2: Income Statement ({form.getFieldValue('periodType') || 'yearly'})</li>
+              <li>Sheet 3: Cash Flow Statement ({form.getFieldValue('periodType') || 'yearly'})</li>
+            </ul>
+          </div>
+        </Form>
+      </Modal>
     </div>
   );
 };

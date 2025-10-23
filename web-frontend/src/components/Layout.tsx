@@ -15,8 +15,10 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   NotificationOutlined,
-  ThunderboltOutlined,
-  BuildOutlined
+  FundOutlined,
+  BuildOutlined,
+  CalendarOutlined,
+  ControlOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -32,7 +34,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const globalLogger = useGlobalLogger();
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -62,19 +64,9 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
-      key: '/investment-themes',
-      icon: <ThunderboltOutlined />,
-      label: 'Investment Themes',
-    },
-    {
       key: '/markets/economic-events',
-      icon: <ThunderboltOutlined />,
+      icon: <CalendarOutlined />,
       label: 'Economic Events',
-    },
-    {
-      key: '/markets/macro-indicators',
-      icon: <CodeOutlined />,
-      label: 'Macro Indicators',
     },
     {
       key: 'ug-data',
@@ -85,6 +77,11 @@ const Layout: React.FC = () => {
           key: '/fundamentals',
           icon: <FileTextOutlined />,
           label: 'Company Query',
+        },
+        {
+          key: '/markets/macro-indicators',
+          icon: <CodeOutlined />,
+          label: 'Macro Indicators',
         },
         {
           key: '/eod-fetch',
@@ -106,18 +103,23 @@ const Layout: React.FC = () => {
         {
           key: '/tasks',
           icon: <AppstoreOutlined />,
-          label: 'AI Agent Management',
+          label: 'AI Agent Settings',
         },
         {
           key: '/prompt-templates',
           icon: <BuildOutlined />,
           label: 'Prompt Templates',
         },
+        {
+          key: '/investment-themes',
+          icon: <FundOutlined />,
+          label: 'Themes Settings',
+        },
         ...(user?.is_admin ? [
           {
             key: '/llm-config',
             icon: <RobotOutlined />,
-            label: 'LLM Configuration',
+            label: 'LLM Settings',
           }
         ] : []),
       ],
@@ -130,7 +132,7 @@ const Layout: React.FC = () => {
         ...(user?.is_admin ? [
           {
             key: '/scheduler',
-            icon: <ThunderboltOutlined />,
+            icon: <ControlOutlined />,
             label: 'Data Source Management',
           },
           {
@@ -254,7 +256,7 @@ const Layout: React.FC = () => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={[]}
+          defaultOpenKeys={['ug-data', 'ai-agents', 'settings']}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ border: 'none', height: collapsed ? 'calc(100vh - 120px)' : 'calc(100vh - 120px)' }}

@@ -790,6 +790,31 @@ class InvestmentThemeEmbeddingService:
                 'avg_similarity': float(match_row[2]) if match_row and match_row[2] else 0.0
             }
             
+            # 🌟 新增：统计描述覆盖率和来源分布
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(description) as with_description,
+                    COUNT(CASE WHEN description_source = 'llm_generated' THEN 1 END) as llm_generated,
+                    COUNT(CASE WHEN description_source = 'simple_template' THEN 1 END) as simple_template,
+                    COUNT(CASE WHEN description_source = 'manual' THEN 1 END) as manual,
+                    COUNT(CASE WHEN description_source = 'scraped' THEN 1 END) as scraped
+                FROM futu_investment_themes
+            """)
+            
+            desc_row = cursor.fetchone()
+            description_stats = {
+                'total': desc_row[0] if desc_row else 0,
+                'with_description': desc_row[1] if desc_row else 0,
+                'coverage_rate': round((desc_row[1] / desc_row[0] * 100), 2) if desc_row and desc_row[0] > 0 else 0.0,
+                'source_breakdown': {
+                    'llm_generated': desc_row[2] if desc_row else 0,
+                    'simple_template': desc_row[3] if desc_row else 0,
+                    'manual': desc_row[4] if desc_row else 0,
+                    'scraped': desc_row[5] if desc_row else 0
+                }
+            }
+            
             cursor.close()
             conn.close()
             
@@ -797,6 +822,7 @@ class InvestmentThemeEmbeddingService:
                 'total_themes': total_count,
                 'market_breakdown': market_stats,
                 'match_statistics': match_stats,
+                'description_statistics': description_stats,  # 🌟 新增
                 'embedding_model': self.embedding_model,
                 'embedding_dimension': self.embedding_dimension
             }

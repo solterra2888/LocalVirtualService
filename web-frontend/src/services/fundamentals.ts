@@ -381,6 +381,14 @@ export interface CompanyFundamentalsUpdateResponse {
   execution_time?: number;
 }
 
+// 财务报表导出请求接口
+export interface FinancialStatementsExportRequest {
+  query: string;
+  year_range?: number[];
+  period_type: 'yearly' | 'quarterly';
+  display_unit: 'original' | 'thousands' | 'millions' | 'billions';
+}
+
 // API函数
 export const fundamentalsAPI = {
   // 搜索公司基本面信息
@@ -416,6 +424,24 @@ export const fundamentalsAPI = {
     const searchResult = await fundamentalsAPI.searchCompany(query);
 
     return { searchResult, updateResult };
+  },
+
+  // 导出财务报表为Excel
+  exportFinancialStatements: async (request: FinancialStatementsExportRequest): Promise<Blob> => {
+    try {
+      const response = await apiClient.post('/markets/company/export-financial-statements', request, {
+        responseType: 'blob'
+      });
+
+      if (response.data.size === 0) {
+        throw new Error('导出的文件为空，请检查是否有数据');
+      }
+
+      return response.data;
+    } catch (error) {
+      console.error('Export financial statements error:', error);
+      throw error;
+    }
   }
 };
 

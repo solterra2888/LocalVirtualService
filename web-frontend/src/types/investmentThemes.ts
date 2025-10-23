@@ -1,21 +1,24 @@
 /**
- * 投资主题向量检索相关类型定义
+ * Investment Theme Vector Retrieval Type Definitions
  */
 
 /**
- * 投资主题
+ * Investment Theme
  */
 export interface InvestmentTheme {
   theme_id: string;
   theme_name: string;
   market: 'HK' | 'US' | 'CN';
+  description?: string;  // Detailed theme description (LLM-generated or manually written)
+  description_source?: 'llm_generated' | 'manual' | 'scraped' | 'simple_template';  // Description source
+  description_updated_at?: string;  // Description update time
   embedding_model?: string;
   created_at?: string;
   updated_at?: string;
 }
 
 /**
- * 主题匹配结果
+ * Theme Match Result
  */
 export interface ThemeMatch {
   theme_id: string;
@@ -29,7 +32,7 @@ export interface ThemeMatch {
 }
 
 /**
- * 主题匹配请求
+ * Theme Match Request
  */
 export interface ThemeMatchRequest {
   news_text: string;
@@ -41,18 +44,19 @@ export interface ThemeMatchRequest {
 }
 
 /**
- * 主题统计信息
+ * Theme Statistics
  */
 export interface ThemeStatistics {
   total_themes: number;
   market_breakdown: MarketBreakdown[];
   match_statistics: MatchStatistics;
+  description_statistics?: DescriptionStatistics;  // New: Description statistics
   embedding_model: string;
   embedding_dimension: number;
 }
 
 /**
- * 市场统计
+ * Market Breakdown
  */
 export interface MarketBreakdown {
   market: string;
@@ -61,7 +65,7 @@ export interface MarketBreakdown {
 }
 
 /**
- * 匹配统计
+ * Match Statistics
  */
 export interface MatchStatistics {
   news_with_themes: number;
@@ -70,14 +74,29 @@ export interface MatchStatistics {
 }
 
 /**
- * 初始化请求
+ * Description Statistics
+ */
+export interface DescriptionStatistics {
+  total: number;
+  with_description: number;
+  coverage_rate: number;  // Coverage rate percentage
+  source_breakdown: {
+    llm_generated: number;
+    simple_template: number;
+    manual: number;
+    scraped: number;
+  };
+}
+
+/**
+ * Initialize Request
  */
 export interface InitializeThemesRequest {
   force_update: boolean;
 }
 
 /**
- * 初始化响应
+ * Initialize Response
  */
 export interface InitializeThemesResponse {
   success: boolean;
@@ -91,7 +110,7 @@ export interface InitializeThemesResponse {
 }
 
 /**
- * 新闻主题响应
+ * News Themes Response
  */
 export interface NewsThemesResponse {
   success: boolean;
@@ -101,7 +120,7 @@ export interface NewsThemesResponse {
 }
 
 /**
- * 主题列表响应
+ * Theme List Response
  */
 export interface ThemeListResponse {
   success: boolean;
@@ -112,7 +131,7 @@ export interface ThemeListResponse {
 }
 
 /**
- * 市场颜色映射
+ * Market Color Mapping
  */
 export const MARKET_COLORS: Record<string, string> = {
   HK: 'green',
@@ -121,16 +140,16 @@ export const MARKET_COLORS: Record<string, string> = {
 };
 
 /**
- * 市场标签映射
+ * Market Label Mapping
  */
 export const MARKET_LABELS: Record<string, string> = {
-  HK: '香港',
-  US: '美国',
-  CN: '中国',
+  HK: 'Hong Kong',
+  US: 'United States',
+  CN: 'China',
 };
 
 /**
- * 相似度等级
+ * Similarity Level
  */
 export enum SimilarityLevel {
   VERY_HIGH = 'very_high',  // >= 0.9
@@ -141,7 +160,7 @@ export enum SimilarityLevel {
 }
 
 /**
- * 获取相似度等级
+ * Get Similarity Level
  */
 export function getSimilarityLevel(similarity: number): SimilarityLevel {
   if (similarity >= 0.9) return SimilarityLevel.VERY_HIGH;
@@ -152,7 +171,7 @@ export function getSimilarityLevel(similarity: number): SimilarityLevel {
 }
 
 /**
- * 获取相似度颜色
+ * Get Similarity Color
  */
 export function getSimilarityColor(similarity: number): string {
   const level = getSimilarityLevel(similarity);
@@ -173,9 +192,27 @@ export function getSimilarityColor(similarity: number): string {
 }
 
 /**
- * 格式化相似度显示
+ * Format Similarity Display
  */
 export function formatSimilarity(similarity: number): string {
   return `${(similarity * 100).toFixed(0)}%`;
+}
+
+/**
+ * Description Source Label Mapping
+ */
+export const DESCRIPTION_SOURCE_LABELS: Record<string, { text: string; color: string }> = {
+  llm_generated: { text: 'LLM Generated', color: 'green' },
+  simple_template: { text: 'Simple Template', color: 'orange' },
+  manual: { text: 'Manual', color: 'blue' },
+  scraped: { text: 'Scraped', color: 'purple' },
+};
+
+/**
+ * Get Description Source Label
+ */
+export function getDescriptionSourceLabel(source?: string): { text: string; color: string } {
+  if (!source) return { text: 'Not Generated', color: 'default' };
+  return DESCRIPTION_SOURCE_LABELS[source] || { text: 'Unknown', color: 'default' };
 }
 

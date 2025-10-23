@@ -282,7 +282,7 @@ const EconomicEventsPage: React.FC = () => {
           <CalendarOutlined /> Economic Events
         </Title>
         <Text type="secondary">
-          Real-time economic events
+          Real-time economic events, 没有 https://tradingeconomics.com/calendar 全面，未来会改进...
         </Text>
       </div>
 

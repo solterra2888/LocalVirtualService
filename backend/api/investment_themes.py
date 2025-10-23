@@ -49,6 +49,12 @@ class UpdateThemeRequest(BaseModel):
     market: str = Field(..., description="市场代码（HK/US/CN）")
 
 
+class FillDescriptionsRequest(BaseModel):
+    """批量填充主题描述请求"""
+    force_regenerate: bool = Field(False, description="是否强制重新生成已存在的描述")
+    market: Optional[str] = Field(None, description="市场过滤（HK/US/CN），为空则处理所有市场")
+
+
 # ==================== API Endpoints ====================
 
 @router.post("/match", response_model=List[ThemeMatchResponse])
@@ -337,10 +343,12 @@ async def list_all_themes(
         
         # 构建查询
         where_clause = ""
+        where_clause_with_alias = ""
         params = []
         
         if market:
             where_clause = "WHERE market = %s"
+            where_clause_with_alias = "WHERE ite.market = %s"
             params.append(market)
         
         # 获取总数
@@ -351,19 +359,24 @@ async def list_all_themes(
         """, params)
         total_count = cursor.fetchone()[0]
         
-        # 获取列表
+        # 获取列表（联合查询获取 description 相关字段）
         params.extend([limit, offset])
         cursor.execute(f"""
             SELECT 
-                theme_id,
-                theme_name,
-                market,
-                embedding_model,
-                created_at,
-                updated_at
-            FROM investment_theme_embeddings
-            {where_clause}
-            ORDER BY market, theme_name
+                ite.theme_id,
+                ite.theme_name,
+                ite.market,
+                ite.embedding_model,
+                ite.created_at,
+                ite.updated_at,
+                fit.description,
+                fit.description_source,
+                fit.description_updated_at
+            FROM investment_theme_embeddings ite
+            LEFT JOIN futu_investment_themes fit 
+                ON ite.theme_id = fit.theme_id AND ite.market = fit.market
+            {where_clause_with_alias}
+            ORDER BY ite.market, ite.theme_name
             LIMIT %s OFFSET %s
         """, params)
         
@@ -375,7 +388,10 @@ async def list_all_themes(
                 'market': row[2],
                 'embedding_model': row[3],
                 'created_at': row[4].isoformat() if row[4] else None,
-                'updated_at': row[5].isoformat() if row[5] else None
+                'updated_at': row[5].isoformat() if row[5] else None,
+                'description': row[6],  # 主题描述
+                'description_source': row[7],  # 描述来源
+                'description_updated_at': row[8].isoformat() if row[8] else None  # 描述更新时间
             })
         
         cursor.close()
@@ -392,4 +408,136 @@ async def list_all_themes(
     except Exception as e:
         logger.error(f"获取主题列表失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+
+
+@router.post("/fill-descriptions")
+async def fill_theme_descriptions(request: FillDescriptionsRequest, background_tasks: BackgroundTasks):
+    """
+    批量填充主题描述（使用LLM生成）
+    
+    参数：
+    - force_regenerate: 是否强制重新生成已有描述
+    - market: 市场过滤（可选）
+    
+    说明：
+    - 默认只填充缺失的描述（增量更新）
+    - force_regenerate=True 时会重新生成所有描述
+    - 使用后台任务异步处理，避免超时
+    
+    示例：
+    ```
+    POST /api/investment-themes/fill-descriptions
+    {
+        "force_regenerate": false,
+        "market": "US"
+    }
+    ```
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        
+        cursor = conn.cursor()
+        
+        # 构建查询条件
+        where_clause = ""
+        params = []
+        
+        if request.market:
+            where_clause = "WHERE market = %s"
+            params.append(request.market)
+        
+        if not request.force_regenerate:
+            # 只填充缺失的描述
+            where_clause = f"{where_clause} AND" if where_clause else "WHERE"
+            where_clause += " (description IS NULL OR description = '')"
+        
+        # 获取需要处理的主题
+        cursor.execute(f"""
+            SELECT id, theme_id, theme_name, market
+            FROM futu_investment_themes
+            {where_clause}
+            ORDER BY market, theme_name
+        """, params)
+        
+        themes_to_process = cursor.fetchall()
+        total = len(themes_to_process)
+        
+        cursor.close()
+        conn.close()
+        
+        if total == 0:
+            return {
+                "success": True,
+                "message": "没有需要处理的主题",
+                "statistics": {
+                    "total": 0,
+                    "processed": 0,
+                    "failed": 0
+                }
+            }
+        
+        # 使用后台任务处理（避免超时）
+        async def process_descriptions():
+            try:
+                db_config_bg = get_database_config()
+                service = InvestmentThemeEmbeddingService(db_config_bg)
+                
+                processed = 0
+                failed = 0
+                
+                for row in themes_to_process:
+                    db_theme_id, theme_id, theme_name, market = row
+                    try:
+                        conn_bg = service.db_manager.get_connection()
+                        cursor_bg = conn_bg.cursor()
+                        
+                        # 调用生成描述方法
+                        await service._generate_enriched_theme_text(
+                            cursor=cursor_bg,
+                            theme_id=theme_id,
+                            theme_name=theme_name,
+                            market=market,
+                            db_theme_id=db_theme_id,
+                            force_regenerate=request.force_regenerate
+                        )
+                        
+                        conn_bg.commit()
+                        cursor_bg.close()
+                        conn_bg.close()
+                        
+                        processed += 1
+                        logger.info(f"✅ 描述已生成: {theme_name} ({processed}/{total})")
+                        
+                    except Exception as e:
+                        failed += 1
+                        logger.error(f"❌ 描述生成失败: {theme_name} - {str(e)}")
+                
+                logger.info(f"🎉 批量填充完成！总计: {total}, 成功: {processed}, 失败: {failed}")
+                
+            except Exception as e:
+                logger.error(f"后台任务失败: {str(e)}")
+        
+        # 添加到后台任务
+        background_tasks.add_task(process_descriptions)
+        
+        return {
+            "success": True,
+            "message": f"已启动批量填充任务，将处理 {total} 个主题",
+            "statistics": {
+                "total": total,
+                "processing": total,
+                "note": "任务在后台异步执行，请稍后查看统计信息"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"批量填充描述失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"操作失败: {str(e)}")
 

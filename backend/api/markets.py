@@ -8,9 +8,11 @@ Markets API - 市场数据接口
 
 import os
 import sys
+import io
+import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
-from fastapi import APIRouter, HTTPException, Depends, Query, status
+from fastapi import APIRouter, HTTPException, Depends, Query, status, Response
 from pydantic import BaseModel, Field
 
 from backend.auth.jwt_utils import get_current_user
@@ -1658,3 +1660,455 @@ async def update_company_fundamentals(
             message=f"更新公司基本面数据失败: {str(e)}",
             execution_time=execution_time
         )
+
+
+# 财务报表导出相关的数据模型
+class FinancialStatementsExportRequest(BaseModel):
+    """财务报表导出请求"""
+    query: str = Field(..., description="股票代码或公司名称")
+    year_range: Optional[List[int]] = Field(None, description="年份范围，如[2020, 2023]")
+    period_type: str = Field(default="yearly", description="期间类型: yearly 或 quarterly")
+    display_unit: str = Field(default="original", description="显示单位: original, thousands, millions, billions")
+
+
+@router.post("/company/export-financial-statements", summary="导出财务报表为Excel")
+async def export_financial_statements(
+    request: FinancialStatementsExportRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    导出指定公司的财务报表为Excel文件
+    
+    功能：
+    1. 根据查询条件查找公司
+    2. 获取指定年份范围和期间类型的财务报表数据
+    3. 生成包含三个工作表的Excel文件：
+       - Sheet1: Balance Sheet (资产负债表)
+       - Sheet2: Income Statement (利润表) 
+       - Sheet3: Cash Flow Statement (现金流量表)
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        info(f"开始导出财务报表", 
+             query=request.query,
+             year_range=request.year_range,
+             period_type=request.period_type,
+             display_unit=request.display_unit,
+             user=current_user.username,
+             source="markets_api")
+        
+        # 获取数据库连接参数
+        from backend.utils.database_config import get_database_config
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 查找公司信息
+        query_sql = """
+        SELECT id, code, name, exchange, primaryticker, currencycode
+        FROM companies 
+        WHERE UPPER(code) = UPPER(%s) 
+           OR UPPER(primaryticker) = UPPER(%s) 
+           OR UPPER(name) ILIKE %s
+        ORDER BY 
+            CASE 
+                WHEN UPPER(code) = UPPER(%s) THEN 1
+                WHEN UPPER(primaryticker) = UPPER(%s) THEN 2
+                ELSE 3
+            END
+        LIMIT 1
+        """
+        
+        search_pattern = f"%{request.query}%"
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute(query_sql, (request.query, request.query, search_pattern, request.query, request.query))
+            company_result = cursor.fetchall()
+        
+        if not company_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到公司: {request.query}"
+            )
+        
+        company = dict(company_result[0])
+        company_id = company['id']
+        
+        # 构建年份过滤条件
+        year_filter = ""
+        params = [company_id]
+        if request.year_range and len(request.year_range) == 2:
+            start_year, end_year = request.year_range
+            year_filter = " AND EXTRACT(YEAR FROM date) BETWEEN %s AND %s"
+            params.extend([start_year, end_year])
+        
+        # 构建期间类型过滤条件
+        period_filter = ""
+        if request.period_type == "quarterly":
+            period_filter = " AND period_type = 'quarterly'"
+        else:
+            period_filter = " AND period_type = 'annual'"
+        
+        # 查询财务报表数据
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            
+            # 查询资产负债表
+            balance_sheet_sql = f"""
+            SELECT * FROM company_balance_sheet 
+            WHERE company_id = %s{year_filter}{period_filter}
+            ORDER BY date DESC
+            """
+            cursor.execute(balance_sheet_sql, params)
+            balance_sheet_data = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询利润表
+            income_statement_sql = f"""
+            SELECT * FROM company_income_statement 
+            WHERE company_id = %s{year_filter}{period_filter}
+            ORDER BY date DESC
+            """
+            cursor.execute(income_statement_sql, params)
+            income_statement_data = [dict(row) for row in cursor.fetchall()]
+            
+            # 查询现金流量表
+            cash_flow_sql = f"""
+            SELECT * FROM company_cash_flow 
+            WHERE company_id = %s{year_filter}{period_filter}
+            ORDER BY date DESC
+            """
+            cursor.execute(cash_flow_sql, params)
+            cash_flow_data = [dict(row) for row in cursor.fetchall()]
+        
+        if not balance_sheet_data and not income_statement_data and not cash_flow_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到符合条件的财务报表数据: {request.query}"
+            )
+        
+        # 创建Excel文件
+        output = io.BytesIO()
+        workbook = Workbook()
+        
+        # 删除默认工作表
+        workbook.remove(workbook.active)
+        
+        # 定义字段映射 - 与前端FundamentalsPage完全一致
+        balance_sheet_fields = {
+            # Assets Section - Current Assets
+            'cash': 'Cash',
+            'cashandequivalents': 'Cash and Equivalents',
+            'cashandshortterminvestments': 'Cash and Short-term Investments',
+            'shortterminvestments': 'Short-term Investments',
+            'netreceivables': 'Net Receivables',
+            'inventory': 'Inventory',
+            'othercurrentassets': 'Other Current Assets',
+            'totalcurrentassets': 'Total Current Assets',
+            
+            # Non-Current Assets
+            'longterminvestments': 'Long-term Investments',
+            'propertyplantequipment': 'Property, Plant & Equipment',
+            'propertyplantandequipmentgross': 'PP&E Gross',
+            'propertyplantandequipmentnet': 'PP&E Net',
+            'accumulateddepreciation': 'Accumulated Depreciation',
+            'goodwill': 'Goodwill',
+            'intangibleassets': 'Intangible Assets',
+            'accumulatedamortization': 'Accumulated Amortization',
+            'noncurrrentassetsother': 'Other Non-current Assets',
+            'deferredlongtermassetcharges': 'Deferred Long-term Asset Charges',
+            'otherassets': 'Other Assets',
+            'earningassets': 'Earning Assets',
+            'nettangibleassets': 'Net Tangible Assets',
+            'noncurrentassetstotal': 'Total Non-current Assets',
+            
+            # Total Assets
+            'totalassets': 'Total Assets',
+
+            # Liabilities Section - Current Liabilities
+            'accountspayable': 'Accounts Payable',
+            'shorttermdebt': 'Short-term Debt',
+            'shortlongtermdebt': 'Short/Long-term Debt',
+            'shortlongtermdebttotal': 'Short/Long-term Debt Total',
+            'othercurrentliab': 'Other Current Liabilities',
+            'currentdeferredrevenue': 'Current Deferred Revenue',
+            'totalcurrentliabilities': 'Total Current Liabilities',
+            
+            # Non-Current Liabilities
+            'longtermdebt': 'Long-term Debt',
+            'longtermdebttotal': 'Total Long-term Debt',
+            'capitalleaseobligations': 'Capital Lease Obligations',
+            'deferredlongtermliab': 'Deferred Long-term Liabilities',
+            'noncurrentliabilitiesother': 'Other Non-current Liabilities',
+            'otherliab': 'Other Liabilities',
+            'netdebt': 'Net Debt',
+            'noncurrentliabilitiestotal': 'Total Non-current Liabilities',
+            
+            # Total Liabilities
+            'totalliab': 'Total Liabilities',
+
+            # Equity Section
+            'commonstock': 'Common Stock',
+            'capitalstock': 'Capital Stock',
+            'retainedearnings': 'Retained Earnings',
+            'otherstockholderequity': 'Other Stockholder Equity',
+            'accumulatedothercomprehensiveincome': 'Accumulated Other Comprehensive Income',
+            'additionalpaidincapital': 'Additional Paid-in Capital',
+            'commonstocktotalequity': 'Common Stock Total Equity',
+            'preferredstocktotalequity': 'Preferred Stock Total Equity',
+            'retainedearningstotalequity': 'Retained Earnings Total Equity',
+            'treasurystock': 'Treasury Stock',
+            'totalpermanentequity': 'Total Permanent Equity',
+            'noncontrollinginterestinconsolidatedentity': 'Non-controlling Interest in Consolidated Entity',
+            'temporaryequityredeemablenoncontrollinginterests': 'Temporary Equity Redeemable Non-controlling Interests',
+            'negativegoodwill': 'Negative Goodwill',
+            'warrants': 'Warrants',
+            'preferredstockredeemable': 'Preferred Stock Redeemable',
+            'capitalsurpluse': 'Capital Surplus',
+            'liabilitiesandstockholdersequity': 'Liabilities and Stockholders Equity',
+            'networkingcapital': 'Net Working Capital',
+            'netinvestedcapital': 'Net Invested Capital',
+            'commonstocksharesoutstanding': 'Common Stock Shares Outstanding',
+            'totalstockholderequity': 'Total Stockholder Equity'
+        }
+        
+        income_statement_fields = {
+            # Revenue Section
+            'totalrevenue': 'Total Revenue',
+            'costofrevenue': 'Cost of Revenue',
+            'grossprofit': 'Gross Profit',
+            
+            # Operating Expenses Section
+            'totaloperatingexpenses': 'Total Operating Expenses',
+            'researchdevelopment': 'Research & Development',
+            'sellinggeneraladministrative': 'Selling, General & Administrative',
+            'sellingandmarketingexpenses': 'Selling and Marketing Expenses',
+            'otheroperatingexpenses': 'Other Operating Expenses',
+            
+            # Operating Income Section
+            'operatingincome': 'Operating Income',
+            'ebit': 'EBIT',
+            'ebitda': 'EBITDA',
+            
+            # Interest Section
+            'interestincome': 'Interest Income',
+            'interestexpense': 'Interest Expense',
+            'netinterestincome': 'Net Interest Income',
+            
+            # Other Income/Expense Section
+            'totalotherincomeexpensenet': 'Total Other Income/Expense Net',
+            'nonoperatingincomenetother': 'Non-Operating Income Net Other',
+            
+            # Pre-Tax Income Section
+            'incomebeforetax': 'Income Before Tax',
+            
+            # Tax Section
+            'taxprovision': 'Tax Provision',
+            'incometaxexpense': 'Income Tax Expense',
+            
+            # Net Income Section
+            'netincome': 'Net Income',
+            'netincomefromcontinuingops': 'Net Income from Continuing Operations',
+            'netincomeapplicabletocommonshares': 'Net Income Applicable to Common Shares',
+            
+            # Depreciation & Amortization Section
+            'reconcileddepreciation': 'Reconciled Depreciation',
+            'depreciationandamortization': 'Depreciation and Amortization',
+            
+            # Special Items Section
+            'extraordinaryitems': 'Extraordinary Items',
+            'nonrecurring': 'Non-Recurring',
+            'otheritems': 'Other Items',
+            'discontinuedoperations': 'Discontinued Operations',
+            'effectofaccountingcharges': 'Effect of Accounting Charges',
+            
+            # Minority Interest & Adjustments Section
+            'minorityinterest': 'Minority Interest',
+            'preferredstockandotheradjustments': 'Preferred Stock and Other Adjustments'
+        }
+        
+        cash_flow_fields = {
+            # Operating Activities
+            'netincome': 'Net Income',
+            'depreciation': 'Depreciation',
+            'stockbasedcompensation': 'Stock Based Compensation',
+            'changeinworkingcapital': 'Change in Working Capital',
+            'changetoaccountreceivables': 'Change to Account Receivables',
+            'changetoinventory': 'Change to Inventory',
+            'changetoliabilities': 'Change to Liabilities',
+            'changetooperatingactivities': 'Change to Operating Activities',
+            'changetonetincome': 'Change to Net Income',
+            'changereceivables': 'Change Receivables',
+            'othernoncashitems': 'Other Non-Cash Items',
+            'cashflowsotheroperating': 'Cash Flows Other Operating',
+            'totalcashfromoperatingactivities': 'Total Cash from Operating Activities',
+            
+            # Investing Activities
+            'capitalexpenditures': 'Capital Expenditures',
+            'investments': 'Investments',
+            'othercashflowsfrominvestingactivities': 'Other Cash Flows from Investing',
+            'salepurchaseofstock': 'Sale/Purchase of Stock',
+            'totalcashflowsfrominvestingactivities': 'Total Cash from Investing Activities',
+            
+            # Financing Activities
+            'dividendspaid': 'Dividends Paid',
+            'netborrowings': 'Net Borrowings',
+            'issuanceofcapitalstock': 'Issuance of Capital Stock',
+            'othercashflowsfromfinancingactivities': 'Other Cash Flows from Financing',
+            'totalcashfromfinancingactivities': 'Total Cash from Financing Activities',
+            
+            # Cash Flow Summary
+            'changeincash': 'Change in Cash',
+            'beginperiodcashflow': 'Beginning Period Cash Flow',
+            'endperiodcashflow': 'End Period Cash Flow',
+            'exchangeratechanges': 'Exchange Rate Changes',
+            'cashandcashequivalentschanges': 'Cash and Cash Equivalents Changes',
+            'freecashflow': 'Free Cash Flow'
+        }
+        
+        # 处理显示单位
+        def format_value(value, unit="original"):
+            if value is None or value == '':
+                return None
+            if unit == "thousands":
+                return value / 1000
+            elif unit == "millions":
+                return value / 1000000
+            elif unit == "billions":
+                return value / 1000000000
+            return value
+        
+        # 创建资产负债表工作表
+        if balance_sheet_data:
+            ws_balance = workbook.create_sheet(title=f"balance_sheet_{request.period_type}")
+            _create_financial_sheet(ws_balance, balance_sheet_data, balance_sheet_fields, 
+                                 request.display_unit, company)
+        
+        # 创建利润表工作表
+        if income_statement_data:
+            ws_income = workbook.create_sheet(title=f"income_statement_{request.period_type}")
+            _create_financial_sheet(ws_income, income_statement_data, income_statement_fields,
+                                 request.display_unit, company)
+        
+        # 创建现金流量表工作表
+        if cash_flow_data:
+            ws_cashflow = workbook.create_sheet(title=f"cashflow_statement_{request.period_type}")
+            _create_financial_sheet(ws_cashflow, cash_flow_data, cash_flow_fields,
+                                 request.display_unit, company)
+        
+        # 保存到内存
+        workbook.save(output)
+        output.seek(0)
+        
+        # 生成文件名
+        company_code = company.get('code', 'company')
+        period_suffix = 'quarterly' if request.period_type == 'quarterly' else 'yearly'
+        year_suffix = ""
+        if request.year_range and len(request.year_range) == 2:
+            year_suffix = f"_{request.year_range[0]}-{request.year_range[1]}"
+        
+        filename = f"{company_code}_financial_statements_{period_suffix}{year_suffix}.xlsx"
+        
+        info(f"财务报表导出完成", 
+             company_code=company_code,
+             filename=filename,
+             balance_sheet_records=len(balance_sheet_data),
+             income_statement_records=len(income_statement_data),
+             cash_flow_records=len(cash_flow_data),
+             user=current_user.username,
+             source="markets_api")
+        
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"导出财务报表失败: {str(e)}", 
+              query=request.query,
+              user=current_user.username,
+              source="markets_api")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导出财务报表失败: {str(e)}"
+        )
+
+
+def _create_financial_sheet(worksheet, data, field_mapping, display_unit, company):
+    """创建财务报表工作表的辅助函数"""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    
+    # 设置标题样式
+    title_font = Font(bold=True, size=14)
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+    
+    # 添加公司信息
+    worksheet['A1'] = f"Company: {company.get('name', 'N/A')}"
+    worksheet['A1'].font = title_font
+    worksheet['A2'] = f"Code: {company.get('code', 'N/A')}"
+    worksheet['A3'] = f"Exchange: {company.get('exchange', 'N/A')}"
+    worksheet['A4'] = f"Currency: {company.get('currencycode', 'USD')}"
+    worksheet['A5'] = f"Display Unit: {display_unit}"
+    worksheet['A6'] = f"Export Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    # 创建数据表格
+    row_start = 8
+    
+    # 创建表头
+    headers = ['Financial Item', 'Field Name']
+    periods = sorted(set(item['date'] for item in data), reverse=True)
+    headers.extend([f"{period}" for period in periods])
+    
+    for col, header in enumerate(headers, 1):
+        cell = worksheet.cell(row=row_start, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+    
+    # 填充数据
+    row = row_start + 1
+    for field_key, field_label in field_mapping.items():
+        worksheet.cell(row=row, column=1, value=field_label)
+        worksheet.cell(row=row, column=2, value=field_key)
+        
+        for col, period in enumerate(periods, 3):
+            # 查找对应期间的数据
+            period_data = next((item for item in data if item['date'] == period), None)
+            if period_data and field_key in period_data:
+                value = period_data[field_key]
+                if value is not None:
+                    # 应用显示单位转换
+                    if display_unit == "thousands":
+                        formatted_value = value / 1000
+                    elif display_unit == "millions":
+                        formatted_value = value / 1000000
+                    elif display_unit == "billions":
+                        formatted_value = value / 1000000000
+                    else:
+                        formatted_value = value
+                    
+                    worksheet.cell(row=row, column=col, value=formatted_value)
+        
+        row += 1
+    
+    # 调整列宽
+    for column in worksheet.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                cell_length = len(str(cell.value or ''))
+                if cell_length > max_length:
+                    max_length = cell_length
+            except Exception:
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        worksheet.column_dimensions[column_letter].width = adjusted_width

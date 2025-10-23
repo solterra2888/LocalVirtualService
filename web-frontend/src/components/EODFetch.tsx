@@ -13,14 +13,11 @@ import {
   message,
   Spin,
   Table,
-  Tag,
-  Statistic,
   Radio
 } from 'antd';
 import {
   DownloadOutlined,
   SearchOutlined,
-  InfoCircleOutlined,
   BarChartOutlined,
   DatabaseOutlined
 } from '@ant-design/icons';
@@ -240,36 +237,8 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
       render: (value: number) => value.toLocaleString(),
       sorter: (a: EODData, b: EODData) => a.volume - b.volume,
     },
-    {
-      title: 'Warning',
-      dataIndex: 'warning',
-      key: 'warning',
-      width: 200,
-      render: (warning: string) => warning ? (
-        <Tag color="orange" icon={<InfoCircleOutlined />}>
-          {warning}
-        </Tag>
-      ) : null,
-    },
   ];
 
-  // Calculate statistics
-  const calculateStats = () => {
-    if (eodData.length === 0) return null;
-
-    const prices = eodData.map(d => d.close);
-    const volumes = eodData.map(d => d.volume);
-    
-    return {
-      highestPrice: Math.max(...prices),
-      lowestPrice: Math.min(...prices),
-      avgVolume: volumes.reduce((a, b) => a + b, 0) / volumes.length,
-      totalVolume: volumes.reduce((a, b) => a + b, 0),
-      priceChange: prices[0] ? ((prices[prices.length - 1] - prices[0]) / prices[0] * 100) : 0
-    };
-  };
-
-  const stats = calculateStats();
 
   return (
     <div style={{ padding: '24px' }}>
@@ -292,110 +261,116 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
             period: 'd'
           }}
         >
-          <Row gutter={[16, 16]}>
-            <Col xs={24} sm={24} md={8}>
-              <Form.Item
-                name="ticker"
-                label="Ticker Symbol"
-                rules={[
-                  { required: true, message: 'Please enter a ticker symbol' },
-                  { validator: validateTicker }
-                ]}
-                tooltip="Enter ticker with exchange code (e.g., AAPL.US, 1810.HK)"
-              >
-                <Input
-                  placeholder="e.g., AAPL.US"
-                  prefix={<SearchOutlined />}
-                  size="large"
-                  style={{ textTransform: 'uppercase' }}
-                />
-              </Form.Item>
+          <Row gutter={[16, 16]} align="top">
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Text strong>Ticker Symbol:</Text>
+                <Form.Item
+                  name="ticker"
+                  rules={[
+                    { required: true, message: 'Please enter a ticker symbol' },
+                    { validator: validateTicker }
+                  ]}
+                  tooltip="Enter ticker with exchange code (e.g., AAPL.US, 1810.HK)"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input
+                    placeholder="e.g., AAPL.US"
+                    prefix={<SearchOutlined />}
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                </Form.Item>
+              </Space>
             </Col>
             
-            <Col xs={24} sm={24} md={8}>
-              <Form.Item
-                name="period"
-                label="Period"
-                rules={[{ required: true, message: 'Please select a period' }]}
-                tooltip="Select data aggregation period"
-              >
-                <Radio.Group 
-                  size="large"
-                  style={{ width: '100%', display: 'flex' }}
-                  optionType="button"
-                  buttonStyle="solid"
-                  value={selectedPeriod}
-                  onChange={(e) => {
-                    setSelectedPeriod(e.target.value);
-                    form.setFieldsValue({ period: e.target.value });
-                  }}
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Text strong>Period:</Text>
+                <Form.Item
+                  name="period"
+                  rules={[{ required: true, message: 'Please select a period' }]}
+                  tooltip="Select data aggregation period"
+                  style={{ marginBottom: 0 }}
                 >
-                  {periodOptions.map(option => (
-                    <Radio.Button 
-                      key={option.value} 
-                      value={option.value}
-                      style={{ flex: 1, textAlign: 'center' }}
-                    >
-                      {option.label}
-                    </Radio.Button>
-                  ))}
-                </Radio.Group>
-                <div style={{ marginTop: 8, fontSize: '12px', color: '#666', textAlign: 'center', minHeight: '16px' }}>
+                  <Radio.Group 
+                    style={{ width: '100%', display: 'flex' }}
+                    optionType="button"
+                    buttonStyle="solid"
+                    value={selectedPeriod}
+                    onChange={(e) => {
+                      setSelectedPeriod(e.target.value);
+                      form.setFieldsValue({ period: e.target.value });
+                    }}
+                  >
+                    {periodOptions.map(option => (
+                      <Radio.Button 
+                        key={option.value} 
+                        value={option.value}
+                        style={{ flex: 1, textAlign: 'center' }}
+                      >
+                        {option.label}
+                      </Radio.Button>
+                    ))}
+                  </Radio.Group>
+                </Form.Item>
+                <div style={{ fontSize: '12px', color: '#666', textAlign: 'center', minHeight: '16px' }}>
                   <Text type="secondary">
                     {periodOptions.find(p => p.value === selectedPeriod)?.description || 'Select a period to see description'}
                   </Text>
                 </div>
-              </Form.Item>
+              </Space>
             </Col>
             
-            <Col xs={24} sm={24} md={8}>
-              <Form.Item
-                name="dateRange"
-                label="Date Range (Optional)"
-                tooltip="Leave empty to fetch all available data"
-              >
-                <RangePicker
-                  style={{ width: '100%' }}
-                  size="large"
-                  disabledDate={disabledDate}
-                  placeholder={['Start Date', 'End Date']}
-                />
-              </Form.Item>
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Text strong>Date Range (Optional):</Text>
+                <Form.Item
+                  name="dateRange"
+                  tooltip="Leave empty to fetch all available data"
+                  style={{ marginBottom: 0 }}
+                >
+                  <RangePicker
+                    style={{ width: '100%' }}
+                    disabledDate={disabledDate}
+                    placeholder={['Start Date', 'End Date']}
+                  />
+                </Form.Item>
+              </Space>
+            </Col>
+            
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Text strong>Actions:</Text>
+                <Space wrap>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<DownloadOutlined />}
+                    loading={loading}
+                  >
+                    Fetch Data
+                  </Button>
+                  <Button
+                    onClick={handleExport}
+                    icon={<DownloadOutlined />}
+                    loading={exporting}
+                    disabled={!fetchInfo}
+                  >
+                    Export
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      form.resetFields();
+                      setEodData([]);
+                      setFetchInfo(null);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </Space>
+              </Space>
             </Col>
           </Row>
-
-          <Form.Item>
-            <Space>
-              <Button
-                type="primary"
-                htmlType="submit"
-                icon={<DownloadOutlined />}
-                loading={loading}
-                size="large"
-              >
-                Fetch EOD Data
-              </Button>
-              <Button
-                onClick={handleExport}
-                icon={<DownloadOutlined />}
-                loading={exporting}
-                disabled={!fetchInfo}
-                size="large"
-              >
-                Export Excel
-              </Button>
-              <Button
-                onClick={() => {
-                  form.resetFields();
-                  setEodData([]);
-                  setFetchInfo(null);
-                }}
-                size="large"
-              >
-                Reset
-              </Button>
-            </Space>
-          </Form.Item>
         </Form>
 
         {loading && (
@@ -417,45 +392,6 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
           />
         )}
 
-        {stats && (
-          <Card size="small" style={{ marginTop: 16 }}>
-            <Title level={4}>Data Statistics</Title>
-            <Row gutter={16}>
-              <Col span={6}>
-                <Statistic
-                  title="Highest Price"
-                  value={stats.highestPrice}
-                  prefix="$"
-                  precision={2}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="Lowest Price"
-                  value={stats.lowestPrice}
-                  prefix="$"
-                  precision={2}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="Average Volume"
-                  value={stats.avgVolume}
-                  precision={0}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="Price Change"
-                  value={stats.priceChange}
-                  suffix="%"
-                  precision={2}
-                  valueStyle={{ color: stats.priceChange >= 0 ? '#3f8600' : '#cf1322' }}
-                />
-              </Col>
-            </Row>
-          </Card>
-        )}
 
         {eodData.length > 0 && (
           <Card size="small" style={{ marginTop: 16 }}>
@@ -468,13 +404,13 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
               dataSource={eodData}
               rowKey="date"
               pagination={{
-                pageSize: 20,
+                total: eodData.length,
+                pageSize: 50,
                 showSizeChanger: true,
                 showQuickJumper: true,
-                showTotal: (total, range) => 
-                  `${range[0]}-${range[1]} of ${total} records`
+                showTotal: (total, range) => `Showing ${range[0]}-${range[1]} of ${total} records`
               }}
-              scroll={{ x: 800 }}
+              scroll={{ x: 760 }}
               size="small"
             />
           </Card>

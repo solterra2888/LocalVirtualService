@@ -1,7 +1,7 @@
 // EODHD API service for fetching End-of-Day stock data
 // Based on: https://eodhd.com/api/eod/{SYMBOL}?from={DATE}&to={DATE}&period={PERIOD}&api_token={TOKEN}&fmt=json
 
-import { api } from './api';
+import { api, default as apiClient } from './api';
 
 export interface EODData {
   date: string;
@@ -79,54 +79,18 @@ class EODApiService {
 
       console.log('Exporting EOD data with params:', requestBody);
 
-      const url = `/api${this.baseUrl}/export`;
-      const token = localStorage.getItem('access_token');
-      console.log('Export URL:', url);
-      console.log('Access token exists:', !!token);
-      console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'no token');
-
-      // Use raw API client for file download with POST method
-      // baseUrl is '/eod-fetch', so we need to add '/api' prefix manually
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
-        },
-        body: JSON.stringify(requestBody)
+      // Use the unified API client for consistency with blob response
+      const response = await apiClient.post(`${this.baseUrl}/export`, requestBody, {
+        responseType: 'blob'
       });
 
-      console.log('Export response status:', response.status);
-
-      if (!response.ok) {
-        let errorMessage = `Export failed! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.detail || errorMessage;
-          console.error('Export error details:', errorData);
-        } catch (e) {
-          // 如果不是JSON响应，尝试获取文本
-          try {
-            const errorText = await response.text();
-            console.error('Export error text:', errorText);
-            if (errorText) {
-              errorMessage = errorText;
-            }
-          } catch (textError) {
-            console.error('Failed to get error text:', textError);
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      const blob = await response.blob();
-      console.log('Export blob size:', blob.size);
+      console.log('Export response received, blob size:', response.data.size);
       
-      if (blob.size === 0) {
+      if (response.data.size === 0) {
         throw new Error('导出的文件为空，请检查是否有数据');
       }
 
-      return blob;
+      return response.data;
     } catch (error) {
       console.error('Export EOD data error:', error);
       throw error;

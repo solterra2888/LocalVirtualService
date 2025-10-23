@@ -112,7 +112,7 @@ async def fetch_eod_data(
         
         # 先检查是否已有存储的数据
         existing_data = await eod_service.get_stored_eod_data(
-            ticker=request.ticker,
+            ticker=request.ticker.upper(),
             period=request.period,
             from_date=request.from_date,
             to_date=request.to_date,
@@ -158,7 +158,7 @@ async def fetch_eod_data(
         try:
             # 设置较短的超时时间进行快速检查
             result = await eod_service.fetch_and_store_eod_data_with_timeout(
-                ticker=request.ticker,
+                ticker=request.ticker.upper(),
                 period=request.period,
                 from_date=request.from_date,
                 to_date=request.to_date,
@@ -168,7 +168,7 @@ async def fetch_eod_data(
             if result["success"]:
                 # 获取已处理的数据
                 display_data = await eod_service.get_stored_eod_data(
-                    ticker=request.ticker,
+                    ticker=request.ticker.upper(),
                     period=request.period,
                     from_date=request.from_date,
                     to_date=request.to_date,
@@ -311,7 +311,7 @@ async def export_eod_data(
         
         # 获取查询条件对应的所有数据（不限制数量）
         data = await eod_service.get_stored_eod_data(
-            ticker=request.ticker,
+            ticker=request.ticker.upper(),
             period=request.period,
             from_date=request.from_date,
             to_date=request.to_date,
