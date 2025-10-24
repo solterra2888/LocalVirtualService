@@ -4,6 +4,7 @@
 """
 import asyncio
 import os
+from datetime import datetime
 from celery import current_task
 from backend.celery_app import app
 from backend.workers.file_worker import FileProcessingWorker
@@ -26,6 +27,23 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
     def update_progress(status=None, progress=None, current_file=None, log_message=None, **kwargs):
         """更新任务进度到Redis"""
         try:
+            # 初始化日志列表（如果不存在）
+            if not hasattr(update_progress, 'logs'):
+                update_progress.logs = []
+            
+            # 如果有新的日志消息，添加到日志列表
+            if log_message:
+                log_entry = {
+                    'timestamp': datetime.now().isoformat(),
+                    'level': 'info',
+                    'message': log_message,
+                    'source': 'celery_task'
+                }
+                update_progress.logs.append(log_entry)
+                # 限制日志数量，避免内存占用过多
+                if len(update_progress.logs) > 50:
+                    update_progress.logs = update_progress.logs[-50:]
+            
             meta = {
                 'status': status or 'processing',
                 'progress': progress or 0,
@@ -34,7 +52,8 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                 'files_processed': getattr(worker, 'files_processed', 0),
                 'files_failed': getattr(worker, 'files_failed', 0),
                 'total_files': len(file_paths),
-                'username': username
+                'username': username,
+                'logs': update_progress.logs
             }
             
             current_task.update_state(
@@ -96,7 +115,8 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
             'total_files': len(file_paths),
             'processing_time': result.get('processing_time', 0),
             'successful_results': len(result.get('successful_results', [])),
-            'final_report': result.get('final_report') is not None
+            'final_report': result.get('final_report') is not None,
+            'logs': getattr(update_progress, 'logs', [])
         }
         
         info(f"任务 {self.request.id} 执行成功: {final_result}", source="celery_task")

@@ -51,6 +51,7 @@ import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
+import { useAuthStore } from '../store/authStore';
 
 import DatabaseTableViewer from '../components/DatabaseTableViewer';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
@@ -97,6 +98,7 @@ interface NewsTheme {
 
 
 const SchedulerPage: React.FC = () => {
+  const { user } = useAuthStore();
   const [dataSources, setDataSources] = useState<DataSource[]>([
     {
       id: 'eodhd_news',
@@ -311,7 +313,16 @@ const SchedulerPage: React.FC = () => {
   const [form] = Form.useForm();
   
   // Active tab state for refresh functionality
-  const [activeTab, setActiveTab] = useState<string>('scheduler_config');
+  const [activeTab, setActiveTab] = useState<string>(user?.is_admin ? 'scheduler_config' : 'task_management');
+  
+  // Update activeTab when user changes
+  useEffect(() => {
+    if (user?.is_admin) {
+      setActiveTab('scheduler_config');
+    } else {
+      setActiveTab('task_management');
+    }
+  }, [user?.is_admin]);
   
   // Refresh triggers for child components
   const [taskManagementRefreshTrigger, setTaskManagementRefreshTrigger] = useState<number>(0);
@@ -805,7 +816,8 @@ const SchedulerPage: React.FC = () => {
           onChange={handleTabChange}
           size="large"
           items={[
-            {
+            // 只有管理员才能看到Scheduler Configuration
+            ...(user?.is_admin ? [{
               key: 'scheduler_config',
               label: (
                 <Space>
@@ -1025,7 +1037,7 @@ const SchedulerPage: React.FC = () => {
                   </Row>
                 </div>
               )
-            },
+            }] : []),
             {
               key: 'task_management',
               label: (

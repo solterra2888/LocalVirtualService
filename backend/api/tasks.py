@@ -136,6 +136,13 @@ async def update_task_type(
             detail=f"RC Agent不存在: {task_id}"
         )
     
+    # 权限检查：普通用户只能编辑自己创建的AI Agent
+    if not current_user.is_admin and task_info.get('created_by') != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足，只能编辑自己创建的AI Agent"
+        )
+    
     try:
         # 更新RC Agent
         success, message = task_manager.update_task_type(
@@ -197,6 +204,13 @@ async def delete_task_type(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"RC Agent不存在: {task_id}"
+        )
+    
+    # 权限检查：普通用户只能删除自己创建的AI Agent
+    if not current_user.is_admin and task_info.get('created_by') != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足，只能删除自己创建的AI Agent"
         )
     
     try:

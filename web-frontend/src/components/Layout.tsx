@@ -101,11 +101,6 @@ const Layout: React.FC = () => {
           label: 'Upload Files',
         },
         {
-          key: '/tasks',
-          icon: <AppstoreOutlined />,
-          label: 'AI Agent Settings',
-        },
-        {
           key: '/prompt-templates',
           icon: <BuildOutlined />,
           label: 'Prompt Templates',
@@ -114,6 +109,11 @@ const Layout: React.FC = () => {
           key: '/investment-themes',
           icon: <FundOutlined />,
           label: 'Themes Settings',
+        },
+        {
+          key: '/tasks',
+          icon: <AppstoreOutlined />,
+          label: 'AI Agent Settings',
         },
         ...(user?.is_admin ? [
           {
@@ -129,12 +129,12 @@ const Layout: React.FC = () => {
       icon: <SettingOutlined />,
       label: 'Settings',
       children: [
+        {
+          key: '/scheduler',
+          icon: <ControlOutlined />,
+          label: 'Data Source Management',
+        },
         ...(user?.is_admin ? [
-          {
-            key: '/scheduler',
-            icon: <ControlOutlined />,
-            label: 'Data Source Management',
-          },
           {
             key: '/users',
             icon: <TeamOutlined />,

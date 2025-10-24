@@ -222,40 +222,6 @@ const FinvizDashboard: React.FC = () => {
   
   const isNewsExpanded = (newsId: number) => expandedNewsItems.has(newsId);
   
-  // 渲染新闻分类标签
-  const renderClassificationTags = (analysisResult: any) => {
-    const classification = getClassificationFromAnalysis(analysisResult);
-    
-    if (!classification || !hasValidClassification(classification)) {
-      return null;
-    }
-
-    const tags = getClassificationTags(classification);
-    
-    if (tags.length === 0) {
-      return null;
-    }
-
-    return (
-      <Space size={[4, 4]} wrap>
-        {tags.map(({ key, config, value, displayValue }) => (
-          <Tag 
-            key={key} 
-            style={{ 
-              fontSize: '9px', 
-              margin: 0,
-              color: '#666',
-              borderColor: '#d9d9d9',
-              backgroundColor: 'transparent'
-            }}
-            title={`${config.label}: ${displayValue}`}
-          >
-            {displayValue}
-          </Tag>
-        ))}
-      </Space>
-    );
-  };
   
   // 缓存工具函数
   const getCacheKey = (type: 'stock' | 'group', identifier: string) => {
@@ -312,6 +278,9 @@ const FinvizDashboard: React.FC = () => {
   const [selectedCompanyNameForFundamentals, setSelectedCompanyNameForFundamentals] = useState<string>('');
   const [analysisModalVisible, setAnalysisModalVisible] = useState<boolean>(false);
   const [selectedNewsForAnalysis, setSelectedNewsForAnalysis] = useState<DashboardNewsItem | null>(null);
+  
+  // 错误状态跟踪，防止重复显示相同的错误消息
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // 初始化数据
   useEffect(() => {
@@ -400,6 +369,9 @@ const FinvizDashboard: React.FC = () => {
       const watchlistData = await dashboardAPI.getUserWatchlist();
       setWatchlistGroups(watchlistData);
       
+      // 成功加载后清除错误状态
+      setLastError(null);
+      
       const totalStocks = watchlistData.reduce((sum, group) => sum + group.items.length, 0);
       logger.logInfo(`加载了 ${watchlistData.length} 个分组，${totalStocks} 支股票`, 'finviz-dashboard');
       
@@ -421,7 +393,14 @@ const FinvizDashboard: React.FC = () => {
       }
       
     } catch (error) {
-      message.error('Failed to load user watchlist');
+      const errorMessage = 'Failed to load user watchlist';
+      
+      // 只有在错误消息与上次不同时才显示错误消息
+      if (lastError !== errorMessage) {
+        message.error(errorMessage);
+        setLastError(errorMessage);
+      }
+      
       logger.logError('Failed to load user watchlist', 'finviz-dashboard', error);
     } finally {
       setLoading(false);

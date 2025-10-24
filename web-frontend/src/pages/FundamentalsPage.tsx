@@ -179,7 +179,7 @@ const FundamentalsPage: React.FC = () => {
         searchLoading: false 
       }));
     } catch (error) {
-      console.error('搜索股票失败:', error);
+      console.error('Failed to search stocks:', error);
       setState(prev => ({ 
         ...prev, 
         searchResults: [], 
@@ -614,7 +614,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportHoldingsData(institutions, 'Institutional Holdings')}
             >
               Export Data
@@ -726,7 +725,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportHoldingsData(funds, 'Fund Holdings')}
             >
               Export Data
@@ -814,7 +812,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportOfficersData(officers)}
             >
               Export Data
@@ -961,7 +958,6 @@ const FundamentalsPage: React.FC = () => {
           return (
             <Button 
               type="link" 
-              size="small"
               onClick={() => window.open(link, '_blank')}
             >
               View
@@ -984,7 +980,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportInsiderTransactionsData(insider_transactions)}
             >
               Export Data
@@ -1121,7 +1116,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportOutstandingSharesData(data, 'annual')}
             >
               Export Annual Data
@@ -1224,7 +1218,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportOutstandingSharesData(data, 'quarterly')}
             >
               Export Quarterly Data
@@ -1449,7 +1442,6 @@ const FundamentalsPage: React.FC = () => {
             <Button 
               type="primary" 
               icon={<DownloadOutlined />} 
-              size="small"
               onClick={() => exportDividendData(data, 'by_year')}
             >
               Export Data
@@ -2642,7 +2634,6 @@ const FundamentalsPage: React.FC = () => {
                   Showing {balanceSheetData.length} balance sheet items - {financialsState.periodType === 'quarterly' ? 'Quarterly' : 'Annual'} data
                 </Text>
                 <Button 
-                  size="small" 
                   onClick={() => exportFinancialData('Balance Sheet', filteredBalanceSheet, getBalanceSheetFields())}
                   disabled={!filteredBalanceSheet || filteredBalanceSheet.length === 0}
                   icon={<TableOutlined />}
@@ -2669,7 +2660,6 @@ const FundamentalsPage: React.FC = () => {
                   Showing {incomeStatementData.length} income statement items - {financialsState.periodType === 'quarterly' ? 'Quarterly' : 'Annual'} data
                 </Text>
                 <Button 
-                  size="small" 
                   onClick={() => exportFinancialData('Income Statement', filteredIncomeStatement, getIncomeStatementFields())}
                   disabled={!filteredIncomeStatement || filteredIncomeStatement.length === 0}
                   icon={<MoneyCollectOutlined />}
@@ -2696,7 +2686,6 @@ const FundamentalsPage: React.FC = () => {
                   Showing {cashFlowData.length} cash flow items - {financialsState.periodType === 'quarterly' ? 'Quarterly' : 'Annual'} data
                 </Text>
                 <Button 
-                  size="small" 
                   onClick={() => exportFinancialData('Cash Flow', filteredCashFlow, getCashFlowFields())}
                   disabled={!filteredCashFlow || filteredCashFlow.length === 0}
                   icon={<FundOutlined />}
@@ -3209,14 +3198,12 @@ const FundamentalsPage: React.FC = () => {
                 icon={<SearchOutlined />}
                 onClick={handleSearch}
                 loading={state.loading}
-                size="large"
               >
                 Search
               </Button>
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleClear}
-                size="large"
                 disabled={state.loading}
               >
                 Clear
@@ -3225,7 +3212,6 @@ const FundamentalsPage: React.FC = () => {
                 <Button
                   icon={<SettingOutlined />}
                   onClick={handleToggleAutoUpdate}
-                  size="large"
                   disabled={state.loading}
                   type={state.autoUpdateEnabled ? "primary" : "default"}
                   title={`Auto-update ${state.autoUpdateEnabled ? 'enabled' : 'disabled'}`}

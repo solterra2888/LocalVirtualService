@@ -11,7 +11,6 @@ import {
   Empty,
   Spin,
   Form,
-  Select,
   Radio
 } from 'antd';
 import {
@@ -77,8 +76,8 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
       const results = await dashboardAPI.searchStocks(query);
       setSearchResults(results);
     } catch (error) {
-      message.error('搜索股票失败');
-      console.error('搜索股票失败:', error);
+      message.error('Failed to search stocks');
+      console.error('Failed to search stocks:', error);
     } finally {
       setLoading(false);
     }

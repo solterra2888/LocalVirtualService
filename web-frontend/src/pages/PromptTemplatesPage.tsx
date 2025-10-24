@@ -34,8 +34,7 @@ import {
   SearchOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  InfoCircleOutlined
+  CloseCircleOutlined
 } from '@ant-design/icons';
 import promptTemplateService, {
   PromptCategory,
@@ -63,10 +62,10 @@ const PromptTemplatesPage: React.FC = () => {
   // Modal states
   const [isEditorVisible, setIsEditorVisible] = useState<boolean>(false);
   const [isTestVisible, setIsTestVisible] = useState<boolean>(false);
-  const [isVariableHelperVisible, setIsVariableHelperVisible] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplateDetail | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestTemplateResponse | null>(null);
+  const [currentEditingCategoryId, setCurrentEditingCategoryId] = useState<number | undefined>();
 
   const [form] = Form.useForm();
   const [testForm] = Form.useForm();
@@ -161,6 +160,7 @@ const PromptTemplatesPage: React.FC = () => {
   // Create/Edit template
   const handleCreateTemplate = () => {
     setEditingTemplate(null);
+    setCurrentEditingCategoryId(undefined);
     form.resetFields();
     setIsEditorVisible(true);
   };
@@ -169,6 +169,7 @@ const PromptTemplatesPage: React.FC = () => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
       setEditingTemplate(detail);
+      setCurrentEditingCategoryId(detail.category_id);
       form.setFieldsValue({
         template_name: detail.template_name,
         template_code: detail.template_code,
@@ -497,6 +498,7 @@ const PromptTemplatesPage: React.FC = () => {
                 placeholder="Select category"
                 size="small"
                 style={{ fontSize: '12px' }}
+                onChange={(value) => setCurrentEditingCategoryId(value)}
               >
                 {categories.map(cat => (
                   <Option key={cat.id} value={cat.id}>
@@ -546,19 +548,7 @@ const PromptTemplatesPage: React.FC = () => {
         </Form.Item>
 
         <Form.Item
-          label={
-            <Space>
-              <Text style={{ fontSize: '12px' }}>User Prompt Template</Text>
-              <Button 
-                type="link" 
-                size="small"
-                icon={<InfoCircleOutlined />}
-                onClick={() => setIsVariableHelperVisible(true)}
-              >
-                变量助手
-              </Button>
-            </Space>
-          }
+          label={<Text style={{ fontSize: '12px' }}>User Prompt Template</Text>}
           name="user_prompt_template"
           rules={[{ required: true, message: 'Please enter user prompt template' }]}
           extra="Use {{variable_name}} format to define variables"
@@ -677,6 +667,7 @@ const PromptTemplatesPage: React.FC = () => {
             categories={categories}
             templates={templates}
             onVariableInsert={handleVariableInsert}
+            currentCategoryId={currentEditingCategoryId}
           />
         </Col>
       </Row>
@@ -948,23 +939,6 @@ const PromptTemplatesPage: React.FC = () => {
       {/* Test panel */}
       {renderTestPanel()}
 
-      {/* Variable Helper Drawer */}
-      <Drawer
-        title="变量助手"
-        placement="right"
-        width={600}
-        open={isVariableHelperVisible}
-        onClose={() => setIsVariableHelperVisible(false)}
-      >
-        <VariableHelper
-          categories={categories}
-          templates={templates}
-          onVariableInsert={(variableText) => {
-            handleVariableInsert(variableText);
-            setIsVariableHelperVisible(false);
-          }}
-        />
-      </Drawer>
     </div>
   );
 };

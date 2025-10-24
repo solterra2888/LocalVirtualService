@@ -268,7 +268,8 @@ async def get_task_status(
                 "message": "任务等待处理中...",
                 "current_file": None,
                 "files_processed": 0,
-                "total_files": 0
+                "total_files": 0,
+                "logs": []
             }
         elif task_result.state == 'PROGRESS':
             info = task_result.info or {}
@@ -280,7 +281,8 @@ async def get_task_status(
                 "current_file": info.get("current_file"),
                 "files_processed": info.get("files_processed", 0),
                 "files_failed": info.get("files_failed", 0),
-                "total_files": info.get("total_files", 0)
+                "total_files": info.get("total_files", 0),
+                "logs": info.get("logs", [])
             }
         elif task_result.state == 'SUCCESS':
             result = task_result.result or {}
@@ -293,7 +295,8 @@ async def get_task_status(
                 "files_failed": result.get("files_failed", 0),
                 "total_files": result.get("total_files", 0),
                 "processing_time": result.get("processing_time", 0),
-                "result": result
+                "result": result,
+                "logs": result.get("logs", [])
             }
         else:  # FAILURE or other states
             info = task_result.info or {}
@@ -304,7 +307,8 @@ async def get_task_status(
                 "message": str(info.get("error", "处理失败")),
                 "files_processed": info.get("files_processed", 0),
                 "files_failed": info.get("files_failed", 0),
-                "total_files": info.get("total_files", 0)
+                "total_files": info.get("total_files", 0),
+                "logs": info.get("logs", [])
             }
             
     except Exception as e:

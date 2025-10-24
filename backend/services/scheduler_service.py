@@ -1785,7 +1785,7 @@ class SchedulerService:
     
     async def _execute_futu_themes_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行富途投资主题数据获取任务
+        执行富途投资主题数据获取任务（通过Celery异步执行）
         
         Args:
             params: 任务参数
@@ -1794,61 +1794,45 @@ class SchedulerService:
                 - scrape_stocks: 是否爬取股票列表（默认: True）
         
         Returns:
-            Dict包含任务执行结果
+            Dict包含任务提交结果
         """
         try:
-            logger.info("开始执行富途投资主题数据获取任务", params=params)
+            logger.info("提交富途投资主题数据获取任务到Celery", params=params)
             
-            # 导入富途主题服务
-            from backend.services.futu_themes_service import create_futu_themes_service
-            
-            # 创建服务实例
-            futu_service = create_futu_themes_service()
+            # 导入Celery任务
+            from backend.tasks.theme_tasks import fetch_futu_themes_task
             
             # 获取参数
             markets = params.get('markets')  # 可以是 ['HK', 'US'] 或 None
             max_pages = params.get('max_pages')  # 每个市场最大爬取页数
             scrape_stocks = params.get('scrape_stocks', True)  # 是否爬取股票列表
             
-            # 在线程池中执行耗时的爬取操作，避免阻塞事件循环
-            import asyncio
-            import concurrent.futures
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    executor,
-                    futu_service.fetch_and_store_themes,
-                    markets,
-                    max_pages,
-                    scrape_stocks
-                )
-            
-            if result.get('error'):
-                error_msg = f"富途投资主题数据获取失败: {result['error']}"
-                logger.error(error_msg)
-                return {
-                    'success': False,
-                    'message': error_msg,
-                    'data': result
+            # 提交Celery任务
+            task = fetch_futu_themes_task.apply_async(
+                kwargs={
+                    'markets': markets,
+                    'max_pages': max_pages,
+                    'scrape_stocks': scrape_stocks
                 }
-            else:
-                success_msg = (
-                    f"富途投资主题数据获取成功: "
-                    f"处理了{result['total_themes']}个主题，"
-                    f"成功{result['success_count']}个，"
-                    f"失败{result['failed_count']}个，"
-                    f"共{result['total_stocks']}只股票，"
-                    f"耗时{result['execution_time']:.2f}秒"
-                )
-                logger.info(success_msg)
-                return {
-                    'success': True,
-                    'message': success_msg,
-                    'data': result
+            )
+            
+            logger.info(f"富途投资主题数据获取任务已提交到Celery: task_id={task.id}")
+            
+            return {
+                'success': True,
+                'message': f"富途投资主题数据获取任务已提交到Celery队列（任务ID: {task.id}）",
+                'data': {
+                    'task_id': task.id,
+                    'status': 'PENDING',
+                    'markets': markets or 'ALL',
+                    'max_pages': max_pages or 'ALL',
+                    'scrape_stocks': scrape_stocks,
+                    'status_url': f'/api/investment-themes/task-status/{task.id}'
                 }
+            }
                 
         except Exception as e:
-            error_msg = f"富途投资主题数据获取任务执行失败: {str(e)}"
+            error_msg = f"提交富途投资主题数据获取任务失败: {str(e)}"
             logger.error(error_msg)
             return {
                 'success': False,

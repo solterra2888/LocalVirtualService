@@ -162,7 +162,7 @@ export const dashboardAPI = {
     try {
       return await api.get<DashboardNewsItem[]>(`/dashboard/sectors/${sector}/news`, params);
     } catch (error) {
-      console.error('获取行业新闻失败:', error);
+      console.error('Failed to get sector news:', error);
       throw error;
     }
   },
@@ -172,7 +172,7 @@ export const dashboardAPI = {
     try {
       return await api.get<DashboardAnalysisResult[]>(`/dashboard/companies/${ticker}/analysis`, params);
     } catch (error) {
-      console.error('获取公司AI分析失败:', error);
+      console.error('Failed to get company analysis:', error);
       throw error;
     }
   },
@@ -182,7 +182,7 @@ export const dashboardAPI = {
     try {
       return await api.get<DashboardAnalysisResult[]>(`/dashboard/sectors/${sector}/analysis`, params);
     } catch (error) {
-      console.error('获取行业AI分析失败:', error);
+      console.error('Failed to get sector analysis:', error);
       throw error;
     }
   },
@@ -192,7 +192,7 @@ export const dashboardAPI = {
     try {
       return await api.get<DashboardAnalysisResult[]>(`/dashboard/companies/${ticker}/reports`, params);
     } catch (error) {
-      console.error('获取公司研报失败:', error);
+      console.error('Failed to get company reports:', error);
       throw error;
     }
   },
@@ -202,7 +202,7 @@ export const dashboardAPI = {
     try {
       return await api.get<DashboardAnalysisResult[]>(`/dashboard/sectors/${sector}/reports`, params);
     } catch (error) {
-      console.error('获取行业研报失败:', error);
+      console.error('Failed to get sector reports:', error);
       throw error;
     }
   },
@@ -212,7 +212,7 @@ export const dashboardAPI = {
     try {
       return await api.get<CompanyInfo[]>('/dashboard/search/companies', { q: query });
     } catch (error) {
-      console.error('搜索公司失败:', error);
+      console.error('Failed to search companies:', error);
       throw error;
     }
   },
@@ -222,7 +222,7 @@ export const dashboardAPI = {
     try {
       return await api.get<{ content: string; filename: string }>(`/dashboard/files/${fileId}/content`);
     } catch (error) {
-      console.error('获取文件内容失败:', error);
+      console.error('Failed to get file content:', error);
       throw error;
     }
   },
@@ -232,7 +232,7 @@ export const dashboardAPI = {
     try {
       return await api.download(`/dashboard/files/${fileId}/download`);
     } catch (error) {
-      console.error('下载文件失败:', error);
+      console.error('Failed to download file:', error);
       throw error;
     }
   },
@@ -244,7 +244,7 @@ export const dashboardAPI = {
     try {
       return await api.get<WatchlistGroup[]>('/dashboard/watchlist');
     } catch (error) {
-      console.error('获取用户watchlist失败:', error);
+      console.error('Failed to get user watchlist:', error);
       throw error;
     }
   },
@@ -260,7 +260,7 @@ export const dashboardAPI = {
     try {
       return await api.post('/dashboard/watchlist', params);
     } catch (error) {
-      console.error('添加到watchlist失败:', error);
+      console.error('Failed to add to watchlist:', error);
       throw error;
     }
   },
@@ -270,7 +270,7 @@ export const dashboardAPI = {
     try {
       return await api.delete(`/dashboard/watchlist/${watchlistId}`);
     } catch (error) {
-      console.error('从watchlist移除失败:', error);
+      console.error('Failed to remove from watchlist:', error);
       throw error;
     }
   },
@@ -283,7 +283,7 @@ export const dashboardAPI = {
         limit: limit || 20 
       });
     } catch (error) {
-      console.error('搜索股票失败:', error);
+      console.error('Failed to search stocks:', error);
       throw error;
     }
   },
@@ -297,7 +297,7 @@ export const dashboardAPI = {
     try {
       return await api.get(`/dashboard/watchlist/${ticker}/research-reports`);
     } catch (error) {
-      console.error('获取研究报告失败:', error);
+      console.error('Failed to get research reports:', error);
       throw error;
     }
   },
@@ -312,7 +312,7 @@ export const dashboardAPI = {
       const symbolsStr = symbols.join(',');
       return await api.get('/dashboard/stock-prices', { symbols: symbolsStr });
     } catch (error) {
-      console.error('获取股票价格失败:', error);
+      console.error('Failed to get stock prices:', error);
       throw error;
     }
   },
@@ -327,7 +327,7 @@ export const dashboardAPI = {
     try {
       return await api.get('/dashboard/watchlist/prices');
     } catch (error) {
-      console.error('获取watchlist股票价格失败:', error);
+      console.error('Failed to get watchlist stock prices:', error);
       throw error;
     }
   },
@@ -354,7 +354,7 @@ export const dashboardAPI = {
       // 临时使用不需要认证的测试端点
       return await api.get(`/dashboard/test-stock-historical-data/${symbol}`, { days });
     } catch (error) {
-      console.error('获取股票历史数据失败:', error);
+      console.error('Failed to get stock historical data:', error);
       throw error;
     }
   }

@@ -45,7 +45,8 @@ import {
   DownloadOutlined,
   RobotOutlined,
   FolderOutlined,
-  TagOutlined
+  TagOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -252,35 +253,7 @@ const FilesPage: React.FC = () => {
     }
   }, [logger.logs, logger.autoScroll]);
 
-  // 加载任务执行历史的函数
-  const loadTaskExecutionsFunc = useCallback(async () => {
-    try {
-      console.log('开始加载任务执行历史...');
-      const executions = await tasksAPI.getTaskExecutions();
-      setTaskExecutions(executions);
-    } catch (error: any) {
-      console.error('加载任务执行历史失败:', error);
-      
-      let errorMessage = '加载任务执行历史失败';
-      if (error.response?.status === 401) {
-        errorMessage += ' - 认证失败，请重新登录';
-      } else if (error.response?.status === 403) {
-        errorMessage += ' - 权限不足';
-      } else if (error.response?.status >= 500) {
-        errorMessage += ' - 服务器内部错误';
-      } else if (error.message === 'Network Error') {
-        errorMessage += ' - Network connection failed';
-      } else {
-        errorMessage += ` - ${error.response?.data?.detail || error.message}`;
-      }
-      
-      // 只在非自动刷新时显示错误消息，避免频繁弹窗
-      if (!error.message?.includes('auto-refresh')) {
-        message.error(errorMessage);
-      }
-      logger.logError(errorMessage, 'file-processing', error);
-    }
-  }, [logger, setTaskExecutions]);
+  // 加载任务执行历史的函数 - 将在状态声明后重新定义
 
   // 加载API密钥等关键配置
   const loadDefaultConfig = useCallback(async () => {
@@ -299,28 +272,56 @@ const FilesPage: React.FC = () => {
     }
   }, [logger, setProcessingParams]);
 
-  // loadTaskTypes 函数定义需要移到这里
-  const loadTaskTypes = useCallback(async () => {
+  // 添加错误重试状态管理
+  const [taskTypesLoadAttempts, setTaskTypesLoadAttempts] = useState(0);
+  const [lastTaskTypesError, setLastTaskTypesError] = useState<number>(0);
+  const maxTaskTypesRetries = 3; // 最大重试次数
+  const retryInterval = 30000; // 重试间隔30秒
+  
+  // 任务执行历史错误重试状态管理
+  const [taskHistoryLoadAttempts, setTaskHistoryLoadAttempts] = useState(0);
+  const [lastTaskHistoryError, setLastTaskHistoryError] = useState<number>(0);
+  const maxTaskHistoryRetries = 3; // 最大重试次数
+  const taskHistoryRetryInterval = 30000; // 重试间隔30秒
+
+  // 加载任务执行历史的函数
+  const loadTaskExecutionsFunc = useCallback(async (showError = true, isAutoRefresh = false) => {
+    const now = Date.now();
+    
+    // 如果最近有错误且未超过重试间隔，则跳过（除非是手动刷新）
+    if (!isAutoRefresh && lastTaskHistoryError > 0 && (now - lastTaskHistoryError) < taskHistoryRetryInterval) {
+      console.log('跳过任务执行历史加载，等待重试间隔...');
+      return;
+    }
+    
+    // 如果超过最大重试次数，则停止尝试（除非是手动刷新）
+    if (!isAutoRefresh && taskHistoryLoadAttempts >= maxTaskHistoryRetries) {
+      console.log('任务执行历史加载失败次数过多，停止尝试');
+      return;
+    }
+
     try {
-      console.log('开始加载RC Agent...');
-      const types = await tasksAPI.getTaskTypes();
-      setTaskTypes(types);
-      // 设置默认RC Agent
-      const defaultTask = types.find(t => t.is_default);
-      if (defaultTask) {
-        setSelectedTaskType(defaultTask.id);
-      }
-    } catch (error: any) {
-      console.error('加载RC Agent失败:', error);
+      console.log('开始加载任务执行历史...');
+      const executions = await tasksAPI.getTaskExecutions();
+      setTaskExecutions(executions);
       
-      // 显示详细的错误信息
-      let errorMessage = '加载RC Agent失败';
+      // 重置错误状态
+      setTaskHistoryLoadAttempts(0);
+      setLastTaskHistoryError(0);
+    } catch (error: any) {
+      console.error('加载任务执行历史失败:', error);
+      
+      // 更新错误状态（只有在非自动刷新时）
+      if (!isAutoRefresh) {
+        setTaskHistoryLoadAttempts(prev => prev + 1);
+        setLastTaskHistoryError(now);
+      }
+      
+      let errorMessage = '加载任务执行历史失败';
       if (error.response?.status === 401) {
         errorMessage += ' - 认证失败，请重新登录';
       } else if (error.response?.status === 403) {
         errorMessage += ' - 权限不足';
-      } else if (error.response?.status === 404) {
-        errorMessage += ' - API端点不存在';
       } else if (error.response?.status >= 500) {
         errorMessage += ' - 服务器内部错误';
       } else if (error.message === 'Network Error') {
@@ -329,10 +330,99 @@ const FilesPage: React.FC = () => {
         errorMessage += ` - ${error.response?.data?.detail || error.message}`;
       }
       
-      message.error(errorMessage);
-      logger.logError(errorMessage, 'file-processing', error);
+      // 只有在显示错误且重试次数未达到上限时才显示错误消息
+      if (showError && taskHistoryLoadAttempts < maxTaskHistoryRetries && !isAutoRefresh) {
+        // 添加重试信息
+        if (taskHistoryLoadAttempts < maxTaskHistoryRetries - 1) {
+          errorMessage += ` (${taskHistoryLoadAttempts + 1}/${maxTaskHistoryRetries})`;
+        } else {
+          errorMessage += ' - 已达到最大重试次数，请检查网络连接';
+        }
+        
+        message.error(errorMessage);
+        logger.logError(errorMessage, 'file-processing', error);
+      } else if (taskHistoryLoadAttempts >= maxTaskHistoryRetries && !isAutoRefresh) {
+        // 最后一次重试失败，显示最终错误消息
+        message.error('任务执行历史加载失败，请检查网络连接或联系管理员');
+        logger.logError('任务执行历史加载失败，已达到最大重试次数', 'file-processing', error);
+      }
     }
-  }, [logger, setSelectedTaskType, setTaskTypes]);
+  }, [logger, setTaskExecutions, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval]);
+
+  // loadTaskTypes 函数定义需要移到这里
+  const loadTaskTypes = useCallback(async (showError = true) => {
+    const now = Date.now();
+    
+    // 如果最近有错误且未超过重试间隔，则跳过
+    if (lastTaskTypesError > 0 && (now - lastTaskTypesError) < retryInterval) {
+      console.log('跳过RC Agent加载，等待重试间隔...');
+      return;
+    }
+    
+    // 如果超过最大重试次数，则停止尝试
+    if (taskTypesLoadAttempts >= maxTaskTypesRetries) {
+      console.log('RC Agent加载失败次数过多，停止尝试');
+      return;
+    }
+
+    try {
+      console.log('开始加载RC Agent...');
+      const types = await tasksAPI.getTaskTypes();
+      setTaskTypes(types);
+      
+      // 重置错误状态
+      setTaskTypesLoadAttempts(0);
+      setLastTaskTypesError(0);
+      
+      // 不再自动选择默认任务，让用户手动选择
+      // 如果用户之前选择了任务且该任务仍然存在，则保持选择
+      if (selectedTaskType && types.find(t => t.id === selectedTaskType)) {
+        // 保持当前选择
+      } else if (types.length > 0) {
+        // 如果没有选择或选择的任务不存在，清空选择
+        setSelectedTaskType('');
+      }
+    } catch (error: any) {
+      console.error('failed to load RC Agent:', error);
+      
+      // 更新错误状态
+      setTaskTypesLoadAttempts(prev => prev + 1);
+      setLastTaskTypesError(now);
+      
+      // 只有在显示错误且重试次数未达到上限时才显示错误消息
+      if (showError && taskTypesLoadAttempts < maxTaskTypesRetries) {
+        // 显示详细的错误信息
+        let errorMessage = 'failed to load RC Agent';
+        if (error.response?.status === 401) {
+          errorMessage += ' - authentication failed, please login again';
+        } else if (error.response?.status === 403) {
+          errorMessage += ' - not enough permissions';
+        } else if (error.response?.status === 404) {
+          errorMessage += ' - API endpoint not found';
+        } else if (error.response?.status >= 500) {
+          errorMessage += ' - server internal error';
+        } else if (error.message === 'Network Error') {
+          errorMessage += ' - network connection failed';
+        } else {
+          errorMessage += ` - ${error.response?.data?.detail || error.message}`;
+        }
+        
+        // 添加重试信息
+        if (taskTypesLoadAttempts < maxTaskTypesRetries - 1) {
+          errorMessage += ` (${taskTypesLoadAttempts + 1}/${maxTaskTypesRetries})`;
+        } else {
+          errorMessage += ' - maximum number of retries reached, please check network connection';
+        }
+        
+        message.error(errorMessage);
+        logger.logError(errorMessage, 'file-processing', error);
+      } else if (taskTypesLoadAttempts >= maxTaskTypesRetries) {
+        // 最后一次重试失败，显示最终错误消息
+        message.error('failed to load RC Agent, please check network connection or contact administrator');
+        logger.logError('failed to load RC Agent, maximum number of retries reached', 'file-processing', error);
+      }
+    }
+  }, [logger, setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
 
   // 加载RC Agent和执行历史
   useEffect(() => {
@@ -342,8 +432,8 @@ const FilesPage: React.FC = () => {
     
     // 设置定时刷新执行历史列表
     const refreshInterval = setInterval(() => {
-      // 静默刷新，不显示错误消息
-      loadTaskExecutionsFunc().catch(() => {
+      // 静默刷新，不显示错误消息，标记为自动刷新
+      loadTaskExecutionsFunc(false, true).catch(() => {
         // 静默处理错误，避免在自动刷新时显示错误消息
       });
     }, 30000); // 每30秒自动刷新一次执行历史列表
@@ -361,8 +451,8 @@ const FilesPage: React.FC = () => {
         const sectorsData = await filesAPI.getSectors();
         setSectors(sectorsData);
       } catch (error) {
-        console.error('加载行业分类失败:', error);
-        message.error('加载行业分类失败');
+        console.error('failed to load sectors:', error);
+        message.error('failed to load sectors');
       } finally {
         setLoadingSectors(false);
       }
@@ -387,8 +477,8 @@ const FilesPage: React.FC = () => {
         });
         setTickerOptions(tickers);
       } catch (error) {
-        console.error('加载股票代码失败:', error);
-        message.error('加载股票代码失败');
+        console.error('failed to load tickers:', error);
+        message.error('failed to load tickers');
       } finally {
         setLoadingTickers(false);
       }
@@ -410,7 +500,7 @@ const FilesPage: React.FC = () => {
   // 自动更新文件状态的函数
   const updateFileStatuses = useCallback(async (taskId: string) => {
     if (updatingFiles) {
-      console.log('跳过文件状态更新 - 上一个请求仍在进行中');
+      console.log('skipping file status update - previous request is still in progress');
       return; // 防止并发请求
     }
     
@@ -430,7 +520,7 @@ const FilesPage: React.FC = () => {
         return file;
       }));
     } catch (error) {
-      console.error('更新文件状态失败:', error);
+      console.error('failed to update file status:', error);
     } finally {
       setUpdatingFiles(false);
     }
@@ -440,7 +530,7 @@ const FilesPage: React.FC = () => {
   const updateTaskStatus = useCallback(async () => {
     if (!currentTaskId || updatingStatus) {
       if (updatingStatus) {
-        console.log('跳过任务状态更新 - 上一个请求仍在进行中');
+        console.log('skipping task status update - previous request is still in progress');
       }
       return; // 防止并发请求
     }
@@ -492,10 +582,10 @@ const FilesPage: React.FC = () => {
         
         // 显示任务完成消息
         if (status.status === 'completed') {
-          message.success('任务处理完成');
+          message.success('task processing completed');
         } else {
-          message.error('任务处理失败');
-          logger.logError('任务处理失败', 'file-processing');
+          message.error('task processing failed');
+          logger.logError('task processing failed', 'file-processing');
         }
         
         // 任务完成后刷新执行历史列表
@@ -503,8 +593,8 @@ const FilesPage: React.FC = () => {
           const executions = await tasksAPI.getTaskExecutions();
           setTaskExecutions(executions);
         } catch (error) {
-          console.error('刷新执行历史失败:', error);
-          logger.logError('刷新执行历史失败', 'file-processing', error);
+          console.error('failed to refresh execution history:', error);
+          logger.logError('failed to refresh execution history', 'file-processing', error);
         }
         
         // 延迟一段时间后再次刷新，确保数据同步
@@ -513,14 +603,14 @@ const FilesPage: React.FC = () => {
             const executions = await tasksAPI.getTaskExecutions();
             setTaskExecutions(executions);
           } catch (error) {
-            console.error('延迟刷新执行历史失败:', error);
-            logger.logError('延迟刷新执行历史失败', 'file-processing', error);
+            console.error('failed to refresh execution history:', error);
+            logger.logError('failed to refresh execution history', 'file-processing', error);
           }
         }, 5000); // 等待5秒后再次刷新，确保数据完全同步
       }
     } catch (error) {
-      console.error('获取任务状态失败:', error);
-      logger.logError(`获取任务状态失败: ${error}`, 'file-processing');
+      console.error('failed to get task status:', error);
+      logger.logError(`failed to get task status: ${error}`, 'file-processing');
     } finally {
       setUpdatingStatus(false);
     }
@@ -556,15 +646,15 @@ const FilesPage: React.FC = () => {
       setExecutionDetailVisible(true);
       setExecutionDetailLoading(true);
       
-      logger.logInfo(`查看任务执行详情: ${execution.task_name}`, 'file-processing');
+      logger.logInfo(`view task execution details: ${execution.task_name}`, 'file-processing');
       
       // 获取包含文件详情的完整执行信息
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
       setExecutionDetailData(details);
       
     } catch (error) {
-      message.error('获取执行详情失败');
-      logger.logError(`获取执行详情失败: ${execution.task_name}`, 'file-processing', error);
+      message.error('failed to get execution details');
+      logger.logError(`failed to get execution details: ${execution.task_name}`, 'file-processing', error);
       setExecutionDetailVisible(false);
     } finally {
       setExecutionDetailLoading(false);
@@ -576,7 +666,7 @@ const FilesPage: React.FC = () => {
       setAiAnalysisLoading(true);
       setAiAnalysisVisible(true);
       
-      logger.logInfo(`获取AI分析报告: ${execution.task_name}`, 'file-processing');
+      logger.logInfo(`view AI analysis report: ${execution.task_name}`, 'file-processing');
       
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
       console.log('AI Analysis Data:', details);
@@ -630,13 +720,13 @@ const FilesPage: React.FC = () => {
   const handleViewFileContent = (fileData: any) => {
     setSelectedFileContent(fileData);
     setFileContentVisible(true);
-    logger.logInfo(`查看AI处理内容: ${fileData.filename}`, 'file-processing');
+    logger.logInfo(`view AI processed content: ${fileData.filename}`, 'file-processing');
   };
 
   const handleViewOriginalFile = async (fileData: any) => {
     try {
       const originalFileInfo = await filesAPI.getOriginalFileInfo(fileData.id);
-      logger.logInfo(`查看原始文件: ${fileData.filename}`, 'file-processing');
+      logger.logInfo(`view original file: ${fileData.filename}`, 'file-processing');
       
       // 根据文件类型决定如何打开
       const fileType = originalFileInfo.file_type.toLowerCase();
@@ -666,17 +756,17 @@ const FilesPage: React.FC = () => {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        message.success(`正在下载文件: ${originalFileInfo.filename}`);
+        message.success(`downloading file: ${originalFileInfo.filename}`);
       }
     } catch (error) {
       console.error('Failed to get original file info:', error);
-      message.error('获取原始文件信息失败');
+      message.error('failed to get original file info');
     }
   };
 
   const handleShowOriginalFiles = async (execution: any) => {
     try {
-      logger.logInfo(`查看任务原始文件: ${execution.task_name}`, 'file-processing');
+      logger.logInfo(`view task original files: ${execution.task_name}`, 'file-processing');
       
       // 获取该执行任务的文件详情
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
@@ -685,7 +775,7 @@ const FilesPage: React.FC = () => {
       const filesWithOriginal = details.files.filter(file => file.original_file_path);
       
       if (filesWithOriginal.length === 0) {
-        message.info('该任务没有可查看的原始文件');
+        message.info('no original files available for this task');
         return;
       }
       
@@ -700,14 +790,14 @@ const FilesPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to get execution files:', error);
-      message.error('获取任务文件失败');
+      message.error('failed to get execution files');
     }
   };
 
   const handleDeleteExecution = (execution: TaskExecution) => {
     setExecutionToDelete(execution);
     setDeleteExecutionVisible(true);
-    logger.logInfo(`准备删除任务执行: ${execution.task_name}`, 'file-processing');
+    logger.logInfo(`prepare to delete task execution: ${execution.task_name}`, 'file-processing');
   };
 
   const confirmDeleteExecution = async () => {
@@ -728,7 +818,7 @@ const FilesPage: React.FC = () => {
       setExecutionToDelete(null);
       
     } catch (error: any) {
-      console.error('删除执行记录失败:', error);
+      console.error('failed to delete execution record:', error);
       const errorMessage = getErrorMessage(error, 'Failed to delete execution record');
       message.error(errorMessage);
       logger.logError(errorMessage, 'file-processing', error);
@@ -767,7 +857,7 @@ const FilesPage: React.FC = () => {
           message.success(`Successfully deleted ${selectedExecutionIds.length} execution record(s)`);
           
         } catch (error: any) {
-          console.error('批量删除执行记录失败:', error);
+          console.error('failed to batch delete execution records:', error);
           const errorMessage = getErrorMessage(error, 'Failed to batch delete execution records');
           message.error(errorMessage);
           logger.logError(errorMessage, 'file-processing', error);
@@ -787,15 +877,15 @@ const FilesPage: React.FC = () => {
     try {
       if (lastCompletedTaskId) {
         await updateFileStatuses(lastCompletedTaskId);
-        message.success('文件状态已刷新');
+        message.success('file status refreshed');
       } else {
-        message.info('没有可刷新的任务');
-        logger.logWarning('没有可刷新的任务', 'file-processing');
+        message.info('no tasks to refresh');
+        logger.logWarning('no tasks to refresh', 'file-processing');
       }
     } catch (error) {
-      console.error('刷新文件状态失败:', error);
-      message.error('刷新文件状态失败，请稍后重试');
-      logger.logError('刷新文件状态失败', 'file-processing', error);
+      console.error('failed to refresh file status:', error);
+      message.error('failed to refresh file status, please try again');
+      logger.logError('failed to refresh file status', 'file-processing', error);
     } finally {
       setRefreshingStatus(false);
     }
@@ -842,25 +932,25 @@ const FilesPage: React.FC = () => {
               industry: selectedIndustry,
               ticker: selectedTicker || undefined
             });
-            message.success(`成功上传 ${uploadedFiles.length} 个文件并设置标签`);
-            logger.logInfo(`为 ${fileIds.length} 个文件设置标签: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
+            message.success(`successfully uploaded ${uploadedFiles.length} files and set tags`);
+            logger.logInfo(`set tags for ${fileIds.length} files: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
           } else {
-            message.success(`成功上传 ${uploadedFiles.length} 个文件`);
+            message.success(`successfully uploaded ${uploadedFiles.length} files`);
           }
         } catch (tagError: any) {
-          console.error('设置文件标签失败:', tagError);
-          const tagErrorMessage = getErrorMessage(tagError, '标签设置失败');
-          message.warning(`文件上传成功，但标签设置失败: ${tagErrorMessage}`);
-          logger.logWarning(`文件标签设置失败: ${tagErrorMessage}`, 'file-processing', tagError);
+          console.error('failed to set file tags:', tagError);
+          const tagErrorMessage = getErrorMessage(tagError, 'failed to set file tags');
+          message.warning(`file uploaded successfully, but tags setting failed: ${tagErrorMessage}`);
+          logger.logWarning(`failed to set file tags: ${tagErrorMessage}`, 'file-processing', tagError);
         }
       } else {
         message.success(`Successfully uploaded ${uploadedFiles.length} files`);
-        logger.logInfo('文件上传成功', 'file-processing');
+        logger.logInfo('file uploaded successfully', 'file-processing');
       }
       
     } catch (error: any) {
-      console.error('文件上传失败:', error);
-      const errorMessage = getErrorMessage(error, '文件上传失败');
+      console.error('failed to upload files:', error);
+      const errorMessage = getErrorMessage(error, 'failed to upload files');
       message.error(errorMessage);
       logger.logError(errorMessage, 'file-processing', error);
     } finally {
@@ -883,7 +973,7 @@ const FilesPage: React.FC = () => {
   const handleRemoveFile = (fileId: string) => {
     const fileName = files.find(f => f.id === fileId)?.name;
     setFiles(prev => prev.filter(f => f.id !== fileId));
-    logger.logInfo(`移除文件: ${fileName}`, 'file-processing');
+    logger.logInfo(`remove file: ${fileName}`, 'file-processing');
   };
 
   const handleMoveFile = (fileId: string, direction: 'up' | 'down') => {
@@ -896,7 +986,7 @@ const FilesPage: React.FC = () => {
       
       if (targetIndex >= 0 && targetIndex < newFiles.length) {
         [newFiles[index], newFiles[targetIndex]] = [newFiles[targetIndex], newFiles[index]];
-        logger.logInfo(`文件位置调整: ${newFiles[targetIndex].name} ${direction === 'up' ? '上移' : '下移'}`, 'file-processing');
+        logger.logInfo(`file position adjusted: ${newFiles[targetIndex].name} ${direction === 'up' ? 'up' : 'down'}`, 'file-processing');
       }
       
       return newFiles;
@@ -905,14 +995,14 @@ const FilesPage: React.FC = () => {
 
   const handleStartProcessing = async () => {
     if (!selectedTaskType) {
-      message.error('请选择RC Agent');
-      logger.logWarning('未选择RC Agent', 'file-processing');
+      message.error('please select RC Agent');
+      logger.logWarning('no RC Agent selected', 'file-processing');
       return;
     }
 
     if (!selectedSector || !selectedIndustry) {
-      message.error('请选择行业分类');
-      logger.logWarning('未选择行业分类', 'file-processing');
+      message.error('please select industry classification');
+      logger.logWarning('no industry classification selected', 'file-processing');
       return;
     }
     
@@ -927,7 +1017,7 @@ const FilesPage: React.FC = () => {
       setCurrentTaskId(null);
       setTaskStatus(null);
       
-      logger.logInfo(`开始处理 ${files.length} 个文件`, 'file-processing');
+      logger.logInfo(`start processing ${files.length} files`, 'file-processing');
       
       // 将所有文件状态设置为ready
       setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
@@ -943,18 +1033,18 @@ const FilesPage: React.FC = () => {
       });
       
       setCurrentTaskId(response.task_id);
-      message.success('文件处理任务已启动');
+      message.success('file processing task started');
       
       // 任务启动后立即刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc();
+        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保任务状态已更新
     } catch (error: any) {
       setProcessing(false);
-      console.error('启动文件处理失败:', error);
-      const errorMessage = getErrorMessage(error, '启动文件处理失败');
+      console.error('failed to start file processing:', error);
+      const errorMessage = getErrorMessage(error, 'failed to start file processing');
       message.error(errorMessage);
-      logger.logError(`启动文件处理失败: ${errorMessage}`, 'file-processing', error);
+      logger.logError(`failed to start file processing: ${errorMessage}`, 'file-processing', error);
     }
   };
 
@@ -964,8 +1054,8 @@ const FilesPage: React.FC = () => {
     setStoppingTask(true);
     try {
       await filesAPI.stopTask(currentTaskId);
-      message.info('已发送停止请求');
-      logger.logInfo('已发送停止任务请求', 'file-processing');
+      message.info('stop task request sent');
+      logger.logInfo('stop task request sent', 'file-processing');
       
       // 停止任务后，等待一段时间再刷新执行历史列表
       setTimeout(async () => {
@@ -973,14 +1063,14 @@ const FilesPage: React.FC = () => {
           const executions = await tasksAPI.getTaskExecutions();
           setTaskExecutions(executions);
         } catch (error) {
-          console.error('任务停止后刷新执行历史失败:', error);
-          logger.logError('任务停止后刷新执行历史失败', 'file-processing', error);
+          console.error('failed to refresh execution history after task stopped:', error);
+          logger.logError('failed to refresh execution history after task stopped', 'file-processing', error);
         }
       }, 3000); // 等待3秒后刷新，确保任务状态已更新
       
     } catch (error: any) {
-      console.error('停止任务失败:', error);
-      const errorMessage = getErrorMessage(error, '停止任务失败');
+      console.error('failed to stop task:', error);
+      const errorMessage = getErrorMessage(error, 'failed to stop task');
       message.error(errorMessage);
       logger.logError(errorMessage, 'file-processing', error);
     } finally {
@@ -998,7 +1088,7 @@ const FilesPage: React.FC = () => {
         newCustomInputs[field.name] = '';
       });
       setCustomInputs(newCustomInputs);
-      logger.logInfo(`切换RC Agent: ${taskType.name}`, 'file-processing');
+      logger.logInfo(`switch RC Agent: ${taskType.name}`, 'file-processing');
     }
   };
 
@@ -1007,11 +1097,11 @@ const FilesPage: React.FC = () => {
     setShowResult(false);
     setProcessingResult(null);
     setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
-    logger.logInfo('重新处理文件', 'file-processing');
+    logger.logInfo('reprocess files', 'file-processing');
     
           // 重新处理时也刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc();
+        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保状态已更新
   };
 
@@ -1021,11 +1111,11 @@ const FilesPage: React.FC = () => {
     setShowResult(false);
     setProcessingResult(null);
     setLastCompletedTaskId(null);
-    logger.logInfo('清空文件列表', 'file-processing');
+    logger.logInfo('clear file list', 'file-processing');
     
           // 清除文件列表时也刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc();
+        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保状态已更新
   };
 
@@ -1068,8 +1158,8 @@ const FilesPage: React.FC = () => {
       });
       setTickerOptions(tickers);
     } catch (error) {
-      console.error('搜索股票代码失败:', error);
-      message.error('搜索股票代码失败');
+      console.error('failed to search tickers:', error);
+      message.error('failed to search tickers');
     } finally {
       setLoadingTickers(false);
     }
@@ -1088,7 +1178,7 @@ const FilesPage: React.FC = () => {
       console.log('Setting sector and industry:', selectedTickerInfo.sector, selectedTickerInfo.industry);
       setSelectedSector(selectedTickerInfo.sector);
       setSelectedIndustry(selectedTickerInfo.industry);
-      message.success(`已自动选择行业: ${selectedTickerInfo.sector} → ${selectedTickerInfo.industry}`);
+      message.success(`automatically selected industry: ${selectedTickerInfo.sector} → ${selectedTickerInfo.industry}`);
     } else {
       console.log('No sector/industry info found for ticker:', value);
     }
@@ -1106,7 +1196,7 @@ const FilesPage: React.FC = () => {
         .filter(id => id);
       
       if (fileIds.length === 0) {
-        message.warning('没有可以设置标签的文件');
+        message.warning('no files to set tags');
         return;
       }
       
@@ -1127,12 +1217,12 @@ const FilesPage: React.FC = () => {
         } : f.tag
       })));
       
-      message.success(`成功为 ${fileIds.length} 个文件设置标签`);
+      message.success(`successfully set tags for ${fileIds.length} files`);
       setShowBatchTagModal(false);
       
     } catch (error: any) {
-      console.error('批量设置标签失败:', error);
-      message.error(`批量设置标签失败: ${error.message || '未知错误'}`);
+      console.error('failed to batch set tags:', error);
+      message.error(`failed to batch set tags: ${error.message || 'unknown error'}`);
     } finally {
       setBatchTagging(false);
     }
@@ -1166,7 +1256,7 @@ const FilesPage: React.FC = () => {
                   ...prev,
                   [field.name]: e.target.value
                 }))}
-                placeholder={`请输入${field.name}`}
+                placeholder={`enter ${field.name}`}
                 maxLength={field.max_length}
                 showCount
                 rows={2}
@@ -2283,8 +2373,34 @@ const FilesPage: React.FC = () => {
                   })}
                 </div>
                 {taskTypes.length === 0 && (
-                  <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
-                    No AI Agents available
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    {taskTypesLoadAttempts >= maxTaskTypesRetries ? (
+                      <div>
+                        <div style={{ color: '#ff4d4f', marginBottom: '10px' }}>
+                          <ExclamationCircleOutlined /> RC Agent加载失败
+                        </div>
+                        <Button 
+                          type="primary" 
+                          size="small" 
+                          onClick={() => {
+                            setTaskTypesLoadAttempts(0);
+                            setLastTaskTypesError(0);
+                            loadTaskTypes(true);
+                          }}
+                          icon={<ReloadOutlined />}
+                        >
+                          重新加载
+                        </Button>
+                      </div>
+                    ) : taskTypesLoadAttempts > 0 ? (
+                      <div style={{ color: '#faad14' }}>
+                        <LoadingOutlined /> 正在重试加载RC Agent... ({taskTypesLoadAttempts}/{maxTaskTypesRetries})
+                      </div>
+                    ) : (
+                      <div style={{ color: '#999' }}>
+                        No AI Agents available
+                      </div>
+                    )}
                   </div>
                 )}
               </Form>

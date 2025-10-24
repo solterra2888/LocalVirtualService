@@ -57,15 +57,16 @@ class TaskManager:
         if not self._load_from_database():
             # 如果数据库加载失败，尝试从配置文件加载
             if not self._load_from_config():
-                # 如果都失败，创建默认任务
-                self._ensure_default_task()
+                # 如果都失败，不再创建默认任务，保持空的任务列表
+                # 用户需要手动创建或配置AI Agent任务
+                print("⚠️ No AI Agent configuration found, please create tasks through the AI Agent Settings page")
         
         # 更新缓存
         _task_manager_cache[self.cache_key] = {
             'task_types': self.task_types.copy(),
             'timestamp': time.time()
         }
-        print(f"🔄 已更新缓存 (用户: {self.username}, 管理员: {self.is_admin}) - {len(self.task_types)} 个AGENT凭据")
+        print(f"🔄 Updated cache (user: {self.username}, admin: {self.is_admin}) - {len(self.task_types)} agent credentials")
     
     def _ensure_default_task(self):
         """确保存在默认任务"""
@@ -86,14 +87,14 @@ class TaskManager:
     def _load_from_database(self):
         """从数据库加载AGENT凭据"""
         try:
-            print("从数据库加载AGENT凭据...")
+            print("Loading agent credentials from database...")
             agents = self.db_manager.get_agent_credentials(self.username, self.is_admin)
             
             if not agents:
-                print("数据库中没有找到AGENT凭据")
+                print("No agent credentials found in database")
                 return False
             
-            print(f"从数据库加载了 {len(agents)} 个AGENT凭据")
+            print(f"Loaded {len(agents)} agent credentials from database")
             
             # 清除现有RC Agent
             self.task_types = {}
@@ -114,9 +115,9 @@ class TaskManager:
                             input_fields = json.loads(input_fields_str)
                         else:  # PostgreSQL可能已经解析了JSON
                             input_fields = input_fields_str
-                        print(f"加载了{agent_name}的 {len(input_fields)} 个输入字段")
+                        print(f"Loaded {len(input_fields)} input fields for {agent_name}")
                     except json.JSONDecodeError:
-                        print(f"无法解析{agent_name}的输入字段JSON")
+                        print(f"Failed to parse input fields JSON for {agent_name}")
                 
                 # 获取备注、创建者和创建时间
                 remarks = ""
@@ -149,36 +150,36 @@ class TaskManager:
                 }
                 
                 if is_default:
-                    print(f"加载了默认AGENT: {agent_name}")
+                    print(f"Loaded default agent: {agent_name}")
             
             return True
         except Exception as e:
-            print(f"从数据库加载AGENT凭据时出错: {str(e)}")
+            print(f"Failed to load agent credentials from database: {str(e)}")
             return False
     
     def _load_from_config(self):
         """从配置文件加载AGENT凭据（向后兼容）"""
         try:
-            print("从配置文件加载AGENT凭据...")
+            print("Loading agent credentials from config file...")
             
             # 获取RC Agent令牌配置
             tokens_dict = config.get_rc_agent_tokens()
             
             if not tokens_dict:
-                print("配置文件中没有找到RC Agent令牌配置")
+                print("No RC Agent token configuration found in config file")
                 return False
             
             # 更新RC Agent
             self.task_types = tokens_dict
             
-            print(f"从配置文件加载了 {len(self.task_types)} 个RC Agent")
+            print(f"Loaded {len(self.task_types)} RC Agents from config file")
             
             # 尝试迁移到数据库
             self._migrate_to_database()
             
             return True
         except Exception as e:
-            print(f"从配置文件加载AGENT凭据时出错: {str(e)}")
+            print(f"Failed to load agent credentials from config file: {str(e)}")
             return False
     
     def _migrate_to_database(self):
@@ -189,15 +190,15 @@ class TaskManager:
             if agents:
                 return  # 数据库中已有数据，跳过迁移
             
-            print("开始将环境变量中的AGENT迁移到数据库...")
+            print("Starting to migrate agent information from environment variables to database...")
             
             # 保存到数据库
             if self.db_manager.save_agent_credentials(self.username, self.task_types):
-                print(f"成功将 {len(self.task_types)} 个AGENT凭据从环境变量迁移到数据库")
+                print(f"Successfully migrated {len(self.task_types)} agent credentials from environment variables to database")
             else:
-                print("迁移AGENT凭据到数据库失败")
+                print("Failed to migrate agent credentials to database")
         except Exception as e:
-            print(f"迁移环境变量AGENT信息到数据库时出错: {e}")
+            print(f"Failed to migrate agent information from environment variables to database: {e}")
     
     def get_task_types(self):
         """获取所有RC Agent"""
@@ -223,21 +224,21 @@ class TaskManager:
         """
         # 验证输入
         if not task_name:
-            return False, "任务名称不能为空", None
+            return False, "Task name cannot be empty", None
         
         if task_name.lower() in ["默认任务", "default task"]:
-            return False, "不能创建名为\"默认任务\"的新任务，此名称已被系统保留", None
+            return False, "Cannot create a new task named \"默认任务\", this name is reserved by the system", None
         
         # 检查名称是否重复
         if task_name in [info['name'] for info in self.task_types.values()]:
-            return False, "任务名称不能重复", None
+            return False, "Task name cannot be duplicated", None
         
         # 生成唯一的数字格式任务ID
         task_id = str(int(time.time() * 1000) + random.randint(1, 1000))
         
         # 验证agent_type
         if agent_type not in ["chatbot", "workflow"]:
-            return False, "Agent类型必须是 'chatbot' 或 'workflow'", None
+            return False, "Agent type must be 'chatbot' or 'workflow'", None
         
         # 添加任务
         self.task_types[task_id] = {
@@ -256,11 +257,11 @@ class TaskManager:
         if success:
             # 清除缓存，强制重新加载
             self._clear_cache()
-            return True, f"已添加新RC Agent: '{task_name}'", task_id
+            return True, f"New RC Agent added: '{task_name}'", task_id
         else:
             # 如果保存失败，从内存中移除
             del self.task_types[task_id]
-            return False, "保存到数据库失败", None
+            return False, "Failed to save to database", None
     
     def update_task_type(self, task_id, task_name=None, task_token=None, input_fields=None, remarks=None, agent_type=None):
         """
@@ -278,20 +279,24 @@ class TaskManager:
             tuple: (success, message)
         """
         if task_id not in self.task_types:
-            return False, "任务不存在"
+            return False, "Task not found"
         
         task_info = self.task_types[task_id]
+        
+        # 权限检查：普通用户只能编辑自己创建的AI Agent
+        if not self.is_admin and task_info.get('created_by') != self.username:
+            return False, "Permission denied, only you can edit your own AI Agent"
         
         # 名称验证（包括默认任务）
         if task_name:
             # 检查更改后的名称是否与其他任务重复
             for other_id, other_info in self.task_types.items():
                 if other_id != task_id and other_info['name'] == task_name:
-                    return False, "任务名称不能重复"
+                    return False, "Task name cannot be duplicated"
         
         # 验证agent_type
         if agent_type is not None and agent_type not in ["chatbot", "workflow"]:
-            return False, "Agent类型必须是 'chatbot' 或 'workflow'"
+            return False, "Agent type must be 'chatbot' or 'workflow'"
         
         # 更新任务信息
         if task_name is not None:
@@ -311,9 +316,9 @@ class TaskManager:
         if success:
             # 清除缓存，强制重新加载
             self._clear_cache()
-            return True, f"已更新任务 '{task_info['name']}' 的设置"
+            return True, f"Updated task '{task_info['name']}' settings"
         else:
-            return False, "保存到数据库失败"
+            return False, "Failed to save to database"
     
     def delete_task_type(self, task_id):
         """
@@ -326,31 +331,37 @@ class TaskManager:
             tuple: (success, message)
         """
         if task_id == "default":
-            return False, "不能删除默认任务"
+            return False, "Cannot delete default task"
         
         if task_id not in self.task_types:
-            return False, "任务不存在"
+            return False, "Task not found"
         
-        task_name = self.task_types[task_id]["name"]
+        task_info = self.task_types[task_id]
+        
+        # 权限检查：普通用户只能删除自己创建的AI Agent
+        if not self.is_admin and task_info.get('created_by') != self.username:
+            return False, "Permission denied, only you can delete your own AI Agent"
+        
+        task_name = task_info["name"]
         
         # 从数据库中删除
-        success = self.db_manager.delete_agent_credential(task_id, task_name)
+        success = self.db_manager.delete_agent_credential(task_id, task_name, self.username, self.is_admin)
         
         if success:
             # 从内存中删除
             del self.task_types[task_id]
             # 清除缓存，强制重新加载
             self._clear_cache()
-            return True, f"已删除RC Agent: '{task_name}'"
+            return True, f"Deleted RC Agent: '{task_name}'"
         else:
-            return False, "从数据库删除失败"
+            return False, "Failed to delete from database"
     
     def save_to_database(self):
         """保存到数据库"""
         try:
             return self.db_manager.save_agent_credentials(self.username, self.task_types)
         except Exception as e:
-            print(f"保存到数据库时出错: {str(e)}")
+            print(f"Failed to save to database: {str(e)}")
             return False
     
     def save_to_config(self):
@@ -359,7 +370,7 @@ class TaskManager:
             config.save_rc_agent_tokens(self.task_types)
             return True
         except Exception as e:
-            print(f"保存到配置文件时出错: {str(e)}")
+            print(f"Failed to save to config file: {str(e)}")
             return False
     
     def get_task_list_for_ui(self):
@@ -396,9 +407,9 @@ class TaskManager:
         task_info = self.task_types[task_id]
         
         if use_ai_agent and not task_info["token"]:
-            return False, f"任务 '{task_info['name']}' 没有配置RC Agent令牌", None
+            return False, f"Task '{task_info['name']}' has no RC Agent token configured", None
         
-        return True, "验证通过", task_info
+        return True, "Validation passed", task_info
     
     def collect_custom_inputs(self, input_widgets_data):
         """
@@ -428,4 +439,4 @@ class TaskManager:
         """清除所有缓存"""
         global _task_manager_cache
         _task_manager_cache.clear()
-        print("已清除所有TaskManager缓存") 
+        print("Cleared all TaskManager caches") 

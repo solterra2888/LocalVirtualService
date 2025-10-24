@@ -11,24 +11,24 @@ import {
   Divider,
   Row,
   Col,
-  Input,
-  Select
+  Input
 } from 'antd';
 import { 
   InfoCircleOutlined, 
   CopyOutlined, 
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import { PromptCategory, PromptTemplateDetail } from '../services/promptTemplateService';
 
 const { Text, Paragraph } = Typography;
 const { Panel } = Collapse;
-const { Option } = Select;
 
 interface VariableHelperProps {
   categories: PromptCategory[];
   templates: PromptTemplateDetail[];
   onVariableInsert?: (variable: string) => void;
+  currentCategoryId?: number;  // 当前编辑模板所属的分类ID
 }
 
 interface VariableInfo {
@@ -44,11 +44,47 @@ interface VariableInfo {
 const VariableHelper: React.FC<VariableHelperProps> = ({
   categories,
   templates,
-  onVariableInsert
+  onVariableInsert,
+  currentCategoryId
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchText, setSearchText] = useState<string>('');
   const [variableInfo, setVariableInfo] = useState<VariableInfo[]>([]);
+
+  // 根据 category 定义可用的变量（基于 category_code）
+  const getCategoryAllowedVariables = (categoryCode?: string): string[] | null => {
+    // null 表示显示所有变量（未选择category或未知category）
+    if (!categoryCode) return null;
+    
+    const categoryVariableMap: { [key: string]: string[] } = {
+      'news_analysis': [
+        // News table fields
+        'title', 'content', 'date', 'source', 'link', 'formatted_text',
+        // Aggregated fields
+        'symbols',
+        // Template parameters
+        'max_length', 'language', 'format', 'temperature', 'model', 'provider'
+      ],
+      'theme_analysis': [
+        // futu_investment_themes fields
+        'theme_id', 'theme_name', 'market', 'theme_url',
+        'change_percent', 'gainers', 'losers', 'unchanged',
+        'top_stock', 'top_stock_change', 'stock_count',
+        // Aggregated from futu_theme_stocks
+        'stock_symbols', 'company_names',
+        // Template parameters
+        'language', 'format', 'temperature', 'model', 'provider'
+      ]
+    };
+    
+    return categoryVariableMap[categoryCode] || null;
+  };
+
+  // 获取当前category的code
+  const getCurrentCategoryCode = (): string | undefined => {
+    if (!currentCategoryId || !categories.length) return undefined;
+    const category = categories.find(c => c.id === currentCategoryId);
+    return category?.category_code;
+  };
 
   // 从现有模板中提取变量信息
   useEffect(() => {
@@ -84,29 +120,65 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
   // 生成变量示例
   const generateVariableExamples = (varName: string, type: string): string[] => {
     const examples: { [key: string]: string[] } = {
-      title: ['新闻标题', '公司公告标题', '市场报告标题'],
-      content: ['新闻正文内容', '详细描述', '完整文本'],
-      symbols: ['AAPL,MSFT,GOOGL', '股票代码列表', '相关证券代码'],
+      // News analysis variables (新闻分析变量 - from news table)
+      title: ['News Title', 'Company Announcement Title', 'Market Report Title'],
+      content: ['News Content', 'Detailed Description', 'Full Text'],
+      date: ['2024-01-15', '2025-10-23', '2024-12-31'],
+      source: ['EODHD', 'Reuters', 'Bloomberg'],
+      link: ['https://news.example.com/...', 'News URL', 'Article link'],
+      formatted_text: ['Formatted news text', 'Processed content', 'Clean text'],
+      
+      // Aggregated from news_symbols (通过JOIN获取)
+      symbols: ['AAPL,MSFT,GOOGL', '0700.HK,9988.HK', 'Stock symbols list'],
+      
+      // Template parameters (模板参数 - 非数据库字段)
       max_length: ['100', '200', '500'],
-      date: ['2024-01-15', '今天', '最近一周'],
-      language: ['中文', 'English', 'zh-CN'],
+      language: ['Chinese', 'English', 'zh-CN'],
       format: ['JSON', 'Markdown', 'Plain Text'],
+      
+      // Investment theme variables (投资主题变量 - from futu_investment_themes)
+      theme_id: ['BK1288', 'BK0123', 'EV_US_001'],
+      theme_name: ['Electric Vehicles (电动汽车)', 'Artificial Intelligence', '5G Technology'],
+      market: ['HK', 'US', 'CN'],
+      theme_url: ['https://www.futunn.com/...', 'Theme URL', 'Link to theme page'],
+      change_percent: ['+8.61%', '-2.34%', '+15.28%'],
+      gainers: ['12', '8', '20'],
+      losers: ['5', '3', '10'],
+      unchanged: ['3', '2', '5'],
+      top_stock: ['Tesla Inc.', 'NVIDIA Corp.', 'Apple Inc.'],
+      top_stock_change: ['+12.5%', '-3.2%', '+8.9%'],
+      stock_count: ['25', '50', '100'],
+      
+      // Aggregated from futu_theme_stocks (通过JOIN futu_theme_stocks获取)
+      stock_symbols: ['TSLA, NIO, RIVN', 'NVDA, MSFT, GOOGL', 'AAPL, MSFT'],
+      company_names: ['Tesla, NIO, Rivian', 'NVIDIA, Microsoft, Google', 'Apple, Microsoft'],
+      
+      // LLM configuration variables (LLM配置变量)
       temperature: ['0.7', '0.3', '1.0'],
       model: ['qwen-plus', 'doubao-seed', 'glm-4'],
       provider: ['qwen', 'doubao', 'glm']
     };
 
-    return examples[varName] || [`示例${varName}值1`, `示例${varName}值2`];
+    return examples[varName] || [`Example ${varName} Value 1`, `Example ${varName} Value 2`];
   };
 
   // 过滤变量
   const filteredVariables = variableInfo.filter(variable => {
-    const matchesCategory = selectedCategory === 'all' || variable.category === selectedCategory;
+    // 1. 首先根据 currentCategoryId 过滤（如果有设置的话）
+    const currentCategoryCode = getCurrentCategoryCode();
+    const allowedVars = getCategoryAllowedVariables(currentCategoryCode);
+    
+    // 如果有 currentCategoryId 且定义了允许的变量列表，则只显示允许的变量
+    if (allowedVars && !allowedVars.includes(variable.name)) {
+      return false;
+    }
+    
+    // 2. 根据搜索文本过滤
     const matchesSearch = !searchText || 
       variable.name.toLowerCase().includes(searchText.toLowerCase()) ||
       variable.description.toLowerCase().includes(searchText.toLowerCase());
     
-    return matchesCategory && matchesSearch;
+    return matchesSearch;
   });
 
   // 按类别分组
@@ -127,6 +199,98 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
       // 复制到剪贴板
       navigator.clipboard.writeText(variableText);
     }
+  };
+
+  // 渲染快捷变量卡片（根据分类过滤）
+  const renderQuickVariables = () => {
+    const currentCategoryCode = getCurrentCategoryCode();
+    const allowedVars = getCategoryAllowedVariables(currentCategoryCode);
+    
+    const newsVars = [
+      { name: 'title', description: 'News Title - from news table' },
+      { name: 'content', description: 'News Content - from news table' },
+      { name: 'symbols', description: 'Stock Symbols - aggregated' },
+      { name: 'date', description: 'Date - from news table' }
+    ];
+
+    const themeVars = [
+      { name: 'theme_name', description: 'Theme Name - from futu_investment_themes' },
+      { name: 'market', description: 'Market (HK/US/CN)' },
+      { name: 'stock_symbols', description: 'Stock Symbols - aggregated' },
+      { name: 'company_names', description: 'Company Names - aggregated' }
+    ];
+
+    // 根据当前分类过滤变量
+    const filterVars = (vars: Array<{name: string, description: string}>) => {
+      if (!allowedVars) return vars;
+      return vars.filter(v => allowedVars.includes(v.name));
+    };
+
+    const filteredNewsVars = filterVars(newsVars);
+    const filteredThemeVars = filterVars(themeVars);
+
+    // 根据分类决定显示哪些分组
+    const showNews = currentCategoryCode === 'news_analysis';
+    const showTheme = currentCategoryCode === 'theme_analysis';
+
+    if (!showNews && !showTheme) return null;
+
+    return (
+      <Card title="Quick Insert" size="small" style={{ marginBottom: 8 }}>
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
+          {currentCategoryCode && (
+            <Alert
+              message={`Filtered for: ${categories.find(c => c.id === currentCategoryId)?.category_name || 'Unknown Category'}`}
+              type="info"
+              showIcon
+              style={{ fontSize: '11px', padding: '4px 8px' }}
+            />
+          )}
+
+          {showNews && filteredNewsVars.length > 0 && (
+            <div>
+              <Text strong style={{ fontSize: '11px', color: '#666' }}>News Analysis</Text>
+              <div style={{ marginTop: '4px' }}>
+                <Space wrap size="small">
+                  {filteredNewsVars.map(v => (
+                    <Tooltip key={v.name} title={v.description}>
+                      <Tag 
+                        color="blue" 
+                        style={{ cursor: 'pointer', fontSize: '11px' }}
+                        onClick={() => handleInsertVariable(v.name)}
+                      >
+                        {`{{${v.name}}}`}
+                      </Tag>
+                    </Tooltip>
+                  ))}
+                </Space>
+              </div>
+            </div>
+          )}
+
+          {showTheme && filteredThemeVars.length > 0 && (
+            <div>
+              <Text strong style={{ fontSize: '11px', color: '#666' }}>Investment Themes</Text>
+              <div style={{ marginTop: '4px' }}>
+                <Space wrap size="small">
+                  {filteredThemeVars.map(v => (
+                    <Tooltip key={v.name} title={v.description}>
+                      <Tag 
+                        color="green" 
+                        style={{ cursor: 'pointer', fontSize: '11px' }}
+                        onClick={() => handleInsertVariable(v.name)}
+                      >
+                        {`{{${v.name}}}`}
+                      </Tag>
+                    </Tooltip>
+                  ))}
+                </Space>
+              </div>
+            </div>
+          )}
+        </Space>
+      </Card>
+    );
   };
 
   // 渲染变量信息
@@ -179,44 +343,12 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
     </Card>
   );
 
-  // 渲染常用变量
-  const renderCommonVariables = () => {
-    const commonVars = [
-      { name: 'title', description: '标题内容' },
-      { name: 'content', description: '正文内容' },
-      { name: 'symbols', description: '股票代码' },
-      { name: 'date', description: '日期' },
-      { name: 'language', description: '语言' },
-      { name: 'format', description: '输出格式' },
-      { name: 'max_length', description: '最大长度' },
-      { name: 'temperature', description: '温度参数' }
-    ];
-
-    return (
-      <Card title="常用变量" size="small">
-        <Space wrap>
-          {commonVars.map(varInfo => (
-            <Tooltip key={varInfo.name} title={varInfo.description}>
-              <Tag 
-                color="blue" 
-                style={{ cursor: 'pointer' }}
-                onClick={() => handleInsertVariable(varInfo.name)}
-              >
-                {`{{${varInfo.name}}}`}
-              </Tag>
-            </Tooltip>
-          ))}
-        </Space>
-      </Card>
-    );
-  };
-
   return (
     <Card 
       title={
         <Space>
           <InfoCircleOutlined />
-          <Text>变量助手</Text>
+          <Text>Variable Helper</Text>
         </Space>
       }
       size="small"
@@ -225,17 +357,17 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {/* 使用说明 */}
         <Alert
-          message="变量使用说明"
+          message="Variable Usage Instructions"
           description={
             <div>
               <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                1. 使用 <Text code>{`{{variable_name}}`}</Text> 格式定义变量
+                1. Use <Text code>{`{{variable_name}}`}</Text> format to define variables
               </Paragraph>
               <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                2. 点击变量可插入到编辑器中
+                2. Click variables to insert them into the editor
               </Paragraph>
               <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                3. 变量名只能包含字母、数字和下划线
+                3. Variable names can only contain letters, numbers, and underscores
               </Paragraph>
             </div>
           }
@@ -244,87 +376,96 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
           style={{ fontSize: '12px' }}
         />
 
-        {/* 常用变量 */}
-        {renderCommonVariables()}
+        {/* 分类提示 */}
+        {!currentCategoryId && (
+          <Alert
+            message="Please select a category"
+            description="Select a category in the form above to see relevant variables"
+            type="warning"
+            showIcon
+            style={{ fontSize: '11px', padding: '8px 12px' }}
+          />
+        )}
 
-        <Divider style={{ margin: '8px 0' }} />
+        {/* 快捷变量插入（根据分类过滤） */}
+        {currentCategoryId && renderQuickVariables()}
+
+        {currentCategoryId && <Divider style={{ margin: '8px 0' }} />}
 
         {/* 筛选器 */}
         <Row gutter={8}>
-          <Col span={12}>
-            <Select
-              size="small"
-              style={{ width: '100%' }}
-              value={selectedCategory}
-              onChange={setSelectedCategory}
-            >
-              <Option value="all">所有类别</Option>
-              {categories.map(category => (
-                <Option key={category.id} value={category.category_name}>
-                  {category.icon} {category.category_name}
-                </Option>
-              ))}
-            </Select>
-          </Col>
-          <Col span={12}>
+          {/* 只显示搜索框，category 由弹窗的 Category 下拉框控制 */}
+          <Col span={24}>
             <Input
               size="small"
-              placeholder="搜索变量..."
+              placeholder="Search variables..."
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
               allowClear
+              prefix={<SearchOutlined />}
             />
           </Col>
         </Row>
 
         {/* 变量列表 */}
-        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-          {Object.keys(groupedVariables).length > 0 ? (
-            <Collapse size="small" ghost>
-              {Object.entries(groupedVariables).map(([category, variables]) => (
-                <Panel 
-                  key={category}
-                  header={
-                    <Space>
-                      <Text strong>{category}</Text>
-                      <Tag>{variables.length}</Tag>
-                    </Space>
-                  }
-                >
-                  {variables.map(renderVariableInfo)}
-                </Panel>
-              ))}
-            </Collapse>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <QuestionCircleOutlined style={{ fontSize: '24px', color: '#ccc' }} />
-              <Paragraph type="secondary" style={{ marginTop: '8px' }}>
-                没有找到匹配的变量
-              </Paragraph>
-            </div>
-          )}
-        </div>
+        {currentCategoryId ? (
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {Object.keys(groupedVariables).length > 0 ? (
+              <Collapse size="small" ghost>
+                {Object.entries(groupedVariables).map(([category, variables]) => (
+                  <Panel 
+                    key={category}
+                    header={
+                      <Space>
+                        <Text strong>{category}</Text>
+                        <Tag>{variables.length}</Tag>
+                      </Space>
+                    }
+                  >
+                    {variables.map(renderVariableInfo)}
+                  </Panel>
+                ))}
+              </Collapse>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                <QuestionCircleOutlined style={{ fontSize: '24px', color: '#ccc' }} />
+                <Paragraph type="secondary" style={{ marginTop: '8px' }}>
+                  No matching variables found
+                </Paragraph>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <InfoCircleOutlined style={{ fontSize: '32px', color: '#d9d9d9' }} />
+            <Paragraph type="secondary" style={{ marginTop: '12px' }}>
+              Select a category to view available variables
+            </Paragraph>
+          </div>
+        )}
 
         {/* 提示信息 */}
-        <Alert
-          message="提示"
-          description={
-            <div>
-              <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                • 变量定义在模板的 "Variables" 字段中
-              </Paragraph>
-              <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                • 支持的类型: string, integer, float, boolean, array, object
-              </Paragraph>
-              <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                • 可以为变量设置默认值和描述
-              </Paragraph>
-            </div>
-          }
-          type="warning"
-          showIcon
-          style={{ fontSize: '12px' }}
-        />
+        {currentCategoryId && (
+          <Alert
+            message="Tips"
+            description={
+              <div>
+                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
+                  • Variables shown are filtered based on the selected category
+                </Paragraph>
+                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
+                  • Supported types: string, integer, float, boolean, array, object
+                </Paragraph>
+                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
+                  • Click a variable to insert it into the template
+                </Paragraph>
+              </div>
+            }
+            type="info"
+            showIcon
+            style={{ fontSize: '12px' }}
+          />
+        )}
       </Space>
     </Card>
   );

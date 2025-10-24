@@ -50,7 +50,7 @@ class VariableDefinition(BaseModel):
 
 class OutputFormatSchema(BaseModel):
     type: str = Field("text", description="输出类型: text/json")
-    schema: Optional[Dict[str, Any]] = Field(None, description="JSON Schema定义")
+    json_schema: Optional[Dict[str, Any]] = Field(None, description="JSON Schema定义")
 
 class TemplateCreate(BaseModel):
     template_code: str = Field(..., description="模板代码，唯一标识")

@@ -6,10 +6,10 @@ import axios from 'axios';
 import {
   ThemeMatch,
   ThemeMatchRequest,
-  ThemeStatistics,
   InitializeThemesResponse,
   NewsThemesResponse,
   ThemeListResponse,
+  TaskStatusResponse,
 } from '../types/investmentThemes';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
@@ -40,15 +40,6 @@ export async function initializeThemeEmbeddings(
   return response.data;
 }
 
-/**
- * Get investment theme statistics
- */
-export async function getThemeStatistics(): Promise<ThemeStatistics> {
-  const response = await axios.get<{ success: boolean; statistics: ThemeStatistics }>(
-    `${API_BASE_URL}/investment-themes/statistics`
-  );
-  return response.data.statistics;
-}
 
 /**
  * Get matched themes for news
@@ -100,13 +91,13 @@ export async function updateThemeEmbedding(
 }
 
 /**
- * Batch fill theme descriptions (using LLM generation)
+ * Batch fill theme descriptions (using LLM generation - returns Celery task)
  */
 export async function fillThemeDescriptions(
   forceRegenerate: boolean = false,
   market?: string
-): Promise<{ success: boolean; message: string; statistics: any }> {
-  const response = await axios.post(
+): Promise<InitializeThemesResponse> {
+  const response = await axios.post<InitializeThemesResponse>(
     `${API_BASE_URL}/investment-themes/fill-descriptions`,
     {
       force_regenerate: forceRegenerate,
@@ -114,5 +105,51 @@ export async function fillThemeDescriptions(
     }
   );
   return response.data;
+}
+
+/**
+ * Get Celery task status
+ */
+export async function getTaskStatus(
+  taskId: string
+): Promise<TaskStatusResponse> {
+  const response = await axios.get<TaskStatusResponse>(
+    `${API_BASE_URL}/investment-themes/task-status/${taskId}`
+  );
+  return response.data;
+}
+
+/**
+ * Poll task until completion
+ */
+export async function pollTaskUntilComplete(
+  taskId: string,
+  onProgress?: (status: TaskStatusResponse) => void,
+  pollInterval: number = 2000,
+  timeout: number = 600000 // 10 minutes
+): Promise<TaskStatusResponse> {
+  const startTime = Date.now();
+  
+  while (true) {
+    const status = await getTaskStatus(taskId);
+    
+    // Notify progress
+    if (onProgress) {
+      onProgress(status);
+    }
+    
+    // Check if completed
+    if (status.status === 'SUCCESS' || status.status === 'FAILURE') {
+      return status;
+    }
+    
+    // Check timeout
+    if (Date.now() - startTime > timeout) {
+      throw new Error('Task timeout');
+    }
+    
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+  }
 }
 

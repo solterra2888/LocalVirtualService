@@ -13,7 +13,6 @@ import {
   Typography,
   Row,
   Col,
-  Statistic,
   message,
   Modal,
   Input,
@@ -27,7 +26,6 @@ import {
 } from 'antd';
 import {
   ReloadOutlined,
-  BarChartOutlined,
   SearchOutlined,
   SyncOutlined,
   FundOutlined,
@@ -40,15 +38,14 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 
 import {
-  getThemeStatistics,
   listThemes,
   initializeThemeEmbeddings,
   matchNewsToThemes,
-  fillThemeDescriptions
+  fillThemeDescriptions,
+  pollTaskUntilComplete
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
-  ThemeStatistics,
   MARKET_COLORS,
   MARKET_LABELS,
   ThemeMatch,
@@ -58,20 +55,16 @@ import { getErrorMessage } from '../utils/errorHandler';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
-const { Option } = Select;
 
 interface PageState {
   loading: boolean;
-  statistics: ThemeStatistics | null;
   themes: InvestmentTheme[];
   total: number;
   currentPage: number;
   pageSize: number;
-  selectedMarket: string | undefined;
   initializing: boolean;
   testModalVisible: boolean;
   testNewsText: string;
-  testMarket: 'HK' | 'US' | 'CN' | undefined;
   testResults: ThemeMatch[];
   testLoading: boolean;
 }
@@ -79,29 +72,17 @@ interface PageState {
 const InvestmentThemesPage: React.FC = () => {
   const [state, setState] = useState<PageState>({
     loading: false,
-    statistics: null,
     themes: [],
     total: 0,
     currentPage: 1,
     pageSize: 20,
-    selectedMarket: undefined,
     initializing: false,
     testModalVisible: false,
     testNewsText: '',
-    testMarket: 'US',
     testResults: [],
     testLoading: false
   });
 
-  // Load statistics
-  const loadStatistics = async () => {
-    try {
-      const stats = await getThemeStatistics();
-      setState(prev => ({ ...prev, statistics: stats }));
-    } catch (error) {
-      message.error(`Failed to load statistics: ${getErrorMessage(error)}`);
-    }
-  };
 
   // Load theme list
   const loadThemes = async (page?: number, market?: string) => {
@@ -127,14 +108,10 @@ const InvestmentThemesPage: React.FC = () => {
     }
   };
 
-  // 🌟 Sync Theme Data (merged functionality - replacing original handleInitialize)
+  // 🌟 Sync Theme Data (merged functionality - using Celery async tasks)
   const handleSyncThemes = async () => {
-    const coverageRate = state.statistics?.description_statistics?.coverage_rate || 0;
-    const missingDescCount = (state.statistics?.description_statistics?.total || 0) - 
-                             (state.statistics?.description_statistics?.with_description || 0);
-    
     Modal.confirm({
-      title: '🔄 Sync Theme Data',
+      title: 'Sync Theme Data',
       icon: <SyncOutlined />,
       width: 600,
       content: (
@@ -144,13 +121,10 @@ const InvestmentThemesPage: React.FC = () => {
             description={
               <div style={{ marginTop: '12px' }}>
                 <div style={{ marginBottom: '8px' }}>
-                  ✅ Generate detailed descriptions for <Text strong>{missingDescCount}</Text> new themes (using LLM)
+                  Generate detailed descriptions for new themes (using LLM)
                 </div>
                 <div style={{ marginBottom: '8px' }}>
-                  ✅ Generate vectors for new themes (incremental update, skip existing)
-                </div>
-                <div>
-                  ✅ Update statistics
+                  Generate vectors for new themes (incremental update, skip existing)
                 </div>
               </div>
             }
@@ -158,14 +132,8 @@ const InvestmentThemesPage: React.FC = () => {
             showIcon
             style={{ marginBottom: '16px' }}
           />
-          <Paragraph>
-            <Text strong>Current Description Coverage:</Text>
-            <Tag color={coverageRate >= 90 ? 'green' : 'orange'}>
-              {coverageRate.toFixed(1)}%
-            </Tag>
-          </Paragraph>
           <Paragraph type="secondary">
-            📌 Estimated Time: {missingDescCount > 20 ? '5-10' : '2-5'} minutes (background async execution)
+            Estimated Time: 2-10 minutes (background async execution using Celery)
           </Paragraph>
         </div>
       ),
@@ -173,34 +141,76 @@ const InvestmentThemesPage: React.FC = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          // Step 1: Fill descriptions
-          message.loading({ content: 'Step 1/2: Generating theme descriptions...', key: 'sync', duration: 0 });
-          const descResult = await fillThemeDescriptions(false, state.selectedMarket);
+          // Step 1: Submit description generation task
+          message.loading({ content: 'Step 1/2: Submitting theme description generation task...', key: 'sync', duration: 0 });
+          const descTask = await fillThemeDescriptions(false);
           
-          if (descResult.success) {
-            // Step 2: Initialize vectors
-            message.loading({ content: 'Step 2/2: Generating theme vectors...', key: 'sync', duration: 0 });
-            const vectorResult = await initializeThemeEmbeddings(false);
-            
+          if (!descTask.success) {
             message.destroy('sync');
-            
-            if (vectorResult.success) {
-              message.success({
-                content: `🎉 Sync completed! Descriptions: ${descResult.statistics.total || 0}, Vectors: ${vectorResult.statistics.processed}`,
-                duration: 6,
+            message.error(`Failed to submit description task: ${descTask.message}`);
+            return;
+          }
+          
+          // Poll description task
+          message.loading({ content: 'Step 1/2: Generating theme descriptions (0%)...', key: 'sync', duration: 0 });
+          const descResult = await pollTaskUntilComplete(
+            descTask.task_id,
+            (status) => {
+              const progressText = status.message || `Progress: ${status.progress}%`;
+              message.loading({ 
+                content: `Step 1/2: ${progressText}`, 
+                key: 'sync', 
+                duration: 0 
               });
-              
-              // Refresh data
-              setTimeout(() => {
-                loadStatistics();
-                loadThemes();
-              }, 2000);
-            } else {
-              message.warning(`Descriptions generated, but vector generation failed: ${vectorResult.message}`);
             }
-          } else {
+          );
+          
+          if (descResult.status === 'FAILURE') {
             message.destroy('sync');
-            message.error(`Sync failed: ${descResult.message}`);
+            message.error(`Description generation failed: ${descResult.error || 'Unknown error'}`);
+            return;
+          }
+          
+          // Step 2: Submit vector generation task
+          message.loading({ content: 'Step 2/2: Submitting theme vector generation task...', key: 'sync', duration: 0 });
+          const vectorTask = await initializeThemeEmbeddings(false);
+          
+          if (!vectorTask.success) {
+            message.destroy('sync');
+            message.warning(`Descriptions generated, but failed to submit vector task: ${vectorTask.message}`);
+            return;
+          }
+          
+          // Poll vector task
+          message.loading({ content: 'Step 2/2: Generating theme vectors (0%)...', key: 'sync', duration: 0 });
+          const vectorResult = await pollTaskUntilComplete(
+            vectorTask.task_id,
+            (status) => {
+              const progressText = status.message || `Progress: ${status.progress}%`;
+              message.loading({ 
+                content: `Step 2/2: ${progressText}`, 
+                key: 'sync', 
+                duration: 0 
+              });
+            }
+          );
+          
+          message.destroy('sync');
+          
+          if (vectorResult.status === 'FAILURE') {
+            message.warning(`Descriptions generated, but vector generation failed: ${vectorResult.error || 'Unknown error'}`);
+          } else {
+            const descStats = descResult.result?.statistics || descResult.result || {};
+            const vectorStats = vectorResult.result?.statistics || vectorResult.result || {};
+            message.success({
+              content: `🎉 Sync completed! Descriptions: ${(descStats as any).processed || 0}/${(descStats as any).total || 0}, Vectors: ${(vectorStats as any).processed || 0}/${(vectorStats as any).total || 0}`,
+              duration: 6,
+            });
+            
+            // Refresh data
+            setTimeout(() => {
+              loadThemes();
+            }, 2000);
           }
         } catch (error) {
           message.destroy('sync');
@@ -212,13 +222,8 @@ const InvestmentThemesPage: React.FC = () => {
 
   // 🌟 Optimize: Enhance Description Quality (fill descriptions only)
   const handleOptimizeDescriptions = async () => {
-    const coverageRate = state.statistics?.description_statistics?.coverage_rate || 0;
-    const missingCount = (state.statistics?.description_statistics?.total || 0) - 
-                         (state.statistics?.description_statistics?.with_description || 0);
-    const simpleTemplateCount = state.statistics?.description_statistics?.source_breakdown?.simple_template || 0;
-    
     Modal.confirm({
-      title: '✨ Optimize Description Quality',
+      title: 'Optimize Description Quality',
       icon: <ExperimentOutlined />,
       width: 600,
       content: (
@@ -228,13 +233,10 @@ const InvestmentThemesPage: React.FC = () => {
             description={
               <div style={{ marginTop: '12px' }}>
                 <div style={{ marginBottom: '8px' }}>
-                  📝 Missing Descriptions: <Text strong>{missingCount}</Text>
-                </div>
-                <div style={{ marginBottom: '8px' }}>
-                  🔄 Simple Template Descriptions: <Text strong>{simpleTemplateCount}</Text> (can be optimized)
+                  Generate detailed descriptions for themes
                 </div>
                 <div>
-                  ✅ Upgrade all to LLM-generated detailed descriptions
+                  Upgrade all to LLM-generated detailed descriptions
                 </div>
               </div>
             }
@@ -242,17 +244,8 @@ const InvestmentThemesPage: React.FC = () => {
             showIcon
             style={{ marginBottom: '16px' }}
           />
-          <Paragraph>
-            <Text strong>Current Coverage:</Text>
-            <Tag color={coverageRate >= 90 ? 'green' : 'orange'}>
-              {coverageRate.toFixed(1)}%
-            </Tag>
-            <Text type="secondary" style={{ marginLeft: '8px' }}>
-              → Expected 100% after optimization
-            </Text>
-          </Paragraph>
           <Paragraph type="secondary">
-            💡 Use Case: When description coverage &lt; 90% or many simple template descriptions
+            Use Case: When description coverage is low or many simple template descriptions
           </Paragraph>
         </div>
       ),
@@ -260,23 +253,45 @@ const InvestmentThemesPage: React.FC = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          message.loading({ content: 'Optimizing theme descriptions...', key: 'optimize', duration: 0 });
-          const result = await fillThemeDescriptions(false, state.selectedMarket);
+          // Submit task
+          message.loading({ content: 'Submitting description optimization task...', key: 'optimize', duration: 0 });
+          const task = await fillThemeDescriptions(false);
+          
+          if (!task.success) {
+            message.destroy('optimize');
+            message.error(`Failed to submit task: ${task.message}`);
+            return;
+          }
+          
+          // Poll task
+          message.loading({ content: 'Optimizing theme descriptions (0%)...', key: 'optimize', duration: 0 });
+          const result = await pollTaskUntilComplete(
+            task.task_id,
+            (status) => {
+              const progressText = status.message || `Progress: ${status.progress}%`;
+              message.loading({ 
+                content: `Optimizing: ${progressText}`, 
+                key: 'optimize', 
+                duration: 0 
+              });
+            }
+          );
           
           message.destroy('optimize');
           
-          if (result.success) {
+          if (result.status === 'FAILURE') {
+            message.error(`Optimization failed: ${result.error || 'Unknown error'}`);
+          } else {
+            const stats = result.result?.statistics || result.result || {};
             message.success({
-              content: result.message,
+              content: `🎉 Optimization completed! Processed: ${(stats as any).processed || 0}/${(stats as any).total || 0}`,
               duration: 5,
             });
             
-            // Remind user to refresh later
+            // Refresh data
             setTimeout(() => {
-              message.info('Optimization task is running in background, please refresh later to see results', 3);
+              loadThemes();
             }, 2000);
-          } else {
-            message.error(`Optimization failed: ${result.message}`);
           }
         } catch (error) {
           message.destroy('optimize');
@@ -289,7 +304,7 @@ const InvestmentThemesPage: React.FC = () => {
   // 🚨 Dangerous Operation: Force Update All Vectors
   const handleForceUpdateVectors = async () => {
     Modal.confirm({
-      title: '⚠️ Warning: Force Update All Vectors',
+      title: 'Warning: Force Update All Vectors',
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 650,
       content: (
@@ -299,13 +314,13 @@ const InvestmentThemesPage: React.FC = () => {
             description={
               <div style={{ marginTop: '12px' }}>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  ⚠️ Will regenerate vectors for <Text strong style={{ color: '#ff4d4f' }}>all themes</Text> (150+)
+                  Will regenerate vectors for <Text strong style={{ color: '#ff4d4f' }}>all themes</Text> (150+)
                 </div>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  ⏱️ Estimated Time: <Text strong>20-30 minutes</Text>
+                  Estimated Time: <Text strong>20-30 minutes</Text>
                 </div>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  💰 Will repeatedly call LLM to generate descriptions (consuming large API quota)
+                  Will repeatedly call LLM to generate descriptions (consuming large API quota)
                 </div>
               </div>
             }
@@ -315,14 +330,14 @@ const InvestmentThemesPage: React.FC = () => {
           />
           <Divider />
           <Paragraph>
-            <Text strong>✅ Applicable Scenarios:</Text>
+            <Text strong>Applicable Scenarios:</Text>
           </Paragraph>
           <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
             <li>Embedding model upgrade (e.g., text-embedding-v2 → v3)</li>
             <li>Vector dimension change</li>
           </ul>
           <Paragraph style={{ marginTop: '12px' }}>
-            <Text strong>❌ Not Applicable Scenarios:</Text>
+            <Text strong>Not Applicable Scenarios:</Text>
           </Paragraph>
           <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
             <li>Daily maintenance (please use "Sync Theme Data")</li>
@@ -342,21 +357,47 @@ const InvestmentThemesPage: React.FC = () => {
       onOk: async () => {
         setState(prev => ({ ...prev, initializing: true }));
         try {
-          const result = await initializeThemeEmbeddings(true);
+          // Submit task
+          message.loading({ content: 'Submitting force update task...', key: 'forceUpdate', duration: 0 });
+          const task = await initializeThemeEmbeddings(true);
           
-          if (result.success) {
+          if (!task.success) {
+            message.destroy('forceUpdate');
+            message.error(`Failed to submit task: ${task.message}`);
+            setState(prev => ({ ...prev, initializing: false }));
+            return;
+          }
+          
+          // Poll task
+          message.loading({ content: 'Force updating all vectors (0%)...', key: 'forceUpdate', duration: 0 });
+          const result = await pollTaskUntilComplete(
+            task.task_id,
+            (status) => {
+              const progressText = status.message || `Progress: ${status.progress}%`;
+              message.loading({ 
+                content: `Force updating: ${progressText}`, 
+                key: 'forceUpdate', 
+                duration: 0 
+              });
+            }
+          );
+          
+          message.destroy('forceUpdate');
+          
+          if (result.status === 'FAILURE') {
+            message.error(`Update failed: ${result.error || 'Unknown error'}`);
+          } else {
+            const stats = result.result?.statistics || result.result || {};
             message.success(
-              `Force update completed! Processed: ${result.statistics.processed}, ` +
-              `Failed: ${result.statistics.failed}`
+              `Force update completed! Processed: ${(stats as any).processed || 0}, ` +
+              `Failed: ${(stats as any).failed || 0}`
             );
             
             // Refresh data
-            await loadStatistics();
             await loadThemes();
-          } else {
-            message.error(`Update failed: ${result.message}`);
           }
         } catch (error) {
+          message.destroy('forceUpdate');
           message.error(`Update failed: ${getErrorMessage(error)}`);
         } finally {
           setState(prev => ({ ...prev, initializing: false }));
@@ -368,7 +409,7 @@ const InvestmentThemesPage: React.FC = () => {
   // 🚨 Dangerous Operation: Regenerate All Descriptions
   const handleForceRegenerateDescriptions = async () => {
     Modal.confirm({
-      title: '⚠️ Warning: Regenerate All Descriptions',
+      title: 'Warning: Regenerate All Descriptions',
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 650,
       content: (
@@ -378,13 +419,13 @@ const InvestmentThemesPage: React.FC = () => {
             description={
               <div style={{ marginTop: '12px' }}>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  ⚠️ Will call LLM to regenerate <Text strong style={{ color: '#ff4d4f' }}>all descriptions</Text> (150+)
+                  Will call LLM to regenerate <Text strong style={{ color: '#ff4d4f' }}>all descriptions</Text> (150+)
                 </div>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  ⏱️ Estimated Time: <Text strong>15-25 minutes</Text>
+                  Estimated Time: <Text strong>15-25 minutes</Text>
                 </div>
                 <div style={{ marginBottom: '8px', color: '#ff4d4f' }}>
-                  💰 LLM API calling cost is high
+                  LLM API calling cost is high
                 </div>
               </div>
             }
@@ -394,14 +435,14 @@ const InvestmentThemesPage: React.FC = () => {
           />
           <Divider />
           <Paragraph>
-            <Text strong>✅ Applicable Scenarios:</Text>
+            <Text strong>Applicable Scenarios:</Text>
           </Paragraph>
           <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
             <li>After major Prompt Template optimization</li>
             <li>Found historical description quality is generally poor</li>
           </ul>
           <Paragraph style={{ marginTop: '12px' }}>
-            <Text strong>❌ Not Applicable Scenarios:</Text>
+            <Text strong>Not Applicable Scenarios:</Text>
           </Paragraph>
           <ul style={{ paddingLeft: '20px', marginTop: '8px' }}>
             <li>Only few descriptions missing (please use "Optimize Description Quality")</li>
@@ -420,22 +461,44 @@ const InvestmentThemesPage: React.FC = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          message.loading({ content: 'Regenerating all descriptions...', key: 'forceRegen', duration: 0 });
-          const result = await fillThemeDescriptions(true, state.selectedMarket);
+          // Submit task
+          message.loading({ content: 'Submitting force regenerate task...', key: 'forceRegen', duration: 0 });
+          const task = await fillThemeDescriptions(true);
+          
+          if (!task.success) {
+            message.destroy('forceRegen');
+            message.error(`Failed to submit task: ${task.message}`);
+            return;
+          }
+          
+          // Poll task
+          message.loading({ content: 'Regenerating all descriptions (0%)...', key: 'forceRegen', duration: 0 });
+          const result = await pollTaskUntilComplete(
+            task.task_id,
+            (status) => {
+              const progressText = status.message || `Progress: ${status.progress}%`;
+              message.loading({ 
+                content: `Regenerating: ${progressText}`, 
+                key: 'forceRegen', 
+                duration: 0 
+              });
+            }
+          );
           
           message.destroy('forceRegen');
           
-          if (result.success) {
+          if (result.status === 'FAILURE') {
+            message.error(`Operation failed: ${result.error || 'Unknown error'}`);
+          } else {
+            const stats: any = result.result?.statistics || result.result || {};
             message.success({
-              content: result.message,
+              content: `🎉 All descriptions regenerated! Processed: ${stats.processed || 0}/${stats.total || 0}`,
               duration: 5,
             });
             
             setTimeout(() => {
-              message.info('Task is running in background, please refresh later to see results', 3);
+              loadThemes();
             }, 2000);
-          } else {
-            message.error(`Operation failed: ${result.message}`);
           }
         } catch (error) {
           message.destroy('forceRegen');
@@ -456,7 +519,6 @@ const InvestmentThemesPage: React.FC = () => {
     try {
       const results = await matchNewsToThemes({
         news_text: state.testNewsText,
-        market: state.testMarket,
         top_k: 10,
         min_similarity: 0.5
       });
@@ -480,7 +542,6 @@ const InvestmentThemesPage: React.FC = () => {
 
   // Initial load (execute only once)
   useEffect(() => {
-    loadStatistics();
     loadThemes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -491,6 +552,7 @@ const InvestmentThemesPage: React.FC = () => {
     Modal.info({
       title: `${theme.theme_name} Theme Description`,
       width: 800,
+      okText: 'Close',
       content: (
         <div>
           <Paragraph>
@@ -527,32 +589,19 @@ const InvestmentThemesPage: React.FC = () => {
       render: (name: string) => <Text strong>{name}</Text>
     },
     {
-      title: 'Market',
-      dataIndex: 'market',
-      key: 'market',
-      width: 80,
-      render: (market: string) => (
-        <Tag color={MARKET_COLORS[market]}>
-          {MARKET_LABELS[market] || market}
-        </Tag>
-      )
-    },
-    {
       title: 'Description Preview',
       dataIndex: 'description',
       key: 'description',
       width: 300,
       ellipsis: true,
       render: (text: string, record: InvestmentTheme) => (
-        <Tooltip title={text || 'No description'}>
-          <Text 
-            ellipsis 
-            style={{ cursor: text ? 'pointer' : 'default', color: text ? undefined : '#999' }}
-            onClick={() => text && showDescriptionModal(record)}
-          >
-            {text || 'Not generated'}
-          </Text>
-        </Tooltip>
+        <Text 
+          ellipsis 
+          style={{ cursor: text ? 'pointer' : 'default', color: text ? undefined : '#999' }}
+          onClick={() => text && showDescriptionModal(record)}
+        >
+          {text || 'Not generated'}
+        </Text>
       )
     },
     {
@@ -581,11 +630,6 @@ const InvestmentThemesPage: React.FC = () => {
     }
   ];
 
-  // Market filter change
-  const handleMarketChange = (market: string | undefined) => {
-    setState(prev => ({ ...prev, selectedMarket: market, currentPage: 1 }));
-    loadThemes(1, market);
-  };
 
   return (
     <div style={{ padding: '24px' }}>
@@ -595,165 +639,24 @@ const InvestmentThemesPage: React.FC = () => {
           <FundOutlined /> Investment Themes Vector Retrieval
         </Title>
         <Paragraph type="secondary">
-          Intelligent theme matching system based on Qwen Embedding, automatically associating news with 150+ investment themes through semantic analysis
+          Intelligent theme matching system based on Reverse Capital Embedding technique, automatically associating news with 150+ investment themes through semantic analysis
         </Paragraph>
       </div>
 
-      {/* Statistics Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Total Themes"
-              value={state.statistics?.total_themes || 0}
-              prefix={<BarChartOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Description Coverage"
-              value={state.statistics?.description_statistics?.coverage_rate || 0}
-              suffix="%"
-              precision={1}
-              valueStyle={{ 
-                color: (state.statistics?.description_statistics?.coverage_rate || 0) >= 90 ? '#52c41a' : '#faad14'
-              }}
-            />
-            <Progress
-              percent={state.statistics?.description_statistics?.coverage_rate || 0}
-              status={
-                (state.statistics?.description_statistics?.coverage_rate || 0) === 100 
-                  ? 'success' 
-                  : 'active'
-              }
-              size="small"
-              showInfo={false}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="HK Market Themes"
-              value={
-                state.statistics?.market_breakdown.find(m => m.market === 'HK')?.count || 0
-              }
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="US Market Themes"
-              value={
-                state.statistics?.market_breakdown.find(m => m.market === 'US')?.count || 0
-              }
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-      
-      {/* Second Row Statistics */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="LLM Generated"
-              value={state.statistics?.description_statistics?.source_breakdown?.llm_generated || 0}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Simple Template"
-              value={state.statistics?.description_statistics?.source_breakdown?.simple_template || 0}
-              valueStyle={{ color: '#faad14' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Manual"
-              value={state.statistics?.description_statistics?.source_breakdown?.manual || 0}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Matched News"
-              value={state.statistics?.match_statistics.news_with_themes || 0}
-              valueStyle={{ color: '#722ed1' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Performance Metrics */}
-      {state.statistics && (
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-          <Col span={24}>
-            <Card title="System Performance" size="small">
-              <Row gutter={16}>
-                <Col span={8}>
-                  <Text type="secondary">Embedding Model:</Text>{' '}
-                  <Tag color="blue">{state.statistics.embedding_model}</Tag>
-                </Col>
-                <Col span={8}>
-                  <Text type="secondary">Vector Dimension:</Text>{' '}
-                  <Tag color="purple">{state.statistics.embedding_dimension}</Tag>
-                </Col>
-                <Col span={8}>
-                  <Text type="secondary">Avg Similarity:</Text>{' '}
-                  <Tag color="green">
-                    {(state.statistics.match_statistics.avg_similarity * 100).toFixed(1)}%
-                  </Tag>
-                </Col>
-              </Row>
-            </Card>
-          </Col>
-        </Row>
-      )}
 
       {/* Action Buttons - Optimized Layout */}
       <Card style={{ marginBottom: '24px' }}>
-        {/* Operation Guide */}
-        <Alert
-          message={
-            <div>
-              <InfoCircleOutlined style={{ marginRight: '8px' }} />
-              <Text strong>Operation Guide:</Text>
-              <Text type="secondary" style={{ marginLeft: '8px' }}>
-                Recommended daily use: "Sync Theme Data" and "Test Match", use advanced maintenance operations with caution
-              </Text>
-            </div>
-          }
-          type="info"
-          showIcon={false}
-          style={{ marginBottom: '16px' }}
-        />
 
-        {/* Common Operations */}
-        <div style={{ marginBottom: '16px' }}>
-          <Text strong style={{ marginBottom: '8px', display: 'block' }}>📌 Common Operations</Text>
-          <Space size="middle" wrap>
+         {/* Operations */}
+         <div style={{ marginBottom: '16px' }}>
+           <Space size="middle" wrap>
             <Tooltip title="Generate descriptions and vectors for new themes, suitable after Futu crawler adds new themes">
               <Button
                 type="primary"
                 icon={<SyncOutlined />}
                 onClick={handleSyncThemes}
-                size="large"
               >
-                🔄 Sync Theme Data
+                Sync Theme Data
               </Button>
             </Tooltip>
             
@@ -762,14 +665,8 @@ const InvestmentThemesPage: React.FC = () => {
                 type="default"
                 icon={<ExperimentOutlined />}
                 onClick={handleOptimizeDescriptions}
-                size="large"
-                style={{ 
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: 'white',
-                  border: 'none'
-                }}
               >
-                ✨ Optimize Descriptions
+                Optimize Descriptions
               </Button>
             </Tooltip>
             
@@ -777,29 +674,11 @@ const InvestmentThemesPage: React.FC = () => {
               <Button
                 icon={<SearchOutlined />}
                 onClick={() => setState(prev => ({ ...prev, testModalVisible: true }))}
-                size="large"
               >
-                🧪 Test Match
+                Test Match
               </Button>
             </Tooltip>
             
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                loadStatistics();
-                loadThemes();
-              }}
-            >
-              Refresh Stats
-            </Button>
-          </Space>
-        </div>
-
-        <Divider />
-
-        {/* Advanced Options and Market Filter */}
-        <Row justify="space-between" align="middle">
-          <Col>
             {/* Advanced Options Dropdown Menu */}
             <Dropdown
               overlay={
@@ -808,22 +687,20 @@ const InvestmentThemesPage: React.FC = () => {
                     key="force-vectors"
                     icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
                     onClick={handleForceUpdateVectors}
-                    danger
                   >
                     <Text type="danger">Force Update All Vectors</Text>
                     <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                      ⚠️ Only for model upgrade (20-30 mins)
+                      Only for model upgrade (20-30 mins)
                     </div>
                   </Menu.Item>
                   <Menu.Item
                     key="force-descriptions"
                     icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
                     onClick={handleForceRegenerateDescriptions}
-                    danger
                   >
                     <Text type="danger">Regenerate All Descriptions</Text>
                     <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                      ⚠️ Only after Prompt optimization (15-25 mins)
+                      Only after Prompt optimization (15-25 mins)
                     </div>
                   </Menu.Item>
                   <Menu.Divider />
@@ -840,31 +717,22 @@ const InvestmentThemesPage: React.FC = () => {
             >
               <Button
                 icon={<SettingOutlined />}
-                style={{ color: '#999' }}
               >
-                ⚙️ Advanced Options <DownOutlined />
+                Advanced Options <DownOutlined />
               </Button>
             </Dropdown>
-          </Col>
+            
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                loadThemes();
+              }}
+            >
+              Refresh Data
+            </Button>
+          </Space>
+        </div>
 
-          <Col>
-            {/* Market Filter */}
-            <Space>
-              <Text>Market Filter:</Text>
-              <Select
-                style={{ width: 120 }}
-                placeholder="All Markets"
-                allowClear
-                value={state.selectedMarket}
-                onChange={handleMarketChange}
-              >
-                <Option value="HK">Hong Kong (HK)</Option>
-                <Option value="US">United States (US)</Option>
-                <Option value="CN">China (CN)</Option>
-              </Select>
-            </Space>
-          </Col>
-        </Row>
       </Card>
 
       {/* Theme List Table */}
@@ -883,7 +751,7 @@ const InvestmentThemesPage: React.FC = () => {
             showTotal: (total) => `Total ${total} themes`,
             onChange: (page, pageSize) => {
               setState(prev => ({ ...prev, currentPage: page, pageSize: pageSize || 20 }));
-              loadThemes(page, state.selectedMarket);
+              loadThemes(page);
             }
           }}
           size="small"
@@ -915,18 +783,6 @@ const InvestmentThemesPage: React.FC = () => {
             />
           </div>
 
-          <div>
-            <Text strong>Select Market:</Text>
-            <Select
-              style={{ width: '100%', marginTop: '8px' }}
-              value={state.testMarket || ''}
-              onChange={(value: string) => setState(prev => ({ ...prev, testMarket: value === '' ? undefined : value as 'HK' | 'US' | 'CN' }))}
-            >
-              <Option value="HK">Hong Kong (HK)</Option>
-              <Option value="US">United States (US)</Option>
-              <Option value="">All Markets</Option>
-            </Select>
-          </div>
 
           <Button
             type="primary"

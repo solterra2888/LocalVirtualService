@@ -1257,11 +1257,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               <Form.Item
                 label="Max Pages Per Market"
                 name={['taskParams', 'max_pages']}
-                extra="Maximum number of pages to scrape per market (1-50). Leave empty to scrape all pages."
+                extra="Maximum number of pages to scrape per market (1-100). Leave empty to scrape all pages. ⚡ Optimized for faster scraping."
               >
                 <InputNumber 
                   min={1} 
-                  max={50} 
+                  max={100} 
                   placeholder="Leave empty for all pages" 
                   style={{ width: '100%' }}
                 />

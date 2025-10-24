@@ -124,7 +124,7 @@ class FileProcessingWorker:
                     self.update_status(
                         current_file=file_name,
                         progress=10.0 + (i / len(file_paths)) * 70.0,
-                        # log_message=f"正在处理文件: {file_name}"
+                        log_message=f"正在处理文件: {file_name}"
                     )
                     
                     # 准备LlamaService参数

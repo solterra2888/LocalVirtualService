@@ -134,7 +134,7 @@ async def get_sectors(current_user: UserResponse = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取行业信息失败: {str(e)}"
+            detail=f"Failed to get sectors: {str(e)}"
         )
 
 @router.get("/companies", summary="获取公司信息")
@@ -196,7 +196,7 @@ async def get_companies(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取公司信息失败: {str(e)}"
+            detail=f"Failed to get company info: {str(e)}"
         )
 
 @router.get("/companies/{ticker}", summary="获取特定公司信息")
@@ -224,7 +224,7 @@ async def get_company_info(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到股票代码为 {ticker} 的公司"
+                detail=f"Company with ticker {ticker} not found"
             )
         
         row = results[0]
@@ -247,7 +247,7 @@ async def get_company_info(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取公司信息失败: {str(e)}"
+            detail=f"Failed to get company info: {str(e)}"
         )
 
 @router.get("/companies/{ticker}/news", summary="获取公司相关新闻")
@@ -331,7 +331,7 @@ async def get_company_news(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取公司新闻失败: {str(e)}"
+            detail=f"Failed to get company news: {str(e)}"
         )
 
 @router.get("/sectors/{sector}/news", summary="获取行业相关新闻")
@@ -417,7 +417,7 @@ async def get_sector_news(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取行业新闻失败: {str(e)}"
+            detail=f"Failed to get sector news: {str(e)}"
         )
 
 @router.get("/companies/{ticker}/analysis", summary="获取公司AI分析结果")
@@ -465,7 +465,7 @@ async def get_company_analysis(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取公司AI分析失败: {str(e)}"
+            detail=f"Failed to get company analysis: {str(e)}"
         )
 
 @router.get("/sectors/{sector}/analysis", summary="获取行业AI分析结果")
@@ -514,7 +514,7 @@ async def get_sector_analysis(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取行业AI分析失败: {str(e)}"
+            detail=f"Failed to get sector analysis: {str(e)}"
         )
 
 @router.get("/search/companies", summary="搜索公司")
@@ -574,7 +574,7 @@ async def search_companies(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"搜索公司失败: {str(e)}"
+            detail=f"Failed to search companies: {str(e)}"
         )
 
 @router.get("/files/{file_id}/content", summary="获取文件内容")
@@ -598,7 +598,7 @@ async def get_file_content(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到ID为 {file_id} 的文件"
+                detail=f"File with ID {file_id} not found"
             )
         
         row = results[0]
@@ -611,7 +611,7 @@ async def get_file_content(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取文件内容失败: {str(e)}"
+            detail=f"Failed to get file content: {str(e)}"
         )
 
 @router.get("/files/{file_id}/download", summary="下载文件")
@@ -638,7 +638,7 @@ async def download_file(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到ID为 {file_id} 的文件"
+                detail=f"File with ID {file_id} not found"
             )
         
         filename, file_path, file_type = results[0]
@@ -647,7 +647,7 @@ async def download_file(
         if not file_path or not os.path.exists(file_path):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件不存在"
+                detail="File not found"
             )
         
         # 确定MIME类型
@@ -681,10 +681,10 @@ async def download_file(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"下载文件失败: {str(e)}"
+            detail=f"Failed to download file: {str(e)}"
         )
 
-@router.get("/watchlist", summary="获取用户的watchlist")
+@router.get("/watchlist", summary="Get user's watchlist")
 async def get_user_watchlist(current_user: UserResponse = Depends(get_current_user)):
     """
     获取当前用户的watchlist（关注的股票列表）
@@ -751,10 +751,10 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取用户watchlist失败: {str(e)}"
+            detail=f"Failed to get user watchlist: {str(e)}"
         )
 
-@router.post("/watchlist", summary="添加股票到watchlist")
+@router.post("/watchlist", summary="Add stock to watchlist")
 async def add_to_watchlist(
     request: dict,
     current_user: UserResponse = Depends(get_current_user)
@@ -777,7 +777,7 @@ async def add_to_watchlist(
         if not symbol:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="股票代码不能为空"
+                detail="Stock code cannot be empty"
             )
         
         # 验证股票代码是否存在于companies表中
@@ -840,7 +840,7 @@ async def add_to_watchlist(
             # 异步更新EODHD fundamentals数据
             fundamentals_update_result = None
             try:
-                logger.info(f"开始为watchlist中的股票 {symbol} 更新EODHD fundamentals数据", 
+                logger.info(f"Starting to update EODHD fundamentals data for {symbol} in watchlist", 
                            user=current_user.username, symbol=symbol)
                 
                 # 检查fundamentals数据是否在24小时内更新过
@@ -853,19 +853,19 @@ async def add_to_watchlist(
                 
                 if freshness_result and freshness_result[0]:
                     # 数据在24小时内更新过，跳过EODHD API调用
-                    logger.info(f"公司 {symbol} 的fundamentals数据较新，跳过更新", 
+                    logger.info(f"Fundamentals data for {symbol} is fresh, skipping update", 
                                user=current_user.username, symbol=symbol,
                                last_update=freshness_result[0])
                     
                     fundamentals_update_result = {
                         "success": True,
-                        "message": f"数据较新，跳过更新。最后更新时间: {freshness_result[0]}",
+                        "message": f"Data is fresh, skipping update. Last update time: {freshness_result[0]}",
                         "skipped": True,
                         "last_update": freshness_result[0].isoformat() if freshness_result[0] else None
                     }
                 else:
                     # 数据需要更新，继续执行EODHD API调用
-                    logger.info(f"公司 {symbol} 的fundamentals数据需要更新，开始从EODHD获取数据", 
+                    logger.info(f"Fundamentals data for {symbol} needs to be updated, starting to get data from EODHD", 
                                user=current_user.username, symbol=symbol)
                     
                     # 获取公司的exchange信息
@@ -913,28 +913,28 @@ async def add_to_watchlist(
                         updated_components = [k for k, v in data_updated.items() if v]
                         fundamentals_update_result = {
                             "success": True,
-                            "message": f"成功更新 {symbol} 的基本面数据，更新了 {len(updated_components)} 个组件",
+                            "message": f"Successfully updated fundamentals data for {symbol}, updated {len(updated_components)} components",
                             "data_updated": data_updated,
                             "updated_components": updated_components
                         }
                         
-                        logger.info(f"成功为watchlist中的股票 {symbol} 更新EODHD fundamentals数据", 
+                        logger.info(f"Successfully updated EODHD fundamentals data for {symbol} in watchlist", 
                                    user=current_user.username, symbol=symbol, 
                                    updated_components=updated_components)
                     else:
                         fundamentals_update_result = {
                             "success": False,
-                            "message": f"无法从EODHD获取 {symbol} 的基本面数据"
+                            "message": f"Failed to get EODHD fundamentals data for {symbol}"
                         }
-                        logger.warning(f"无法为watchlist中的股票 {symbol} 获取EODHD fundamentals数据", 
+                        logger.warning(f"Failed to get EODHD fundamentals data for {symbol} in watchlist", 
                                       user=current_user.username, symbol=symbol)
                     
             except Exception as e:
                 fundamentals_update_result = {
                     "success": False,
-                    "message": f"更新 {symbol} 的基本面数据时发生错误: {str(e)}"
+                    "message": f"Failed to update fundamentals data for {symbol}: {str(e)}"
                 }
-                logger.error(f"为watchlist中的股票 {symbol} 更新EODHD fundamentals数据失败", 
+                logger.error(f"Failed to update EODHD fundamentals data for {symbol} in watchlist", 
                            user=current_user.username, symbol=symbol, error=str(e))
             
             # 构建响应消息
@@ -1037,7 +1037,7 @@ async def get_ticker_research_reports(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取研究报告失败: {str(e)}"
+            detail=f"Failed to get research reports: {str(e)}"
         )
 
 @router.get("/test/research-reports/{ticker}", summary="测试获取ticker关联的研究报告（无需认证）")
@@ -1102,12 +1102,12 @@ async def test_get_ticker_research_reports(ticker: str):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取研究报告失败: {str(e)}"
+            detail=f"Failed to get research reports: {str(e)}"
         )
 
-@router.get("/stock-prices", summary="获取股票实时价格数据")
+@router.get("/stock-prices", summary="Get real-time prices for stocks")
 async def get_stock_prices(
-    symbols: str = Query(..., description="股票代码，多个用逗号分隔，如: AAPL,MSFT,GOOGL"),
+    symbols: str = Query(..., description="Stock codes, separated by commas, e.g.: AAPL,MSFT,GOOGL"),
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
@@ -1124,7 +1124,7 @@ async def get_stock_prices(
         if not symbol_list:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="请提供有效的股票代码"
+                detail="Please provide valid stock codes"
             )
         
         # 构建查询条件
@@ -1177,10 +1177,10 @@ async def get_stock_prices(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取股票价格数据失败: {str(e)}"
+            detail=f"Failed to get stock prices: {str(e)}"
         )
 
-@router.get("/watchlist/prices", summary="获取watchlist股票的实时价格")
+@router.get("/watchlist/prices", summary="Get real-time prices for stocks in watchlist")
 async def get_watchlist_stock_prices(current_user: UserResponse = Depends(get_current_user)):
     """
     获取用户watchlist中所有股票的实时价格数据
@@ -1275,7 +1275,7 @@ async def get_watchlist_stock_prices(current_user: UserResponse = Depends(get_cu
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取watchlist股票价格数据失败: {str(e)}"
+            detail=f"Failed to get watchlist stock prices: {str(e)}"
         )
 
 @router.get("/test-stock-historical-data/{symbol}", summary="Test historical stock data (no auth)")
@@ -1500,13 +1500,13 @@ async def remove_from_watchlist(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"移除watchlist项失败: {str(e)}"
+            detail=f"Failed to remove watchlist item: {str(e)}"
         )
 
-@router.get("/search/stocks", summary="搜索股票（用于添加到watchlist）")
+@router.get("/search/stocks", summary="Search stocks (for adding to watchlist)")
 async def search_stocks(
-    q: str = Query(..., description="搜索关键词"),
-    limit: int = Query(20, description="返回结果数量限制"),
+    q: str = Query(..., description="Search keywords"),
+    limit: int = Query(20, description="Return result limit"),
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
@@ -1567,10 +1567,10 @@ async def search_stocks(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"搜索股票失败: {str(e)}"
+            detail=f"Search stocks failed: {str(e)}"
         )
 
-@router.get("/health", summary="健康检查")
+@router.get("/health", summary="check dashboard API health")
 async def health_check():
     """
     仪表板API健康检查端点

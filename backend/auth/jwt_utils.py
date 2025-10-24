@@ -98,8 +98,24 @@ def authenticate_user(username: str, password: str, db_conn_params: dict) -> Opt
     if not user_info:
         return None
     
-    # 验证密码（使用bcrypt验证）
-    if not verify_password(password, user_info.get('password_hash', '')):
+    stored_hash = user_info.get('password_hash', '')
+    stored_salt = user_info.get('salt', '')
+    
+    # 判断密码哈希格式并选择相应的验证方法
+    password_valid = False
+    
+    if stored_hash.startswith('$2b$'):
+        # bcrypt格式 - 使用passlib验证
+        try:
+            password_valid = verify_password(password, stored_hash)
+        except Exception as e:
+            print(f"bcrypt验证失败: {e}")
+            password_valid = False
+    else:
+        # PBKDF2格式 - 使用UserAuth验证
+        password_valid = UserAuth.verify_password(stored_hash, stored_salt, password)
+    
+    if not password_valid:
         return None
     
     # 更新最后登录时间

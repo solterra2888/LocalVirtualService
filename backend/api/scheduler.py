@@ -144,7 +144,7 @@ class CreateFutuThemesTaskRequest(BaseModel):
     timezone: str = Field(default="Asia/Hong_Kong", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     markets: Optional[List[str]] = Field(default=None, description="市场列表，如['HK', 'US']，不指定则爬取所有市场")
-    max_pages: Optional[int] = Field(default=None, description="每个市场最大爬取页数，不指定则爬取所有页面", ge=1, le=50)
+    max_pages: Optional[int] = Field(default=None, description="每个市场最大爬取页数（最多100页），不指定则爬取所有页面", ge=1, le=100)
     scrape_stocks: bool = Field(default=True, description="是否爬取股票列表")
 
 

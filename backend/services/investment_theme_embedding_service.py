@@ -352,15 +352,27 @@ class InvestmentThemeEmbeddingService:
                 
                 # 🔥 优化：构建增强版文本描述（包含股票信息）
                 # 🌟 支持缓存：如果 force_update=True，强制重新生成描述
-                batch_texts = []
+                # 🚀 使用并发处理加速描述生成
+                description_tasks = []
                 for db_id, theme_id, theme_name, market in zip(batch_db_ids, batch_theme_ids, batch_theme_names, batch_markets):
                     # 使用新的增强文本生成方法，传入数据库ID
                     # force_regenerate=force_update 确保强制更新时重新生成描述
-                    text = await self._generate_enriched_theme_text(
+                    task = self._generate_enriched_theme_text(
                         cursor, theme_id, theme_name, market, db_id, 
                         force_regenerate=force_update
                     )
-                    batch_texts.append(text)
+                    description_tasks.append(task)
+                
+                # 并发执行所有描述生成任务
+                batch_texts = await asyncio.gather(*description_tasks, return_exceptions=True)
+                
+                # 处理异常，将异常结果替换为简单描述
+                for idx, text in enumerate(batch_texts):
+                    if isinstance(text, Exception):
+                        theme_name = batch_theme_names[idx]
+                        market = batch_markets[idx]
+                        logger.warning(f"描述生成失败，使用简单描述: {theme_name} - {str(text)}")
+                        batch_texts[idx] = f"{theme_name} ({market} market)"
                 
                 logger.info(f"处理批次 {i//batch_size + 1}/{(len(themes_to_process) + batch_size - 1)//batch_size}")
                 
@@ -733,105 +745,6 @@ class InvestmentThemeEmbeddingService:
         else:
             return None
     
-    def get_theme_statistics(self) -> Dict[str, Any]:
-        """
-        获取主题向量统计信息
-        
-        Returns:
-            统计信息字典
-        """
-        conn = self.db_manager.get_connection()
-        if not conn:
-            return {}
-        
-        try:
-            cursor = conn.cursor()
-            
-            # 统计各市场的主题数量
-            cursor.execute("""
-                SELECT 
-                    market,
-                    COUNT(*) as count,
-                    MAX(updated_at) as last_updated
-                FROM investment_theme_embeddings
-                GROUP BY market
-                ORDER BY market
-            """)
-            
-            market_stats = []
-            total_count = 0
-            
-            for row in cursor.fetchall():
-                market = row[0]
-                count = row[1]
-                last_updated = row[2]
-                
-                market_stats.append({
-                    'market': market,
-                    'count': count,
-                    'last_updated': last_updated.isoformat() if last_updated else None
-                })
-                
-                total_count += count
-            
-            # 统计新闻主题匹配数量
-            cursor.execute("""
-                SELECT 
-                    COUNT(DISTINCT news_id) as news_with_themes,
-                    COUNT(*) as total_matches,
-                    AVG(similarity_score) as avg_similarity
-                FROM news_theme_matches
-            """)
-            
-            match_row = cursor.fetchone()
-            match_stats = {
-                'news_with_themes': match_row[0] if match_row else 0,
-                'total_matches': match_row[1] if match_row else 0,
-                'avg_similarity': float(match_row[2]) if match_row and match_row[2] else 0.0
-            }
-            
-            # 🌟 新增：统计描述覆盖率和来源分布
-            cursor.execute("""
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(description) as with_description,
-                    COUNT(CASE WHEN description_source = 'llm_generated' THEN 1 END) as llm_generated,
-                    COUNT(CASE WHEN description_source = 'simple_template' THEN 1 END) as simple_template,
-                    COUNT(CASE WHEN description_source = 'manual' THEN 1 END) as manual,
-                    COUNT(CASE WHEN description_source = 'scraped' THEN 1 END) as scraped
-                FROM futu_investment_themes
-            """)
-            
-            desc_row = cursor.fetchone()
-            description_stats = {
-                'total': desc_row[0] if desc_row else 0,
-                'with_description': desc_row[1] if desc_row else 0,
-                'coverage_rate': round((desc_row[1] / desc_row[0] * 100), 2) if desc_row and desc_row[0] > 0 else 0.0,
-                'source_breakdown': {
-                    'llm_generated': desc_row[2] if desc_row else 0,
-                    'simple_template': desc_row[3] if desc_row else 0,
-                    'manual': desc_row[4] if desc_row else 0,
-                    'scraped': desc_row[5] if desc_row else 0
-                }
-            }
-            
-            cursor.close()
-            conn.close()
-            
-            return {
-                'total_themes': total_count,
-                'market_breakdown': market_stats,
-                'match_statistics': match_stats,
-                'description_statistics': description_stats,  # 🌟 新增
-                'embedding_model': self.embedding_model,
-                'embedding_dimension': self.embedding_dimension
-            }
-            
-        except Exception as e:
-            logger.error(f"获取主题统计信息失败: {str(e)}")
-            if conn:
-                conn.close()
-            return {}
     
     async def update_single_theme_embedding(
         self, 

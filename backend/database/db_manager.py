@@ -24,7 +24,7 @@ class DatabaseManager:
         """
         self.db_conn_params = db_conn_params or {}
     
-    def get_connection(self, max_retries=3, retry_delay=1):
+    def get_connection(self, max_retries=5, retry_delay=2):
         """获取PostgreSQL数据库连接，支持重试机制"""
         last_error = None
         
@@ -36,7 +36,7 @@ class DatabaseManager:
                     database=self.db_conn_params.get('db_name', ''),
                     user=self.db_conn_params.get('db_user', ''),
                     password=self.db_conn_params.get('db_password', ''),
-                    connect_timeout=15,  # 统一连接超时到15秒
+                    connect_timeout=30,  # 增加连接超时到30秒
                     options='-c statement_timeout=600000',  # 设置10分钟语句超时
                     keepalives_idle=30,  # 30秒后开始发送keepalive
                     keepalives_interval=5,  # 每5秒发送一次keepalive
@@ -48,7 +48,7 @@ class DatabaseManager:
                 if attempt < max_retries - 1:
                     print(f"数据库连接失败，{retry_delay}秒后重试 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
                     time.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
+                    retry_delay = min(retry_delay * 1.5, 10)  # 渐进式退避，最大10秒
                 else:
                     print(f"连接PostgreSQL数据库时出错 (所有重试都失败): {str(e)}")
         
@@ -788,7 +788,7 @@ class DatabaseManager:
                 conn.close()
             return False
     
-    def delete_agent_credential(self, task_id, agent_name=None):
+    def delete_agent_credential(self, task_id, agent_name=None, username=None, is_admin=False):
         """删除AGENT凭据"""
         conn = self.get_connection()
         if not conn:
@@ -798,6 +798,27 @@ class DatabaseManager:
         
         try:
             cursor.execute("BEGIN")
+            
+            # 首先检查记录是否存在并获取创建者信息
+            try:
+                int_task_id = int(task_id)
+                cursor.execute("SELECT id, created_by FROM agent_credentials WHERE id = %s", (int_task_id,))
+            except ValueError:
+                # 如果task_id不是数字，则通过名称查找
+                if agent_name:
+                    cursor.execute("SELECT id, created_by FROM agent_credentials WHERE agent_name = %s", (agent_name,))
+                else:
+                    return False
+            
+            record = cursor.fetchone()
+            if not record:
+                return False
+            
+            record_id, created_by = record
+            
+            # 权限检查：普通用户只能删除自己创建的AI Agent
+            if not is_admin and created_by != username:
+                return False
             
             # 删除AGENT凭据记录
             affected_rows = 0

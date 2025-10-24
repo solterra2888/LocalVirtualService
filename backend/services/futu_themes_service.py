@@ -2,12 +2,12 @@
 """
 Futu Investment Themes Service - 富途投资主题数据获取服务
 
-通过运行futu_scraper_with_stocks.py脚本获取富途投资主题和股票数据
+通过调用爬虫模块获取富途投资主题和股票数据
 数据来源：https://www.futunn.com/en/quote/us/concepts
 
 主要功能：
-1. 调用爬虫脚本获取主题和股票数据
-2. 解析JSON数据
+1. 调用爬虫模块（backend.scrapers.futu_scraper）获取主题和股票数据
+2. 解析爬取的数据
 3. 存储到数据库（futu_investment_themes 和 futu_theme_stocks 表）
 4. 支持港股(HK)和美股(US)市场
 """
@@ -40,14 +40,6 @@ class FutuThemesService:
             self.db_manager = DatabaseManager(db_config)
             logger.info("数据库管理器配置完成")
             
-            # 获取项目根目录和爬虫脚本路径
-            self.project_root = Path(__file__).parent.parent.parent
-            self.scraper_script = self.project_root / "参考代码" / "futu_scraper_with_stocks.py"
-            
-            if not self.scraper_script.exists():
-                raise FileNotFoundError(f"爬虫脚本不存在: {self.scraper_script}")
-            
-            logger.info(f"爬虫脚本路径: {self.scraper_script}")
             logger.info("富途投资主题服务初始化完成")
             
         except Exception as e:
@@ -69,61 +61,39 @@ class FutuThemesService:
             Dict: 爬取的数据，格式为 {market: [themes]}，失败返回None
         """
         try:
-            logger.info(f"开始运行爬虫脚本，市场: {markets or 'ALL'}, 最大页数: {max_pages or 'ALL'}")
+            logger.info(f"开始运行爬虫，市场: {markets or 'ALL'}, 最大页数: {max_pages or 'ALL'}")
             
-            # 修改脚本临时配置（通过环境变量或修改脚本）
-            # 这里我们采用最简单的方式：直接运行脚本，它会生成JSON文件
+            # 直接导入爬虫模块（从 backend.scrapers 包）
+            from backend.scrapers import scrape_all_markets
             
-            # 运行爬虫脚本
-            cmd = ['python3', str(self.scraper_script)]
+            # 调用爬取函数
+            logger.info("开始爬取数据...")
+            start_time = time.time()
             
-            logger.info(f"执行命令: {' '.join(cmd)}")
+            all_markets_data = scrape_all_markets(
+                markets_to_scrape=markets,
+                max_consecutive_empty=3,
+                max_pages=max_pages,
+                scrape_stocks=scrape_stocks,
+                max_themes_with_stocks=None  # 爬取所有主题的股票
+            )
             
-            # 使用非交互模式运行（避免等待用户输入）
-            # 我们需要修改脚本以支持命令行参数，或者直接导入模块
+            elapsed_time = time.time() - start_time
+            logger.info(f"爬取完成，耗时: {elapsed_time:.2f}秒")
             
-            # 方案：导入脚本作为模块
-            import sys
-            sys.path.insert(0, str(self.scraper_script.parent))
+            # 统计爬取结果
+            total_themes = sum(len(themes) for themes in all_markets_data.values())
+            total_stocks = sum(
+                sum(len(theme.get('stocks', [])) for theme in themes)
+                for themes in all_markets_data.values()
+            )
             
-            try:
-                from futu_scraper_with_stocks import scrape_all_markets
-                
-                # 调用爬取函数
-                logger.info("开始爬取数据...")
-                start_time = time.time()
-                
-                all_markets_data = scrape_all_markets(
-                    markets_to_scrape=markets,
-                    max_consecutive_empty=3,
-                    max_pages=max_pages,
-                    scrape_stocks=scrape_stocks,
-                    max_themes_with_stocks=None  # 爬取所有主题的股票
-                )
-                
-                elapsed_time = time.time() - start_time
-                logger.info(f"爬取完成，耗时: {elapsed_time:.2f}秒")
-                
-                # 统计爬取结果
-                total_themes = sum(len(themes) for themes in all_markets_data.values())
-                total_stocks = sum(
-                    sum(len(theme.get('stocks', [])) for theme in themes)
-                    for themes in all_markets_data.values()
-                )
-                
-                logger.info(f"爬取统计: {total_themes}个主题, {total_stocks}只股票")
-                
-                return all_markets_data
-                
-            except ImportError as e:
-                logger.error(f"无法导入爬虫脚本: {str(e)}")
-                return None
-            finally:
-                # 移除临时添加的路径
-                sys.path.pop(0)
-                
+            logger.info(f"爬取统计: {total_themes}个主题, {total_stocks}只股票")
+            
+            return all_markets_data
+            
         except Exception as e:
-            logger.error(f"运行爬虫脚本失败: {str(e)}")
+            logger.error(f"运行爬虫失败: {str(e)}")
             return None
     
     def parse_theme_data(self, theme_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -183,13 +153,14 @@ class FutuThemesService:
             
             try:
                 # 插入主题数据（使用ON CONFLICT更新）
+                # 修改：只按 theme_id + market 去重，不按日期，避免同一主题在不同日期重复存储
                 insert_theme_sql = """
                 INSERT INTO futu_investment_themes 
                 (theme_id, theme_name, market, theme_url, change_percent, 
                  gainers, losers, unchanged, top_stock, top_stock_change, 
                  stock_count, scraped_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (theme_id, market, DATE(scraped_at))
+                ON CONFLICT (theme_id, market)
                 DO UPDATE SET
                     theme_name = EXCLUDED.theme_name,
                     theme_url = EXCLUDED.theme_url,
@@ -200,6 +171,7 @@ class FutuThemesService:
                     top_stock = EXCLUDED.top_stock,
                     top_stock_change = EXCLUDED.top_stock_change,
                     stock_count = EXCLUDED.stock_count,
+                    scraped_at = EXCLUDED.scraped_at,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING id
                 """

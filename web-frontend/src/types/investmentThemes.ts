@@ -43,50 +43,6 @@ export interface ThemeMatchRequest {
   save_to_db?: boolean;
 }
 
-/**
- * Theme Statistics
- */
-export interface ThemeStatistics {
-  total_themes: number;
-  market_breakdown: MarketBreakdown[];
-  match_statistics: MatchStatistics;
-  description_statistics?: DescriptionStatistics;  // New: Description statistics
-  embedding_model: string;
-  embedding_dimension: number;
-}
-
-/**
- * Market Breakdown
- */
-export interface MarketBreakdown {
-  market: string;
-  count: number;
-  last_updated?: string;
-}
-
-/**
- * Match Statistics
- */
-export interface MatchStatistics {
-  news_with_themes: number;
-  total_matches: number;
-  avg_similarity: number;
-}
-
-/**
- * Description Statistics
- */
-export interface DescriptionStatistics {
-  total: number;
-  with_description: number;
-  coverage_rate: number;  // Coverage rate percentage
-  source_breakdown: {
-    llm_generated: number;
-    simple_template: number;
-    manual: number;
-    scraped: number;
-  };
-}
 
 /**
  * Initialize Request
@@ -96,17 +52,37 @@ export interface InitializeThemesRequest {
 }
 
 /**
- * Initialize Response
+ * Initialize Response (Celery Task)
  */
 export interface InitializeThemesResponse {
   success: boolean;
   message: string;
-  statistics: {
-    total: number;
-    processed: number;
-    failed: number;
-    skipped: number;
+  task_id: string;
+  status_url: string;
+}
+
+/**
+ * Task Status Response
+ */
+export interface TaskStatusResponse {
+  task_id: string;
+  status: 'PENDING' | 'PROGRESS' | 'SUCCESS' | 'FAILURE';
+  progress: number;
+  message: string;
+  result?: {
+    success: boolean;
+    total?: number;
+    processed?: number;
+    failed?: number;
+    skipped?: number;
+    statistics?: any;
   };
+  error?: string;
+  total?: number;
+  processed?: number;
+  failed?: number;
+  current_batch?: number;
+  total_batches?: number;
 }
 
 /**

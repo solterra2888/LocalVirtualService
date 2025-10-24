@@ -54,7 +54,7 @@ const EconomicEventsPage: React.FC = () => {
       const data = await marketsAPI.getEconomicEvents(params);
       setEvents(data);
     } catch (error) {
-      console.error('获取经济事件失败:', error);
+      console.error('Failed to get economic event data:', error);
       message.error('Failed to retrieve economic event data');
     } finally {
       setLoading(false);
@@ -67,7 +67,7 @@ const EconomicEventsPage: React.FC = () => {
       const countryList = await marketsAPI.getEconomicEventsCountries();
       setCountries(countryList);
     } catch (error) {
-      console.error('获取经济事件国家列表失败:', error);
+      console.error('Failed to get economic event countries list:', error);
       message.error('Failed to retrieve country list');
     }
   }, []);

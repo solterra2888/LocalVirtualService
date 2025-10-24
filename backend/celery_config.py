@@ -12,6 +12,10 @@ load_project_env()
 broker_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 result_backend = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
+# Celery 6.0+ 兼容性配置
+broker_connection_retry_on_startup = True  # 启动时重试broker连接
+broker_connection_retry = True  # 保持向后兼容
+
 # 任务序列化配置
 task_serializer = 'json'
 accept_content = ['json']
@@ -35,9 +39,16 @@ enable_utc = True
 task_routes = {
     'backend.tasks.file_tasks.*': {'queue': 'file_processing'},
     'backend.tasks.news_tasks.*': {'queue': 'ai_processing'},
+    'backend.tasks.theme_tasks.*': {'queue': 'ai_processing'},
     # 明确指定新闻分析任务（使用任务名称而不是模块路径）
     'analyze_news_batch': {'queue': 'ai_processing'},
     'analyze_unanalyzed_news': {'queue': 'ai_processing'},
+    # 明确指定投资主题任务
+    'initialize_theme_embeddings': {'queue': 'ai_processing'},
+    'fill_theme_descriptions': {'queue': 'ai_processing'},
+    'regenerate_all_theme_embeddings': {'queue': 'ai_processing'},
+    # Futu投资主题爬取任务（长时间运行，单独队列）
+    'fetch_futu_themes': {'queue': 'data_fetching'},
 }
 
 # Worker配置
@@ -46,8 +57,8 @@ task_acks_late = True  # 任务完成后确认
 worker_max_tasks_per_child = 1000  # 防止内存泄漏
 
 # 任务时间限制
-task_time_limit = 3600  # 1小时硬限制
-task_soft_time_limit = 3000  # 50分钟软限制
+task_time_limit = 7200  # 2小时硬限制（Futu主题爬取需要约1小时）
+task_soft_time_limit = 6600  # 110分钟软限制
 
 # 结果过期时间
 result_expires = 3600  # 1小时后过期

@@ -30,6 +30,7 @@ import {
 } from '@ant-design/icons';
 import { tasksAPI } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useAuthStore } from '../store/authStore';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -63,6 +64,7 @@ interface TaskFormData {
 }
 
 const TasksPage: React.FC = () => {
+  const { user } = useAuthStore();
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskFormVisible, setTaskFormVisible] = useState(false);
@@ -80,16 +82,13 @@ const TasksPage: React.FC = () => {
     loadTaskTypes();
   }, []);
 
-  const loadTaskTypes = async () => {
+  const loadTaskTypes = async (showError = true) => {
     setLoading(true);
     try {
       const types = await tasksAPI.getTaskTypes();
       setTaskTypes(types);
     } catch (error: any) {
       console.error('加载RC Agent失败:', error);
-      
-      const errorMessage = getErrorMessage(error, '加载RC Agent失败');
-      message.error(errorMessage);
       
       // 在控制台输出详细错误信息
       console.error('详细错误信息:', {
@@ -99,6 +98,12 @@ const TasksPage: React.FC = () => {
         config: error.config,
         message: error.message
       });
+      
+      // 只有在显示错误时才显示错误消息
+      if (showError) {
+        const errorMessage = getErrorMessage(error, '加载RC Agent失败');
+        message.error(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -246,45 +251,53 @@ const TasksPage: React.FC = () => {
     {
       title: 'Actions',
       key: 'actions',
-      render: (_: any, record: TaskType) => (
-        <Space>
-          <Button
-            type="text"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewTask(record)}
-            size="small"
-          >
-            View
-          </Button>
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => handleEditTask(record)}
-            size="small"
-          >
-            Edit
-          </Button>
-          {!record.is_default && (
-            <Popconfirm
-              title="Are you sure to delete this AI Agent?"
-              onConfirm={() => handleDeleteTask(record)}
-              okText="Confirm"
-              cancelText="Cancel"
+      render: (_: any, record: TaskType) => {
+        // 检查用户是否有权限编辑/删除此AI Agent
+        const canEdit = user?.is_admin || record.creator === user?.username;
+        const canDelete = user?.is_admin || (record.creator === user?.username && !record.is_default);
+        
+        return (
+          <Space>
+            <Button
+              type="text"
+              icon={<EyeOutlined />}
+              onClick={() => handleViewTask(record)}
+              size="small"
             >
+              View
+            </Button>
+            {canEdit && (
               <Button
                 type="text"
-                danger
-                icon={<DeleteOutlined />}
+                icon={<EditOutlined />}
+                onClick={() => handleEditTask(record)}
                 size="small"
-                loading={deletingTaskId === record.id}
-                disabled={deletingTaskId === record.id}
               >
-                Delete
+                Edit
               </Button>
-            </Popconfirm>
-          )}
-        </Space>
-      )
+            )}
+            {canDelete && (
+              <Popconfirm
+                title="Are you sure to delete this AI Agent?"
+                onConfirm={() => handleDeleteTask(record)}
+                okText="Confirm"
+                cancelText="Cancel"
+              >
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  size="small"
+                  loading={deletingTaskId === record.id}
+                  disabled={deletingTaskId === record.id}
+                >
+                  Delete
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        );
+      }
     }
   ];
 
@@ -480,12 +493,18 @@ const TasksPage: React.FC = () => {
     <div>
       <div className="page-header">
         <div className="flex-between">
-          <div>
-            <Title level={3} className="page-title">AI Agent Management</Title>
-            <div className="page-description">Manage AI Agents</div>
+          <div style={{ flex: 1, marginRight: '24px' }}>
+            <Title level={3} className="page-title">AI Agent Settings</Title>
+            <div className="page-description">
+              Configure and manage AI agents that integrate with third-party LLMOps platforms. 
+              These agents leverage external chatbot and workflow services to provide intelligent 
+              automation capabilities. Before configuring agents here, ensure you have already 
+              set up the corresponding chatbots or workflows on the Dify platform, as this 
+              interface serves as the configuration and invocation layer for those external services.
+            </div>
           </div>
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={loadTaskTypes} loading={loading}>
+            <Button icon={<ReloadOutlined />} onClick={() => loadTaskTypes(true)} loading={loading}>
               Refresh
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTask}>

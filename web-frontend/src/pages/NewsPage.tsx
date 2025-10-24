@@ -120,14 +120,14 @@ const NewsPage: React.FC = () => {
     } catch (error) {
       const loadTime = Date.now() - startTime;
       
-      console.error('❌ [新闻列表] 获取新闻数据失败', {
+      console.error('❌ Failed to get news data [News List]', {
         error: error,
         params,
         load_time: `${loadTime}ms`,
         timestamp: new Date().toISOString()
       });
       
-      message.error(`获取新闻数据失败: ${getErrorMessage(error)}`);
+      message.error(`Failed to get news data: ${getErrorMessage(error)}`);
       setState(prev => ({ ...prev, loading: false }));
     }
   };
@@ -135,20 +135,20 @@ const NewsPage: React.FC = () => {
   // 加载主题和股票代码数据
   const loadMetadata = async () => {
     try {
-      console.log('开始加载元数据...');
+      console.log('start to load metadata...');
       const [topics, symbols] = await Promise.all([
         newsAPI.getTopics(),
         newsAPI.getSymbols()
       ]);
-      console.log('元数据加载成功:', { topics: topics.length, symbols: symbols.length });
+      console.log('loaded metadata successfully:', { topics: topics.length, symbols: symbols.length });
       setState(prev => ({
         ...prev,
         topics,
         symbols: symbols.slice(0, 50)
       }));
     } catch (error: any) {
-      console.error('获取元数据失败:', error);
-      message.error(`获取过滤选项失败: ${getErrorMessage(error)}`);
+      console.error('Failed to get metadata:', error);
+      message.error(`Failed to get metadata: ${getErrorMessage(error)}`);
     }
   };
 
@@ -216,7 +216,7 @@ const NewsPage: React.FC = () => {
   // 执行删除新闻
   const handleDeleteNews = async () => {
     if (!state.deleteStartDate || !state.deleteEndDate) {
-      message.error('请选择日期范围');
+      message.error('Please select date range');
       return;
     }
 
@@ -233,11 +233,11 @@ const NewsPage: React.FC = () => {
         loadNewsData(); // 刷新新闻列表
         loadMetadata(); // 刷新元数据
       } else {
-        message.error(response.message || '删除失败');
+        message.error(response.message || 'Failed to delete news');
       }
     } catch (error) {
-      console.error('删除新闻失败:', error);
-      message.error(`删除新闻失败: ${getErrorMessage(error)}`);
+      console.error('Failed to delete news:', error);
+      message.error(`Failed to delete news: ${getErrorMessage(error)}`);
     } finally {
       setState(prev => ({ ...prev, deleteLoading: false }));
     }
@@ -263,8 +263,8 @@ const NewsPage: React.FC = () => {
         detailModalVisible: true
       }));
     } catch (error) {
-      console.error('获取新闻详情失败:', error);
-      message.error(`获取新闻详情失败: ${getErrorMessage(error)}`);
+      console.error('Failed to get news detail:', error);
+      message.error(`Failed to get news detail: ${getErrorMessage(error)}`);
     }
   };
 
@@ -1199,12 +1199,12 @@ const NewsPage: React.FC = () => {
         />
         
         <Form layout="vertical">
-          <Form.Item label="选择日期范围" required>
+          <Form.Item label="Select date range" required>
             <RangePicker
               style={{ width: '100%' }}
               onChange={handleDateRangeChange}
               format="YYYY-MM-DD"
-              placeholder={['开始日期', '结束日期']}
+              placeholder={['Start date', 'End date']}
             />
           </Form.Item>
           

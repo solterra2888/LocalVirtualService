@@ -4,6 +4,7 @@
 提供主题向量初始化、匹配、统计等功能
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -51,8 +52,8 @@ class UpdateThemeRequest(BaseModel):
 
 class FillDescriptionsRequest(BaseModel):
     """批量填充主题描述请求"""
-    force_regenerate: bool = Field(False, description="是否强制重新生成已存在的描述")
-    market: Optional[str] = Field(None, description="市场过滤（HK/US/CN），为空则处理所有市场")
+    force_regenerate: bool = Field(False, description="whether to force regenerate existing descriptions")
+    market: Optional[str] = Field(None, description="market filter (HK/US/CN), if empty, process all markets")
 
 
 # ==================== API Endpoints ====================
@@ -82,7 +83,7 @@ async def match_news_to_themes(request: ThemeMatchRequest):
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"收到主题匹配请求",
+            f"Received theme matching request",
             news_id=request.news_id,
             market=request.market,
             top_k=request.top_k
@@ -97,32 +98,30 @@ async def match_news_to_themes(request: ThemeMatchRequest):
             save_to_db=request.save_to_db
         )
         
-        logger.info(f"主题匹配完成，找到 {len(matches)} 个匹配")
+        logger.info(f"Theme matching completed, found {len(matches)} matches")
         
         return matches
         
     except Exception as e:
-        logger.error(f"主题匹配失败: {str(e)}")
+        logger.error(f"Theme matching failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"主题匹配失败: {str(e)}")
 
 
 @router.post("/initialize")
-async def initialize_theme_embeddings(
-    request: InitializeThemesRequest,
-    background_tasks: BackgroundTasks
-):
+async def initialize_theme_embeddings(request: InitializeThemesRequest):
     """
-    初始化所有投资主题的向量
+    Initialize all investment theme embeddings (using Celery)
     
     说明：
     - 从 futu_investment_themes 表读取主题
     - 调用Qwen Embedding API生成向量
     - 存储到 investment_theme_embeddings 表
-    - 支持后台任务执行（大量主题时推荐）
+    - 使用 Celery 后台任务执行（异步处理）
     
     注意：
     - 首次运行需要几分钟时间
     - force_update=True 将重新生成所有向量
+    - 任务在后台异步执行，使用返回的 task_id 查询进度
     
     示例：
     ```
@@ -131,75 +130,41 @@ async def initialize_theme_embeddings(
         "force_update": false
     }
     ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "Task started",
+        "task_id": "abc-123-def-456",
+        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
+    }
+    ```
     """
     try:
-        db_config = get_database_config()
-        service = InvestmentThemeEmbeddingService(db_config)
+        from backend.tasks.theme_tasks import initialize_theme_embeddings_task
         
-        logger.info("开始初始化投资主题向量", force_update=request.force_update)
+        logger.info("Starting theme embeddings initialization task (Celery)", force_update=request.force_update)
         
-        # 执行初始化
-        result = await service.initialize_all_theme_embeddings(
-            force_update=request.force_update
+        # Submit Celery task
+        task = initialize_theme_embeddings_task.apply_async(
+            kwargs={'force_update': request.force_update}
         )
         
-        if result.get('success'):
-            logger.info(
-                f"主题向量初始化完成",
-                total=result.get('total'),
-                processed=result.get('processed'),
-                failed=result.get('failed')
-            )
-            
-            return {
-                "success": True,
-                "message": "主题向量初始化完成",
-                "statistics": result
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"初始化失败: {result.get('error', 'Unknown error')}"
-            )
-            
-    except Exception as e:
-        logger.error(f"初始化主题向量失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"初始化失败: {str(e)}")
-
-
-@router.get("/statistics")
-async def get_theme_statistics():
-    """
-    获取投资主题向量统计信息
-    
-    返回信息包括：
-    - 主题总数
-    - 各市场主题数量分布
-    - 新闻主题匹配统计
-    - Embedding模型信息
-    
-    示例：
-    ```
-    GET /api/investment-themes/statistics
-    ```
-    """
-    try:
-        db_config = get_database_config()
-        service = InvestmentThemeEmbeddingService(db_config)
-        
-        stats = service.get_theme_statistics()
-        
-        if not stats:
-            raise HTTPException(status_code=404, detail="未找到统计信息")
+        logger.info(f"Theme embeddings initialization task submitted: {task.id}")
         
         return {
             "success": True,
-            "statistics": stats
+            "message": "Theme embeddings initialization task started",
+            "task_id": task.id,
+            "status_url": f"/api/investment-themes/task-status/{task.id}"
         }
-        
+            
     except Exception as e:
-        logger.error(f"获取统计信息失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+        logger.error(f"Failed to start theme embeddings initialization task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+
+
 
 
 @router.put("/update-theme")
@@ -225,7 +190,7 @@ async def update_theme_embedding(request: UpdateThemeRequest):
         db_config = get_database_config()
         service = InvestmentThemeEmbeddingService(db_config)
         
-        logger.info(f"更新主题向量: {request.theme_id} - {request.theme_name}")
+        logger.info(f"Updating theme vector: {request.theme_id} - {request.theme_name}")
         
         success = await service.update_single_theme_embedding(
             theme_id=request.theme_id,
@@ -236,14 +201,14 @@ async def update_theme_embedding(request: UpdateThemeRequest):
         if success:
             return {
                 "success": True,
-                "message": f"主题向量更新成功: {request.theme_name}"
+                "message": f"Theme vector updated successfully: {request.theme_name}"
             }
         else:
-            raise HTTPException(status_code=500, detail="更新失败")
+            raise HTTPException(status_code=500, detail="Update failed")
             
     except Exception as e:
-        logger.error(f"更新主题向量失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+        logger.error(f"Updating theme vector failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
 
 
 @router.get("/news/{news_id}/themes")
@@ -266,7 +231,7 @@ async def get_news_themes(news_id: int):
         conn = db_manager.get_connection()
         
         if not conn:
-            raise HTTPException(status_code=500, detail="数据库连接失败")
+            raise HTTPException(status_code=500, detail="Database connection failed")
         
         cursor = conn.cursor()
         cursor.execute("""
@@ -306,8 +271,8 @@ async def get_news_themes(news_id: int):
         }
         
     except Exception as e:
-        logger.error(f"获取新闻主题失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+        logger.error(f"Getting news themes failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Getting failed: {str(e)}")
 
 
 @router.get("/themes")
@@ -337,7 +302,7 @@ async def list_all_themes(
         conn = db_manager.get_connection()
         
         if not conn:
-            raise HTTPException(status_code=500, detail="数据库连接失败")
+            raise HTTPException(status_code=500, detail="Database connection failed")
         
         cursor = conn.cursor()
         
@@ -406,14 +371,87 @@ async def list_all_themes(
         }
         
     except Exception as e:
-        logger.error(f"获取主题列表失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+        logger.error(f"Getting theme list failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Getting failed: {str(e)}")
+
+
+@router.get("/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    Get Celery task status and progress
+    
+    说明：
+    - 查询 Celery 任务的当前状态和进度
+    - 适用于所有投资主题相关的异步任务
+    
+    示例：
+    ```
+    GET /api/investment-themes/task-status/abc-123-def-456
+    ```
+    
+    返回：
+    ```
+    {
+        "task_id": "abc-123-def-456",
+        "status": "PROGRESS",
+        "progress": 45,
+        "message": "Processing batch 5/10",
+        "result": null
+    }
+    ```
+    
+    状态说明：
+    - PENDING: 任务等待中
+    - PROGRESS: 任务执行中
+    - SUCCESS: 任务成功完成
+    - FAILURE: 任务失败
+    """
+    try:
+        from celery.result import AsyncResult
+        from backend.celery_app import app
+        
+        # Get task result
+        task_result = AsyncResult(task_id, app=app)
+        
+        response = {
+            "task_id": task_id,
+            "status": task_result.state,
+            "progress": 0,
+            "message": "",
+            "result": None
+        }
+        
+        if task_result.state == 'PENDING':
+            response["message"] = "Task is waiting to be executed"
+        elif task_result.state == 'PROGRESS':
+            # Get progress information from task meta
+            if task_result.info:
+                response["progress"] = task_result.info.get('progress', 0)
+                response["message"] = task_result.info.get('message', 'Processing...')
+                # Include additional metadata
+                for key in ['total', 'processed', 'failed', 'current_batch', 'total_batches']:
+                    if key in task_result.info:
+                        response[key] = task_result.info[key]
+        elif task_result.state == 'SUCCESS':
+            response["progress"] = 100
+            response["message"] = "Task completed successfully"
+            response["result"] = task_result.result
+        elif task_result.state == 'FAILURE':
+            response["progress"] = 0
+            response["message"] = f"Task failed: {str(task_result.info)}"
+            response["error"] = str(task_result.info)
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to get task status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get task status: {str(e)}")
 
 
 @router.post("/fill-descriptions")
-async def fill_theme_descriptions(request: FillDescriptionsRequest, background_tasks: BackgroundTasks):
+async def fill_theme_descriptions(request: FillDescriptionsRequest):
     """
-    批量填充主题描述（使用LLM生成）
+    Batch fill theme descriptions using LLM (using Celery)
     
     参数：
     - force_regenerate: 是否强制重新生成已有描述
@@ -422,7 +460,8 @@ async def fill_theme_descriptions(request: FillDescriptionsRequest, background_t
     说明：
     - 默认只填充缺失的描述（增量更新）
     - force_regenerate=True 时会重新生成所有描述
-    - 使用后台任务异步处理，避免超时
+    - 使用 Celery 后台任务异步处理，避免超时
+    - 任务在后台异步执行，使用返回的 task_id 查询进度
     
     示例：
     ```
@@ -432,112 +471,171 @@ async def fill_theme_descriptions(request: FillDescriptionsRequest, background_t
         "market": "US"
     }
     ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "Task started",
+        "task_id": "abc-123-def-456",
+        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
+    }
+    ```
     """
     try:
-        from backend.database.db_manager import DatabaseManager
+        from backend.tasks.theme_tasks import fill_theme_descriptions_task
         
-        db_config = get_database_config()
-        db_manager = DatabaseManager(db_config)
-        conn = db_manager.get_connection()
+        logger.info(
+            "Starting theme descriptions filling task (Celery)", 
+            force_regenerate=request.force_regenerate,
+            market=request.market
+        )
         
-        if not conn:
-            raise HTTPException(status_code=500, detail="数据库连接失败")
-        
-        cursor = conn.cursor()
-        
-        # 构建查询条件
-        where_clause = ""
-        params = []
-        
-        if request.market:
-            where_clause = "WHERE market = %s"
-            params.append(request.market)
-        
-        if not request.force_regenerate:
-            # 只填充缺失的描述
-            where_clause = f"{where_clause} AND" if where_clause else "WHERE"
-            where_clause += " (description IS NULL OR description = '')"
-        
-        # 获取需要处理的主题
-        cursor.execute(f"""
-            SELECT id, theme_id, theme_name, market
-            FROM futu_investment_themes
-            {where_clause}
-            ORDER BY market, theme_name
-        """, params)
-        
-        themes_to_process = cursor.fetchall()
-        total = len(themes_to_process)
-        
-        cursor.close()
-        conn.close()
-        
-        if total == 0:
-            return {
-                "success": True,
-                "message": "没有需要处理的主题",
-                "statistics": {
-                    "total": 0,
-                    "processed": 0,
-                    "failed": 0
-                }
+        # Submit Celery task
+        task = fill_theme_descriptions_task.apply_async(
+            kwargs={
+                'force_regenerate': request.force_regenerate,
+                'market': request.market
             }
+        )
         
-        # 使用后台任务处理（避免超时）
-        async def process_descriptions():
-            try:
-                db_config_bg = get_database_config()
-                service = InvestmentThemeEmbeddingService(db_config_bg)
-                
-                processed = 0
-                failed = 0
-                
-                for row in themes_to_process:
-                    db_theme_id, theme_id, theme_name, market = row
-                    try:
-                        conn_bg = service.db_manager.get_connection()
-                        cursor_bg = conn_bg.cursor()
-                        
-                        # 调用生成描述方法
-                        await service._generate_enriched_theme_text(
-                            cursor=cursor_bg,
-                            theme_id=theme_id,
-                            theme_name=theme_name,
-                            market=market,
-                            db_theme_id=db_theme_id,
-                            force_regenerate=request.force_regenerate
-                        )
-                        
-                        conn_bg.commit()
-                        cursor_bg.close()
-                        conn_bg.close()
-                        
-                        processed += 1
-                        logger.info(f"✅ 描述已生成: {theme_name} ({processed}/{total})")
-                        
-                    except Exception as e:
-                        failed += 1
-                        logger.error(f"❌ 描述生成失败: {theme_name} - {str(e)}")
-                
-                logger.info(f"🎉 批量填充完成！总计: {total}, 成功: {processed}, 失败: {failed}")
-                
-            except Exception as e:
-                logger.error(f"后台任务失败: {str(e)}")
-        
-        # 添加到后台任务
-        background_tasks.add_task(process_descriptions)
+        logger.info(f"Theme descriptions filling task submitted: {task.id}")
         
         return {
             "success": True,
-            "message": f"已启动批量填充任务，将处理 {total} 个主题",
-            "statistics": {
-                "total": total,
-                "processing": total,
-                "note": "任务在后台异步执行，请稍后查看统计信息"
-            }
+            "message": "Theme descriptions filling task started",
+            "task_id": task.id,
+            "status_url": f"/api/investment-themes/task-status/{task.id}"
         }
         
     except Exception as e:
-        logger.error(f"批量填充描述失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"操作失败: {str(e)}")
+        logger.error(f"Failed to start theme descriptions filling task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+
+
+@router.post("/regenerate-all")
+async def regenerate_all_theme_embeddings(market: Optional[str] = None):
+    """
+    Regenerate all theme embeddings (descriptions + vectors) using Celery
+    
+    说明：
+    - 完全重新生成所有主题的描述和向量
+    - 包含两个步骤：1) 生成描述 2) 生成向量
+    - 适用于模型更新或大规模数据更新后
+    - 使用 Celery 后台任务异步处理
+    
+    参数：
+    - market: 市场过滤（HK/US/CN），为空则处理所有市场
+    
+    示例：
+    ```
+    POST /api/investment-themes/regenerate-all?market=US
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "Task started",
+        "task_id": "abc-123-def-456",
+        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
+    }
+    ```
+    """
+    try:
+        from backend.tasks.theme_tasks import regenerate_all_theme_embeddings_task
+        
+        logger.info("Starting regenerate all theme embeddings task (Celery)", market=market)
+        
+        # Submit Celery task
+        task = regenerate_all_theme_embeddings_task.apply_async(
+            kwargs={'market': market}
+        )
+        
+        logger.info(f"Regenerate all theme embeddings task submitted: {task.id}")
+        
+        return {
+            "success": True,
+            "message": "Regenerate all theme embeddings task started",
+            "task_id": task.id,
+            "status_url": f"/api/investment-themes/task-status/{task.id}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start regenerate all task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+
+
+@router.post("/fetch-futu-themes")
+async def fetch_futu_themes(
+    markets: Optional[List[str]] = None,
+    max_pages: Optional[int] = None,
+    scrape_stocks: bool = True
+):
+    """
+    Fetch Futu investment themes data using Celery (手动触发)
+    
+    说明：
+    - 手动触发富途投资主题数据爬取
+    - 任务通常需要约1小时运行时间
+    - 使用 Celery 后台任务异步处理
+    - 爬取港股、美股等市场的投资主题及相关股票
+    
+    参数：
+    - markets: 市场列表，如 ['HK', 'US']，为空则爬取所有市场
+    - max_pages: 每个市场最大爬取页数，为空则爬取所有页面
+    - scrape_stocks: 是否爬取每个主题的股票列表（默认：True）
+    
+    示例：
+    ```
+    POST /api/investment-themes/fetch-futu-themes
+    {
+        "markets": ["HK", "US"],
+        "max_pages": null,
+        "scrape_stocks": true
+    }
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "Futu themes fetching task started",
+        "task_id": "abc-123-def-456",
+        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
+    }
+    ```
+    """
+    try:
+        from backend.tasks.theme_tasks import fetch_futu_themes_task
+        
+        logger.info(
+            "手动触发Futu投资主题爬取任务 (Celery)", 
+            markets=markets or "ALL",
+            max_pages=max_pages or "ALL",
+            scrape_stocks=scrape_stocks
+        )
+        
+        # 提交Celery任务
+        task = fetch_futu_themes_task.apply_async(
+            kwargs={
+                'markets': markets,
+                'max_pages': max_pages,
+                'scrape_stocks': scrape_stocks
+            }
+        )
+        
+        logger.info(f"Futu投资主题爬取任务已提交: {task.id}")
+        
+        return {
+            "success": True,
+            "message": "Futu themes fetching task started (expected to run for ~1 hour)",
+            "task_id": task.id,
+            "status_url": f"/api/investment-themes/task-status/{task.id}",
+            "estimated_duration": "约1小时"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start Futu themes fetching task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
 
