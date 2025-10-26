@@ -2,7 +2,7 @@
  * Investment Theme Vector Retrieval API Service
  */
 
-import axios from 'axios';
+import { api } from './api';
 import {
   ThemeMatch,
   ThemeMatchRequest,
@@ -12,19 +12,13 @@ import {
   TaskStatusResponse,
 } from '../types/investmentThemes';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
-
 /**
  * Match news to investment themes
  */
 export async function matchNewsToThemes(
   request: ThemeMatchRequest
 ): Promise<ThemeMatch[]> {
-  const response = await axios.post<ThemeMatch[]>(
-    `${API_BASE_URL}/investment-themes/match`,
-    request
-  );
-  return response.data;
+  return await api.post<ThemeMatch[]>('/investment-themes/match', request);
 }
 
 /**
@@ -33,11 +27,10 @@ export async function matchNewsToThemes(
 export async function initializeThemeEmbeddings(
   forceUpdate: boolean = false
 ): Promise<InitializeThemesResponse> {
-  const response = await axios.post<InitializeThemesResponse>(
-    `${API_BASE_URL}/investment-themes/initialize`,
+  return await api.post<InitializeThemesResponse>(
+    '/investment-themes/initialize',
     { force_update: forceUpdate }
   );
-  return response.data;
 }
 
 
@@ -45,10 +38,10 @@ export async function initializeThemeEmbeddings(
  * Get matched themes for news
  */
 export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
-  const response = await axios.get<NewsThemesResponse>(
-    `${API_BASE_URL}/investment-themes/news/${newsId}/themes`
+  const response = await api.get<NewsThemesResponse>(
+    `/investment-themes/news/${newsId}/themes`
   );
-  return response.data.themes;
+  return response.themes;
 }
 
 /**
@@ -64,11 +57,7 @@ export async function listThemes(
     params.market = market;
   }
 
-  const response = await axios.get<ThemeListResponse>(
-    `${API_BASE_URL}/investment-themes/themes`,
-    { params }
-  );
-  return response.data;
+  return await api.get<ThemeListResponse>('/investment-themes/themes', params);
 }
 
 /**
@@ -79,15 +68,11 @@ export async function updateThemeEmbedding(
   themeName: string,
   market: string
 ): Promise<{ success: boolean; message: string }> {
-  const response = await axios.put(
-    `${API_BASE_URL}/investment-themes/update-theme`,
-    {
-      theme_id: themeId,
-      theme_name: themeName,
-      market,
-    }
-  );
-  return response.data;
+  return await api.put('/investment-themes/update-theme', {
+    theme_id: themeId,
+    theme_name: themeName,
+    market,
+  });
 }
 
 /**
@@ -97,14 +82,13 @@ export async function fillThemeDescriptions(
   forceRegenerate: boolean = false,
   market?: string
 ): Promise<InitializeThemesResponse> {
-  const response = await axios.post<InitializeThemesResponse>(
-    `${API_BASE_URL}/investment-themes/fill-descriptions`,
+  return await api.post<InitializeThemesResponse>(
+    '/investment-themes/fill-descriptions',
     {
       force_regenerate: forceRegenerate,
       market,
     }
   );
-  return response.data;
 }
 
 /**
@@ -113,10 +97,7 @@ export async function fillThemeDescriptions(
 export async function getTaskStatus(
   taskId: string
 ): Promise<TaskStatusResponse> {
-  const response = await axios.get<TaskStatusResponse>(
-    `${API_BASE_URL}/investment-themes/task-status/${taskId}`
-  );
-  return response.data;
+  return await api.get<TaskStatusResponse>(`/investment-themes/task-status/${taskId}`);
 }
 
 /**
@@ -151,5 +132,130 @@ export async function pollTaskUntilComplete(
     // Wait before next poll
     await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
+}
+
+/**
+ * Update theme enabled/disabled status (Admin only)
+ */
+export async function updateThemeEnabledStatus(
+  themeId: string,
+  market: string,
+  isEnabled: boolean
+): Promise<{ success: boolean; message: string }> {
+  return await api.patch(`/investment-themes/${themeId}/enabled`, {
+    market,
+    is_enabled: isEnabled,
+  });
+}
+
+/**
+ * Batch update theme enabled/disabled status (Admin only)
+ */
+export async function batchUpdateThemeEnabledStatus(
+  themeIds: string[],
+  markets: string[],
+  isEnabled: boolean
+): Promise<{
+  success: boolean;
+  total: number;
+  success_count: number;
+  failed_count: number;
+  results: Array<{
+    theme_id: string;
+    market: string;
+    success: boolean;
+    message: string;
+  }>;
+}> {
+  return await api.post('/investment-themes/batch-enabled', {
+    theme_ids: themeIds,
+    markets,
+    is_enabled: isEnabled,
+  });
+}
+
+/**
+ * Update theme description (Admin only)
+ */
+export async function updateThemeDescription(
+  themeId: string,
+  market: string,
+  description: string,
+  version?: number
+): Promise<{
+  success: boolean;
+  message: string;
+  description_saved: boolean;
+  embedding_updated: boolean;
+  error?: string;
+}> {
+  return await api.patch(`/investment-themes/${themeId}/description`, {
+    market,
+    description,
+    version,
+  });
+}
+
+/**
+ * Delete theme (Admin only, soft delete)
+ */
+export async function deleteTheme(
+  themeId: string,
+  market: string
+): Promise<{
+  success: boolean;
+  message: string;
+  deleted_matches_count: number;
+  deleted_embeddings: boolean;
+}> {
+  // Note: DELETE with body requires special handling
+  // Using POST with _method workaround or direct apiClient
+  const apiClient = (await import('./api')).default;
+  const response = await apiClient.delete(`/investment-themes/${themeId}`, {
+    data: { market }
+  });
+  return response.data;
+}
+
+/**
+ * Generate theme description using LLM (Admin only)
+ */
+export async function generateThemeDescription(
+  themeName: string,
+  market: string
+): Promise<{
+  success: boolean;
+  description: string;
+  message: string;
+  error?: string;
+}> {
+  return await api.post('/investment-themes/generate-description', {
+    theme_name: themeName,
+    market,
+  });
+}
+
+/**
+ * Create new theme (Admin only)
+ */
+export async function createTheme(
+  themeName: string,
+  market: string,
+  description: string,
+  themeId?: string
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  theme_saved: boolean;
+  embedding_created: boolean;
+  error?: string;
+}> {
+  return await api.post('/investment-themes/create', {
+    theme_name: themeName,
+    market,
+    description,
+    theme_id: themeId,
+  });
 }
 

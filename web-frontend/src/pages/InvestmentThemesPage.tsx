@@ -22,7 +22,9 @@ import {
   Tooltip,
   Dropdown,
   Menu,
-  Alert
+  Alert,
+  Switch,
+  Form
 } from 'antd';
 import {
   ReloadOutlined,
@@ -33,7 +35,13 @@ import {
   ExperimentOutlined,
   WarningOutlined,
   InfoCircleOutlined,
-  DownOutlined
+  DownOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  CheckCircleOutlined,
+  StopOutlined,
+  PlusOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -42,7 +50,12 @@ import {
   initializeThemeEmbeddings,
   matchNewsToThemes,
   fillThemeDescriptions,
-  pollTaskUntilComplete
+  pollTaskUntilComplete,
+  updateThemeEnabledStatus,
+  updateThemeDescription,
+  deleteTheme,
+  generateThemeDescription,
+  createTheme
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
@@ -52,6 +65,7 @@ import {
   getDescriptionSourceLabel
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useAuthStore } from '../store/authStore';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -67,9 +81,25 @@ interface PageState {
   testNewsText: string;
   testResults: ThemeMatch[];
   testLoading: boolean;
+  editModalVisible: boolean;
+  editingTheme: InvestmentTheme | null;
+  editDescription: string;
+  editLoading: boolean;
+  selectedRowKeys: React.Key[];
+  createModalVisible: boolean;
+  createStep: number;
+  newThemeName: string;
+  newThemeMarket: string;
+  newThemeId: string;
+  newThemeDescription: string;
+  generatingDescription: boolean;
+  creatingTheme: boolean;
 }
 
 const InvestmentThemesPage: React.FC = () => {
+  const { user } = useAuthStore();
+  const isAdmin = user?.is_admin === true;
+  
   const [state, setState] = useState<PageState>({
     loading: false,
     themes: [],
@@ -80,7 +110,20 @@ const InvestmentThemesPage: React.FC = () => {
     testModalVisible: false,
     testNewsText: '',
     testResults: [],
-    testLoading: false
+    testLoading: false,
+    editModalVisible: false,
+    editingTheme: null,
+    editDescription: '',
+    editLoading: false,
+    selectedRowKeys: [],
+    createModalVisible: false,
+    createStep: 1,
+    newThemeName: '',
+    newThemeMarket: 'US',
+    newThemeId: '',
+    newThemeDescription: '',
+    generatingDescription: false,
+    creatingTheme: false
   });
 
 
@@ -563,18 +606,256 @@ const InvestmentThemesPage: React.FC = () => {
             <Text strong>Description Source:</Text>
             <Tag color={sourceLabel.color}>{sourceLabel.text}</Tag>
           </Paragraph>
-          {theme.description_updated_at && (
+          {theme.last_manual_edit_at && (
             <Paragraph>
-              <Text strong>Updated At:</Text>
-              <Text type="secondary">{new Date(theme.description_updated_at).toLocaleString('en-US')}</Text>
+              <Text strong>Last Edited:</Text>
+              <Text type="secondary">{new Date(theme.last_manual_edit_at).toLocaleString('en-US')} by {theme.last_manual_edit_by}</Text>
             </Paragraph>
           )}
           <Divider />
           <Paragraph style={{ fontSize: '14px', lineHeight: '1.8' }}>
-            {theme.description || <Text type="secondary">No description available</Text>}
+            {theme.description_preview || <Text type="secondary">No description available</Text>}
           </Paragraph>
         </div>
       ),
+    });
+  };
+
+  // Handle enable/disable theme toggle (Admin only)
+  const handleToggleEnabled = async (theme: InvestmentTheme) => {
+    if (!isAdmin) {
+      message.error('Only administrators can perform this operation');
+      return;
+    }
+
+    const newStatus = !theme.is_enabled_for_matching;
+    
+    try {
+      await updateThemeEnabledStatus(theme.theme_id, theme.market, newStatus);
+      message.success(`Theme ${newStatus ? 'enabled' : 'disabled'}`);
+      loadThemes(state.currentPage);
+    } catch (error) {
+      message.error(`Failed to update status: ${getErrorMessage(error)}`);
+    }
+  };
+
+  // Handle edit description (Admin only)
+  const handleEditDescription = (theme: InvestmentTheme) => {
+    if (!isAdmin) {
+      message.error('Only administrators can perform this operation');
+      return;
+    }
+
+    setState(prev => ({
+      ...prev,
+      editModalVisible: true,
+      editingTheme: theme,
+      editDescription: theme.description_preview || ''
+    }));
+  };
+
+  // Submit edit description
+  const handleSubmitEdit = async () => {
+    if (!state.editingTheme) return;
+
+    if (!state.editDescription.trim()) {
+      message.error('Description cannot be empty');
+      return;
+    }
+
+    setState(prev => ({ ...prev, editLoading: true }));
+
+    try {
+      const result = await updateThemeDescription(
+        state.editingTheme.theme_id,
+        state.editingTheme.market,
+        state.editDescription,
+        state.editingTheme.version
+      );
+
+      if (result.description_saved) {
+        if (result.embedding_updated) {
+          message.success('Description and vector updated successfully');
+        } else {
+          message.warning(`Description saved, but vector update failed: ${result.error || 'Unknown error'}`);
+        }
+        
+        setState(prev => ({
+          ...prev,
+          editModalVisible: false,
+          editingTheme: null,
+          editDescription: '',
+          editLoading: false
+        }));
+        
+        loadThemes(state.currentPage);
+      } else {
+        message.error(result.message || 'Update failed');
+        setState(prev => ({ ...prev, editLoading: false }));
+      }
+    } catch (error) {
+      message.error(`Update failed: ${getErrorMessage(error)}`);
+      setState(prev => ({ ...prev, editLoading: false }));
+    }
+  };
+
+  // Handle delete theme (Admin only)
+  const handleDeleteTheme = (theme: InvestmentTheme) => {
+    if (!isAdmin) {
+      message.error('Only administrators can perform this operation');
+      return;
+    }
+
+    Modal.confirm({
+      title: 'Confirm Delete Theme?',
+      icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+      width: 600,
+      content: (
+        <div>
+          <Alert
+            type="warning"
+            message="This operation cannot be undone!"
+            style={{ marginBottom: 16 }}
+          />
+          <Paragraph>
+            <Text strong>Theme ID:</Text> {theme.theme_id}
+          </Paragraph>
+          <Paragraph>
+            <Text strong>Theme Name:</Text> {theme.theme_name}
+          </Paragraph>
+          <Paragraph>
+            <Text strong>Market:</Text> <Tag color={MARKET_COLORS[theme.market]}>{MARKET_LABELS[theme.market]}</Tag>
+          </Paragraph>
+          <Paragraph>
+            <Text strong>Related Stocks:</Text> {theme.stock_count || 0}
+          </Paragraph>
+          <Paragraph type="danger">
+            This will delete:
+            <ul>
+              <li>Theme vector data (investment_theme_embeddings)</li>
+              <li>All news matching records (news_theme_matches)</li>
+            </ul>
+          </Paragraph>
+        </div>
+      ),
+      okText: 'Confirm Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const result = await deleteTheme(theme.theme_id, theme.market);
+          
+          if (result.success) {
+            message.success(result.message + ` (deleted ${result.deleted_matches_count} matching records)`);
+            loadThemes(state.currentPage);
+          } else {
+            message.error(result.message);
+          }
+        } catch (error) {
+          message.error(`Delete failed: ${getErrorMessage(error)}`);
+        }
+      }
+    });
+  };
+
+  // Handle create theme - Step 1: Generate description
+  const handleGenerateDescription = async () => {
+    if (!state.newThemeName.trim()) {
+      message.error('Please enter theme name');
+      return;
+    }
+
+    setState(prev => ({ ...prev, generatingDescription: true }));
+
+    try {
+      const result = await generateThemeDescription(state.newThemeName, state.newThemeMarket);
+      
+      if (result.success) {
+        setState(prev => ({
+          ...prev,
+          newThemeDescription: result.description,
+          createStep: 2,
+          generatingDescription: false
+        }));
+        message.success('Description generated successfully');
+      } else {
+        message.error(result.message || 'Failed to generate description');
+        setState(prev => ({ ...prev, generatingDescription: false }));
+      }
+    } catch (error) {
+      message.error(`Generate description failed: ${getErrorMessage(error)}`);
+      setState(prev => ({ ...prev, generatingDescription: false }));
+    }
+  };
+
+  // Handle create theme - Step 2: Create theme with description
+  const handleCreateTheme = async () => {
+    if (!state.newThemeDescription.trim()) {
+      message.error('Please enter description');
+      return;
+    }
+
+    setState(prev => ({ ...prev, creatingTheme: true }));
+
+    try {
+      const result = await createTheme(
+        state.newThemeName,
+        state.newThemeMarket,
+        state.newThemeDescription,
+        state.newThemeId || undefined
+      );
+      
+      if (result.theme_saved) {
+        if (result.embedding_created) {
+          message.success(`Theme '${state.newThemeName}' created successfully!`);
+        } else {
+          message.warning(`Theme saved, but vector generation failed: ${result.error || 'Unknown error'}`);
+        }
+        
+        // Reset and close modal
+        setState(prev => ({
+          ...prev,
+          createModalVisible: false,
+          createStep: 1,
+          newThemeName: '',
+          newThemeMarket: 'US',
+          newThemeId: '',
+          newThemeDescription: '',
+          creatingTheme: false
+        }));
+        
+        // Reload themes list
+        loadThemes(state.currentPage);
+      } else {
+        message.error(result.message || 'Failed to create theme');
+        setState(prev => ({ ...prev, creatingTheme: false }));
+      }
+    } catch (error) {
+      message.error(`Create theme failed: ${getErrorMessage(error)}`);
+      setState(prev => ({ ...prev, creatingTheme: false }));
+    }
+  };
+
+  // Handle cancel create
+  const handleCancelCreate = () => {
+    Modal.confirm({
+      title: 'Confirm Cancel?',
+      content: 'Unsaved changes will be lost.',
+      okText: 'Yes, Cancel',
+      cancelText: 'Continue Editing',
+      onOk: () => {
+        setState(prev => ({
+          ...prev,
+          createModalVisible: false,
+          createStep: 1,
+          newThemeName: '',
+          newThemeMarket: 'US',
+          newThemeId: '',
+          newThemeDescription: '',
+          generatingDescription: false,
+          creatingTheme: false
+        }));
+      }
     });
   };
 
@@ -589,10 +870,18 @@ const InvestmentThemesPage: React.FC = () => {
       render: (name: string) => <Text strong>{name}</Text>
     },
     {
+      title: 'Market',
+      dataIndex: 'market',
+      key: 'market',
+      width: 100,
+      fixed: 'left',
+      render: (market: string) => <Tag color={MARKET_COLORS[market]}>{market}</Tag>
+    },
+    {
       title: 'Description Preview',
-      dataIndex: 'description',
-      key: 'description',
-      width: 300,
+      dataIndex: 'description_preview',
+      key: 'description_preview',
+      width: 250,
       ellipsis: true,
       render: (text: string, record: InvestmentTheme) => (
         <Text 
@@ -605,29 +894,78 @@ const InvestmentThemesPage: React.FC = () => {
       )
     },
     {
-      title: 'Description Source',
+      title: 'Source',
       dataIndex: 'description_source',
       key: 'description_source',
-      width: 120,
+      width: 110,
       render: (source: string) => {
         const label = getDescriptionSourceLabel(source);
         return <Tag color={label.color}>{label.text}</Tag>;
       }
     },
     {
-      title: 'Embedding Model',
-      dataIndex: 'embedding_model',
-      key: 'embedding_model',
-      width: 150,
-      render: (model: string) => <Tag color="blue">{model || 'text-embedding-v3'}</Tag>
+      title: 'Enabled',
+      dataIndex: 'is_enabled_for_matching',
+      key: 'is_enabled_for_matching',
+      width: 90,
+      render: (_: any, record: InvestmentTheme) => (
+        <Tooltip title={isAdmin ? "Click to toggle" : "View only"}>
+          <Switch
+            checked={record.is_enabled_for_matching ?? true}
+            onChange={() => handleToggleEnabled(record)}
+            disabled={!isAdmin}
+            checkedChildren={<CheckCircleOutlined />}
+            unCheckedChildren={<StopOutlined />}
+          />
+        </Tooltip>
+      )
     },
     {
-      title: 'Updated At',
+      title: 'Stocks',
+      dataIndex: 'stock_count',
+      key: 'stock_count',
+      width: 80,
+      render: (count: number) => <Text>{count || 0}</Text>
+    },
+    {
+      title: 'Updated',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 160,
-      render: (date: string) => date ? new Date(date).toLocaleString('en-US') : '-'
-    }
+      width: 140,
+      render: (date: string) => date ? new Date(date).toLocaleString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      }) : '-'
+    },
+    ...(isAdmin ? [{
+      title: 'Actions',
+      key: 'actions',
+      width: 120,
+      fixed: 'right' as const,
+      render: (_: any, record: InvestmentTheme) => (
+        <Space size="small">
+          <Tooltip title="Edit Description">
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => handleEditDescription(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete Theme">
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDeleteTheme(record)}
+            />
+          </Tooltip>
+        </Space>
+      )
+    }] : [])
   ];
 
 
@@ -650,9 +988,21 @@ const InvestmentThemesPage: React.FC = () => {
          {/* Operations */}
          <div style={{ marginBottom: '16px' }}>
            <Space size="middle" wrap>
+            {isAdmin && (
+              <Tooltip title="Create a new custom investment theme with LLM-generated description">
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
+                >
+                  Create New Theme
+                </Button>
+              </Tooltip>
+            )}
+            
             <Tooltip title="Generate descriptions and vectors for new themes, suitable after Futu crawler adds new themes">
               <Button
-                type="primary"
+                type={isAdmin ? "default" : "primary"}
                 icon={<SyncOutlined />}
                 onClick={handleSyncThemes}
               >
@@ -832,6 +1182,236 @@ const InvestmentThemesPage: React.FC = () => {
             </div>
           )}
         </Space>
+      </Modal>
+
+      {/* Edit Description Modal */}
+      <Modal
+        title={`Edit Theme Description${state.editingTheme ? ` - ${state.editingTheme.theme_name}` : ''}`}
+        open={state.editModalVisible}
+        onCancel={() => setState(prev => ({ 
+          ...prev, 
+          editModalVisible: false, 
+          editingTheme: null,
+          editDescription: '' 
+        }))}
+        onOk={handleSubmitEdit}
+        okText="Save & Re-vectorize"
+        cancelText="Cancel"
+        confirmLoading={state.editLoading}
+        width={700}
+      >
+        {state.editingTheme && (
+          <div>
+            <Alert
+              message="Important Notes"
+              description={
+                <ul style={{ marginBottom: 0, paddingLeft: '20px' }}>
+                  <li>Description will be saved immediately</li>
+                  <li>Vector will be regenerated automatically (may take a few seconds)</li>
+                  <li>If vectorization fails, description is still saved</li>
+                </ul>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <Space direction="vertical" style={{ width: '100%' }} size="small">
+              <div>
+                <Text strong>Theme ID:</Text> <Text code>{state.editingTheme.theme_id}</Text>
+              </div>
+              <div>
+                <Text strong>Market:</Text> <Tag color={MARKET_COLORS[state.editingTheme.market]}>{state.editingTheme.market}</Tag>
+              </div>
+              {state.editingTheme.last_manual_edit_by && (
+                <div>
+                  <Text strong>Last Edited By:</Text> <Text>{state.editingTheme.last_manual_edit_by}</Text>
+                  {' at '}
+                  <Text type="secondary">
+                    {state.editingTheme.last_manual_edit_at 
+                      ? new Date(state.editingTheme.last_manual_edit_at).toLocaleString('en-US') 
+                      : '-'}
+                  </Text>
+                </div>
+              )}
+            </Space>
+            <Divider />
+            <Form.Item label="Description" required style={{ marginBottom: 0 }}>
+              <TextArea
+                value={state.editDescription}
+                onChange={(e) => setState(prev => ({ ...prev, editDescription: e.target.value }))}
+                placeholder="Enter detailed theme description..."
+                autoSize={{ minRows: 6, maxRows: 12 }}
+                maxLength={2000}
+                showCount
+              />
+            </Form.Item>
+          </div>
+        )}
+      </Modal>
+
+      {/* Create New Theme Modal */}
+      <Modal
+        title={
+          <Space>
+            <PlusOutlined />
+            <span>Create New Investment Theme</span>
+            <Tag color="blue">Step {state.createStep}/2</Tag>
+          </Space>
+        }
+        open={state.createModalVisible}
+        onCancel={handleCancelCreate}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        {state.createStep === 1 && (
+          <div>
+            <Alert
+              message="Step 1: Basic Information"
+              description="Fill in the theme name and market, then let AI generate a detailed description."
+              type="info"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+            
+            <Form layout="vertical">
+              <Form.Item label="Theme Name" required>
+                <Input
+                  placeholder="e.g. AI Chips, Clean Energy, Quantum Computing"
+                  value={state.newThemeName}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeName: e.target.value }))}
+                  maxLength={200}
+                  showCount
+                />
+              </Form.Item>
+              
+              <Form.Item label="Market" required>
+                <Select
+                  value={state.newThemeMarket}
+                  onChange={(value) => setState(prev => ({ ...prev, newThemeMarket: value }))}
+                  style={{ width: '100%' }}
+                >
+                  <Select.Option value="HK">
+                    <Tag color={MARKET_COLORS['HK']}>HK</Tag> {MARKET_LABELS['HK']}
+                  </Select.Option>
+                  <Select.Option value="US">
+                    <Tag color={MARKET_COLORS['US']}>US</Tag> {MARKET_LABELS['US']}
+                  </Select.Option>
+                  <Select.Option value="CN">
+                    <Tag color={MARKET_COLORS['CN']}>CN</Tag> {MARKET_LABELS['CN']}
+                  </Select.Option>
+                </Select>
+              </Form.Item>
+              
+              <Form.Item 
+                label="Theme ID (Optional)" 
+                help="Leave empty to auto-generate (format: CUSTOM_MARKET_TIMESTAMP)"
+              >
+                <Input
+                  placeholder="e.g. AI_CHIP_US (optional)"
+                  value={state.newThemeId}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeId: e.target.value }))}
+                  maxLength={50}
+                />
+              </Form.Item>
+            </Form>
+            
+            <div style={{ textAlign: 'right', marginTop: 24 }}>
+              <Space>
+                <Button onClick={handleCancelCreate}>
+                  Cancel
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  onClick={handleGenerateDescription}
+                  loading={state.generatingDescription}
+                  disabled={!state.newThemeName.trim()}
+                >
+                  {state.generatingDescription ? 'Generating...' : 'Generate Description with AI'}
+                </Button>
+              </Space>
+            </div>
+          </div>
+        )}
+        
+        {state.createStep === 2 && (
+          <div>
+            <Alert
+              message="Step 2: Review & Edit Description"
+              description={
+                <div>
+                  <div>AI has generated a description for your theme. You can edit it before creating.</div>
+                  <div style={{ marginTop: 8 }}>
+                    After confirmation, the theme will be created and vectorized automatically.
+                  </div>
+                </div>
+              }
+              type="success"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+            
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }} size="small">
+              <div>
+                <Text strong>Theme Name:</Text> <Text>{state.newThemeName}</Text>
+              </div>
+              <div>
+                <Text strong>Market:</Text> <Tag color={MARKET_COLORS[state.newThemeMarket]}>{state.newThemeMarket}</Tag>
+              </div>
+              {state.newThemeId && (
+                <div>
+                  <Text strong>Theme ID:</Text> <Text code>{state.newThemeId}</Text>
+                </div>
+              )}
+            </Space>
+            
+            <Divider />
+            
+            <Form layout="vertical">
+              <Form.Item 
+                label={
+                  <Space>
+                    <span>Theme Description</span>
+                    <Tag icon={<RobotOutlined />} color="purple">AI Generated</Tag>
+                  </Space>
+                } 
+                required
+              >
+                <TextArea
+                  value={state.newThemeDescription}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeDescription: e.target.value }))}
+                  placeholder="Edit the AI-generated description..."
+                  autoSize={{ minRows: 8, maxRows: 15 }}
+                  maxLength={2000}
+                  showCount
+                />
+              </Form.Item>
+            </Form>
+            
+            <div style={{ textAlign: 'right', marginTop: 24 }}>
+              <Space>
+                <Button 
+                  onClick={() => setState(prev => ({ ...prev, createStep: 1 }))}
+                  disabled={state.creatingTheme}
+                >
+                  Back
+                </Button>
+                <Button onClick={handleCancelCreate} disabled={state.creatingTheme}>
+                  Cancel
+                </Button>
+                <Button
+                  type="primary"
+                  onClick={handleCreateTheme}
+                  loading={state.creatingTheme}
+                  disabled={!state.newThemeDescription.trim()}
+                >
+                  {state.creatingTheme ? 'Creating...' : 'Create Theme & Vectorize'}
+                </Button>
+              </Space>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

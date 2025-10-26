@@ -101,6 +101,9 @@ export const api = {
   put: <T = any>(url: string, data?: any): Promise<T> => 
     apiClient.put(url, data).then(extractData),
   
+  patch: <T = any>(url: string, data?: any): Promise<T> => 
+    apiClient.patch(url, data).then(extractData),
+  
   delete: <T = any>(url: string): Promise<T> => 
     apiClient.delete(url).then(extractData),
   

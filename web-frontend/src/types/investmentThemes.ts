@@ -9,12 +9,22 @@ export interface InvestmentTheme {
   theme_id: string;
   theme_name: string;
   market: 'HK' | 'US' | 'CN';
-  description?: string;  // Detailed theme description (LLM-generated or manually written)
+  description_preview?: string;  // Theme description preview (LLM-generated or manually written)
   description_source?: 'llm_generated' | 'manual' | 'scraped' | 'simple_template';  // Description source
-  description_updated_at?: string;  // Description update time
   embedding_model?: string;
   created_at?: string;
   updated_at?: string;
+  
+  // Theme management fields
+  version?: number;  // Version number for optimistic locking
+  last_manual_edit_at?: string;  // Last manual edit time
+  last_manual_edit_by?: string;  // Last editor username
+  is_enabled_for_matching?: boolean;  // Whether enabled for news matching
+  is_deleted?: boolean;  // Whether soft deleted
+  
+  // Additional info from futu_investment_themes
+  stock_count?: number;  // Number of stocks in this theme
+  change_percent?: string;  // Theme change percentage
 }
 
 /**

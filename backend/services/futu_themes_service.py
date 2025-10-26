@@ -172,7 +172,10 @@ class FutuThemesService:
                     top_stock_change = EXCLUDED.top_stock_change,
                     stock_count = EXCLUDED.stock_count,
                     scraped_at = EXCLUDED.scraped_at,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CURRENT_TIMESTAMP,
+                    -- 关键：保留用户配置的状态，不被爬虫覆盖
+                    is_deleted = futu_investment_themes.is_deleted,
+                    is_enabled_for_matching = futu_investment_themes.is_enabled_for_matching
                 RETURNING id
                 """
                 

@@ -10,7 +10,7 @@ import re
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from backend.database.db_manager import DatabaseManager
-from backend.core.llm_framework import llm_service
+from backend.core.llm_framework import llm_service, LLMMessage
 from backend.utils.logger import get_logger
 
 logger = get_logger("investment_theme_embedding_service")
@@ -545,30 +545,37 @@ class InvestmentThemeEmbeddingService:
             # 根据数据库模式选择不同的查询方式
             if use_pgvector:
                 # pgvector模式：使用向量操作符
+                # JOIN futu_investment_themes来过滤启用且未删除的主题
                 market_filter = ""
                 params = [news_vector, news_vector, top_k]
                 
                 if market:
-                    market_filter = "AND market = %s"
+                    market_filter = "AND e.market = %s"
                     params.insert(2, market)
                 
                 # 使用pgvector的余弦相似度操作符 <=>
                 # 1 - (v1 <=> v2) = 余弦相似度
+                # JOIN主表过滤：is_deleted = FALSE AND is_enabled_for_matching = TRUE
                 query = f"""
                     SELECT 
-                        theme_id,
-                        theme_name,
-                        market,
-                        1 - (embedding_vector <=> %s::vector) as similarity
-                    FROM investment_theme_embeddings
-                    WHERE 1=1 {market_filter}
-                    ORDER BY embedding_vector <=> %s::vector
+                        e.theme_id,
+                        e.theme_name,
+                        e.market,
+                        1 - (e.embedding_vector <=> %s::vector) as similarity
+                    FROM investment_theme_embeddings e
+                    INNER JOIN futu_investment_themes t 
+                        ON e.theme_id = t.theme_id AND e.market = t.market
+                    WHERE t.is_deleted = FALSE 
+                        AND t.is_enabled_for_matching = TRUE
+                        {market_filter}
+                    ORDER BY e.embedding_vector <=> %s::vector
                     LIMIT %s
                 """
                 
                 cursor.execute(query, params)
             else:
                 # JSONB模式：先获取所有主题，然后在Python中计算相似度
+                # JOIN主表过滤：is_deleted = FALSE AND is_enabled_for_matching = TRUE
                 import json
                 import numpy as np
                 
@@ -576,17 +583,21 @@ class InvestmentThemeEmbeddingService:
                 params = []
                 
                 if market:
-                    market_filter = "WHERE market = %s"
+                    market_filter = "AND e.market = %s"
                     params.append(market)
                 
                 query = f"""
                     SELECT 
-                        theme_id,
-                        theme_name,
-                        market,
-                        embedding_data
-                    FROM investment_theme_embeddings
-                    {market_filter}
+                        e.theme_id,
+                        e.theme_name,
+                        e.market,
+                        e.embedding_data
+                    FROM investment_theme_embeddings e
+                    INNER JOIN futu_investment_themes t 
+                        ON e.theme_id = t.theme_id AND e.market = t.market
+                    WHERE t.is_deleted = FALSE 
+                        AND t.is_enabled_for_matching = TRUE
+                        {market_filter}
                 """
                 
                 cursor.execute(query, params)
@@ -835,4 +846,674 @@ class InvestmentThemeEmbeddingService:
         except Exception as e:
             logger.error(f"更新主题向量失败: {str(e)}")
             return False
+    
+    async def update_theme_description(
+        self,
+        theme_id: str,
+        market: str,
+        new_description: str,
+        editor_username: str,
+        version: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        更新主题描述并重新生成向量
+        
+        Args:
+            theme_id: 主题ID
+            market: 市场代码
+            new_description: 新的描述内容
+            editor_username: 编辑者用户名
+            version: 乐观锁版本号（可选，用于并发控制）
+            
+        Returns:
+            {
+                "success": bool,
+                "message": str,
+                "description_saved": bool,  # 描述是否保存成功
+                "embedding_updated": bool,  # 向量是否更新成功
+                "error": str (optional)
+            }
+        """
+        logger.info(f"开始更新主题描述: {theme_id} ({market})")
+        
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return {
+                "success": False,
+                "message": "数据库连接失败",
+                "description_saved": False,
+                "embedding_updated": False
+            }
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 1. 检查主题是否存在且未被删除
+            cursor.execute("""
+                SELECT theme_name, is_deleted 
+                FROM futu_investment_themes 
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            theme_row = cursor.fetchone()
+            if not theme_row:
+                cursor.close()
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "主题不存在",
+                    "description_saved": False,
+                    "embedding_updated": False
+                }
+            
+            theme_name, is_deleted = theme_row
+            if is_deleted:
+                cursor.close()
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "主题已被删除，无法编辑",
+                    "description_saved": False,
+                    "embedding_updated": False
+                }
+            
+            # 2. 更新描述到数据库（两阶段提交：先保存描述）
+            # 2.1 使用乐观锁检查版本（如果提供了version）
+            if version is not None:
+                cursor.execute("""
+                    SELECT version FROM investment_theme_embeddings
+                    WHERE theme_id = %s AND market = %s
+                """, (theme_id, market))
+                
+                row = cursor.fetchone()
+                if not row or row[0] != version:
+                    cursor.close()
+                    conn.close()
+                    return {
+                        "success": False,
+                        "message": "版本冲突，主题可能已被其他用户修改，请刷新后重试",
+                        "description_saved": False,
+                        "embedding_updated": False
+                    }
+            
+            # 2.2 更新描述到futu_investment_themes表
+            cursor.execute("""
+                UPDATE futu_investment_themes
+                SET description = %s,
+                    description_source = 'manual',
+                    description_updated_at = NOW(),
+                    updated_at = NOW()
+                WHERE theme_id = %s AND market = %s
+            """, (new_description, theme_id, market))
+            
+            # 2.3 更新版本和编辑追踪到investment_theme_embeddings表
+            cursor.execute("""
+                UPDATE investment_theme_embeddings
+                SET last_manual_edit_at = NOW(),
+                    last_manual_edit_by = %s,
+                    version = version + 1,
+                    updated_at = NOW()
+                WHERE theme_id = %s AND market = %s
+            """, (editor_username, theme_id, market))
+            
+            conn.commit()
+            logger.info(f"描述保存成功: {theme_id}")
+            
+            # 3. 尝试重新生成向量
+            embedding_success = False
+            embedding_error = None
+            
+            try:
+                # 直接使用用户提供的描述生成向量
+                # 构建用于向量化的文本：包含主题名称、市场和描述
+                embedding_text = f"{theme_name} ({market} market)\n\n{new_description}"
+                
+                # 调用Qwen Embedding API
+                if 'qwen' not in llm_service.providers:
+                    raise Exception("Qwen提供商未配置")
+                
+                embeddings = await llm_service.providers['qwen'].generate_embeddings(
+                    texts=[embedding_text],
+                    model=self.embedding_model,
+                    text_type="document"
+                )
+                
+                if not embeddings or len(embeddings) == 0:
+                    raise Exception("向量生成失败，返回空结果")
+                
+                embedding = embeddings[0]
+                
+                # 验证向量维度
+                if len(embedding) != self.embedding_dimension:
+                    raise Exception(
+                        f"向量维度不匹配: 期望{self.embedding_dimension}, 实际{len(embedding)}"
+                    )
+                
+                # 4. 更新向量到数据库
+                use_pgvector = self._detect_database_mode(cursor)
+                
+                if use_pgvector:
+                    cursor.execute("""
+                        UPDATE investment_theme_embeddings
+                        SET embedding_vector = %s,
+                            embedding_model = %s,
+                            updated_at = NOW()
+                        WHERE theme_id = %s AND market = %s
+                    """, (embedding, self.embedding_model, theme_id, market))
+                else:
+                    import json
+                    embedding_json = json.dumps(embedding)
+                    cursor.execute("""
+                        UPDATE investment_theme_embeddings
+                        SET embedding_data = %s::jsonb,
+                            embedding_model = %s,
+                            updated_at = NOW()
+                        WHERE theme_id = %s AND market = %s
+                    """, (embedding_json, self.embedding_model, theme_id, market))
+                
+                conn.commit()
+                embedding_success = True
+                logger.info(f"向量更新成功: {theme_id}")
+                
+            except Exception as e:
+                embedding_error = str(e)
+                logger.error(f"向量生成/更新失败: {embedding_error}")
+                # 不回滚，保留已保存的描述
+            
+            cursor.close()
+            conn.close()
+            
+            # 5. 返回结果
+            if embedding_success:
+                return {
+                    "success": True,
+                    "message": "描述和向量更新成功",
+                    "description_saved": True,
+                    "embedding_updated": True
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"描述已保存，但向量更新失败: {embedding_error}",
+                    "description_saved": True,
+                    "embedding_updated": False,
+                    "error": embedding_error
+                }
+            
+        except Exception as e:
+            logger.error(f"更新主题描述失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return {
+                "success": False,
+                "message": f"更新失败: {str(e)}",
+                "description_saved": False,
+                "embedding_updated": False,
+                "error": str(e)
+            }
+    
+    def update_theme_enabled_status(
+        self,
+        theme_id: str,
+        market: str,
+        is_enabled: bool,
+        operator_username: str
+    ) -> Dict[str, Any]:
+        """
+        更新主题的启用/禁用状态
+        
+        Args:
+            theme_id: 主题ID
+            market: 市场代码
+            is_enabled: 是否启用
+            operator_username: 操作者用户名
+            
+        Returns:
+            {"success": bool, "message": str}
+        """
+        logger.info(f"更新主题状态: {theme_id} ({market}) -> {is_enabled}")
+        
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return {"success": False, "message": "数据库连接失败"}
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 检查主题是否存在且未被删除
+            cursor.execute("""
+                SELECT theme_name, is_deleted 
+                FROM futu_investment_themes 
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            row = cursor.fetchone()
+            if not row:
+                cursor.close()
+                conn.close()
+                return {"success": False, "message": "主题不存在"}
+            
+            if row[1]:  # is_deleted
+                cursor.close()
+                conn.close()
+                return {"success": False, "message": "主题已被删除"}
+            
+            # 如果要启用，检查是否已向量化
+            if is_enabled:
+                cursor.execute("""
+                    SELECT 1 FROM investment_theme_embeddings 
+                    WHERE theme_id = %s AND market = %s
+                """, (theme_id, market))
+                
+                if not cursor.fetchone():
+                    cursor.close()
+                    conn.close()
+                    return {
+                        "success": False,
+                        "message": "主题尚未向量化，无法启用。请先同步主题数据。"
+                    }
+            
+            # 更新状态
+            cursor.execute("""
+                UPDATE futu_investment_themes
+                SET is_enabled_for_matching = %s,
+                    updated_at = NOW()
+                WHERE theme_id = %s AND market = %s
+            """, (is_enabled, theme_id, market))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            status_text = "启用" if is_enabled else "禁用"
+            logger.info(f"主题状态更新成功: {theme_id} -> {status_text}")
+            
+            return {
+                "success": True,
+                "message": f"主题已{status_text}"
+            }
+            
+        except Exception as e:
+            logger.error(f"更新主题状态失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return {"success": False, "message": f"更新失败: {str(e)}"}
+    
+    def delete_theme(
+        self,
+        theme_id: str,
+        market: str,
+        operator_username: str
+    ) -> Dict[str, Any]:
+        """
+        软删除投资主题及其关联数据
+        
+        删除操作包括：
+        1. 软删除 futu_investment_themes（标记is_deleted=TRUE）
+        2. 删除 investment_theme_embeddings 的向量数据
+        3. 删除 news_theme_matches 的匹配记录
+        
+        Args:
+            theme_id: 主题ID
+            market: 市场代码
+            operator_username: 操作者用户名
+            
+        Returns:
+            {
+                "success": bool,
+                "message": str,
+                "deleted_matches_count": int,
+                "deleted_embeddings": bool
+            }
+        """
+        logger.info(f"开始删除主题: {theme_id} ({market}) by {operator_username}")
+        
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return {"success": False, "message": "数据库连接失败"}
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 1. 检查主题是否存在
+            cursor.execute("""
+                SELECT theme_name, is_deleted 
+                FROM futu_investment_themes 
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            row = cursor.fetchone()
+            if not row:
+                cursor.close()
+                conn.close()
+                return {"success": False, "message": "主题不存在"}
+            
+            theme_name = row[0]
+            if row[1]:  # 已被删除
+                cursor.close()
+                conn.close()
+                return {"success": False, "message": "主题已被删除"}
+            
+            # 2. 软删除主题主表
+            cursor.execute("""
+                UPDATE futu_investment_themes
+                SET is_deleted = TRUE,
+                    deleted_at = NOW(),
+                    deleted_by = %s,
+                    is_enabled_for_matching = FALSE,
+                    updated_at = NOW()
+                WHERE theme_id = %s AND market = %s
+            """, (operator_username, theme_id, market))
+            
+            # 3. 删除向量数据
+            cursor.execute("""
+                DELETE FROM investment_theme_embeddings
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            deleted_embeddings = cursor.rowcount > 0
+            
+            # 4. 删除新闻匹配记录
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_theme_matches
+                WHERE theme_id = %s
+            """, (theme_id,))
+            
+            match_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                DELETE FROM news_theme_matches
+                WHERE theme_id = %s
+            """, (theme_id,))
+            
+            deleted_matches_count = cursor.rowcount
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            logger.info(
+                f"主题删除成功: {theme_id} - {theme_name}, "
+                f"删除向量: {deleted_embeddings}, "
+                f"删除匹配记录: {deleted_matches_count}条"
+            )
+            
+            return {
+                "success": True,
+                "message": f"主题 '{theme_name}' 已删除",
+                "deleted_matches_count": deleted_matches_count,
+                "deleted_embeddings": deleted_embeddings
+            }
+            
+        except Exception as e:
+            logger.error(f"删除主题失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return {
+                "success": False,
+                "message": f"删除失败: {str(e)}"
+            }
+    
+    def _enhance_theme_text(
+        self, 
+        theme_name: str, 
+        market: str, 
+        description: str
+    ) -> str:
+        """
+        增强主题文本，用于向量化
+        
+        将主题名称、市场和描述组合成适合向量化的文本格式
+        
+        Args:
+            theme_name: 主题名称
+            market: 市场代码
+            description: 主题描述
+            
+        Returns:
+            增强后的文本
+        """
+        # 构建增强版文本：主题名称 + 市场信息 + 详细描述
+        enhanced_text = f"{theme_name} ({market} market)\n\n{description}"
+        
+        logger.debug(f"增强文本生成: {theme_name}, 长度: {len(enhanced_text)}")
+        
+        return enhanced_text
+    
+    async def generate_theme_description(
+        self,
+        theme_name: str,
+        market: str
+    ) -> Dict[str, Any]:
+        """
+        使用LLM为新theme生成描述（预览，不保存）
+        使用 theme_description_generator_v1 模板
+        
+        Args:
+            theme_name: 主题名称
+            market: 市场代码
+            
+        Returns:
+            {
+                "success": bool,
+                "description": str,
+                "message": str,
+                "error": str (optional)
+            }
+        """
+        logger.info(f"为新主题生成描述: {theme_name} ({market})")
+        
+        try:
+            # 使用 theme_description_generator_v1 模板生成描述
+            response = await llm_service.chat_completion_with_template(
+                template_code=self.llm_template_code,
+                variables={
+                    'theme_name': theme_name,
+                    'market': market,
+                    'stock_symbols': 'Not available',  # 新主题还没有股票数据
+                    'company_names': 'Not available'
+                }
+            )
+            
+            if not response or not response.content:
+                raise Exception("LLM未返回描述内容")
+            
+            description = response.content.strip()
+            
+            # 验证生成的描述
+            if len(description) < 50:
+                raise Exception("生成的描述过短，请重试")
+            
+            logger.info(f"描述生成成功，长度: {len(description)}")
+            
+            return {
+                "success": True,
+                "description": description,
+                "message": "描述生成成功"
+            }
+            
+        except Exception as e:
+            logger.error(f"生成主题描述失败: {str(e)}")
+            return {
+                "success": False,
+                "description": "",
+                "message": f"生成失败: {str(e)}",
+                "error": str(e)
+            }
+    
+    async def create_theme(
+        self,
+        theme_name: str,
+        market: str,
+        description: str,
+        creator_username: str,
+        theme_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        创建新的投资主题并生成向量
+        
+        Args:
+            theme_name: 主题名称
+            market: 市场代码
+            description: 主题描述
+            creator_username: 创建者用户名
+            theme_id: 主题ID（可选，如果不提供则自动生成）
+            
+        Returns:
+            {
+                "success": bool,
+                "message": str,
+                "theme_id": str,
+                "theme_saved": bool,
+                "embedding_created": bool,
+                "error": str (optional)
+            }
+        """
+        logger.info(f"创建新主题: {theme_name} ({market})")
+        
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return {
+                "success": False,
+                "message": "数据库连接失败",
+                "theme_saved": False,
+                "embedding_created": False
+            }
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 1. 生成theme_id（如果未提供）
+            if not theme_id:
+                # 生成格式：CUSTOM_<MARKET>_<TIMESTAMP>
+                import time
+                theme_id = f"CUSTOM_{market}_{int(time.time())}"
+            
+            # 2. 检查theme_id是否已存在
+            cursor.execute("""
+                SELECT 1 FROM futu_investment_themes 
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            if cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return {
+                    "success": False,
+                    "message": f"主题ID {theme_id} 已存在，请使用其他ID",
+                    "theme_saved": False,
+                    "embedding_created": False
+                }
+            
+            # 3. 插入到futu_investment_themes表
+            cursor.execute("""
+                INSERT INTO futu_investment_themes 
+                (theme_id, theme_name, market, stock_count, scraped_at, created_at, updated_at,
+                 is_enabled_for_matching, is_deleted, description, description_source)
+                VALUES (%s, %s, %s, 0, NOW(), NOW(), NOW(), TRUE, FALSE, %s, 'manual')
+                RETURNING id
+            """, (theme_id, theme_name, market, description))
+            
+            futu_theme_id = cursor.fetchone()[0]
+            conn.commit()
+            
+            logger.info(f"主题保存成功: {theme_id} (DB ID: {futu_theme_id})")
+            
+            # 4. 尝试生成向量
+            embedding_success = False
+            embedding_error = None
+            
+            try:
+                # 生成增强文本
+                enhanced_text = self._enhance_theme_text(theme_name, market, description)
+                
+                # 调用Qwen Embedding API
+                if 'qwen' not in llm_service.providers:
+                    raise Exception("Qwen提供商未配置")
+                
+                embeddings = await llm_service.providers['qwen'].generate_embeddings(
+                    texts=[enhanced_text],
+                    model=self.embedding_model,
+                    text_type="document"
+                )
+                
+                if not embeddings or len(embeddings) == 0:
+                    raise Exception("向量生成失败，返回空结果")
+                
+                embedding = embeddings[0]
+                
+                # 验证向量维度
+                if len(embedding) != self.embedding_dimension:
+                    raise Exception(
+                        f"向量维度不匹配: 期望{self.embedding_dimension}, 实际{len(embedding)}"
+                    )
+                
+                # 5. 保存向量到investment_theme_embeddings
+                use_pgvector = self._detect_database_mode(cursor)
+                
+                if use_pgvector:
+                    cursor.execute("""
+                        INSERT INTO investment_theme_embeddings 
+                        (theme_id, theme_name, market, embedding_vector, embedding_model,
+                         last_manual_edit_at, last_manual_edit_by, version)
+                        VALUES (%s, %s, %s, %s, %s, NOW(), %s, 1)
+                    """, (theme_id, theme_name, market, embedding, 
+                          self.embedding_model, creator_username))
+                else:
+                    import json
+                    embedding_json = json.dumps(embedding)
+                    cursor.execute("""
+                        INSERT INTO investment_theme_embeddings 
+                        (theme_id, theme_name, market, embedding_data, embedding_model,
+                         last_manual_edit_at, last_manual_edit_by, version)
+                        VALUES (%s, %s, %s, %s::jsonb, %s, NOW(), %s, 1)
+                    """, (theme_id, theme_name, market, embedding_json,
+                          self.embedding_model, creator_username))
+                
+                conn.commit()
+                embedding_success = True
+                logger.info(f"向量创建成功: {theme_id}")
+                
+            except Exception as e:
+                embedding_error = str(e)
+                logger.error(f"向量生成/保存失败: {embedding_error}")
+                # 不回滚，保留已保存的主题
+            
+            cursor.close()
+            conn.close()
+            
+            # 6. 返回结果
+            if embedding_success:
+                return {
+                    "success": True,
+                    "message": f"主题 '{theme_name}' 创建成功",
+                    "theme_id": theme_id,
+                    "theme_saved": True,
+                    "embedding_created": True
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"主题已保存，但向量生成失败: {embedding_error}",
+                    "theme_id": theme_id,
+                    "theme_saved": True,
+                    "embedding_created": False,
+                    "error": embedding_error
+                }
+            
+        except Exception as e:
+            logger.error(f"创建主题失败: {str(e)}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return {
+                "success": False,
+                "message": f"创建失败: {str(e)}",
+                "theme_saved": False,
+                "embedding_created": False,
+                "error": str(e)
+            }
 

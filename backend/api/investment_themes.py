@@ -5,12 +5,13 @@
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
+from backend.auth.jwt_utils import get_current_admin_user, TokenData
 
 router = APIRouter(prefix="/investment-themes", tags=["Investment Themes"])
 logger = get_logger("investment_themes_api")
@@ -54,6 +55,45 @@ class FillDescriptionsRequest(BaseModel):
     """批量填充主题描述请求"""
     force_regenerate: bool = Field(False, description="whether to force regenerate existing descriptions")
     market: Optional[str] = Field(None, description="market filter (HK/US/CN), if empty, process all markets")
+
+
+class UpdateEnabledStatusRequest(BaseModel):
+    """更新启用状态请求"""
+    market: str = Field(..., description="市场代码（HK/US/CN）")
+    is_enabled: bool = Field(..., description="是否启用")
+
+
+class BatchUpdateEnabledRequest(BaseModel):
+    """批量更新启用状态请求"""
+    theme_ids: List[str] = Field(..., description="主题ID列表")
+    markets: List[str] = Field(..., description="市场代码列表（与theme_ids对应）")
+    is_enabled: bool = Field(..., description="是否启用")
+
+
+class UpdateDescriptionRequest(BaseModel):
+    """更新主题描述请求"""
+    market: str = Field(..., description="市场代码（HK/US/CN）")
+    description: str = Field(..., min_length=1, max_length=2000, description="新的描述内容")
+    version: Optional[int] = Field(None, description="版本号（用于乐观锁）")
+
+
+class DeleteThemeRequest(BaseModel):
+    """删除主题请求"""
+    market: str = Field(..., description="市场代码（HK/US/CN）")
+
+
+class GenerateDescriptionRequest(BaseModel):
+    """生成主题描述请求"""
+    theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
+    market: str = Field(..., description="市场代码（HK/US/CN）")
+
+
+class CreateThemeRequest(BaseModel):
+    """创建主题请求"""
+    theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
+    market: str = Field(..., description="市场代码（HK/US/CN）")
+    description: str = Field(..., min_length=10, max_length=2000, description="主题描述")
+    theme_id: Optional[str] = Field(None, max_length=50, description="主题ID（可选，不提供则自动生成）")
 
 
 # ==================== API Endpoints ====================
@@ -324,7 +364,7 @@ async def list_all_themes(
         """, params)
         total_count = cursor.fetchone()[0]
         
-        # 获取列表（联合查询获取 description 相关字段）
+        # 获取列表（联合查询获取 description 和管理相关字段）
         params.extend([limit, offset])
         cursor.execute(f"""
             SELECT 
@@ -334,9 +374,15 @@ async def list_all_themes(
                 ite.embedding_model,
                 ite.created_at,
                 ite.updated_at,
+                ite.version,
+                ite.last_manual_edit_at,
+                ite.last_manual_edit_by,
                 fit.description,
                 fit.description_source,
-                fit.description_updated_at
+                fit.is_enabled_for_matching,
+                fit.is_deleted,
+                fit.stock_count,
+                fit.change_percent
             FROM investment_theme_embeddings ite
             LEFT JOIN futu_investment_themes fit 
                 ON ite.theme_id = fit.theme_id AND ite.market = fit.market
@@ -354,9 +400,15 @@ async def list_all_themes(
                 'embedding_model': row[3],
                 'created_at': row[4].isoformat() if row[4] else None,
                 'updated_at': row[5].isoformat() if row[5] else None,
-                'description': row[6],  # 主题描述
-                'description_source': row[7],  # 描述来源
-                'description_updated_at': row[8].isoformat() if row[8] else None  # 描述更新时间
+                'version': row[6],  # 版本号
+                'last_manual_edit_at': row[7].isoformat() if row[7] else None,  # 最后编辑时间
+                'last_manual_edit_by': row[8],  # 最后编辑者
+                'description_preview': row[9],  # 主题描述预览（从futu_investment_themes获取）
+                'description_source': row[10],  # 描述来源
+                'is_enabled_for_matching': row[11] if row[11] is not None else True,  # 是否启用
+                'is_deleted': row[12] if row[12] is not None else False,  # 是否已删除
+                'stock_count': row[13] if row[13] else 0,  # 股票数量
+                'change_percent': row[14]  # 涨跌幅
             })
         
         cursor.close()
@@ -638,4 +690,431 @@ async def fetch_futu_themes(
     except Exception as e:
         logger.error(f"Failed to start Futu themes fetching task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+
+
+# ==================== Theme Management Endpoints (Admin Only) ====================
+
+@router.patch("/{theme_id}/enabled")
+async def update_theme_enabled_status(
+    theme_id: str,
+    request: UpdateEnabledStatusRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    更新主题的启用/禁用状态（仅管理员）
+    
+    权限：仅管理员
+    
+    说明：
+    - 禁用的主题不会参与新闻匹配
+    - 启用主题前会检查是否已向量化
+    
+    示例：
+    ```
+    PATCH /api/investment-themes/BK1001/enabled
+    {
+        "market": "HK",
+        "is_enabled": false
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} updating theme status",
+            theme_id=theme_id,
+            market=request.market,
+            is_enabled=request.is_enabled
+        )
+        
+        result = service.update_theme_enabled_status(
+            theme_id=theme_id,
+            market=request.market,
+            is_enabled=request.is_enabled,
+            operator_username=current_user.username
+        )
+        
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update theme enabled status failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@router.post("/batch-enabled")
+async def batch_update_theme_enabled_status(
+    request: BatchUpdateEnabledRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    批量更新主题的启用/禁用状态（仅管理员）
+    
+    权限：仅管理员
+    
+    示例：
+    ```
+    POST /api/investment-themes/batch-enabled
+    {
+        "theme_ids": ["BK1001", "BK1002"],
+        "markets": ["HK", "HK"],
+        "is_enabled": false
+    }
+    ```
+    """
+    try:
+        if len(request.theme_ids) != len(request.markets):
+            raise HTTPException(
+                status_code=400,
+                detail="theme_ids和markets数组长度必须一致"
+            )
+        
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} batch updating theme status",
+            count=len(request.theme_ids),
+            is_enabled=request.is_enabled
+        )
+        
+        results = []
+        success_count = 0
+        failed_count = 0
+        
+        for theme_id, market in zip(request.theme_ids, request.markets):
+            result = service.update_theme_enabled_status(
+                theme_id=theme_id,
+                market=market,
+                is_enabled=request.is_enabled,
+                operator_username=current_user.username
+            )
+            
+            results.append({
+                "theme_id": theme_id,
+                "market": market,
+                "success": result["success"],
+                "message": result["message"]
+            })
+            
+            if result["success"]:
+                success_count += 1
+            else:
+                failed_count += 1
+        
+        return {
+            "success": True,
+            "total": len(request.theme_ids),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "results": results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch update theme enabled status failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量更新失败: {str(e)}")
+
+
+@router.patch("/{theme_id}/description")
+async def update_theme_description(
+    theme_id: str,
+    request: UpdateDescriptionRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    更新主题描述并重新向量化（仅管理员）
+    
+    权限：仅管理员
+    
+    说明：
+    - 更新主题的描述内容
+    - 自动重新生成向量
+    - 如果向量化失败，描述仍会保存，但会返回错误提示
+    - 支持乐观锁（可选版本号参数）
+    
+    示例：
+    ```
+    PATCH /api/investment-themes/BK1001/description
+    {
+        "market": "HK",
+        "description": "这是一个关于人工智能和机器学习的主题，包含相关的科技公司...",
+        "version": 5
+    }
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "描述和向量更新成功",
+        "description_saved": true,
+        "embedding_updated": true
+    }
+    ```
+    
+    或（向量化失败时）：
+    ```
+    {
+        "success": false,
+        "message": "描述已保存，但向量更新失败: API限流",
+        "description_saved": true,
+        "embedding_updated": false,
+        "error": "API限流"
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} updating theme description",
+            theme_id=theme_id,
+            market=request.market,
+            description_length=len(request.description)
+        )
+        
+        result = await service.update_theme_description(
+            theme_id=theme_id,
+            market=request.market,
+            new_description=request.description,
+            editor_username=current_user.username,
+            version=request.version
+        )
+        
+        # 根据结果返回不同的状态码
+        if result["success"]:
+            return result
+        elif result.get("description_saved"):
+            # 描述保存成功但向量化失败，返回206 Partial Content
+            return result
+        else:
+            # 完全失败
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update theme description failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@router.delete("/{theme_id}")
+async def delete_theme(
+    theme_id: str,
+    market: str,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    删除投资主题（软删除，仅管理员）
+    
+    权限：仅管理员
+    
+    说明：
+    - 软删除主题（标记为已删除，不会从数据库物理删除）
+    - 级联删除相关数据：
+      * 向量数据（investment_theme_embeddings）
+      * 新闻匹配记录（news_theme_matches）
+    - 爬虫不会重新创建已删除的主题
+    
+    示例：
+    ```
+    DELETE /api/investment-themes/BK1001?market=HK
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "主题 'AI芯片' 已删除",
+        "deleted_matches_count": 156,
+        "deleted_embeddings": true
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} deleting theme",
+            theme_id=theme_id,
+            market=market
+        )
+        
+        result = service.delete_theme(
+            theme_id=theme_id,
+            market=market,
+            operator_username=current_user.username
+        )
+        
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete theme failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.post("/generate-description")
+async def generate_theme_description(
+    request: GenerateDescriptionRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    为新主题生成LLM描述（预览，不保存，仅管理员）
+    
+    权限：仅管理员
+    
+    说明：
+    - 使用LLM生成主题描述
+    - 仅返回生成的描述，不保存到数据库
+    - 用户可以在创建主题前预览和编辑描述
+    
+    示例：
+    ```
+    POST /api/investment-themes/generate-description
+    {
+        "theme_name": "AI芯片",
+        "market": "US"
+    }
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "description": "AI芯片是指专门为人工智能计算设计的...",
+        "message": "描述生成成功"
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} generating description for new theme",
+            theme_name=request.theme_name,
+            market=request.market
+        )
+        
+        result = await service.generate_theme_description(
+            theme_name=request.theme_name,
+            market=request.market
+        )
+        
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate description failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成描述失败: {str(e)}")
+
+
+@router.post("/create")
+async def create_theme(
+    request: CreateThemeRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    创建新的投资主题（仅管理员）
+    
+    权限：仅管理员
+    
+    说明：
+    - 创建新主题并保存到数据库
+    - 自动生成向量
+    - theme_id可选，不提供则自动生成（格式：CUSTOM_<MARKET>_<TIMESTAMP>）
+    - 如果向量化失败，主题仍会保存，但会返回错误提示
+    
+    流程：
+    1. 保存主题基本信息到 futu_investment_themes
+    2. 生成向量并保存到 investment_theme_embeddings
+    3. 返回创建结果
+    
+    示例：
+    ```
+    POST /api/investment-themes/create
+    {
+        "theme_name": "AI芯片",
+        "market": "US",
+        "description": "AI芯片是指专门为人工智能计算设计的半导体芯片...",
+        "theme_id": "AI_CHIP_US"  // 可选
+    }
+    ```
+    
+    返回（成功）：
+    ```
+    {
+        "success": true,
+        "message": "主题 'AI芯片' 创建成功",
+        "theme_id": "AI_CHIP_US",
+        "theme_saved": true,
+        "embedding_created": true
+    }
+    ```
+    
+    返回（主题保存成功但向量化失败）：
+    ```
+    {
+        "success": false,
+        "message": "主题已保存，但向量生成失败: API限流",
+        "theme_id": "AI_CHIP_US",
+        "theme_saved": true,
+        "embedding_created": false,
+        "error": "API限流"
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} creating new theme",
+            theme_name=request.theme_name,
+            market=request.market,
+            theme_id=request.theme_id
+        )
+        
+        result = await service.create_theme(
+            theme_name=request.theme_name,
+            market=request.market,
+            description=request.description,
+            creator_username=current_user.username,
+            theme_id=request.theme_id
+        )
+        
+        # 根据结果返回不同的状态码
+        if result["success"]:
+            return result
+        elif result.get("theme_saved"):
+            # 主题保存成功但向量化失败，返回206 Partial Content
+            return result
+        else:
+            # 完全失败
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create theme failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建主题失败: {str(e)}")
 
