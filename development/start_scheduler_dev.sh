@@ -178,12 +178,10 @@ echo -e "${PURPLE}🕒 启动调度器开发服务器...${NC}"
 echo "   按 Ctrl+C 停止服务"
 echo ""
 
-# 使用uvicorn启动调度器服务，开启热重载
+# 使用uvicorn启动调度器服务
+# 注意：调度器服务不使用--reload模式，避免多个进程同时运行调度器导致任务重复执行
 exec "$PYTHON_CMD" -m uvicorn scheduler_main:scheduler_app \
     --host 0.0.0.0 \
     --port 8001 \
-    --reload \
-    --reload-dir backend \
-    --reload-dir config \
     --log-level info \
     --access-log

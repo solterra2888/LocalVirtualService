@@ -31,7 +31,7 @@ mkdir -p logs
 # --logfile: 日志文件路径
 # -P solo: 使用solo pool（单进程模式，适合开发环境）
 
-celery -A backend.celery_app worker \
+/opt/anaconda3/envs/rcTool/bin/python -m celery -A backend.celery_app worker \
     -Q data_fetching \
     --concurrency=1 \
     --max-tasks-per-child=10 \

@@ -6,6 +6,7 @@
 import os
 import json
 import pytz
+import redis
 import asyncio
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable
@@ -34,9 +35,9 @@ class SchedulerService:
         self.scheduler = AsyncIOScheduler(
             timezone=pytz.timezone('America/New_York'),  # 默认使用纽约时间
             job_defaults={
-                'coalesce': False,
+                'coalesce': True,  # 合并积压的任务，避免重复执行
                 'max_instances': 1,
-                'misfire_grace_time': 300  # 5分钟容错时间
+                'misfire_grace_time': 60  # 60秒容错时间，超过则放弃执行
             }
         )
         
@@ -44,6 +45,11 @@ class SchedulerService:
         from backend.utils.database_config import get_database_config
         db_config = get_database_config()
         self.db_manager = DatabaseManager(db_config)
+        
+        # 初始化 Redis 客户端（用于分布式锁）
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        logger.info(f"Redis 客户端初始化完成: {redis_url}")
         
         # 注册任务类型和执行函数
         self.task_handlers = {
@@ -589,12 +595,53 @@ class SchedulerService:
         )
     
     async def _execute_task(self, task_id: str, task_type: str, task_params: Dict[str, Any]):
-        """执行任务"""
+        """执行任务（带分布式锁保护）"""
         execution_log_id = None
         started_at = datetime.now(tz=timezone.utc)
+        lock_key = f"scheduler_lock:{task_type}"
+        lock_acquired = False
         
         try:
-            logger.info(f"开始执行任务: {task_id}, 类型: {task_type}")
+            # 🔒 尝试获取 Redis 分布式锁
+            # 使用 SET NX EX 命令：只在键不存在时设置，并设置过期时间
+            lock_acquired = self.redis_client.set(
+                lock_key,
+                f"{task_id}_{started_at.timestamp()}",  # 锁的值包含任务ID和时间戳
+                nx=True,  # 只在不存在时设置
+                ex=600    # 10分钟后自动过期，防止死锁
+            )
+            
+            if not lock_acquired:
+                # 无法获取锁，说明同类型任务正在运行
+                logger.warning(
+                    f"⏭️  任务 {task_type} 正在运行中，跳过本次执行",
+                    task_id=task_id,
+                    task_type=task_type
+                )
+                
+                # 记录跳过的执行
+                execution_log_id = await self._log_task_execution_start(
+                    task_id, f'Task-{task_id}', task_type, started_at, task_params
+                )
+                
+                if execution_log_id:
+                    finished_at = datetime.now(tz=timezone.utc)
+                    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                    await self._log_task_execution_finish(
+                        execution_log_id,
+                        finished_at,
+                        duration_ms,
+                        'skipped',
+                        error_message='任务正在运行，已跳过本次执行'
+                    )
+                
+                return {
+                    'success': False,
+                    'message': '任务正在运行，已跳过',
+                    'skipped': True
+                }
+            
+            logger.info(f"🔓 获取任务锁成功: {task_id}, 类型: {task_type}")
             
             # 获取任务配置以获取任务名称
             task_config = await self._get_task_config(task_id)
@@ -683,6 +730,15 @@ class SchedulerService:
             
             await self._increment_fail_count(task_id)
             logger.error(f"任务执行异常: {task_id}, 错误: {str(e)}")
+        
+        finally:
+            # 🔓 释放 Redis 锁
+            if lock_acquired:
+                try:
+                    self.redis_client.delete(lock_key)
+                    logger.info(f"🔓 释放任务锁: {task_type}")
+                except Exception as e:
+                    logger.error(f"释放 Redis 锁失败: {str(e)}", lock_key=lock_key)
     
     async def _execute_eodhd_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行EODHD新闻获取任务"""
@@ -731,8 +787,8 @@ class SchedulerService:
                     'eodhd_news'  # scheduler_source参数
                 )
             
-            # 计算实际新增的新闻数量
-            new_count = result['success_count'] - result['existing_count']
+            # 🔥 使用正确的new_count（从result中获取）
+            new_count = result.get('new_count', 0)
             
             # 详细的统计信息
             stats_summary = {
@@ -745,7 +801,7 @@ class SchedulerService:
             }
             
             if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，更新 {result['existing_count']} 条"
             else:
                 message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，全部为新增"
             
@@ -1787,15 +1843,22 @@ class SchedulerService:
         """
         执行富途投资主题数据获取任务（通过Celery异步执行）
         
+        注意：此方法会等待Celery任务完成（可能需要30-60分钟），以便记录准确的执行结果
+        
         Args:
             params: 任务参数
                 - markets: 市场列表，如 ['HK', 'US']（可选，默认爬取所有市场）
                 - max_pages: 每个市场最大爬取页数（可选，默认爬取所有页面）
                 - scrape_stocks: 是否爬取股票列表（默认: True）
+                - wait_for_completion: 是否等待任务完成（默认: True）
+                - timeout: 任务超时时间（秒，默认: 7200 = 2小时）
         
         Returns:
-            Dict包含任务提交结果
+            Dict包含任务执行结果
         """
+        import asyncio
+        from celery.result import AsyncResult
+        
         try:
             logger.info("提交富途投资主题数据获取任务到Celery", params=params)
             
@@ -1806,6 +1869,8 @@ class SchedulerService:
             markets = params.get('markets')  # 可以是 ['HK', 'US'] 或 None
             max_pages = params.get('max_pages')  # 每个市场最大爬取页数
             scrape_stocks = params.get('scrape_stocks', True)  # 是否爬取股票列表
+            wait_for_completion = params.get('wait_for_completion', True)  # 是否等待完成
+            timeout = params.get('timeout', 7200)  # 默认2小时超时
             
             # 提交Celery任务
             task = fetch_futu_themes_task.apply_async(
@@ -1818,22 +1883,99 @@ class SchedulerService:
             
             logger.info(f"富途投资主题数据获取任务已提交到Celery: task_id={task.id}")
             
-            return {
-                'success': True,
-                'message': f"富途投资主题数据获取任务已提交到Celery队列（任务ID: {task.id}）",
-                'data': {
-                    'task_id': task.id,
-                    'status': 'PENDING',
-                    'markets': markets or 'ALL',
-                    'max_pages': max_pages or 'ALL',
-                    'scrape_stocks': scrape_stocks,
-                    'status_url': f'/api/investment-themes/task-status/{task.id}'
+            # 如果不等待完成，立即返回
+            if not wait_for_completion:
+                return {
+                    'success': True,
+                    'message': f"富途投资主题数据获取任务已提交到Celery队列（任务ID: {task.id}）",
+                    'data': {
+                        'task_id': task.id,
+                        'status': 'PENDING',
+                        'markets': markets or 'ALL',
+                        'max_pages': max_pages or 'ALL',
+                        'scrape_stocks': scrape_stocks,
+                        'status_url': f'/api/investment-themes/task-status/{task.id}'
+                    }
                 }
-            }
+            
+            # 等待任务完成（异步等待，不阻塞事件循环）
+            logger.info(f"等待Celery任务完成: {task.id} (超时: {timeout}秒)")
+            
+            try:
+                # 在线程池中执行阻塞的 task.get()
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,  # 使用默认线程池
+                    lambda: task.get(timeout=timeout, propagate=False)
+                )
+                
+                # 检查任务结果
+                if isinstance(result, Exception):
+                    # 任务执行失败
+                    error_msg = f"富途投资主题数据获取任务执行失败: {str(result)}"
+                    logger.error(error_msg, task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': error_msg,
+                        'data': {
+                            'task_id': task.id,
+                            'error': str(result)
+                        }
+                    }
+                
+                # 任务执行成功
+                if result and result.get('success'):
+                    total_themes = result.get('total_themes', 0)
+                    success_count = result.get('success_count', 0)
+                    total_stocks = result.get('total_stocks', 0)
+                    execution_time = result.get('execution_time', 0)
+                    
+                    success_msg = (
+                        f"富途投资主题数据获取成功: "
+                        f"处理了{total_themes}个主题，成功{success_count}个，"
+                        f"爬取{total_stocks}只股票，耗时{execution_time:.1f}秒"
+                    )
+                    logger.info(success_msg, task_id=task.id)
+                    
+                    return {
+                        'success': True,
+                        'message': success_msg,
+                        'data': {
+                            'task_id': task.id,
+                            'total_themes': total_themes,
+                            'success_count': success_count,
+                            'total_stocks': total_stocks,
+                            'execution_time': execution_time,
+                            'markets': result.get('markets', [])
+                        }
+                    }
+                else:
+                    error_msg = result.get('error', '未知错误') if result else '任务返回结果为空'
+                    logger.error(f"富途投资主题数据获取失败: {error_msg}", task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': f"富途投资主题数据获取失败: {error_msg}",
+                        'data': {'task_id': task.id}
+                    }
+                    
+            except asyncio.TimeoutError:
+                # 任务超时
+                error_msg = f"富途投资主题数据获取任务超时（超过{timeout}秒）"
+                logger.error(error_msg, task_id=task.id)
+                # 尝试撤销任务
+                try:
+                    task.revoke(terminate=True)
+                except:
+                    pass
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': {'task_id': task.id}
+                }
                 
         except Exception as e:
-            error_msg = f"提交富途投资主题数据获取任务失败: {str(e)}"
-            logger.error(error_msg)
+            error_msg = f"执行富途投资主题数据获取任务失败: {str(e)}"
+            logger.error(error_msg, exception=str(e))
             return {
                 'success': False,
                 'message': error_msg,

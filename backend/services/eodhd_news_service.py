@@ -303,6 +303,7 @@ class EODHDNewsService:
                 logger.warning("没有成功处理的新闻数据")
                 return {
                     'success_count': 0,
+                    'new_count': 0,
                     'existing_count': 0,
                     'failed_count': failed_count,
                     'total_count': fetched_count,
@@ -316,6 +317,7 @@ class EODHDNewsService:
             # 汇总结果
             final_result = {
                 'success_count': db_result['success_count'],
+                'new_count': db_result.get('new_count', 0),  # 🔥 新增：传递真正新增的数量
                 'existing_count': db_result['existing_count'],
                 'failed_count': db_result['failed_count'] + failed_count,
                 'total_count': fetched_count,
@@ -325,6 +327,7 @@ class EODHDNewsService:
             
             logger.info("新闻获取和存储流程完成", 
                        success_count=final_result['success_count'],
+                       new_count=final_result.get('new_count', 0),
                        existing_count=final_result['existing_count'],
                        failed_count=final_result['failed_count'],
                        total_count=final_result['total_count'],
@@ -822,12 +825,13 @@ class EODHDNewsService:
         logger.info("开始批量插入新闻到数据库", articles_count=len(articles))
         
         if not articles:
-            return {'success_count': 0, 'existing_count': 0, 'failed_count': 0, 'new_news_ids': []}
+            return {'success_count': 0, 'new_count': 0, 'existing_count': 0, 'failed_count': 0, 'new_news_ids': []}
         
         try:
             # 🚀 优化：分批处理，使用更大的批次（1000条）
             batch_size = 1000  # 每批处理1000条新闻（参考eodhd_fundamentals）
             total_success = 0
+            total_new = 0  # 🔥 新增：追踪真正新增的新闻数量
             total_existing = 0
             total_failed = 0
             all_new_news_ids = []  # 🔥 新增：收集所有新插入的新闻ID
@@ -863,6 +867,7 @@ class EODHDNewsService:
                                       success=success_count, existing=existing_count, failed=failed_count)
                             
                             total_success += success_count
+                            total_new += new_count  # 🔥 累积新增数量
                             total_existing += existing_count
                             total_failed += failed_count
                         
@@ -873,6 +878,7 @@ class EODHDNewsService:
             
             result = {
                 'success_count': total_success,
+                'new_count': total_new,  # 🔥 新增：返回真正新增的数量
                 'existing_count': total_existing,
                 'failed_count': total_failed,
                 'new_news_ids': all_new_news_ids  # 🔥 新增：返回所有新插入的新闻ID
@@ -880,6 +886,7 @@ class EODHDNewsService:
             
             logger.info("批量插入新闻完成", 
                        success_count=total_success,
+                       new_count=total_new,
                        existing_count=total_existing,
                        failed_count=total_failed,
                        new_news_count=len(all_new_news_ids))
@@ -889,6 +896,7 @@ class EODHDNewsService:
             logger.error("批量插入新闻失败", exception=str(e))
             return {
                 'success_count': 0,
+                'new_count': 0,  # 🔥 新增
                 'existing_count': 0,
                 'failed_count': len(articles),
                 'new_news_ids': []
@@ -912,7 +920,7 @@ class EODHDNewsService:
     def _batch_insert_new_articles(self, cursor, new_articles: List[Dict[str, Any]], scheduler_source: Optional[str] = None) -> tuple:
         """批量插入新的新闻文章（使用execute_values高性能批量插入）"""
         if not new_articles:
-            return [], 0, 0, 0, 0
+            return [], 0, 0, 0, 0, []
         
         # 🚀 优化：先对文章进行去重，避免同一批次中有重复的link
         # PostgreSQL的ON CONFLICT不允许在同一批次中处理相同约束值的多条记录
@@ -935,6 +943,17 @@ class EODHDNewsService:
         
         if duplicate_count > 0:
             logger.info(f"批次内去重: 原始{len(new_articles)}条，去重后{len(unique_articles)}条，跳过{duplicate_count}条重复")
+        
+        # 🔥 关键修复：在插入前检查哪些新闻已存在
+        links_to_insert = [article.get('link') for article in unique_articles if article.get('link')]
+        existing_links_before = set()
+        if links_to_insert:
+            placeholders = ','.join(['%s'] * len(links_to_insert))
+            check_sql = f"SELECT link FROM news WHERE link IN ({placeholders})"
+            cursor.execute(check_sql, links_to_insert)
+            existing_links_before = {row[0] for row in cursor.fetchall()}
+        
+        logger.debug(f"插入前检查: 共{len(links_to_insert)}条，已存在{len(existing_links_before)}条")
         
         # 准备批量插入的数据
         news_data = []
@@ -1008,14 +1027,16 @@ class EODHDNewsService:
             else:
                 news_ids = []
             
-            # 统计
+            # 🔥 修复：正确区分新增和更新的新闻
+            # 统计新增（不在existing_links_before中）和更新的（在existing_links_before中）
+            new_count = sum(1 for article in unique_articles 
+                          if article.get('link') not in existing_links_before)
+            existing_count = len(existing_links_before)
             success_count = len(news_ids)
-            new_count = success_count  # 简化：不区分新增和更新
-            existing_count = 0
             # 失败数 = 去重后的数量 - 成功数 + 批次内重复数
             failed_count = (len(unique_articles) - success_count) + duplicate_count
             
-            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 失败{failed_count}")
+            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 更新{existing_count}, 失败{failed_count}")
             # 返回去重后的文章列表，确保与news_ids对应
             return news_ids, success_count, failed_count, new_count, existing_count, unique_articles
             
