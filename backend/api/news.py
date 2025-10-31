@@ -56,7 +56,7 @@ class NewsService:
             base_query = """
                 SELECT n.id, n.date, n.title, n.content, n.link, n.source,
                        n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,
-                       n.created_at, n.updated_at, n.scheduler_source
+                       n.created_at, n.updated_at, n.scheduler_source, n.analysis_result
                 FROM news n
             """
             
@@ -101,7 +101,7 @@ class NewsService:
             
             # 计算总数
             count_query = base_query.replace(
-                "SELECT n.id, n.date, n.title, n.content, n.link, n.source,\n                       n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,\n                       n.created_at, n.updated_at, n.scheduler_source",
+                "SELECT n.id, n.date, n.title, n.content, n.link, n.source,\n                       n.sentiment_polarity, n.sentiment_neg, n.sentiment_neu, n.sentiment_pos,\n                       n.created_at, n.updated_at, n.scheduler_source, n.analysis_result",
                 "SELECT COUNT(n.id)"
             )
             cursor.execute(count_query, params)
@@ -130,6 +130,7 @@ class NewsService:
                     'created_at': row[10].isoformat() if row[10] else None,
                     'updated_at': row[11].isoformat() if row[11] else None,
                     'scheduler_source': row[12],
+                    'analysis_result': row[13],  # 添加 analysis_result 字段
                     'symbols': [],
                     'tags': [],
                     'auto_tags': []
@@ -167,6 +168,28 @@ class NewsService:
                 cursor.execute(auto_tag_query, (row[0],))
                 auto_tags = [t[0] for t in cursor.fetchall()]
                 news_item['auto_tags'] = auto_tags
+                
+                # 获取投资主题匹配结果
+                theme_query = """
+                    SELECT 
+                        theme_id, theme_name, market, similarity_score, match_rank
+                    FROM news_theme_matches
+                    WHERE news_id = %s
+                    ORDER BY match_rank ASC
+                    LIMIT 5
+                """
+                cursor.execute(theme_query, (row[0],))
+                theme_matches = []
+                for theme_row in cursor.fetchall():
+                    theme_matches.append({
+                        'theme_id': theme_row[0],
+                        'theme_name': theme_row[1],
+                        'market': theme_row[2],
+                        'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
+                        'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
+                        'rank': theme_row[4]
+                    })
+                news_item['theme_matches'] = theme_matches
                 
                 news_list.append(news_item)
             
@@ -898,7 +921,7 @@ async def get_news_detail(
             query = """
                 SELECT id, date, title, content, link, source, 
                        sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
-                       created_at, updated_at
+                       created_at, updated_at, analysis_result
                 FROM news
                 WHERE id = %s
             """
@@ -921,6 +944,7 @@ async def get_news_detail(
                 'sentiment_pos': row[9],
                 'created_at': row[10].isoformat() if row[10] else None,
                 'updated_at': row[11].isoformat() if row[11] else None,
+                'analysis_result': row[12],  # 添加 analysis_result 字段
                 'symbols': [],
                 'tags': [],
                 'auto_tags': []
@@ -958,6 +982,28 @@ async def get_news_detail(
             cursor.execute(auto_tag_query, (news_id,))
             auto_tags = [t[0] for t in cursor.fetchall()]
             news_item['auto_tags'] = auto_tags
+            
+            # 获取投资主题匹配结果
+            theme_query = """
+                SELECT 
+                    theme_id, theme_name, market, similarity_score, match_rank
+                FROM news_theme_matches
+                WHERE news_id = %s
+                ORDER BY match_rank ASC
+                LIMIT 5
+            """
+            cursor.execute(theme_query, (news_id,))
+            theme_matches = []
+            for theme_row in cursor.fetchall():
+                theme_matches.append({
+                    'theme_id': theme_row[0],
+                    'theme_name': theme_row[1],
+                    'market': theme_row[2],
+                    'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
+                    'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
+                    'rank': theme_row[4]
+                })
+            news_item['theme_matches'] = theme_matches
             
             return news_item
             

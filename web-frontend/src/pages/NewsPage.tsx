@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card,
-  Table,
+  List,
   Input,
   Select,
   DatePicker,
@@ -18,7 +18,8 @@ import {
   Tooltip,
   Empty,
   Alert,
-  Form
+  Form,
+  Skeleton
 } from 'antd';
 import {
   SearchOutlined,
@@ -28,9 +29,10 @@ import {
   ClearOutlined,
   SettingOutlined,
   DeleteOutlined,
-  WarningOutlined
+  WarningOutlined,
+  CalendarOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
 import dayjs, { Dayjs } from 'dayjs';
 
 import { newsAPI, newsUtils } from '../services/news';
@@ -48,6 +50,14 @@ import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
 import { MARKET_COLORS, formatSimilarity } from '../types/investmentThemes';
+import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
+import { 
+  getClassificationFromAnalysis, 
+  getClassificationTags, 
+  hasValidClassification,
+  getClassificationSummary,
+  getRelatedSectors
+} from '../utils/newsClassificationHelper';
 
 const { Text, Title, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
@@ -66,6 +76,7 @@ interface NewsPageState {
   deleteLoading: boolean;
   deleteStartDate: string | null;
   deleteEndDate: string | null;
+  expandedNewsItems: Set<number>;
 }
 
 const NewsPage: React.FC = () => {
@@ -85,7 +96,8 @@ const NewsPage: React.FC = () => {
     deleteModalVisible: false,
     deleteLoading: false,
     deleteStartDate: null,
-    deleteEndDate: null
+    deleteEndDate: null,
+    expandedNewsItems: new Set()
   });
 
   // 加载新闻数据
@@ -279,393 +291,35 @@ const NewsPage: React.FC = () => {
     }));
   };
 
-  // Table column definitions
-  const columns: ColumnsType<NewsItem> = [
-    {
-      title: 'Title',
-      dataIndex: 'title',
-      key: 'title',
-      width: 300,
-      ellipsis: true,
-      render: (title: string, record: NewsItem) => (
-        <Tooltip 
-          title={title}
-          placement="topLeft"
-          mouseEnterDelay={0.5}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Button
-                type="link"
-                onClick={() => showNewsDetail(record.id)}
-                style={{ 
-                  padding: 0, 
-                  height: 'auto', 
-                  textAlign: 'left', 
-                  fontSize: '11px',
-                  width: '100%',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                <Text 
-                  strong 
-                  style={{ 
-                    fontSize: '11px',
-                    display: 'block',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {title}
-                </Text>
-              </Button>
-            </div>
-            {newsUtils.hasExternalLink(record) && (
-              <Tooltip title="View Original">
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<LinkOutlined />}
-                  onClick={() => window.open(record.link, '_blank')}
-                  style={{ 
-                    fontSize: '10px', 
-                    flexShrink: 0,
-                    padding: '2px 4px',
-                    minWidth: '24px'
-                  }}
-                />
-              </Tooltip>
-            )}
-          </div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'Source',
-      dataIndex: 'source',
-      key: 'source',
-      width: 120,
-      render: (source: string) => (
-        <Text type="secondary" style={{ fontSize: '11px' }}>{newsUtils.getSourceDisplayName(source)}</Text>
-      )
-    },
-    {
-      title: 'Date',
-      dataIndex: 'date',
-      key: 'date',
-      width: 160,
-      render: (date: string) => (
-        <Text type="secondary" style={{ fontSize: '11px' }}>{newsUtils.formatNewsDate(date)}</Text>
-      )
-    },
-    {
-      title: 'Sentiment',
-      dataIndex: 'sentiment_polarity',
-      key: 'sentiment',
-      width: 100,
-      render: (_, record: NewsItem) => {
-        const sentiment = newsUtils.getSentimentLabel(record);
-        return (
-          <Tag color={sentiment.color} style={{ fontSize: '10px' }}>
-            {sentiment.label}
-          </Tag>
-        );
+  // 新闻展开/收缩功能
+  const toggleNewsExpansion = (newsId: number) => {
+    setState(prev => {
+      const newSet = new Set(prev.expandedNewsItems);
+      if (newSet.has(newsId)) {
+        newSet.delete(newsId);
+      } else {
+        newSet.add(newsId);
       }
-    },
-    {
-      title: 'Symbols',
-      dataIndex: 'symbols',
-      key: 'symbols',
-      width: 150,
-      render: (symbols: string[]) => (
-        <Tooltip 
-          title={
-            <div>
-              <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>All Symbols:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                 {symbols.map((symbol, index) => (
-                   <Tag key={index} style={{ fontSize: '11px', margin: 0 }}>
-                     {newsUtils.formatSymbolCode(symbol)}
-                   </Tag>
-                 ))}
-              </div>
-            </div>
-          }
-          placement="topLeft"
-          mouseEnterDelay={0.5}
-        >
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            overflow: 'hidden'
-          }}>
-            <div style={{ 
-              display: 'flex', 
-              gap: '4px',
-              overflow: 'hidden',
-              flex: 1
-            }}>
-                                            {symbols.slice(0, 2).map((symbol, index) => (
-                <Tag key={index} style={{ 
-                  fontSize: '11px', 
-                  margin: 0, 
-                  flexShrink: 0,
-                  maxWidth: '50px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {newsUtils.formatSymbolCode(symbol)}
-                </Tag>
-              ))}
-            </div>
-            {symbols.length > 2 && (
-              <span style={{ 
-                fontSize: '10px', 
-                margin: 0, 
-                flexShrink: 0,
-                color: '#1890ff',
-                fontWeight: 'bold'
-              }}>
-                +{symbols.length - 2}
-              </span>
-            )}
-          </div>
-        </Tooltip>
-      )
-    },
-        {
-      title: 'Tags',
-      dataIndex: 'tags',
-      key: 'tags',
-      width: 200,
-      render: (tags: string[]) => (
-        <Tooltip 
-          title={
-            <div>
-              <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>All Tags:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                 {tags.map((tag, index) => (
-                   <Tag key={index} color="blue" style={{ fontSize: '11px', margin: 0 }}>
-                     {tag}
-                   </Tag>
-                 ))}
-              </div>
-            </div>
-          }
-          placement="topLeft"
-          mouseEnterDelay={0.5}
-        >
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            overflow: 'hidden'
-          }}>
-            <div style={{ 
-              display: 'flex', 
-              gap: '4px',
-              overflow: 'hidden',
-              flex: 1
-            }}>
-              {tags.slice(0, 2).map((tag, index) => (
-                <Tag key={index} color="blue" style={{ 
-                  fontSize: '11px', 
-                  margin: 0, 
-                  flexShrink: 0,
-                  maxWidth: '70px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {tag}
-                </Tag>
-          ))}
-            </div>
-            {tags.length > 2 && (
-              <span style={{ 
-                fontSize: '10px', 
-                margin: 0, 
-                flexShrink: 0,
-                color: '#1890ff',
-                fontWeight: 'bold'
-              }}>
-                +{tags.length - 2}
-              </span>
-            )}
-          </div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'Auto Tags',
-      dataIndex: 'auto_tags',
-      key: 'auto_tags',
-      width: 200,
-      render: (autoTags: string[]) => (
-        <Tooltip 
-          title={
-            <div>
-              <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>All Auto Tags:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {autoTags && autoTags.map((tag, index) => (
-                  <Tag key={index} color="orange" style={{ fontSize: '11px', margin: 0 }}>
-                    {tag}
-                  </Tag>
-                ))}
-              </div>
-            </div>
-          }
-          placement="topLeft"
-          mouseEnterDelay={0.5}
-        >
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            overflow: 'hidden'
-          }}>
-            <div style={{ 
-              display: 'flex', 
-              gap: '4px',
-              overflow: 'hidden',
-              flex: 1
-            }}>
-              {autoTags && autoTags.slice(0, 2).map((tag, index) => (
-                <Tag key={index} color="orange" style={{ 
-                  fontSize: '11px', 
-                  margin: 0, 
-                  flexShrink: 0,
-                  maxWidth: '70px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {tag}
-                </Tag>
-              ))}
-            </div>
-            {autoTags && autoTags.length > 2 && (
-              <span style={{ 
-                fontSize: '10px', 
-                margin: 0, 
-                flexShrink: 0,
-                color: '#fa8c16',
-                fontWeight: 'bold'
-              }}>
-                +{autoTags.length - 2}
-              </span>
-            )}
-          </div>
-        </Tooltip>
-      )
-    },
-    {
-      title: 'Investment Themes',
-      dataIndex: 'theme_matches',
-      key: 'theme_matches',
-      width: 220,
-      render: (themeMatches: NewsThemeMatch[], record: NewsItem) => {
-        // 直接使用传入的主题匹配数据，不在这里使用 hooks
-        const displayThemes = themeMatches || [];
+      return { ...prev, expandedNewsItems: newSet };
+    });
+  };
 
-        if (!displayThemes || displayThemes.length === 0) {
-          return <Text type="secondary" style={{ fontSize: '11px' }}>-</Text>;
-        }
+  const isNewsExpanded = (newsId: number) => state.expandedNewsItems.has(newsId);
 
-        return (
-          <Tooltip 
-            title={
-              <div>
-                <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Matched Investment Themes:</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {displayThemes.map((theme, index) => (
-                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Tag color={MARKET_COLORS[theme.market]} style={{ fontSize: '11px', margin: 0, minWidth: '35px', textAlign: 'center' }}>
-                        {theme.market}
-                      </Tag>
-                      <span style={{ flex: 1 }}>{theme.theme_name}</span>
-                      <Badge 
-                        count={formatSimilarity(theme.similarity)} 
-                        style={{ backgroundColor: theme.confidence >= 0.8 ? '#52c41a' : theme.confidence >= 0.7 ? '#1890ff' : '#faad14', fontSize: '10px' }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            }
-            placement="topLeft"
-            mouseEnterDelay={0.3}
-          >
-            <div style={{ 
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              overflow: 'hidden'
-            }}>
-              <div style={{ 
-                display: 'flex', 
-                gap: '4px',
-                overflow: 'hidden',
-                flex: 1
-              }}>
-                {displayThemes.slice(0, 2).map((theme, index) => (
-                  <Tag 
-                    key={index} 
-                    color={MARKET_COLORS[theme.market]} 
-                    style={{ 
-                      fontSize: '11px', 
-                      margin: 0, 
-                      flexShrink: 0,
-                      maxWidth: '90px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {theme.theme_name}
-                  </Tag>
-                ))}
-              </div>
-              {displayThemes.length > 2 && (
-                <span style={{ 
-                  fontSize: '10px', 
-                  margin: 0, 
-                  flexShrink: 0,
-                  color: '#52c41a',
-                  fontWeight: 'bold'
-                }}>
-                  +{displayThemes.length - 2}
-                </span>
-              )}
-            </div>
-          </Tooltip>
-        );
-      }
-    },
-    {
-      title: 'Actions',
-      key: 'action',
-      width: 100,
-      render: (_, record: NewsItem) => (
-        <Space>
-          <Button
-            type="primary"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => showNewsDetail(record.id)}
-            style={{ fontSize: '10px' }}
-          >
-            Detail
-          </Button>
-        </Space>
-      )
-    }
-  ];
+  // 情感标签辅助函数
+  const getSentimentColor = (polarity?: number) => {
+    if (!polarity) return 'default';
+    if (polarity > 0.1) return 'green';
+    if (polarity < -0.1) return 'red';
+    return 'orange';
+  };
+
+  const getSentimentText = (polarity?: number) => {
+    if (!polarity) return 'Neutral';
+    if (polarity > 0.1) return 'Positive';
+    if (polarity < -0.1) return 'Negative';
+    return 'Neutral';
+  };
 
   return (
     <div style={{ padding: '24px' }}>
@@ -964,7 +618,7 @@ const NewsPage: React.FC = () => {
 
 
 
-      {/* News Table */}
+      {/* News List */}
       <Card>
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
           <Text strong style={{ fontSize: '14px' }}>News List</Text>
@@ -995,178 +649,488 @@ const NewsPage: React.FC = () => {
           </Space>
         </div>
         
-        <Table
-          columns={columns}
-          dataSource={state.newsData?.news || []}
-          rowKey="id"
-          loading={state.loading}
-          size="small"
-          style={{ fontSize: '11px' }}
-          pagination={{
-            current: state.newsData?.page || 1,
-            pageSize: state.newsData?.page_size || 20,
-            total: state.newsData?.total || 0,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `Items ${range[0]}-${range[1]} of ${total}`,
-            onChange: handleTableChange,
-            onShowSizeChange: handleTableChange
-          }}
-          locale={{
-            emptyText: <Empty description="No news data" />
-          }}
-        />
+        {state.loading ? (
+          <div>
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Card key={index} style={{ marginBottom: '16px' }}>
+                <Skeleton active paragraph={{ rows: 2 }} />
+                <div style={{ marginTop: '12px' }}>
+                  <Skeleton.Input style={{ width: '60%' }} size="small" />
+          </div>
+              </Card>
+            ))}
+          </div>
+        ) : !state.newsData || state.newsData.news.length === 0 ? (
+          <Empty description="No news data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <>
+          <div style={{ position: 'relative' }}>
+              {state.newsData.news.map((item, index) => (
+              <div key={item.id} style={{ position: 'relative', marginBottom: '24px' }}>
+                {/* Timeline line */}
+                {index < state.newsData!.news.length - 1 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: '40px',
+                      top: '60px',
+                      bottom: '-24px',
+                      width: '2px',
+                      backgroundColor: '#d9d9d9',
+                      zIndex: 1
+                    }}
+                  />
+                )}
+                
+                {/* Timeline dot */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '36px',
+                    top: '22px',
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: '#1890ff',
+                    border: '1px solid #fff',
+                    boxShadow: '0 0 0 1px #1890ff',
+                    zIndex: 2
+                  }}
+                />
+                
+                {/* Content */}
+                <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
+                  <List.Item
+                    extra={
+                      <Space direction="vertical" align="end">
+                        <Space size={[4, 4]} wrap>
+                          {/* 情感标签 */}
+                          <Tag 
+                              color={getSentimentColor(item.sentiment_polarity)}
+                            style={{ fontSize: '8px', margin: 0 }}
+                          >
+                              {getSentimentText(item.sentiment_polarity)}
+                          </Tag>
+                            {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
+                            <Tag 
+                              color="blue" 
+                              icon={<RobotOutlined />} 
+                              style={{ fontSize: '8px', margin: 0 }}
+                            >
+                              AI分析
+                            </Tag>
+                          )}
+                        </Space>
+                      </Space>
+                    }
+                  >
+                    <List.Item.Meta
+                      avatar={
+                        <Space align="center" style={{ minWidth: '120px' }}>
+                          <Text type="secondary" style={{ fontSize: '12px' }}>
+                              <CalendarOutlined /> {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
+                            </Text>
+                            <Text type="secondary" style={{ fontSize: '11px' }}>
+                              {item.date ? new Date(item.date).toLocaleTimeString() : 'N/A'}
+                          </Text>
+                        </Space>
+                      }
+                      title={
+                        <Space>
+                          <span 
+                            style={{ 
+                              fontSize: '14px', 
+                              cursor: 'pointer',
+                              color: '#1890ff',
+                              textDecoration: 'underline',
+                              maxWidth: '800px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              display: 'inline-block'
+                            }}
+                              title={item.title}
+                              onClick={() => {
+                                setState(prev => ({
+                                  ...prev,
+                                  selectedNews: item,
+                                  detailModalVisible: true
+                                }));
+                              }}
+                          >
+                            {item.title}
+                          </span>
+                          <Text type="secondary" style={{ fontSize: '12px' }}>
+                            - {newsUtils.getSourceDisplayName(item.source)}
+                          </Text>
+                        </Space>
+                      }
+                      description={null}
+                    />
+                    <div style={{ fontSize: '13px', marginBottom: '8px' }}>
+                      {(() => {
+                          const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
+                        return displayContent ? (
+                          <div>
+                            <div style={{ 
+                              maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
+                              overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
+                              position: 'relative'
+                            }}>
+                              <MarkdownRenderer 
+                                content={displayContent}
+                                style={{
+                                  fontSize: '13px',
+                                  lineHeight: '1.4'
+                                }}
+                              />
+                              {!isNewsExpanded(item.id) && (
+                                <div style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: '20px',
+                                  background: 'linear-gradient(transparent, white)',
+                                  pointerEvents: 'none'
+                                }} />
+                              )}
+                            </div>
+                            <Button
+                              type="link"
+                              size="small"
+                              onClick={() => toggleNewsExpansion(item.id)}
+                              style={{ 
+                                padding: '4px 0', 
+                                fontSize: '12px',
+                                height: 'auto'
+                              }}
+                            >
+                              {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
+                            </Button>
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </List.Item>
+                </div>
+              </div>
+            ))}
+            </div>
+            
+            {/* Pagination */}
+            <div style={{ marginTop: '24px', textAlign: 'center' }}>
+              <Space>
+                <Button
+                  disabled={!state.newsData || state.newsData.page <= 1}
+                  onClick={() => {
+                    if (state.newsData) {
+                      handleTableChange(state.newsData.page - 1, state.newsData.page_size);
+                    }
+                  }}
+                >
+                  Previous
+                </Button>
+                <Text>
+                  Page {state.newsData?.page || 1} of {state.newsData?.total_pages || 1}
+                  {' '}(Total: {state.newsData?.total || 0} items)
+                </Text>
+                <Button
+                  disabled={!state.newsData || state.newsData.page >= state.newsData.total_pages}
+                  onClick={() => {
+                    if (state.newsData) {
+                      handleTableChange(state.newsData.page + 1, state.newsData.page_size);
+                    }
+                  }}
+                >
+                  Next
+                </Button>
+                <Select
+                  value={state.newsData?.page_size || 20}
+                  onChange={(value) => {
+                    handleTableChange(1, value);
+                  }}
+                  style={{ width: 100 }}
+                  size="small"
+                >
+                  <Option value={10}>10 / page</Option>
+                  <Option value={20}>20 / page</Option>
+                  <Option value={50}>50 / page</Option>
+                  <Option value={100}>100 / page</Option>
+                </Select>
+              </Space>
+            </div>
+          </>
+        )}
       </Card>
 
-      {/* News Detail Modal */}
+      {/* AI Analysis Details Modal */}
       <Modal
-        title="News Detail"
+        title={
+          <Space>
+            <RobotOutlined style={{ color: '#1890ff' }} />
+            <span>{state.selectedNews?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
+          </Space>
+        }
         open={state.detailModalVisible}
         onCancel={() => setState(prev => ({ ...prev, detailModalVisible: false }))}
         footer={[
           <Button key="close" onClick={() => setState(prev => ({ ...prev, detailModalVisible: false }))}>
             Close
           </Button>,
-          ...(state.selectedNews && newsUtils.hasExternalLink(state.selectedNews) ? [
+          state.selectedNews?.link && (
             <Button
-              key="external"
+              key="original" 
               type="primary"
-              icon={<LinkOutlined />}
               onClick={() => window.open(state.selectedNews?.link, '_blank')}
             >
               View Original
             </Button>
-          ] : [])
+          )
         ]}
         width={800}
-        centered
-        style={{ top: 0 }}
-        bodyStyle={{ maxHeight: '80vh', overflow: 'auto' }}
       >
         {state.selectedNews && (
-          <div>
-            <Title level={4}>{state.selectedNews.title}</Title>
-            
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={12}>
-                <Text type="secondary">Source: {newsUtils.getSourceDisplayName(state.selectedNews.source)}</Text>
-              </Col>
-              <Col span={12}>
-                <Text type="secondary">Date: {newsUtils.formatNewsDate(state.selectedNews.date)}</Text>
-              </Col>
-            </Row>
+          <>
+            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f5f5f5' }}>
+              <Typography.Title level={5} style={{ marginBottom: '12px' }}>
+                {state.selectedNews.title}
+              </Typography.Title>
+              <Space size="small" wrap>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  <CalendarOutlined /> {state.selectedNews.date ? new Date(state.selectedNews.date).toLocaleString() : 'N/A'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Source: {newsUtils.getSourceDisplayName(state.selectedNews.source) || 'N/A'}
+                </Text>
+              </Space>
+            </Card>
 
-            {/* Sentiment Analysis */}
-            {state.selectedNews.sentiment_polarity !== undefined && (
-              <div style={{ marginBottom: 16 }}>
-                <Text strong>Sentiment Analysis: </Text>
-                <Tag color={newsUtils.getSentimentLabel(state.selectedNews).color} style={{ marginLeft: 8 }}>
-                  {newsUtils.getSentimentLabel(state.selectedNews).label}
-                </Tag>
-                <div style={{ marginTop: 8 }}>
-                  <Text type="secondary">
-                    Positive: {((state.selectedNews.sentiment_pos || 0) * 100).toFixed(1)}% | 
-                    Neutral: {((state.selectedNews.sentiment_neu || 0) * 100).toFixed(1)}% | 
-                    Negative: {((state.selectedNews.sentiment_neg || 0) * 100).toFixed(1)}%
-                  </Text>
+            {(() => {
+              const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
+              const hasAnyAnalysis = Object.keys(allResults).length > 0;
+              const summaryResult = getAnalysisContent(state.selectedNews.analysis_result, 'news_summary_v1');
+
+              if (hasAnyAnalysis) {
+                return (
+                  <>
+                    {/* 优先显示 news_summary_v1 的结果 */}
+                    {summaryResult && typeof summaryResult.content === 'string' && (
+                      <>
+                        <Card 
+                          title="AI Analysis (Summary)" 
+                          size="small"
+                          headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
+                        >
+                          <MarkdownRenderer 
+                            content={summaryResult.content}
+                            style={{
+                              fontSize: '12px',
+                              lineHeight: '1.6'
+                            }}
+                          />
+                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                            <Space size="small">
+                              {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
+                              {summaryResult.model && <span>Model: {summaryResult.model}</span>}
+                              {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
+                              {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
+                            </Space>
                 </div>
-              </div>
-            )}
+                        </Card>
 
-            {/* Related Symbols */}
-            {state.selectedNews.symbols.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <Text strong>Related Symbols: </Text>
-                <div style={{ marginTop: 8 }}>
+                        {state.selectedNews.content && (
+                          <Card 
+                            title="Original Content" 
+                            size="small"
+                            style={{ marginTop: '16px' }}
+                            headStyle={{ backgroundColor: '#f5f5f5' }}
+                          >
+                            <Paragraph 
+                              ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
+                              style={{ fontSize: '13px', color: '#666' }}
+                            >
+                              {state.selectedNews.content}
+                            </Paragraph>
+                          </Card>
+                        )}
+
+                        {/* Tags Card */}
+                        <Card 
+                          title="Tags" 
+                          size="small"
+                          style={{ marginTop: '16px' }}
+                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
+                        >
+                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                            {/* Related Tickers */}
+                            {state.selectedNews.symbols && state.selectedNews.symbols.length > 0 && (
+                              <div>
+                                <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Tickers:</Text>
+                                <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
                   {state.selectedNews.symbols.map((symbol, index) => (
-                    <Tag key={index} style={{ marginBottom: 4 }}>
+                                    <Tag key={index} color="default" style={{ fontSize: '9px' }}>
                       {newsUtils.formatSymbolCode(symbol)}
                     </Tag>
                   ))}
-                </div>
+                                </Space>
               </div>
             )}
 
-            {/* Tags */}
-            {state.selectedNews.tags.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <Text strong>Tags: </Text>
-                <div style={{ marginTop: 8 }}>
-                  {state.selectedNews.tags.map((tag, index) => (
-                    <Tag key={index} color="blue" style={{ marginBottom: 4 }}>
-                      {tag}
+                            {/* Classification Tags */}
+                            {(() => {
+                              const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
+                              if (!classification || !hasValidClassification(classification)) {
+                                return null;
+                              }
+
+                              const tags = getClassificationTags(classification);
+                              const relatedSectors = getRelatedSectors(classification);
+
+                              return (
+                                <>
+                                  {/* 主要分类标签 */}
+                                  <div>
+                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Classification Tags:</Text>
+                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                      {tags.map(({ key, config, value, displayValue }) => (
+                                        <Tag 
+                                          key={key} 
+                                          color={config.color} 
+                                          style={{ fontSize: '9px' }}
+                                          title={`${config.label}: ${displayValue}`}
+                                        >
+                                          {displayValue}
                     </Tag>
                   ))}
+                                    </Space>
                 </div>
-              </div>
-            )}
 
-            {/* Auto Tags */}
-            {state.selectedNews.auto_tags && state.selectedNews.auto_tags.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <Text strong>Auto Tags: </Text>
-                <div style={{ marginTop: 8 }}>
-                  {state.selectedNews.auto_tags.map((tag, index) => (
-                    <Tag key={index} color="orange" style={{ marginBottom: 4 }}>
-                      {tag}
+                                  {/* 相关行业 */}
+                                  {relatedSectors.length > 0 && (
+                                    <div>
+                                      <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Sectors:</Text>
+                                      <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                        {relatedSectors.map(sector => (
+                                          <Tag key={sector} color="purple" style={{ fontSize: '9px' }}>
+                                            {sector}
                     </Tag>
                   ))}
-                </div>
+                                      </Space>
               </div>
             )}
+                                </>
+                              );
+                            })()}
 
-            <Divider />
+                            {/* Analysis Template Tags */}
+                            {(() => {
+                              const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
+                              const templateCodes = Object.keys(allResults);
 
-            {/* News Content */}
+                              if (templateCodes.length > 0) {
+                                return (
             <div>
-              {state.selectedNews.analysis_result ? (
-                <>
-                  <div style={{ marginBottom: 16 }}>
-                    <Text strong>AI Analysis: </Text>
-                    <Tag color="blue" style={{ marginLeft: 8 }}>
-                      {(() => {
-                        const result = state.selectedNews.analysis_result;
-                        if (typeof result === 'object' && result && 'template_code' in result) {
-                          return (result as any).template_code || 'AI Analysis';
-                        }
-                        return 'AI Analysis';
+                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Analysis Template:</Text>
+                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                      {templateCodes.map(templateCode => (
+                                        <Tag key={templateCode} color="green" style={{ fontSize: '9px' }}>
+                                          {templateCode}
+                                        </Tag>
+                                      ))}
+                                    </Space>
+                                  </div>
+                                );
+                              }
+                              return null;
                       })()}
-                    </Tag>
+
+                            {/* Confidence Information */}
+                            {(() => {
+                              const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
+                              if (!classification || !hasValidClassification(classification)) {
+                                return null;
+                              }
+
+                              const summary = getClassificationSummary(classification);
+                              
+                              if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
+                                return (
+                                  <div>
+                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Confidence:</Text>
+                                    <Space size="small" style={{ marginTop: '4px' }}>
+                                      {summary.confidence.theme > 0 && (
+                                        <Text style={{ fontSize: '9px' }}>
+                                          Theme: {(summary.confidence.theme * 100).toFixed(0)}%
+                                        </Text>
+                                      )}
+                                      {summary.confidence.event > 0 && (
+                                        <Text style={{ fontSize: '9px' }}>
+                                          Event: {(summary.confidence.event * 100).toFixed(0)}%
+                                        </Text>
+                                      )}
+                                    </Space>
                   </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </Space>
+                        </Card>
+                      </>
+                    )}
+
+                    {/* 显示其他模板的结果 */}
+                    {Object.entries(allResults).map(([templateCode, result]) => {
+                      if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null; // 已经显示过了
+                      if (templateCode === 'news_classification') return null; // 不显示新闻分类分析
+                      
+                      return (
                   <Card 
-                    title="Analysis Content" 
+                          key={templateCode}
+                          title={`AI Analysis (${templateCode})`} 
                     size="small"
-                    headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
-                    style={{ marginBottom: 16 }}
-                  >
-                    <MarkdownRenderer 
-                      content={state.selectedNews.analysis_result.content}
-                      style={{
-                        fontSize: '14px',
-                        lineHeight: '1.6'
-                      }}
-                    />
-                  </Card>
-                  
-                  {state.selectedNews.content && (
-                    <div>
-                      <Text strong>Original Content: </Text>
-                      <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                        {state.selectedNews.content}
-                      </Paragraph>
+                          style={{ marginTop: '16px' }}
+                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
+                        >
+                          <pre style={{ 
+                            fontSize: '12px', 
+                            whiteSpace: 'pre-wrap', 
+                            wordBreak: 'break-word',
+                            margin: 0
+                          }}>
+                            {typeof result.content === 'string' 
+                              ? result.content 
+                              : JSON.stringify(result.content, null, 2)}
+                          </pre>
+                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                            <Space size="small">
+                              {result.provider && <span>Provider: {result.provider}</span>}
+                              {result.model && <span>Model: {result.model}</span>}
+                              {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
+                              {result.temperature && <span>Temperature: {result.temperature}</span>}
+                            </Space>
                     </div>
-                  )}
-                </>
-              ) : (
-                <div>
-                  <Text strong>Content: </Text>
-                  <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                    {state.selectedNews.content || 'No detailed content available'}
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              } else {
+                return (
+                  <Card 
+                    title="News Content" 
+                    size="small"
+                    headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
+                  >
+                    <Paragraph style={{ fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {state.selectedNews.content || 'No content available'}
                   </Paragraph>
-                </div>
-              )}
-            </div>
-          </div>
+                  </Card>
+                );
+              }
+            })()}
+          </>
         )}
       </Modal>
 

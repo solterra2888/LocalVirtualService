@@ -87,6 +87,7 @@ export interface NewsSearchParams {
   start_date?: string;
   end_date?: string;
   search_text?: string;
+  unified_theme_name?: string;  // 统一主题名称筛选
 }
 
 export interface NewsTopicKeyword {

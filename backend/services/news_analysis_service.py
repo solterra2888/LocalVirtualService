@@ -380,6 +380,67 @@ class NewsAnalysisService:
                     provider_model = f"{response.provider}/{response.model}" if hasattr(response, 'provider') and hasattr(response, 'model') else "未知"
                     logger.info(f"  ✅ LLM分析成功 | 模型: {provider_model} | Tokens: {tokens_used} | 重试: {attempt}次")
                     
+                    # 🔥 新增：处理分类维度（如果是 news_classification 模板）
+                    if template_code == 'news_classification':
+                        try:
+                            from backend.services.theme_mapping_service import ThemeMappingService
+                            theme_service = ThemeMappingService(self.db_manager)
+                            
+                            # 解析 LLM 返回的 JSON
+                            try:
+                                classification_data = json.loads(response.content)
+                            except:
+                                # 尝试提取 JSON（可能包含 markdown 格式）
+                                import re
+                                json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+                                if json_match:
+                                    classification_data = json.loads(json_match.group())
+                                else:
+                                    raise ValueError("无法解析 LLM 返回的 JSON")
+                            
+                            # 提取所有维度
+                            dimensions = {
+                                'primary_theme': classification_data.get('primary_theme'),
+                                'event_type': classification_data.get('event_type'),
+                                'impact_scope': classification_data.get('impact_scope'),
+                                'urgency': classification_data.get('urgency'),
+                                'related_sectors': classification_data.get('related_sectors', []),
+                                'rationale': classification_data.get('rationale'),
+                                'analyzed_at': datetime.now().isoformat()
+                            }
+                            
+                            # 提取置信度
+                            confidence_scores = {
+                                'primary_theme_confidence': classification_data.get('primary_theme_confidence', 0.8),
+                                'event_type_confidence': classification_data.get('event_type_confidence', 0.8),
+                            }
+                            
+                            # 批量插入所有维度
+                            result = theme_service.upsert_classification_dimensions(
+                                news_id=news_id,
+                                classification_data=dimensions,
+                                confidence_scores=confidence_scores
+                            )
+                            
+                            if result.get('success'):
+                                total_inserted = result.get('total_inserted', 0)
+                                records = result.get('records', [])
+                                
+                                # 构建日志信息
+                                dimension_summary = []
+                                for rec in records:
+                                    dimension_summary.append(f"{rec['title']}={rec['value']}")
+                                
+                                logger.info(f"  🎯 分类维度已保存 ({total_inserted}条): {', '.join(dimension_summary)}")
+                                
+                                if result.get('errors'):
+                                    logger.warning(f"  ⚠️  部分维度插入失败: {result['errors']}")
+                            else:
+                                logger.error(f"  ❌ 分类维度保存失败: {result.get('error', 'Unknown error')}")
+                                
+                        except Exception as e:
+                            logger.error(f"  ❌ 处理分类维度失败: {str(e)}")
+                    
                     # 🔥 新增：投资主题匹配（基于向量检索）
                     theme_matches = []
                     if enable_theme_matching and self.theme_embedding_service:
@@ -418,18 +479,60 @@ class NewsAnalysisService:
                             logger.error(f"  ❌ 主题匹配失败: {str(theme_error)}")
                             # 主题匹配失败不影响整体分析结果
                     
+                    # 🔥 新增：自动同步主题到统一表
+                    sync_result = None
+                    try:
+                        from backend.database.async_db_manager import AsyncDatabaseManager
+                        from backend.services.theme_unification_service import ThemeUnificationService
+                        from backend.utils.database_config import get_database_config
+                        
+                        logger.info(f"  🔄 开始同步主题到统一表...")
+                        
+                        # 创建异步数据库管理器和主题统一服务
+                        db_config = get_database_config()
+                        async_db = AsyncDatabaseManager(db_config)
+                        theme_service = ThemeUnificationService(async_db)
+                        
+                        # 同步该新闻的所有主题
+                        sync_result = await theme_service.sync_all_sources(
+                            news_ids=[news_id],
+                            force_resync=False
+                        )
+                        
+                        if sync_result.success:
+                            total_themes = sum(sync_result.details.values())
+                            logger.info(f"  ✅ 主题同步完成 | 总计: {total_themes} 条主题")
+                        else:
+                            logger.warning(f"  ⚠️  主题同步部分失败: {sync_result.errors}")
+                            
+                    except Exception as sync_error:
+                        logger.error(f"  ❌ 主题同步失败: {str(sync_error)}")
+                        # 同步失败不影响整体分析结果
+                    
                     # 🎯 日志改进：添加成功完成标记
                     logger.info(f"✅ 新闻分析完成 | ID: {news_id} | 模板: {template_code}")
                     logger.info("=" * 80)
                     
-                    return {
+                    # 构建返回结果（确保所有内容都可JSON序列化）
+                    result = {
                         "success": True,
                         "news_id": news_id,
                         "analysis": response.content,
                         "parsed_data": response.parsed_data if hasattr(response, 'parsed_data') else None,
                         "retry_count": attempt,
-                        "theme_matches": theme_matches  # 返回匹配的主题
+                        "theme_matches": theme_matches if theme_matches else []  # 返回匹配的主题
                     }
+                    
+                    # 添加主题同步结果（确保序列化）
+                    if sync_result:
+                        result["theme_sync_result"] = {
+                            "success": sync_result.success,
+                            "synced_count": sync_result.synced_count,
+                            "failed_count": sync_result.failed_count,
+                            "details": sync_result.details if sync_result.details else {}
+                        }
+                    
+                    return result
                     
                 except Exception as llm_error:
                     error_msg = str(llm_error)

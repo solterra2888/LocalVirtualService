@@ -61,8 +61,9 @@ class SchedulerService:
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
-             'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
-            'futu_themes': self._execute_futu_themes_task  # 新增：富途投资主题数据获取任务
+            'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
+            'futu_themes': self._execute_futu_themes_task,  # 富途投资主题数据获取任务
+            'theme_sync': self._execute_theme_sync_task  # 🔥 新增：主题同步任务
         }
         
         # 添加事件监听器
@@ -1980,6 +1981,87 @@ class SchedulerService:
                 'success': False,
                 'message': error_msg,
                 'data': None
+            }
+    
+    async def _execute_theme_sync_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行主题同步任务
+        将EODHD、Vector Retrieval、LLM分类的主题数据同步到统一表
+        
+        Args:
+            params: 任务参数
+                - days: 同步最近N天的新闻（默认: 7）
+                - force_resync: 是否强制重新同步（默认: False）
+                - sync_unsynced: 是否只同步未同步的新闻（默认: True）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行主题同步任务", params=params)
+            
+            # 导入必要的模块
+            from backend.database.async_db_manager import AsyncDatabaseManager
+            from backend.services.theme_unification_service import ThemeUnificationService
+            from backend.utils.database_config import get_database_config
+            
+            # 创建服务实例
+            db_config = get_database_config()
+            async_db = AsyncDatabaseManager(db_config)
+            service = ThemeUnificationService(async_db)
+            
+            # 获取参数
+            days = params.get('days', 7)
+            force_resync = params.get('force_resync', False)
+            sync_unsynced = params.get('sync_unsynced', True)
+            
+            # 执行同步
+            if sync_unsynced:
+                logger.info("同步未同步的新闻主题")
+                result = await service.sync_unsynced_news()
+            else:
+                logger.info(f"同步最近 {days} 天的新闻主题")
+                result = await service.sync_recent_news(days=days, force_resync=force_resync)
+            
+            # 构建返回结果
+            if result.success:
+                total_themes = sum(result.details.values()) if result.details else 0
+                message = f"主题同步成功: {result.synced_count} 条新闻，共 {total_themes} 条主题"
+                
+                logger.info(message, details=result.details)
+                
+                return {
+                    'success': True,
+                    'message': message,
+                    'data': {
+                        'synced_count': result.synced_count,
+                        'failed_count': result.failed_count,
+                        'eodhd_tags': result.details.get('eodhd_auto_tag', 0),
+                        'vector_matches': result.details.get('vector_retrieval', 0),
+                        'llm_classifications': result.details.get('llm_classification', 0),
+                        'total_themes': total_themes
+                    }
+                }
+            else:
+                error_msg = f"主题同步部分失败: {result.failed_count} 条新闻失败"
+                logger.warning(error_msg, errors=result.errors[:5])
+                
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': {
+                        'synced_count': result.synced_count,
+                        'failed_count': result.failed_count,
+                        'errors': result.errors[:10]  # 最多返回10个错误
+                    }
+                }
+        
+        except Exception as e:
+            logger.error(f"主题同步任务执行失败: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f"主题同步任务执行失败: {str(e)}"
             }
     
     def _job_listener(self, event):

@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -96,6 +96,9 @@ app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 from backend.api import chart_events
 app.include_router(chart_events.router, prefix="/api/chart-events", tags=["图表事件"])
 
+# 统一主题管理API（支持 Primary Theme）
+app.include_router(themes_unified.router, prefix="/api", tags=["统一主题管理"])
+
 # EOD Fetch API
 from backend.api import eod_fetch
 app.include_router(eod_fetch.router, prefix="/api", tags=["EOD数据获取"])
@@ -113,6 +116,9 @@ app.include_router(news_analysis.router, prefix="/api", tags=["新闻分析"])
 # 投资主题向量化API
 from backend.api import investment_themes
 app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"])
+
+# 统一主题系统API
+app.include_router(themes_unified.router, prefix="/api", tags=["统一主题系统"])
 
 # 静态文件服务
 # 为上传的文件提供静态文件访问

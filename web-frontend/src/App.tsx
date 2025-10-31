@@ -13,7 +13,7 @@ import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
 import FilesPage from './pages/FilesPage';
 import TasksPage from './pages/TasksPage';
 import UsersPage from './pages/UsersPage';
-import NewsPage from './pages/NewsPage';
+import NewsTimelinePage from './pages/NewsTimelinePage';
 import SchedulerPage from './pages/SchedulerPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
@@ -118,7 +118,7 @@ const App: React.FC = () => {
                 <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
                 <Route path="files" element={<FilesPage />} />
                 <Route path="tasks" element={<TasksPage />} />
-                <Route path="news" element={<NewsPage />} />
+                <Route path="news" element={<NewsTimelinePage />} />
                 <Route path="fundamentals" element={<FundamentalsPage />} />
                 <Route path="eod-fetch" element={<EODFetchPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />

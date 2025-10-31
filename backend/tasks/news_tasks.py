@@ -234,12 +234,30 @@ def analyze_news_by_ids_task(
             tasks = [analyze_with_semaphore(news_id) for news_id in news_ids]
             results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
             
-            # 统计结果
+            # 统计结果并确保所有结果都可序列化
+            serializable_results = []
             for result in results:
-                if isinstance(result, dict) and result.get('success'):
+                if isinstance(result, Exception):
+                    # 将异常转换为可序列化的字典
+                    serializable_results.append({
+                        'success': False,
+                        'error': str(result),
+                        'error_type': type(result).__name__
+                    })
+                    failed_count += 1
+                elif isinstance(result, dict) and result.get('success'):
+                    serializable_results.append(result)
                     success_count += 1
                 else:
+                    # 其他情况也确保可序列化
+                    serializable_results.append(result if isinstance(result, dict) else {
+                        'success': False,
+                        'error': 'Unknown result type',
+                        'result': str(result)
+                    })
                     failed_count += 1
+            
+            results = serializable_results
                     
         finally:
             loop.close()

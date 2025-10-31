@@ -85,13 +85,15 @@ class EODHDNewsService:
         """创建一个具有重试机制和优化超时设置的会话"""
         session = requests.Session()
         
-        # 配置重试策略
+        # 配置重试策略（仅重试服务器错误和速率限制，不重试超时）
         retry_strategy = Retry(
             total=3,  # 总重试次数
-            backoff_factor=2,  # 指数退避因子
+            backoff_factor=2,  # 指数退避因子（2秒、4秒、8秒）
             status_forcelist=[429, 500, 502, 503, 504],  # 需要重试的状态码
             allowed_methods=["GET"],  # 只对GET请求重试
-            raise_on_status=False  # 不立即抛出异常，让重试机制处理
+            raise_on_status=False,  # 不立即抛出异常，让重试机制处理
+            # 🔥 关键：不重试读取错误，避免超时被重试机制覆盖
+            respect_retry_after_header=True
         )
         
         # 创建适配器
@@ -170,31 +172,64 @@ class EODHDNewsService:
                        params_count=len(params),
                        params=params)  # 完整打印请求参数
             
-            # 使用优化的会话和更长的超时时间
-            response = self.session.get(
-                self.base_url, 
-                params=params, 
-                timeout=(10, 60)  # 连接超时10秒，读取超时60秒
-            )
-            response.raise_for_status()
+            # 🔥 优化：使用更长的超时时间，并添加重试逻辑
+            max_retries = 2  # 超时重试2次
+            last_exception = None
             
-            # 记录响应状态和内容预览
-            response_text = response.text[:500] if response.text else "Empty response"
-            logger.info("EODHD API请求发送完成，正在解析响应", 
-                       status_code=response.status_code,
-                       response_preview=response_text)
-            
-            result = response.json()
-            result_count = len(result) if isinstance(result, list) else (len(result.get('data', [])) if isinstance(result, dict) else 0)
-            logger.info("EODHD API响应成功", status_code=response.status_code, result_count=result_count)
-            
-            return result
-        except requests.exceptions.Timeout as e:
-            logger.error("EODHD API请求超时", exception=str(e), url=self.base_url)
-            raise Exception(f"获取新闻超时: {e}")
-        except requests.exceptions.RequestException as e:
-            logger.error("EODHD API调用失败", exception=str(e), url=self.base_url)
-            raise Exception(f"获取新闻失败: {e}")
+            for attempt in range(max_retries + 1):
+                try:
+                    if attempt > 0:
+                        wait_time = 5 * attempt  # 递增等待时间：5秒、10秒
+                        logger.warning(f"第 {attempt + 1} 次尝试请求EODHD API（等待{wait_time}秒后）")
+                        time.sleep(wait_time)
+                    
+                    # 连接超时15秒，读取超时90秒（EODHD有时响应较慢）
+                    response = self.session.get(
+                        self.base_url, 
+                        params=params, 
+                        timeout=(15, 90)
+                    )
+                    response.raise_for_status()
+                    
+                    # 记录响应状态和内容预览
+                    response_text = response.text[:500] if response.text else "Empty response"
+                    logger.info("EODHD API请求成功", 
+                               status_code=response.status_code,
+                               response_preview=response_text,
+                               attempt=attempt + 1)
+                    
+                    result = response.json()
+                    result_count = len(result) if isinstance(result, list) else (len(result.get('data', [])) if isinstance(result, dict) else 0)
+                    logger.info("EODHD API响应解析成功", 
+                               status_code=response.status_code, 
+                               result_count=result_count)
+                    
+                    return result
+                    
+                except requests.exceptions.Timeout as e:
+                    last_exception = e
+                    logger.warning(f"EODHD API请求超时（第{attempt + 1}次尝试）", 
+                                 exception=str(e), 
+                                 url=self.base_url)
+                    if attempt < max_retries:
+                        continue  # 继续重试
+                    else:
+                        logger.error("EODHD API请求超时，已达到最大重试次数", 
+                                   exception=str(e), 
+                                   url=self.base_url,
+                                   total_attempts=max_retries + 1)
+                        raise Exception(f"获取新闻超时（已重试{max_retries}次）: {e}")
+                        
+                except requests.exceptions.RequestException as e:
+                    # 其他网络错误不重试，直接抛出
+                    logger.error("EODHD API调用失败", exception=str(e), url=self.base_url)
+                    raise Exception(f"获取新闻失败: {e}")
+                    
+        except Exception as e:
+            # 捕获所有未处理的异常
+            if not isinstance(e, Exception) or "获取新闻" not in str(e):
+                logger.error("EODHD API调用过程中发生未预期的错误", exception=str(e))
+            raise
     
     def fetch_and_store_news(self, symbols: Optional[str] = None, topic: Optional[str] = None,
                            start_date: Optional[str] = None, end_date: Optional[str] = None,

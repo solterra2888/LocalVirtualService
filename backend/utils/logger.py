@@ -43,6 +43,9 @@ class UnifiedLogger:
         log_level = getattr(logging, level.upper(), logging.INFO)
         self.logger.setLevel(log_level)
         
+        # 防止日志向上传播到父logger（避免Celery worker中重复记录）
+        self.logger.propagate = False
+        
         # 清除已有的handlers
         self.logger.handlers.clear()
         
@@ -52,8 +55,17 @@ class UnifiedLogger:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
+        # 检测是否在Celery worker环境中运行
+        is_celery_worker = False
+        try:
+            # 检查是否有celery logger，或者检测环境变量
+            celery_logger = logging.getLogger('celery')
+            is_celery_worker = len(celery_logger.handlers) > 0
+        except:
+            pass
+        
         # 控制台输出
-        if log_to_console:
+        if log_to_console and not is_celery_worker:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
@@ -78,7 +90,9 @@ class UnifiedLogger:
             self.logger.addHandler(file_handler)
         
         self._initialized = True
-        self.info(f"日志系统初始化完成 - 级别: {level}, 文件输出: {log_to_file}, 控制台输出: {log_to_console}")
+        # 只在非Celery环境中打印初始化日志
+        if not is_celery_worker:
+            self.info(f"日志系统初始化完成 - 级别: {level}, 文件输出: {log_to_file}, 控制台输出: {log_to_console}")
     
     def debug(self, message: str, source: str = None, **kwargs):
         """调试级别日志"""

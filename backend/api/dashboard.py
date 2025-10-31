@@ -320,10 +320,11 @@ async def get_company_news(
                 "sentiment_pos": float(row[7]) if row[7] is not None else None,
                 "sentiment_neg": float(row[8]) if row[8] is not None else None,
                 "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "analysis_result": row[10] if row[10] else None,  # 分析结果
+                "analysis_result": row[10] if row[10] else None,  # 分析结果（JSON格式）
                 "scheduler_source": row[11],  # 调度器来源
                 "tags": row[12] if row[12] else [],  # 直接从查询结果获取
-                "symbols": row[13] if row[13] else []  # 直接从查询结果获取
+                "symbols": row[13] if row[13] else [],  # 直接从查询结果获取
+                "auto_tags": []  # 添加 auto_tags 字段以保持一致性
             }
             news_items.append(news_item)
         
@@ -407,9 +408,10 @@ async def get_sector_news(
                 "sentiment_pos": float(row[7]) if row[7] is not None else None,
                 "sentiment_neg": float(row[8]) if row[8] is not None else None,
                 "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "analysis_result": row[10] if row[10] else None,  # 分析结果
+                "analysis_result": row[10] if row[10] else None,  # 分析结果（JSON格式）
                 "tags": row[11] if row[11] else [],  # 直接从查询结果获取
-                "symbols": row[12] if row[12] else []  # 直接从查询结果获取
+                "symbols": row[12] if row[12] else [],  # 直接从查询结果获取
+                "auto_tags": []  # 添加 auto_tags 字段以保持一致性
             }
             news_items.append(news_item)
         
