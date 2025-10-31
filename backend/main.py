@@ -117,9 +117,6 @@ app.include_router(news_analysis.router, prefix="/api", tags=["新闻分析"])
 from backend.api import investment_themes
 app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"])
 
-# 统一主题系统API
-app.include_router(themes_unified.router, prefix="/api", tags=["统一主题系统"])
-
 # 静态文件服务
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):

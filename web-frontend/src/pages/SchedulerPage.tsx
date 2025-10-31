@@ -1212,7 +1212,7 @@ const SchedulerPage: React.FC = () => {
                   </Tabs.TabPane>
                   
                   <Tabs.TabPane
-                    tab={<span><TagOutlined />Theme Management</span>}
+                    tab={<span><TagOutlined />Highlight Setting</span>}
                     key="themes"
                   >
                     <div style={{ marginBottom: 16 }}>
@@ -1247,8 +1247,8 @@ const SchedulerPage: React.FC = () => {
                     </div>
 
                     <Alert
-                      message="Theme Management Instructions"
-                      description="Themes are used for intelligent news classification and filtering. Each theme contains multiple keywords, and the system automatically adds corresponding tags to news based on these keywords."
+                      message="Keyword Highlight Instructions"
+                      description="Create themes with keywords to automatically highlight matching words in news content. Each theme can have a custom color, and keywords will be highlighted with that color when found in the original news text."
                       type="info"
                       showIcon
                       style={{ marginBottom: 16 }}

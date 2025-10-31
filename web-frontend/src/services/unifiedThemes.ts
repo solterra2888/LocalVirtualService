@@ -10,7 +10,7 @@ import type {
   ThemeMasterData
 } from '../types/unifiedThemes';
 
-const BASE_URL = '/themes-unified';
+const BASE_URL = '/themes';
 
 export interface ThemeSyncResult {
   success: boolean;

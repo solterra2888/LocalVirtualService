@@ -62,13 +62,15 @@ import {
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
 import { filesAPI } from '../services/files';
+import { newsAPI } from '../services/news';
+import type { NewsTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import FundamentalsOverviewModal from './FundamentalsOverviewModal';
 import StockChart from './StockChart';
 import type { DataNode } from 'antd/es/tree';
 
 const { Content, Sider } = Layout;
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
 
@@ -207,6 +209,9 @@ const FinvizDashboard: React.FC = () => {
   // 新闻展开状态管理
   const [expandedNewsItems, setExpandedNewsItems] = useState<Set<number>>(new Set());
   
+  // 主题关键词数据（用于高亮）
+  const [themes, setThemes] = useState<NewsTheme[]>([]);
+  
   // 新闻展开/收缩功能
   const toggleNewsExpansion = (newsId: number) => {
     setExpandedNewsItems(prev => {
@@ -221,6 +226,133 @@ const FinvizDashboard: React.FC = () => {
   };
   
   const isNewsExpanded = (newsId: number) => expandedNewsItems.has(newsId);
+  
+  // 关键词高亮函数
+  const highlightKeywords = (text: string): React.ReactNode => {
+    if (!text || themes.length === 0) {
+      return text;
+    }
+
+    // 收集所有关键词及其对应的主题颜色
+    interface KeywordMatch {
+      keyword: string;
+      color: string;
+      themeName: string;
+    }
+    
+    const keywordMatches: KeywordMatch[] = [];
+    
+    themes.forEach(theme => {
+      if (theme.keywords && theme.keywords.length > 0) {
+        theme.keywords.forEach(keyword => {
+          keywordMatches.push({
+            keyword: keyword.trim(),
+            color: theme.color || '#1890ff',
+            themeName: theme.topic_name
+          });
+        });
+      }
+    });
+
+    // 如果没有关键词，直接返回原文本
+    if (keywordMatches.length === 0) {
+      return text;
+    }
+
+    // 按关键词长度排序（长的优先），避免短词先匹配导致长词无法匹配
+    keywordMatches.sort((a, b) => b.keyword.length - a.keyword.length);
+
+    // 存储所有匹配位置和对应的主题信息
+    interface MatchPosition {
+      start: number;
+      end: number;
+      color: string;
+      keyword: string;
+      themeName: string;
+    }
+
+    const positions: MatchPosition[] = [];
+
+    // 查找所有匹配位置
+    keywordMatches.forEach(({ keyword, color, themeName }) => {
+      if (!keyword) return;
+      
+      // 转义特殊字符，并使用单词边界 \b 进行精确匹配
+      // \b 确保匹配的是完整的单词，不会匹配单词的一部分
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escapedKeyword}\\b`, 'gi');
+      let match;
+      
+      while ((match = regex.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        
+        // 检查是否与已有位置重叠
+        const isOverlapping = positions.some(pos => 
+          (start >= pos.start && start < pos.end) || 
+          (end > pos.start && end <= pos.end) ||
+          (start <= pos.start && end >= pos.end)
+        );
+        
+        if (!isOverlapping) {
+          positions.push({ start, end, color, keyword: match[0], themeName });
+        }
+      }
+    });
+
+    // 如果没有匹配，返回原文本
+    if (positions.length === 0) {
+      return text;
+    }
+
+    // 按开始位置排序
+    positions.sort((a, b) => a.start - b.start);
+
+    // 构建带高亮的文本
+    const elements: React.ReactNode[] = [];
+    let lastIndex = 0;
+
+    positions.forEach((pos, index) => {
+      // 添加高亮前的普通文本
+      if (pos.start > lastIndex) {
+        elements.push(
+          <span key={`text-${index}`}>
+            {text.substring(lastIndex, pos.start)}
+          </span>
+        );
+      }
+
+      // 添加高亮文本
+      elements.push(
+        <span
+          key={`highlight-${index}`}
+          style={{
+            backgroundColor: pos.color,
+            color: '#fff',
+            padding: '2px 4px',
+            borderRadius: '2px',
+            fontWeight: 'bold'
+          }}
+          title={`Theme: ${pos.themeName}`}
+        >
+          {pos.keyword}
+        </span>
+      );
+
+      lastIndex = pos.end;
+    });
+
+    // 添加剩余的文本
+    if (lastIndex < text.length) {
+      elements.push(
+        <span key="text-end">
+          {text.substring(lastIndex)}
+        </span>
+      );
+    }
+
+    return <>{elements}</>;
+  };
   
   
   // 缓存工具函数
@@ -285,6 +417,7 @@ const FinvizDashboard: React.FC = () => {
   // 初始化数据
   useEffect(() => {
     loadUserWatchlist();
+    loadThemes();
     logger.logInfo('FinvizDashboard页面已加载', 'finviz-dashboard');
     
     // 定期清理过期缓存
@@ -404,6 +537,18 @@ const FinvizDashboard: React.FC = () => {
       logger.logError('Failed to load user watchlist', 'finviz-dashboard', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 加载主题数据（用于关键词高亮）
+  const loadThemes = async () => {
+    try {
+      const themesResponse = await newsAPI.getThemes();
+      setThemes(themesResponse.data.filter(t => t.is_active)); // 只加载激活的主题
+      logger.logInfo(`加载了 ${themesResponse.data.length} 个主题`, 'finviz-dashboard');
+    } catch (error) {
+      logger.logError('Failed to load themes', 'finviz-dashboard', error);
+      // 主题加载失败不阻塞页面，不显示错误消息
     }
   };
 
@@ -1670,12 +1815,9 @@ const FinvizDashboard: React.FC = () => {
                             style={{ marginTop: '16px' }}
                             headStyle={{ backgroundColor: '#f5f5f5' }}
                           >
-                            <Paragraph 
-                              ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
-                              style={{ fontSize: '13px', color: '#666' }}
-                            >
-                              {selectedNewsForAnalysis.content}
-                            </Paragraph>
+                            <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.8' }}>
+                              {highlightKeywords(selectedNewsForAnalysis.content)}
+                            </div>
                           </Card>
                         )}
 
@@ -1847,12 +1989,11 @@ const FinvizDashboard: React.FC = () => {
                     size="small"
                     headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
                   >
-                    <Paragraph 
-                      ellipsis={{ rows: 10, expandable: true, symbol: 'Expand' }}
-                      style={{ fontSize: '14px' }}
-                    >
-                      {selectedNewsForAnalysis.content || 'No content available'}
-                    </Paragraph>
+                    <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
+                      {selectedNewsForAnalysis.content 
+                        ? highlightKeywords(selectedNewsForAnalysis.content)
+                        : 'No content available'}
+                    </div>
                   </Card>
                 );
               }

@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Card,
   List,
-  Input,
-  Select,
-  DatePicker,
   Button,
   Space,
   Tag,
@@ -14,26 +11,15 @@ import {
   message,
   Modal,
   Badge,
-  Divider,
-  Tooltip,
   Empty,
-  Alert,
-  Form,
   Skeleton
 } from 'antd';
 import {
-  SearchOutlined,
-  ReloadOutlined,
-  EyeOutlined,
-  LinkOutlined,
-  ClearOutlined,
-  SettingOutlined,
-  DeleteOutlined,
-  WarningOutlined,
   CalendarOutlined,
-  RobotOutlined
+  RobotOutlined,
+  FilterOutlined
 } from '@ant-design/icons';
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 
 import { newsAPI, newsUtils } from '../services/news';
 import {
@@ -42,15 +28,15 @@ import {
   NewsTopic,
   NewsSymbol,
   NewsSearchParams,
-  NewsThemeMatch
+  NewsTheme
 } from '../types/news';
 
 import ThemeManagementModal from '../components/ThemeManagementModal';
+import ThemeFilterPanel from '../components/ThemeFilterPanel';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
-import { MARKET_COLORS, formatSimilarity } from '../types/investmentThemes';
-import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
+import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, hasAnalysisForTemplate } from '../utils/newsAnalysisHelper';
 import { 
   getClassificationFromAnalysis, 
   getClassificationTags, 
@@ -58,10 +44,26 @@ import {
   getClassificationSummary,
   getRelatedSectors
 } from '../utils/newsClassificationHelper';
+import { themesAPI } from '../services/themes';
+import type { ThemeFilterState, FilteredNews } from '../types/themes';
 
-const { Text, Title, Paragraph } = Typography;
-const { RangePicker } = DatePicker;
-const { Option } = Select;
+const { Text } = Typography;
+
+// 辅助函数：获取情感颜色
+const getSentimentColor = (polarity?: number) => {
+  if (!polarity) return 'default';
+  if (polarity > 0.1) return 'green';
+  if (polarity < -0.1) return 'red';
+  return 'orange';
+};
+
+// 辅助函数：获取情感文本
+const getSentimentText = (polarity?: number) => {
+  if (!polarity) return 'Neutral';
+  if (polarity > 0.1) return 'Positive';
+  if (polarity < -0.1) return 'Negative';
+  return 'Neutral';
+};
 
 interface NewsPageState {
   loading: boolean;
@@ -72,11 +74,15 @@ interface NewsPageState {
   selectedNews: NewsItem | null;
   detailModalVisible: boolean;
   themeManagementModalVisible: boolean;
-  deleteModalVisible: boolean;
-  deleteLoading: boolean;
-  deleteStartDate: string | null;
-  deleteEndDate: string | null;
   expandedNewsItems: Set<number>;
+  // 主题筛选相关
+  themeFilters: ThemeFilterState;
+  filteredNewsData: FilteredNews[];
+  filteredTotal: number;
+  filteredPage: number;
+  filteredPageSize: number;
+  // 主题关键词数据（用于高亮）
+  themes: NewsTheme[];
 }
 
 const NewsPage: React.FC = () => {
@@ -93,70 +99,46 @@ const NewsPage: React.FC = () => {
     selectedNews: null,
     detailModalVisible: false,
     themeManagementModalVisible: false,
-    deleteModalVisible: false,
-    deleteLoading: false,
-    deleteStartDate: null,
-    deleteEndDate: null,
-    expandedNewsItems: new Set()
+    expandedNewsItems: new Set(),
+    // 主题筛选相关
+    themeFilters: {
+      categories: [],
+      eventTypes: [],
+      impactScopes: [],
+      urgencyLevels: [],
+      relatedSectors: [],
+      sourceTypes: [],
+      minConfidence: 0.5,
+      onlyPrimary: false,
+      dateRange: null,
+      market: null
+    },
+    filteredNewsData: [],
+    filteredTotal: 0,
+    filteredPage: 1,
+    filteredPageSize: 20,
+    themes: []
   });
-
-  // 加载新闻数据
-  const loadNewsData = async (params: NewsSearchParams = state.searchParams) => {
-    const startTime = Date.now();
-    
-    console.log('📰 [新闻列表] 开始加载新闻数据', {
-      params,
-      timestamp: new Date().toISOString()
-    });
-    
-    setState(prev => ({ ...prev, loading: true }));
-    try {
-      const data = await newsAPI.getNewsList(params);
-      const loadTime = Date.now() - startTime;
-      
-      console.log('✅ [新闻列表] 新闻数据加载成功', {
-        total: data.total,
-        page: data.page,
-        page_size: data.page_size,
-        total_pages: data.total_pages,
-        news_count: data.news?.length || 0,
-        load_time: `${loadTime}ms`
-      });
-      
-      setState(prev => ({
-        ...prev,
-        newsData: data,
-        searchParams: params,
-        loading: false
-      }));
-    } catch (error) {
-      const loadTime = Date.now() - startTime;
-      
-      console.error('❌ Failed to get news data [News List]', {
-        error: error,
-        params,
-        load_time: `${loadTime}ms`,
-        timestamp: new Date().toISOString()
-      });
-      
-      message.error(`Failed to get news data: ${getErrorMessage(error)}`);
-      setState(prev => ({ ...prev, loading: false }));
-    }
-  };
 
   // 加载主题和股票代码数据
   const loadMetadata = async () => {
     try {
       console.log('start to load metadata...');
-      const [topics, symbols] = await Promise.all([
+      const [topics, symbols, themesResponse] = await Promise.all([
         newsAPI.getTopics(),
-        newsAPI.getSymbols()
+        newsAPI.getSymbols(),
+        newsAPI.getThemes()
       ]);
-      console.log('loaded metadata successfully:', { topics: topics.length, symbols: symbols.length });
+      console.log('loaded metadata successfully:', { 
+        topics: topics.length, 
+        symbols: symbols.length,
+        themes: themesResponse.data.length 
+      });
       setState(prev => ({
         ...prev,
         topics,
-        symbols: symbols.slice(0, 50)
+        symbols: symbols.slice(0, 50),
+        themes: themesResponse.data.filter(t => t.is_active) // 只加载激活的主题
       }));
     } catch (error: any) {
       console.error('Failed to get metadata:', error);
@@ -164,106 +146,102 @@ const NewsPage: React.FC = () => {
     }
   };
 
+  // 加载主题筛选的新闻
+  const loadFilteredNews = async (page: number = 1, pageSize: number = 20, filters?: ThemeFilterState) => {
+    const startTime = Date.now();
+    
+    // 使用传入的 filters 或当前 state 中的 filters
+    const activeFilters = filters || state.themeFilters;
+    
+    console.log('🎯 [主题筛选] 开始加载筛选新闻', {
+      filters: activeFilters,
+      page,
+      pageSize,
+      timestamp: new Date().toISOString()
+    });
+    
+    setState(prev => ({ ...prev, loading: true }));
+    
+    try {
+      // 构建请求参数
+      const request = {
+        categories: activeFilters.categories.length > 0 ? activeFilters.categories : undefined,
+        event_types: activeFilters.eventTypes.length > 0 ? activeFilters.eventTypes : undefined,
+        impact_scopes: activeFilters.impactScopes.length > 0 ? activeFilters.impactScopes : undefined,
+        urgency_levels: activeFilters.urgencyLevels.length > 0 ? activeFilters.urgencyLevels : undefined,
+        related_sectors: activeFilters.relatedSectors.length > 0 ? activeFilters.relatedSectors : undefined,
+        source_types: activeFilters.sourceTypes.length > 0 ? activeFilters.sourceTypes : undefined,
+        min_confidence: activeFilters.minConfidence,
+        only_primary: activeFilters.onlyPrimary,
+        start_date: activeFilters.dateRange?.[0]?.format('YYYY-MM-DD'),
+        end_date: activeFilters.dateRange?.[1]?.format('YYYY-MM-DD'),
+        market: activeFilters.market || undefined,
+        page,
+        page_size: pageSize
+      };
+      
+      const response = await themesAPI.filterNews(request);
+      const loadTime = Date.now() - startTime;
+      
+      console.log('✅ [主题筛选] 筛选新闻加载成功', {
+        total: response.total,
+        page: response.page,
+        page_size: response.page_size,
+        total_pages: response.total_pages,
+        news_count: response.news?.length || 0,
+        load_time: `${loadTime}ms`
+      });
+      
+      setState(prev => ({
+        ...prev,
+        filteredNewsData: response.news,
+        filteredTotal: response.total,
+        filteredPage: response.page,
+        filteredPageSize: response.page_size,
+        loading: false
+      }));
+    } catch (error) {
+      const loadTime = Date.now() - startTime;
+      
+      console.error('❌ Failed to filter news by themes', {
+        error,
+        filters: activeFilters,
+        load_time: `${loadTime}ms`,
+        timestamp: new Date().toISOString()
+      });
+      
+      message.error(`筛选新闻失败: ${getErrorMessage(error)}`);
+      setState(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // 处理主题筛选变化
+  const handleThemeFilterChange = (filters: ThemeFilterState) => {
+    setState(prev => ({ ...prev, themeFilters: filters }));
+  };
+
+  // 应用主题筛选
+  const handleApplyThemeFilter = (filters?: ThemeFilterState) => {
+    loadFilteredNews(1, state.filteredPageSize, filters);
+  };
+
+
+  // 主题筛选分页处理
+  const handleFilteredPagination = (page: number, pageSize?: number) => {
+    loadFilteredNews(page, pageSize || state.filteredPageSize);
+  };
+
   // 初始化数据
   useEffect(() => {
     if (isAuthenticated && user) {
       console.log('NewsPage: 用户已认证', { user: user.username, token: !!localStorage.getItem('access_token') });
-      loadNewsData();
+      loadFilteredNews(1, 20); // 初始加载时也加载筛选新闻（使用默认筛选条件）
       loadMetadata();
     } else {
       console.log('NewsPage: 用户未认证或认证状态未初始化');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user]);
-
-  // 处理搜索
-  const handleSearch = () => {
-    loadNewsData({ ...state.searchParams, page: 1 });
-  };
-
-  // 处理重置
-  const handleReset = () => {
-    const resetParams = { page: 1, page_size: 20 };
-    setState(prev => ({ ...prev, searchParams: resetParams }));
-    loadNewsData(resetParams);
-  };
-
-  // 打开删除新闻弹窗
-  const openDeleteModal = () => {
-    setState(prev => ({
-      ...prev,
-      deleteModalVisible: true,
-      deleteStartDate: null,
-      deleteEndDate: null
-    }));
-  };
-
-  // 关闭删除新闻弹窗
-  const closeDeleteModal = () => {
-    setState(prev => ({
-      ...prev,
-      deleteModalVisible: false,
-      deleteStartDate: null,
-      deleteEndDate: null
-    }));
-  };
-
-  // 处理日期范围变化
-  const handleDateRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
-    if (dates && dates[0] && dates[1]) {
-      setState(prev => ({
-        ...prev,
-        deleteStartDate: dates[0]!.format('YYYY-MM-DD'),
-        deleteEndDate: dates[1]!.format('YYYY-MM-DD')
-      }));
-    } else {
-      setState(prev => ({
-        ...prev,
-        deleteStartDate: null,
-        deleteEndDate: null
-      }));
-    }
-  };
-
-  // 执行删除新闻
-  const handleDeleteNews = async () => {
-    if (!state.deleteStartDate || !state.deleteEndDate) {
-      message.error('Please select date range');
-      return;
-    }
-
-    setState(prev => ({ ...prev, deleteLoading: true }));
-    try {
-      const response = await newsAPI.deleteNewsByDateRange({
-        start_date: state.deleteStartDate,
-        end_date: state.deleteEndDate
-      });
-
-      if (response.success) {
-        message.success(response.message);
-        closeDeleteModal();
-        loadNewsData(); // 刷新新闻列表
-        loadMetadata(); // 刷新元数据
-      } else {
-        message.error(response.message || 'Failed to delete news');
-      }
-    } catch (error) {
-      console.error('Failed to delete news:', error);
-      message.error(`Failed to delete news: ${getErrorMessage(error)}`);
-    } finally {
-      setState(prev => ({ ...prev, deleteLoading: false }));
-    }
-  };
-
-  // 处理分页
-  const handleTableChange = (page: number, pageSize?: number) => {
-    const newParams = {
-      ...state.searchParams,
-      page,
-      page_size: pageSize || 20
-    };
-    loadNewsData(newParams);
-  };
 
   // 显示新闻详情
   const showNewsDetail = async (newsId: number) => {
@@ -278,17 +256,6 @@ const NewsPage: React.FC = () => {
       console.error('Failed to get news detail:', error);
       message.error(`Failed to get news detail: ${getErrorMessage(error)}`);
     }
-  };
-
-  // 更新搜索参数
-  const updateSearchParam = (key: keyof NewsSearchParams, value: any) => {
-    setState(prev => ({
-      ...prev,
-      searchParams: {
-        ...prev.searchParams,
-        [key]: value
-      }
-    }));
   };
 
   // 新闻展开/收缩功能
@@ -306,19 +273,131 @@ const NewsPage: React.FC = () => {
 
   const isNewsExpanded = (newsId: number) => state.expandedNewsItems.has(newsId);
 
-  // 情感标签辅助函数
-  const getSentimentColor = (polarity?: number) => {
-    if (!polarity) return 'default';
-    if (polarity > 0.1) return 'green';
-    if (polarity < -0.1) return 'red';
-    return 'orange';
-  };
+  // 关键词高亮函数
+  const highlightKeywords = (text: string): React.ReactNode => {
+    if (!text || state.themes.length === 0) {
+      return text;
+    }
 
-  const getSentimentText = (polarity?: number) => {
-    if (!polarity) return 'Neutral';
-    if (polarity > 0.1) return 'Positive';
-    if (polarity < -0.1) return 'Negative';
-    return 'Neutral';
+    // 收集所有关键词及其对应的主题颜色
+    interface KeywordMatch {
+      keyword: string;
+      color: string;
+      themeName: string;
+    }
+    
+    const keywordMatches: KeywordMatch[] = [];
+    
+    state.themes.forEach(theme => {
+      if (theme.keywords && theme.keywords.length > 0) {
+        theme.keywords.forEach(keyword => {
+          keywordMatches.push({
+            keyword: keyword.trim(),
+            color: theme.color || '#1890ff',
+            themeName: theme.topic_name
+          });
+        });
+      }
+    });
+
+    // 如果没有关键词，直接返回原文本
+    if (keywordMatches.length === 0) {
+      return text;
+    }
+
+    // 按关键词长度排序（长的优先），避免短词先匹配导致长词无法匹配
+    keywordMatches.sort((a, b) => b.keyword.length - a.keyword.length);
+
+    // 存储所有匹配位置和对应的主题信息
+    interface MatchPosition {
+      start: number;
+      end: number;
+      color: string;
+      keyword: string;
+      themeName: string;
+    }
+
+    const positions: MatchPosition[] = [];
+
+    // 查找所有匹配位置
+    keywordMatches.forEach(({ keyword, color, themeName }) => {
+      if (!keyword) return;
+      
+      // 转义特殊字符，并使用单词边界 \b 进行精确匹配
+      // \b 确保匹配的是完整的单词，不会匹配单词的一部分
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escapedKeyword}\\b`, 'gi');
+      let match;
+      
+      while ((match = regex.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        
+        // 检查是否与已有位置重叠
+        const isOverlapping = positions.some(pos => 
+          (start >= pos.start && start < pos.end) || 
+          (end > pos.start && end <= pos.end) ||
+          (start <= pos.start && end >= pos.end)
+        );
+        
+        if (!isOverlapping) {
+          positions.push({ start, end, color, keyword: match[0], themeName });
+        }
+      }
+    });
+
+    // 如果没有匹配，返回原文本
+    if (positions.length === 0) {
+      return text;
+    }
+
+    // 按开始位置排序
+    positions.sort((a, b) => a.start - b.start);
+
+    // 构建带高亮的文本
+    const elements: React.ReactNode[] = [];
+    let lastIndex = 0;
+
+    positions.forEach((pos, index) => {
+      // 添加高亮前的普通文本
+      if (pos.start > lastIndex) {
+        elements.push(
+          <span key={`text-${index}`}>
+            {text.substring(lastIndex, pos.start)}
+          </span>
+        );
+      }
+
+      // 添加高亮文本
+      elements.push(
+        <span
+          key={`highlight-${index}`}
+          style={{
+            backgroundColor: pos.color,
+            color: '#fff',
+            padding: '2px 4px',
+            borderRadius: '2px',
+            fontWeight: 'bold'
+          }}
+          title={`Theme: ${pos.themeName}`}
+        >
+          {pos.keyword}
+        </span>
+      );
+
+      lastIndex = pos.end;
+    });
+
+    // 添加剩余的文本
+    if (lastIndex < text.length) {
+      elements.push(
+        <span key="text-end">
+          {text.substring(lastIndex)}
+        </span>
+      );
+    }
+
+    return <>{elements}</>;
   };
 
   return (
@@ -463,406 +542,232 @@ const NewsPage: React.FC = () => {
           }
         `}
       </style>
-      {/* Statistics Summary */}
-      {state.newsData && (
-        <div style={{ 
-          marginBottom: 16, 
-          padding: '8px 16px', 
-          backgroundColor: '#fafafa', 
-          borderRadius: '6px',
-          border: '1px solid #f0f0f0'
-        }}>
-          <Row gutter={16} align="middle">
-            <Col span={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text strong style={{ fontSize: '16px', color: '#1890ff' }}>
-                  {state.newsData.total}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: '11px' }}>Total News</Text>
-              </div>
-            </Col>
-            <Col span={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text strong style={{ fontSize: '16px', color: '#52c41a' }}>
-                  {state.topics.length}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: '11px' }}>Active Topics</Text>
-              </div>
-            </Col>
-            <Col span={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text strong style={{ fontSize: '16px', color: '#faad14' }}>
-                  {state.symbols.length}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: '11px' }}>Related Symbols</Text>
-              </div>
-            </Col>
-            <Col span={6}>
-              <div style={{ textAlign: 'center' }}>
-                <Text strong style={{ fontSize: '16px', color: '#722ed1' }}>
-                  {state.newsData.total_pages}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: '11px' }}>Total Pages</Text>
-              </div>
-            </Col>
-          </Row>
-        </div>
-      )}
-
-      {/* Search and Filter Area */}
-      <Card style={{ marginBottom: 16, padding: '8px' }}>
-        <Row gutter={[16, 8]} align="middle">
+      {/* 主题筛选面板 */}
+        <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={6}>
-            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Input
-                placeholder="Search news title or content"
-                prefix={<SearchOutlined />}
-                value={state.searchParams.search_text}
-                onChange={(e) => updateSearchParam('search_text', e.target.value)}
-                onPressEnter={handleSearch}
-                size="small"
-                style={{ fontSize: '12px', height: '20px', width: '100%' }}
-              />
-            </div>
-          </Col>
-          <Col span={4}>
-            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Select
-                placeholder="Select topic"
-                allowClear
-                style={{ width: '100%', fontSize: '12px' }}
-                value={state.searchParams.topic_id}
-                onChange={(value) => updateSearchParam('topic_id', value)}
-                size="small"
-                dropdownStyle={{ fontSize: '12px' }}
-              >
-                {state.topics.map(topic => (
-                  <Option key={topic.id} value={topic.id} style={{ fontSize: '12px' }}>
-                    <Badge color={newsUtils.getTopicColor(topic)} text={topic.topic_name} />
-                  </Option>
-                ))}
-              </Select>
-            </div>
-          </Col>
-          <Col span={4}>
-            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Select
-                placeholder="Select symbol"
-                allowClear
-                showSearch
-                style={{ width: '100%', fontSize: '12px' }}
-                value={state.searchParams.symbol_code}
-                onChange={(value) => updateSearchParam('symbol_code', value)}
-                filterOption={(input, option) =>
-                  option?.children?.toString().toLowerCase().includes(input.toLowerCase()) ?? false
-                }
-                size="small"
-                dropdownStyle={{ fontSize: '12px' }}
-              >
-                {state.symbols.map(symbol => (
-                  <Option key={symbol.symbol_code} value={symbol.symbol_code} style={{ fontSize: '12px' }}>
-                    {newsUtils.formatSymbolCode(symbol.symbol_code)} ({symbol.news_count})
-                  </Option>
-                ))}
-              </Select>
-            </div>
-          </Col>
-          <Col span={5}>
-            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                            <RangePicker
-                style={{ width: '100%', fontSize: '12px', height: '20px' }}
-                value={[
-                  state.searchParams.start_date ? dayjs(state.searchParams.start_date) : null,
-                  state.searchParams.end_date ? dayjs(state.searchParams.end_date) : null
-                ]}
-                onChange={(dates) => {
-                  updateSearchParam('start_date', dates?.[0]?.format('YYYY-MM-DD'));
-                  updateSearchParam('end_date', dates?.[1]?.format('YYYY-MM-DD'));
-                }}
-                size="small"
-                inputReadOnly={false}
-                placeholder={['开始日期', '结束日期']}
-                format="YYYY-MM-DD"
-              />
-            </div>
-          </Col>
-          <Col span={5}>
-            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<SearchOutlined />}
-                  onClick={handleSearch}
-                  size="small"
-                  style={{ fontSize: '12px' }}
-                >
-                  Search
-                </Button>
-                <Button
-                  icon={<ClearOutlined />}
-                  onClick={handleReset}
-                  size="small"
-                  style={{ fontSize: '12px' }}
-                >
-                  Reset
-                </Button>
-              </Space>
-            </div>
-          </Col>
-        </Row>
-      </Card>
-
-
-
-      {/* News List */}
-      <Card>
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-          <Text strong style={{ fontSize: '14px' }}>News List</Text>
-          <Space>
-            <Button
-              danger
-              icon={<DeleteOutlined />}
-              onClick={openDeleteModal}
-              size="small"
-            >
-              Delete News
-            </Button>
-            <Button
-              icon={<SettingOutlined />}
-              onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
-              size="small"
-            >
-              Theme Management
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => loadNewsData(state.searchParams)}
+            <ThemeFilterPanel
+              onFilterChange={handleThemeFilterChange}
+              onApply={handleApplyThemeFilter}
               loading={state.loading}
-              size="small"
-            >
-              Refresh
-            </Button>
-          </Space>
-        </div>
-        
-        {state.loading ? (
-          <div>
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Card key={index} style={{ marginBottom: '16px' }}>
-                <Skeleton active paragraph={{ rows: 2 }} />
-                <div style={{ marginTop: '12px' }}>
-                  <Skeleton.Input style={{ width: '60%' }} size="small" />
-          </div>
-              </Card>
-            ))}
-          </div>
-        ) : !state.newsData || state.newsData.news.length === 0 ? (
-          <Empty description="No news data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        ) : (
-          <>
-          <div style={{ position: 'relative' }}>
-              {state.newsData.news.map((item, index) => (
-              <div key={item.id} style={{ position: 'relative', marginBottom: '24px' }}>
-                {/* Timeline line */}
-                {index < state.newsData!.news.length - 1 && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '40px',
-                      top: '60px',
-                      bottom: '-24px',
-                      width: '2px',
-                      backgroundColor: '#d9d9d9',
-                      zIndex: 1
+            />
+          </Col>
+          <Col span={18}>
+            {/* 主题筛选模式下的新闻列表 */}
+            <Card
+              title={
+                <Space>
+                  <FilterOutlined />
+                  <span>Filtered Results</span>
+                  <Badge 
+                    count={state.filteredTotal} 
+                    overflowCount={999}
+                    style={{ 
+                      fontSize: '10px',
+                      height: '18px',
+                      lineHeight: '18px',
+                      padding: '0 6px',
+                      minWidth: '18px',
+                      backgroundColor: '#ff9c9c'
                     }}
                   />
-                )}
-                
-                {/* Timeline dot */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '36px',
-                    top: '22px',
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    backgroundColor: '#1890ff',
-                    border: '1px solid #fff',
-                    boxShadow: '0 0 0 1px #1890ff',
-                    zIndex: 2
-                  }}
-                />
-                
-                {/* Content */}
-                <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
-                  <List.Item
-                    extra={
-                      <Space direction="vertical" align="end">
-                        <Space size={[4, 4]} wrap>
-                          {/* 情感标签 */}
-                          <Tag 
-                              color={getSentimentColor(item.sentiment_polarity)}
-                            style={{ fontSize: '8px', margin: 0 }}
-                          >
-                              {getSentimentText(item.sentiment_polarity)}
-                          </Tag>
-                            {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
-                            <Tag 
-                              color="blue" 
-                              icon={<RobotOutlined />} 
-                              style={{ fontSize: '8px', margin: 0 }}
-                            >
-                              AI分析
-                            </Tag>
-                          )}
-                        </Space>
-                      </Space>
-                    }
-                  >
-                    <List.Item.Meta
-                      avatar={
-                        <Space align="center" style={{ minWidth: '120px' }}>
-                          <Text type="secondary" style={{ fontSize: '12px' }}>
-                              <CalendarOutlined /> {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
-                            </Text>
-                            <Text type="secondary" style={{ fontSize: '11px' }}>
-                              {item.date ? new Date(item.date).toLocaleTimeString() : 'N/A'}
-                          </Text>
-                        </Space>
-                      }
-                      title={
-                        <Space>
-                          <span 
-                            style={{ 
-                              fontSize: '14px', 
-                              cursor: 'pointer',
-                              color: '#1890ff',
-                              textDecoration: 'underline',
-                              maxWidth: '800px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              display: 'inline-block'
-                            }}
-                              title={item.title}
-                              onClick={() => {
-                                setState(prev => ({
-                                  ...prev,
-                                  selectedNews: item,
-                                  detailModalVisible: true
-                                }));
-                              }}
-                          >
-                            {item.title}
-                          </span>
-                          <Text type="secondary" style={{ fontSize: '12px' }}>
-                            - {newsUtils.getSourceDisplayName(item.source)}
-                          </Text>
-                        </Space>
-                      }
-                      description={null}
-                    />
-                    <div style={{ fontSize: '13px', marginBottom: '8px' }}>
-                      {(() => {
-                          const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
-                        return displayContent ? (
-                          <div>
-                            <div style={{ 
-                              maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
-                              overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
-                              position: 'relative'
-                            }}>
-                              <MarkdownRenderer 
-                                content={displayContent}
-                                style={{
-                                  fontSize: '13px',
-                                  lineHeight: '1.4'
-                                }}
-                              />
-                              {!isNewsExpanded(item.id) && (
-                                <div style={{
-                                  position: 'absolute',
-                                  bottom: 0,
-                                  left: 0,
-                                  right: 0,
-                                  height: '20px',
-                                  background: 'linear-gradient(transparent, white)',
-                                  pointerEvents: 'none'
-                                }} />
-                              )}
-                            </div>
-                            <Button
-                              type="link"
-                              size="small"
-                              onClick={() => toggleNewsExpansion(item.id)}
-                              style={{ 
-                                padding: '4px 0', 
-                                fontSize: '12px',
-                                height: 'auto'
-                              }}
-                            >
-                              {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
-                            </Button>
-                          </div>
-                        ) : null;
-                      })()}
-                    </div>
-                  </List.Item>
-                </div>
-              </div>
-            ))}
-            </div>
-            
-            {/* Pagination */}
-            <div style={{ marginTop: '24px', textAlign: 'center' }}>
-              <Space>
+                </Space>
+              }
+              extra={
                 <Button
-                  disabled={!state.newsData || state.newsData.page <= 1}
-                  onClick={() => {
-                    if (state.newsData) {
-                      handleTableChange(state.newsData.page - 1, state.newsData.page_size);
-                    }
-                  }}
-                >
-                  Previous
-                </Button>
-                <Text>
-                  Page {state.newsData?.page || 1} of {state.newsData?.total_pages || 1}
-                  {' '}(Total: {state.newsData?.total || 0} items)
-                </Text>
-                <Button
-                  disabled={!state.newsData || state.newsData.page >= state.newsData.total_pages}
-                  onClick={() => {
-                    if (state.newsData) {
-                      handleTableChange(state.newsData.page + 1, state.newsData.page_size);
-                    }
-                  }}
-                >
-                  Next
-                </Button>
-                <Select
-                  value={state.newsData?.page_size || 20}
-                  onChange={(value) => {
-                    handleTableChange(1, value);
-                  }}
-                  style={{ width: 100 }}
+                  icon={<FilterOutlined />}
+                  onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
                   size="small"
                 >
-                  <Option value={10}>10 / page</Option>
-                  <Option value={20}>20 / page</Option>
-                  <Option value={50}>50 / page</Option>
-                  <Option value={100}>100 / page</Option>
-                </Select>
-              </Space>
-            </div>
-          </>
-        )}
-      </Card>
+                  Highlight Setting
+                </Button>
+              }
+            >
+              {state.loading ? (
+                <div style={{ textAlign: 'center', padding: '40px' }}>
+                  <Skeleton active />
+                </div>
+              ) : state.filteredNewsData.length === 0 ? (
+                <Empty description="No news found" />
+              ) : (
+                <>
+                  <div style={{ position: 'relative' }}>
+                    {state.filteredNewsData.map((item: FilteredNews, index: number) => (
+                      <div key={item.id} style={{ position: 'relative', marginBottom: '24px' }}>
+                        {/* Timeline line */}
+                        {index < state.filteredNewsData.length - 1 && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: '40px',
+                              top: '60px',
+                              bottom: '-24px',
+                              width: '2px',
+                              backgroundColor: '#d9d9d9',
+                              zIndex: 1
+                            }}
+                          />
+                        )}
+                        
+                        {/* Timeline dot */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '36px',
+                            top: '22px',
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            backgroundColor: '#1890ff',
+                            border: '1px solid #fff',
+                            boxShadow: '0 0 0 1px #1890ff',
+                            zIndex: 2
+                          }}
+                        />
+                        
+                        {/* Content */}
+                        <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
+                          <List.Item
+                            extra={
+                              <Space direction="vertical" align="end">
+                                <Space size={[4, 4]} wrap>
+                                  {/* 情感标签 */}
+                                  <Tag 
+                                    color={getSentimentColor(item.sentiment_polarity)}
+                                    style={{ fontSize: '8px', margin: 0 }}
+                                  >
+                                    {getSentimentText(item.sentiment_polarity)}
+                                  </Tag>
+                                  {/* AI分析标签 */}
+                                  {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
+                                    <Tag 
+                                      color="blue" 
+                                      icon={<RobotOutlined />} 
+                                      style={{ fontSize: '8px', margin: 0 }}
+                                    >
+                                      AI分析
+                                    </Tag>
+                                  )}
+                                </Space>
+                              </Space>
+                            }
+                          >
+                            <List.Item.Meta
+                              avatar={
+                                <Space align="center" style={{ minWidth: '120px' }}>
+                                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                                    <CalendarOutlined /> {item.date ? dayjs(item.date).format('YYYY-MM-DD') : 'N/A'}
+                                  </Text>
+                                  <Text type="secondary" style={{ fontSize: '11px' }}>
+                                    {item.date ? dayjs(item.date).format('HH:mm:ss') : 'N/A'}
+                                  </Text>
+                                </Space>
+                              }
+                              title={
+                                <Space>
+                                  <span 
+                                    style={{ 
+                                      fontSize: '14px', 
+                                      cursor: 'pointer',
+                                      color: '#1890ff',
+                                      textDecoration: 'underline',
+                                      maxWidth: '800px',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}
+                                    title={item.title}
+                                    onClick={() => showNewsDetail(item.id)}
+                                  >
+                                    {item.title}
+                                  </span>
+                                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                                    - {newsUtils.getSourceDisplayName(item.source)}
+                                  </Text>
+                                </Space>
+                              }
+                              description={null}
+                            />
+                            
+                            {/* 新闻内容 - 支持展开/收起 */}
+                            <div style={{ fontSize: '13px', marginBottom: '8px' }}>
+                              {(() => {
+                                const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
+                                return displayContent ? (
+                                  <div>
+                                    <div style={{ 
+                                      maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
+                                      overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
+                                      position: 'relative'
+                                    }}>
+                                      <MarkdownRenderer 
+                                        content={displayContent}
+                                        style={{
+                                          fontSize: '13px',
+                                          lineHeight: '1.4'
+                                        }}
+                                      />
+                                      {!isNewsExpanded(item.id) && (
+                                        <div style={{
+                                          position: 'absolute',
+                                          bottom: 0,
+                                          left: 0,
+                                          right: 0,
+                                          height: '20px',
+                                          background: 'linear-gradient(transparent, white)',
+                                          pointerEvents: 'none'
+                                        }} />
+                                      )}
+                                    </div>
+                                    <Button
+                                      type="link"
+                                      size="small"
+                                      onClick={() => toggleNewsExpansion(item.id)}
+                                      style={{ 
+                                        padding: '4px 0', 
+                                        fontSize: '12px',
+                                        height: 'auto'
+                                      }}
+                                    >
+                                      {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
+                                    </Button>
+                                  </div>
+                                ) : null;
+                              })()}
+                            </div>
+                          </List.Item>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+
+                  {/* 分页 */}
+                  <div style={{ marginTop: 16, textAlign: 'center' }}>
+                    <Button.Group>
+                      <Button
+                        disabled={state.filteredPage <= 1}
+                        onClick={() => handleFilteredPagination(state.filteredPage - 1)}
+                      >
+                        上一页
+                      </Button>
+                      <Button disabled>
+                        {state.filteredPage} / {Math.ceil(state.filteredTotal / state.filteredPageSize)}
+                      </Button>
+                      <Button
+                        disabled={state.filteredPage >= Math.ceil(state.filteredTotal / state.filteredPageSize)}
+                        onClick={() => handleFilteredPagination(state.filteredPage + 1)}
+                      >
+                        下一页
+                      </Button>
+                    </Button.Group>
+                  </div>
+                </>
+              )}
+            </Card>
+          </Col>
+        </Row>
+
 
       {/* AI Analysis Details Modal */}
       <Modal
@@ -946,12 +851,9 @@ const NewsPage: React.FC = () => {
                             style={{ marginTop: '16px' }}
                             headStyle={{ backgroundColor: '#f5f5f5' }}
                           >
-                            <Paragraph 
-                              ellipsis={{ rows: 3, expandable: true, symbol: 'Expand' }}
-                              style={{ fontSize: '13px', color: '#666' }}
-                            >
-                              {state.selectedNews.content}
-                            </Paragraph>
+                            <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.8' }}>
+                              {highlightKeywords(state.selectedNews.content)}
+                            </div>
                           </Card>
                         )}
 
@@ -968,14 +870,14 @@ const NewsPage: React.FC = () => {
                               <div>
                                 <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Tickers:</Text>
                                 <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                  {state.selectedNews.symbols.map((symbol, index) => (
-                                    <Tag key={index} color="default" style={{ fontSize: '9px' }}>
-                      {newsUtils.formatSymbolCode(symbol)}
-                    </Tag>
-                  ))}
+                                  {state.selectedNews.symbols.map(symbol => (
+                                    <Tag key={symbol} color="default" style={{ fontSize: '9px' }}>
+                                      {symbol}
+                                    </Tag>
+                                  ))}
                                 </Space>
-              </div>
-            )}
+                              </div>
+                            )}
 
                             {/* Classification Tags */}
                             {(() => {
@@ -1123,67 +1025,17 @@ const NewsPage: React.FC = () => {
                     size="small"
                     headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
                   >
-                    <Paragraph style={{ fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {state.selectedNews.content || 'No content available'}
-                  </Paragraph>
+                    <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
+                      {state.selectedNews.content 
+                        ? highlightKeywords(state.selectedNews.content)
+                        : 'No content available'}
+                    </div>
                   </Card>
                 );
               }
             })()}
           </>
         )}
-      </Modal>
-
-      {/* 删除新闻弹窗 */}
-      <Modal
-        title={
-          <Space>
-            <WarningOutlined style={{ color: '#ff4d4f' }} />
-            <Text>按日期范围删除新闻</Text>
-          </Space>
-        }
-        open={state.deleteModalVisible}
-        onCancel={closeDeleteModal}
-        onOk={handleDeleteNews}
-        okText="确认删除"
-        cancelText="取消"
-        okButtonProps={{ 
-          danger: true, 
-          loading: state.deleteLoading,
-          disabled: !state.deleteStartDate || !state.deleteEndDate
-        }}
-        width={500}
-      >
-        <Alert
-          message="警告"
-          description="此操作将永久删除选定日期范围内的新闻及所有相关数据（包括 news_auto_tags_relations、news_symbols、news_tags 等），此操作不可撤销！"
-          type="warning"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
-        
-        <Form layout="vertical">
-          <Form.Item label="Select date range" required>
-            <RangePicker
-              style={{ width: '100%' }}
-              onChange={handleDateRangeChange}
-              format="YYYY-MM-DD"
-              placeholder={['Start date', 'End date']}
-            />
-          </Form.Item>
-          
-          {state.deleteStartDate && state.deleteEndDate && (
-            <Alert
-              message={
-                <Text>
-                  您即将删除 {state.deleteStartDate} 至 {state.deleteEndDate} 之间的新闻
-                </Text>
-              }
-              type="info"
-              showIcon
-            />
-          )}
-        </Form>
       </Modal>
 
       {/* 主题管理模态框 */}

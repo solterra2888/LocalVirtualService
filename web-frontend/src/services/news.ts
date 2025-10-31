@@ -11,9 +11,7 @@ import {
   NewsTheme,
   CreateThemeParams,
   UpdateThemeParams,
-  ThemeKeywordParams,
-  DeleteNewsByDateRangeParams,
-  DeleteNewsResponse
+  ThemeKeywordParams
 } from '../types/news';
 
 // 新闻API服务
@@ -186,17 +184,6 @@ export const newsAPI = {
     return api.post(`/news/themes/${themeId}/reset`);
   },
 
-  // ============ 新闻删除API ============
-
-  // 按日期范围删除新闻
-  deleteNewsByDateRange: async (params: DeleteNewsByDateRangeParams): Promise<DeleteNewsResponse> => {
-    const queryParams = new URLSearchParams();
-    
-    queryParams.append('start_date', params.start_date);
-    queryParams.append('end_date', params.end_date);
-
-    return api.delete(`/news/delete-by-date-range?${queryParams.toString()}`);
-  }
 };
 
 // 新闻工具函数

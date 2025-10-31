@@ -170,22 +170,6 @@ export interface ThemeKeywordParams {
   weights?: string;
 }
 
-// 删除新闻相关类型
-export interface DeleteNewsByDateRangeParams {
-  start_date: string;  // YYYY-MM-DD格式
-  end_date: string;    // YYYY-MM-DD格式
-}
-
-export interface DeleteNewsResponse {
-  success: boolean;
-  message: string;
-  data: {
-    deleted_count: number;
-    start_date: string;
-    end_date: string;
-  };
-}
-
 // API测试相关类型
 export interface EODHDTestResponse {
   success: boolean;
