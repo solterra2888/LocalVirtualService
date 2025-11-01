@@ -232,9 +232,9 @@ class EODHDNewsService:
             raise
     
     def fetch_and_store_news(self, symbols: Optional[str] = None, topic: Optional[str] = None,
-                           start_date: Optional[str] = None, end_date: Optional[str] = None,
-                           max_results: Optional[int] = None, topic_filter: Optional[str] = None,
-                           keywords: Optional[List[str]] = None, scheduler_source: Optional[str] = None) -> Dict[str, Any]:
+                          start_date: Optional[str] = None, end_date: Optional[str] = None,
+                          max_results: Optional[int] = None, topic_filter: Optional[str] = None,
+                          keywords: Optional[List[str]] = None, scheduler_source: Optional[str] = None) -> Dict[str, Any]:
         """
         获取新闻并存储到数据库
         
@@ -261,6 +261,12 @@ class EODHDNewsService:
                    keywords_count=len(keywords) if keywords else 0)
         
         try:
+            # 解析请求的symbols列表（用于后续过滤）
+            requested_symbols = []
+            if symbols:
+                requested_symbols = [s.strip().upper() for s in symbols.split(',') if s.strip()]
+                logger.info("解析请求的symbols", count=len(requested_symbols), symbols_preview=requested_symbols[:10])
+            
             # 步骤1：获取新闻
             logger.info("步骤1：从EODHD API获取原始新闻数据")
             logger.info("调用_get_all_news方法")
@@ -314,8 +320,8 @@ class EODHDNewsService:
             
             for i, article in enumerate(news_articles):
                 try:
-                    # 传入缓存，避免每条新闻都查询数据库
-                    processed = self._process_article_for_db(article, topic_keywords_cache)
+                    # 传入缓存和请求的symbols列表，用于过滤无关的symbols
+                    processed = self._process_article_for_db(article, topic_keywords_cache, requested_symbols)
                     processed_articles.append(processed)
                     if (i + 1) % 100 == 0:  # 每100条记录一次进度
                         logger.debug("新闻处理进度", 
@@ -667,12 +673,15 @@ class EODHDNewsService:
         except Exception:
             return []
     
-    def _process_article_for_db(self, article: Dict[str, Any], topic_keywords_cache: Dict[str, List[str]] = None) -> Dict[str, Any]:
+    def _process_article_for_db(self, article: Dict[str, Any], 
+                               topic_keywords_cache: Dict[str, List[str]] = None,
+                               requested_symbols: Optional[List[str]] = None) -> Dict[str, Any]:
         """处理文章数据以适应数据库格式
         
         Args:
             article: 新闻文章数据
             topic_keywords_cache: 主题关键词缓存（可选，用于批量处理时避免重复查询）
+            requested_symbols: 请求的symbols列表（可选，用于过滤无关symbols）
         """
         # 从文章中提取情感数据
         sentiment = article.get('sentiment') or {}
@@ -686,13 +695,37 @@ class EODHDNewsService:
             else:
                 source = source or 'Unknown'
         
+        # 获取并过滤symbols
+        raw_symbols = article.get('symbols', [])
+        if requested_symbols and raw_symbols:
+            # 如果提供了requested_symbols，过滤只保留相关的symbols
+            filtered_symbols = []
+            removed_symbols = []
+            for symbol in raw_symbols:
+                if self._is_symbol_relevant(symbol, requested_symbols):
+                    filtered_symbols.append(symbol)
+                else:
+                    removed_symbols.append(symbol)
+            symbols = filtered_symbols
+            
+            # 记录过滤效果（仅当有symbols被过滤时）
+            if removed_symbols:
+                logger.debug("过滤无关symbols", 
+                           title=article.get('title', '')[:50],
+                           raw_symbols=raw_symbols,
+                           kept_symbols=filtered_symbols,
+                           removed_symbols=removed_symbols)
+        else:
+            # 没有提供requested_symbols时，保留所有symbols
+            symbols = raw_symbols
+        
         processed = {
             'date': article.get('date'),
             'title': article.get('title'),
             'content': article.get('content'),
             'link': article.get('link'),
             'source': source,
-            'symbols': article.get('symbols', []),
+            'symbols': symbols,  # 使用过滤后的symbols
             'tags': self._auto_tag_article(article, topic_keywords_cache),  # 用户自定义的topic tags
             'api_tags': article.get('tags', []),      # EODHD API原始tags
             'sentiment_polarity': sentiment.get('polarity') if sentiment else None,
@@ -703,6 +736,59 @@ class EODHDNewsService:
         }
         
         return processed
+    
+    def _is_symbol_relevant(self, symbol: str, requested_symbols: List[str]) -> bool:
+        """
+        判断一个symbol是否与请求的symbols列表相关
+        
+        Args:
+            symbol: 要检查的symbol（如 "1810.HK"）
+            requested_symbols: 请求的symbols列表（如 ["1810.HK", "AAPL.US"]）
+            
+        Returns:
+            bool: 如果symbol与请求的symbols相关则返回True，否则返回False
+        """
+        if not symbol or not requested_symbols:
+            return False
+        
+        symbol_upper = symbol.strip().upper()
+        
+        # 将 requested_symbols 也转换为大写（确保大小写不敏感）
+        requested_symbols_upper = [r.strip().upper() for r in requested_symbols]
+        
+        # 直接精确匹配
+        if symbol_upper in requested_symbols_upper:
+            return True
+        
+        # 检查是否是同一个股票的不同表示形式
+        # 例如：AAPL 和 AAPL.US，或 1810 和 1810.HK
+        symbol_parts = symbol_upper.split('.')
+        symbol_code = symbol_parts[0]
+        symbol_exchange = symbol_parts[1] if len(symbol_parts) > 1 else None
+        
+        for requested in requested_symbols_upper:
+            requested_parts = requested.split('.')
+            requested_code = requested_parts[0]
+            requested_exchange = requested_parts[1] if len(requested_parts) > 1 else None
+            
+            # 股票代码必须完全一致
+            if symbol_code != requested_code:
+                continue
+            
+            # 如果股票代码一致，检查交易所
+            if symbol_exchange and requested_exchange:
+                # 两者都有交易所后缀，必须完全匹配
+                if symbol_exchange == requested_exchange:
+                    return True
+            elif not symbol_exchange and not requested_exchange:
+                # 两者都没有交易所后缀，匹配
+                return True
+            elif not symbol_exchange or not requested_exchange:
+                # 一个有交易所后缀，一个没有，也认为匹配
+                # 例如：AAPL 匹配 AAPL.US
+                return True
+        
+        return False
     
     def _extract_source_from_url(self, url: str) -> str:
         """从URL中提取来源信息"""

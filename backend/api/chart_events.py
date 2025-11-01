@@ -114,7 +114,7 @@ async def create_chart_event(
         )
 
 
-@router.get("/{symbol}", response_model=List[ChartEventResponse], summary="获取指定股票的事件")
+@router.get("/{symbol}", summary="获取指定股票的事件")
 async def get_chart_events_by_symbol(
     symbol: str,
     current_user: UserResponse = Depends(get_current_user)

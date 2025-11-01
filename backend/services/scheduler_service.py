@@ -574,7 +574,13 @@ class SchedulerService:
                 'symbols': None,
                 'topic': None,
                 'topic_filter': None,
-                'keywords': None
+                'keywords': None,
+                'auto_analyze': False,
+                'use_celery': True,
+                'analysis_templates': ["news_summary_v1", "news_classification"],
+                'analysis_batch_size': 1000,
+                'max_concurrent': 5,
+                'enable_theme_matching': True
             },
             created_by=created_by
         )
@@ -590,7 +596,13 @@ class SchedulerService:
             task_params={
                 'max_results': 100,
                 'recent_days': None,
-                'user_id': None  # 获取所有用户的watchlist
+                'user_id': None,  # 获取所有用户的watchlist
+                'auto_analyze': False,
+                'use_celery': True,
+                'analysis_templates': ["news_summary_v1", "news_classification"],
+                'analysis_batch_size': 1000,
+                'max_concurrent': 5,
+                'enable_theme_matching': True
             },
             created_by=created_by
         )

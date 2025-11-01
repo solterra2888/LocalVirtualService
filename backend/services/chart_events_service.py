@@ -260,6 +260,52 @@ class ChartEventsService:
             error(f"删除图表事件失败: {str(e)}", source="chart_events")
             return False
 
+    def delete_events_by_symbol(self, user_id: int, symbol: str) -> int:
+        """
+        删除指定用户的指定股票的所有事件（用于级联删除）
+        
+        Args:
+            user_id: 用户ID
+            symbol: 股票代码
+            
+        Returns:
+            删除的事件数量
+        """
+        if not self.db_manager:
+            warning("数据库连接不可用", source="chart_events")
+            return 0
+
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                return 0
+
+            with conn.cursor() as cursor:
+                # 生成可能的symbol变体，确保删除所有相关事件
+                symbol_variants = self._get_symbol_variants(symbol)
+                
+                # 使用IN查询来删除所有可能的symbol变体
+                placeholders = ','.join(['%s'] * len(symbol_variants))
+                delete_sql = f"""
+                    DELETE FROM chart_events 
+                    WHERE user_id = %s AND symbol IN ({placeholders})
+                """
+                
+                cursor.execute(delete_sql, [user_id] + symbol_variants)
+                deleted_count = cursor.rowcount
+                conn.commit()
+                
+                if deleted_count > 0:
+                    info(f"级联删除图表事件: user_id={user_id}, symbol={symbol}, variants={symbol_variants}, deleted={deleted_count}", source="chart_events")
+                else:
+                    info(f"没有需要删除的图表事件: user_id={user_id}, symbol={symbol}", source="chart_events")
+                
+                return deleted_count
+
+        except Exception as e:
+            error(f"删除股票事件失败: symbol={symbol}, error={str(e)}", source="chart_events")
+            return 0
+
     def get_user_events_summary(self, user_id: int) -> Dict[str, Any]:
         """
         获取用户事件统计摘要

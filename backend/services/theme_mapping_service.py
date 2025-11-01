@@ -413,7 +413,11 @@ class ThemeMappingService:
             metadata_json = json.dumps(metadata)
             
             for dim in dimensions_to_insert:
+                # 🔥 使用 SAVEPOINT 机制：每个插入操作独立，失败不影响后续操作
+                savepoint_name = f"dim_{dim['title']}_{len(inserted_records)}"
                 try:
+                    cursor.execute(f"SAVEPOINT {savepoint_name}")
+                    
                     # 对于有 llm_classification_title 的维度，使用 unique_news_classification_dimension 约束
                     # 对于 related_sectors 这种多个值的维度，使用 theme_name 来区分
                     if dim['title'] == 'related_sectors':
@@ -492,10 +496,21 @@ class ThemeMappingService:
                         })
                         logger.debug(f"  ✅ Inserted/Updated {dim['title']}: {dim['value']}")
                     
+                    # 释放 savepoint（成功）
+                    cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                    
                 except Exception as e:
-                    error_msg = f"Failed to insert {dim['title']}={dim['value']}: {str(e)}"
-                    errors.append(error_msg)
-                    logger.error(f"  ❌ {error_msg}")
+                    # 回滚到 savepoint，不影响其他操作
+                    try:
+                        cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                    except:
+                        pass  # savepoint 可能已经失效
+                    
+                    # 清理错误信息中的换行符，使日志更清晰
+                    error_msg = str(e).replace('\n', ' ').strip()
+                    error_detail = f"Failed to insert {dim['title']}={dim['value']}: {error_msg}"
+                    errors.append(error_detail)
+                    logger.error(f"  ❌ {error_detail}")
                     # 继续处理下一个维度，不中断事务
             
             conn.commit()

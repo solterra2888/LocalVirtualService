@@ -413,7 +413,7 @@ async def create_eodhd_news_task(
             analysis_templates_list = [request.analysis_template]
         elif not analysis_templates_list:
             # 默认值
-            analysis_templates_list = ["news_summary_v1"]
+            analysis_templates_list = ["news_summary_v1", "news_classification"]
         
         task_params = {
             'max_results': request.max_results,
@@ -1071,7 +1071,7 @@ async def create_watchlist_news_task(
             analysis_templates_list = [request.analysis_template]
         elif not analysis_templates_list:
             # 默认值
-            analysis_templates_list = ["news_summary_v1"]
+            analysis_templates_list = ["news_summary_v1", "news_classification"]
         
         task_params = {
             'max_results': request.max_results,

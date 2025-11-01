@@ -15,6 +15,38 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   className, 
   style 
 }) => {
+  // 预处理内容：为紧跟在有序列表项后的无序列表添加缩进
+  // 这样可以确保有序列表的序号连续（1. 2. 3.）而不是重复（1. 1. 1.）
+  const preprocessContent = (text: string): string => {
+    const lines = text.split('\n');
+    const processedLines: string[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const currentLine = lines[i];
+      const prevLine = i > 0 ? lines[i - 1] : '';
+      
+      // 检查当前行是否是无序列表项（以 "- " 开头，但不是已经有缩进的）
+      const isUnorderedListItem = /^- /.test(currentLine) && !/^\s+- /.test(currentLine);
+      
+      // 检查上一行是否是有序列表项或者是空行（但再上一行是有序列表项）
+      const prevIsOrderedList = /^\d+\.\s/.test(prevLine);
+      const prevIsEmpty = prevLine.trim() === '';
+      const beforePrevLine = i > 1 ? lines[i - 2] : '';
+      const beforePrevIsOrderedList = /^\d+\.\s/.test(beforePrevLine);
+      
+      // 如果当前行是无序列表且紧跟在有序列表项后（可能中间有空行），添加缩进
+      if (isUnorderedListItem && (prevIsOrderedList || (prevIsEmpty && beforePrevIsOrderedList))) {
+        processedLines.push('   ' + currentLine); // 添加3个空格缩进
+      } else {
+        processedLines.push(currentLine);
+      }
+    }
+    
+    return processedLines.join('\n');
+  };
+  
+  const processedContent = preprocessContent(content);
+  
   return (
     <div className={className} style={style}>
       <ReactMarkdown
@@ -229,7 +261,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           )
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );

@@ -11,6 +11,9 @@ interface EventDotProps {
 const EventDot: React.FC<EventDotProps> = ({ cx = 0, cy = 0, event, onClick }) => {
   const config = EVENT_TYPE_CONFIGS[event.type] || EVENT_TYPE_CONFIGS['custom'];
   
+  // DEBUG: 检查坐标和配置
+  console.log(`EventDot render - ID: ${event.id}, cx: ${cx}, cy: ${cy}, type: ${event.type}, icon: ${config.icon}, color: ${config.color}`);
+  
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onClick?.(event);
@@ -47,7 +50,7 @@ const EventDot: React.FC<EventDotProps> = ({ cx = 0, cy = 0, event, onClick }) =
         fill={config.color}
         stroke="#fff"
         strokeWidth={3}
-        filter="url(#drop-shadow)"
+        filter="url(#event-drop-shadow)"
       />
       
       {/* 内圈强调 */}
@@ -80,13 +83,6 @@ const EventDot: React.FC<EventDotProps> = ({ cx = 0, cy = 0, event, onClick }) =
       
       {/* 鼠标悬停显示标题 */}
       <title>{event.title}</title>
-      
-      {/* 定义阴影滤镜 */}
-      <defs>
-        <filter id="drop-shadow" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="1" dy="1" stdDeviation="2" floodColor="rgba(0,0,0,0.3)"/>
-        </filter>
-      </defs>
     </g>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   Form,
@@ -6,9 +6,11 @@ import {
   Select,
   DatePicker,
   Space,
-  Typography
+  Typography,
+  Button,
+  Popconfirm
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { 
   ChartEvent, 
@@ -26,6 +28,7 @@ interface EventEditModalProps {
   visible: boolean;
   onCancel: () => void;
   onSave: (eventData: EventFormData) => Promise<void>;
+  onDelete?: (eventId: string) => Promise<void>; // 删除事件的回调
   event?: ChartEvent | null; // 如果为空则为新增模式
   defaultDate?: string; // 默认日期（从图表点击获取）
   loading?: boolean;
@@ -35,11 +38,13 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
   visible,
   onCancel,
   onSave,
+  onDelete,
   event,
   defaultDate,
   loading = false
 }) => {
   const [form] = Form.useForm();
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const isEdit = !!event;
 
   useEffect(() => {
@@ -51,7 +56,6 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
           type: event.type,
           title: event.title,
           description: event.description,
-          position: event.position || EVENT_TYPE_CONFIGS[event.type].defaultPosition,
           relatedUrl: event.relatedUrl,
           relatedFileId: event.relatedFileId,
         });
@@ -60,7 +64,6 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         form.setFieldsValue({
           date: defaultDate ? dayjs(defaultDate) : dayjs(),
           type: EventType.CUSTOM,
-          position: EventPosition.MIDDLE,
         });
       }
     }
@@ -74,7 +77,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         type: values.type,
         title: values.title,
         description: values.description,
-        position: values.position,
+        position: EventPosition.MIDDLE, // 默认使用 middle
         relatedUrl: values.relatedUrl,
         relatedFileId: values.relatedFileId,
       };
@@ -91,12 +94,18 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
     onCancel();
   };
 
-  const handleTypeChange = (type: EventType) => {
-    // 当事件类型改变时，自动设置默认位置
-    const config = EVENT_TYPE_CONFIGS[type];
-    form.setFieldsValue({
-      position: config.defaultPosition
-    });
+  const handleDelete = async () => {
+    if (!event || !onDelete) return;
+    
+    setDeleteLoading(true);
+    try {
+      await onDelete(event.id);
+      form.resetFields();
+    } catch (error) {
+      console.error('Delete event failed:', error);
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   return (
@@ -113,6 +122,39 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
       confirmLoading={loading}
       width={500}
       destroyOnClose
+      footer={[
+        isEdit && onDelete && (
+          <Popconfirm
+            key="delete"
+            title="Delete Event"
+            description="Are you sure you want to delete this event? This action cannot be undone."
+            onConfirm={handleDelete}
+            okText="Yes, Delete"
+            cancelText="Cancel"
+            okButtonProps={{ danger: true, loading: deleteLoading }}
+          >
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              style={{ float: 'left' }}
+              loading={deleteLoading}
+            >
+              Delete
+            </Button>
+          </Popconfirm>
+        ),
+        <Button key="cancel" onClick={handleCancel}>
+          Cancel
+        </Button>,
+        <Button
+          key="save"
+          type="primary"
+          onClick={handleSave}
+          loading={loading}
+        >
+          {isEdit ? 'Update' : 'Create'}
+        </Button>
+      ]}
     >
       <Form
         form={form}
@@ -138,7 +180,6 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         >
           <Select
             placeholder="Select event type"
-            onChange={handleTypeChange}
           >
             {Object.entries(EVENT_TYPE_CONFIGS).map(([type, config]) => (
               <Option key={type} value={type}>
@@ -173,33 +214,6 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
             showCount
             maxLength={500}
           />
-        </Form.Item>
-
-        <Form.Item
-          label="Display Position"
-          name="position"
-          rules={[{ required: true, message: 'Please select display position' }]}
-        >
-          <Select placeholder="Select position on chart">
-            <Option value={EventPosition.TOP}>
-              <Space>
-                <span>🔝</span>
-                <span>Top</span>
-              </Space>
-            </Option>
-            <Option value={EventPosition.MIDDLE}>
-              <Space>
-                <span>🎯</span>
-                <span>Middle</span>
-              </Space>
-            </Option>
-            <Option value={EventPosition.BOTTOM}>
-              <Space>
-                <span>🔻</span>
-                <span>Bottom</span>
-              </Space>
-            </Option>
-          </Select>
         </Form.Item>
 
         <Form.Item

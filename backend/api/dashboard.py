@@ -1443,7 +1443,7 @@ async def remove_from_watchlist(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    Remove stock from user's watchlist
+    Remove stock from user's watchlist and cascade delete related chart events
     """
     try:
         db_conn_params = get_database_config()
@@ -1482,9 +1482,25 @@ async def remove_from_watchlist(
             conn.close()
             
             if affected_rows > 0:
+                # 级联删除该股票的所有图表事件
+                from backend.services.chart_events_service import get_chart_events_service
+                chart_events_service = get_chart_events_service()
+                deleted_events_count = chart_events_service.delete_events_by_symbol(
+                    current_user.user_id, 
+                    symbol
+                )
+                
+                logger.info(
+                    f"Removed {symbol} from watchlist and deleted {deleted_events_count} chart events",
+                    user_id=current_user.user_id,
+                    symbol=symbol,
+                    deleted_events=deleted_events_count
+                )
+                
                 return {
                     "message": f"Successfully removed {symbol} from watchlist",
-                    "symbol": symbol
+                    "symbol": symbol,
+                    "deleted_events": deleted_events_count
                 }
             else:
                 raise HTTPException(

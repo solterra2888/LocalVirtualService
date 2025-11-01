@@ -533,7 +533,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 label="Analysis Templates (LLM)"
                 name={['taskParams', 'analysis_templates']}
                 extra="Select one or more LLM prompt templates for text analysis (multiple templates will run in parallel)"
-                initialValue={["news_summary_v1"]}
+                initialValue={["news_summary_v1", "news_classification"]}
               >
                 <Select 
                   mode="multiple"
@@ -693,7 +693,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 label="Analysis Templates (LLM)"
                 name={['taskParams', 'analysis_templates']}
                 extra="Select one or more LLM prompt templates for text analysis (multiple templates will run in parallel)"
-                initialValue={["news_summary_v1"]}
+                initialValue={["news_summary_v1", "news_classification"]}
               >
                 <Select 
                   mode="multiple"

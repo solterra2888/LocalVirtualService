@@ -8,15 +8,13 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer,
-  ReferenceDot
+  ResponsiveContainer
 } from 'recharts';
 import { ReloadOutlined, DeleteOutlined, PlusOutlined, SettingOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { dashboardAPI, type StockPriceData } from '../services/dashboard';
 import EventEditModal from './EventEditModal';
-import EventDot from './EventDot';
 import { useChartEvents } from '../hooks/useChartEvents';
-import { ChartEvent, EventFormData } from '../types/events';
+import { ChartEvent, EventFormData, EVENT_TYPE_CONFIGS } from '../types/events';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -77,6 +75,15 @@ const StockChart: React.FC<StockChartProps> = ({
   const [eventModalVisible, setEventModalVisible] = useState<boolean>(false);
   const [editingEvent, setEditingEvent] = useState<ChartEvent | null>(null);
   const [clickedDate, setClickedDate] = useState<string | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  
+  const chartContainerRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      const width = node.offsetWidth;
+      console.log('Chart container ref set, dimensions:', width, 'x', node.offsetHeight);
+      setContainerWidth(width);
+    }
+  }, []);
   
   
   // 使用事件管理hook - 优先使用primaryTicker作为事件symbol
@@ -86,7 +93,8 @@ const StockChart: React.FC<StockChartProps> = ({
     events,
     loading: eventsLoading,
     addEvent,
-    updateEvent
+    updateEvent,
+    deleteEvent
   } = useChartEvents(eventSymbol);
 
   const fetchHistoricalData = useCallback(async () => {
@@ -185,8 +193,19 @@ const StockChart: React.FC<StockChartProps> = ({
     }
   }, [editingEvent, updateEvent, addEvent]);
 
-  // 处理图表点击事件
-  const handleChartClick = useCallback((event: any) => {
+  const handleDeleteEvent = useCallback(async (eventId: string) => {
+    try {
+      await deleteEvent(eventId);
+      message.success('Event deleted successfully');
+      setEventModalVisible(false);
+      setEditingEvent(null);
+    } catch (error) {
+      message.error('Failed to delete event');
+    }
+  }, [deleteEvent]);
+
+  // 处理图表双击事件
+  const handleChartDoubleClick = useCallback((event: any) => {
     if (!event || !event.activeLabel) return;
     
     const clickedDateStr = event.activeLabel;
@@ -198,19 +217,42 @@ const StockChart: React.FC<StockChartProps> = ({
   // 获取事件标记的Y坐标值（价格）
   const getEventYValue = useCallback((event: ChartEvent, chartData: CandlestickData[]) => {
     const dataPoint = chartData.find(d => d.date === event.date);
-    if (!dataPoint || !yAxisDomain) return null;
+    
+    console.log(`getEventYValue for event ${event.id}:`, {
+      date: event.date,
+      foundDataPoint: !!dataPoint,
+      yAxisDomain: yAxisDomain,
+      dataPoint: dataPoint
+    });
+    
+    if (!dataPoint) {
+      console.log(`Event ${event.id}: No dataPoint found for date ${event.date}`);
+      return null;
+    }
+    
+    if (!yAxisDomain) {
+      console.log(`Event ${event.id}: yAxisDomain is undefined!`);
+      return null;
+    }
 
     const [minPrice, maxPrice] = yAxisDomain;
     const priceRange = maxPrice - minPrice;
     
+    let yValue;
     switch (event.position) {
       case 'top':
-        return maxPrice - (priceRange * 0.1); // 距离顶部10%
+        yValue = maxPrice - (priceRange * 0.1); // 距离顶部10%
+        break;
       case 'bottom':
-        return minPrice + (priceRange * 0.1); // 距离底部10%
+        yValue = minPrice + (priceRange * 0.1); // 距离底部10%
+        break;
       default: // middle
-        return (dataPoint.high + dataPoint.low) / 2; // 当日平均价格
+        yValue = (dataPoint.high + dataPoint.low) / 2; // 当日平均价格
+        break;
     }
+    
+    console.log(`Event ${event.id}: Calculated yValue = ${yValue}`);
+    return yValue;
   }, [yAxisDomain]);
 
   // Custom tooltip component
@@ -283,7 +325,7 @@ const StockChart: React.FC<StockChartProps> = ({
           
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '6px', marginTop: '6px' }}>
             <p style={{ margin: '0', fontSize: '10px', color: '#999', fontStyle: 'italic' }}>
-              💡 Click here to add event marker
+              💡 Double-click here to add event marker
             </p>
           </div>
         </div>
@@ -545,13 +587,18 @@ const StockChart: React.FC<StockChartProps> = ({
       }
       style={{ marginBottom: '16px' }}
     >
-      <div style={{ height: '400px' }}>
+      <div style={{ height: '400px', position: 'relative' }} ref={chartContainerRef}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart 
             data={data} 
-            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-            onClick={handleChartClick}
+            margin={{ top: 20, right: 30, left: 60, bottom: 25 }}
+            onDoubleClick={handleChartDoubleClick}
           >
+            <defs>
+              <filter id="event-drop-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="1" dy="1" stdDeviation="2" floodColor="rgba(0,0,0,0.3)"/>
+              </filter>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis 
               dataKey="date" 
@@ -617,36 +664,93 @@ const StockChart: React.FC<StockChartProps> = ({
               strokeDasharray="2 2"
             />
             
-            {/* 事件标记 - 放在最后以确保在所有线条上方 */}
-            {showEvents && events.map(event => {
-              const eventData = data.find(d => d.date === event.date);
-              if (!eventData) return null;
-              
-              const yValue = getEventYValue(event, data);
-              if (yValue === null) return null;
-              
-              return (
-                <ReferenceDot
-                  key={`event-${event.id}`}
-                  x={event.date}
-                  y={yValue}
-                  yAxisId="price"
-                  r={0} // 设置为0，让自定义组件控制大小
-                  fill="transparent"
-                  stroke="transparent"
-                  shape={(props: any) => (
-                    <EventDot 
-                      cx={props.cx} 
-                      cy={props.cy} 
-                      event={event} 
-                      onClick={handleEditEvent} 
-                    />
-                  )}
-                />
-              );
-            })}
           </ComposedChart>
         </ResponsiveContainer>
+        
+        {/* 事件标记覆盖层 - 使用绝对定位 */}
+        {showEvents && data.length > 0 && yAxisDomain && events.length > 0 && containerWidth > 0 && (() => {
+          console.log('=== Rendering Event Overlay ===');
+          const margin = { top: 20, right: 30, left: 60, bottom: 25 };
+          const containerHeight = 400;
+          const chartWidth = containerWidth - margin.left - margin.right;
+          const chartHeight = containerHeight - margin.top - margin.bottom;
+          
+          // 获取日期范围
+          const minDate = new Date(data[0].date).getTime();
+          const maxDate = new Date(data[data.length - 1].date).getTime();
+          
+          // 获取价格范围
+          const [minPrice, maxPrice] = yAxisDomain;
+          const priceRange = maxPrice - minPrice;
+          
+          console.log('Date range:', minDate, 'to', maxDate);
+          console.log('Price range:', minPrice, 'to', maxPrice);
+          
+          return events.map(event => {
+            const eventData = data.find(d => d.date === event.date);
+            if (!eventData) return null;
+            
+            const yValue = getEventYValue(event, data);
+            if (yValue === null) return null;
+            
+            // 找到事件在数据数组中的索引位置
+            const eventIndex = data.findIndex(d => d.date === event.date);
+            if (eventIndex === -1) return null;
+            
+            // 使用索引位置计算X坐标（更精确的离散点映射）
+            // XAxis使用的是band/point scale，每个数据点占据相等的空间
+            // Recharts默认在XAxis两端有0.5个单位的padding
+            const totalPoints = data.length;
+            const padding = 6.5; // XAxis的默认padding
+            const effectiveWidth = chartWidth;
+            const pointSpacing = effectiveWidth / (totalPoints - 1 + 2 * padding);
+            
+            // 计算事件点的X坐标（考虑padding）
+            const left = margin.left + (padding + eventIndex) * pointSpacing;
+            
+            // 计算Y坐标
+            const yRatio = (maxPrice - yValue) / priceRange;
+            const top = margin.top + yRatio * chartHeight;
+            
+            console.log(`Event ${event.id}: index=${eventIndex}/${data.length}, pointSpacing=${pointSpacing.toFixed(2)}px, left=${left.toFixed(1)}px, top=${top.toFixed(1)}px`);
+            
+            const config = EVENT_TYPE_CONFIGS[event.type] || EVENT_TYPE_CONFIGS['custom'];
+            
+            return (
+              <div
+                key={event.id}
+                style={{
+                  position: 'absolute',
+                  left: `${left}px`,
+                  top: `${top}px`,
+                  transform: 'translate(-50%, -50%)',
+                  cursor: 'pointer',
+                  zIndex: 10
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEditEvent(event);
+                }}
+                title={event.title}
+              >
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '50%',
+                  background: config.color,
+                  border: '3px solid #fff',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '14px'
+                }}>
+                  {config.icon}
+                </div>
+              </div>
+            );
+          });
+        })()}
       </div>
       
       {/* 事件编辑模态框 */}
@@ -658,6 +762,7 @@ const StockChart: React.FC<StockChartProps> = ({
           setClickedDate(null);
         }}
         onSave={handleSaveEvent}
+        onDelete={editingEvent ? handleDeleteEvent : undefined}
         event={editingEvent}
         defaultDate={clickedDate || undefined}
         loading={eventsLoading}
