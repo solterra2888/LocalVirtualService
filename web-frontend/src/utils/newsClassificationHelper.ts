@@ -14,6 +14,7 @@ export interface NewsClassificationData {
   impact_scope: string;
   urgency: string;
   related_sectors: string[];
+  related_countries: string[];
   rationale: string;
 }
 
@@ -97,6 +98,36 @@ export const URGENCY_MAP: Record<string, string> = {
   'timely': '及时',
   'routine': '常规',
   'background': '背景'
+};
+
+// 国家/地区映射
+export const COUNTRIES_MAP: Record<string, string> = {
+  'china': '中国',
+  'usa': '美国',
+  'japan': '日本',
+  'germany': '德国',
+  'uk': '英国',
+  'france': '法国',
+  'india': '印度',
+  'russia': '俄罗斯',
+  'brazil': '巴西',
+  'canada': '加拿大',
+  'australia': '澳大利亚',
+  'south_korea': '韩国',
+  'mexico': '墨西哥',
+  'indonesia': '印度尼西亚',
+  'saudi_arabia': '沙特阿拉伯',
+  'turkey': '土耳其',
+  'switzerland': '瑞士',
+  'taiwan': '中国台湾',
+  'hong_kong': '中国香港',
+  'singapore': '新加坡',
+  'eu': '欧盟',
+  'middle_east': '中东地区',
+  'africa': '非洲',
+  'south_america': '南美洲',
+  'southeast_asia': '东南亚',
+  'global': '全球多国'
 };
 
 /**
@@ -246,6 +277,19 @@ export function getRelatedSectors(classification: NewsClassificationData | null)
 }
 
 /**
+ * 获取相关国家/地区标签
+ * @param classification - 分类数据
+ * @returns 相关国家/地区数组
+ */
+export function getRelatedCountries(classification: NewsClassificationData | null): string[] {
+  if (!classification || !classification.related_countries) {
+    return [];
+  }
+  
+  return classification.related_countries;
+}
+
+/**
  * 获取分类摘要信息
  * @param classification - 分类数据
  * @returns 摘要信息
@@ -256,6 +300,7 @@ export function getClassificationSummary(classification: NewsClassificationData 
   impact: string;
   urgency: string;
   sectors: string[];
+  countries: string[];
   confidence: {
     theme: number;
     event: number;
@@ -271,6 +316,7 @@ export function getClassificationSummary(classification: NewsClassificationData 
     impact: classification!.impact_scope,
     urgency: classification!.urgency,
     sectors: classification!.related_sectors || [],
+    countries: classification!.related_countries || [],
     confidence: {
       theme: classification!.primary_theme_confidence || 0,
       event: classification!.event_type_confidence || 0

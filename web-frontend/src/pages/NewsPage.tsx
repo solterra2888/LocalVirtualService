@@ -42,8 +42,19 @@ import {
   getClassificationTags, 
   hasValidClassification,
   getClassificationSummary,
-  getRelatedSectors
+  getRelatedSectors,
+  getRelatedCountries,
+  COUNTRIES_MAP
 } from '../utils/newsClassificationHelper';
+import {
+  hasValidUnifiedThemes,
+  groupThemesByCanonicalName,
+  getBestThemeDisplay,
+  getSourceTypeConfig,
+  getThemeCategoryConfig,
+  formatQualityScore,
+  getQualityScoreColor
+} from '../utils/unifiedThemeHelper';
 import { themesAPI } from '../services/themes';
 import type { ThemeFilterState, FilteredNews } from '../types/themes';
 
@@ -79,8 +90,10 @@ interface NewsPageState {
   themeFilters: ThemeFilterState;
   filteredNewsData: FilteredNews[];
   filteredTotal: number;
-  filteredPage: number;
+  filteredOffset: number;
   filteredPageSize: number;
+  hasMoreNews: boolean;
+  loadingMore: boolean;
   // 主题关键词数据（用于高亮）
   themes: NewsTheme[];
 }
@@ -107,6 +120,7 @@ const NewsPage: React.FC = () => {
       impactScopes: [],
       urgencyLevels: [],
       relatedSectors: [],
+      relatedCountries: [],
       sourceTypes: [],
       minConfidence: 0.5,
       onlyPrimary: false,
@@ -115,8 +129,10 @@ const NewsPage: React.FC = () => {
     },
     filteredNewsData: [],
     filteredTotal: 0,
-    filteredPage: 1,
+    filteredOffset: 0,
     filteredPageSize: 20,
+    hasMoreNews: true,
+    loadingMore: false,
     themes: []
   });
 
@@ -146,37 +162,46 @@ const NewsPage: React.FC = () => {
     }
   };
 
-  // 加载主题筛选的新闻
-  const loadFilteredNews = async (page: number = 1, pageSize: number = 20, filters?: ThemeFilterState) => {
+  // 加载主题筛选的新闻（支持追加模式）
+  const loadFilteredNews = async (reset: boolean = true, filters?: ThemeFilterState) => {
     const startTime = Date.now();
     
     // 使用传入的 filters 或当前 state 中的 filters
     const activeFilters = filters || state.themeFilters;
+    const offset = reset ? 0 : state.filteredOffset;
+    const pageSize = state.filteredPageSize;
     
     console.log('🎯 [主题筛选] 开始加载筛选新闻', {
       filters: activeFilters,
-      page,
+      offset,
       pageSize,
+      reset,
       timestamp: new Date().toISOString()
     });
     
-    setState(prev => ({ ...prev, loading: true }));
+    // 根据 reset 设置不同的 loading 状态
+    if (reset) {
+      setState(prev => ({ ...prev, loading: true }));
+    } else {
+      setState(prev => ({ ...prev, loadingMore: true }));
+    }
     
     try {
-      // 构建请求参数
+      // 构建请求参数（使用 offset 而不是 page）
       const request = {
         categories: activeFilters.categories.length > 0 ? activeFilters.categories : undefined,
         event_types: activeFilters.eventTypes.length > 0 ? activeFilters.eventTypes : undefined,
         impact_scopes: activeFilters.impactScopes.length > 0 ? activeFilters.impactScopes : undefined,
         urgency_levels: activeFilters.urgencyLevels.length > 0 ? activeFilters.urgencyLevels : undefined,
         related_sectors: activeFilters.relatedSectors.length > 0 ? activeFilters.relatedSectors : undefined,
+        related_countries: activeFilters.relatedCountries.length > 0 ? activeFilters.relatedCountries : undefined,
         source_types: activeFilters.sourceTypes.length > 0 ? activeFilters.sourceTypes : undefined,
         min_confidence: activeFilters.minConfidence,
         only_primary: activeFilters.onlyPrimary,
         start_date: activeFilters.dateRange?.[0]?.format('YYYY-MM-DD'),
         end_date: activeFilters.dateRange?.[1]?.format('YYYY-MM-DD'),
         market: activeFilters.market || undefined,
-        page,
+        page: Math.floor(offset / pageSize) + 1,
         page_size: pageSize
       };
       
@@ -189,16 +214,20 @@ const NewsPage: React.FC = () => {
         page_size: response.page_size,
         total_pages: response.total_pages,
         news_count: response.news?.length || 0,
-        load_time: `${loadTime}ms`
+        load_time: `${loadTime}ms`,
+        reset
       });
       
+      // 根据 reset 模式决定是替换还是追加数据
       setState(prev => ({
         ...prev,
-        filteredNewsData: response.news,
+        filteredNewsData: reset ? response.news : [...prev.filteredNewsData, ...response.news],
         filteredTotal: response.total,
-        filteredPage: response.page,
+        filteredOffset: reset ? pageSize : prev.filteredOffset + pageSize,
         filteredPageSize: response.page_size,
-        loading: false
+        hasMoreNews: response.news.length === pageSize,
+        loading: false,
+        loadingMore: false
       }));
     } catch (error) {
       const loadTime = Date.now() - startTime;
@@ -211,7 +240,7 @@ const NewsPage: React.FC = () => {
       });
       
       message.error(`筛选新闻失败: ${getErrorMessage(error)}`);
-      setState(prev => ({ ...prev, loading: false }));
+      setState(prev => ({ ...prev, loading: false, loadingMore: false }));
     }
   };
 
@@ -220,22 +249,29 @@ const NewsPage: React.FC = () => {
     setState(prev => ({ ...prev, themeFilters: filters }));
   };
 
-  // 应用主题筛选
+  // 应用主题筛选（重置并加载）
   const handleApplyThemeFilter = (filters?: ThemeFilterState) => {
-    loadFilteredNews(1, state.filteredPageSize, filters);
+    // 重置 offset 和 hasMore 状态
+    setState(prev => ({ 
+      ...prev, 
+      filteredOffset: 0, 
+      hasMoreNews: true,
+      filteredNewsData: []
+    }));
+    loadFilteredNews(true, filters);
   };
 
-
-  // 主题筛选分页处理
-  const handleFilteredPagination = (page: number, pageSize?: number) => {
-    loadFilteredNews(page, pageSize || state.filteredPageSize);
+  // 加载更多新闻
+  const loadMoreNews = () => {
+    if (!state.hasMoreNews || state.loadingMore) return;
+    loadFilteredNews(false);
   };
 
   // 初始化数据
   useEffect(() => {
     if (isAuthenticated && user) {
       console.log('NewsPage: 用户已认证', { user: user.username, token: !!localStorage.getItem('access_token') });
-      loadFilteredNews(1, 20); // 初始加载时也加载筛选新闻（使用默认筛选条件）
+      loadFilteredNews(true); // 初始加载时也加载筛选新闻（使用默认筛选条件）
       loadMetadata();
     } else {
       console.log('NewsPage: 用户未认证或认证状态未初始化');
@@ -689,6 +725,19 @@ const NewsPage: React.FC = () => {
                               description={null}
                             />
                             
+                            {/* Ticker标签 */}
+                            {item.symbols && item.symbols.length > 0 && (
+                              <div style={{ marginBottom: '8px' }}>
+                                <Space size={[4, 4]} wrap>
+                                  {item.symbols.map((symbol: string) => (
+                                    <Tag key={symbol} color="default" style={{ fontSize: '10px', margin: 0 }}>
+                                      {symbol}
+                                    </Tag>
+                                  ))}
+                                </Space>
+                              </div>
+                            )}
+
                             {/* 新闻内容 - 支持展开/收起 */}
                             <div style={{ fontSize: '13px', marginBottom: '8px' }}>
                               {(() => {
@@ -741,27 +790,26 @@ const NewsPage: React.FC = () => {
                     ))}
                   </div>
 
-
-                  {/* 分页 */}
-                  <div style={{ marginTop: 16, textAlign: 'center' }}>
-                    <Button.Group>
-                      <Button
-                        disabled={state.filteredPage <= 1}
-                        onClick={() => handleFilteredPagination(state.filteredPage - 1)}
+                  {/* Load More 按钮 */}
+                  {state.hasMoreNews && (
+                    <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
+                      <Button 
+                        type="primary" 
+                        loading={state.loadingMore}
+                        onClick={loadMoreNews}
+                        disabled={state.loadingMore}
                       >
-                        上一页
+                        {state.loadingMore ? 'Loading...' : 'Load More News'}
                       </Button>
-                      <Button disabled>
-                        {state.filteredPage} / {Math.ceil(state.filteredTotal / state.filteredPageSize)}
-                      </Button>
-                      <Button
-                        disabled={state.filteredPage >= Math.ceil(state.filteredTotal / state.filteredPageSize)}
-                        onClick={() => handleFilteredPagination(state.filteredPage + 1)}
-                      >
-                        下一页
-                      </Button>
-                    </Button.Group>
-                  </div>
+                    </div>
+                  )}
+                  
+                  {/* 没有更多数据提示 */}
+                  {!state.hasMoreNews && state.filteredNewsData.length > 0 && (
+                    <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
+                      <Text type="secondary">All news loaded</Text>
+                    </div>
+                  )}
                 </>
               )}
             </Card>
@@ -888,6 +936,7 @@ const NewsPage: React.FC = () => {
 
                               const tags = getClassificationTags(classification);
                               const relatedSectors = getRelatedSectors(classification);
+                              const relatedCountries = getRelatedCountries(classification);
 
                               return (
                                 <>
@@ -916,6 +965,25 @@ const NewsPage: React.FC = () => {
                                         {relatedSectors.map(sector => (
                                           <Tag key={sector} color="purple" style={{ fontSize: '9px' }}>
                                             {sector}
+                    </Tag>
+                  ))}
+                                      </Space>
+              </div>
+            )}
+
+                                  {/* 相关国家/地区 */}
+                                  {relatedCountries.length > 0 && (
+                                    <div>
+                                      <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Countries:</Text>
+                                      <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                        {relatedCountries.map(country => (
+                                          <Tag 
+                                            key={country} 
+                                            color="geekblue" 
+                                            style={{ fontSize: '9px' }}
+                                            title={country}
+                                          >
+                                            {COUNTRIES_MAP[country] || country}
                     </Tag>
                   ))}
                                       </Space>
@@ -976,6 +1044,77 @@ const NewsPage: React.FC = () => {
                                 );
                               }
                               return null;
+                            })()}
+
+                            {/* Unified Themes (统一主题) */}
+                            {(() => {
+                              if (!hasValidUnifiedThemes(state.selectedNews.unified_themes)) {
+                                return null;
+                              }
+
+                              const groupedThemes = groupThemesByCanonicalName(state.selectedNews.unified_themes || []);
+                              
+                              if (groupedThemes.size === 0) {
+                                return null;
+                              }
+
+                              return (
+                                <div>
+                                  <Text strong style={{ fontSize: '9px', color: '#666' }}>
+                                    Unified Themes: 
+                                    <Tag color="cyan" style={{ fontSize: '8px', marginLeft: '4px' }}>
+                                      Multi-Source
+                                    </Tag>
+                                  </Text>
+                                  <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                    {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
+                                      const displayInfo = getBestThemeDisplay(themes);
+                                      const categoryConfig = getThemeCategoryConfig(displayInfo.category);
+                                      const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
+                                      
+                                      return (
+                                        <Tag 
+                                          key={canonicalName}
+                                          color={qualityColor}
+                                          style={{ fontSize: '9px', cursor: 'help' }}
+                                          title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
+                                        >
+                                          {categoryConfig.icon} {displayInfo.displayName}
+                                          {displayInfo.isVerified && <span style={{ marginLeft: '2px' }}>✓</span>}
+                                          {displayInfo.isPrimary && <span style={{ marginLeft: '2px' }}>⭐</span>}
+                                          {displayInfo.sources.length > 1 && (
+                                            <Badge 
+                                              count={displayInfo.sources.length} 
+                                              style={{ 
+                                                backgroundColor: '#52c41a', 
+                                                fontSize: '8px',
+                                                height: '14px',
+                                                lineHeight: '14px',
+                                                minWidth: '14px',
+                                                marginLeft: '4px'
+                                              }}
+                                            />
+                                          )}
+                                        </Tag>
+                                      );
+                                    })}
+                                  </Space>
+                                  {/* 来源统计 */}
+                                  <div style={{ marginTop: '8px' }}>
+                                    <Text style={{ fontSize: '8px', color: '#999' }}>
+                                      Sources: {' '}
+                                      {Array.from(new Set(state.selectedNews.unified_themes?.map(t => t.source_type) || [])).map(sourceType => {
+                                        const config = getSourceTypeConfig(sourceType);
+                                        return (
+                                          <Tag key={sourceType} color={config.color} style={{ fontSize: '7px', marginRight: '2px' }}>
+                                            {config.icon} {config.label}
+                                          </Tag>
+                                        );
+                                      })}
+                                    </Text>
+                                  </div>
+                                </div>
+                              );
                             })()}
                           </Space>
                         </Card>

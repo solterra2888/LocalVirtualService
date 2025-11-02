@@ -311,7 +311,8 @@ class ThemeMappingService:
                     "event_type": "product_launch",
                     "impact_scope": "company_specific",
                     "urgency": "timely",
-                    "related_sectors": ["healthcare", "technology", "finance"]
+                    "related_sectors": ["healthcare", "technology", "finance"],
+                    "related_countries": ["usa", "china", "japan"]
                 }
             confidence_scores: 各维度的置信度，格式：
                 {
@@ -404,6 +405,19 @@ class ThemeMappingService:
                             'is_primary': False
                         })
             
+            # 2.6 Related Countries (数组，每个元素一条记录)
+            related_countries = classification_data.get('related_countries', [])
+            if isinstance(related_countries, list):
+                for country in related_countries:
+                    if country:  # 跳过空值
+                        dimensions_to_insert.append({
+                            'title': 'related_countries',
+                            'value': country,
+                            'theme_master_id': None,
+                            'confidence': 0.8,
+                            'is_primary': False
+                        })
+            
             # 3. 批量插入
             metadata = {
                 'analyzed_at': classification_data.get('analyzed_at'),
@@ -419,8 +433,8 @@ class ThemeMappingService:
                     cursor.execute(f"SAVEPOINT {savepoint_name}")
                     
                     # 对于有 llm_classification_title 的维度，使用 unique_news_classification_dimension 约束
-                    # 对于 related_sectors 这种多个值的维度，使用 theme_name 来区分
-                    if dim['title'] == 'related_sectors':
+                    # 对于 related_sectors 和 related_countries 这种多个值的维度，使用 theme_name 来区分
+                    if dim['title'] in ['related_sectors', 'related_countries']:
                         # related_sectors 使用通用约束 (news_id, source_type, theme_name, market)
                         cursor.execute("""
                             INSERT INTO news_themes_unified (
@@ -582,7 +596,8 @@ class ThemeMappingService:
                 'event_type': None,
                 'impact_scope': None,
                 'urgency': None,
-                'related_sectors': []
+                'related_sectors': [],
+                'related_countries': []
             }
             
             for row in rows:
@@ -602,6 +617,8 @@ class ThemeMappingService:
                     result['urgency'] = value
                 elif title == 'related_sectors':
                     result['related_sectors'].append(value)
+                elif title == 'related_countries':
+                    result['related_countries'].append(value)
             
             return result
             

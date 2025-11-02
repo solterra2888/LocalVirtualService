@@ -1148,8 +1148,8 @@ class EODHDNewsService:
             else:
                 news_ids = []
             
-            # 🔥 修复：正确区分新增和更新的新闻
-            # 统计新增（不在existing_links_before中）和更新的（在existing_links_before中）
+            # 🔥 修复：正确区分新增和已存在的新闻
+            # 统计新增（不在existing_links_before中）和已存在的（在existing_links_before中）
             new_count = sum(1 for article in unique_articles 
                           if article.get('link') not in existing_links_before)
             existing_count = len(existing_links_before)
@@ -1157,7 +1157,7 @@ class EODHDNewsService:
             # 失败数 = 去重后的数量 - 成功数 + 批次内重复数
             failed_count = (len(unique_articles) - success_count) + duplicate_count
             
-            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 更新{existing_count}, 失败{failed_count}")
+            logger.debug(f"批量处理新闻: 成功{success_count}, 新增{new_count}, 已存在{existing_count}, 失败{failed_count}")
             # 返回去重后的文章列表，确保与news_ids对应
             return news_ids, success_count, failed_count, new_count, existing_count, unique_articles
             

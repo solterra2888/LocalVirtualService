@@ -69,6 +69,7 @@ class ThemeFilterRequest(BaseModel):
     impact_scopes: Optional[List[str]] = Field(None, description="影响范围列表")
     urgency_levels: Optional[List[str]] = Field(None, description="时效性列表")
     related_sectors: Optional[List[str]] = Field(None, description="相关行业列表")
+    related_countries: Optional[List[str]] = Field(None, description="相关国家/地区列表")
     
     # 来源类型
     source_types: Optional[List[str]] = Field(None, description="来源类型列表")
@@ -728,6 +729,18 @@ async def filter_news_by_themes(
             """)
             subquery_params.extend([request.min_confidence] + request.related_sectors)
         
+        # 相关国家/地区筛选
+        if request.related_countries:
+            placeholders = ', '.join(['%s'] * len(request.related_countries))
+            theme_subqueries.append(f"""
+                SELECT DISTINCT news_id FROM news_themes_unified
+                WHERE is_active = true
+                  AND confidence_score >= %s
+                  AND llm_classification_title = 'related_countries'
+                  AND theme_name IN ({placeholders})
+            """)
+            subquery_params.extend([request.min_confidence] + request.related_countries)
+        
         # 来源类型筛选
         if request.source_types:
             placeholders = ', '.join(['%s'] * len(request.source_types))
@@ -836,6 +849,7 @@ async def filter_news_by_themes(
             'impact_scopes': request.impact_scopes or [],
             'urgency_levels': request.urgency_levels or [],
             'related_sectors': request.related_sectors or [],
+            'related_countries': request.related_countries or [],
             'source_types': request.source_types or [],
             'min_confidence': request.min_confidence,
             'only_primary': request.only_primary,
@@ -862,7 +876,7 @@ async def filter_news_by_themes(
 
 @router.get("/trending", response_model=TrendingThemesResponse, summary="获取热门主题")
 async def get_trending_themes(
-    dimension: str = Query('primary_theme', description="维度：primary_theme, event_type, impact_scope, urgency, related_sectors"),
+    dimension: str = Query('primary_theme', description="维度：primary_theme, event_type, impact_scope, urgency, related_sectors, related_countries"),
     days: int = Query(7, ge=1, le=90, description="统计天数"),
     top_k: int = Query(10, ge=1, le=50, description="返回Top K"),
     source_type: Optional[str] = Query(None, description="来源类型筛选"),
@@ -1050,7 +1064,7 @@ async def get_trending_themes(
 
 @router.get("/dimensions", response_model=DimensionValuesResponse, summary="获取指定维度的所有可能值")
 async def get_dimension_values(
-    dimension: str = Query(..., description="维度：primary_theme, event_type, impact_scope, urgency, related_sectors, source_type"),
+    dimension: str = Query(..., description="维度：primary_theme, event_type, impact_scope, urgency, related_sectors, related_countries, source_type"),
     days: Optional[int] = Query(None, ge=1, le=365, description="统计最近N天的数据"),
     min_count: int = Query(1, ge=1, description="最小新闻数量"),
     current_user: TokenData = Depends(get_current_user)
@@ -1134,7 +1148,7 @@ async def get_dimension_values(
             """
             
         else:
-            # 其他维度（event_type, impact_scope, urgency, related_sectors）
+            # 其他维度（event_type, impact_scope, urgency, related_sectors, related_countries）
             query = """
                 SELECT 
                     ntu.theme_name as value,

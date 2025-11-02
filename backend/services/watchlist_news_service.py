@@ -194,6 +194,7 @@ class WatchlistNewsService:
                 logger.warning("未找到任何watchlist股票代码")
                 return {
                     'success_count': 0,
+                    'new_count': 0,
                     'existing_count': 0,
                     'failed_count': 0,
                     'total_count': 0,

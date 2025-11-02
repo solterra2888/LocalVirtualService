@@ -583,7 +583,7 @@ class ThemeUnificationService:
     def _extract_themes_from_llm_result(self, analysis_result: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         从LLM分析结果中提取主题
-        支持多种模板格式，增强版：提取 news_classification 中的 primary_theme 和 related_sectors
+        支持多种模板格式，增强版：提取 news_classification 中的 primary_theme、related_sectors 和 related_countries
         """
         themes = []
         
@@ -644,6 +644,23 @@ class ThemeUnificationService:
                             })
                     if related_sectors:
                         logger.debug(f"提取到 {len(related_sectors)} 个 related_sectors: {related_sectors}")
+                
+                # 1.2.5 提取 related_countries（国家/地区维度）
+                related_countries = content.get('related_countries', [])
+                country_confidence = 0.8  # 国家关联置信度
+                
+                if isinstance(related_countries, list):
+                    for country in related_countries:
+                        if country:  # 确保不为空
+                            themes.append({
+                                'name': country,
+                                'confidence': country_confidence,
+                                'type': 'country',
+                                'is_primary': False,
+                                'source_detail': 'news_classification.related_countries'
+                            })
+                    if related_countries:
+                        logger.debug(f"提取到 {len(related_countries)} 个 related_countries: {related_countries}")
                 
                 # 1.3 可选：提取 event_type（事件类型）
                 event_type = content.get('event_type')

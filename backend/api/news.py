@@ -191,6 +191,53 @@ class NewsService:
                     })
                 news_item['theme_matches'] = theme_matches
                 
+                # 获取统一主题数据 (news_themes_unified)
+                unified_themes_query = """
+                    SELECT 
+                        ntu.id,
+                        ntu.theme_name,
+                        ntu.canonical_theme_name,
+                        ntu.source_type,
+                        ntu.confidence_score,
+                        ntu.quality_score,
+                        ntu.rank_in_news,
+                        ntu.market,
+                        ntu.is_verified,
+                        ntu.is_primary,
+                        ntu.metadata,
+                        tmd.display_name,
+                        tmd.category,
+                        tmd.sub_category,
+                        tmd.description
+                    FROM news_themes_unified ntu
+                    LEFT JOIN theme_master_data tmd ON ntu.theme_master_id = tmd.id
+                    WHERE ntu.news_id = %s 
+                      AND ntu.is_active = true
+                    ORDER BY ntu.quality_score DESC NULLS LAST, ntu.confidence_score DESC
+                    LIMIT 10
+                """
+                cursor.execute(unified_themes_query, (row[0],))
+                unified_themes = []
+                for ut_row in cursor.fetchall():
+                    unified_themes.append({
+                        'id': ut_row[0],
+                        'theme_name': ut_row[1],
+                        'canonical_theme_name': ut_row[2],
+                        'source_type': ut_row[3],
+                        'confidence_score': float(ut_row[4]) if ut_row[4] is not None else 0.0,
+                        'quality_score': float(ut_row[5]) if ut_row[5] is not None else 0.0,
+                        'rank_in_news': ut_row[6],
+                        'market': ut_row[7],
+                        'is_verified': ut_row[8],
+                        'is_primary': ut_row[9],
+                        'metadata': ut_row[10],
+                        'display_name': ut_row[11],
+                        'category': ut_row[12],
+                        'sub_category': ut_row[13],
+                        'description': ut_row[14]
+                    })
+                news_item['unified_themes'] = unified_themes
+                
                 news_list.append(news_item)
             
             return {
@@ -428,8 +475,8 @@ async def fetch_news_from_eodhd(
                    failed_count=result['failed_count'],
                    total_count=result['total_count'])
         
-        # 计算实际新增的新闻数量
-        new_count = result['success_count'] - result['existing_count']
+        # 获取实际新增的新闻数量（从result中直接获取）
+        new_count = result.get('new_count', 0)
         
         if result['existing_count'] > 0:
             message = f"成功获取 {result['fetched_count']} 条新闻，其中新增 {new_count} 条，{result['existing_count']} 条已存在"

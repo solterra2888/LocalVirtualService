@@ -14,6 +14,7 @@ export interface ThemeFilterState {
   impactScopes: string[];
   urgencyLevels: string[];
   relatedSectors: string[];
+  relatedCountries: string[];
   sourceTypes: string[];
   minConfidence: number;
   onlyPrimary: boolean;
@@ -27,6 +28,7 @@ export interface ThemeFilterRequest {
   impact_scopes?: string[];
   urgency_levels?: string[];
   related_sectors?: string[];
+  related_countries?: string[];
   source_types?: string[];
   min_confidence?: number;
   only_primary?: boolean;
@@ -60,6 +62,7 @@ export interface FilteredNews {
   sentiment_neg?: number;
   sentiment_neu?: number;
   sentiment_pos?: number;
+  symbols?: string[];
   themes: NewsTheme[];
 }
 
@@ -76,6 +79,7 @@ export interface NewsFilterResponse {
     impact_scopes: string[];
     urgency_levels: string[];
     related_sectors: string[];
+    related_countries: string[];
     source_types: string[];
     min_confidence: number;
     only_primary: boolean;

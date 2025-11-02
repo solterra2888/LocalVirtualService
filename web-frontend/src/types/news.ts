@@ -30,6 +30,25 @@ export interface NewsThemeMatch {
   rank: number;
 }
 
+// 统一主题数据（从news_themes_unified表）
+export interface NewsUnifiedTheme {
+  id: number;
+  theme_name: string;
+  canonical_theme_name: string;
+  source_type: 'eodhd_auto_tag' | 'vector_retrieval' | 'llm_classification' | 'manual' | 'hybrid';
+  confidence_score: number;
+  quality_score?: number;
+  rank_in_news?: number;
+  market?: string;
+  is_verified: boolean;
+  is_primary: boolean;
+  metadata?: any;
+  display_name?: string;
+  category?: string;
+  sub_category?: string;
+  description?: string;
+}
+
 export interface NewsItem {
   id: number;
   date?: string;
@@ -48,7 +67,8 @@ export interface NewsItem {
   tags: string[];          // 用户自定义的topic tags
   auto_tags: string[];     // API原始tags
   analysis_result?: NewsAnalysisResult;  // AI分析结果
-  theme_matches?: NewsThemeMatch[];  // 投资主题匹配结果
+  theme_matches?: NewsThemeMatch[];  // 投资主题匹配结果（旧）
+  unified_themes?: NewsUnifiedTheme[];  // 统一主题数据（新）
 }
 
 export interface NewsListResponse {

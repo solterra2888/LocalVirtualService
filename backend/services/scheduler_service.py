@@ -814,7 +814,7 @@ class SchedulerService:
             }
             
             if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，更新 {result['existing_count']} 条"
+                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，已存在 {result['existing_count']} 条"
             else:
                 message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，全部为新增"
             
@@ -1057,8 +1057,8 @@ class SchedulerService:
                     params.get('user_id')  # 可选：指定用户ID，为None时获取所有用户的watchlist
                 )
             
-            # 计算实际新增的新闻数量
-            new_count = result['success_count'] - result['existing_count']
+            # 获取实际新增的新闻数量（从result中直接获取）
+            new_count = result.get('new_count', 0)
             
             # 详细的统计信息
             stats_summary = {
@@ -1072,7 +1072,7 @@ class SchedulerService:
             }
             
             if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，{result['existing_count']} 条已存在"
+                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，已存在 {result['existing_count']} 条"
             else:
                 message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，全部为新增"
             

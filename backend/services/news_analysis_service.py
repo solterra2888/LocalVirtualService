@@ -448,6 +448,7 @@ class NewsAnalysisService:
                                 'impact_scope': classification_data.get('impact_scope'),
                                 'urgency': classification_data.get('urgency'),
                                 'related_sectors': classification_data.get('related_sectors', []),
+                                'related_countries': classification_data.get('related_countries', []),
                                 'rationale': classification_data.get('rationale'),
                                 'analyzed_at': datetime.now().isoformat()
                             }

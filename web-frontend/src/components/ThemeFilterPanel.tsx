@@ -20,6 +20,7 @@ import {
   InfoCircleOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import locale from 'antd/es/date-picker/locale/en_US';
 import { themesAPI } from '../services/themes';
 import type { DimensionValue, ThemeFilterState } from '../types/themes';
 
@@ -43,6 +44,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
     impactScopes: [],
     urgencyLevels: [],
     relatedSectors: [],
+    relatedCountries: [],
     sourceTypes: [],
     minConfidence: 0.5,
     onlyPrimary: false,
@@ -57,6 +59,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
     impactScopes: DimensionValue[];
     urgencyLevels: DimensionValue[];
     relatedSectors: DimensionValue[];
+    relatedCountries: DimensionValue[];
     sourceTypes: DimensionValue[];
   }>({
     categories: [],
@@ -64,6 +67,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
     impactScopes: [],
     urgencyLevels: [],
     relatedSectors: [],
+    relatedCountries: [],
     sourceTypes: []
   });
 
@@ -84,6 +88,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
         'impact_scope': 'impactScopes',
         'urgency': 'urgencyLevels',
         'related_sectors': 'relatedSectors',
+        'related_countries': 'relatedCountries',
         'source_type': 'sourceTypes'
       }[dimension] as keyof typeof dimensionData;
       
@@ -105,8 +110,11 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
   useEffect(() => {
     loadDimensionValues('primary_theme');
     loadDimensionValues('event_type');
+    loadDimensionValues('impact_scope');
+    loadDimensionValues('urgency');
     loadDimensionValues('source_type');
     loadDimensionValues('related_sectors');
+    loadDimensionValues('related_countries');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -134,6 +142,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
       impactScopes: [],
       urgencyLevels: [],
       relatedSectors: [],
+      relatedCountries: [],
       sourceTypes: [],
       minConfidence: 0.5,
       onlyPrimary: false,
@@ -271,6 +280,35 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
           )}
         </Panel>
 
+        <Panel header={<span style={{ fontSize: '11px', fontWeight: 'bold' }}>Impact Scope</span>} key="impact_scope">
+          {renderCheckboxList(
+            dimensionData.impactScopes,
+            filters.impactScopes,
+            'impactScopes',
+            dimensionLoading.impact_scope || false
+          )}
+        </Panel>
+
+        <Panel header={<span style={{ fontSize: '11px', fontWeight: 'bold' }}>Urgency</span>} key="urgency">
+          {renderCheckboxList(
+            dimensionData.urgencyLevels,
+            filters.urgencyLevels,
+            'urgencyLevels',
+            dimensionLoading.urgency || false
+          )}
+        </Panel>
+
+        <Panel header={<span style={{ fontSize: '11px', fontWeight: 'bold' }}>Countries/Regions</span>} key="related_countries">
+          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {renderCheckboxList(
+              dimensionData.relatedCountries,
+              filters.relatedCountries,
+              'relatedCountries',
+              dimensionLoading.related_countries || false
+            )}
+          </div>
+        </Panel>
+
         <Panel header={<span style={{ fontSize: '11px', fontWeight: 'bold' }}>Source Type</span>} key="source_type">
           {renderCheckboxList(
             dimensionData.sourceTypes,
@@ -309,6 +347,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
             size="small"
             value={filters.dateRange}
             onChange={(dates) => updateFilter('dateRange', dates)}
+            locale={locale}
             presets={[
               { label: 'Last 7 Days', value: [dayjs().subtract(7, 'days'), dayjs()] },
               { label: 'Last 30 Days', value: [dayjs().subtract(30, 'days'), dayjs()] },
