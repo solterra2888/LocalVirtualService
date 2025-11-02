@@ -40,6 +40,7 @@ task_routes = {
     'backend.tasks.file_tasks.*': {'queue': 'file_processing'},
     'backend.tasks.news_tasks.*': {'queue': 'ai_processing'},
     'backend.tasks.theme_tasks.*': {'queue': 'ai_processing'},
+    'backend.tasks.data_tasks.*': {'queue': 'data_fetching'},  # 🔥 新增：数据获取任务
     # 明确指定新闻分析任务（使用任务名称而不是模块路径）
     'analyze_news_batch': {'queue': 'ai_processing'},
     'analyze_unanalyzed_news': {'queue': 'ai_processing'},
@@ -47,8 +48,10 @@ task_routes = {
     'initialize_theme_embeddings': {'queue': 'ai_processing'},
     'fill_theme_descriptions': {'queue': 'ai_processing'},
     'regenerate_all_theme_embeddings': {'queue': 'ai_processing'},
-    # Futu投资主题爬取任务（长时间运行，单独队列）
+    # 长时间运行的数据获取任务（data_fetching队列）
     'fetch_futu_themes': {'queue': 'data_fetching'},
+    'fetch_eodhd_fundamentals': {'queue': 'data_fetching'},  # 🔥 新增：基本面数据获取
+    'fetch_eodhd_eod_stock_prices': {'queue': 'data_fetching'},  # 🔥 新增：历史股价数据获取
 }
 
 # Worker配置

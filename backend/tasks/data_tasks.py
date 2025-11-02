@@ -1,0 +1,292 @@
+# -*- coding: utf-8 -*-
+"""
+数据获取相关 Celery 任务
+用于长时间运行的数据获取操作
+"""
+
+import asyncio
+from celery import current_task
+from backend.celery_app import app
+from backend.utils.database_config import get_database_config
+from backend.utils.logger import info, error
+
+
+@app.task(bind=True, name='fetch_eodhd_fundamentals')
+def fetch_eodhd_fundamentals_task(self, exchanges, data_types):
+    """
+    异步获取 EODHD 基本面数据 Celery 任务
+    
+    适用场景：
+    - 长时间运行的基本面数据获取（5-15分钟）
+    - 处理上千家公司的多种数据类型
+    - 需要独立 worker 环境避免阻塞 APScheduler
+    
+    Args:
+        exchanges: 交易所列表，如 ['NYSE', 'NASDAQ']
+        data_types: 数据类型列表，如 ['General', 'Financials', 'Highlights']
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'data': dict,
+                'statistics': dict
+            }
+    """
+    
+    def update_progress(status=None, progress=None, current_exchange=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'current_exchange': current_exchange,
+                'message': log_message or '',
+                'companies_processed': kwargs.get('companies_processed', 0),
+                'companies_failed': kwargs.get('companies_failed', 0),
+                'total_exchanges': len(exchanges)
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_data_task")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_data_task")
+    
+    try:
+        info(f"开始执行 EODHD 基本面数据获取任务", 
+             task_id=self.request.id,
+             exchanges=exchanges, 
+             data_types=data_types,
+             source="celery_data_task")
+        
+        update_progress(
+            status='starting',
+            progress=0,
+            log_message=f"初始化基本面数据服务，准备获取 {len(exchanges)} 个交易所的数据"
+        )
+        
+        # 导入服务
+        from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+        service = EODHDFundamentalsService()
+        
+        # 定义进度回调函数
+        def progress_callback(msg):
+            info(f"进度: {msg}", source="celery_data_task")
+            # 尝试从消息中提取进度信息
+            if "处理" in msg or "获取" in msg:
+                update_progress(log_message=msg)
+        
+        # 执行数据获取（异步方法需要在新的事件循环中运行）
+        # 因为 Celery worker 默认不在 asyncio 事件循环中
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(
+                service.fetch_exchange_fundamentals(
+                    exchanges=exchanges,
+                    data_types=data_types,
+                    progress_callback=progress_callback
+                )
+            )
+        finally:
+            loop.close()
+        
+        # 处理结果
+        if result.get('success'):
+            total_companies = result.get('total_companies', 0)
+            successful_companies = result.get('successful_companies', 0)
+            failed_companies = result.get('failed_companies', 0)
+            
+            update_progress(
+                status='completed',
+                progress=100,
+                log_message=f"完成！成功处理 {successful_companies}/{total_companies} 家公司",
+                companies_processed=successful_companies,
+                companies_failed=failed_companies
+            )
+            
+            info(f"EODHD 基本面数据获取成功", 
+                 task_id=self.request.id,
+                 total=total_companies,
+                 success=successful_companies,
+                 failed=failed_companies,
+                 result=result.get('message'),
+                 source="celery_data_task")
+        else:
+            error(f"EODHD 基本面数据获取失败", 
+                  task_id=self.request.id,
+                  error=result.get('message'),
+                  source="celery_data_task")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"EODHD 基本面数据获取任务异常: {str(e)}"
+        error(error_msg, 
+              task_id=self.request.id,
+              exception=str(e),
+              source="celery_data_task")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        # 返回错误结果而不是抛出异常，这样调度器可以记录详细的错误信息
+        return {
+            'success': False,
+            'message': error_msg,
+            'data': None
+        }
+
+
+@app.task(bind=True, name='fetch_eodhd_eod_stock_prices', queue='data_fetching')
+def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
+    """
+    异步获取 EODHD 历史股价数据 Celery 任务
+    
+    适用场景：
+    - 获取 watchlist 中所有股票的历史价格数据
+    - 执行时间 3-10分钟（取决于 watchlist 大小）
+    - 避免阻塞 APScheduler
+    
+    Args:
+        days_back: 回溯天数（默认: 60天）
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'total_tickers': int,
+                'success_count': int,
+                'failed_count': int,
+                'total_records': int,
+                'execution_time': float
+            }
+    """
+    
+    def update_progress(status=None, progress=None, current_ticker=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'current_ticker': current_ticker,
+                'message': log_message or '',
+                'tickers_processed': kwargs.get('tickers_processed', 0),
+                'tickers_failed': kwargs.get('tickers_failed', 0),
+                'records_stored': kwargs.get('records_stored', 0)
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_data_task")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_data_task")
+    
+    try:
+        info(f"开始执行 EODHD 历史股价数据获取任务", 
+             task_id=self.request.id,
+             days_back=days_back,
+             source="celery_data_task")
+        
+        update_progress(
+            status='starting',
+            progress=0,
+            log_message=f"初始化历史股价服务，准备获取最近 {days_back} 天的数据"
+        )
+        
+        # 导入服务
+        from backend.services.eodhd_eod_stock_prices_service import create_eodhd_eod_stock_prices_service
+        service = create_eodhd_eod_stock_prices_service()
+        
+        # 执行数据获取（同步方法）
+        info(f"开始获取历史股价数据", source="celery_data_task")
+        result = service.fetch_and_store_watchlist_eod_prices(days_back)
+        
+        # 处理结果
+        if result.get('error'):
+            error_msg = f"EODHD历史股价数据获取失败: {result['error']}"
+            error(error_msg, 
+                  task_id=self.request.id,
+                  source="celery_data_task")
+            
+            update_progress(
+                status='failed',
+                progress=0,
+                log_message=error_msg
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': result
+            }
+        else:
+            total_tickers = result.get('total_tickers', 0)
+            success_count = result.get('success_count', 0)
+            failed_count = result.get('failed_count', 0)
+            total_records = result.get('total_records', 0)
+            execution_time = result.get('execution_time', 0)
+            
+            success_msg = f"EODHD历史股价数据获取成功: 处理了{total_tickers}个ticker，成功{success_count}个，失败{failed_count}个，存储了{total_records}条记录，耗时{execution_time:.2f}秒"
+            
+            update_progress(
+                status='completed',
+                progress=100,
+                log_message=success_msg,
+                tickers_processed=success_count,
+                tickers_failed=failed_count,
+                records_stored=total_records
+            )
+            
+            info(success_msg, 
+                 task_id=self.request.id,
+                 source="celery_data_task")
+            
+            return {
+                'success': True,
+                'message': success_msg,
+                'total_tickers': total_tickers,
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'total_records': total_records,
+                'execution_time': execution_time,
+                'data': result
+            }
+        
+    except Exception as e:
+        error_msg = f"EODHD历史股价数据获取任务异常: {str(e)}"
+        error(error_msg, 
+              task_id=self.request.id,
+              exception=str(e),
+              source="celery_data_task")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        # 返回错误结果
+        return {
+            'success': False,
+            'message': error_msg,
+            'data': None
+        }
+

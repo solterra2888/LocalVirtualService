@@ -45,7 +45,8 @@ import {
   BulbOutlined,
   ScheduleOutlined,
   FilterOutlined,
-  BarChartOutlined
+  BarChartOutlined,
+  LineChartOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -67,7 +68,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -187,6 +188,24 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/futu-themes',
           params: {},
           icon: <GlobalOutlined />
+        }
+      ]
+    },
+    {
+      id: 'market_data',
+      name: 'Market Data (Indices, Forex, Commodities, Bonds, Sectors)',
+      type: 'market_data',
+      description: 'Get real-time and historical market data from EODHD API (32 assets: indices, forex, commodities, bond yields, sectors)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_market_data_schedule',
+          name: 'Configure Market Data Fetch',
+          description: 'Set up periodic market data fetching (every 6 hours, realtime + EOD data)',
+          endpoint: '/scheduler/tasks/market-data',
+          params: {},
+          icon: <LineChartOutlined />
         }
       ]
     },
@@ -371,6 +390,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
+          (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
+          (sourceIdLower === 'market_data' && taskType === 'market_data') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -426,6 +447,8 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
         (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
         (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
+        (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
+        (sourceIdLower === 'market_data' && taskType === 'market_data') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -522,6 +545,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
+          (sourceIdLower === 'market_data' && taskType === 'market_data') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
@@ -633,7 +657,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes' || dataSource.id === 'market_data') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -896,6 +920,7 @@ const SchedulerPage: React.FC = () => {
                                         (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
                                         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
                                         (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
+                                        (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                         (sourceIdLower.includes('events') && taskType.includes('events')) ||
                                         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
                                       );
@@ -1083,7 +1108,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data'}
           dataSourceName={selectedDataSource.name}
         />
       )}

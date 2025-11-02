@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -113,6 +113,17 @@ export interface CreateFutuThemesTaskParams {
   markets?: string[];
   max_pages?: number;
   scrape_stocks?: boolean;
+}
+
+export interface CreateMarketDataTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  asset_types?: string[];
+  fetch_realtime?: boolean;
+  fetch_eod?: boolean;
+  eod_days?: number;
 }
 
 export interface CronPreset {
@@ -570,6 +581,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认Futu投资主题定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建市场数据定时任务
+   */
+  async createMarketDataTask(params: CreateMarketDataTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/market-data', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建市场数据定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建市场数据定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建市场数据定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认市场数据定时任务
+   */
+  async createDefaultMarketDataTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/market-data/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认市场数据定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认市场数据定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认市场数据定时任务失败'
       };
     }
   }

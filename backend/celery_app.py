@@ -34,6 +34,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入投资主题任务模块失败: {e}")
 
+try:
+    from backend.tasks import data_tasks
+    print(f"✅ 成功导入数据获取任务模块: {data_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入数据获取任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

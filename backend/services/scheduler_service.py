@@ -63,7 +63,8 @@ class SchedulerService:
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
             'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
             'futu_themes': self._execute_futu_themes_task,  # 富途投资主题数据获取任务
-            'theme_sync': self._execute_theme_sync_task  # 🔥 新增：主题同步任务
+            'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
+            'market_data': self._execute_market_data_task  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
         }
         
         # 添加事件监听器
@@ -1454,13 +1455,32 @@ class SchedulerService:
             }
     
     async def _execute_fundamentals_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EODHD基本面数据获取任务"""
+        """
+        执行EODHD基本面数据获取任务（通过Celery异步执行）
+        
+        注意：此方法会等待Celery任务完成（可能需要5-15分钟），以便记录准确的执行结果
+        
+        Args:
+            params: 任务参数
+                - exchanges: 交易所列表
+                - data_types: 数据类型列表
+                - wait_for_completion: 是否等待任务完成（默认: True）
+                - timeout: 任务超时时间（秒，默认: 1800 = 30分钟）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        import asyncio
+        from celery.result import AsyncResult
+        
         try:
-            logger.info(f"开始执行基本面数据获取任务，参数: {params}")
+            logger.info("提交EODHD基本面数据获取任务到Celery", params=params)
             
             # 获取参数
             exchanges = params.get('exchanges', [])
-            data_types = params.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions'])  # 支持所有基本面数据类型
+            data_types = params.get('data_types', ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions'])
+            wait_for_completion = params.get('wait_for_completion', True)
+            timeout = params.get('timeout', 1800)  # 默认30分钟超时
             
             # 参数验证
             if not exchanges:
@@ -1491,136 +1511,96 @@ class SchedulerService:
             
             if not valid_data_types:
                 logger.warning(f"无效的数据类型: {data_types}，支持的数据类型: {supported_data_types}")
-                valid_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']  # 默认使用所有支持的类型
+                valid_data_types = ['General', 'Financials', 'Highlights', 'Valuation', 'Technicals', 'Holders', 'outstandingShares', 'Earnings', 'SharesStats', 'AnalystRatings', 'SplitsDividends', 'InsiderTransactions']
             
             logger.info(f"准备获取 {len(valid_exchanges)} 个交易所的基本面数据，数据类型: {valid_data_types}")
             
-            # 初始化基本面数据服务
+            # 导入Celery任务
+            from backend.tasks.data_tasks import fetch_eodhd_fundamentals_task
+            
+            # 提交Celery任务
+            task = fetch_eodhd_fundamentals_task.apply_async(
+                kwargs={
+                    'exchanges': valid_exchanges,
+                    'data_types': valid_data_types
+                }
+            )
+            
+            logger.info(f"EODHD基本面数据获取任务已提交到Celery: task_id={task.id}")
+            
+            # 如果不等待完成，立即返回
+            if not wait_for_completion:
+                return {
+                    'success': True,
+                    'message': f"EODHD基本面数据获取任务已提交到Celery队列（任务ID: {task.id}）",
+                    'data': {
+                        'task_id': task.id,
+                        'status': 'PENDING',
+                        'exchanges': valid_exchanges,
+                        'data_types': valid_data_types
+                    }
+                }
+            
+            # 等待任务完成（异步等待，不阻塞事件循环）
+            logger.info(f"等待Celery任务完成: {task.id} (超时: {timeout}秒)")
+            
             try:
-                from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
-                fundamentals_service = EODHDFundamentalsService()
-                
-                # 执行基本面数据获取
-                result = await fundamentals_service.fetch_exchange_fundamentals(
-                    exchanges=valid_exchanges,
-                    data_types=valid_data_types,
-                    progress_callback=lambda msg: logger.info(f"进度: {msg}")
+                # 在线程池中执行阻塞的 task.get()
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,  # 使用默认线程池
+                    lambda: task.get(timeout=timeout, propagate=False)
                 )
                 
-                if result.get('success', False):
-                    total_companies = result.get('total_companies', 0)
-                    successful_companies = result.get('successful_companies', 0)
-                    failed_companies = result.get('failed_companies', 0)
-                    exchanges_data = result.get('exchanges', {})
-                    
-                    # 详细统计处理结果
-                    processed_exchanges = len([ex for ex, data in exchanges_data.items() if data.get('successful', 0) > 0])
-                    success_rate = (successful_companies / total_companies * 100) if total_companies > 0 else 0
-                    
-                    # 构建成功率描述
-                    if success_rate >= 90:
-                        success_level = "优秀"
-                    elif success_rate >= 70:
-                        success_level = "良好"
-                    elif success_rate >= 50:
-                        success_level = "一般"
-                    else:
-                        success_level = "需要关注"
-                    
-                    success_msg = f"基本面数据获取完成: 总计 {total_companies} 家公司, 成功 {successful_companies} 家, 失败 {failed_companies} 家 (成功率: {success_rate:.1f}% - {success_level}), 处理 {processed_exchanges} 个交易所"
-                    
-                    # 添加数据类型详情信息
-                    data_type_details = []
-                    if 'General' in valid_data_types:
-                        data_type_details.append("基本信息")
-                    if 'Financials' in valid_data_types:
-                        data_type_details.append("财务报表")
-                    if 'Highlights' in valid_data_types:
-                        data_type_details.append("关键指标")
-                    if 'Valuation' in valid_data_types:
-                        data_type_details.append("估值数据")
-                    if 'Technicals' in valid_data_types:
-                        data_type_details.append("技术指标")
-                    if 'Holders' in valid_data_types:
-                        data_type_details.append("股东数据")
-                    if 'outstandingShares' in valid_data_types:
-                        data_type_details.append("流通股数据")
-                    if 'Earnings' in valid_data_types:
-                        data_type_details.append("盈利数据")
-                    
-                    if data_type_details:
-                        success_msg += f" (包含: {', '.join(data_type_details)})"
-                    
-                    # 添加交易所详细信息
-                    exchange_details = []
-                    for exchange, data in exchanges_data.items():
-                        ex_success = data.get('successful', 0)
-                        ex_total = data.get('total', 0)
-                        if ex_total > 0:
-                            ex_rate = (ex_success / ex_total * 100)
-                            exchange_details.append(f"{exchange}: {ex_success}/{ex_total} ({ex_rate:.1f}%)")
-                    
-                    if exchange_details:
-                        success_msg += f"\n交易所详情: {', '.join(exchange_details)}"
-                    
-                    logger.info(success_msg)
-                    return {
-                        'success': True,
-                        'message': success_msg,
-                        'data': result,
-                        'statistics': {
-                            'total_companies': total_companies,
-                            'successful_companies': successful_companies,
-                            'failed_companies': failed_companies,
-                            'success_rate': success_rate,
-                            'processed_exchanges': processed_exchanges,
-                            'data_types': valid_data_types,
-                            'exchange_details': exchanges_data
-                        }
-                }
-                else:
-                    # 详细分析失败原因
-                    error_details = result.get('data', {})
-                    exchanges_data = error_details.get('exchanges', {})
-                    
-                    failed_exchanges = []
-                    for exchange, data in exchanges_data.items():
-                        if data.get('successful', 0) == 0:
-                            error_reason = data.get('message', '未知错误')
-                            failed_exchanges.append(f"{exchange}: {error_reason}")
-                    
-                    error_msg = f"基本面数据获取失败: {result.get('message', '未知错误')}"
-                    if failed_exchanges:
-                        error_msg += f"\n失败的交易所: {'; '.join(failed_exchanges)}"
-                    
-                    logger.error(error_msg)
+                # 检查任务结果
+                if isinstance(result, Exception):
+                    # 任务执行失败
+                    error_msg = f"EODHD基本面数据获取任务执行失败: {str(result)}"
+                    logger.error(error_msg, task_id=task.id)
                     return {
                         'success': False,
                         'message': error_msg,
-                        'data': result,
-                        'failed_exchanges': failed_exchanges
+                        'data': {
+                            'task_id': task.id,
+                            'error': str(result)
+                        }
+                    }
+                
+                # 任务执行成功，返回结果
+                if result and result.get('success'):
+                    # 直接返回Celery任务的结果
+                    logger.info("EODHD基本面数据获取任务执行成功", 
+                               task_id=task.id,
+                               message=result.get('message'))
+                    return result
+                else:
+                    # 任务执行失败
+                    error_msg = result.get('message', '未知错误') if result else '任务返回结果为空'
+                    logger.error(f"EODHD基本面数据获取失败: {error_msg}", task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': f"EODHD基本面数据获取失败: {error_msg}",
+                        'data': {'task_id': task.id}
                     }
                     
-            except ImportError as e:
-                error_msg = f"无法导入基本面数据服务: {str(e)}"
-                logger.error(error_msg)
+            except asyncio.TimeoutError:
+                # 任务超时
+                error_msg = f"EODHD基本面数据获取任务超时（超过{timeout}秒）"
+                logger.error(error_msg, task_id=task.id)
+                # 尝试撤销任务
+                try:
+                    task.revoke(terminate=True)
+                except:
+                    pass
                 return {
                     'success': False,
                     'message': error_msg,
-                    'data': None
+                    'data': {'task_id': task.id}
                 }
-            except Exception as service_error:
-                error_msg = f"基本面数据服务执行失败: {str(service_error)}"
-                logger.error(error_msg)
-                return {
-                    'success': False,
-                    'message': error_msg,
-                    'data': None
-                }
-            
+                
         except Exception as e:
-            error_msg = f"基本面数据低频获取任务执行失败: {str(e)}"
-            logger.error(error_msg)
+            error_msg = f"执行EODHD基本面数据获取任务失败: {str(e)}"
+            logger.error(error_msg, exception=str(e))
             return {
                 'success': False,
                 'message': error_msg,
@@ -1716,50 +1696,112 @@ class SchedulerService:
             }
     
     async def _execute_eodhd_eod_stock_prices_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EODHD历史股价数据获取任务"""
+        """
+        执行EODHD历史股价数据获取任务（通过Celery异步执行）
+        
+        注意：此方法会等待Celery任务完成（可能需要3-10分钟），以便记录准确的执行结果
+        
+        Args:
+            params: 任务参数
+                - days_back: 回溯天数（默认: 60天）
+                - wait_for_completion: 是否等待任务完成（默认: True）
+                - timeout: 任务超时时间（秒，默认: 900 = 15分钟）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        import asyncio
+        from celery.result import AsyncResult
+        
         try:
-            logger.info("执行EODHD历史股价数据获取任务", params=params)
-            
-            # 导入历史股价服务
-            from backend.services.eodhd_eod_stock_prices_service import create_eodhd_eod_stock_prices_service
-            
-            # 创建服务实例
-            eod_stock_prices_service = create_eodhd_eod_stock_prices_service()
+            logger.info("提交EODHD历史股价数据获取任务到Celery", params=params)
             
             # 获取参数
-            days_back = params.get('days_back', 60)  # 默认回溯60天
+            days_back = params.get('days_back', 60)
+            wait_for_completion = params.get('wait_for_completion', True)
+            timeout = params.get('timeout', 900)  # 默认15分钟超时
             
-            # 在线程池中执行耗时的历史价格获取操作，避免阻塞事件循环
-            import asyncio
-            import concurrent.futures
+            # 导入Celery任务
+            from backend.tasks.data_tasks import fetch_eodhd_eod_stock_prices_task
             
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    executor,
-                    eod_stock_prices_service.fetch_and_store_watchlist_eod_prices,
-                    days_back
+            # 提交Celery任务
+            task = fetch_eodhd_eod_stock_prices_task.apply_async(
+                kwargs={'days_back': days_back}
+            )
+            
+            logger.info(f"EODHD历史股价数据获取任务已提交到Celery: task_id={task.id}")
+            
+            # 如果不等待完成，立即返回
+            if not wait_for_completion:
+                return {
+                    'success': True,
+                    'message': f"EODHD历史股价数据获取任务已提交到Celery队列（任务ID: {task.id}）",
+                    'data': {
+                        'task_id': task.id,
+                        'status': 'PENDING',
+                        'days_back': days_back
+                    }
+                }
+            
+            # 等待任务完成（异步等待，不阻塞事件循环）
+            logger.info(f"等待Celery任务完成: {task.id} (超时: {timeout}秒)")
+            
+            try:
+                # 在线程池中执行阻塞的 task.get()
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,  # 使用默认线程池
+                    lambda: task.get(timeout=timeout, propagate=False)
                 )
-            
-            if result.get('error'):
-                error_msg = f"EODHD历史股价数据获取失败: {result['error']}"
-                logger.error(error_msg)
+                
+                # 检查任务结果
+                if isinstance(result, Exception):
+                    # 任务执行失败
+                    error_msg = f"EODHD历史股价数据获取任务执行失败: {str(result)}"
+                    logger.error(error_msg, task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': error_msg,
+                        'data': {
+                            'task_id': task.id,
+                            'error': str(result)
+                        }
+                    }
+                
+                # 任务执行成功，返回结果
+                if result and result.get('success'):
+                    logger.info("EODHD历史股价数据获取任务执行成功", 
+                               task_id=task.id,
+                               message=result.get('message'))
+                    return result
+                else:
+                    # 任务执行失败
+                    error_msg = result.get('message', '未知错误') if result else '任务返回结果为空'
+                    logger.error(f"EODHD历史股价数据获取失败: {error_msg}", task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': f"EODHD历史股价数据获取失败: {error_msg}",
+                        'data': {'task_id': task.id}
+                    }
+                    
+            except asyncio.TimeoutError:
+                # 任务超时
+                error_msg = f"EODHD历史股价数据获取任务超时（超过{timeout}秒）"
+                logger.error(error_msg, task_id=task.id)
+                # 尝试撤销任务
+                try:
+                    task.revoke(terminate=True)
+                except:
+                    pass
                 return {
                     'success': False,
                     'message': error_msg,
-                    'data': result
-                }
-            else:
-                success_msg = f"EODHD历史股价数据获取成功: 处理了{result['total_tickers']}个ticker，成功{result['success_count']}个，失败{result['failed_count']}个，存储了{result['total_records']}条记录，耗时{result['execution_time']:.2f}秒"
-                logger.info(success_msg)
-                return {
-                    'success': True,
-                    'message': success_msg,
-                    'data': result
+                    'data': {'task_id': task.id}
                 }
                 
         except Exception as e:
-            error_msg = f"EODHD历史股价数据获取任务执行失败: {str(e)}"
-            logger.error(error_msg)
+            error_msg = f"执行EODHD历史股价数据获取任务失败: {str(e)}"
+            logger.error(error_msg, exception=str(e))
             return {
                 'success': False,
                 'message': error_msg,
@@ -2074,6 +2116,71 @@ class SchedulerService:
                 'success': False,
                 'error': str(e),
                 'message': f"主题同步任务执行失败: {str(e)}"
+            }
+    
+    async def _execute_market_data_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行市场数据获取任务
+        获取指数、外汇、大宗商品、债券、板块等市场数据
+        
+        Args:
+            params: 任务参数
+                - asset_types: 资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector']
+                - fetch_realtime: 是否获取实时数据（默认: True）
+                - fetch_eod: 是否获取EOD历史数据（默认: True）
+                - eod_days: 获取最近几天的EOD数据（默认: 5）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行市场数据获取任务", params=params)
+            
+            # 导入服务
+            from backend.services.market_data_service import create_market_data_service
+            market_data_service = create_market_data_service()
+            
+            # 提取参数
+            asset_types = params.get('asset_types')
+            fetch_realtime = params.get('fetch_realtime', True)
+            fetch_eod = params.get('fetch_eod', True)
+            eod_days = params.get('eod_days', 5)
+            
+            # 关键：在线程池中执行同步方法（避免阻塞事件循环）
+            import asyncio
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    market_data_service.fetch_and_store_market_data,
+                    asset_types,
+                    fetch_realtime,
+                    fetch_eod,
+                    eod_days
+                )
+            
+            if result['success']:
+                message = f"✅ {result['message']}"
+                logger.info("市场数据任务执行成功", result_msg=message, data=result.get('data'))
+                return {
+                    'success': True,
+                    'message': message,
+                    'data': result.get('data')
+                }
+            else:
+                logger.error("市场数据任务执行失败", error=result['message'])
+                return {
+                    'success': False,
+                    'message': f"❌ {result['message']}"
+                }
+                
+        except Exception as e:
+            error_msg = f"市场数据任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'data': None
             }
     
     def _job_listener(self, event):

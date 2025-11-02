@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes|market_data)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -146,6 +146,21 @@ class CreateFutuThemesTaskRequest(BaseModel):
     markets: Optional[List[str]] = Field(default=None, description="市场列表，如['HK', 'US']，不指定则爬取所有市场")
     max_pages: Optional[int] = Field(default=None, description="每个市场最大爬取页数（最多100页），不指定则爬取所有页面", ge=1, le=100)
     scrape_stocks: bool = Field(default=True, description="是否爬取股票列表")
+
+
+class CreateMarketDataTaskRequest(BaseModel):
+    """创建市场数据定时任务请求模型"""
+    name: str = Field(default="Market Data Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="0 */6 * * *", description="Cron表达式（默认每6小时）")
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    asset_types: Optional[List[str]] = Field(
+        default=None, 
+        description="资产类型列表: index, forex, commodity, bond, sector，不指定则获取所有类型"
+    )
+    fetch_realtime: bool = Field(default=True, description="是否获取实时数据")
+    fetch_eod: bool = Field(default=True, description="是否获取EOD历史数据")
+    eod_days: int = Field(default=5, description="获取最近几天的EOD数据", ge=1, le=30)
 
 
 # ============ 定时任务管理API ============
@@ -993,6 +1008,134 @@ async def create_default_futu_themes_task(
         raise
     except Exception as e:
         logger.error("创建默认Futu投资主题定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ============ 市场数据定时任务专用API ============
+
+@router.post("/tasks/market-data", summary="创建市场数据定时任务")
+async def create_market_data_task(
+    request: CreateMarketDataTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建市场数据定时任务（指数、外汇、大宗商品、债券、板块）
+    
+    默认配置：
+    - 每6小时执行一次 (0 */6 * * *)
+    - 获取所有资产类型
+    - 同时获取实时数据和历史数据
+    """
+    try:
+        logger.info("创建市场数据定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 市场数据任务参数
+        task_params = {
+            'asset_types': request.asset_types,
+            'fetch_realtime': request.fetch_realtime,
+            'fetch_eod': request.fetch_eod,
+            'eod_days': request.eod_days
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="market_data",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("市场数据定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("市场数据定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except ValueError as e:
+        logger.error("市场数据定时任务创建参数错误", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+    except Exception as e:
+        logger.error("创建市场数据定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/market-data/default", summary="创建默认市场数据定时任务")
+async def create_default_market_data_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的市场数据定时任务
+    
+    默认配置：
+    - 每6小时执行一次 (0 */6 * * *)
+    - 获取所有资产类型（指数、外汇、大宗商品、债券、板块）
+    - 同时获取实时数据和最近5天的历史数据
+    """
+    try:
+        logger.info("创建默认市场数据定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="Market Data Auto Fetch",
+            task_type="market_data",
+            cron_expression="0 */6 * * *",  # 每6小时
+            timezone="Asia/Shanghai",
+            enabled=True,
+            task_params={
+                'asset_types': None,  # 获取所有类型
+                'fetch_realtime': True,
+                'fetch_eod': True,
+                'eod_days': 5
+            },
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认市场数据定时任务创建成功", 
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认市场数据定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认市场数据定时任务失败", 
                     exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")

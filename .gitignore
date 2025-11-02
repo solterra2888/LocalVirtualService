@@ -8,6 +8,8 @@ uploads/
 sql数据库/
 node_modules/
 build/
+jikun/
+market_data_test_output
 .idea/
 .vscode/
 .DS_Store

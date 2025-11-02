@@ -25,7 +25,8 @@ import {
   BulbOutlined,
   BarChartOutlined,
   QuestionCircleOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  LineChartOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
@@ -37,7 +38,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data';
   dataSourceName: string;
 }
 
@@ -129,6 +130,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 2 * * *',
       defaultName: 'Futu Themes Auto Fetch',
       description: 'Get investment themes and related stocks from Futu website (HK and US markets, daily at 2 AM HKT)'
+    },
+    market_data: {
+      icon: <LineChartOutlined style={{ color: '#52c41a' }} />,
+      params: ['asset_types', 'fetch_realtime', 'fetch_eod', 'eod_days'],
+      defaultSchedule: '0 */6 * * *',
+      defaultName: 'Market Data Auto Fetch',
+      description: 'Get real-time and historical market data (indices, forex, commodities, bonds, sectors) every 6 hours'
     }
   };
 
@@ -273,6 +281,19 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             scrape_stocks: data.taskParams?.scrape_stocks !== undefined ? data.taskParams.scrape_stocks : true
           };
           result = await schedulerAPI.createFutuThemesTask(futuThemesParams);
+        } else if (dataSourceType === 'market_data') {
+          // 市场数据任务的专用创建逻辑
+          const marketDataParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            asset_types: data.taskParams?.asset_types,
+            fetch_realtime: data.taskParams?.fetch_realtime !== undefined ? data.taskParams.fetch_realtime : true,
+            fetch_eod: data.taskParams?.fetch_eod !== undefined ? data.taskParams.fetch_eod : true,
+            eod_days: data.taskParams?.eod_days || 5
+          };
+          result = await schedulerAPI.createMarketDataTask(marketDataParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -1277,6 +1298,77 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 <Switch 
                   checkedChildren="Enabled" 
                   unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
+            </>
+          );
+          
+        case 'market_data':
+          return (
+            <>
+              <Alert
+                message="Market Data Fetcher (32 Assets: Indices, Forex, Commodities, Bonds, Sectors)"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically fetch real-time and historical (EOD) market data from EODHD API. Supports 8 indices, 4 forex pairs, 5 commodities, 4 bond yields, and 11 sectors."
+              />
+              
+              <Form.Item
+                label="Asset Types"
+                name={['taskParams', 'asset_types']}
+                extra="Select asset types to fetch. Leave empty to fetch all types (recommended)."
+              >
+                <Select 
+                  mode="multiple"
+                  placeholder="Select asset types (leave empty for all)"
+                  allowClear
+                >
+                  <Option value="index">📈 Indices (8 assets: S&P 500, Nasdaq, Dow Jones, etc.)</Option>
+                  <Option value="forex">💱 Forex (4 pairs: USD/CNH, EUR/USD, GBP/USD, USD/JPY)</Option>
+                  <Option value="commodity">🛢️ Commodities (5 assets: Gold, Silver, Copper, Oil, Natural Gas)</Option>
+                  <Option value="bond">📊 Bond Yields (4 types: 3M, 1Y, 5Y, 10Y Treasury)</Option>
+                  <Option value="sector">🏢 Sectors (11 sectors: Tech, Finance, Healthcare, etc.)</Option>
+                </Select>
+              </Form.Item>
+              
+              <Form.Item
+                label="Fetch Realtime Data"
+                name={['taskParams', 'fetch_realtime']}
+                valuePropName="checked"
+                extra="Enable to fetch current market prices and changes (recommended)."
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Enabled" 
+                  unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Fetch EOD Historical Data"
+                name={['taskParams', 'fetch_eod']}
+                valuePropName="checked"
+                extra="Enable to fetch end-of-day historical OHLC data (recommended)."
+                initialValue={true}
+              >
+                <Switch 
+                  checkedChildren="Enabled" 
+                  unCheckedChildren="Disabled" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="EOD Days"
+                name={['taskParams', 'eod_days']}
+                extra="Number of recent days to fetch EOD data (1-30 days)."
+                initialValue={5}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={30} 
+                  placeholder="5" 
+                  style={{ width: '100%' }}
                 />
               </Form.Item>
             </>

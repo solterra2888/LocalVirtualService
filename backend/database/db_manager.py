@@ -374,6 +374,9 @@ class DatabaseManager:
             # 创建Futu主题相关表
             self._create_futu_themes_tables(conn)
             
+            # 创建市场数据相关表
+            self._create_market_data_tables(conn)
+            
             conn.commit()
             conn.close()
             return True
@@ -440,7 +443,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener', 'news_analysis', 'futu_themes', 'eodhd_stock_prices', 'eodhd_eod_stock_prices')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'finviz_screener', 'news_analysis', 'futu_themes', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -565,7 +568,8 @@ class DatabaseManager:
                 'eodhd_stock_prices',
                 'eodhd_eod_stock_prices',
                 'news_analysis',
-                'futu_themes'
+                'futu_themes',
+                'market_data'
             ]
             
             # 合并现有类型和新类型（去重）
@@ -1493,4 +1497,27 @@ class DatabaseManager:
             print(f"获取LLM使用统计失败: {str(e)}")
             if conn:
                 conn.close()
-            return [] 
+            return []
+    
+    def _create_market_data_tables(self, conn):
+        """创建市场数据相关表"""
+        cursor = conn.cursor()
+        
+        try:
+            # 读取并执行SQL迁移脚本
+            migration_file = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/create_market_data_tables.sql'
+            )
+            
+            if os.path.exists(migration_file):
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ 市场数据相关表创建/更新完成")
+            else:
+                print(f"⚠️ 市场数据迁移脚本不存在: {migration_file}")
+        except Exception as e:
+            print(f"❌ 创建市场数据表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass 
