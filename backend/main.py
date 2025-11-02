@@ -117,6 +117,10 @@ app.include_router(news_analysis.router, prefix="/api", tags=["新闻分析"])
 from backend.api import investment_themes
 app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"])
 
+# 用户新闻筛选预设API
+from backend.api import user_news_presets
+app.include_router(user_news_presets.router, prefix="/api", tags=["用户新闻筛选预设"])
+
 # 静态文件服务
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):
