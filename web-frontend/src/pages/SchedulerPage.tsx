@@ -1019,14 +1019,73 @@ const SchedulerPage: React.FC = () => {
                             </div>
                           )}
 
-                          <div style={{ marginBottom: '16px' }}>
-                            <Text strong>Configuration:</Text>
-                          </div>
-
-                          {/* Cron Expression Display */}
+                          {/* Cron Expression Display with Configuration Icon */}
                           {(() => {
                             const cronInfo = getCronInfo(source.id);
                             if (cronInfo) {
+                              // Format configuration content for tooltip (excluding cron expression)
+                              const formattedParams = formatTaskParams(source.id, cronInfo.params);
+                              const configContent = (
+                                <div style={{ maxWidth: '400px', color: '#fff' }}>
+                                  <div style={{ marginBottom: '10px' }}>
+                                    <Space>
+                                      <ScheduleOutlined style={{ color: '#1890ff' }} />
+                                      <span style={{ fontSize: '13px', fontWeight: 'bold' }}>Configuration Details</span>
+                                    </Space>
+                                  </div>
+                                  <div style={{ marginBottom: '8px', fontSize: '12px' }}>
+                                    Timezone: <span style={{ color: '#1890ff' }}>{cronInfo.timezone}</span>
+                                  </div>
+                                  {cronInfo.description && (
+                                    <div style={{ marginBottom: '8px', fontSize: '12px' }}>
+                                      Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
+                                    </div>
+                                  )}
+                                  {formattedParams && (
+                                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                                      <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>
+                                        Configuration Parameters:
+                                      </div>
+                                      <pre style={{ 
+                                        margin: 0, 
+                                        fontSize: '11px', 
+                                        fontFamily: 'monospace',
+                                        whiteSpace: 'pre-wrap',
+                                        color: '#1890ff',
+                                        backgroundColor: 'rgba(0,0,0,0.3)',
+                                        padding: '8px',
+                                        borderRadius: '4px',
+                                        maxHeight: '200px',
+                                        overflow: 'auto'
+                                      }}>
+                                        {formattedParams}
+                                      </pre>
+                                      {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+                                        <div style={{ marginTop: '10px' }}>
+                                          <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '4px' }}>
+                                            Full JSON:
+                                          </div>
+                                          <pre style={{ 
+                                            margin: 0, 
+                                            fontSize: '10px', 
+                                            fontFamily: 'monospace',
+                                            whiteSpace: 'pre-wrap',
+                                            color: '#52c41a',
+                                            backgroundColor: 'rgba(0,0,0,0.3)',
+                                            padding: '6px',
+                                            borderRadius: '4px',
+                                            maxHeight: '150px',
+                                            overflow: 'auto'
+                                          }}>
+                                            {JSON.stringify(cronInfo.params, null, 2)}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+
                               return (
                                 <div style={{ 
                                   marginBottom: '16px', 
@@ -1046,18 +1105,35 @@ const SchedulerPage: React.FC = () => {
                                       )}
                                     </Space>
                                   </div>
-                                  <div style={{ marginBottom: '4px' }}>
-                                    <Space>
-                                      <Text code style={{ 
-                                        fontSize: '12px', 
-                                        backgroundColor: '#fff', 
-                                        padding: '2px 6px', 
-                                        borderRadius: '3px',
-                                        color: cronInfo.isValid ? '#000' : '#ff4d4f'
-                                      }}>
-                                        {cronInfo.expression}
-                                      </Text>
-                                    </Space>
+                                  <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Text code style={{ 
+                                      fontSize: '12px', 
+                                      backgroundColor: '#fff', 
+                                      padding: '2px 6px', 
+                                      borderRadius: '3px',
+                                      color: cronInfo.isValid ? '#000' : '#ff4d4f'
+                                    }}>
+                                      {cronInfo.expression}
+                                    </Text>
+                                    <Tooltip 
+                                      title={configContent}
+                                      placement="top"
+                                      overlayStyle={{ maxWidth: '450px' }}
+                                      overlayInnerStyle={{ 
+                                        backgroundColor: 'rgba(0,0,0,0.85)',
+                                        padding: '12px',
+                                        borderRadius: '6px'
+                                      }}
+                                    >
+                                      <SettingOutlined 
+                                        style={{ 
+                                          color: cronInfo.isValid ? '#1890ff' : '#ff4d4f', 
+                                          fontSize: '16px',
+                                          cursor: 'pointer',
+                                          transition: 'color 0.3s'
+                                        }} 
+                                      />
+                                    </Tooltip>
                                   </div>
                                   {!cronInfo.isValid && cronInfo.validationMessage && (
                                     <div style={{ marginBottom: '4px' }}>
@@ -1066,56 +1142,6 @@ const SchedulerPage: React.FC = () => {
                                       </Text>
                                     </div>
                                   )}
-                                  <div>
-                                    <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      Timezone: {cronInfo.timezone}
-                                    </Text>
-                                  </div>
-                                  {/* Display formatted task parameters */}
-                                  {(() => {
-                                    const formattedParams = formatTaskParams(source.id, cronInfo.params);
-                                    if (formattedParams) {
-                                      return (
-                                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e1e4e8' }}>
-                                          <Space>
-                                            <Text strong style={{ fontSize: '11px', color: '#666' }}>
-                                              Configuration:
-                                            </Text>
-                                            <Text style={{ fontSize: '11px', color: '#1890ff' }}>
-                                              {formattedParams}
-                                            </Text>
-                                          </Space>
-                                          {/* Also show full JSON in tooltip */}
-                                          {JSON.stringify(cronInfo.params, null, 2) !== formattedParams && (
-                                        <Tooltip 
-                                          title={
-                                            <pre style={{ 
-                                              margin: 0, 
-                                              fontSize: '12px', 
-                                              fontFamily: 'monospace',
-                                              whiteSpace: 'pre-wrap',
-                                              maxWidth: '300px'
-                                            }}>
-                                              {JSON.stringify(cronInfo.params, null, 2)}
-                                            </pre>
-                                          }
-                                          placement="top"
-                                        >
-                                          <SettingOutlined 
-                                            style={{ 
-                                              color: '#1890ff', 
-                                                  fontSize: '11px',
-                                                  cursor: 'pointer',
-                                                  marginLeft: '8px'
-                                            }} 
-                                          />
-                                        </Tooltip>
-                                      )}
-                                  </div>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
                                 </div>
                               );
                             }

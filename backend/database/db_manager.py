@@ -1542,8 +1542,7 @@ class DatabaseManager:
                     sql = f.read()
                 cursor.execute(sql)
                 print("✅ 财报日历相关表创建/更新完成")
-            else:
-                print(f"⚠️ 财报日历迁移脚本不存在: {migration_file}")
+            # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建财报日历表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行

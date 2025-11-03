@@ -450,20 +450,82 @@ async def get_economic_events(
     - **offset**: 偏移量
     """
     try:
-        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}", source="markets_api")
+        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}, country={country}", source="markets_api")
         
-        # 从数据库获取数据
-        market_service = get_market_data_service()
-        events = market_service.get_economic_events(
-            from_date=from_date,
-            to_date=to_date,
-            country=country,
-            limit=limit,
-            offset=offset
-        )
+        # 处理多个国家代码（用逗号分隔）
+        countries = []
+        if country:
+            # 分割国家代码
+            countries = [c.strip() for c in country.split(',') if c.strip()]
         
-        info(f"获取到 {len(events)} 条经济事件数据", source="markets_api")
-        return events
+        # 从API获取数据
+        events_service = get_economic_events_service()
+        all_events_data = []
+        
+        if countries:
+            # 如果有指定国家，为每个国家分别请求
+            # 为了控制总数，将limit分配给每个国家（向上取整，确保至少每个国家有数据）
+            country_limit = max(1, limit // len(countries)) if len(countries) > 1 else limit
+            
+            for country_code in countries:
+                try:
+                    country_events = events_service.get_economic_events(
+                        from_date=from_date,
+                        to_date=to_date,
+                        country=country_code,
+                        limit=country_limit,
+                        offset=offset
+                    )
+                    all_events_data.extend(country_events)
+                except Exception as e:
+                    # 如果某个国家请求失败，记录错误但继续处理其他国家
+                    warning(f"获取国家 {country_code} 的经济事件失败: {str(e)}", source="markets_api")
+                    continue
+        else:
+            # 如果没有指定国家，获取所有国家
+            all_events_data = events_service.get_economic_events(
+                from_date=from_date,
+                to_date=to_date,
+                country=None,
+                limit=limit,
+                offset=offset
+            )
+        
+        # 格式化事件数据
+        formatted_events = []
+        for event_data in all_events_data:
+            try:
+                formatted_event = events_service.format_event_data(event_data)
+                
+                # 计算impact值
+                impact = calculate_event_impact(formatted_event['event'])
+                formatted_event['impact'] = impact
+                
+                # 转换为响应模型格式
+                formatted_events.append({
+                    'date': formatted_event.get('date'),
+                    'time': formatted_event.get('time'),
+                    'country': formatted_event.get('country'),
+                    'event': formatted_event.get('event'),
+                    'period': formatted_event.get('period'),
+                    'actual': formatted_event.get('actual'),
+                    'previous': formatted_event.get('previous'),
+                    'forecast': formatted_event.get('forecast'),
+                    'calculated_change': formatted_event.get('calculated_change'),
+                    'calculated_change_pct': formatted_event.get('calculated_change_pct'),
+                    'impact': formatted_event.get('impact')
+                })
+            except Exception as e:
+                # 如果格式化某个事件失败，记录错误但继续处理其他事件
+                warning(f"格式化经济事件数据失败: {str(e)}", source="markets_api")
+                continue
+        
+        # 如果指定了多个国家，可能总数超过limit，需要截断
+        if len(formatted_events) > limit:
+            formatted_events = formatted_events[:limit]
+        
+        info(f"获取到 {len(formatted_events)} 条经济事件数据", source="markets_api")
+        return formatted_events
         
     except Exception as e:
         error(f"获取经济事件数据失败: {str(e)}", source="markets_api")
@@ -611,11 +673,14 @@ async def get_economic_events_countries(
     获取经济事件数据库中可用的国家列表
     """
     try:
-        # 初始化数据库服务
-        market_service = get_market_data_service()
+        # 获取经济事件服务
+        events_service = get_economic_events_service()
         
-        # 从经济事件数据库获取国家列表
-        countries = market_service.get_available_countries()
+        # 获取支持的国家代码列表
+        country_codes = events_service.get_supported_countries()
+        
+        # 转换为响应模型格式
+        countries = [{"code": code, "name": code} for code in country_codes]
         
         return countries
         
