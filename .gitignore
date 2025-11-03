@@ -9,6 +9,8 @@ sql数据库/
 node_modules/
 build/
 jikun/
+deployment/
+development/
 market_data_test_output
 .idea/
 .vscode/

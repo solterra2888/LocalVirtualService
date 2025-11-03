@@ -33,7 +33,7 @@ export interface TaskExecution {
   taskName: string;
   startTime: string;
   endTime?: string;
-  status: 'running' | 'success' | 'failed';
+  status: 'running' | 'success' | 'failed' | 'timeout' | 'cancelled';
   duration?: number;
   details?: string;
   recordsProcessed?: number;

@@ -173,7 +173,7 @@ export interface ExecutionLog {
   started_at: string;
   finished_at?: string;
   duration_ms?: number;
-  status: 'running' | 'success' | 'failed' | 'timeout';
+  status: 'running' | 'success' | 'failed' | 'timeout' | 'cancelled';
   result_message?: string;
   result_data?: any;
   error_message?: string;

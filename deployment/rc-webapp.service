@@ -5,19 +5,16 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-User=kevin
-Group=kevin
-WorkingDirectory=/home/kevin/rcproject
+User=root
+Group=root
+WorkingDirectory=/opt/rcproject
+
+# 从.env文件加载所有配置（包含敏感信息）
+EnvironmentFile=/opt/rcproject/.env
+
+# 仅覆盖路径相关的环境变量
 Environment=PATH=/home/kevin/miniconda3/envs/rc_project/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONPATH=/home/kevin/rcproject
-Environment=DB_HOST=localhost
-Environment=DB_PORT=5432
-Environment=DB_NAME=rc_database
-Environment=DB_USER=postgres
-Environment=DB_PASSWORD=1q23l,Sc45+@!
-Environment=SCHEDULER_SERVICE_URL=http://localhost:8001
-Environment=WEBAPP_URL=http://localhost:8000
-Environment=DEPLOYMENT_MODE=unified
+Environment=PYTHONPATH=/opt/rcproject
 ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=3

@@ -146,7 +146,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       success: { color: '#00b96b', icon: <CheckCircleOutlined /> },
       failed: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
       error: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
-      running: { color: '#40a9ff', icon: <PlayCircleOutlined /> }
+      running: { color: '#40a9ff', icon: <PlayCircleOutlined /> },
+      timeout: { color: '#fa8c16', icon: <ClockCircleOutlined /> },
+      cancelled: { color: '#8c8c8c', icon: <InfoCircleOutlined /> }
     };
     
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.error;
@@ -318,7 +320,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         { text: 'Success', value: 'success' },
         { text: 'Failed', value: 'failed' },
         { text: 'Error', value: 'error' },
-        { text: 'Running', value: 'running' }
+        { text: 'Running', value: 'running' },
+        { text: 'Timeout', value: 'timeout' },
+        { text: 'Cancelled', value: 'cancelled' }
       ],
       onFilter: (value: any, record: ExecutionLog) => record.status === value
     },
@@ -334,6 +338,14 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
           ) : log.status === 'running' ? (
             <Text style={{ fontSize: '11px', color: '#1890ff' }}>
               {log.result_message || 'Task is running...'}
+            </Text>
+          ) : log.status === 'cancelled' ? (
+            <Text style={{ fontSize: '11px', color: '#8c8c8c' }}>
+              {log.error_message || log.result_message || 'Task was cancelled'}
+            </Text>
+          ) : log.status === 'timeout' ? (
+            <Text style={{ fontSize: '11px', color: '#fa8c16' }}>
+              {log.error_message || 'Execution timeout'}
             </Text>
           ) : (
             <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>

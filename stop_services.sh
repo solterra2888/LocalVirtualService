@@ -13,18 +13,33 @@ fi
 
 echo "📋 停止服务列表:"
 echo "   - Nginx代理"
+echo "   - 调度器服务"
+echo "   - Celery Worker (AI处理)"
+echo "   - Celery Worker (数据获取)"
 echo "   - 前端应用"
 echo "   - Web应用"
+echo "   - Redis缓存"
 echo "   - PostgreSQL数据库"
-echo ""
-echo "ℹ️  注意: 调度器服务需要单独停止"
-echo "   停止调度器: sudo ./scheduler/stop_scheduler.sh"
 echo ""
 
 # 停止Nginx
 echo "🌐 停止Nginx代理..."
 systemctl stop nginx
 echo "✅ Nginx已停止"
+
+# 停止调度器
+echo "🕒 停止调度器服务..."
+systemctl stop rc-scheduler
+echo "✅ 调度器服务已停止"
+
+# 停止Celery Workers
+echo "🤖 停止Celery AI Worker..."
+systemctl stop rc-celery-ai
+echo "✅ Celery AI Worker已停止"
+
+echo "📊 停止Celery Data Worker..."
+systemctl stop rc-celery-data
+echo "✅ Celery Data Worker已停止"
 
 # 停止前端应用
 echo "🎨 停止前端应用..."
@@ -35,6 +50,11 @@ echo "✅ 前端应用已停止"
 echo "🌐 停止Web应用..."
 systemctl stop rc-webapp
 echo "✅ Web应用已停止"
+
+# 停止Redis
+echo "🔴 停止Redis缓存..."
+systemctl stop redis
+echo "✅ Redis已停止"
 
 # 停止PostgreSQL
 echo "🗄️ 停止PostgreSQL数据库..."
@@ -81,7 +101,7 @@ echo "================================"
 echo "💡 要重新启动服务，请运行:"
 echo "   sudo ./start_services.sh"
 echo ""
-echo "🕒 调度器管理:"
-echo "   - 启动调度器: sudo ./scheduler/start_scheduler.sh"
-echo "   - 停止调度器: sudo ./scheduler/stop_scheduler.sh"
-echo "   - 查看状态: sudo ./scheduler/status_scheduler.sh"
+echo "🔧 服务管理命令:"
+echo "   - 启动所有服务: sudo ./start_services.sh"
+echo "   - 重启所有服务: sudo ./restart_services.sh"
+echo "   - 查看服务状态: systemctl status 'rc-*'"
