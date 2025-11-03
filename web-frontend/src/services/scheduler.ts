@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -124,6 +124,17 @@ export interface CreateMarketDataTaskParams {
   fetch_realtime?: boolean;
   fetch_eod?: boolean;
   eod_days?: number;
+}
+
+export interface CreateEarningsCalendarTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  start_date?: string;
+  end_date?: string;
+  days?: number;
+  fetch_next_week?: boolean;
 }
 
 export interface CronPreset {
@@ -621,6 +632,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认市场数据定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建财报日历定时任务
+   */
+  async createEarningsCalendarTask(params: CreateEarningsCalendarTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/earnings-calendar', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建财报日历定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建财报日历定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建财报日历定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认财报日历定时任务
+   */
+  async createDefaultEarningsCalendarTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/earnings-calendar/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认财报日历定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认财报日历定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认财报日历定时任务失败'
       };
     }
   }

@@ -290,3 +290,167 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
             'data': None
         }
 
+
+@app.task(bind=True, name='fetch_earnings_calendar', queue='data_fetching')
+def fetch_earnings_calendar_task(self, start_date=None, end_date=None, days=None, fetch_next_week=False):
+    """
+    异步获取财报日历数据 Celery 任务
+    
+    适用场景：
+    - 大量财报数据获取（13000+条记录）
+    - 执行时间 5-15分钟
+    - 需要进度追踪和批量处理
+    - 避免阻塞 APScheduler
+    
+    Args:
+        start_date: 开始日期 (YYYY-MM-DD)，可选
+        end_date: 结束日期 (YYYY-MM-DD)，可选
+        days: 从今天开始的天数，可选（默认7天）
+        fetch_next_week: 是否获取下周数据，可选（默认False）
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'data': {
+                    'total_count': int,
+                    'new_count': int,
+                    'updated_count': int,
+                    'start_date': str,
+                    'end_date': str
+                }
+            }
+    """
+    
+    def update_progress(status=None, progress=None, current_batch=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'current_batch': current_batch,
+                'message': log_message or '',
+                'records_processed': kwargs.get('records_processed', 0),
+                'records_stored': kwargs.get('records_stored', 0),
+                'new_records': kwargs.get('new_records', 0),
+                'updated_records': kwargs.get('updated_records', 0)
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_earnings_task")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_earnings_task")
+    
+    try:
+        info(f"开始执行财报日历数据获取任务", 
+             task_id=self.request.id,
+             start_date=start_date,
+             end_date=end_date,
+             days=days,
+             fetch_next_week=fetch_next_week,
+             source="celery_earnings_task")
+        
+        update_progress(
+            status='starting',
+            progress=0,
+            log_message="初始化财报日历服务..."
+        )
+        
+        # 导入服务
+        from backend.services.earnings_calendar_service import create_earnings_calendar_service
+        service = create_earnings_calendar_service()
+        
+        # 决定使用哪种获取方式
+        if fetch_next_week:
+            update_progress(
+                progress=5,
+                log_message="获取下周财报数据..."
+            )
+            result = service.fetch_next_week_earnings()
+        elif start_date and end_date:
+            update_progress(
+                progress=5,
+                log_message=f"获取指定日期范围财报数据: {start_date} 到 {end_date}..."
+            )
+            result = service.fetch_earnings_calendar(start_date, end_date)
+        elif days:
+            update_progress(
+                progress=5,
+                log_message=f"获取未来 {days} 天财报数据..."
+            )
+            result = service.fetch_custom_period_earnings(days)
+        else:
+            update_progress(
+                progress=5,
+                log_message="获取未来 7 天财报数据（默认）..."
+            )
+            result = service.fetch_custom_period_earnings(7)
+        
+        # 处理结果
+        if result.get('success'):
+            data = result.get('data', {})
+            total_count = data.get('total_count', 0)
+            new_count = data.get('new_count', 0)
+            updated_count = data.get('updated_count', 0)
+            
+            success_msg = f"财报日历数据获取成功: 总计 {total_count} 条，新增 {new_count} 条，更新 {updated_count} 条"
+            
+            update_progress(
+                status='completed',
+                progress=100,
+                log_message=success_msg,
+                records_processed=total_count,
+                records_stored=total_count,
+                new_records=new_count,
+                updated_records=updated_count
+            )
+            
+            info(success_msg, 
+                 task_id=self.request.id,
+                 total=total_count,
+                 new=new_count,
+                 updated=updated_count,
+                 source="celery_earnings_task")
+            
+            return result
+        else:
+            error_msg = f"财报日历数据获取失败: {result.get('message', '未知错误')}"
+            error(error_msg, 
+                  task_id=self.request.id,
+                  source="celery_earnings_task")
+            
+            update_progress(
+                status='failed',
+                progress=0,
+                log_message=error_msg
+            )
+            
+            return result
+        
+    except Exception as e:
+        error_msg = f"财报日历数据获取任务异常: {str(e)}"
+        error(error_msg, 
+              task_id=self.request.id,
+              exception=str(e),
+              source="celery_earnings_task")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        # 返回错误结果
+        return {
+            'success': False,
+            'message': error_msg,
+            'data': None
+        }
+

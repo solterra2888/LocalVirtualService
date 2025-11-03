@@ -64,7 +64,8 @@ class SchedulerService:
             'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
             'futu_themes': self._execute_futu_themes_task,  # 富途投资主题数据获取任务
             'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
-            'market_data': self._execute_market_data_task  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
+            'market_data': self._execute_market_data_task,  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
+            'earnings_calendar': self._execute_earnings_calendar_task  # 财报日历数据获取任务
         }
         
         # 添加事件监听器
@@ -1238,65 +1239,104 @@ class SchedulerService:
     async def _execute_economic_events_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行经济事件获取任务"""
         try:
-            logger.info(f"执行经济事件获取任务 | params={params}")
+            logger.info(f"开始执行经济事件获取任务 | params={params}")
             
-            # 导入所需的服务
-            from backend.services.economic_events_service import EconomicEventsService
-            from backend.services.market_data_service import MarketDataService
+            # 关键：在线程池中执行同步方法（避免阻塞事件循环）
+            import asyncio
+            import concurrent.futures
             
-            # 初始化服务
-            api_client = EconomicEventsService()
-            market_service = MarketDataService()
-            
-            # 构建API请求参数
-            api_params = {}
-            if 'from_date' in params:
-                api_params['from_date'] = params['from_date']
-            if 'to_date' in params:
-                api_params['to_date'] = params['to_date']
-            if 'country' in params:
-                api_params['country'] = params['country']
-
-
-            if 'limit' in params:
-                api_params['limit'] = params['limit']
-            
-            # 从API获取数据
-            events_data = api_client.get_economic_events(**api_params)
-            
-            if not events_data:
+            def _fetch_and_store_economic_events():
+                """同步方法：获取并存储经济事件数据"""
+                # 导入所需的服务
+                from backend.services.economic_events_service import EconomicEventsService
+                from backend.services.market_data_service import create_market_data_service
+                
+                # 初始化服务
+                api_client = EconomicEventsService()
+                market_service = create_market_data_service()
+                
+                # 构建API请求参数
+                api_params = {}
+                if 'from_date' in params:
+                    api_params['from_date'] = params['from_date']
+                if 'to_date' in params:
+                    api_params['to_date'] = params['to_date']
+                if 'country' in params:
+                    api_params['country'] = params['country']
+                if 'limit' in params:
+                    api_params['limit'] = params['limit']
+                
+                # 从API获取数据
+                events_data = api_client.get_economic_events(**api_params)
+                
+                if not events_data:
+                    return {
+                        'success': True,
+                        'message': '未获取到新数据',
+                        'data': {'total_fetched': 0, 'new_records': 0}
+                    }
+                
+                # 格式化数据并计算impact
+                formatted_data = []
+                for event in events_data:
+                    formatted_event = api_client.format_event_data(event)
+                    
+                    # 计算impact值
+                    event_name = formatted_event.get('event', '')
+                    # 简单的impact计算：根据事件名称判断重要性
+                    formatted_event['impact'] = 1  # 默认值
+                    if event_name:
+                        # 重要事件关键词
+                        high_impact_keywords = ['Interest Rate', 'Non-Farm Payrolls', 'GDP', 'CPI', 'Inflation', 'Unemployment', 'FOMC', 'Fed', 'Central Bank']
+                        medium_impact_keywords = ['PMI', 'Employment', 'Retail Sales', 'Consumer', 'Trade Balance']
+                        
+                        event_lower = event_name.lower()
+                        if any(kw.lower() in event_lower for kw in high_impact_keywords):
+                            formatted_event['impact'] = 3
+                        elif any(kw.lower() in event_lower for kw in medium_impact_keywords):
+                            formatted_event['impact'] = 2
+                    
+                    formatted_data.append(formatted_event)
+                
+                # 保存到数据库
+                inserted_count = market_service.batch_insert_economic_events(formatted_data)
+                
+                logger.info(f"经济事件任务执行完成: 获取{len(formatted_data)}条，保存{inserted_count}条")
+                
                 return {
                     'success': True,
-                    'message': '未获取到新数据',
-                    'data': {'total_fetched': 0, 'new_records': 0}
+                    'message': f'成功获取并保存 {inserted_count} 条经济事件数据',
+                    'data': {
+                        'total_fetched': len(formatted_data),
+                        'new_records': inserted_count,
+                        'params': params
+                    }
                 }
             
-            # 格式化数据
-            formatted_data = []
-            for event in events_data:
-                formatted_event = api_client.format_event_data(event)
-                formatted_data.append(formatted_event)
+            # 在线程池中执行同步方法
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    _fetch_and_store_economic_events
+                )
             
-            # 保存到数据库
-            inserted_count = market_service.batch_insert_economic_events(formatted_data)
-            
-            logger.info(f"经济事件任务执行完成: 获取{len(formatted_data)}条，保存{inserted_count}条")
-            
-            return {
-                'success': True,
-                'message': f'成功获取并保存 {inserted_count} 条经济事件数据',
-                'data': {
-                    'total_fetched': len(formatted_data),
-                    'new_records': inserted_count,
-                    'params': params
+            if result['success']:
+                message = f"✅ {result['message']}"
+                logger.info("经济事件任务执行成功", result_msg=message, data=result.get('data'))
+                return result
+            else:
+                logger.error("经济事件任务执行失败", error=result['message'])
+                return {
+                    'success': False,
+                    'message': f"❌ {result['message']}"
                 }
-            }
-            
+                
         except Exception as e:
-            logger.error(f"经济事件获取任务执行失败: {str(e)}")
+            error_msg = f"经济事件任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
             return {
                 'success': False,
-                'message': f"经济事件获取失败: {str(e)}",
+                'message': f"❌ {error_msg}",
                 'data': None
             }
     
@@ -2176,6 +2216,98 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"市场数据任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'data': None
+            }
+    
+    async def _execute_earnings_calendar_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行财报日历数据获取任务（使用Celery异步处理）
+        
+        对于13000+条数据的大批量处理，使用Celery任务队列：
+        - 避免阻塞APScheduler
+        - 支持进度追踪
+        - 支持任务重试和错误恢复
+        - 独立worker处理，不影响调度器性能
+        
+        Args:
+            params: 任务参数
+                - start_date: 开始日期 (YYYY-MM-DD)，可选
+                - end_date: 结束日期 (YYYY-MM-DD)，可选
+                - days: 从今天开始的天数，可选（默认7天）
+                - fetch_next_week: 是否获取下周数据，可选（默认False）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行财报日历数据获取任务（使用Celery）", params=params)
+            
+            # 导入Celery任务
+            from backend.tasks.data_tasks import fetch_earnings_calendar_task
+            
+            # 提取参数
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+            days = params.get('days')
+            fetch_next_week = params.get('fetch_next_week', False)
+            
+            # 提交Celery任务（异步执行）
+            celery_task = fetch_earnings_calendar_task.delay(
+                start_date=start_date,
+                end_date=end_date,
+                days=days,
+                fetch_next_week=fetch_next_week
+            )
+            
+            logger.info(f"财报日历Celery任务已提交", 
+                       task_id=celery_task.id,
+                       celery_task_id=celery_task.id)
+            
+            # 等待任务完成（可选：也可以异步返回任务ID，让调用方查询状态）
+            # 这里选择等待完成，因为调度器需要记录执行结果
+            try:
+                result = celery_task.get(timeout=1800)  # 30分钟超时
+                
+                if result.get('success'):
+                    message = f"✅ {result['message']}"
+                    logger.info("财报日历任务执行成功", 
+                               result_msg=message, 
+                               data=result.get('data'),
+                               celery_task_id=celery_task.id)
+                    return {
+                        'success': True,
+                        'message': message,
+                        'data': result.get('data'),
+                        'celery_task_id': celery_task.id
+                    }
+                else:
+                    logger.error("财报日历任务执行失败", 
+                                error=result.get('message'),
+                                celery_task_id=celery_task.id)
+                    return {
+                        'success': False,
+                        'message': f"❌ {result.get('message', '任务执行失败')}",
+                        'celery_task_id': celery_task.id
+                    }
+                    
+            except Exception as celery_error:
+                error_msg = f"Celery任务执行异常: {str(celery_error)}"
+                logger.error(error_msg, 
+                            exception=str(celery_error),
+                            celery_task_id=celery_task.id)
+                return {
+                    'success': False,
+                    'message': f"❌ {error_msg}",
+                    'celery_task_id': celery_task.id,
+                    'data': None
+                }
+                
+        except Exception as e:
+            error_msg = f"财报日历任务提交异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {
                 'success': False,

@@ -52,6 +52,7 @@ task_routes = {
     'fetch_futu_themes': {'queue': 'data_fetching'},
     'fetch_eodhd_fundamentals': {'queue': 'data_fetching'},  # 🔥 新增：基本面数据获取
     'fetch_eodhd_eod_stock_prices': {'queue': 'data_fetching'},  # 🔥 新增：历史股价数据获取
+    'fetch_earnings_calendar': {'queue': 'data_fetching'},  # 🔥 新增：财报日历数据获取（13000+条记录）
 }
 
 # Worker配置

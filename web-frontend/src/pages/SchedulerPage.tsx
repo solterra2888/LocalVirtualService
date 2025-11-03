@@ -33,9 +33,6 @@ import {
   ClockCircleOutlined,
   DatabaseOutlined,
   GlobalOutlined,
-
-
-
   InfoCircleOutlined,
   CloudDownloadOutlined,
   TagOutlined,
@@ -46,7 +43,8 @@ import {
   ScheduleOutlined,
   FilterOutlined,
   BarChartOutlined,
-  LineChartOutlined
+  LineChartOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -68,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -206,6 +204,24 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/market-data',
           params: {},
           icon: <LineChartOutlined />
+        }
+      ]
+    },
+    {
+      id: 'earnings_calendar',
+      name: 'Earnings Calendar',
+      type: 'earnings_calendar',
+      description: 'Get US earnings calendar from EODHD API (no S&P 500 filtering, all US stocks)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_earnings_calendar_schedule',
+          name: 'Configure Earnings Calendar Fetch',
+          description: 'Set up periodic earnings calendar fetching (weekly on Sunday at 6 AM ET)',
+          endpoint: '/scheduler/tasks/earnings-calendar',
+          params: {},
+          icon: <CalendarOutlined />
         }
       ]
     },
@@ -392,6 +408,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+          (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -449,6 +466,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
         (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+        (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -491,7 +509,52 @@ const SchedulerPage: React.FC = () => {
     };
   };
 
+  // Format task parameters for display
+  const formatTaskParams = (sourceId: string, params: Record<string, any>) => {
+    if (!params || Object.keys(params).length === 0) {
+      return null;
+    }
 
+    const sourceIdLower = sourceId.toLowerCase();
+
+    // Format earnings_calendar parameters
+    if (sourceIdLower === 'earnings_calendar') {
+      const parts: string[] = [];
+      
+      if (params.fetch_next_week) {
+        parts.push('📅 Next Week');
+      } else if (params.start_date && params.end_date) {
+        parts.push(`📅 ${params.start_date} to ${params.end_date}`);
+      } else if (params.days) {
+        parts.push(`📅 Next ${params.days} days`);
+      }
+      
+      return parts.length > 0 ? parts.join(', ') : null;
+    }
+
+    // Format market_data parameters
+    if (sourceIdLower === 'market_data') {
+      const parts: string[] = [];
+      
+      if (params.asset_types && Array.isArray(params.asset_types) && params.asset_types.length > 0) {
+        parts.push(`Types: ${params.asset_types.join(', ')}`);
+      } else {
+        parts.push('Types: All');
+      }
+      
+      if (params.fetch_realtime) {
+        parts.push('Realtime: ✅');
+      }
+      if (params.fetch_eod) {
+        parts.push(`EOD: ${params.eod_days || 5} days`);
+      }
+      
+      return parts.join(' | ');
+    }
+
+    // Default: return formatted JSON
+    return JSON.stringify(params, null, 2);
+  };
 
   // Load theme data
   const loadThemes = async () => {
@@ -546,6 +609,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+          (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && !sourceIdLower.includes('fundamentals') && taskType.includes('exchange')) ||
@@ -657,7 +721,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes' || dataSource.id === 'market_data') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -921,6 +985,7 @@ const SchedulerPage: React.FC = () => {
                                         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
                                         (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
                                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+                                        (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                         (sourceIdLower.includes('events') && taskType.includes('events')) ||
                                         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
                                       );
@@ -992,7 +1057,36 @@ const SchedulerPage: React.FC = () => {
                                       }}>
                                         {cronInfo.expression}
                                       </Text>
-                                      {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+                                    </Space>
+                                  </div>
+                                  {!cronInfo.isValid && cronInfo.validationMessage && (
+                                    <div style={{ marginBottom: '4px' }}>
+                                      <Text type="danger" style={{ fontSize: '11px' }}>
+                                        {cronInfo.validationMessage}
+                                      </Text>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <Text type="secondary" style={{ fontSize: '11px' }}>
+                                      Timezone: {cronInfo.timezone}
+                                    </Text>
+                                  </div>
+                                  {/* Display formatted task parameters */}
+                                  {(() => {
+                                    const formattedParams = formatTaskParams(source.id, cronInfo.params);
+                                    if (formattedParams) {
+                                      return (
+                                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e1e4e8' }}>
+                                          <Space>
+                                            <Text strong style={{ fontSize: '11px', color: '#666' }}>
+                                              Configuration:
+                                            </Text>
+                                            <Text style={{ fontSize: '11px', color: '#1890ff' }}>
+                                              {formattedParams}
+                                            </Text>
+                                          </Space>
+                                          {/* Also show full JSON in tooltip */}
+                                          {JSON.stringify(cronInfo.params, null, 2) !== formattedParams && (
                                         <Tooltip 
                                           title={
                                             <pre style={{ 
@@ -1010,26 +1104,18 @@ const SchedulerPage: React.FC = () => {
                                           <SettingOutlined 
                                             style={{ 
                                               color: '#1890ff', 
-                                              fontSize: '12px',
-                                              cursor: 'pointer'
+                                                  fontSize: '11px',
+                                                  cursor: 'pointer',
+                                                  marginLeft: '8px'
                                             }} 
                                           />
                                         </Tooltip>
                                       )}
-                                    </Space>
                                   </div>
-                                  {!cronInfo.isValid && cronInfo.validationMessage && (
-                                    <div style={{ marginBottom: '4px' }}>
-                                      <Text type="danger" style={{ fontSize: '11px' }}>
-                                        {cronInfo.validationMessage}
-                                      </Text>
-                                    </div>
-                                  )}
-                                  <div>
-                                    <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      Timezone: {cronInfo.timezone}
-                                    </Text>
-                                  </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                               );
                             }
@@ -1108,7 +1194,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar'}
           dataSourceName={selectedDataSource.name}
         />
       )}
