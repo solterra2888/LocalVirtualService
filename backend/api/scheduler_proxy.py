@@ -35,14 +35,6 @@ class SchedulerServiceClient:
         # 合并请求头
         request_headers = headers or {}
         
-        # 调试：记录认证头信息
-        if 'authorization' in request_headers:
-            logger.info(f"转发认证头: {request_headers['authorization'][:20]}...")
-        else:
-            logger.warning("未找到认证头")
-        
-        logger.info(f"代理请求到调度器服务: {method} {url}")
-        
         # 首先尝试使用httpx
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -59,7 +51,6 @@ class SchedulerServiceClient:
                 # 尝试解析JSON响应
                 try:
                     result = response.json()
-                    logger.info(f"调度器服务响应成功: {response.status_code}")
                     return result
                 except:
                     # 如果不是JSON响应，返回文本
@@ -94,7 +85,6 @@ class SchedulerServiceClient:
                 # 尝试解析JSON响应
                 try:
                     result = response.json()
-                    logger.info(f"调度器服务响应成功: {response.status_code}")
                     return result
                 except:
                     # 如果不是JSON响应，返回文本
@@ -379,6 +369,31 @@ async def create_default_market_data_task_proxy(request: Request, current_user=D
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认市场数据任务代理失败: {str(e)}")
+
+@router.post("/tasks/earnings-calendar", summary="创建财报日历定时任务")
+async def create_earnings_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建财报日历定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/earnings-calendar", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建财报日历任务代理失败: {str(e)}")
+
+@router.post("/tasks/earnings-calendar/default", summary="创建默认财报日历定时任务")
+async def create_default_earnings_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认财报日历定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/earnings-calendar/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认财报日历任务代理失败: {str(e)}")
 
 @router.post("/tasks/{task_id}/enable", summary="启用定时任务")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
