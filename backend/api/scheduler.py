@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes|market_data)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes|market_data|earnings_calendar|ipo_calendar)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -173,6 +173,21 @@ class CreateEarningsCalendarTaskRequest(BaseModel):
     end_date: Optional[str] = Field(default=None, description="结束日期 (YYYY-MM-DD)")
     days: Optional[int] = Field(default=7, description="从今天开始的天数（默认7天）", ge=1, le=90)
     fetch_next_week: bool = Field(default=False, description="是否获取下周数据")
+
+
+class CreateIPOCalendarTaskRequest(BaseModel):
+    """创建 IPO 日历定时任务请求模型"""
+    name: str = Field(default="IPO Calendar Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="0 6 * * 0", description="Cron表达式（默认每周日早上6点）")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    start_date: Optional[str] = Field(default=None, description="开始日期 (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(default=None, description="结束日期 (YYYY-MM-DD)")
+    days: Optional[int] = Field(default=30, description="从今天开始的天数（默认30天）", ge=1, le=365)
+    fetch_next_week: bool = Field(default=False, description="是否获取下周数据")
+    
+    # 注意：EODHD API 不支持 exchanges 参数，已移除
+    # 如果需要过滤特定交易所，可以在查询数据库时使用 WHERE 条件
 
 
 # ============ 定时任务管理API ============
@@ -1235,13 +1250,141 @@ async def create_default_earnings_calendar_task(
         scheduler_service = await get_scheduler_service()
         
         result = await scheduler_service.create_cron_task(
-            task_name="Earnings Calendar Auto Fetch",
-            task_type="earnings_calendar",
+            task_name="IPO Calendar Auto Fetch",
+            task_type="ipo_calendar",
             cron_expression="0 6 * * 0",  # 每周日早上6点
             timezone="America/New_York",
             enabled=True,
             task_params={
-                'days': 7,
+                'days': 30,
+                'exchanges': ['US', 'HK']  # 默认获取 US 和 HK 交易所
+            },
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认 IPO 日历定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认 IPO 日历定时任务创建失败", 
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认 IPO 日历定时任务失败", 
+                    exception=str(e), 
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/ipo-calendar", summary="创建 IPO 日历定时任务")
+async def create_ipo_calendar_task(
+    request: CreateIPOCalendarTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 IPO 日历定时任务
+    
+    默认配置：
+    - 每周日早上6点执行 (0 6 * * 0)
+    - 获取未来30天的 IPO 数据
+    - 支持自定义日期范围或获取下周数据
+    
+    注意：EODHD API 不支持 exchanges 参数，会返回所有交易所的数据。
+    如果需要过滤特定交易所，可以在查询数据库时使用 WHERE 条件。
+    """
+    try:
+        logger.info("创建 IPO 日历定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # IPO 日历任务参数
+        # 注意：EODHD API 不支持 exchanges 参数，已移除
+        task_params = {
+            'start_date': request.start_date,
+            'end_date': request.end_date,
+            'days': request.days,
+            'fetch_next_week': request.fetch_next_week
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="ipo_calendar",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("IPO 日历定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("IPO 日历定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except ValueError as e:
+        logger.error("IPO 日历定时任务创建参数错误", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+    except Exception as e:
+        logger.error("创建 IPO 日历定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/ipo-calendar/default", summary="创建默认 IPO 日历定时任务")
+async def create_default_ipo_calendar_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的 IPO 日历定时任务
+    
+    默认配置：
+    - 每周日早上6点执行 (0 6 * * 0)
+    - 获取未来30天的 IPO 数据
+    
+    注意：EODHD API 会返回所有交易所的数据，如果需要过滤特定交易所，
+    可以在查询数据库时使用 WHERE 条件。
+    """
+    try:
+        logger.info("创建默认 IPO 日历定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="IPO Calendar Auto Fetch",
+            task_type="ipo_calendar",
+            cron_expression="0 6 * * 0",  # 每周日早上6点
+            timezone="America/New_York",
+            enabled=True,
+            task_params={
+                'days': 30,
                 'fetch_next_week': False
             },
             created_by=current_user.username

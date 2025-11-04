@@ -25,6 +25,9 @@ export interface InvestmentTheme {
   // Additional info from futu_investment_themes
   stock_count?: number;  // Number of stocks in this theme
   change_percent?: string;  // Theme change percentage
+  
+  // Vector embedding status
+  has_embedding?: boolean;  // Whether this theme has been vectorized
 }
 
 /**

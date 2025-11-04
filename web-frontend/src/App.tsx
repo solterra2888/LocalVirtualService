@@ -20,6 +20,7 @@ import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
 import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import InvestmentThemesPage from './pages/InvestmentThemesPage';
+import CandlestickDemoPage from './pages/CandlestickDemoPage';
 import './App.css';
 
 // 私有路由组件
@@ -124,6 +125,7 @@ const App: React.FC = () => {
                 <Route path="scheduler" element={<SchedulerPage />} />
                 <Route path="prompt-templates" element={<PromptTemplatesPage />} />
                 <Route path="investment-themes" element={<InvestmentThemesPage />} />
+                <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
                 
                 {/* 管理员路由 */}
                 <Route

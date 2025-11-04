@@ -265,6 +265,19 @@ export const dashboardAPI = {
     }
   },
 
+  // 更新watchlist项
+  updateWatchlistItem: async (watchlistId: number, params: {
+    priority?: number;
+    notes?: string;
+  }): Promise<{ message: string; watchlist_id: number; symbol: string; priority: number; notes?: string }> => {
+    try {
+      return await api.put(`/dashboard/watchlist/${watchlistId}`, params);
+    } catch (error) {
+      console.error('Failed to update watchlist item:', error);
+      throw error;
+    }
+  },
+
   // 从watchlist移除股票
   removeFromWatchlist: async (watchlistId: number): Promise<{ message: string; symbol: string }> => {
     try {
@@ -351,8 +364,8 @@ export const dashboardAPI = {
     };
   }> => {
     try {
-      // 临时使用不需要认证的测试端点
-      return await api.get(`/dashboard/test-stock-historical-data/${symbol}`, { days });
+      // 使用正式端点，已修复period='d'过滤，确保只返回日数据
+      return await api.get(`/dashboard/stock-historical-data/${symbol}`, { days });
     } catch (error) {
       console.error('Failed to get stock historical data:', error);
       throw error;

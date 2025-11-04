@@ -16,6 +16,7 @@
     "dompurify": "^3.2.7",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.3",
+    "lightweight-charts": "^4.2.3",
     "mermaid": "^11.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

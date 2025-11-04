@@ -753,8 +753,10 @@ const InvestmentThemesPage: React.FC = () => {
           } else {
             message.error(result.message);
           }
-        } catch (error) {
-          message.error(`Delete failed: ${getErrorMessage(error)}`);
+        } catch (error: any) {
+          const errorMsg = getErrorMessage(error);
+          console.error('Delete theme error:', error);
+          message.error(`Delete failed: ${errorMsg}`);
         }
       }
     });
@@ -904,6 +906,19 @@ const InvestmentThemesPage: React.FC = () => {
         const label = getDescriptionSourceLabel(source);
         return <Tag color={label.color}>{label.text}</Tag>;
       }
+    },
+    {
+      title: 'Vectorized',
+      dataIndex: 'has_embedding',
+      key: 'has_embedding',
+      width: 110,
+      render: (hasEmbedding: boolean, record: InvestmentTheme) => (
+        <Tooltip title={hasEmbedding ? `Embedding model: ${record.embedding_model || 'text-embedding-v3'}` : 'Not vectorized yet'}>
+          <Tag color={hasEmbedding ? 'green' : 'default'} icon={hasEmbedding ? <CheckCircleOutlined /> : null}>
+            {hasEmbedding ? 'Yes' : 'No'}
+          </Tag>
+        </Tooltip>
+      )
     },
     {
       title: 'Enabled',

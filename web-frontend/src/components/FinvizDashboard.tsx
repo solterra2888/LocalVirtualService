@@ -18,7 +18,8 @@ import {
   Button,
   Skeleton,
   Select,
-  Modal
+  Modal,
+  Dropdown
 } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
@@ -57,7 +58,9 @@ import {
   StarOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  RobotOutlined
+  RobotOutlined,
+  EditOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
@@ -65,6 +68,7 @@ import { filesAPI } from '../services/files';
 import { newsAPI } from '../services/news';
 import type { NewsTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
+import EditWatchlistItemModal from './EditWatchlistItemModal';
 import FundamentalsOverviewModal from './FundamentalsOverviewModal';
 import StockChart from './StockChart';
 import type { DataNode } from 'antd/es/tree';
@@ -405,6 +409,13 @@ const FinvizDashboard: React.FC = () => {
   
   // 模态框状态
   const [addModalVisible, setAddModalVisible] = useState<boolean>(false);
+  const [editModalVisible, setEditModalVisible] = useState<boolean>(false);
+  const [editingItem, setEditingItem] = useState<WatchlistItem | null>(null);
+  
+  // 右键菜单状态
+  const [contextMenuVisible, setContextMenuVisible] = useState<boolean>(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [contextMenuItem, setContextMenuItem] = useState<WatchlistItem | null>(null);
   const [fundamentalsModalVisible, setFundamentalsModalVisible] = useState<boolean>(false);
   const [selectedTickerForFundamentals, setSelectedTickerForFundamentals] = useState<string>('');
   const [selectedCompanyNameForFundamentals, setSelectedCompanyNameForFundamentals] = useState<string>('');
@@ -1043,6 +1054,90 @@ const FinvizDashboard: React.FC = () => {
     await loadUserWatchlist();
   };
 
+  // 编辑成功后的回调
+  const handleEditSuccess = async () => {
+    await loadUserWatchlist();
+    // 如果编辑的是当前选中的股票，更新选中股票的信息
+    if (editingItem && selectedStock?.watchlist_id === editingItem.watchlist_id) {
+      // 重新加载watchlist以获取更新后的数据
+      const watchlistData = await dashboardAPI.getUserWatchlist();
+      setWatchlistGroups(watchlistData);
+      
+      // 找到更新后的股票信息
+      for (const group of watchlistData) {
+        const updatedItem = group.items.find(item => item.watchlist_id === editingItem.watchlist_id);
+        if (updatedItem) {
+          setSelectedStock(updatedItem as WatchlistStockInfo);
+          break;
+        }
+      }
+    }
+  };
+
+  // 处理右键点击
+  const handleRightClick = (info: any) => {
+    const { event, node } = info;
+    event.preventDefault();
+    event.stopPropagation();
+
+    // 只处理股票节点（不是分组节点）
+    if (node.key && node.key.toString().startsWith('stock-')) {
+      const watchlistId = parseInt(node.key.toString().replace('stock-', ''));
+      
+      // 在所有watchlist中查找对应的股票
+      let foundItem: WatchlistItem | null = null;
+      for (const group of watchlistGroups) {
+        foundItem = group.items.find(item => item.watchlist_id === watchlistId) || null;
+        if (foundItem) break;
+      }
+      
+      if (foundItem) {
+        setContextMenuItem(foundItem);
+        setContextMenuPosition({ x: event.clientX, y: event.clientY });
+        setContextMenuVisible(true);
+      }
+    }
+  };
+
+  // 处理右键菜单项点击
+  const handleContextMenuClick = ({ key }: { key: string }) => {
+    setContextMenuVisible(false);
+    
+    if (!contextMenuItem) return;
+    
+    if (key === 'edit') {
+      setEditingItem(contextMenuItem);
+      setEditModalVisible(true);
+    } else if (key === 'delete') {
+      // 显示确认对话框
+      Modal.confirm({
+        title: 'Delete Watchlist Item',
+        content: `Are you sure you want to remove ${contextMenuItem.symbol} from your watchlist?`,
+        okText: 'Delete',
+        okType: 'danger',
+        cancelText: 'Cancel',
+        onOk: async () => {
+          await handleRemoveFromWatchlist(contextMenuItem.watchlist_id, contextMenuItem.symbol);
+        },
+      });
+    }
+  };
+
+  // 右键菜单配置
+  const contextMenuItems = [
+    {
+      key: 'edit',
+      label: 'Edit',
+      icon: <EditOutlined />,
+    },
+    {
+      key: 'delete',
+      label: 'Delete',
+      icon: <DeleteOutlined />,
+      danger: true,
+    },
+  ];
+
   // 处理公司名称点击，显示基本面信息
   const handleCompanyNameClick = (ticker: string, companyName: string) => {
     setSelectedTickerForFundamentals(ticker);
@@ -1383,7 +1478,6 @@ const FinvizDashboard: React.FC = () => {
         realTimePriceData={priceData}
         onRefreshPrice={loadWatchlistPrices}
         priceLoading={pricesLoading}
-        onRemoveFromWatchlist={() => handleRemoveFromWatchlist(selectedStock.watchlist_id, selectedStock.symbol)}
         sector={selectedStock.sector}
         industry={selectedStock.industry}
         exchange={selectedStock.exchange}
@@ -1594,15 +1688,40 @@ const FinvizDashboard: React.FC = () => {
                     </Button>
                   </Empty>
                 ) : (
-                  <Tree
-                    showIcon
-                    selectedKeys={selectedKey ? [selectedKey] : []}
-                    expandedKeys={expandedKeys}
-                    onExpand={setExpandedKeys}
-                    treeData={treeData}
-                    onSelect={handleTreeSelect}
-                    style={{ background: 'transparent' }}
-                  />
+                  <div>
+                    <Tree
+                      showIcon
+                      selectedKeys={selectedKey ? [selectedKey] : []}
+                      expandedKeys={expandedKeys}
+                      onExpand={setExpandedKeys}
+                      treeData={treeData}
+                      onSelect={handleTreeSelect}
+                      onRightClick={handleRightClick}
+                      style={{ background: 'transparent' }}
+                    />
+                    {contextMenuVisible && (
+                      <Dropdown
+                        menu={{ items: contextMenuItems, onClick: handleContextMenuClick }}
+                        trigger={['click']}
+                        open={contextMenuVisible}
+                        onOpenChange={(visible) => {
+                          setContextMenuVisible(visible);
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: 'fixed',
+                            left: contextMenuPosition.x,
+                            top: contextMenuPosition.y,
+                            width: 1,
+                            height: 1,
+                            pointerEvents: 'none',
+                            zIndex: 9999
+                          }}
+                        />
+                      </Dropdown>
+                    )}
+                  </div>
                 )}
               </Spin>
             )}
@@ -1715,6 +1834,17 @@ const FinvizDashboard: React.FC = () => {
         open={addModalVisible}
         onCancel={() => setAddModalVisible(false)}
         onSuccess={handleAddSuccess}
+      />
+
+      {/* 编辑watchlist项的模态框 */}
+      <EditWatchlistItemModal
+        open={editModalVisible}
+        item={editingItem}
+        onCancel={() => {
+          setEditModalVisible(false);
+          setEditingItem(null);
+        }}
+        onSuccess={handleEditSuccess}
       />
 
       {/* 基本面信息概览模态框 */}

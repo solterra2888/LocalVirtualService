@@ -65,7 +65,8 @@ class SchedulerService:
             'futu_themes': self._execute_futu_themes_task,  # 富途投资主题数据获取任务
             'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
             'market_data': self._execute_market_data_task,  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
-            'earnings_calendar': self._execute_earnings_calendar_task  # 财报日历数据获取任务
+            'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
+            'ipo_calendar': self._execute_ipo_calendar_task  # IPO 日历数据获取任务
         }
         
         # 添加事件监听器
@@ -2308,6 +2309,102 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"财报日历任务提交异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'data': None
+            }
+    
+    async def _execute_ipo_calendar_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 IPO 日历数据获取任务（使用Celery异步处理）
+        
+        对于 IPO 数据的大批量处理，使用Celery任务队列：
+        - 避免阻塞APScheduler
+        - 支持进度追踪
+        - 支持任务重试和错误恢复
+        - 独立worker处理，不影响调度器性能
+        
+        Args:
+            params: 任务参数
+                - start_date: 开始日期 (YYYY-MM-DD)，可选
+                - end_date: 结束日期 (YYYY-MM-DD)，可选
+                - days: 从今天开始的天数，可选（默认30天）
+                - fetch_next_week: 是否获取下周数据，可选（默认False）
+                
+        注意：EODHD API 不支持 exchanges 参数，会返回所有交易所的数据。
+        如果需要过滤特定交易所，可以在查询数据库时使用 WHERE 条件。
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        try:
+            logger.info("开始执行 IPO 日历数据获取任务（使用Celery）", params=params)
+            
+            # 导入Celery任务
+            from backend.tasks.data_tasks import fetch_ipo_calendar_task
+            
+            # 提取参数
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+            days = params.get('days')
+            fetch_next_week = params.get('fetch_next_week', False)
+            
+            # 提交Celery任务（异步执行）
+            # 注意：EODHD API 不支持 exchanges 参数，已移除
+            celery_task = fetch_ipo_calendar_task.delay(
+                start_date=start_date,
+                end_date=end_date,
+                days=days,
+                fetch_next_week=fetch_next_week
+            )
+            
+            logger.info(f"IPO 日历Celery任务已提交", 
+                       task_id=celery_task.id,
+                       celery_task_id=celery_task.id)
+            
+            # 等待任务完成（可选：也可以异步返回任务ID，让调用方查询状态）
+            # 这里选择等待完成，因为调度器需要记录执行结果
+            try:
+                result = celery_task.get(timeout=1800)  # 30分钟超时
+                
+                if result.get('success'):
+                    message = f"✅ {result['message']}"
+                    logger.info("IPO 日历任务执行成功", 
+                               result_msg=message, 
+                               data=result.get('data'),
+                               celery_task_id=celery_task.id)
+                    return {
+                        'success': True,
+                        'message': message,
+                        'data': result.get('data'),
+                        'celery_task_id': celery_task.id
+                    }
+                else:
+                    logger.error("IPO 日历任务执行失败", 
+                                error=result.get('message'),
+                                celery_task_id=celery_task.id)
+                    return {
+                        'success': False,
+                        'message': f"❌ {result.get('message', '任务执行失败')}",
+                        'celery_task_id': celery_task.id
+                    }
+                    
+            except Exception as celery_error:
+                error_msg = f"Celery任务执行异常: {str(celery_error)}"
+                logger.error(error_msg, 
+                            exception=str(celery_error),
+                            celery_task_id=celery_task.id)
+                return {
+                    'success': False,
+                    'message': f"❌ {error_msg}",
+                    'celery_task_id': celery_task.id,
+                    'data': None
+                }
+                
+        except Exception as e:
+            error_msg = f"IPO 日历任务提交异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {
                 'success': False,

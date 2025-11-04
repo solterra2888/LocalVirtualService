@@ -8,7 +8,8 @@ import {
   Space,
   Typography,
   Button,
-  Popconfirm
+  Popconfirm,
+  message
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -32,6 +33,7 @@ interface EventEditModalProps {
   event?: ChartEvent | null; // 如果为空则为新增模式
   defaultDate?: string; // 默认日期（从图表点击获取）
   loading?: boolean;
+  availableTradingDates?: string[]; // 图表中可用的交易日列表（YYYY-MM-DD格式）
 }
 
 const EventEditModal: React.FC<EventEditModalProps> = ({
@@ -41,11 +43,36 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
   onDelete,
   event,
   defaultDate,
-  loading = false
+  loading = false,
+  availableTradingDates = []
 }) => {
   const [form] = Form.useForm();
   const [deleteLoading, setDeleteLoading] = useState(false);
   const isEdit = !!event;
+
+  // 判断日期是否为交易日
+  const isTradingDay = (date: dayjs.Dayjs | null): boolean => {
+    if (!date || availableTradingDates.length === 0) {
+      // 如果没有交易日列表，允许所有日期（向后兼容）
+      return true;
+    }
+    const dateStr = date.format('YYYY-MM-DD');
+    return availableTradingDates.includes(dateStr);
+  };
+
+  // DatePicker 的 disabledDate 函数：禁用非交易日
+  const disabledDate = (current: dayjs.Dayjs | null): boolean => {
+    if (!current) return false;
+    // 编辑模式下，如果当前日期就是已有事件的日期，允许选择（即使不在交易日列表中）
+    if (isEdit && event) {
+      const eventDate = dayjs(event.date);
+      if (current.format('YYYY-MM-DD') === eventDate.format('YYYY-MM-DD')) {
+        return false;
+      }
+    }
+    // 禁用非交易日
+    return !isTradingDay(current);
+  };
 
   useEffect(() => {
     if (visible) {
@@ -72,8 +99,18 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
+      const selectedDate = values.date.format('YYYY-MM-DD');
+      
+      // 最终验证：确保选择的日期是交易日（除非是编辑已有事件且日期未改变）
+      if (!isEdit || (isEdit && event && event.date !== selectedDate)) {
+        if (!isTradingDay(values.date)) {
+          message.error('Please select a trading day that exists in the chart');
+          return;
+        }
+      }
+      
       const eventData: EventFormData = {
-        date: values.date.format('YYYY-MM-DD'),
+        date: selectedDate,
         type: values.type,
         title: values.title,
         description: values.description,
@@ -164,12 +201,28 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         <Form.Item
           label="Date"
           name="date"
-          rules={[{ required: true, message: 'Please select a date' }]}
+          rules={[
+            { required: true, message: 'Please select a date' },
+            {
+              validator: (_, value) => {
+                if (!value) {
+                  return Promise.resolve();
+                }
+                if (!isTradingDay(value)) {
+                  return Promise.reject(
+                    new Error('Please select a trading day that exists in the chart')
+                  );
+                }
+                return Promise.resolve();
+              }
+            }
+          ]}
         >
           <DatePicker 
             style={{ width: '100%' }}
             format="YYYY-MM-DD"
             placeholder="Select event date"
+            disabledDate={disabledDate}
           />
         </Form.Item>
 
@@ -243,6 +296,12 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
       <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f6f6f6', borderRadius: '6px' }}>
         <Text type="secondary" style={{ fontSize: '12px' }}>
           💡 Tip: Event markers will be displayed on the candlestick chart for the corresponding date. Different event types have different icons and colors for easy identification.
+          {availableTradingDates.length > 0 && (
+            <>
+              <br />
+              📅 Only trading days shown in the chart are selectable ({availableTradingDates.length} days available).
+            </>
+          )}
         </Text>
       </div>
     </Modal>

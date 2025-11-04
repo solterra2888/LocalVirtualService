@@ -42,10 +42,10 @@ class SchedulerServiceClient:
                 
                 # 处理响应
                 if response.status_code >= 400:
-                    logger.error(f"调度器服务请求失败: {response.status_code} - {response.text}")
+                    logger.error(f"failed to request scheduler service: {response.status_code} - {response.text}")
                     raise HTTPException(
                         status_code=response.status_code,
-                        detail=f"调度器服务错误: {response.text}"
+                        detail=f"scheduler service error: {response.text}"
                     )
                 
                 # 尝试解析JSON响应
@@ -57,7 +57,7 @@ class SchedulerServiceClient:
                     return {"content": response.text, "status_code": response.status_code}
                     
         except (httpx.ConnectError, httpx.TimeoutException) as e:
-            logger.warning(f"httpx连接失败，尝试使用requests: {str(e)}")
+            logger.warning(f"httpx connection failed, trying requests: {str(e)}")
             
             # 如果httpx失败，使用requests作为备选方案
             try:
@@ -76,10 +76,10 @@ class SchedulerServiceClient:
                 
                 # 处理响应
                 if response.status_code >= 400:
-                    logger.error(f"调度器服务请求失败: {response.status_code} - {response.text}")
+                    logger.error(f"failed to request scheduler service: {response.status_code} - {response.text}")
                     raise HTTPException(
                         status_code=response.status_code,
-                        detail=f"调度器服务错误: {response.text}"
+                        detail=f"scheduler service error: {response.text}"
                     )
                 
                 # 尝试解析JSON响应
@@ -91,17 +91,17 @@ class SchedulerServiceClient:
                     return {"content": response.text, "status_code": response.status_code}
                     
             except requests.exceptions.RequestException as req_e:
-                logger.error(f"requests连接也失败: {str(req_e)}")
+                logger.error(f"requests connection failed: {str(req_e)}")
                 raise HTTPException(
                     status_code=503,
-                    detail="调度器服务不可用，请确保调度器服务正在运行"
+                    detail="scheduler service is not available, please ensure the scheduler service is running"
                 )
                 
         except Exception as e:
-            logger.error(f"调度器服务请求异常: {str(e)}")
+            logger.error(f"scheduler service request exception: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"调度器服务请求失败: {str(e)}"
+                detail=f"failed to request scheduler service: {str(e)}"
             )
     
     async def get(self, endpoint: str, params: Optional[Dict] = None, headers: Optional[Dict] = None) -> Dict[str, Any]:
@@ -135,14 +135,14 @@ def get_auth_headers(request: Request) -> Dict[str, str]:
 
 @router.get("/health", summary="调度器服务健康检查")
 async def scheduler_health_proxy():
-    """代理调度器服务健康检查"""
+    """proxy scheduler service health check"""
     try:
         result = await scheduler_client.get("/health")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"健康检查代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy scheduler service health check: {str(e)}")
 
 @router.get("/status", summary="调度器详细状态")
 async def scheduler_status_proxy(current_user=Depends(get_current_user)):
@@ -153,7 +153,7 @@ async def scheduler_status_proxy(current_user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"状态查询代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy scheduler service status check: {str(e)}")
 
 @router.get("/tasks", summary="获取所有定时任务")
 async def get_tasks_proxy(request: Request, current_user=Depends(get_current_user)): 
@@ -165,7 +165,7 @@ async def get_tasks_proxy(request: Request, current_user=Depends(get_current_use
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取任务列表代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get tasks: {str(e)}")
 
 @router.post("/tasks/cron", summary="创建Cron定时任务")
 async def create_cron_task_proxy(request: Request, current_user=Depends(get_current_user)):
@@ -179,9 +179,9 @@ async def create_cron_task_proxy(request: Request, current_user=Depends(get_curr
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建Cron任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create cron task: {str(e)}")
 
-@router.post("/tasks/interval", summary="创建间隔定时任务")
+@router.post("/tasks/interval", summary="create interval task")
 async def create_interval_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建间隔定时任务"""
     try:
@@ -192,9 +192,9 @@ async def create_interval_task_proxy(request: Request, current_user=Depends(get_
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建间隔任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create interval task: {str(e)}")
 
-@router.post("/tasks/eodhd-news", summary="创建EODHD新闻定时任务")
+@router.post("/tasks/eodhd-news", summary="create eodhd news task")
 async def create_eodhd_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建EODHD新闻定时任务"""
     try:
@@ -231,9 +231,9 @@ async def create_finviz_screener_task_proxy(request: Request, current_user=Depen
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建Finviz筛选任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create finviz screener task: {str(e)}")
 
-@router.post("/tasks/eodhd-news/default", summary="创建默认EODHD新闻定时任务")
+@router.post("/tasks/eodhd-news/default", summary="create default eodhd news task")
 async def create_default_eodhd_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认EODHD新闻定时任务"""
     try:
@@ -243,9 +243,9 @@ async def create_default_eodhd_news_task_proxy(request: Request, current_user=De
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认EODHD新闻任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default eodhd news task: {str(e)}")
 
-@router.post("/tasks/watchlist-news", summary="创建Watchlist新闻定时任务")
+@router.post("/tasks/watchlist-news", summary="create watchlist news task")
 async def create_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建Watchlist新闻定时任务"""
     try:
@@ -256,9 +256,9 @@ async def create_watchlist_news_task_proxy(request: Request, current_user=Depend
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建Watchlist新闻任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create watchlist news task: {str(e)}")
 
-@router.post("/tasks/watchlist-news/default", summary="创建默认Watchlist新闻定时任务")
+@router.post("/tasks/watchlist-news/default", summary="create default watchlist news task")
 async def create_default_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认Watchlist新闻定时任务"""
     try:
@@ -268,9 +268,9 @@ async def create_default_watchlist_news_task_proxy(request: Request, current_use
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认Watchlist新闻任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default watchlist news task: {str(e)}")
 
-@router.post("/tasks/eodhd-stock-prices", summary="创建EODHD股票价格定时任务")
+@router.post("/tasks/eodhd-stock-prices", summary="create eodhd stock prices task")
 async def create_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建EODHD股票价格定时任务"""
     try:
@@ -281,9 +281,9 @@ async def create_eodhd_stock_prices_task_proxy(request: Request, current_user=De
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建EODHD股票价格任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create eodhd stock prices task: {str(e)}")
 
-@router.post("/tasks/eodhd-stock-prices/default", summary="创建默认EODHD股票价格定时任务")
+@router.post("/tasks/eodhd-stock-prices/default", summary="create default eodhd stock prices task")
 async def create_default_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认EODHD股票价格定时任务"""
     try:
@@ -293,9 +293,9 @@ async def create_default_eodhd_stock_prices_task_proxy(request: Request, current
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认EODHD股票价格任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default eodhd stock prices task: {str(e)}")
 
-@router.post("/tasks/eodhd-eod-stock-prices", summary="创建EODHD历史股价定时任务")
+@router.post("/tasks/eodhd-eod-stock-prices", summary="create eodhd eod stock prices task")
 async def create_eodhd_eod_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建EODHD历史股价定时任务"""
     try:
@@ -306,9 +306,9 @@ async def create_eodhd_eod_stock_prices_task_proxy(request: Request, current_use
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建EODHD历史股价任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create eodhd eod stock prices task: {str(e)}")
 
-@router.post("/tasks/eodhd-eod-stock-prices/default", summary="创建默认EODHD历史股价定时任务")
+@router.post("/tasks/eodhd-eod-stock-prices/default", summary="create default eodhd eod stock prices task")
 async def create_default_eodhd_eod_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认EODHD历史股价定时任务"""
     try:
@@ -318,9 +318,9 @@ async def create_default_eodhd_eod_stock_prices_task_proxy(request: Request, cur
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认EODHD历史股价任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default eodhd eod stock prices task: {str(e)}")
 
-@router.post("/tasks/futu-themes", summary="创建Futu投资主题定时任务")
+@router.post("/tasks/futu-themes", summary="create futu themes task")
 async def create_futu_themes_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建Futu投资主题定时任务"""
     try:
@@ -331,9 +331,9 @@ async def create_futu_themes_task_proxy(request: Request, current_user=Depends(g
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建Futu投资主题任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create futu themes task: {str(e)}")
 
-@router.post("/tasks/futu-themes/default", summary="创建默认Futu投资主题定时任务")
+@router.post("/tasks/futu-themes/default", summary="create default futu themes task")
 async def create_default_futu_themes_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认Futu投资主题定时任务"""
     try:
@@ -343,9 +343,9 @@ async def create_default_futu_themes_task_proxy(request: Request, current_user=D
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认Futu投资主题任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default futu themes task: {str(e)}")
 
-@router.post("/tasks/market-data", summary="创建市场数据定时任务")
+@router.post("/tasks/market-data", summary="create market data task")
 async def create_market_data_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建市场数据定时任务"""
     try:
@@ -356,9 +356,9 @@ async def create_market_data_task_proxy(request: Request, current_user=Depends(g
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建市场数据任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create market data task: {str(e)}")
 
-@router.post("/tasks/market-data/default", summary="创建默认市场数据定时任务")
+@router.post("/tasks/market-data/default", summary="create default market data task")
 async def create_default_market_data_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认市场数据定时任务"""
     try:
@@ -368,9 +368,9 @@ async def create_default_market_data_task_proxy(request: Request, current_user=D
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认市场数据任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default market data task: {str(e)}")
 
-@router.post("/tasks/earnings-calendar", summary="创建财报日历定时任务")
+@router.post("/tasks/earnings-calendar", summary="create earnings calendar task")
 async def create_earnings_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建财报日历定时任务"""
     try:
@@ -381,9 +381,9 @@ async def create_earnings_calendar_task_proxy(request: Request, current_user=Dep
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建财报日历任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create earnings calendar task: {str(e)}")
 
-@router.post("/tasks/earnings-calendar/default", summary="创建默认财报日历定时任务")
+@router.post("/tasks/earnings-calendar/default", summary="create default earnings calendar task")
 async def create_default_earnings_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认财报日历定时任务"""
     try:
@@ -393,9 +393,34 @@ async def create_default_earnings_calendar_task_proxy(request: Request, current_
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认财报日历任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default earnings calendar task: {str(e)}")
 
-@router.post("/tasks/{task_id}/enable", summary="启用定时任务")
+@router.post("/tasks/ipo-calendar", summary="create IPO calendar task")
+async def create_ipo_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 IPO 日历定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/ipo-calendar", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create IPO calendar task: {str(e)}")
+
+@router.post("/tasks/ipo-calendar/default", summary="create default IPO calendar task")
+async def create_default_ipo_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 IPO 日历定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/ipo-calendar/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default IPO calendar task: {str(e)}")
+
+@router.post("/tasks/{task_id}/enable", summary="enable task")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""
     try:
@@ -405,9 +430,9 @@ async def enable_task_proxy(request: Request, task_id: str, current_user=Depends
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"启用任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy enable task: {str(e)}")
 
-@router.post("/tasks/{task_id}/disable", summary="禁用定时任务")
+@router.post("/tasks/{task_id}/disable", summary="disable task")
 async def disable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理禁用定时任务"""
     try:
@@ -417,9 +442,9 @@ async def disable_task_proxy(request: Request, task_id: str, current_user=Depend
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"禁用任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy disable task: {str(e)}")
 
-@router.delete("/tasks/{task_id}", summary="删除定时任务")
+@router.delete("/tasks/{task_id}", summary="delete task")
 async def delete_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理删除定时任务"""
     try:
@@ -429,9 +454,9 @@ async def delete_task_proxy(request: Request, task_id: str, current_user=Depends
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy delete task: {str(e)}")
 
-@router.post("/execute/eodhd-fundamentals", summary="手动执行EODHD基本面数据更新")
+@router.post("/execute/eodhd-fundamentals", summary="update eodhd fundamentals data manually")
 async def execute_fundamentals_update_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理手动执行EODHD基本面数据更新"""
     try:
@@ -442,9 +467,9 @@ async def execute_fundamentals_update_proxy(request: Request, current_user=Depen
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"手动执行基本面数据更新代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy update eodhd fundamentals data manually: {str(e)}")
 
-@router.get("/tasks/{task_id}/logs", summary="获取任务执行日志")
+@router.get("/tasks/{task_id}/logs", summary="get task execution logs")
 async def get_task_logs_proxy(task_id: str, limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
     """代理获取任务执行日志"""
     try:
@@ -454,9 +479,9 @@ async def get_task_logs_proxy(task_id: str, limit: int = 50, offset: int = 0, cu
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取任务日志代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get task logs: {str(e)}")
 
-@router.get("/execution-logs", summary="获取所有任务执行日志")
+@router.get("/execution-logs", summary="get all task execution logs")
 async def get_all_execution_logs_proxy(limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
     """代理获取所有任务执行日志"""
     try:
@@ -466,9 +491,9 @@ async def get_all_execution_logs_proxy(limit: int = 50, offset: int = 0, current
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取所有执行日志代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get all execution logs: {str(e)}")
 
-@router.get("/execution-logs/download", summary="下载执行日志CSV")
+@router.get("/execution-logs/download", summary="download execution logs csv")
 async def download_execution_logs_csv_proxy(
     task_id: Optional[str] = None, 
     limit: int = 1000, 
@@ -490,7 +515,7 @@ async def download_execution_logs_csv_proxy(
             if response.status_code >= 400:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail="下载CSV文件失败"
+                    detail="failed to download csv file"
                 )
             
             # 返回文件响应
@@ -504,9 +529,9 @@ async def download_execution_logs_csv_proxy(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"下载CSV代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy download csv: {str(e)}")
 
-@router.delete("/execution-logs/clear", summary="清空执行日志")
+@router.delete("/execution-logs/clear", summary="clear execution logs")
 async def clear_execution_logs_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理清空执行日志"""
     try:
@@ -516,9 +541,9 @@ async def clear_execution_logs_proxy(request: Request, current_user=Depends(get_
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清空执行日志代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy clear execution logs: {str(e)}")
 
-@router.get("/presets/cron-expressions", summary="获取常用Cron表达式预设")
+@router.get("/presets/cron-expressions", summary="get common cron expressions presets")
 async def get_cron_presets_proxy():
     """代理获取常用Cron表达式预设"""
     try:
@@ -527,9 +552,9 @@ async def get_cron_presets_proxy():
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取Cron预设代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get cron presets: {str(e)}")
 
-@router.get("/presets/timezones", summary="获取支持的时区列表")
+@router.get("/presets/timezones", summary="get supported timezones list")
 async def get_timezone_presets_proxy():
     """代理获取支持的时区列表"""
     try:
@@ -538,9 +563,9 @@ async def get_timezone_presets_proxy():
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取时区预设代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get timezone presets: {str(e)}")
 
-@router.get("/debug/database-tables", summary="查看数据库表数据（调试用）")
+@router.get("/debug/database-tables", summary="get database tables data (debug only)")
 async def get_database_tables_proxy(request: Request, table_name: str, limit: int = 50, current_user=Depends(get_current_user)):
     """代理查看数据库表数据"""
     try:
@@ -551,9 +576,9 @@ async def get_database_tables_proxy(request: Request, table_name: str, limit: in
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查看数据库表代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get database tables data: {str(e)}")
 
-@router.get("/debug/table-structure", summary="查看表结构")
+@router.get("/debug/table-structure", summary="get table structure")
 async def get_table_structure_proxy(current_user=Depends(get_current_user)):
     """代理查看表结构"""
     try:
@@ -562,5 +587,5 @@ async def get_table_structure_proxy(current_user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查看表结构代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to proxy get table structure: {str(e)}")
 

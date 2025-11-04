@@ -26,7 +26,8 @@ import {
   BarChartOutlined,
   QuestionCircleOutlined,
   DatabaseOutlined,
-  LineChartOutlined
+  LineChartOutlined,
+  CalendarOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
@@ -38,7 +39,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar';
   dataSourceName: string;
 }
 
@@ -144,6 +145,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 6 * * 0',
       defaultName: 'Earnings Calendar Auto Fetch',
       description: 'Get US earnings calendar data weekly (no S&P 500 filtering, all US stocks)'
+    },
+    ipo_calendar: {
+      icon: <CalendarOutlined style={{ color: '#722ed1' }} />,
+      params: ['days', 'fetch_next_week', 'start_date', 'end_date'],
+      defaultSchedule: '0 6 * * 0',
+      defaultName: 'IPO Calendar Auto Fetch',
+      description: 'Get IPO calendar data weekly from EODHD API (all exchanges). Note: EODHD API does not support exchange filtering - all exchanges data will be returned.'
     }
   };
 
@@ -314,6 +322,20 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             end_date: data.taskParams?.end_date
           };
           result = await schedulerAPI.createEarningsCalendarTask(earningsCalendarParams);
+        } else if (dataSourceType === 'ipo_calendar') {
+          // IPO 日历任务的专用创建逻辑
+          // 注意：EODHD API 不支持 exchanges 参数，已移除
+          const ipoCalendarParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            days: data.taskParams?.days || 30,
+            fetch_next_week: data.taskParams?.fetch_next_week || false,
+            start_date: data.taskParams?.start_date,
+            end_date: data.taskParams?.end_date
+          };
+          result = await schedulerAPI.createIPOCalendarTask(ipoCalendarParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -1454,6 +1476,78 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 extra="Optional: Specific end date (YYYY-MM-DD format)"
               >
                 <Input placeholder="e.g., 2025-11-17" />
+              </Form.Item>
+            </>
+          );
+
+        case 'ipo_calendar':
+          return (
+            <>
+              <Alert
+                message="IPO Calendar Fetcher"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically fetch IPO calendar data from EODHD API. Note: EODHD API does not support exchange filtering - all exchanges data will be returned. If you need to filter by specific exchanges, you can query the database with WHERE conditions."
+              />
+              
+              <Alert
+                message="Exchange Filtering Not Supported"
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="The EODHD IPO Calendar API does not support exchange filtering. All exchanges data will be fetched and stored. You can filter by exchange when querying the database."
+              />
+              
+              <Form.Item
+                label="Fetch Mode"
+                name={['taskParams', 'fetch_next_week']}
+                valuePropName="checked"
+                extra="Enable to fetch next week's data specifically, or disable to use custom settings."
+                initialValue={false}
+              >
+                <Switch 
+                  checkedChildren="Next Week" 
+                  unCheckedChildren="Custom Period" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Days Ahead"
+                name={['taskParams', 'days']}
+                extra="Number of days ahead to fetch (1-365 days). Default is 30 days."
+                initialValue={30}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={365} 
+                  placeholder="30" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+
+              <Alert
+                message="Optional: Custom Date Range"
+                type="warning"
+                showIcon
+                style={{ marginTop: 16, marginBottom: 16 }}
+                description="You can also specify exact start and end dates. If provided, these will override the 'Days Ahead' setting."
+              />
+              
+              <Form.Item
+                label="Start Date"
+                name={['taskParams', 'start_date']}
+                extra="Optional: Specific start date (YYYY-MM-DD format)"
+              >
+                <Input placeholder="e.g., 2025-11-10" />
+              </Form.Item>
+              
+              <Form.Item
+                label="End Date"
+                name={['taskParams', 'end_date']}
+                extra="Optional: Specific end date (YYYY-MM-DD format)"
+              >
+                <Input placeholder="e.g., 2025-12-10" />
               </Form.Item>
             </>
           );

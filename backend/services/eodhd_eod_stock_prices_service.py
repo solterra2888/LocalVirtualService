@@ -131,6 +131,7 @@ class EODHDEODStockPricesService:
                 SELECT MAX(date) as latest_date 
                 FROM stock_prices_eod 
                 WHERE code = %s
+                AND period = 'd'
             """
             
             with self.db_manager.get_connection() as conn:

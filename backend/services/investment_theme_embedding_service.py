@@ -1177,37 +1177,45 @@ class InvestmentThemeEmbeddingService:
         try:
             cursor = conn.cursor()
             
-            # 1. 检查主题是否存在
+            # 1. 首先检查主题是否在 investment_theme_embeddings 中存在（因为列表是从这里查询的）
+            cursor.execute("""
+                SELECT theme_name 
+                FROM investment_theme_embeddings 
+                WHERE theme_id = %s AND market = %s
+            """, (theme_id, market))
+            
+            embedding_row = cursor.fetchone()
+            if not embedding_row:
+                cursor.close()
+                conn.close()
+                return {"success": False, "message": "主题不存在（未找到向量数据）"}
+            
+            theme_name = embedding_row[0]
+            
+            # 2. 检查主题在 futu_investment_themes 中的状态
             cursor.execute("""
                 SELECT theme_name, is_deleted 
                 FROM futu_investment_themes 
                 WHERE theme_id = %s AND market = %s
             """, (theme_id, market))
             
-            row = cursor.fetchone()
-            if not row:
-                cursor.close()
-                conn.close()
-                return {"success": False, "message": "主题不存在"}
+            futu_row = cursor.fetchone()
             
-            theme_name = row[0]
-            if row[1]:  # 已被删除
-                cursor.close()
-                conn.close()
-                return {"success": False, "message": "主题已被删除"}
+            # 3. 如果主题在 futu_investment_themes 中存在且未被删除，则软删除它
+            if futu_row and not futu_row[1]:  # 存在且未删除
+                cursor.execute("""
+                    UPDATE futu_investment_themes
+                    SET is_deleted = TRUE,
+                        deleted_at = NOW(),
+                        deleted_by = %s,
+                        is_enabled_for_matching = FALSE,
+                        updated_at = NOW()
+                    WHERE theme_id = %s AND market = %s
+                """, (operator_username, theme_id, market))
+            elif futu_row and futu_row[1]:  # 已软删除，跳过更新，直接删除向量数据
+                logger.info(f"主题 {theme_id} 已在 futu_investment_themes 中被软删除，继续删除向量数据")
             
-            # 2. 软删除主题主表
-            cursor.execute("""
-                UPDATE futu_investment_themes
-                SET is_deleted = TRUE,
-                    deleted_at = NOW(),
-                    deleted_by = %s,
-                    is_enabled_for_matching = FALSE,
-                    updated_at = NOW()
-                WHERE theme_id = %s AND market = %s
-            """, (operator_username, theme_id, market))
-            
-            # 3. 删除向量数据
+            # 4. 删除向量数据
             cursor.execute("""
                 DELETE FROM investment_theme_embeddings
                 WHERE theme_id = %s AND market = %s
@@ -1215,7 +1223,7 @@ class InvestmentThemeEmbeddingService:
             
             deleted_embeddings = cursor.rowcount > 0
             
-            # 4. 删除新闻匹配记录
+            # 5. 删除新闻匹配记录
             cursor.execute("""
                 SELECT COUNT(*) FROM news_theme_matches
                 WHERE theme_id = %s
@@ -1240,9 +1248,13 @@ class InvestmentThemeEmbeddingService:
                 f"删除匹配记录: {deleted_matches_count}条"
             )
             
+            message_text = f"主题 '{theme_name}' 已删除"
+            if futu_row and futu_row[1]:
+                message_text += "（向量数据已清理）"
+            
             return {
                 "success": True,
-                "message": f"主题 '{theme_name}' 已删除",
+                "message": message_text,
                 "deleted_matches_count": deleted_matches_count,
                 "deleted_embeddings": deleted_embeddings
             }

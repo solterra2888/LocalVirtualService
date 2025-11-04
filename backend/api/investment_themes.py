@@ -5,7 +5,7 @@
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
@@ -408,7 +408,8 @@ async def list_all_themes(
                 'is_enabled_for_matching': row[11] if row[11] is not None else True,  # 是否启用
                 'is_deleted': row[12] if row[12] is not None else False,  # 是否已删除
                 'stock_count': row[13] if row[13] else 0,  # 股票数量
-                'change_percent': row[14]  # 涨跌幅
+                'change_percent': row[14],  # 涨跌幅
+                'has_embedding': True  # 由于查询来自investment_theme_embeddings表，所以都是已向量化的
             })
         
         cursor.close()
@@ -910,7 +911,7 @@ async def update_theme_description(
 @router.delete("/{theme_id}")
 async def delete_theme(
     theme_id: str,
-    market: str,
+    market: str = Query(..., description="市场代码（HK/US/CN）"),
     current_user: TokenData = Depends(get_current_admin_user)
 ):
     """

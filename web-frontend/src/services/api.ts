@@ -58,9 +58,9 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
       window.location.href = '/login';
-      message.error('登录已过期，请重新登录');
+      message.error('login expired, please login again');
     } else if (error.response?.status === 403) {
-      message.error('权限不足');
+      message.error('permission denied');
     } else if (error.response?.status === 404) {
       // 不在这里显示404错误，让组件自己处理
       console.warn('404 Error:', error.response?.data);
@@ -68,18 +68,18 @@ apiClient.interceptors.response.use(
       // 不在这里显示409错误，让组件自己处理（如watchlist重复添加）
       console.warn('409 Conflict:', error.response?.data);
     } else if (error.response?.status && error.response.status >= 500) {
-      const errorMessage = (error.response?.data as any)?.detail || '服务器内部错误';
-      message.error(`服务器错误: ${errorMessage}`);
+      const errorMessage = (error.response?.data as any)?.detail || 'server internal error';
+      message.error(`server error: ${errorMessage}`);
       console.error('Server Error Details:', error.response?.data);
     } else if (error.message === 'Network Error') {
       // 网络连接失败提示已移除
       console.warn('Network Error:', error);
     } else if (error.code === 'ECONNABORTED') {
-      message.error('请求超时，请稍后重试');
+      message.error('request timeout, please try again later');
     } else {
       // 显示具体的错误信息
-      const errorMessage = (error.response?.data as any)?.detail || error.message || '未知错误';
-      message.error(`请求失败: ${errorMessage}`);
+      const errorMessage = (error.response?.data as any)?.detail || error.message || 'unknown error';
+      message.error(`request failed: ${errorMessage}`);
     }
     return Promise.reject(error);
   }

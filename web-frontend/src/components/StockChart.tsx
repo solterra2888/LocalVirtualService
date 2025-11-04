@@ -766,6 +766,7 @@ const StockChart: React.FC<StockChartProps> = ({
         event={editingEvent}
         defaultDate={clickedDate || undefined}
         loading={eventsLoading}
+        availableTradingDates={data.map(d => d.date)}
       />
     </Card>
   );

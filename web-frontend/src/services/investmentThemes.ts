@@ -208,13 +208,8 @@ export async function deleteTheme(
   deleted_matches_count: number;
   deleted_embeddings: boolean;
 }> {
-  // Note: DELETE with body requires special handling
-  // Using POST with _method workaround or direct apiClient
-  const apiClient = (await import('./api')).default;
-  const response = await apiClient.delete(`/investment-themes/${themeId}`, {
-    data: { market }
-  });
-  return response.data;
+  // Pass market as query parameter (FastAPI doesn't support body in DELETE requests)
+  return await api.delete(`/investment-themes/${themeId}?market=${encodeURIComponent(market)}`);
 }
 
 /**

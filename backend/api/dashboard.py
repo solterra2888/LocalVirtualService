@@ -1311,6 +1311,7 @@ async def test_stock_historical_data(
         WHERE code = %s 
         AND date >= %s 
         AND date <= %s
+        AND period = 'd'
         ORDER BY date ASC
         """
         
@@ -1393,6 +1394,7 @@ async def get_stock_historical_data(
         WHERE code = %s 
         AND date >= %s 
         AND date <= %s
+        AND period = 'd'
         ORDER BY date ASC
         """
         
@@ -1435,6 +1437,100 @@ async def get_stock_historical_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch historical data: {str(e)}"
+        )
+
+@router.put("/watchlist/{watchlist_id}", summary="Update watchlist item")
+async def update_watchlist_item(
+    watchlist_id: int,
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    更新watchlist项的priority和notes
+    
+    请求参数:
+    - priority: 优先级 (可选，支持1=Low, 2=Medium, 3=High)
+    - notes: 备注 (可选)
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 检查该watchlist项是否属于当前用户
+        check_query = """
+        SELECT symbol, priority, notes FROM target_tracking_config 
+        WHERE id = %s AND user_id = %s
+        """
+        result = db_manager.fetch_one(check_query, [watchlist_id, current_user.user_id])
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Watchlist item not found or permission denied"
+            )
+        
+        symbol = result[0]
+        current_priority = result[1]
+        current_notes = result[2]
+        
+        # 获取更新的值，如果没有提供则使用当前值
+        new_priority = request.get('priority', current_priority)
+        new_notes = request.get('notes', current_notes)
+        
+        # 验证priority值
+        if new_priority not in [1, 2, 3]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Priority must be 1 (Low), 2 (Medium), or 3 (High)"
+            )
+        
+        # 更新watchlist项
+        update_query = """
+        UPDATE target_tracking_config 
+        SET priority = %s, notes = %s
+        WHERE id = %s AND user_id = %s
+        RETURNING id
+        """
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database connection failed"
+            )
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(update_query, [new_priority, new_notes, watchlist_id, current_user.user_id])
+            result = cursor.fetchone()
+            conn.commit()
+            conn.close()
+            
+            if result:
+                return {
+                    "message": f"Watchlist item {symbol} updated successfully",
+                    "watchlist_id": watchlist_id,
+                    "symbol": symbol,
+                    "priority": new_priority,
+                    "notes": new_notes
+                }
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update watchlist item"
+                )
+        except Exception as e:
+            if conn:
+                conn.rollback()
+                conn.close()
+            raise e
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update watchlist item: {str(e)}"
         )
 
 @router.delete("/watchlist/{watchlist_id}", summary="Remove stock from watchlist")
