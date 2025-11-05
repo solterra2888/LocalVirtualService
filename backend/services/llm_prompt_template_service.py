@@ -475,10 +475,20 @@ class LLMPromptTemplateService:
             return template_id
             
         except Exception as e:
-            logger.error(f"Failed to create template: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Failed to create template: {error_msg}")
+            
+            # 检查是否是唯一约束冲突（template_code 重复）
+            if 'duplicate key value violates unique constraint' in error_msg.lower():
+                if 'template_code' in error_msg.lower():
+                    template_code = template_data.get('template_code', 'unknown')
+                    conn.rollback()
+                    conn.close()
+                    raise ValueError(f"Template code '{template_code}' already exists. Please use a different template code.")
+            
             conn.rollback()
             conn.close()
-            return None
+            raise  # 重新抛出异常，让上层处理
     
     def update_template(self, template_id: int, updates: Dict[str, Any], user_id: Optional[int] = None) -> bool:
         """
@@ -501,6 +511,7 @@ class LLMPromptTemplateService:
             
             # 权限检查：用户只能更新自己的模板，除非是管理员
             if user_id:
+                # 获取模板信息
                 cursor.execute(
                     "SELECT created_by, scope FROM llm_prompt_templates WHERE id = %s",
                     (template_id,)
@@ -512,10 +523,20 @@ class LLMPromptTemplateService:
                     return False
                 
                 created_by, scope = result
-                if scope == 'system':
-                    # 系统模板需要管理员权限（这里简化处理，实际应检查is_admin）
-                    logger.warning(f"User {user_id} attempting to update system template {template_id}")
-                elif created_by != user_id:
+                
+                # 检查用户是否为管理员
+                cursor.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
+                user_result = cursor.fetchone()
+                is_admin = user_result[0] if user_result else False
+                
+                # 系统模板只能由管理员更新
+                if scope == 'system' and not is_admin:
+                    logger.error(f"User {user_id} (non-admin) attempted to update system template {template_id}")
+                    conn.close()
+                    return False
+                
+                # 非管理员只能更新自己创建的模板
+                if not is_admin and created_by != user_id:
                     logger.error(f"User {user_id} not authorized to update template {template_id}")
                     conn.close()
                     return False

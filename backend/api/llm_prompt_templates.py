@@ -60,8 +60,8 @@ class TemplateCreate(BaseModel):
     user_prompt_template: str = Field(..., description="用户提示词模板")
     variables: Dict[str, VariableDefinition] = Field(default_factory=dict, description="变量定义")
     output_format: OutputFormatSchema = Field(default_factory=OutputFormatSchema, description="输出格式")
-    recommended_provider: Optional[str] = Field(None, description="推荐的LLM提供商")
-    recommended_model: Optional[str] = Field(None, description="推荐的模型")
+    recommended_provider: str = Field(..., description="推荐的LLM提供商（必填）")
+    recommended_model: str = Field(..., description="推荐的模型（必填）")
     temperature: float = Field(0.7, ge=0, le=2, description="温度参数")
     max_tokens: int = Field(2000, ge=1, description="最大token数")
     scope: str = Field("user", description="范围: system/user/shared")
@@ -307,9 +307,23 @@ async def create_template(
             raise HTTPException(status_code=500, detail="创建模板失败")
     except HTTPException:
         raise
+    except ValueError as e:
+        # 处理业务逻辑错误（如 template_code 重复）
+        error_msg = str(e)
+        if 'already exists' in error_msg.lower():
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         logger.error(f"Failed to create template: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"创建模板失败: {str(e)}")
+        error_msg = str(e)
+        # 检查是否是数据库唯一约束冲突
+        if 'duplicate key' in error_msg.lower() or 'unique constraint' in error_msg.lower():
+            if 'template_code' in error_msg.lower():
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Template code '{template_dict.get('template_code', 'unknown')}' already exists. Please use a different template code."
+                )
+        raise HTTPException(status_code=500, detail=f"创建模板失败: {error_msg}")
 
 
 @router.put("/templates/{template_id}", summary="更新模板")
@@ -321,6 +335,19 @@ async def update_template(
     """更新模板"""
     try:
         service = LLMPromptTemplateService()
+        
+        # 检查模板是否存在
+        template = service.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="模板不存在")
+        
+        # 检查权限：系统模板只能由管理员更新
+        if template['scope'] == 'system' and not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="只有管理员可以更新系统模板")
+        
+        # 检查权限：非管理员只能更新自己的模板
+        if not current_user.is_admin and template.get('created_by') != current_user.user_id:
+            raise HTTPException(status_code=403, detail="您没有权限更新此模板")
         
         # 转换为dict，排除None值
         updates_dict = {k: v for k, v in updates.dict().items() if v is not None}
@@ -362,6 +389,20 @@ async def delete_template(
     """删除模板（软删除）"""
     try:
         service = LLMPromptTemplateService()
+        
+        # 检查模板是否存在
+        template = service.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="模板不存在")
+        
+        # 检查权限：系统模板只能由管理员删除
+        if template['scope'] == 'system' and not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="只有管理员可以删除系统模板")
+        
+        # 检查权限：非管理员只能删除自己的模板
+        if not current_user.is_admin and template.get('created_by') != current_user.user_id:
+            raise HTTPException(status_code=403, detail="您没有权限删除此模板")
+        
         success = service.delete_template(template_id, user_id=current_user.user_id)
         
         if success:

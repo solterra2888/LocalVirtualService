@@ -36,6 +36,7 @@ export interface DashboardNewsItem {
   symbols: string[];
   tags: string[];
   scheduler_source?: string;  // 调度器来源
+  updated_at?: string;  // 更新时间
   analysis_result?: NewsAnalysisResult;
 }
 

@@ -34,7 +34,8 @@ import {
   SearchOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  EyeOutlined
 } from '@ant-design/icons';
 import promptTemplateService, {
   PromptCategory,
@@ -43,13 +44,25 @@ import promptTemplateService, {
   TestTemplateResponse
 } from '../services/promptTemplateService';
 import VariableHelper from '../components/VariableHelper';
+import { useAuthStore } from '../store/authStore';
 
 const { Title, Paragraph, Text } = Typography;
 const { Option } = Select;
 const { TextArea } = Input;
 const { Panel } = Collapse;
 
+// Provider-Model mapping configuration
+const PROVIDER_MODEL_MAPPING: Record<string, string[]> = {
+  'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext'],
+  'doubao': ['doubao-seed-1-6-250615'],
+  'glm': ['glm-4.6', 'glm-4', 'glm-4-flash']
+};
+
 const PromptTemplatesPage: React.FC = () => {
+  // Get current user
+  const { user } = useAuthStore();
+  const isAdmin = user?.is_admin || false;
+  
   // State management
   const [categories, setCategories] = useState<PromptCategory[]>([]);
   const [templates, setTemplates] = useState<PromptTemplateDetail[]>([]);
@@ -58,10 +71,18 @@ const PromptTemplatesPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [searchText, setSearchText] = useState<string>('');
   const [scopeFilter, setScopeFilter] = useState<string>('all');
+  const [activeFilter, setActiveFilter] = useState<string>('active_only');
+  const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [currentScope, setCurrentScope] = useState<string>('user');
 
   // Modal states
   const [isEditorVisible, setIsEditorVisible] = useState<boolean>(false);
   const [isTestVisible, setIsTestVisible] = useState<boolean>(false);
+  const [isDeleteConfirmVisible, setIsDeleteConfirmVisible] = useState<boolean>(false);
+  const [deletingTemplate, setDeletingTemplate] = useState<PromptTemplateDetail | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>('');
+  const [deleting, setDeleting] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplateDetail | null>(null);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestTemplateResponse | null>(null);
@@ -157,10 +178,43 @@ const PromptTemplatesPage: React.FC = () => {
     }
   }, [selectedCategory, searchText, scopeFilter, loadTemplates]);
 
+  // Handle provider change - update available models
+  const handleProviderChange = (provider: string) => {
+    setSelectedProvider(provider);
+    const models = PROVIDER_MODEL_MAPPING[provider] || [];
+    setAvailableModels(models);
+    
+    // Clear the model field when provider changes
+    form.setFieldValue('recommended_model', undefined);
+    
+    // Auto-select first model if available
+    if (models.length > 0) {
+      form.setFieldValue('recommended_model', models[0]);
+    }
+  };
+
+  // Handle scope change - control is_public field visibility
+  const handleScopeChange = (scope: string) => {
+    setCurrentScope(scope);
+    
+    // Auto-set is_public based on scope
+    if (scope === 'user') {
+      // Private: always not public
+      form.setFieldValue('is_public', false);
+    } else if (scope === 'system') {
+      // System: always public (but field will be hidden)
+      form.setFieldValue('is_public', true);
+    }
+    // For 'shared', let user decide via the Published toggle
+  };
+
   // Create/Edit template
   const handleCreateTemplate = () => {
     setEditingTemplate(null);
     setCurrentEditingCategoryId(undefined);
+    setSelectedProvider(undefined);
+    setAvailableModels([]);
+    setCurrentScope('user'); // Default to private
     form.resetFields();
     setIsEditorVisible(true);
   };
@@ -168,8 +222,21 @@ const PromptTemplatesPage: React.FC = () => {
   const handleEditTemplate = async (template: PromptTemplateDetail) => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
+      const canEdit = canEditTemplate(detail);
+      
       setEditingTemplate(detail);
       setCurrentEditingCategoryId(detail.category_id);
+      
+      // Initialize scope state
+      setCurrentScope(detail.scope);
+      
+      // Initialize provider and models for cascade select
+      if (detail.recommended_provider) {
+        setSelectedProvider(detail.recommended_provider);
+        const models = PROVIDER_MODEL_MAPPING[detail.recommended_provider] || [];
+        setAvailableModels(models);
+      }
+      
       form.setFieldsValue({
         template_name: detail.template_name,
         template_code: detail.template_code,
@@ -183,8 +250,15 @@ const PromptTemplatesPage: React.FC = () => {
         max_tokens: detail.max_tokens,
         scope: detail.scope,
         is_public: detail.is_public,
+        is_active: detail.is_active,
         tags: detail.tags
       });
+      
+      // Show warning if read-only
+      if (!canEdit) {
+        message.info('This is a read-only view. You cannot edit this template.');
+      }
+      
       setIsEditorVisible(true);
     } catch (error: any) {
       message.error('Failed to load template details: ' + (error.message || 'Unknown error'));
@@ -205,28 +279,83 @@ const PromptTemplatesPage: React.FC = () => {
       setIsEditorVisible(false);
       loadTemplates();
     } catch (error: any) {
-      message.error('Save failed: ' + (error.message || 'Unknown error'));
+      // Extract error message from different error formats
+      let errorMessage = 'Unknown error';
+      
+      if (error.response?.data?.detail) {
+        // FastAPI HTTPException format
+        errorMessage = error.response.data.detail;
+      } else if (error.response?.data?.message) {
+        // Custom error format
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        // Standard error message
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      message.error(`Save failed: ${errorMessage}`);
     }
   };
 
   // Delete template
   const handleDeleteTemplate = (template: PromptTemplateDetail) => {
-    Modal.confirm({
-      title: 'Confirm Delete',
-      content: `Are you sure you want to delete template "${template.template_name}"?`,
-      okText: 'Delete',
-      okType: 'danger',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          await promptTemplateService.deleteTemplate(template.id);
-          message.success('Template deleted successfully');
-          loadTemplates();
-        } catch (error: any) {
-          message.error('Delete failed: ' + (error.message || 'Unknown error'));
+    // System template requires special confirmation
+    if (template.scope === 'system') {
+      setDeletingTemplate(template);
+      setDeleteConfirmText('');
+      setIsDeleteConfirmVisible(true);
+    } else {
+      // Regular template - simple confirmation
+      Modal.confirm({
+        title: 'Confirm Delete',
+        content: `Are you sure you want to delete template "${template.template_name}"?`,
+        okText: 'Delete',
+        okType: 'danger',
+        cancelText: 'Cancel',
+        onOk: async () => {
+          try {
+            await promptTemplateService.deleteTemplate(template.id);
+            message.success('Template deleted successfully');
+            loadTemplates();
+          } catch (error: any) {
+            message.error('Delete failed: ' + (error.message || 'Unknown error'));
+          }
         }
-      }
-    });
+      });
+    }
+  };
+
+  // Handle system template deletion with confirmation text
+  const handleConfirmSystemTemplateDelete = async () => {
+    if (!deletingTemplate) return;
+
+    if (deleteConfirmText !== 'DELETE') {
+      message.error('Please type "DELETE" to confirm deletion');
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await promptTemplateService.deleteTemplate(deletingTemplate.id);
+      message.success('System template deleted successfully');
+      setIsDeleteConfirmVisible(false);
+      setDeletingTemplate(null);
+      setDeleteConfirmText('');
+      loadTemplates();
+    } catch (error: any) {
+      message.error('Delete failed: ' + (error.message || 'Unknown error'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Cancel system template deletion
+  const handleCancelSystemTemplateDelete = () => {
+    setIsDeleteConfirmVisible(false);
+    setDeletingTemplate(null);
+    setDeleteConfirmText('');
   };
 
   // Test template
@@ -353,6 +482,13 @@ const PromptTemplatesPage: React.FC = () => {
     </Card>
   );
 
+  // Helper function: check if user can edit template
+  const canEditTemplate = (template: PromptTemplateDetail): boolean => {
+    if (isAdmin) return true;
+    if (template.scope === 'system') return false;
+    return template.created_by === user?.id;
+  };
+
   // Render template list
   const renderTemplateList = () => {
     const filteredTemplates = templates.filter(t => {
@@ -360,78 +496,107 @@ const PromptTemplatesPage: React.FC = () => {
           !t.description?.toLowerCase().includes(searchText.toLowerCase())) {
         return false;
       }
+      // Filter by active status
+      if (activeFilter === 'active_only' && !t.is_active) return false;
+      if (activeFilter === 'inactive_only' && t.is_active) return false;
       return true;
     });
 
     return (
       <div style={{ marginBottom: 16 }}>
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {filteredTemplates.map(template => (
-            <Card
-              key={template.id}
-              size="small"
-              hoverable
-              actions={[
+          {filteredTemplates.map(template => {
+            const canEdit = canEditTemplate(template);
+            const isSystemTemplate = template.scope === 'system';
+            
+            // Build actions array based on permissions
+            const actions = [
+              canEdit ? (
                 <Tooltip title="Edit">
                   <EditOutlined onClick={() => handleEditTemplate(template)} />
-                </Tooltip>,
-                <Tooltip title="Test">
-                  <ExperimentOutlined onClick={() => handleTestTemplate(template)} />
-                </Tooltip>,
-                <Tooltip title="Export">
-                  <DownloadOutlined onClick={() => handleExportTemplate(template)} />
-                </Tooltip>,
+                </Tooltip>
+              ) : (
+                <Tooltip title="View (Read-only)">
+                  <EyeOutlined onClick={() => handleEditTemplate(template)} />
+                </Tooltip>
+              ),
+              <Tooltip title="Test">
+                <ExperimentOutlined onClick={() => handleTestTemplate(template)} />
+              </Tooltip>,
+              <Tooltip title="Export">
+                <DownloadOutlined onClick={() => handleExportTemplate(template)} />
+              </Tooltip>
+            ];
+            
+            // Only show delete button if user can edit
+            if (canEdit) {
+              actions.push(
                 <Tooltip title="Delete">
                   <DeleteOutlined onClick={() => handleDeleteTemplate(template)} />
                 </Tooltip>
-              ]}
-            >
-              <Row justify="space-between" align="top">
-                <Col span={18}>
-                  <Space direction="vertical" size="small">
-                    <Space>
-                      <Text strong style={{ fontSize: '16px' }}>{template.template_name}</Text>
-                      {template.is_default && <StarFilled style={{ color: '#faad14' }} />}
-                      <Tag color={
-                        template.scope === 'system' ? 'blue' :
-                        template.scope === 'user' ? 'green' : 'orange'
-                      }>
-                        {template.scope === 'system' ? 'System' : 
-                         template.scope === 'user' ? 'Private' : 'Shared'}
-                      </Tag>
+              );
+            }
+            
+            return (
+              <Card
+                key={template.id}
+                size="small"
+                hoverable
+                actions={actions}
+              >
+                <Row justify="space-between" align="top">
+                  <Col span={18}>
+                    <Space direction="vertical" size="small">
+                      <Space>
+                        <Text strong style={{ fontSize: '16px' }}>{template.template_name}</Text>
+                        {template.is_default && <StarFilled style={{ color: '#faad14' }} />}
+                        <Tag color={
+                          template.scope === 'system' ? 'blue' :
+                          template.scope === 'user' ? 'green' : 'orange'
+                        }>
+                          {template.scope === 'system' ? 'System' : 
+                           template.scope === 'user' ? 'Private' : 'Shared'}
+                        </Tag>
+                        {!template.is_active && (
+                          <Tag color="red">Inactive</Tag>
+                        )}
+                        {isSystemTemplate && !isAdmin && (
+                          <Tag color="default">Read-only</Tag>
+                        )}
+                      </Space>
+                      <Text type="secondary" style={{ fontSize: '12px' }}>{template.description}</Text>
+                      <Space size="small">
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          Template Code: {template.template_code}
+                        </Text>
+                        <Divider type="vertical" />
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          Category: {template.category_name}
+                        </Text>
+                      </Space>
                     </Space>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>{template.description}</Text>
-                    <Space size="small">
-                      <Text type="secondary" style={{ fontSize: '12px' }}>
-                        Template Code: {template.template_code}
-                      </Text>
-                      <Divider type="vertical" />
-                      <Text type="secondary" style={{ fontSize: '12px' }}>
-                        Category: {template.category_name}
-                      </Text>
+                  </Col>
+                  <Col span={6} style={{ textAlign: 'right' }}>
+                    <Space direction="vertical" size="small" align="end">
+                      <Statistic 
+                        title="Usage Count" 
+                        value={template.usage_count} 
+                        valueStyle={{ fontSize: '16px' }}
+                      />
+                      {template.success_rate !== undefined && template.success_rate !== null && (
+                        <Tag color={template.success_rate >= 90 ? 'success' : 'warning'}>
+                          Success Rate: {template.success_rate.toFixed(1)}%
+                        </Tag>
+                      )}
+                      {template.recommended_model && (
+                        <Tag>{template.recommended_model}</Tag>
+                      )}
                     </Space>
-                  </Space>
-                </Col>
-                <Col span={6} style={{ textAlign: 'right' }}>
-                  <Space direction="vertical" size="small" align="end">
-                    <Statistic 
-                      title="Usage Count" 
-                      value={template.usage_count} 
-                      valueStyle={{ fontSize: '16px' }}
-                    />
-                    {template.success_rate !== undefined && template.success_rate !== null && (
-                      <Tag color={template.success_rate >= 90 ? 'success' : 'warning'}>
-                        Success Rate: {template.success_rate.toFixed(1)}%
-                      </Tag>
-                    )}
-                    {template.recommended_model && (
-                      <Tag>{template.recommended_model}</Tag>
-                    )}
-                  </Space>
-                </Col>
-              </Row>
-            </Card>
-          ))}
+                  </Col>
+                </Row>
+              </Card>
+            );
+          })}
           {filteredTemplates.length === 0 && (
             <Empty description="No templates available" />
           )}
@@ -441,22 +606,40 @@ const PromptTemplatesPage: React.FC = () => {
   };
 
   // Render editor
-  const renderEditor = () => (
-    <Modal
-      title={editingTemplate ? 'Edit Template' : 'Create Template'}
-      open={isEditorVisible}
-      onCancel={() => setIsEditorVisible(false)}
-      width={1200}
-      footer={null}
-    >
-      <Row gutter={16}>
-        <Col span={16}>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={handleSaveTemplate}
-            size="small"
-          >
+  const renderEditor = () => {
+    const isReadOnly = editingTemplate ? !canEditTemplate(editingTemplate) : false;
+    
+    return (
+      <Modal
+        title={
+          <Space>
+            {editingTemplate ? (isReadOnly ? 'View Template (Read-only)' : 'Edit Template') : 'Create Template'}
+            {isReadOnly && <Tag color="default">Read-only</Tag>}
+          </Space>
+        }
+        open={isEditorVisible}
+        onCancel={() => setIsEditorVisible(false)}
+        width={1200}
+        footer={null}
+      >
+        <Row gutter={16}>
+          <Col span={16}>
+            {isReadOnly && (
+              <Alert
+                message="Read-only Mode"
+                description="You can only view this template. System templates can only be edited by administrators."
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+            )}
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={handleSaveTemplate}
+              size="small"
+              disabled={isReadOnly}
+            >
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
@@ -510,14 +693,23 @@ const PromptTemplatesPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Scope</Text>}
+              label={<Text style={{ fontSize: '12px' }}>Visibility Scope</Text>}
               name="scope"
               initialValue="user"
+              extra={
+                currentScope === 'user' ? 'Only you can see and use this template' :
+                currentScope === 'shared' ? 'Can be shared with other users (control publishing status below)' :
+                currentScope === 'system' ? 'Available to all users as a standard template' : ''
+              }
             >
-              <Select size="small" style={{ fontSize: '12px' }}>
-                <Option value="user">Private</Option>
-                <Option value="shared">Shared</Option>
-                <Option value="system">System</Option>
+              <Select 
+                size="small" 
+                style={{ fontSize: '12px' }}
+                onChange={handleScopeChange}
+              >
+                <Option value="user">🔒 Private (Only Me)</Option>
+                <Option value="shared">👥 Shared (Can Publish)</Option>
+                {isAdmin && <Option value="system">🌟 System (Admin Only - Always Public)</Option>}
               </Select>
             </Form.Item>
           </Col>
@@ -561,36 +753,44 @@ const PromptTemplatesPage: React.FC = () => {
           />
         </Form.Item>
 
-        <Divider style={{ fontSize: '12px', margin: '12px 0' }}>Recommended Configuration</Divider>
+        <Divider style={{ fontSize: '12px', margin: '12px 0' }}>Recommended Configuration (Required)</Divider>
 
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Recommended Provider</Text>}
+              label={<Text style={{ fontSize: '12px' }}>Recommended Provider <Text type="danger">*</Text></Text>}
               name="recommended_provider"
+              rules={[{ required: true, message: 'Please select a provider' }]}
             >
               <Select 
                 placeholder="Select LLM provider" 
-                allowClear
                 size="small"
                 style={{ fontSize: '12px' }}
+                onChange={handleProviderChange}
               >
-                <Option value="qwen">Qwen</Option>
-                <Option value="doubao">Doubao</Option>
-                <Option value="glm">GLM</Option>
+                <Option value="qwen">🔷 Qwen</Option>
+                <Option value="doubao">🫘 Doubao</Option>
+                <Option value="glm">🧠 GLM</Option>
               </Select>
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Recommended Model</Text>}
+              label={<Text style={{ fontSize: '12px' }}>Recommended Model <Text type="danger">*</Text></Text>}
               name="recommended_model"
+              rules={[{ required: true, message: 'Please select a model' }]}
+              extra={selectedProvider ? `Available models for ${selectedProvider}` : 'Please select a provider first'}
             >
-              <Input 
-                placeholder="e.g.: qwen-plus"
+              <Select 
+                placeholder={selectedProvider ? "Select model" : "Select provider first"}
                 style={{ fontSize: '12px' }}
                 size="small"
-              />
+                disabled={!selectedProvider || availableModels.length === 0}
+              >
+                {availableModels.map(model => (
+                  <Option key={model} value={model}>{model}</Option>
+                ))}
+              </Select>
             </Form.Item>
           </Col>
         </Row>
@@ -640,22 +840,71 @@ const PromptTemplatesPage: React.FC = () => {
           />
         </Form.Item>
 
-        <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>Public Sharing</Text>}
-          name="is_public"
-          valuePropName="checked"
-          initialValue={false}
-        >
-          <Switch size="small" />
-        </Form.Item>
+        {/* Published Status - Only show for Shared scope */}
+        {currentScope === 'shared' && (
+          <Alert
+            message="Shared Template Publishing"
+            description={
+              <>
+                <Paragraph style={{ marginBottom: 8, fontSize: '12px' }}>
+                  Shared templates have two states:
+                </Paragraph>
+                <ul style={{ marginBottom: 0, paddingLeft: 20, fontSize: '12px' }}>
+                  <li><Text strong>Draft (Unpublished)</Text>: Only you can see and edit this template</li>
+                  <li><Text strong>Published</Text>: All users can see and use this template</li>
+                </ul>
+              </>
+            }
+            type="info"
+            showIcon
+            style={{ marginBottom: 16, fontSize: '12px' }}
+          />
+        )}
+
+        <Row gutter={12}>
+          {currentScope === 'shared' && (
+            <Col span={12}>
+              <Form.Item
+                label={<Text style={{ fontSize: '12px' }}>Published Status</Text>}
+                name="is_public"
+                valuePropName="checked"
+                initialValue={false}
+                extra="Enable to publish this template to all users"
+              >
+                <Switch 
+                  size="small"
+                  checkedChildren="Published" 
+                  unCheckedChildren="Draft"
+                />
+              </Form.Item>
+            </Col>
+          )}
+          <Col span={currentScope === 'shared' ? 12 : 24}>
+            <Form.Item
+              label={<Text style={{ fontSize: '12px' }}>Active Status</Text>}
+              name="is_active"
+              valuePropName="checked"
+              initialValue={true}
+              extra="Inactive templates will not be usable"
+            >
+              <Switch 
+                size="small"
+                checkedChildren="Active" 
+                unCheckedChildren="Inactive"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
 
         <Form.Item style={{ marginBottom: 0 }}>
           <Space size="small">
-            <Button type="primary" htmlType="submit" size="small">
-              Save
-            </Button>
+            {!isReadOnly && (
+              <Button type="primary" htmlType="submit" size="small">
+                Save
+              </Button>
+            )}
             <Button onClick={() => setIsEditorVisible(false)} size="small">
-              Cancel
+              {isReadOnly ? 'Close' : 'Cancel'}
             </Button>
           </Space>
         </Form.Item>
@@ -672,7 +921,8 @@ const PromptTemplatesPage: React.FC = () => {
         </Col>
       </Row>
     </Modal>
-  );
+    );
+  };
 
   // Render test panel
   const renderTestPanel = () => {
@@ -904,7 +1154,7 @@ const PromptTemplatesPage: React.FC = () => {
                   </Col>
                   <Col>
                     <Select
-                      style={{ width: 120 }}
+                      style={{ width: 140 }}
                       value={scopeFilter}
                       onChange={setScopeFilter}
                     >
@@ -912,6 +1162,17 @@ const PromptTemplatesPage: React.FC = () => {
                       <Option value="system">System Templates</Option>
                       <Option value="user">My Templates</Option>
                       <Option value="shared">Shared Templates</Option>
+                    </Select>
+                  </Col>
+                  <Col>
+                    <Select
+                      style={{ width: 130 }}
+                      value={activeFilter}
+                      onChange={setActiveFilter}
+                    >
+                      <Option value="all">All Status</Option>
+                      <Option value="active_only">Active Only</Option>
+                      <Option value="inactive_only">Inactive Only</Option>
                     </Select>
                   </Col>
                   <Col>
@@ -938,6 +1199,77 @@ const PromptTemplatesPage: React.FC = () => {
 
       {/* Test panel */}
       {renderTestPanel()}
+
+      {/* System Template Delete Confirmation Modal */}
+      <Modal
+        title={
+          <Space>
+            <Text strong style={{ color: '#ff4d4f' }}>⚠️ Delete System Template</Text>
+          </Space>
+        }
+        open={isDeleteConfirmVisible}
+        onCancel={handleCancelSystemTemplateDelete}
+        onOk={handleConfirmSystemTemplateDelete}
+        okText="Delete"
+        okType="danger"
+        okButtonProps={{ disabled: deleteConfirmText !== 'DELETE', loading: deleting }}
+        cancelText="Cancel"
+        width={600}
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <Alert
+            message="Dangerous Operation"
+            description={
+              <div>
+                <Paragraph strong style={{ marginBottom: '8px' }}>
+                  You are about to delete a <Text strong style={{ color: '#ff4d4f' }}>System Template</Text>:
+                </Paragraph>
+                <Paragraph style={{ marginBottom: '8px' }}>
+                  <Text strong>Template Name:</Text> {deletingTemplate?.template_name}
+                </Paragraph>
+                <Paragraph style={{ marginBottom: '8px' }}>
+                  <Text strong>Template Code:</Text> <Text code>{deletingTemplate?.template_code}</Text>
+                </Paragraph>
+                <Paragraph style={{ marginTop: '12px', color: '#ff4d4f' }}>
+                  <Text strong>⚠️ Warning:</Text>
+                </Paragraph>
+                <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+                  <li>This action cannot be undone</li>
+                  <li>System templates are critical for application functionality</li>
+                  <li>Deleting this template may cause errors in dependent features</li>
+                  <li>Any scheduled tasks using this template will fail</li>
+                </ul>
+              </div>
+            }
+            type="error"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+
+          <div>
+            <Paragraph strong>
+              To confirm deletion, please type <Text code style={{ color: '#ff4d4f' }}>DELETE</Text> in the box below:
+            </Paragraph>
+            <Input
+              placeholder="Type DELETE to confirm"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              onPressEnter={handleConfirmSystemTemplateDelete}
+              style={{
+                marginTop: '8px',
+                borderColor: deleteConfirmText && deleteConfirmText !== 'DELETE' ? '#ff4d4f' : undefined
+              }}
+              status={deleteConfirmText && deleteConfirmText !== 'DELETE' ? 'error' : ''}
+            />
+            {deleteConfirmText && deleteConfirmText !== 'DELETE' && (
+              <Text type="danger" style={{ fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                The text you entered does not match "DELETE"
+              </Text>
+            )}
+          </div>
+        </Space>
+      </Modal>
 
     </div>
   );

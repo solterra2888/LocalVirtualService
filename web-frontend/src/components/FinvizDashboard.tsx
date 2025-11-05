@@ -1256,14 +1256,14 @@ const FinvizDashboard: React.FC = () => {
                 >
                   <List.Item.Meta
                     avatar={
-                      <Space align="center" style={{ minWidth: '120px' }}>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          <CalendarOutlined /> {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: '11px' }}>
-                          {item.date ? new Date(item.date).toLocaleTimeString() : 'N/A'}
-                        </Text>
-                      </Space>
+                      <Text type="secondary" style={{ fontSize: '10px', whiteSpace: 'nowrap' }}>
+                        <CalendarOutlined /> {item.date ? `${new Date(item.date).toLocaleDateString()} ${new Date(item.date).toLocaleTimeString()}` : 'N/A'}
+                        {item.updated_at && (
+                          <span style={{ marginLeft: '8px', color: '#999' }}>
+                            | Updated: {`${new Date(item.updated_at).toLocaleDateString()} ${new Date(item.updated_at).toLocaleTimeString()}`}
+                          </span>
+                        )}
+                      </Text>
                     }
                     title={
                       <Space>

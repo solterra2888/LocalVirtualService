@@ -459,7 +459,6 @@ async def get_provider_models(
         model_mapping = {
             "qwen": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
             "doubao": ["doubao-seed-1-6-250615"],
-            "wenxin": ["ernie-4.0-8k", "ernie-3.5-8k", "ernie-turbo-8k"],
             "glm": ["glm-4.6", "glm-4", "glm-4-flash"]
         }
         
