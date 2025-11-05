@@ -489,6 +489,33 @@ const FinvizDashboard: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchValue, priorityFilter, exchangeFilter, sectorFilter, watchlistGroups, stockPrices]);
 
+  // 确保初次加载时自动选择第一个股票
+  useEffect(() => {
+    if (watchlistGroups.length > 0 && !selectedKey && !loading) {
+      const firstGroup = watchlistGroups.find(group => group.items.length > 0);
+      if (firstGroup && firstGroup.items.length > 0) {
+        const firstStock = firstGroup.items[0];
+        const stockKey = `stock-${firstStock.watchlist_id}`;
+        
+        console.log('Auto-selecting first stock:', {
+          symbol: firstStock.symbol,
+          company: firstStock.company,
+          primaryticker: firstStock.primaryticker,
+          watchlist_id: firstStock.watchlist_id
+        });
+        
+        // 设置选中状态
+        setSelectedKey(stockKey);
+        setSelectedType('stock');
+        setSelectedStock(firstStock);
+        setSelectedGroup('');
+        
+        logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistGroups, loading]);
+
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
     if (selectedKey && activeTab === 'news') {
@@ -518,23 +545,6 @@ const FinvizDashboard: React.FC = () => {
       
       const totalStocks = watchlistData.reduce((sum, group) => sum + group.items.length, 0);
       logger.logInfo(`加载了 ${watchlistData.length} 个分组，${totalStocks} 支股票`, 'finviz-dashboard');
-      
-      // 如果有股票且当前没有选中任何股票，自动选择第一个股票
-      if (totalStocks > 0 && !selectedKey) {
-        const firstGroup = watchlistData.find(group => group.items.length > 0);
-        if (firstGroup && firstGroup.items.length > 0) {
-          const firstStock = firstGroup.items[0];
-          const stockKey = `stock-${firstStock.watchlist_id}`;
-          
-          // 设置选中状态
-          setSelectedKey(stockKey);
-          setSelectedType('stock');
-          setSelectedStock(firstStock);
-          setSelectedGroup('');
-          
-          logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
-        }
-      }
       
     } catch (error) {
       const errorMessage = 'Failed to load user watchlist';
@@ -1462,16 +1472,9 @@ const FinvizDashboard: React.FC = () => {
 
     return (
       <div>
-        {/* Notes */}
-        {selectedStock.notes && (
-          <div style={{ marginBottom: '16px', padding: '8px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
-            <Text type="secondary" style={{ fontSize: '12px' }}>Notes: </Text>
-            <Text style={{ fontSize: '12px' }}>{selectedStock.notes}</Text>
-          </div>
-        )}
-      
       {/* Candlestick Chart */}
       <StockChart 
+        key={`${selectedStock.symbol}-${selectedStock.watchlist_id}`}
         symbol={selectedStock.symbol}
         companyName={selectedStock.custom_name || selectedStock.company}
         primaryTicker={selectedStock.primaryticker}
@@ -1754,7 +1757,17 @@ const FinvizDashboard: React.FC = () => {
         {/* 右侧内容区域 */}
         <Content style={{ background: '#fff', margin: '0', height: '100%' }}>
           <div style={{ padding: '24px', height: '100%' }}>
-            {selectedKey ? (
+            {loading ? (
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                height: '50%',
+                flexDirection: 'column'
+              }}>
+                <Spin size="large" tip="Loading watchlist..." />
+              </div>
+            ) : selectedKey ? (
               <>
                 {selectedType === 'group' && (
                   <div style={{ marginBottom: '24px' }}>

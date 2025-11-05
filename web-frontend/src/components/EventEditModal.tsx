@@ -19,7 +19,7 @@ import {
   EventPosition, 
   EVENT_TYPE_CONFIGS, 
   EventFormData 
-} from './eventTypes';
+} from '../types/events';
 
 const { TextArea } = Input;
 const { Option } = Select;

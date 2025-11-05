@@ -621,3 +621,187 @@ def fetch_ipo_calendar_task(self, start_date=None, end_date=None, days=None, fet
             'data': None
         }
 
+
+
+@app.task(bind=True, name='fetch_single_ticker_eod_history', queue='data_fetching')
+def fetch_single_ticker_eod_history_task(self, ticker: str, days_back: int = None):
+    """
+    异步获取单个 ticker 的全部历史 EOD 数据 Celery 任务
+    
+    适用场景：
+    - 用户添加新股票到 watchlist 时立即获取历史数据
+    - 不阻塞用户操作，后台异步执行
+    
+    Args:
+        ticker: 股票代码（如 AAPL.US）
+        days_back: 回溯天数（None 表示获取全部历史数据，通常为 10 年）
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'ticker': str,
+                'records_stored': int,
+                'execution_time': float
+            }
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'ticker': ticker,
+                'message': log_message or '',
+                'records_stored': kwargs.get('records_stored', 0)
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_single_ticker_task")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_single_ticker_task")
+    
+    try:
+        start_time = time.time()
+        
+        # 如果未指定天数，默认获取 10 年历史数据（3650 天）
+        if days_back is None:
+            days_back = 3650
+        
+        info(f"开始获取单个 ticker 历史数据: {ticker}, 回溯 {days_back} 天", 
+             task_id=self.request.id,
+             ticker=ticker,
+             days_back=days_back,
+             source="celery_single_ticker_task")
+        
+        update_progress(
+            status='processing',
+            progress=10,
+            log_message=f"正在获取 {ticker} 的历史数据..."
+        )
+        
+        # 初始化服务
+        from backend.services.eodhd_eod_stock_prices_service import EODHDEODStockPricesService
+        
+        eod_service = EODHDEODStockPricesService()
+        
+        update_progress(
+            status='processing',
+            progress=30,
+            log_message=f"正在从 EODHD API 获取 {ticker} 数据..."
+        )
+        
+        # 计算日期范围
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        
+        # 获取数据
+        eod_data = eod_service.fetch_eod_data_for_ticker(ticker, start_date, end_date)
+        
+        if not eod_data:
+            error_msg = f"未能从 EODHD 获取 {ticker} 的数据"
+            error(error_msg, 
+                  task_id=self.request.id,
+                  ticker=ticker,
+                  source="celery_single_ticker_task")
+            
+            update_progress(
+                status='failed',
+                progress=0,
+                log_message=error_msg
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg,
+                'ticker': ticker,
+                'records_stored': 0,
+                'execution_time': time.time() - start_time
+            }
+        
+        update_progress(
+            status='processing',
+            progress=60,
+            log_message=f"获取到 {len(eod_data)} 条数据，正在存储到数据库..."
+        )
+        
+        # 存储数据
+        records_stored = eod_service.store_eod_data(ticker, eod_data)
+        
+        execution_time = time.time() - start_time
+        
+        if records_stored > 0:
+            success_msg = f"成功获取并存储 {ticker} 的 {records_stored} 条历史数据（耗时 {execution_time:.2f} 秒）"
+            info(success_msg, 
+                 task_id=self.request.id,
+                 ticker=ticker,
+                 records=records_stored,
+                 execution_time=execution_time,
+                 source="celery_single_ticker_task")
+            
+            update_progress(
+                status='completed',
+                progress=100,
+                log_message=success_msg,
+                records_stored=records_stored
+            )
+            
+            return {
+                'success': True,
+                'message': success_msg,
+                'ticker': ticker,
+                'records_stored': records_stored,
+                'execution_time': execution_time
+            }
+        else:
+            error_msg = f"存储 {ticker} 数据失败"
+            error(error_msg, 
+                  task_id=self.request.id,
+                  ticker=ticker,
+                  source="celery_single_ticker_task")
+            
+            update_progress(
+                status='failed',
+                progress=0,
+                log_message=error_msg
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg,
+                'ticker': ticker,
+                'records_stored': 0,
+                'execution_time': execution_time
+            }
+        
+    except Exception as e:
+        error_msg = f"获取 {ticker} 历史数据任务异常: {str(e)}"
+        error(error_msg, 
+              task_id=self.request.id,
+              ticker=ticker,
+              exception=str(e),
+              source="celery_single_ticker_task")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        return {
+            'success': False,
+            'message': error_msg,
+            'ticker': ticker,
+            'records_stored': 0,
+            'execution_time': 0
+        }

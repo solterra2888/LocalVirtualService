@@ -939,6 +939,48 @@ async def add_to_watchlist(
                 logger.error(f"Failed to update EODHD fundamentals data for {symbol} in watchlist", 
                            user=current_user.username, symbol=symbol, error=str(e))
             
+            # 🔥 异步获取该 ticker 的全部历史 EOD 数据（通过 Celery 后台任务）
+            eod_task_result = None
+            try:
+                # 使用 primaryticker 作为 ticker（如果有的话）
+                ticker_for_eod = stock_info[3] if stock_info[3] else symbol
+                
+                logger.info(f"提交 Celery 任务获取 {ticker_for_eod} 的历史数据", 
+                           user=current_user.username, 
+                           symbol=symbol,
+                           ticker=ticker_for_eod)
+                
+                # 导入并提交 Celery 任务（异步执行，不阻塞）
+                from backend.tasks.data_tasks import fetch_single_ticker_eod_history_task
+                
+                # 提交任务到 Celery，获取全部历史数据（10年）
+                task = fetch_single_ticker_eod_history_task.apply_async(
+                    args=[ticker_for_eod],
+                    kwargs={'days_back': None}  # None 表示获取全部历史数据
+                )
+                
+                eod_task_result = {
+                    "success": True,
+                    "task_id": task.id,
+                    "message": f"Historical data fetch task submitted for {ticker_for_eod}"
+                }
+                
+                logger.info(f"成功提交历史数据获取任务", 
+                           user=current_user.username,
+                           symbol=symbol,
+                           ticker=ticker_for_eod,
+                           task_id=task.id)
+                
+            except Exception as e:
+                eod_task_result = {
+                    "success": False,
+                    "message": f"Failed to submit historical data task: {str(e)}"
+                }
+                logger.error(f"提交历史数据获取任务失败", 
+                           user=current_user.username,
+                           symbol=symbol,
+                           error=str(e))
+            
             # 构建响应消息
             response_message = f"Successfully added {symbol} to watchlist"
             if fundamentals_update_result:
@@ -947,12 +989,16 @@ async def add_to_watchlist(
                 else:
                     response_message += f". Note: {fundamentals_update_result['message']}"
             
+            if eod_task_result and eod_task_result["success"]:
+                response_message += f". Historical data is being fetched in background (task: {eod_task_result['task_id'][:8]}...)"
+            
             return {
                 "message": response_message,
                 "watchlist_id": watchlist_id,
                 "symbol": symbol,
                 "company_name": stock_info[1],
-                "fundamentals_update": fundamentals_update_result
+                "fundamentals_update": fundamentals_update_result,
+                "eod_task": eod_task_result
             }
         else:
             raise HTTPException(

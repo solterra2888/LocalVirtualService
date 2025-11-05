@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
-import { Card, Spin, Alert, Typography, Space, Button } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Card, Spin, Alert, Typography, Space, Button, message, Tooltip } from 'antd';
 import { 
   createChart, 
   IChartApi, 
@@ -10,6 +10,9 @@ import {
 } from 'lightweight-charts';
 import { ReloadOutlined } from '@ant-design/icons';
 import { dashboardAPI, type StockPriceData } from '../services/dashboard';
+import { useChartEvents } from '../hooks/useChartEvents';
+import EventEditModal from './EventEditModal';
+import { ChartEvent, EventFormData, EVENT_TYPE_CONFIGS } from '../types/events';
 
 const { Title } = Typography;
 
@@ -35,6 +38,21 @@ interface CandlestickChartProps {
   staticData?: CandlestickDataPoint[];
   // 是否使用模拟数据（当 API 失败时）
   useMockData?: boolean;
+  // 是否显示头部（标题和控制按钮）
+  showHeader?: boolean;
+  // 外部控制事件管理
+  onAddEventClick?: () => void;
+  onToggleEvents?: () => void;
+  externalShowEvents?: boolean;
+  // 是否显示交易量
+  showVolume?: boolean;
+  // 传递数据给父组件
+  onDataLoaded?: (dates: string[]) => void;
+  // 双击K线时的回调，传递日期
+  onDoubleClickCandlestick?: (date: string) => void;
+  // 外部传入的事件数据（用于避免多个useChartEvents实例导致的状态不同步）
+  externalEvents?: ChartEvent[];
+  externalEventsLoading?: boolean;
 }
 
 // 默认加载5年数据，初始显示最近1年
@@ -84,7 +102,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   width,
   height = 400,
   staticData,
-  useMockData = false
+  useMockData = false,
+  showHeader = true,
+  onAddEventClick,
+  onToggleEvents,
+  externalShowEvents,
+  showVolume = false,
+  onDataLoaded,
+  onDoubleClickCandlestick,
+  externalEvents,
+  externalEventsLoading
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -93,11 +120,40 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const ema20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ema50SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
-
   const [data, setData] = useState<CandlestickDataPoint[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const hasSetInitialRange = useRef<boolean>(false);
+
+  // 事件标记相关状态
+  // 如果提供了外部控制，使用外部状态，否则使用内部状态
+  const [internalShowEvents, setInternalShowEvents] = useState<boolean>(true);
+  const showEvents = externalShowEvents !== undefined ? externalShowEvents : internalShowEvents;
+  
+  const [eventModalVisible, setEventModalVisible] = useState<boolean>(false);
+  const [editingEvent, setEditingEvent] = useState<ChartEvent | null>(null);
+  const [clickedDate, setClickedDate] = useState<string | null>(null);
+  const [eventMarkerPositions, setEventMarkerPositions] = useState<Map<string, { left: number; top: number }>>(new Map());
+
+  // 使用事件管理hook - 优先使用primaryTicker作为事件symbol
+  // 如果提供了外部事件数据，使用外部数据；否则使用内部hook
+  const eventSymbol = primaryTicker || symbol;
+  const internalChartEvents = useChartEvents(eventSymbol);
+  
+  // 优先使用外部传入的events，如果没有则使用内部的
+  const events = externalEvents !== undefined ? externalEvents : internalChartEvents.events;
+  const eventsLoading = externalEventsLoading !== undefined ? externalEventsLoading : internalChartEvents.loading;
+  const addEvent = internalChartEvents.addEvent;
+  const updateEvent = internalChartEvents.updateEvent;
+  const deleteEvent = internalChartEvents.deleteEvent;
+
+  console.log('[CandlestickChart] Events source:', {
+    usingExternal: externalEvents !== undefined,
+    externalEventsCount: externalEvents?.length,
+    internalEventsCount: internalChartEvents.events.length,
+    finalEventsCount: events.length,
+    symbol
+  });
 
   // 初始化图表的辅助函数
   const initializeChart = useCallback(() => {
@@ -344,6 +400,183 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     }
   }, [width, height]);
 
+  // 处理图表双击事件，创建新事件
+  const handleChartDoubleClick = useCallback((event: MouseEvent) => {
+    if (!chartRef.current || !data.length || !chartContainerRef.current) {
+      return;
+    }
+
+    // 获取鼠标在容器内的相对坐标
+    const rect = chartContainerRef.current.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // 使用lightweight-charts的coordinateToTime方法将X坐标转换为时间戳
+    const timeScale = chartRef.current.timeScale();
+    const timestamp = timeScale.coordinateToTime(x);
+
+    if (timestamp === null) {
+      return;
+    }
+
+    // 将时间戳转换为日期字符串 (YYYY-MM-DD)
+    const date = new Date(timestamp * 1000);
+    const dateStr = date.toISOString().split('T')[0];
+
+    // 查找对应的数据点
+    const dataPoint = data.find(d => d.date === dateStr);
+    
+    // 如果找到了对应的数据点，打开事件编辑模态框
+    if (dataPoint) {
+      // 如果提供了双击回调，调用它并传递日期
+      if (onDoubleClickCandlestick) {
+        onDoubleClickCandlestick(dateStr);
+      } else if (onAddEventClick) {
+        // 如果没有双击回调但有添加事件回调，调用它
+        onAddEventClick();
+      } else {
+        // 内部控制模式：直接设置日期并打开模态框
+        setClickedDate(dateStr);
+        setEditingEvent(null);
+        setEventModalVisible(true);
+      }
+    } else {
+      // 如果没找到精确匹配，尝试找到最接近的数据点
+      const closestDataPoint = data.reduce((prev, curr) => {
+        const prevDiff = Math.abs(new Date(prev.date).getTime() - date.getTime());
+        const currDiff = Math.abs(new Date(curr.date).getTime() - date.getTime());
+        return currDiff < prevDiff ? curr : prev;
+      });
+
+      // 如果最接近的数据点在7天内，使用它
+      const daysDiff = Math.abs(new Date(closestDataPoint.date).getTime() - date.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysDiff <= 7) {
+        if (onDoubleClickCandlestick) {
+          onDoubleClickCandlestick(closestDataPoint.date);
+        } else if (onAddEventClick) {
+          onAddEventClick();
+        } else {
+          setClickedDate(closestDataPoint.date);
+          setEditingEvent(null);
+          setEventModalVisible(true);
+        }
+      }
+    }
+  }, [data, onAddEventClick, onDoubleClickCandlestick]);
+
+  // 事件处理函数
+  const handleEditEvent = useCallback((event: ChartEvent) => {
+    setEditingEvent(event);
+    setEventModalVisible(true);
+  }, []);
+
+  const handleSaveEvent = useCallback(async (eventData: EventFormData) => {
+    try {
+      if (editingEvent) {
+        await updateEvent(editingEvent.id, eventData);
+        message.success('Event updated successfully');
+      } else {
+        await addEvent(eventData);
+        message.success('Event added successfully');
+        // 创建新事件后，如果是内部控制模式，自动显示事件图标
+        if (!onToggleEvents) {
+          setInternalShowEvents(true);
+        }
+      }
+      setEventModalVisible(false);
+      setEditingEvent(null);
+      setClickedDate(null);
+    } catch (error) {
+      message.error('Failed to save event');
+    }
+  }, [editingEvent, updateEvent, addEvent, onToggleEvents]);
+
+  const handleDeleteEvent = useCallback(async (eventId: string) => {
+    try {
+      await deleteEvent(eventId);
+      message.success('Event deleted successfully');
+      setEventModalVisible(false);
+      setEditingEvent(null);
+    } catch (error) {
+      message.error('Failed to delete event');
+    }
+  }, [deleteEvent]);
+
+  // 计算事件标记在图表上的位置
+  const calculateEventMarkerPositions = useCallback(() => {
+    console.log('[calculateEventMarkerPositions] Starting calculation:', {
+      hasChart: !!chartRef.current,
+      hasSeries: !!candlestickSeriesRef.current,
+      dataLength: data.length,
+      showEvents,
+      eventsCount: events.length,
+      symbol
+    });
+
+    if (!chartRef.current || !candlestickSeriesRef.current || !data.length || !showEvents || events.length === 0) {
+      console.log('[calculateEventMarkerPositions] Skipping calculation - conditions not met');
+      setEventMarkerPositions(new Map());
+      return;
+    }
+
+    const positions = new Map<string, { left: number; top: number }>();
+    const chart = chartRef.current;
+    const timeScale = chart.timeScale();
+    
+    // 获取容器的实际宽度
+    const containerWidth = chartContainerRef.current?.clientWidth || chartContainerRef.current?.offsetWidth || 800;
+    
+    // 估算左侧Y轴占用的宽度（通常为60-80px）
+    const leftAxisWidth = 60;
+    // 估算右侧Y轴占用的宽度（通常为50-70px）
+    const rightAxisWidth = 50;
+    // 绘图区域的起始X坐标（从左侧Y轴之后开始）
+    const plotAreaStartX = leftAxisWidth;
+    // 绘图区域的结束X坐标（在右侧Y轴之前）
+    const plotAreaEndX = containerWidth - rightAxisWidth;
+
+    console.log('[calculateEventMarkerPositions] Processing events:', events.map(e => ({ 
+      id: e.id, 
+      date: e.date, 
+      title: e.title 
+    })));
+
+    events.forEach(event => {
+      const eventDataPoint = data.find(d => d.date === event.date);
+      if (!eventDataPoint) {
+        console.log(`[calculateEventMarkerPositions] No data point found for event ${event.id} on ${event.date}`);
+        return;
+      }
+
+      const timestamp = Math.floor(new Date(event.date).getTime() / 1000) as Time;
+      const xCoordinate = timeScale.timeToCoordinate(timestamp);
+      
+      // 使用固定的Y坐标偏移量，将事件标记显示在图表顶部
+      // 这样事件标记会始终可见，不会被K线遮挡
+      const yOffset = 40; // 从顶部开始的固定偏移量
+
+      console.log(`[calculateEventMarkerPositions] Event ${event.id}:`, {
+        date: event.date,
+        timestamp,
+        xCoordinate,
+        inRange: xCoordinate !== null && xCoordinate >= plotAreaStartX && xCoordinate <= plotAreaEndX
+      });
+
+      // 检查X坐标是否在可见的绘图区域内
+      // timeToCoordinate 返回的坐标是相对于整个图表容器的
+      // 如果返回 null 或坐标超出绘图区域（左侧Y轴之后，右侧Y轴之前），则不显示该事件图标
+      if (xCoordinate !== null && xCoordinate >= plotAreaStartX && xCoordinate <= plotAreaEndX) {
+        positions.set(event.id, {
+          left: xCoordinate,
+          top: yOffset
+        });
+      }
+    });
+
+    console.log(`[calculateEventMarkerPositions] Calculated ${positions.size} positions out of ${events.length} events`);
+    setEventMarkerPositions(positions);
+  }, [data, showEvents, events, symbol]);
+
   // 提取数据更新逻辑为独立函数（必须在 useLayoutEffect 之前定义）
   const updateChartData = useCallback(() => {
     if (!data.length || !chartRef.current || !candlestickSeriesRef.current) {
@@ -435,8 +668,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       console.log('✅ Candlestick data set:', candlestickData.length, 'points');
 
       if (volumeSeriesRef.current) {
-        volumeSeriesRef.current.setData(volumeData);
-        console.log('Volume data set:', volumeData.length, 'points');
+        // 根据showVolume决定是否显示交易量数据
+        if (showVolume) {
+          volumeSeriesRef.current.setData(volumeData);
+          console.log('Volume data set:', volumeData.length, 'points');
+        } else {
+          // 如果不需要显示交易量，设置为空数组来隐藏
+          volumeSeriesRef.current.setData([]);
+          console.log('Volume data cleared (hidden)');
+        }
       }
 
       if (ema20SeriesRef.current && ema20Data.length > 0) {
@@ -497,10 +737,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           }
         }
       }, 500);
+      // 数据更新后，重新计算事件标记位置
+      calculateEventMarkerPositions();
     } catch (error) {
       console.error('❌ Error updating chart data:', error);
     }
-  }, [data]);
+  }, [data, showVolume, calculateEventMarkerPositions]);
 
   // 监听图表初始化完成事件
   useEffect(() => {
@@ -690,10 +932,135 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     updateChartData();
   }, [data, updateChartData]);
 
+  // 监听图表视图变化和事件变化，重新计算事件标记位置
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const chart = chartRef.current;
+    const handleVisibleRangeChange = () => {
+      calculateEventMarkerPositions();
+    };
+
+    // 订阅时间范围变化事件
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+    // 初始计算一次
+    calculateEventMarkerPositions();
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    };
+  }, [calculateEventMarkerPositions]);
+
+  // 当事件列表或显示状态变化时，重新计算标记位置
+  useEffect(() => {
+    calculateEventMarkerPositions();
+  }, [events, showEvents, calculateEventMarkerPositions]);
+
+  // 监听事件加载状态，当事件列表更新完成后重新计算位置
+  useEffect(() => {
+    console.log('[CandlestickChart] Events loading state changed:', {
+      eventsLoading,
+      eventsCount: events.length,
+      hasChart: !!chartRef.current,
+      showEvents,
+      symbol
+    });
+    
+    // 当 eventsLoading 从 true 变为 false 时，说明事件列表已经更新完成
+    if (!eventsLoading && events.length >= 0 && chartRef.current) {
+      console.log('[CandlestickChart] Events loaded, recalculating positions in 150ms...');
+      // 延迟一小段时间确保图表已准备好并且 DOM 已更新
+      const timer = setTimeout(() => {
+        console.log('[CandlestickChart] Calculating event marker positions now');
+        calculateEventMarkerPositions();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [eventsLoading, events.length, calculateEventMarkerPositions, showEvents, symbol]);
+
+  // 监听图表容器的双击事件
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const container = chartContainerRef.current;
+    
+    // 添加双击事件监听
+    container.addEventListener('dblclick', handleChartDoubleClick);
+
+    return () => {
+      container.removeEventListener('dblclick', handleChartDoubleClick);
+    };
+  }, [handleChartDoubleClick]);
+
+  // 隐藏 TradingView 水印标记
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const hideWatermark = () => {
+      if (!chartContainerRef.current) return;
+
+      // 查找包含特定 path 的 SVG 元素（TradingView 水印）
+      // 通过查找包含指定 path d 属性的元素
+      const svgElements = chartContainerRef.current.querySelectorAll('svg');
+      svgElements.forEach((svg) => {
+        const paths = svg.querySelectorAll('path');
+        paths.forEach((path) => {
+          const d = path.getAttribute('d');
+          // 匹配用户提供的 path d 属性（使用部分匹配，因为可能有空格或格式差异）
+          if (d && (
+            d.includes('M2 0H0v10h6v9h21.4') || 
+            d.includes('M14 7V2H2v6h6v9h4V7h2Z')
+          )) {
+            // 隐藏整个包含这个 path 的 SVG 或其父元素
+            const parent = path.closest('svg') || path.parentElement;
+            if (parent) {
+              (parent as HTMLElement).style.display = 'none';
+            }
+          }
+        });
+      });
+
+      // 也尝试通过查找包含 "TradingView" 文本的元素
+      const allElements = chartContainerRef.current.querySelectorAll('*');
+      allElements.forEach((el) => {
+        if (el.textContent && el.textContent.includes('TradingView')) {
+          (el as HTMLElement).style.display = 'none';
+        }
+      });
+    };
+
+    // 立即尝试隐藏
+    hideWatermark();
+
+    // 使用 MutationObserver 监听 DOM 变化，确保在图表动态加载后也能隐藏
+    const observer = new MutationObserver(() => {
+      hideWatermark();
+    });
+
+    if (chartContainerRef.current) {
+      observer.observe(chartContainerRef.current, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    // 定期检查（以防万一）
+    const interval = setInterval(hideWatermark, 1000);
+
+    return () => {
+      observer.disconnect();
+      clearInterval(interval);
+    };
+  }, [chartRef, symbol]); // 当图表引用或symbol变化时重新运行
+
   const fetchHistoricalData = useCallback(async () => {
     // 如果提供了静态数据，直接使用
     if (staticData) {
       setData(staticData);
+      if (onDataLoaded) {
+        onDataLoaded(staticData.map(d => d.date));
+      }
       return;
     }
 
@@ -701,6 +1068,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (useMockData) {
       const mockData = generateMockData(DEFAULT_DATA_DAYS);
       setData(mockData);
+      if (onDataLoaded) {
+        onDataLoaded(mockData.map(d => d.date));
+      }
       return;
     }
 
@@ -716,6 +1086,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       if (response.success && response.data) {
         setData(response.data);
         console.log('Data loaded successfully:', response.data.length, 'records');
+        // 通知父组件数据已加载
+        if (onDataLoaded) {
+          onDataLoaded(response.data.map(d => d.date));
+        }
       } else {
         setError('Failed to fetch historical data');
         console.error('API returned no data:', response);
@@ -738,7 +1112,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [symbol, primaryTicker, staticData, useMockData]);
+  }, [symbol, primaryTicker, staticData, useMockData, onDataLoaded]);
 
   useEffect(() => {
     if (symbol) {
@@ -795,6 +1169,176 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     );
   }
 
+  // 图表内容区域
+  const chartContent = (
+    <div style={{ position: 'relative', width: '100%', height: `${height}px` }}>
+      {/* 隐藏 TradingView 水印的样式 */}
+      <style>{`
+        #candlestick-chart-container svg path[d*="M2 0H0v10h6v9h21.4"],
+        #candlestick-chart-container svg path[d*="M14 7V2H2v6h6v9h4V7h2Z"] {
+          display: none !important;
+          visibility: hidden !important;
+        }
+      `}</style>
+      
+      {loading && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(255, 255, 255, 0.8)',
+          zIndex: 10
+        }}>
+          <Spin size="large" />
+        </div>
+      )}
+      <div 
+        ref={chartContainerRef}
+        style={{ 
+          width: '100%', 
+          height: `${height}px`,
+          minWidth: '400px',
+          minHeight: '300px',
+          position: 'relative',
+          backgroundColor: '#ffffff',
+          display: 'block',
+          overflow: 'hidden',
+          visibility: 'visible'
+        }} 
+        id="candlestick-chart-container"
+      />
+      {/* 事件标记叠加层 */}
+      {showEvents && events.length > 0 && eventMarkerPositions.size > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 5
+        }}>
+          {events.map(event => {
+            const position = eventMarkerPositions.get(event.id);
+            if (!position) return null;
+
+            const config = EVENT_TYPE_CONFIGS[event.type];
+            
+            return (
+              <Tooltip
+                key={event.id}
+                title={
+                  <div>
+                    <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{event.title}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.9 }}>
+                      {new Date(event.date).toLocaleDateString('en-US', { 
+                        year: 'numeric', 
+                        month: 'short', 
+                        day: 'numeric' 
+                      })}
+                    </div>
+                    {event.description && (
+                      <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '4px', maxWidth: '200px' }}>
+                        {event.description}
+                      </div>
+                    )}
+                  </div>
+                }
+                placement="top"
+                overlayStyle={{ maxWidth: '250px' }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${position.left}px`,
+                    top: `${position.top}px`,
+                    transform: 'translate(-50%, -50%)',
+                    cursor: 'pointer',
+                    pointerEvents: 'auto',
+                    zIndex: 10
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditEvent(event);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    // 阻止双击事件传播，避免触发创建新事件
+                  }}
+                >
+                  <div style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    background: config.color,
+                    border: '3px solid #fff',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '14px',
+                    transition: 'transform 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                  >
+                    {config.icon}
+                  </div>
+                </div>
+              </Tooltip>
+            );
+          })}
+        </div>
+      )}
+      {!data.length && !loading && !chartRef.current && (
+        <div style={{ 
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          color: '#8c8c8c'
+        }}>
+          <p>No historical data available</p>
+        </div>
+      )}
+    </div>
+  );
+
+  // 如果不显示头部，直接返回图表内容（包含事件编辑模态框）
+  if (!showHeader) {
+    return (
+      <>
+        {chartContent}
+        
+        {/* 事件编辑模态框 */}
+        <EventEditModal
+          visible={eventModalVisible}
+          onCancel={() => {
+            setEventModalVisible(false);
+            setEditingEvent(null);
+            setClickedDate(null);
+          }}
+          onSave={handleSaveEvent}
+          onDelete={editingEvent ? handleDeleteEvent : undefined}
+          event={editingEvent}
+          defaultDate={clickedDate || undefined}
+          loading={eventsLoading}
+          availableTradingDates={data.map(d => d.date)}
+        />
+      </>
+    );
+  }
+
+  // 显示完整的卡片（包含头部和实时价格信息）
   return (
     <Card 
       title={
@@ -858,52 +1402,26 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         </div>
       )}
 
-      <div style={{ position: 'relative', width: '100%', height: `${height}px` }}>
-        {loading && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'rgba(255, 255, 255, 0.8)',
-            zIndex: 10
-          }}>
-            <Spin size="large" />
-          </div>
-        )}
-        <div 
-          ref={chartContainerRef}
-          style={{ 
-            width: '100%', 
-            height: `${height}px`,
-            minWidth: '400px',
-            minHeight: '300px',
-            position: 'relative',
-            backgroundColor: '#ffffff',
-            display: 'block',
-            overflow: 'hidden',
-            visibility: 'visible'
-          }} 
-          id="candlestick-chart-container"
-        />
-        {!data.length && !loading && !chartRef.current && (
-          <div style={{ 
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            color: '#8c8c8c'
-          }}>
-            <p>No historical data available</p>
-          </div>
-        )}
-      </div>
+      {chartContent}
+      
+      {/* 事件编辑模态框 */}
+      <EventEditModal
+        visible={eventModalVisible}
+        onCancel={() => {
+          setEventModalVisible(false);
+          setEditingEvent(null);
+          setClickedDate(null);
+        }}
+        onSave={handleSaveEvent}
+        onDelete={editingEvent ? handleDeleteEvent : undefined}
+        event={editingEvent}
+        defaultDate={clickedDate || undefined}
+        loading={eventsLoading}
+        availableTradingDates={data.map(d => d.date)}
+      />
     </Card>
   );
 };
 
 export default CandlestickChart;
+
