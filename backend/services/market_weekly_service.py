@@ -10,6 +10,8 @@ Market Weekly Report Service
 """
 
 import os
+import json
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from backend.database.db_manager import DatabaseManager
@@ -17,6 +19,10 @@ from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 
 logger = get_logger("market_weekly_service")
+
+# 内存缓存（简单实现，如果Redis不可用则使用此缓存）
+_memory_cache = {}
+_cache_lock = {}  # 用于防止并发请求
 
 
 class MarketWeeklyService:
@@ -28,73 +34,107 @@ class MarketWeeklyService:
         self.db_manager = DatabaseManager(db_config)
         logger.info("MarketWeeklyService initialized")
     
-    def generate_report(self, period: str = 'latest') -> Dict[str, Any]:
+    def generate_report(self, period: str = 'latest', use_cache: bool = True, cache_ttl: int = 3600) -> Dict[str, Any]:
         """
         生成Market Weekly报告
         
         Args:
             period: 报告周期，'latest' 表示最新一周
+            use_cache: 是否使用缓存，默认True
+            cache_ttl: 缓存过期时间（秒），默认3600秒（1小时）
         
         Returns:
             完整的报告数据字典
         """
+        cache_key = f"market_weekly_report:{period}"
+        
+        # 尝试从缓存获取
+        if use_cache:
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                logger.info(f"Using cached report for period: {period}")
+                return cached_data
+        
+        # 如果缓存不存在或已过期，生成新报告
         logger.info(f"Generating Market Weekly report for period: {period}")
         
-        # 1. 计算周度时间范围
-        week_start, week_end = self._calculate_week_range(period)
-        generated_at = datetime.utcnow().isoformat() + 'Z'
+        # 防止并发请求同时生成报告
+        if cache_key in _cache_lock:
+            logger.info(f"Report generation already in progress for {period}, waiting...")
+            # 等待最多10秒
+            for _ in range(20):
+                time.sleep(0.5)
+                cached_data = self._get_from_cache(cache_key)
+                if cached_data:
+                    return cached_data
+            logger.warning(f"Timeout waiting for report generation, proceeding with new generation")
         
-        logger.info(f"Report period: {week_start} to {week_end}")
-        
-        # 2. 计算Week-over-Week变化
-        indices_wow = self._calculate_wow('index', week_start, week_end)
-        sectors_wow = self._calculate_wow('sector', week_start, week_end)
-        forex_wow = self._calculate_wow('forex', week_start, week_end)
-        commodities_wow = self._calculate_wow('commodity', week_start, week_end)
-        yields_wow = self._calculate_wow('bond', week_start, week_end)
-        
-        # 3. 计算相对表现（3个月，indexed to 100）
-        indices_relative = self._calculate_relative_performance('index', days=90)
-        sectors_relative = self._calculate_relative_performance('sector', days=90)
-        forex_relative = self._calculate_relative_performance('forex', days=90)
-        commodities_relative = self._calculate_relative_performance('commodity', days=90)
-        yields_data = self._calculate_relative_performance('bond', days=90)
-        
-        # 4. 生成执行摘要
-        executive_summary = self._generate_executive_summary(indices_wow, week_start, week_end)
-        
-        # 5. 获取技术视图数据（资产列表）
-        technical_views = self._get_technical_views_data()
-        
-        # 6. 获取下周展望数据
-        next_week_outlook = self._get_next_week_outlook(week_end)
-        
-        # 整合报告数据
-        report = {
-            'meta': {
-                'week_start': week_start.strftime('%Y-%m-%d'),
-                'week_end': week_end.strftime('%Y-%m-%d'),
-                'generated_at': generated_at
-            },
-            'executive_summary': executive_summary,
-            'weekly_performance': {
-                'indices_wow': indices_wow,
-                'indices_relative': indices_relative,
-                'sectors_wow': sectors_wow,
-                'sectors_relative': sectors_relative,
-                'forex_wow': forex_wow,
-                'forex_relative': forex_relative,
-                'commodities_wow': commodities_wow,
-                'commodities_relative': commodities_relative,
-                'yields_wow': yields_wow,
-                'yields_data': yields_data
-            },
-            'technical_views': technical_views,
-            'next_week_outlook': next_week_outlook
-        }
-        
-        logger.info("Report generated successfully")
-        return report
+        _cache_lock[cache_key] = True
+        try:
+            # 1. 计算周度时间范围
+            week_start, week_end = self._calculate_week_range(period)
+            generated_at = datetime.utcnow().isoformat() + 'Z'
+            
+            logger.info(f"Report period: {week_start} to {week_end}")
+            
+            # 2. 计算Week-over-Week变化
+            indices_wow = self._calculate_wow('index', week_start, week_end)
+            sectors_wow = self._calculate_wow('sector', week_start, week_end)
+            forex_wow = self._calculate_wow('forex', week_start, week_end)
+            commodities_wow = self._calculate_wow('commodity', week_start, week_end)
+            yields_wow = self._calculate_wow('bond', week_start, week_end)
+            
+            # 3. 计算相对表现（3个月，indexed to 100）
+            indices_relative = self._calculate_relative_performance('index', days=90)
+            sectors_relative = self._calculate_relative_performance('sector', days=90)
+            forex_relative = self._calculate_relative_performance('forex', days=90)
+            commodities_relative = self._calculate_relative_performance('commodity', days=90)
+            yields_data = self._calculate_relative_performance('bond', days=90)
+            
+            # 4. 生成执行摘要
+            executive_summary = self._generate_executive_summary(indices_wow, week_start, week_end)
+            
+            # 5. 获取技术视图数据（资产列表）
+            technical_views = self._get_technical_views_data()
+            
+            # 6. 获取下周展望数据
+            next_week_outlook = self._get_next_week_outlook(week_end)
+            
+            # 整合报告数据
+            report = {
+                'meta': {
+                    'week_start': week_start.strftime('%Y-%m-%d'),
+                    'week_end': week_end.strftime('%Y-%m-%d'),
+                    'generated_at': generated_at
+                },
+                'executive_summary': executive_summary,
+                'weekly_performance': {
+                    'indices_wow': indices_wow,
+                    'indices_relative': indices_relative,
+                    'sectors_wow': sectors_wow,
+                    'sectors_relative': sectors_relative,
+                    'forex_wow': forex_wow,
+                    'forex_relative': forex_relative,
+                    'commodities_wow': commodities_wow,
+                    'commodities_relative': commodities_relative,
+                    'yields_wow': yields_wow,
+                    'yields_data': yields_data
+                },
+                'technical_views': technical_views,
+                'next_week_outlook': next_week_outlook
+            }
+            
+            logger.info("Report generated successfully")
+            
+            # 保存到缓存
+            if use_cache:
+                self._save_to_cache(cache_key, report, cache_ttl)
+            
+            return report
+        finally:
+            # 释放锁
+            if cache_key in _cache_lock:
+                del _cache_lock[cache_key]
     
     def _calculate_week_range(self, period: str) -> tuple:
         """
@@ -677,8 +717,8 @@ class MarketWeeklyService:
             shares
         FROM ipo_calendar
         WHERE start_date >= %s AND start_date <= %s
-          AND (exchange LIKE '%US%' OR exchange LIKE '%NYSE%' OR exchange LIKE '%NASDAQ%' 
-               OR exchange LIKE '%HK%' OR exchange LIKE '%Hong Kong%')
+          AND (exchange LIKE '%%US%%' OR exchange LIKE '%%NYSE%%' OR exchange LIKE '%%NASDAQ%%' 
+               OR exchange LIKE '%%HK%%' OR exchange LIKE '%%Hong Kong%%')
         ORDER BY start_date, code
         LIMIT 50;
         """
@@ -686,44 +726,63 @@ class MarketWeeklyService:
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            cursor.execute(query, (start_date, end_date))
+            # 使用date()方法确保传递的是date对象而不是datetime对象
+            cursor.execute(query, (start_date.date(), end_date.date()))
             
             results = []
             rows = cursor.fetchall()
             
             for row in rows:
                 try:
-                    # 安全地访问每个索引，避免元组索引错误
-                    start_date_val = row[0] if len(row) > 0 else None
-                    code_val = row[1] if len(row) > 1 else ''
-                    name_val = row[2] if len(row) > 2 else ''
-                    exchange_val = row[3] if len(row) > 3 else ''
-                    deal_type_val = row[4] if len(row) > 4 else '-'
-                    price_from = row[5] if len(row) > 5 else None
-                    price_to = row[6] if len(row) > 6 else None
-                    shares_val = row[7] if len(row) > 7 else None
+                    # 确保row有足够的元素
+                    if not row or len(row) < 8:
+                        logger.warning(f"IPO row has insufficient columns: {len(row) if row else 0}, row data: {row}")
+                        continue
+                    
+                    # 安全地访问每个索引
+                    start_date_val = row[0]
+                    code_val = row[1] if row[1] else ''
+                    name_val = row[2] if row[2] else ''
+                    exchange_val = row[3] if row[3] else ''
+                    deal_type_val = row[4] if row[4] else '-'
+                    price_from = row[5]
+                    price_to = row[6]
+                    shares_val = row[7]
                     
                     # 格式化价格范围
-                    if price_from and price_to:
-                        price_range = f"${price_from} - ${price_to}"
-                    elif price_from:
-                        price_range = f"${price_from}"
+                    if price_from is not None and price_to is not None:
+                        price_range = f"${float(price_from):.2f} - ${float(price_to):.2f}"
+                    elif price_from is not None:
+                        price_range = f"${float(price_from):.2f}"
                     else:
                         price_range = '-'
                     
                     # 格式化股数
-                    shares = str(shares_val) if shares_val else '-'
+                    if shares_val is not None:
+                        # 格式化大数字，添加千位分隔符
+                        shares = f"{int(shares_val):,}"
+                    else:
+                        shares = '-'
+                    
+                    # 格式化日期
+                    if start_date_val:
+                        if hasattr(start_date_val, 'strftime'):
+                            date_str = start_date_val.strftime('%Y-%m-%d')
+                        else:
+                            date_str = str(start_date_val)
+                    else:
+                        date_str = ''
                     
                     results.append({
-                        'date': start_date_val.strftime('%Y-%m-%d') if start_date_val else '',
-                        'ticker': code_val or '',
-                        'company': name_val or '',
-                        'exchange': exchange_val or '',
-                        'deal_type': deal_type_val or '-',
+                        'date': date_str,
+                        'ticker': code_val,
+                        'company': name_val,
+                        'exchange': exchange_val,
+                        'deal_type': deal_type_val,
                         'price_range': price_range,
                         'shares': shares
                     })
-                except (IndexError, AttributeError) as e:
+                except (IndexError, AttributeError, TypeError, ValueError) as e:
                     logger.warning(f"Error processing IPO row: {str(e)}, row data: {row}")
                     continue
             
@@ -735,6 +794,8 @@ class MarketWeeklyService:
         
         except Exception as e:
             logger.error(f"Error fetching IPO calendar: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
     
     def get_watchlist_stocks(self, user_id: int) -> List[Dict]:
@@ -784,13 +845,300 @@ class MarketWeeklyService:
             logger.error(f"Error fetching watchlist stocks: {str(e)}")
             return []
     
-    def refresh_report(self):
+    def refresh_report(self, period: str = 'latest'):
         """
         刷新报告（清除缓存，重新生成）
         
-        Note: 当前实现没有使用缓存，每次都是实时生成
-        TODO: 如果启用缓存，在这里清除缓存
+        Args:
+            period: 报告周期，'latest' 表示最新一周
         """
-        logger.info("Report refresh requested (currently generates fresh data on every request)")
-        pass
+        cache_key = f"market_weekly_report:{period}"
+        
+        # 清除缓存
+        self._clear_cache(cache_key)
+        
+        logger.info(f"Cache cleared for period: {period}, next request will generate fresh report")
+    
+    def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """从缓存获取数据（优先使用Redis，否则使用内存缓存）"""
+        try:
+            # 尝试使用Redis
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+            if redis_url and redis_url != 'redis://localhost:6379/0':
+                import redis
+                redis_client = redis.from_url(redis_url, decode_responses=True)
+                cached = redis_client.get(cache_key)
+                if cached:
+                    data = json.loads(cached)
+                    logger.info(f"Retrieved from Redis cache: {cache_key}")
+                    return data
+        except Exception as e:
+            logger.debug(f"Redis cache not available: {str(e)}, using memory cache")
+        
+        # 使用内存缓存
+        if cache_key in _memory_cache:
+            cached_data = _memory_cache[cache_key]
+            # 检查是否过期
+            if time.time() < cached_data['expires_at']:
+                logger.info(f"Retrieved from memory cache: {cache_key}")
+                return cached_data['data']
+            else:
+                # 缓存已过期，删除
+                del _memory_cache[cache_key]
+        
+        return None
+    
+    def _save_to_cache(self, cache_key: str, data: Dict[str, Any], ttl: int = 3600):
+        """保存数据到缓存（优先使用Redis，否则使用内存缓存）"""
+        try:
+            # 尝试使用Redis
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+            if redis_url and redis_url != 'redis://localhost:6379/0':
+                import redis
+                redis_client = redis.from_url(redis_url, decode_responses=True)
+                redis_client.setex(cache_key, ttl, json.dumps(data))
+                logger.info(f"Saved to Redis cache: {cache_key}, TTL: {ttl}s")
+                return
+        except Exception as e:
+            logger.debug(f"Redis cache not available: {str(e)}, using memory cache")
+        
+        # 使用内存缓存
+        _memory_cache[cache_key] = {
+            'data': data,
+            'expires_at': time.time() + ttl
+        }
+        logger.info(f"Saved to memory cache: {cache_key}, TTL: {ttl}s")
+    
+    def _clear_cache(self, cache_key: str):
+        """清除缓存"""
+        try:
+            # 尝试清除Redis缓存
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+            if redis_url and redis_url != 'redis://localhost:6379/0':
+                import redis
+                redis_client = redis.from_url(redis_url, decode_responses=True)
+                redis_client.delete(cache_key)
+                logger.info(f"Cleared Redis cache: {cache_key}")
+        except Exception as e:
+            logger.debug(f"Redis cache not available: {str(e)}")
+        
+        # 清除内存缓存
+        if cache_key in _memory_cache:
+            del _memory_cache[cache_key]
+            logger.info(f"Cleared memory cache: {cache_key}")
+    
+    def generate_chart_image(self, symbol: str, label: str, days: int = 90) -> Optional[str]:
+        """
+        生成candlestick图表图片，样式参考report_debug.py
+        
+        Args:
+            symbol: 股票代码
+            label: 图表标题
+            days: 天数
+        
+        Returns:
+            base64编码的PNG图片字符串，如果没有数据则返回None
+        """
+        import pandas as pd
+        import matplotlib
+        matplotlib.use('Agg')  # 使用非GUI后端
+        import matplotlib.pyplot as plt
+        import mplfinance as mpf
+        from matplotlib.lines import Line2D
+        import base64
+        import io
+        
+        logger.info(f"Generating chart for {symbol}, days={days}")
+        
+        try:
+            # 1. 获取历史数据
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=days)
+            
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            rows = []
+            
+            # 首先尝试从 stock_prices_eod 表获取数据（个股）
+            query_stock = """
+            SELECT date, open, high, low, close, volume
+            FROM stock_prices_eod
+            WHERE code = %s 
+            AND date >= %s 
+            AND date <= %s
+            AND period = 'd'
+            ORDER BY date ASC
+            """
+            
+            cursor.execute(query_stock, (symbol, start_date, end_date))
+            rows = cursor.fetchall()
+            
+            # 如果没有数据，尝试从 market_data_eod 表获取（指数、外汇、商品、债券）
+            if not rows:
+                logger.info(f"No data in stock_prices_eod for {symbol}, trying market_data_eod table")
+                
+                query_market = """
+                SELECT date, open, high, low, close, volume
+                FROM market_data_eod
+                WHERE code = %s 
+                AND date >= %s 
+                AND date <= %s
+                ORDER BY date ASC
+                """
+                
+                cursor.execute(query_market, (symbol, start_date, end_date))
+                rows = cursor.fetchall()
+                
+                if rows:
+                    logger.info(f"Found {len(rows)} records in market_data_eod table for {symbol}")
+            
+            cursor.close()
+            conn.close()
+            
+            if not rows:
+                logger.warning(f"No data found for {symbol} in either stock_prices_eod or market_data_eod")
+                return None
+            
+            # 2. 转换为DataFrame
+            df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
+            df = df.astype(float)
+            
+            # 3. 检查是否有OHLC数据
+            has_ohlc = all(col in df.columns for col in ['open', 'high', 'low', 'close'])
+            
+            if not has_ohlc:
+                # 如果没有OHLC数据，只有close，使用简单折线图
+                plt.rcParams.update({
+                    "figure.facecolor": "white",
+                    "axes.facecolor": "#FAFAFA",
+                    "axes.edgecolor": "#CCCCCC",
+                    "axes.linewidth": 1.2,
+                    "axes.grid": True,
+                    "axes.grid.axis": "y",
+                    "grid.color": "#E5E5E5",
+                    "grid.linestyle": "-",
+                    "grid.linewidth": 0.8,
+                    "grid.alpha": 0.6,
+                    "font.size": 10,
+                    "savefig.dpi": 300
+                })
+                
+                fig, ax = plt.subplots(figsize=(12, 6))
+                df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
+                df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+                
+                ax.plot(df.index, df['close'], color='#2C3E50', linewidth=2, label='Close')
+                ax.plot(df.index, df['EMA_20'], color='#BBBBBB', linewidth=1.5, label='EMA 20')
+                ax.plot(df.index, df['EMA_50'], color='#AAAAAA', linewidth=1.5, label='EMA 50')
+                
+                ax.set_ylabel("Price", fontweight="bold", color="#2C3E50")
+                ax.set_title(f"{label} — Daily Chart", loc="left", fontsize=11, pad=8, color="#2C3E50", fontweight="bold")
+                ax.legend(loc="upper left", fontsize=8, framealpha=0.9, edgecolor="#CCCCCC")
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                fig.autofmt_xdate()
+                plt.tight_layout()
+                
+                # 转换为base64
+                buffer = io.BytesIO()
+                plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+                plt.close(fig)
+                buffer.seek(0)
+                image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                return image_base64
+            
+            # 4. 计算EMA指标
+            df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
+            df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+            df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
+            
+            # 5. 设置mplfinance样式（参考report_debug.py）
+            ema_colors = ["#BBBBBB", "#AAAAAA", "#999999"]
+            ema_plots = [
+                mpf.make_addplot(df['EMA_20'], color=ema_colors[0], width=1.2),
+                mpf.make_addplot(df['EMA_50'], color=ema_colors[1], width=1.2),
+                mpf.make_addplot(df['EMA_200'], color=ema_colors[2], width=1.2)
+            ]
+            
+            # Market colors配置（白色上涨蜡烛，红色下跌蜡烛）
+            mc = mpf.make_marketcolors(
+                up="#FFFFFF",
+                down="#E74C3C",
+                edge={"up": "#000000", "down": "#E74C3C"},
+                wick={"up": "#000000", "down": "#E74C3C"},
+                volume={"up": "#95A5A6", "down": "#F1948A"}
+            )
+            
+            # Style配置
+            s = mpf.make_mpf_style(
+                marketcolors=mc,
+                gridcolor="#E5E5E5",
+                gridstyle="-",
+                gridaxis="horizontal",
+                facecolor="#F8F9FA",
+                figcolor="#F8F9FA",
+                edgecolor="#CCCCCC",
+                y_on_right=True,
+                rc={
+                    "font.size": 8,
+                    "axes.labelsize": 9,
+                    "axes.titlesize": 11,
+                    "xtick.labelsize": 8,
+                    "ytick.labelsize": 8,
+                    "legend.fontsize": 8
+                }
+            )
+            
+            # 6. 生成图表
+            fig, axes = mpf.plot(
+                df,
+                type="candle",
+                style=s,
+                title="",
+                ylabel="Price",
+                figsize=(12, 6),
+                returnfig=True,
+                show_nontrading=False,
+                datetime_format="%b %d",
+                xrotation=0,
+                scale_padding={"left": 0.05, "right": 0.35, "top": 0.3, "bottom": 0.3},
+                update_width_config=dict(candle_linewidth=0.6, candle_width=0.6),
+                addplot=ema_plots,
+                volume=False
+            )
+            
+            # 7. 设置标题和图例
+            for ax in axes:
+                ax.margins(x=0)
+            
+            axes[0].set_title(f"{label} — Daily Chart", loc="left", fontsize=11, pad=8, color="#2C3E50", fontweight="bold")
+            
+            # 添加图例
+            legend_handles = [Line2D([0], [0], color=c, linewidth=2) for c in ema_colors]
+            axes[0].legend(
+                handles=legend_handles,
+                labels=["EMA 20", "EMA 50", "EMA 200"],
+                loc="upper left",
+                fontsize=8,
+                framealpha=0.9,
+                edgecolor="#CCCCCC"
+            )
+            
+            # 8. 转换为base64
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            buffer.seek(0)
+            image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            logger.info(f"Chart generated successfully for {symbol}")
+            return image_base64
+            
+        except Exception as e:
+            logger.error(f"Error generating chart for {symbol}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 

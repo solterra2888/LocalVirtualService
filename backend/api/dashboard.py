@@ -1428,9 +1428,9 @@ async def get_stock_historical_data(
         
         print(f"Date range: {start_date} to {end_date}")
         
-        # Query historical data from stock_prices_eod table
+        # Query historical data from stock_prices_eod table first
         # Try exact match first, then try with .US suffix
-        query = """
+        query_stock = """
         SELECT 
             date,
             open,
@@ -1446,15 +1446,43 @@ async def get_stock_historical_data(
         ORDER BY date ASC
         """
         
-        results = db_manager.fetch_all(query, [symbol, start_date, end_date])
-        print(f"Found {len(results)} records for symbol {symbol}")
+        results = db_manager.fetch_all(query_stock, [symbol, start_date, end_date])
+        print(f"Found {len(results)} records in stock_prices_eod for symbol {symbol}")
         
         # If no results and symbol doesn't have .US suffix, try adding it
         if len(results) == 0 and not symbol.endswith('.US'):
             print(f"No results for {symbol}, trying with .US suffix")
             symbol_with_us = f"{symbol}.US"
-            results = db_manager.fetch_all(query, [symbol_with_us, start_date, end_date])
-            print(f"Found {len(results)} records for symbol {symbol_with_us}")
+            results = db_manager.fetch_all(query_stock, [symbol_with_us, start_date, end_date])
+            print(f"Found {len(results)} records in stock_prices_eod for symbol {symbol_with_us}")
+        
+        # If still no results, try market_data_eod table (for indices, forex, commodities, etc.)
+        if len(results) == 0:
+            print(f"No results in stock_prices_eod, trying market_data_eod for symbol {symbol}")
+            query_market = """
+            SELECT 
+                date,
+                open,
+                high,
+                low,
+                close,
+                volume
+            FROM market_data_eod 
+            WHERE code = %s 
+            AND date >= %s 
+            AND date <= %s
+            ORDER BY date ASC
+            """
+            
+            results = db_manager.fetch_all(query_market, [symbol, start_date, end_date])
+            print(f"Found {len(results)} records in market_data_eod for symbol {symbol}")
+            
+            # If still no results and symbol doesn't have .US suffix, try adding it
+            if len(results) == 0 and not symbol.endswith('.US'):
+                print(f"No results for {symbol}, trying with .US suffix in market_data_eod")
+                symbol_with_us = f"{symbol}.US"
+                results = db_manager.fetch_all(query_market, [symbol_with_us, start_date, end_date])
+                print(f"Found {len(results)} records in market_data_eod for symbol {symbol_with_us}")
         
         # Format results for chart
         historical_data = []

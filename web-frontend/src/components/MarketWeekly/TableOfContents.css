@@ -3,8 +3,8 @@
   position: fixed;
   right: 20px;
   top: 100px;
-  width: 180px;
-  padding: 16px 12px;
+  width: 150px;
+  padding: 16px 10px;
   border-left: 1px solid #e8e8e8;
   border-radius: 8px;
   max-height: calc(100vh - 120px);
@@ -61,7 +61,7 @@
   margin-bottom: 12px;
   margin-top: 32px; /* 为按钮留出空间 */
   padding-left: 4px;
-  padding-right: 32px; /* 为按钮留出空间 */
+  padding-right: 28px; /* 为按钮留出空间 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -82,7 +82,8 @@
   height: 28px;
   line-height: 28px;
   margin: 2px 0;
-  padding-left: 12px !important;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -93,7 +94,8 @@
   height: 28px;
   line-height: 28px;
   margin: 2px 0;
-  padding-left: 12px !important;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -104,7 +106,8 @@
   font-size: 9px;
   height: 24px;
   line-height: 24px;
-  padding-left: 24px !important;
+  padding-left: 20px !important;
+  padding-right: 4px !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -55,11 +55,6 @@ const Layout: React.FC = () => {
   // 菜单项配置
   const menuItems = [
     {
-      key: '/market-weekly',
-      icon: <BarChartOutlined />,
-      label: 'Market Weekly',
-    },
-    {
       key: '/dashboard',
       icon: <StockOutlined />,
       label: 'Target Tracking',
@@ -68,6 +63,11 @@ const Layout: React.FC = () => {
       key: '/news',
       icon: <NotificationOutlined />,
       label: 'News',
+    },
+    {
+      key: '/market-weekly',
+      icon: <BarChartOutlined />,
+      label: 'Market Weekly',
     },
     {
       key: '/markets/economic-events',

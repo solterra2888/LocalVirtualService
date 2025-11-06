@@ -19,16 +19,29 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ className }) => {
   // 监听页面滚动，高亮当前section
   useEffect(() => {
     const handleScroll = () => {
-      const sections = document.querySelectorAll('section[id]');
+      // 查找所有带ID的section和subsection元素
+      const sections = document.querySelectorAll('section[id], div.subsection[id]');
       let currentSection = 'executive-summary';
+      let closestSection = null;
+      let closestDistance = Infinity;
 
       sections.forEach((section) => {
         const rect = section.getBoundingClientRect();
-        // 如果section在视口的上半部分，认为是当前section
-        if (rect.top <= 150 && rect.bottom >= 150) {
-          currentSection = section.id;
+        // 计算section顶部到视口导航栏下方（150px）的距离
+        const distance = Math.abs(rect.top - 150);
+        
+        // 如果section在视口中且距离更近，则更新当前section
+        if (rect.top <= 150 && rect.bottom >= 0) {
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestSection = section.id;
+          }
         }
       });
+
+      if (closestSection) {
+        currentSection = closestSection;
+      }
 
       setActiveSection(currentSection);
     };
@@ -52,45 +65,46 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ className }) => {
     }
   };
 
+  // 统一处理菜单点击事件
+  const handleMenuClick = ({ key }: { key: string }) => {
+    scrollToSection(key);
+  };
+
   const items: MenuItem[] = [
     {
       key: 'executive-summary',
-      label: 'Executive Summary',
-      onClick: () => scrollToSection('executive-summary')
+      label: 'Executive Summary'
     },
     {
       key: 'weekly-performance',
       label: 'Weekly Performance',
-      onClick: () => scrollToSection('weekly-performance'),
       children: [
-        { key: 'equity-weekly', label: 'Equity Indices', onClick: () => scrollToSection('equity-weekly') },
-        { key: 'sectors-weekly', label: 'US Sectors', onClick: () => scrollToSection('sectors-weekly') },
-        { key: 'forex-weekly', label: 'Foreign Exchange', onClick: () => scrollToSection('forex-weekly') },
-        { key: 'commodities-weekly', label: 'Commodities', onClick: () => scrollToSection('commodities-weekly') },
-        { key: 'yields-weekly', label: 'Treasury Yields', onClick: () => scrollToSection('yields-weekly') }
+        { key: 'equity-weekly', label: 'Equity Indices' },
+        { key: 'sectors-weekly', label: 'US Sectors' },
+        { key: 'forex-weekly', label: 'Foreign Exchange' },
+        { key: 'commodities-weekly', label: 'Commodities' },
+        { key: 'yields-weekly', label: 'Treasury Yields' }
       ]
     },
     {
       key: 'technical-views',
       label: 'Technical Views',
-      onClick: () => scrollToSection('technical-views'),
       children: [
-        { key: 'equity-technical', label: 'Equity Indices', onClick: () => scrollToSection('equity-technical') },
-        { key: 'sectors-technical', label: 'US Sectors', onClick: () => scrollToSection('sectors-technical') },
-        { key: 'watchlist-technical', label: 'My Watchlist', onClick: () => scrollToSection('watchlist-technical') },
-        { key: 'forex-technical', label: 'Foreign Exchange', onClick: () => scrollToSection('forex-technical') },
-        { key: 'commodities-technical', label: 'Commodities', onClick: () => scrollToSection('commodities-technical') },
-        { key: 'yields-technical', label: 'Treasury Yields', onClick: () => scrollToSection('yields-technical') }
+        { key: 'equity-technical', label: 'Equity Indices' },
+        { key: 'sectors-technical', label: 'US Sectors' },
+        { key: 'watchlist-technical', label: 'My Watchlist' },
+        { key: 'forex-technical', label: 'Foreign Exchange' },
+        { key: 'commodities-technical', label: 'Commodities' },
+        { key: 'yields-technical', label: 'Treasury Yields' }
       ]
     },
     {
       key: 'next-week-outlook',
       label: 'Next Week Outlook',
-      onClick: () => scrollToSection('next-week-outlook'),
       children: [
-        { key: 'economic-calendar', label: 'Economic Calendar', onClick: () => scrollToSection('economic-calendar') },
-        { key: 'earnings-calendar', label: 'Earnings Calendar', onClick: () => scrollToSection('earnings-calendar') },
-        { key: 'ipo-calendar', label: 'IPO Calendar', onClick: () => scrollToSection('ipo-calendar') }
+        { key: 'economic-calendar', label: 'Economic Calendar' },
+        { key: 'earnings-calendar', label: 'Earnings Calendar' },
+        { key: 'ipo-calendar', label: 'IPO Calendar' }
       ]
     }
   ];
@@ -103,6 +117,7 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ className }) => {
         selectedKeys={[activeSection]}
         openKeys={openKeys}
         onOpenChange={setOpenKeys}
+        onClick={handleMenuClick}
         items={items}
         className="toc-menu"
       />
@@ -149,6 +164,7 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ className }) => {
           selectedKeys={[activeSection]}
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
+          onClick={handleMenuClick}
           items={items}
           className="toc-menu"
         />

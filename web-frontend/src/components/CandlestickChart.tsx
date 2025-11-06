@@ -55,9 +55,9 @@ interface CandlestickChartProps {
   externalEventsLoading?: boolean;
 }
 
-// 默认加载5年数据，初始显示最近1年
-const DEFAULT_DATA_DAYS = 1825; // 5年
-const INITIAL_DISPLAY_MONTHS = 12; // 初始显示最近1年
+// 默认加载1年数据，初始显示最近3个月
+const DEFAULT_DATA_DAYS = 365; // 1年
+const INITIAL_DISPLAY_MONTHS = 3; // 初始显示最近3个月
 
 // 生成模拟数据用于离线测试
 const generateMockData = (days: number = 90): CandlestickDataPoint[] => {

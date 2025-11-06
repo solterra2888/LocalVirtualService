@@ -54,8 +54,28 @@ const RelativeLineChart: React.FC<RelativeLineChartProps> = ({
     );
   }
 
+  // 过滤数据，只显示最近3个月
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const filteredData = data.filter(point => {
+    const pointDate = new Date(point.date);
+    return pointDate >= threeMonthsAgo;
+  });
+
+  if (filteredData.length === 0) {
+    return (
+      <Card>
+        {showTitle && <Text strong style={{ fontSize: '14px' }}>{title}</Text>}
+        <Empty
+          description="No data available for the last 3 months"
+          style={{ padding: '40px 0' }}
+        />
+      </Card>
+    );
+  }
+
   // 提取所有资产名称（除了date字段）
-  const assetNames = Object.keys(data[0]).filter(key => key !== 'date');
+  const assetNames = Object.keys(filteredData[0]).filter(key => key !== 'date');
 
   // 自定义Tooltip
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -148,7 +168,7 @@ const RelativeLineChart: React.FC<RelativeLineChartProps> = ({
     let minValue = Infinity;
     let maxValue = -Infinity;
 
-    data.forEach(point => {
+    filteredData.forEach(point => {
       assetNames.forEach(assetName => {
         const value = point[assetName];
         if (typeof value === 'number' && !isNaN(value)) {
@@ -184,7 +204,7 @@ const RelativeLineChart: React.FC<RelativeLineChartProps> = ({
       )}
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
-          data={data}
+          data={filteredData}
           margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />

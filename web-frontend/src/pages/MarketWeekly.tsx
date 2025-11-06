@@ -19,16 +19,34 @@ const MarketWeekly: React.FC = () => {
   const [reportData, setReportData] = useState<MarketWeeklyReport | null>(null);
 
   // 加载报告数据
-  const loadReport = async () => {
+  const loadReport = async (useCache: boolean = true) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await marketWeeklyAPI.getReport('latest');
-      setReportData(data);
+      
+      // 先尝试从缓存加载（如果启用缓存）
+      if (useCache) {
+        // 快速显示缓存数据
+        const cachedData = await marketWeeklyAPI.getReport('latest', true);
+        setReportData(cachedData);
+        setLoading(false); // 先显示缓存数据
+        
+        // 后台刷新（不阻塞UI）
+        try {
+          const freshData = await marketWeeklyAPI.getReport('latest', false);
+          setReportData(freshData);
+        } catch (refreshError) {
+          console.warn('Background refresh failed, using cached data:', refreshError);
+        }
+      } else {
+        // 强制刷新，不使用缓存
+        const data = await marketWeeklyAPI.getReport('latest', false);
+        setReportData(data);
+        setLoading(false);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load Market Weekly report');
       console.error('Error loading report:', err);
-    } finally {
       setLoading(false);
     }
   };
@@ -37,9 +55,17 @@ const MarketWeekly: React.FC = () => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
+      
+      // 清除缓存
+      marketWeeklyAPI.clearCache('latest');
+      
+      // 清除后端缓存
       await marketWeeklyAPI.refreshReport();
+      
+      // 重新加载（不使用缓存）
+      await loadReport(false);
+      
       message.success('Report refreshed successfully');
-      await loadReport();
     } catch (err: any) {
       message.error('Failed to refresh report');
       console.error('Error refreshing report:', err);
