@@ -62,7 +62,7 @@ class SchedulerService:
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
             'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
-            'futu_themes': self._execute_futu_themes_task,  # 富途投资主题数据获取任务
+            # 'futu_themes': 已删除 - 移除 futu 爬虫相关功能
             'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
             'market_data': self._execute_market_data_task,  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
             'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
@@ -1935,148 +1935,8 @@ class SchedulerService:
                 'data': None
             }
     
-    async def _execute_futu_themes_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行富途投资主题数据获取任务（通过Celery异步执行）
-        
-        注意：此方法会等待Celery任务完成（可能需要30-60分钟），以便记录准确的执行结果
-        
-        Args:
-            params: 任务参数
-                - markets: 市场列表，如 ['HK', 'US']（可选，默认爬取所有市场）
-                - max_pages: 每个市场最大爬取页数（可选，默认爬取所有页面）
-                - scrape_stocks: 是否爬取股票列表（默认: True）
-                - wait_for_completion: 是否等待任务完成（默认: True）
-                - timeout: 任务超时时间（秒，默认: 7200 = 2小时）
-        
-        Returns:
-            Dict包含任务执行结果
-        """
-        import asyncio
-        from celery.result import AsyncResult
-        
-        try:
-            logger.info("提交富途投资主题数据获取任务到Celery", params=params)
-            
-            # 导入Celery任务
-            from backend.tasks.theme_tasks import fetch_futu_themes_task
-            
-            # 获取参数
-            markets = params.get('markets')  # 可以是 ['HK', 'US'] 或 None
-            max_pages = params.get('max_pages')  # 每个市场最大爬取页数
-            scrape_stocks = params.get('scrape_stocks', True)  # 是否爬取股票列表
-            wait_for_completion = params.get('wait_for_completion', True)  # 是否等待完成
-            timeout = params.get('timeout', 7200)  # 默认2小时超时
-            
-            # 提交Celery任务
-            task = fetch_futu_themes_task.apply_async(
-                kwargs={
-                    'markets': markets,
-                    'max_pages': max_pages,
-                    'scrape_stocks': scrape_stocks
-                }
-            )
-            
-            logger.info(f"富途投资主题数据获取任务已提交到Celery: task_id={task.id}")
-            
-            # 如果不等待完成，立即返回
-            if not wait_for_completion:
-                return {
-                    'success': True,
-                    'message': f"富途投资主题数据获取任务已提交到Celery队列（任务ID: {task.id}）",
-                    'data': {
-                        'task_id': task.id,
-                        'status': 'PENDING',
-                        'markets': markets or 'ALL',
-                        'max_pages': max_pages or 'ALL',
-                        'scrape_stocks': scrape_stocks,
-                        'status_url': f'/api/investment-themes/task-status/{task.id}'
-                    }
-                }
-            
-            # 等待任务完成（异步等待，不阻塞事件循环）
-            logger.info(f"等待Celery任务完成: {task.id} (超时: {timeout}秒)")
-            
-            try:
-                # 在线程池中执行阻塞的 task.get()
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,  # 使用默认线程池
-                    lambda: task.get(timeout=timeout, propagate=False)
-                )
-                
-                # 检查任务结果
-                if isinstance(result, Exception):
-                    # 任务执行失败
-                    error_msg = f"富途投资主题数据获取任务执行失败: {str(result)}"
-                    logger.error(error_msg, task_id=task.id)
-                    return {
-                        'success': False,
-                        'message': error_msg,
-                        'data': {
-                            'task_id': task.id,
-                            'error': str(result)
-                        }
-                    }
-                
-                # 任务执行成功
-                if result and result.get('success'):
-                    total_themes = result.get('total_themes', 0)
-                    success_count = result.get('success_count', 0)
-                    total_stocks = result.get('total_stocks', 0)
-                    execution_time = result.get('execution_time', 0)
-                    
-                    success_msg = (
-                        f"富途投资主题数据获取成功: "
-                        f"处理了{total_themes}个主题，成功{success_count}个，"
-                        f"爬取{total_stocks}只股票，耗时{execution_time:.1f}秒"
-                    )
-                    logger.info(success_msg, task_id=task.id)
-                    
-                    return {
-                        'success': True,
-                        'message': success_msg,
-                        'data': {
-                            'task_id': task.id,
-                            'total_themes': total_themes,
-                            'success_count': success_count,
-                            'total_stocks': total_stocks,
-                            'execution_time': execution_time,
-                            'markets': result.get('markets', [])
-                        }
-                    }
-                else:
-                    error_msg = result.get('error', '未知错误') if result else '任务返回结果为空'
-                    logger.error(f"富途投资主题数据获取失败: {error_msg}", task_id=task.id)
-                    return {
-                        'success': False,
-                        'message': f"富途投资主题数据获取失败: {error_msg}",
-                        'data': {'task_id': task.id}
-                    }
-                    
-            except asyncio.TimeoutError:
-                # 任务超时
-                error_msg = f"富途投资主题数据获取任务超时（超过{timeout}秒）"
-                logger.error(error_msg, task_id=task.id)
-                # 尝试撤销任务
-                try:
-                    task.revoke(terminate=True)
-                except:
-                    pass
-                return {
-                    'success': False,
-                    'message': error_msg,
-                    'data': {'task_id': task.id}
-                }
-                
-        except Exception as e:
-            error_msg = f"执行富途投资主题数据获取任务失败: {str(e)}"
-            logger.error(error_msg, exception=str(e))
-            return {
-                'success': False,
-                'message': error_msg,
-                'data': None
-            }
+    # _execute_futu_themes_task 已删除
+    # 原因：移除 futu 爬虫相关功能，改为纯手动主题管理
     
     async def _execute_theme_sync_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """

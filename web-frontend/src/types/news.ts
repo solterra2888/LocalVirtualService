@@ -24,7 +24,6 @@ export type NewsAnalysisResult = SingleTemplateAnalysisResult | MultiTemplateAna
 export interface NewsThemeMatch {
   theme_id: string;
   theme_name: string;
-  market: 'HK' | 'US' | 'CN';
   similarity: number;
   confidence: number;
   rank: number;

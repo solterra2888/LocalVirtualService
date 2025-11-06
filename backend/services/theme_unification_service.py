@@ -245,7 +245,6 @@ class ThemeUnificationService:
             ntm.id,
             ntm.theme_id,
             ntm.theme_name,
-            ntm.market,
             ntm.similarity_score,
             ntm.match_rank,
             ntm.match_method,
@@ -277,7 +276,7 @@ class ThemeUnificationService:
                 'news_theme_matches',
                 float(match['similarity_score']),
                 match['match_rank'],
-                match['market'],
+                None,  # market is no longer available from news_theme_matches
                 metadata
             ))
         

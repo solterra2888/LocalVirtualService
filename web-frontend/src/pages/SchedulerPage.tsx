@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -171,24 +171,7 @@ const SchedulerPage: React.FC = () => {
         }
       ]
     },
-    {
-      id: 'futu_themes',
-      name: 'Futu Investment Themes',
-      type: 'futu_themes',
-      description: 'Get investment themes and related stocks from Futu website (HK and US markets)',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_futu_themes_schedule',
-          name: 'Configure Futu Themes Fetch',
-          description: 'Set up periodic investment themes fetching from Futu (daily at 2 AM HKT)',
-          endpoint: '/scheduler/tasks/futu-themes',
-          params: {},
-          icon: <GlobalOutlined />
-        }
-      ]
-    },
+    // futu_themes 数据源已删除 - 改为纯手动主题管理
     {
       id: 'market_data',
       name: 'Market Data (Indices, Forex, Commodities, Bonds, Sectors)',
@@ -424,7 +407,6 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
-          (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
           (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -642,7 +624,6 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
-          (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
           (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -757,7 +738,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'futu_themes' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1019,7 +1000,6 @@ const SchedulerPage: React.FC = () => {
                                       return (
                                         (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
                                         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
-                                        (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
                                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1257,7 +1237,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar'}
           dataSourceName={selectedDataSource.name}
         />
       )}

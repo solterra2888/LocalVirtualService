@@ -2,12 +2,12 @@
 """
 Scrapers Package
 
-包含各种数据爬虫实现：
-- Futu投资主题爬虫
-- 其他数据源爬虫（待扩展）
+包含各种数据爬虫实现（待扩展）
+
+注意：Futu 投资主题爬虫已删除，改为纯手动主题管理
 """
 
-from .futu_scraper import scrape_all_markets
+# futu_scraper 已删除
 
-__all__ = ['scrape_all_markets']
+__all__ = []
 

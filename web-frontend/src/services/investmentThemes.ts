@@ -48,14 +48,10 @@ export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
  * List all investment themes
  */
 export async function listThemes(
-  market?: string,
   limit: number = 100,
   offset: number = 0
 ): Promise<ThemeListResponse> {
   const params: Record<string, any> = { limit, offset };
-  if (market) {
-    params.market = market;
-  }
 
   return await api.get<ThemeListResponse>('/investment-themes/themes', params);
 }
@@ -65,13 +61,11 @@ export async function listThemes(
  */
 export async function updateThemeEmbedding(
   themeId: string,
-  themeName: string,
-  market: string
+  themeName: string
 ): Promise<{ success: boolean; message: string }> {
   return await api.put('/investment-themes/update-theme', {
     theme_id: themeId,
     theme_name: themeName,
-    market,
   });
 }
 
@@ -79,14 +73,12 @@ export async function updateThemeEmbedding(
  * Batch fill theme descriptions (using LLM generation - returns Celery task)
  */
 export async function fillThemeDescriptions(
-  forceRegenerate: boolean = false,
-  market?: string
+  forceRegenerate: boolean = false
 ): Promise<InitializeThemesResponse> {
   return await api.post<InitializeThemesResponse>(
     '/investment-themes/fill-descriptions',
     {
       force_regenerate: forceRegenerate,
-      market,
     }
   );
 }
@@ -139,11 +131,9 @@ export async function pollTaskUntilComplete(
  */
 export async function updateThemeEnabledStatus(
   themeId: string,
-  market: string,
   isEnabled: boolean
 ): Promise<{ success: boolean; message: string }> {
   return await api.patch(`/investment-themes/${themeId}/enabled`, {
-    market,
     is_enabled: isEnabled,
   });
 }
@@ -153,7 +143,6 @@ export async function updateThemeEnabledStatus(
  */
 export async function batchUpdateThemeEnabledStatus(
   themeIds: string[],
-  markets: string[],
   isEnabled: boolean
 ): Promise<{
   success: boolean;
@@ -162,14 +151,12 @@ export async function batchUpdateThemeEnabledStatus(
   failed_count: number;
   results: Array<{
     theme_id: string;
-    market: string;
     success: boolean;
     message: string;
   }>;
 }> {
   return await api.post('/investment-themes/batch-enabled', {
     theme_ids: themeIds,
-    markets,
     is_enabled: isEnabled,
   });
 }
@@ -179,7 +166,6 @@ export async function batchUpdateThemeEnabledStatus(
  */
 export async function updateThemeDescription(
   themeId: string,
-  market: string,
   description: string,
   version?: number
 ): Promise<{
@@ -190,34 +176,52 @@ export async function updateThemeDescription(
   error?: string;
 }> {
   return await api.patch(`/investment-themes/${themeId}/description`, {
-    market,
     description,
     version,
   });
 }
 
 /**
- * Delete theme (Admin only, soft delete)
+ * Delete theme (Admin only, hard delete)
  */
 export async function deleteTheme(
-  themeId: string,
-  market: string
+  themeId: string
 ): Promise<{
   success: boolean;
   message: string;
   deleted_matches_count: number;
   deleted_embeddings: boolean;
 }> {
-  // Pass market as query parameter (FastAPI doesn't support body in DELETE requests)
-  return await api.delete(`/investment-themes/${themeId}?market=${encodeURIComponent(market)}`);
+  return await api.delete(`/investment-themes/${themeId}`);
+}
+
+/**
+ * Batch delete themes (Admin only, hard delete)
+ */
+export async function batchDeleteThemes(
+  themeIds: string[]
+): Promise<{
+  success: boolean;
+  message: string;
+  deleted_count: number;
+  failed_count: number;
+  total_matches_deleted: number;
+  details: Array<{
+    theme_id: string;
+    theme_name?: string;
+    success: boolean;
+    matches_deleted?: number;
+    message: string;
+  }>;
+}> {
+  return await api.post('/investment-themes/batch-delete', { theme_ids: themeIds });
 }
 
 /**
  * Generate theme description using LLM (Admin only)
  */
 export async function generateThemeDescription(
-  themeName: string,
-  market: string
+  themeName: string
 ): Promise<{
   success: boolean;
   description: string;
@@ -226,7 +230,6 @@ export async function generateThemeDescription(
 }> {
   return await api.post('/investment-themes/generate-description', {
     theme_name: themeName,
-    market,
   });
 }
 
@@ -235,7 +238,6 @@ export async function generateThemeDescription(
  */
 export async function createTheme(
   themeName: string,
-  market: string,
   description: string,
   themeId?: string
 ): Promise<{
@@ -248,7 +250,6 @@ export async function createTheme(
 }> {
   return await api.post('/investment-themes/create', {
     theme_name: themeName,
-    market,
     description,
     theme_id: themeId,
   });

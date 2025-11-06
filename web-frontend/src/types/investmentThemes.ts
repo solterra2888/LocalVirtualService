@@ -8,7 +8,6 @@
 export interface InvestmentTheme {
   theme_id: string;
   theme_name: string;
-  market: 'HK' | 'US' | 'CN';
   description_preview?: string;  // Theme description preview (LLM-generated or manually written)
   description_source?: 'llm_generated' | 'manual' | 'scraped' | 'simple_template';  // Description source
   embedding_model?: string;
@@ -20,11 +19,6 @@ export interface InvestmentTheme {
   last_manual_edit_at?: string;  // Last manual edit time
   last_manual_edit_by?: string;  // Last editor username
   is_enabled_for_matching?: boolean;  // Whether enabled for news matching
-  is_deleted?: boolean;  // Whether soft deleted
-  
-  // Additional info from futu_investment_themes
-  stock_count?: number;  // Number of stocks in this theme
-  change_percent?: string;  // Theme change percentage
   
   // Vector embedding status
   has_embedding?: boolean;  // Whether this theme has been vectorized
@@ -36,7 +30,6 @@ export interface InvestmentTheme {
 export interface ThemeMatch {
   theme_id: string;
   theme_name: string;
-  market: 'HK' | 'US' | 'CN';
   similarity: number;
   confidence: number;
   rank: number;
@@ -50,7 +43,6 @@ export interface ThemeMatch {
 export interface ThemeMatchRequest {
   news_text: string;
   news_id?: number;
-  market?: 'HK' | 'US' | 'CN';
   top_k?: number;
   min_similarity?: number;
   save_to_db?: boolean;
@@ -119,23 +111,6 @@ export interface ThemeListResponse {
   offset: number;
 }
 
-/**
- * Market Color Mapping
- */
-export const MARKET_COLORS: Record<string, string> = {
-  HK: 'green',
-  US: 'blue',
-  CN: 'red',
-};
-
-/**
- * Market Label Mapping
- */
-export const MARKET_LABELS: Record<string, string> = {
-  HK: 'Hong Kong',
-  US: 'United States',
-  CN: 'China',
-};
 
 /**
  * Similarity Level

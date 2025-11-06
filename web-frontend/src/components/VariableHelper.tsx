@@ -65,12 +65,8 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
         'max_length', 'language', 'format', 'temperature', 'model', 'provider'
       ],
       'theme_analysis': [
-        // futu_investment_themes fields
-        'theme_id', 'theme_name', 'market', 'theme_url',
-        'change_percent', 'gainers', 'losers', 'unchanged',
-        'top_stock', 'top_stock_change', 'stock_count',
-        // Aggregated from futu_theme_stocks
-        'stock_symbols', 'company_names',
+        // investment_theme_embeddings fields (simplified after removing futu dependencies)
+        'theme_id', 'theme_name',
         // Template parameters
         'language', 'format', 'temperature', 'model', 'provider'
       ]
@@ -136,22 +132,9 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
       language: ['Chinese', 'English', 'zh-CN'],
       format: ['JSON', 'Markdown', 'Plain Text'],
       
-      // Investment theme variables (投资主题变量 - from futu_investment_themes)
-      theme_id: ['BK1288', 'BK0123', 'EV_US_001'],
-      theme_name: ['Electric Vehicles (电动汽车)', 'Artificial Intelligence', '5G Technology'],
-      market: ['HK', 'US', 'CN'],
-      theme_url: ['https://www.futunn.com/...', 'Theme URL', 'Link to theme page'],
-      change_percent: ['+8.61%', '-2.34%', '+15.28%'],
-      gainers: ['12', '8', '20'],
-      losers: ['5', '3', '10'],
-      unchanged: ['3', '2', '5'],
-      top_stock: ['Tesla Inc.', 'NVIDIA Corp.', 'Apple Inc.'],
-      top_stock_change: ['+12.5%', '-3.2%', '+8.9%'],
-      stock_count: ['25', '50', '100'],
-      
-      // Aggregated from futu_theme_stocks (通过JOIN futu_theme_stocks获取)
-      stock_symbols: ['TSLA, NIO, RIVN', 'NVDA, MSFT, GOOGL', 'AAPL, MSFT'],
-      company_names: ['Tesla, NIO, Rivian', 'NVIDIA, Microsoft, Google', 'Apple, Microsoft'],
+      // Investment theme variables (投资主题变量 - from investment_theme_embeddings)
+      theme_id: ['CUSTOM_1730901234567', 'CUSTOM_1730901234568', 'CUSTOM_1730901234569'],
+      theme_name: ['Electric Vehicles', 'Artificial Intelligence', '5G Technology'],
       
       // LLM configuration variables (LLM配置变量)
       temperature: ['0.7', '0.3', '1.0'],
@@ -214,10 +197,7 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
     ];
 
     const themeVars = [
-      { name: 'theme_name', description: 'Theme Name - from futu_investment_themes' },
-      { name: 'market', description: 'Market (HK/US/CN)' },
-      { name: 'stock_symbols', description: 'Stock Symbols - aggregated' },
-      { name: 'company_names', description: 'Company Names - aggregated' }
+      { name: 'theme_name', description: 'Theme Name - from investment_theme_embeddings' }
     ];
 
     // 根据当前分类过滤变量

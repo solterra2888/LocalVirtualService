@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|futu_themes|market_data|earnings_calendar|ipo_calendar)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -137,15 +137,7 @@ class CreateEODHDEODStockPricesTaskRequest(BaseModel):
     days_back: int = Field(default=60, description="回溯天数", ge=1, le=365)
 
 
-class CreateFutuThemesTaskRequest(BaseModel):
-    """创建Futu投资主题定时任务请求模型"""
-    name: str = Field(default="Futu Themes Auto Fetch", description="任务名称")
-    cron_expression: str = Field(default="0 2 * * *", description="Cron表达式（默认每天凌晨2点）")
-    timezone: str = Field(default="Asia/Hong_Kong", description="时区")
-    enabled: bool = Field(default=True, description="是否启用")
-    markets: Optional[List[str]] = Field(default=None, description="市场列表，如['HK', 'US']，不指定则爬取所有市场")
-    max_pages: Optional[int] = Field(default=None, description="每个市场最大爬取页数（最多100页），不指定则爬取所有页面", ge=1, le=100)
-    scrape_stocks: bool = Field(default=True, description="是否爬取股票列表")
+# CreateFutuThemesTaskRequest 已删除 - 不再支持 futu 主题爬虫
 
 
 class CreateMarketDataTaskRequest(BaseModel):
@@ -916,128 +908,10 @@ async def create_default_eodhd_eod_stock_prices_task(
 
 # ============ Futu投资主题定时任务专用API ============
 
-@router.post("/tasks/futu-themes", summary="创建Futu投资主题定时任务")
-async def create_futu_themes_task(
-    request: CreateFutuThemesTaskRequest,
-    current_user=Depends(get_current_user)
-):
-    """
-    创建Futu投资主题数据获取定时任务
-    
-    默认配置：
-    - 香港时间每天凌晨2点执行 (0 2 * * *)
-    - 爬取港股和美股市场的投资主题
-    - 包含每个主题下的股票列表
-    """
-    try:
-        logger.info("创建Futu投资主题定时任务请求", 
-                   user=current_user.username,
-                   task_name=request.name,
-                   cron_expression=request.cron_expression)
-        
-        scheduler_service = await get_scheduler_service()
-        
-        # Futu主题任务参数
-        task_params = {
-            'markets': request.markets,
-            'max_pages': request.max_pages,
-            'scrape_stocks': request.scrape_stocks
-        }
-        
-        result = await scheduler_service.create_cron_task(
-            task_name=request.name,
-            task_type="futu_themes",
-            cron_expression=request.cron_expression,
-            timezone=request.timezone,
-            enabled=request.enabled,
-            task_params=task_params,
-            created_by=current_user.username
-        )
-        
-        if result['success']:
-            logger.info("Futu投资主题定时任务创建成功", 
-                       user=current_user.username,
-                       task_id=result['task_id'])
-            return {
-                "success": True,
-                "message": result['message'],
-                "data": {
-                    "task_id": result['task_id'],
-                    "task_config": result['task_config']
-                }
-            }
-        else:
-            logger.error("Futu投资主题定时任务创建失败", 
-                        failure_reason=result.get('message', '未知错误'),
-                        user=current_user.username)
-            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("创建Futu投资主题定时任务失败", 
-                    exception=str(e), 
-                    user=current_user.username)
-        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
-
-
-@router.post("/tasks/futu-themes/default", summary="创建默认Futu投资主题定时任务")
-async def create_default_futu_themes_task(
-    current_user=Depends(get_current_user)
-):
-    """
-    创建默认的Futu投资主题定时任务
-    
-    默认配置：
-    - 香港时间每天凌晨2点执行 (0 2 * * *)
-    - 爬取所有市场（港股和美股）
-    - 爬取所有页面
-    - 包含股票列表
-    """
-    try:
-        logger.info("创建默认Futu投资主题定时任务请求", user=current_user.username)
-        
-        scheduler_service = await get_scheduler_service()
-        
-        result = await scheduler_service.create_cron_task(
-            task_name="Futu Themes Auto Fetch",
-            task_type="futu_themes",
-            cron_expression="0 2 * * *",  # 每天凌晨2点
-            timezone="Asia/Hong_Kong",
-            enabled=True,
-            task_params={
-                'markets': None,  # 爬取所有市场
-                'max_pages': None,  # 爬取所有页面
-                'scrape_stocks': True  # 包含股票列表
-            },
-            created_by=current_user.username
-        )
-        
-        if result['success']:
-            logger.info("默认Futu投资主题定时任务创建成功", 
-                       user=current_user.username,
-                       task_id=result['task_id'])
-            return {
-                "success": True,
-                "message": result['message'],
-                "data": {
-                    "task_id": result['task_id'],
-                    "task_config": result['task_config']
-                }
-            }
-        else:
-            logger.error("默认Futu投资主题定时任务创建失败", 
-                        failure_reason=result.get('message', '未知错误'),
-                        user=current_user.username)
-            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("创建默认Futu投资主题定时任务失败", 
-                    exception=str(e), 
-                    user=current_user.username)
-        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+# @router.post("/tasks/futu-themes") - 已删除
+# @router.post("/tasks/futu-themes/default") - 已删除
+# 原因：移除 futu 爬虫相关功能，改为纯手动主题管理
+# 用户应通过 /api/investment-themes/create endpoint 手动创建主题
 
 
 # ============ 市场数据定时任务专用API ============

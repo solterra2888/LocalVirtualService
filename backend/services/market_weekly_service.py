@@ -548,32 +548,49 @@ class MarketWeeklyService:
     
     def _get_economic_calendar(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """获取经济日历数据"""
-        query = """
-        SELECT 
-            date,
-            event,
-            country,
-            actual,
-            forecast,
-            previous,
-            importance
-        FROM economic_events
-        WHERE date >= %s AND date <= %s
-          AND (importance = 'high' OR importance = 'medium')
-          AND country = 'US'
-        ORDER BY date, importance DESC
-        LIMIT 50;
-        """
-        
+        # 注意：economic_events表可能不存在或列名不同，这里返回空列表避免错误
+        # TODO: 如果需要经济日历功能，需要先创建economic_events表
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
+            
+            # 先检查表是否存在
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'economic_events'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+            
+            if not table_exists:
+                logger.warning("economic_events table does not exist, returning empty list")
+                cursor.close()
+                conn.close()
+                return []
+            
+            # 表存在，尝试查询（不使用importance列）
+            query = """
+            SELECT 
+                date,
+                event,
+                country,
+                actual,
+                forecast,
+                previous
+            FROM economic_events
+            WHERE date >= %s AND date <= %s
+              AND country = 'US'
+            ORDER BY date DESC
+            LIMIT 50;
+            """
+            
             cursor.execute(query, (start_date, end_date))
             
             results = []
             for row in cursor.fetchall():
                 results.append({
-                    'date': row[0].strftime('%Y-%m-%d'),
+                    'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
                     'time': row[0].strftime('%H:%M') if hasattr(row[0], 'hour') else '',
                     'event': row[1] or '',
                     'country': row[2] or 'US',
@@ -594,15 +611,17 @@ class MarketWeeklyService:
     
     def _get_earnings_calendar(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """获取财报日历数据"""
+        # 使用company_earnings_history表代替earnings_calendar表
         query = """
         SELECT 
-            date,
-            code,
-            name,
-            before_after_market
-        FROM earnings_calendar
-        WHERE date >= %s AND date <= %s
-        ORDER BY date, code
+            ceh.reportdate as date,
+            c.code,
+            c.name,
+            ceh.beforeaftermarket
+        FROM company_earnings_history ceh
+        INNER JOIN companies c ON ceh.company_id = c.id
+        WHERE ceh.reportdate >= %s AND ceh.reportdate <= %s
+        ORDER BY ceh.reportdate, c.code
         LIMIT 100;
         """
         
@@ -628,7 +647,7 @@ class MarketWeeklyService:
                 ticker = row[1].replace('.US', '') if row[1] else ''
                 
                 results.append({
-                    'date': row[0].strftime('%Y-%m-%d'),
+                    'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
                     'time': time_str,
                     'ticker': ticker,
                     'company': row[2] or ''
@@ -670,29 +689,43 @@ class MarketWeeklyService:
             cursor.execute(query, (start_date, end_date))
             
             results = []
-            for row in cursor.fetchall():
-                # 格式化价格范围
-                price_from = row[5]
-                price_to = row[6]
-                if price_from and price_to:
-                    price_range = f"${price_from} - ${price_to}"
-                elif price_from:
-                    price_range = f"${price_from}"
-                else:
-                    price_range = '-'
-                
-                # 格式化股数
-                shares = str(row[7]) if row[7] else '-'
-                
-                results.append({
-                    'date': row[0].strftime('%Y-%m-%d'),
-                    'ticker': row[1] or '',
-                    'company': row[2] or '',
-                    'exchange': row[3] or '',
-                    'deal_type': row[4] or '-',
-                    'price_range': price_range,
-                    'shares': shares
-                })
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                try:
+                    # 安全地访问每个索引，避免元组索引错误
+                    start_date_val = row[0] if len(row) > 0 else None
+                    code_val = row[1] if len(row) > 1 else ''
+                    name_val = row[2] if len(row) > 2 else ''
+                    exchange_val = row[3] if len(row) > 3 else ''
+                    deal_type_val = row[4] if len(row) > 4 else '-'
+                    price_from = row[5] if len(row) > 5 else None
+                    price_to = row[6] if len(row) > 6 else None
+                    shares_val = row[7] if len(row) > 7 else None
+                    
+                    # 格式化价格范围
+                    if price_from and price_to:
+                        price_range = f"${price_from} - ${price_to}"
+                    elif price_from:
+                        price_range = f"${price_from}"
+                    else:
+                        price_range = '-'
+                    
+                    # 格式化股数
+                    shares = str(shares_val) if shares_val else '-'
+                    
+                    results.append({
+                        'date': start_date_val.strftime('%Y-%m-%d') if start_date_val else '',
+                        'ticker': code_val or '',
+                        'company': name_val or '',
+                        'exchange': exchange_val or '',
+                        'deal_type': deal_type_val or '-',
+                        'price_range': price_range,
+                        'shares': shares
+                    })
+                except (IndexError, AttributeError) as e:
+                    logger.warning(f"Error processing IPO row: {str(e)}, row data: {row}")
+                    continue
             
             cursor.close()
             conn.close()
@@ -716,15 +749,16 @@ class MarketWeeklyService:
         """
         logger.info(f"Fetching watchlist for user {user_id}")
         
+        # 使用target_tracking_config表代替watchlist表
         query = """
         SELECT 
-            w.symbol,
+            ttc.symbol,
             c.name as company_name,
-            c.code as primary_ticker
-        FROM watchlist w
-        LEFT JOIN companies c ON w.symbol = c.code
-        WHERE w.user_id = %s
-        ORDER BY w.symbol;
+            COALESCE(ttc.primaryticker, ttc.symbol) as primary_ticker
+        FROM target_tracking_config ttc
+        LEFT JOIN companies c ON ttc.symbol = c.code
+        WHERE ttc.user_id = %s AND ttc.enabled = true
+        ORDER BY ttc.symbol;
         """
         
         try:

@@ -54,13 +54,12 @@ import {
   updateThemeEnabledStatus,
   updateThemeDescription,
   deleteTheme,
+  batchDeleteThemes,
   generateThemeDescription,
   createTheme
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
-  MARKET_COLORS,
-  MARKET_LABELS,
   ThemeMatch,
   getDescriptionSourceLabel
 } from '../types/investmentThemes';
@@ -89,7 +88,6 @@ interface PageState {
   createModalVisible: boolean;
   createStep: number;
   newThemeName: string;
-  newThemeMarket: string;
   newThemeId: string;
   newThemeDescription: string;
   generatingDescription: boolean;
@@ -120,7 +118,6 @@ const InvestmentThemesPage: React.FC = () => {
     createModalVisible: false,
     createStep: 1,
     newThemeName: '',
-    newThemeMarket: 'US',
     newThemeId: '',
     newThemeDescription: '',
     generatingDescription: false,
@@ -130,14 +127,14 @@ const InvestmentThemesPage: React.FC = () => {
 
 
   // Load theme list
-  const loadThemes = async (page?: number, market?: string) => {
+  const loadThemes = async (page?: number, pageSize?: number) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       const currentPage = page || state.currentPage;
+      const currentPageSize = pageSize || state.pageSize;
       const response = await listThemes(
-        market,
-        state.pageSize,
-        (currentPage - 1) * state.pageSize
+        currentPageSize,
+        (currentPage - 1) * currentPageSize
       );
       
       setState(prev => ({
@@ -145,6 +142,7 @@ const InvestmentThemesPage: React.FC = () => {
         themes: response.themes,
         total: response.total,
         currentPage: currentPage,
+        pageSize: currentPageSize,
         loading: false
       }));
     } catch (error) {
@@ -601,10 +599,6 @@ const InvestmentThemesPage: React.FC = () => {
       content: (
         <div>
           <Paragraph>
-            <Text strong>Market:</Text>
-            <Tag color={MARKET_COLORS[theme.market]}>{MARKET_LABELS[theme.market]}</Tag>
-          </Paragraph>
-          <Paragraph>
             <Text strong>Description Source:</Text>
             <Tag color={sourceLabel.color}>{sourceLabel.text}</Tag>
           </Paragraph>
@@ -633,7 +627,7 @@ const InvestmentThemesPage: React.FC = () => {
     const newStatus = !theme.is_enabled_for_matching;
     
     try {
-      await updateThemeEnabledStatus(theme.theme_id, theme.market, newStatus);
+      await updateThemeEnabledStatus(theme.theme_id, newStatus);
       message.success(`Theme ${newStatus ? 'enabled' : 'disabled'}`);
       loadThemes(state.currentPage);
     } catch (error) {
@@ -670,7 +664,6 @@ const InvestmentThemesPage: React.FC = () => {
     try {
       const result = await updateThemeDescription(
         state.editingTheme.theme_id,
-        state.editingTheme.market,
         state.editDescription,
         state.editingTheme.version
       );
@@ -715,8 +708,9 @@ const InvestmentThemesPage: React.FC = () => {
       content: (
         <div>
           <Alert
-            type="warning"
-            message="This operation cannot be undone!"
+            type="error"
+            message="⚠️ Permanent Deletion - This operation CANNOT be undone!"
+            description="The theme will be permanently deleted from the database."
             style={{ marginBottom: 16 }}
           />
           <Paragraph>
@@ -725,14 +719,8 @@ const InvestmentThemesPage: React.FC = () => {
           <Paragraph>
             <Text strong>Theme Name:</Text> {theme.theme_name}
           </Paragraph>
-          <Paragraph>
-            <Text strong>Market:</Text> <Tag color={MARKET_COLORS[theme.market]}>{MARKET_LABELS[theme.market]}</Tag>
-          </Paragraph>
-          <Paragraph>
-            <Text strong>Related Stocks:</Text> {theme.stock_count || 0}
-          </Paragraph>
           <Paragraph type="danger">
-            This will delete:
+            This will permanently delete:
             <ul>
               <li>Theme vector data (investment_theme_embeddings)</li>
               <li>All news matching records (news_theme_matches)</li>
@@ -745,7 +733,7 @@ const InvestmentThemesPage: React.FC = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const result = await deleteTheme(theme.theme_id, theme.market);
+          const result = await deleteTheme(theme.theme_id);
           
           if (result.success) {
             message.success(result.message + ` (deleted ${result.deleted_matches_count} matching records)`);
@@ -762,6 +750,116 @@ const InvestmentThemesPage: React.FC = () => {
     });
   };
 
+  // Handle batch delete themes (Admin only)
+  const handleBatchDelete = () => {
+    if (!isAdmin) {
+      message.error('Only administrators can perform this operation');
+      return;
+    }
+
+    if (state.selectedRowKeys.length === 0) {
+      message.warning('Please select themes to delete');
+      return;
+    }
+
+    // Find selected themes details
+    const selectedThemes = state.themes.filter(theme => 
+      state.selectedRowKeys.includes(theme.theme_id)
+    );
+
+    Modal.confirm({
+      title: `Confirm Batch Delete ${selectedThemes.length} Themes?`,
+      icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+      width: 700,
+      content: (
+        <div>
+          <Alert
+            type="error"
+            message="⚠️ Permanent Batch Deletion - This operation CANNOT be undone!"
+            description="All selected themes will be permanently deleted from the database."
+            style={{ marginBottom: 16 }}
+          />
+          <Paragraph>
+            <Text strong>Selected Themes: {selectedThemes.length}</Text>
+          </Paragraph>
+          <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: 16 }}>
+            {selectedThemes.map(theme => (
+              <div key={theme.theme_id} style={{ padding: '8px', background: '#f5f5f5', marginBottom: '4px', borderRadius: '4px' }}>
+                <Text strong>{theme.theme_name}</Text>
+                {' '}
+                <Text type="secondary">({theme.theme_id})</Text>
+              </div>
+            ))}
+          </div>
+          <Paragraph type="danger">
+            This will permanently delete:
+            <ul>
+              <li>All selected theme vector data (investment_theme_embeddings)</li>
+              <li>All related news matching records (news_theme_matches)</li>
+            </ul>
+          </Paragraph>
+        </div>
+      ),
+      okText: 'Confirm Batch Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const themeIds = selectedThemes.map(theme => theme.theme_id);
+
+          const result = await batchDeleteThemes(themeIds);
+          
+          if (result.success || result.deleted_count > 0) {
+            if (result.failed_count > 0) {
+              Modal.info({
+                title: 'Batch Delete Completed with Issues',
+                width: 700,
+                content: (
+                  <div>
+                    <Paragraph>
+                      <Text type="success" strong>Successfully deleted: {result.deleted_count} themes</Text>
+                    </Paragraph>
+                    <Paragraph>
+                      <Text type="danger" strong>Failed: {result.failed_count} themes</Text>
+                    </Paragraph>
+                    <Paragraph>
+                      <Text>Total matching records deleted: {result.total_matches_deleted}</Text>
+                    </Paragraph>
+                    {result.details && result.details.filter(d => !d.success).length > 0 && (
+                      <div>
+                        <Divider />
+                        <Text strong>Failed Items:</Text>
+                        <ul>
+                          {result.details.filter(d => !d.success).map((detail, idx) => (
+                            <li key={idx}>
+                              {detail.theme_name || detail.theme_id}: {detail.message}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              });
+            } else {
+              message.success(`Successfully deleted ${result.deleted_count} themes (${result.total_matches_deleted} matching records)`);
+            }
+            
+            // Clear selection and reload
+            setState(prev => ({ ...prev, selectedRowKeys: [] }));
+            loadThemes(state.currentPage);
+          } else {
+            message.error(result.message);
+          }
+        } catch (error: any) {
+          const errorMsg = getErrorMessage(error);
+          console.error('Batch delete error:', error);
+          message.error(`Batch delete failed: ${errorMsg}`);
+        }
+      }
+    });
+  };
+
   // Handle create theme - Step 1: Generate description
   const handleGenerateDescription = async () => {
     if (!state.newThemeName.trim()) {
@@ -772,7 +870,7 @@ const InvestmentThemesPage: React.FC = () => {
     setState(prev => ({ ...prev, generatingDescription: true }));
 
     try {
-      const result = await generateThemeDescription(state.newThemeName, state.newThemeMarket);
+      const result = await generateThemeDescription(state.newThemeName);
       
       if (result.success) {
         setState(prev => ({
@@ -804,7 +902,6 @@ const InvestmentThemesPage: React.FC = () => {
     try {
       const result = await createTheme(
         state.newThemeName,
-        state.newThemeMarket,
         state.newThemeDescription,
         state.newThemeId || undefined
       );
@@ -822,7 +919,6 @@ const InvestmentThemesPage: React.FC = () => {
           createModalVisible: false,
           createStep: 1,
           newThemeName: '',
-          newThemeMarket: 'US',
           newThemeId: '',
           newThemeDescription: '',
           creatingTheme: false
@@ -853,7 +949,6 @@ const InvestmentThemesPage: React.FC = () => {
           createModalVisible: false,
           createStep: 1,
           newThemeName: '',
-          newThemeMarket: 'US',
           newThemeId: '',
           newThemeDescription: '',
           generatingDescription: false,
@@ -872,14 +967,6 @@ const InvestmentThemesPage: React.FC = () => {
       width: 200,
       fixed: 'left',
       render: (name: string) => <Text strong>{name}</Text>
-    },
-    {
-      title: 'Market',
-      dataIndex: 'market',
-      key: 'market',
-      width: 100,
-      fixed: 'left',
-      render: (market: string) => <Tag color={MARKET_COLORS[market]}>{market}</Tag>
     },
     {
       title: 'Description Preview',
@@ -936,13 +1023,6 @@ const InvestmentThemesPage: React.FC = () => {
           />
         </Tooltip>
       )
-    },
-    {
-      title: 'Stocks',
-      dataIndex: 'stock_count',
-      key: 'stock_count',
-      width: 80,
-      render: (count: number) => <Text>{count || 0}</Text>
     },
     {
       title: 'Updated',
@@ -1019,15 +1099,28 @@ const InvestmentThemesPage: React.FC = () => {
          <div style={{ marginBottom: '16px' }}>
            <Space size="middle" wrap>
             {isAdmin && (
-              <Tooltip title="Create a new custom investment theme with LLM-generated description">
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
-                >
-                  Create New Theme
-                </Button>
-              </Tooltip>
+              <>
+                <Tooltip title="Create a new custom investment theme with LLM-generated description">
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
+                  >
+                    Create New Theme
+                  </Button>
+                </Tooltip>
+                
+                <Tooltip title="Delete selected themes (soft delete)">
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={handleBatchDelete}
+                    disabled={state.selectedRowKeys.length === 0}
+                  >
+                    Batch Delete {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+                  </Button>
+                </Tooltip>
+              </>
             )}
             
             <Tooltip title="Generate descriptions and vectors for new themes, suitable after Futu crawler adds new themes">
@@ -1122,6 +1215,17 @@ const InvestmentThemesPage: React.FC = () => {
           dataSource={state.themes}
           rowKey="theme_id"
           loading={state.loading}
+          rowSelection={isAdmin ? {
+            selectedRowKeys: state.selectedRowKeys,
+            onChange: (selectedRowKeys: React.Key[]) => {
+              setState(prev => ({ ...prev, selectedRowKeys }));
+            },
+            selections: [
+              Table.SELECTION_ALL,
+              Table.SELECTION_INVERT,
+              Table.SELECTION_NONE,
+            ],
+          } : undefined}
           pagination={{
             current: state.currentPage,
             pageSize: state.pageSize,
@@ -1130,8 +1234,14 @@ const InvestmentThemesPage: React.FC = () => {
             showQuickJumper: true,
             showTotal: (total) => `Total ${total} themes`,
             onChange: (page, pageSize) => {
-              setState(prev => ({ ...prev, currentPage: page, pageSize: pageSize || 20 }));
-              loadThemes(page);
+              // 清空选中项（改变页面大小或翻页时）
+              setState(prev => ({ 
+                ...prev, 
+                currentPage: page, 
+                pageSize: pageSize || 20,
+                selectedRowKeys: []  // 清空选中项
+              }));
+              loadThemes(page, pageSize || 20);  // 传递新的 pageSize
             }
           }}
           size="small"
@@ -1186,11 +1296,8 @@ const InvestmentThemesPage: React.FC = () => {
                       <Col span={2}>
                         <Text strong style={{ fontSize: '16px' }}>#{result.rank}</Text>
                       </Col>
-                      <Col span={10}>
+                      <Col span={14}>
                         <Text strong>{result.theme_name}</Text>
-                      </Col>
-                      <Col span={4}>
-                        <Tag color={MARKET_COLORS[result.market]}>{result.market}</Tag>
                       </Col>
                       <Col span={8}>
                         <Tooltip title={`Similarity: ${result.similarity.toFixed(4)}`}>
@@ -1248,9 +1355,6 @@ const InvestmentThemesPage: React.FC = () => {
             <Space direction="vertical" style={{ width: '100%' }} size="small">
               <div>
                 <Text strong>Theme ID:</Text> <Text code>{state.editingTheme.theme_id}</Text>
-              </div>
-              <div>
-                <Text strong>Market:</Text> <Tag color={MARKET_COLORS[state.editingTheme.market]}>{state.editingTheme.market}</Tag>
               </div>
               {state.editingTheme.last_manual_edit_by && (
                 <div>
@@ -1315,27 +1419,9 @@ const InvestmentThemesPage: React.FC = () => {
                 />
               </Form.Item>
               
-              <Form.Item label="Market" required>
-                <Select
-                  value={state.newThemeMarket}
-                  onChange={(value) => setState(prev => ({ ...prev, newThemeMarket: value }))}
-                  style={{ width: '100%' }}
-                >
-                  <Select.Option value="HK">
-                    <Tag color={MARKET_COLORS['HK']}>HK</Tag> {MARKET_LABELS['HK']}
-                  </Select.Option>
-                  <Select.Option value="US">
-                    <Tag color={MARKET_COLORS['US']}>US</Tag> {MARKET_LABELS['US']}
-                  </Select.Option>
-                  <Select.Option value="CN">
-                    <Tag color={MARKET_COLORS['CN']}>CN</Tag> {MARKET_LABELS['CN']}
-                  </Select.Option>
-                </Select>
-              </Form.Item>
-              
               <Form.Item 
                 label="Theme ID (Optional)" 
-                help="Leave empty to auto-generate (format: CUSTOM_MARKET_TIMESTAMP)"
+                help="Leave empty to auto-generate (format: CUSTOM_TIMESTAMP)"
               >
                 <Input
                   placeholder="e.g. AI_CHIP_US (optional)"
@@ -1385,9 +1471,6 @@ const InvestmentThemesPage: React.FC = () => {
             <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }} size="small">
               <div>
                 <Text strong>Theme Name:</Text> <Text>{state.newThemeName}</Text>
-              </div>
-              <div>
-                <Text strong>Market:</Text> <Tag color={MARKET_COLORS[state.newThemeMarket]}>{state.newThemeMarket}</Tag>
               </div>
               {state.newThemeId && (
                 <div>

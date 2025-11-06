@@ -202,10 +202,10 @@ def fill_theme_descriptions_task(
             where_clause = f"{where_clause} AND" if where_clause else "WHERE"
             where_clause += " (description IS NULL OR description = '')"
         
-        # Get themes to process
+        # Get themes to process (从 investment_theme_embeddings 读取)
         cursor.execute(f"""
             SELECT id, theme_id, theme_name, market
-            FROM futu_investment_themes
+            FROM investment_theme_embeddings
             {where_clause}
             ORDER BY market, theme_name
         """, params)
@@ -479,142 +479,6 @@ def regenerate_all_theme_embeddings_task(self, market: str = None):
         }
 
 
-@app.task(bind=True, name='fetch_futu_themes', queue='data_fetching')
-def fetch_futu_themes_task(
-    self,
-    markets: list = None,
-    max_pages: int = None,
-    scrape_stocks: bool = True
-):
-    """
-    Celery task: Fetch Futu investment themes data
-    
-    适用场景：
-    - 定期爬取富途投资主题数据（通常需要1小时左右）
-    - 获取港股、美股等市场的投资主题及相关股票
-    - 长时间运行任务，避免阻塞调度器
-    
-    Args:
-        markets: Market list to scrape, e.g., ['HK', 'US'], None for all markets
-        max_pages: Max pages per market, None for all pages
-        scrape_stocks: Whether to scrape stock list for each theme
-        
-    Returns:
-        dict: Scraping statistics
-            - success: bool
-            - total_themes: int - Total themes processed
-            - success_count: int - Successfully saved
-            - failed_count: int - Failed to save
-            - total_stocks: int - Total stocks scraped
-            - execution_time: float - Execution time in seconds
-            - markets: list - Markets processed
-    """
-    task_id = self.request.id
-    
-    try:
-        logger.info(
-            f"Starting Futu themes fetching task {task_id}",
-            markets=markets or "ALL",
-            max_pages=max_pages or "ALL",
-            scrape_stocks=scrape_stocks
-        )
-        
-        # Update initial status
-        update_task_progress(
-            task_id,
-            status="initializing",
-            progress=0,
-            message=f"Initializing Futu themes scraper for markets: {markets or 'ALL'}..."
-        )
-        
-        # Import Futu themes service
-        from backend.services.futu_themes_service import create_futu_themes_service
-        
-        futu_service = create_futu_themes_service()
-        
-        # Update status to processing
-        update_task_progress(
-            task_id,
-            status="processing",
-            progress=10,
-            message="Starting web scraping... This may take up to 1 hour."
-        )
-        
-        # Execute scraping (synchronous, long-running)
-        # Note: We cannot update progress during scraping because 
-        # the scraper script doesn't provide callbacks
-        result = futu_service.fetch_and_store_themes(
-            markets=markets,
-            max_pages=max_pages,
-            scrape_stocks=scrape_stocks
-        )
-        
-        # Check results
-        if result.get('error'):
-            error_msg = result['error']
-            logger.error(f"Task {task_id} failed: {error_msg}")
-            
-            update_task_progress(
-                task_id,
-                status="failed",
-                progress=0,
-                message=f"Futu themes fetching failed: {error_msg}"
-            )
-            
-            return {
-                "success": False,
-                "error": error_msg,
-                "statistics": result
-            }
-        else:
-            total_themes = result.get('total_themes', 0)
-            success_count = result.get('success_count', 0)
-            failed_count = result.get('failed_count', 0)
-            total_stocks = result.get('total_stocks', 0)
-            execution_time = result.get('execution_time', 0)
-            markets_processed = result.get('markets', [])
-            
-            # Update completion status
-            update_task_progress(
-                task_id,
-                status="completed",
-                progress=100,
-                message=f"Futu themes fetching completed: {success_count}/{total_themes} themes, {total_stocks} stocks, {execution_time:.2f}s",
-                total_themes=total_themes,
-                success_count=success_count,
-                failed_count=failed_count,
-                total_stocks=total_stocks,
-                execution_time=execution_time,
-                markets=markets_processed
-            )
-            
-            logger.info(
-                f"Task {task_id} completed successfully",
-                total_themes=total_themes,
-                success_count=success_count,
-                total_stocks=total_stocks,
-                execution_time=execution_time
-            )
-            
-            return {
-                "success": True,
-                "message": f"Successfully fetched {success_count} themes with {total_stocks} stocks",
-                "statistics": result
-            }
-            
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Task {task_id} exception: {error_msg}")
-        
-        update_task_progress(
-            task_id,
-            status="failed",
-            progress=0,
-            message=f"Task exception: {error_msg}"
-        )
-        
-        return {
-            "success": False,
-            "error": error_msg
-        }
+# fetch_futu_themes_task 已删除
+# 原因：移除 futu 爬虫相关功能，改为纯手动主题管理
 

@@ -23,7 +23,6 @@ class ThemeMatchRequest(BaseModel):
     """主题匹配请求"""
     news_text: str = Field(..., description="新闻文本（标题+内容）")
     news_id: Optional[int] = Field(None, description="新闻ID（用于保存匹配结果）")
-    market: Optional[str] = Field(None, description="市场过滤（HK/US/CN）")
     top_k: int = Field(5, ge=1, le=20, description="返回Top-K个主题")
     min_similarity: float = Field(0.6, ge=0.0, le=1.0, description="最小相似度阈值")
     save_to_db: bool = Field(False, description="是否保存匹配结果到数据库")
@@ -33,7 +32,6 @@ class ThemeMatchResponse(BaseModel):
     """主题匹配响应"""
     theme_id: str
     theme_name: str
-    market: str
     similarity: float
     confidence: float
     rank: int
@@ -48,50 +46,48 @@ class UpdateThemeRequest(BaseModel):
     """更新单个主题向量请求"""
     theme_id: str = Field(..., description="主题ID")
     theme_name: str = Field(..., description="主题名称")
-    market: str = Field(..., description="市场代码（HK/US/CN）")
 
 
 class FillDescriptionsRequest(BaseModel):
     """批量填充主题描述请求"""
     force_regenerate: bool = Field(False, description="whether to force regenerate existing descriptions")
-    market: Optional[str] = Field(None, description="market filter (HK/US/CN), if empty, process all markets")
 
 
 class UpdateEnabledStatusRequest(BaseModel):
     """更新启用状态请求"""
-    market: str = Field(..., description="市场代码（HK/US/CN）")
     is_enabled: bool = Field(..., description="是否启用")
 
 
 class BatchUpdateEnabledRequest(BaseModel):
     """批量更新启用状态请求"""
     theme_ids: List[str] = Field(..., description="主题ID列表")
-    markets: List[str] = Field(..., description="市场代码列表（与theme_ids对应）")
     is_enabled: bool = Field(..., description="是否启用")
 
 
 class UpdateDescriptionRequest(BaseModel):
     """更新主题描述请求"""
-    market: str = Field(..., description="市场代码（HK/US/CN）")
     description: str = Field(..., min_length=1, max_length=2000, description="新的描述内容")
     version: Optional[int] = Field(None, description="版本号（用于乐观锁）")
 
 
 class DeleteThemeRequest(BaseModel):
     """删除主题请求"""
-    market: str = Field(..., description="市场代码（HK/US/CN）")
+    pass  # theme_id将从路径参数获取
+
+
+class BatchDeleteThemeRequest(BaseModel):
+    """批量删除主题请求"""
+    theme_ids: List[str] = Field(..., description="主题ID列表")
 
 
 class GenerateDescriptionRequest(BaseModel):
     """生成主题描述请求"""
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
-    market: str = Field(..., description="市场代码（HK/US/CN）")
 
 
 class CreateThemeRequest(BaseModel):
     """创建主题请求"""
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
-    market: str = Field(..., description="市场代码（HK/US/CN）")
     description: str = Field(..., min_length=10, max_length=2000, description="主题描述")
     theme_id: Optional[str] = Field(None, max_length=50, description="主题ID（可选，不提供则自动生成）")
 
@@ -112,7 +108,6 @@ async def match_news_to_themes(request: ThemeMatchRequest):
     POST /api/investment-themes/match
     {
         "news_text": "特斯拉发布新款电动车，配备先进自动驾驶功能",
-        "market": "US",
         "top_k": 3,
         "min_similarity": 0.6
     }
@@ -125,14 +120,12 @@ async def match_news_to_themes(request: ThemeMatchRequest):
         logger.info(
             f"Received theme matching request",
             news_id=request.news_id,
-            market=request.market,
             top_k=request.top_k
         )
         
         matches = await service.match_news_to_themes(
             news_text=request.news_text,
             news_id=request.news_id,
-            market=request.market,
             top_k=request.top_k,
             min_similarity=request.min_similarity,
             save_to_db=request.save_to_db
@@ -153,9 +146,9 @@ async def initialize_theme_embeddings(request: InitializeThemesRequest):
     Initialize all investment theme embeddings (using Celery)
     
     说明：
-    - 从 futu_investment_themes 表读取主题
+    - 从 investment_theme_embeddings 表读取主题
     - 调用Qwen Embedding API生成向量
-    - 存储到 investment_theme_embeddings 表
+    - 更新到 investment_theme_embeddings 表
     - 使用 Celery 后台任务执行（异步处理）
     
     注意：
@@ -278,7 +271,6 @@ async def get_news_themes(news_id: int):
             SELECT 
                 theme_id,
                 theme_name,
-                market,
                 similarity_score,
                 match_rank,
                 match_method,
@@ -293,11 +285,10 @@ async def get_news_themes(news_id: int):
             results.append({
                 'theme_id': row[0],
                 'theme_name': row[1],
-                'market': row[2],
-                'similarity': float(row[3]),
-                'rank': row[4],
-                'match_method': row[5],
-                'matched_at': row[6].isoformat() if row[6] else None
+                'similarity': float(row[2]),
+                'rank': row[3],
+                'match_method': row[4],
+                'matched_at': row[5].isoformat() if row[5] else None
             })
         
         cursor.close()
@@ -347,47 +338,32 @@ async def list_all_themes(
         cursor = conn.cursor()
         
         # 构建查询
-        where_clause = ""
-        where_clause_with_alias = ""
         params = []
         
-        if market:
-            where_clause = "WHERE market = %s"
-            where_clause_with_alias = "WHERE ite.market = %s"
-            params.append(market)
-        
         # 获取总数
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT COUNT(*) 
-            FROM investment_theme_embeddings 
-            {where_clause}
+            FROM investment_theme_embeddings
         """, params)
         total_count = cursor.fetchone()[0]
         
-        # 获取列表（联合查询获取 description 和管理相关字段）
+        # 获取列表（直接从 investment_theme_embeddings 查询所有字段）
         params.extend([limit, offset])
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT 
                 ite.theme_id,
                 ite.theme_name,
-                ite.market,
                 ite.embedding_model,
                 ite.created_at,
                 ite.updated_at,
                 ite.version,
                 ite.last_manual_edit_at,
                 ite.last_manual_edit_by,
-                fit.description,
-                fit.description_source,
-                fit.is_enabled_for_matching,
-                fit.is_deleted,
-                fit.stock_count,
-                fit.change_percent
+                ite.description,
+                ite.description_source,
+                ite.is_enabled_for_matching
             FROM investment_theme_embeddings ite
-            LEFT JOIN futu_investment_themes fit 
-                ON ite.theme_id = fit.theme_id AND ite.market = fit.market
-            {where_clause_with_alias}
-            ORDER BY ite.market, ite.theme_name
+            ORDER BY ite.theme_name
             LIMIT %s OFFSET %s
         """, params)
         
@@ -396,20 +372,16 @@ async def list_all_themes(
             themes.append({
                 'theme_id': row[0],
                 'theme_name': row[1],
-                'market': row[2],
-                'embedding_model': row[3],
-                'created_at': row[4].isoformat() if row[4] else None,
-                'updated_at': row[5].isoformat() if row[5] else None,
-                'version': row[6],  # 版本号
-                'last_manual_edit_at': row[7].isoformat() if row[7] else None,  # 最后编辑时间
-                'last_manual_edit_by': row[8],  # 最后编辑者
-                'description_preview': row[9],  # 主题描述预览（从futu_investment_themes获取）
-                'description_source': row[10],  # 描述来源
-                'is_enabled_for_matching': row[11] if row[11] is not None else True,  # 是否启用
-                'is_deleted': row[12] if row[12] is not None else False,  # 是否已删除
-                'stock_count': row[13] if row[13] else 0,  # 股票数量
-                'change_percent': row[14],  # 涨跌幅
-                'has_embedding': True  # 由于查询来自investment_theme_embeddings表，所以都是已向量化的
+                'embedding_model': row[2],
+                'created_at': row[3].isoformat() if row[3] else None,
+                'updated_at': row[4].isoformat() if row[4] else None,
+                'version': row[5],
+                'last_manual_edit_at': row[6].isoformat() if row[6] else None,
+                'last_manual_edit_by': row[7],
+                'description_preview': row[8],
+                'description_source': row[9],
+                'is_enabled_for_matching': row[10] if row[10] is not None else True,
+                'has_embedding': True
             })
         
         cursor.close()
@@ -619,78 +591,9 @@ async def regenerate_all_theme_embeddings(market: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
 
 
-@router.post("/fetch-futu-themes")
-async def fetch_futu_themes(
-    markets: Optional[List[str]] = None,
-    max_pages: Optional[int] = None,
-    scrape_stocks: bool = True
-):
-    """
-    Fetch Futu investment themes data using Celery (手动触发)
-    
-    说明：
-    - 手动触发富途投资主题数据爬取
-    - 任务通常需要约1小时运行时间
-    - 使用 Celery 后台任务异步处理
-    - 爬取港股、美股等市场的投资主题及相关股票
-    
-    参数：
-    - markets: 市场列表，如 ['HK', 'US']，为空则爬取所有市场
-    - max_pages: 每个市场最大爬取页数，为空则爬取所有页面
-    - scrape_stocks: 是否爬取每个主题的股票列表（默认：True）
-    
-    示例：
-    ```
-    POST /api/investment-themes/fetch-futu-themes
-    {
-        "markets": ["HK", "US"],
-        "max_pages": null,
-        "scrape_stocks": true
-    }
-    ```
-    
-    返回：
-    ```
-    {
-        "success": true,
-        "message": "Futu themes fetching task started",
-        "task_id": "abc-123-def-456",
-        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
-    }
-    ```
-    """
-    try:
-        from backend.tasks.theme_tasks import fetch_futu_themes_task
-        
-        logger.info(
-            "手动触发Futu投资主题爬取任务 (Celery)", 
-            markets=markets or "ALL",
-            max_pages=max_pages or "ALL",
-            scrape_stocks=scrape_stocks
-        )
-        
-        # 提交Celery任务
-        task = fetch_futu_themes_task.apply_async(
-            kwargs={
-                'markets': markets,
-                'max_pages': max_pages,
-                'scrape_stocks': scrape_stocks
-            }
-        )
-        
-        logger.info(f"Futu投资主题爬取任务已提交: {task.id}")
-        
-        return {
-            "success": True,
-            "message": "Futu themes fetching task started (expected to run for ~1 hour)",
-            "task_id": task.id,
-            "status_url": f"/api/investment-themes/task-status/{task.id}",
-            "estimated_duration": "约1小时"
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to start Futu themes fetching task: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+# /fetch-futu-themes endpoint 已删除
+# 原因：移除 futu 爬虫相关功能，改为纯手动主题管理
+# 用户应通过 /create endpoint 手动创建主题
 
 
 # ==================== Theme Management Endpoints (Admin Only) ====================
@@ -789,17 +692,15 @@ async def batch_update_theme_enabled_status(
         success_count = 0
         failed_count = 0
         
-        for theme_id, market in zip(request.theme_ids, request.markets):
+        for theme_id in request.theme_ids:
             result = service.update_theme_enabled_status(
                 theme_id=theme_id,
-                market=market,
                 is_enabled=request.is_enabled,
                 operator_username=current_user.username
             )
             
             results.append({
                 "theme_id": theme_id,
-                "market": market,
                 "success": result["success"],
                 "message": result["message"]
             })
@@ -845,7 +746,6 @@ async def update_theme_description(
     ```
     PATCH /api/investment-themes/BK1001/description
     {
-        "market": "HK",
         "description": "这是一个关于人工智能和机器学习的主题，包含相关的科技公司...",
         "version": 5
     }
@@ -879,13 +779,11 @@ async def update_theme_description(
         logger.info(
             f"Admin {current_user.username} updating theme description",
             theme_id=theme_id,
-            market=request.market,
             description_length=len(request.description)
         )
         
         result = await service.update_theme_description(
             theme_id=theme_id,
-            market=request.market,
             new_description=request.description,
             editor_username=current_user.username,
             version=request.version
@@ -911,24 +809,23 @@ async def update_theme_description(
 @router.delete("/{theme_id}")
 async def delete_theme(
     theme_id: str,
-    market: str = Query(..., description="市场代码（HK/US/CN）"),
     current_user: TokenData = Depends(get_current_admin_user)
 ):
     """
-    删除投资主题（软删除，仅管理员）
+    删除投资主题（仅管理员，物理删除）
     
     权限：仅管理员
     
     说明：
-    - 软删除主题（标记为已删除，不会从数据库物理删除）
+    - 硬删除主题（物理删除，不可恢复）
     - 级联删除相关数据：
       * 向量数据（investment_theme_embeddings）
       * 新闻匹配记录（news_theme_matches）
-    - 爬虫不会重新创建已删除的主题
+    - ⚠️ 警告：此操作不可逆！
     
     示例：
     ```
-    DELETE /api/investment-themes/BK1001?market=HK
+    DELETE /api/investment-themes/BK1001
     ```
     
     返回：
@@ -947,13 +844,11 @@ async def delete_theme(
         
         logger.info(
             f"Admin {current_user.username} deleting theme",
-            theme_id=theme_id,
-            market=market
+            theme_id=theme_id
         )
         
         result = service.delete_theme(
             theme_id=theme_id,
-            market=market,
             operator_username=current_user.username
         )
         
@@ -967,6 +862,69 @@ async def delete_theme(
     except Exception as e:
         logger.error(f"Delete theme failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.post("/batch-delete")
+async def batch_delete_themes(
+    request: BatchDeleteThemeRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    批量删除投资主题（仅管理员，物理删除）
+    
+    权限：仅管理员
+    
+    说明：
+    - 硬删除多个主题（物理删除，不可恢复）
+    - 批量删除相关数据：
+      * 向量数据（investment_theme_embeddings）
+      * 新闻匹配记录（news_theme_matches）
+    - ⚠️ 警告：此操作不可逆！
+    
+    示例：
+    ```
+    POST /api/investment-themes/batch-delete
+    {
+        "theme_ids": ["BK1001", "US_TECH"]
+    }
+    ```
+    
+    返回：
+    ```
+    {
+        "success": true,
+        "message": "成功批量删除 2 个主题，删除 156 条匹配记录",
+        "deleted_count": 2,
+        "failed_count": 0,
+        "total_matches_deleted": 156,
+        "details": [...]
+    }
+    ```
+    """
+    try:
+        db_config = get_database_config()
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        logger.info(
+            f"Admin {current_user.username} batch deleting {len(request.theme_ids)} themes",
+            theme_ids=request.theme_ids
+        )
+        
+        result = service.batch_delete_themes(
+            theme_keys=request.theme_ids,
+            operator_username=current_user.username
+        )
+        
+        if result["success"] or result["deleted_count"] > 0:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch delete themes failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
 
 
 @router.post("/generate-description")
@@ -988,8 +946,7 @@ async def generate_theme_description(
     ```
     POST /api/investment-themes/generate-description
     {
-        "theme_name": "AI芯片",
-        "market": "US"
+        "theme_name": "AI芯片"
     }
     ```
     
@@ -1008,13 +965,11 @@ async def generate_theme_description(
         
         logger.info(
             f"Admin {current_user.username} generating description for new theme",
-            theme_name=request.theme_name,
-            market=request.market
+            theme_name=request.theme_name
         )
         
         result = await service.generate_theme_description(
-            theme_name=request.theme_name,
-            market=request.market
+            theme_name=request.theme_name
         )
         
         if result["success"]:
@@ -1042,12 +997,12 @@ async def create_theme(
     说明：
     - 创建新主题并保存到数据库
     - 自动生成向量
-    - theme_id可选，不提供则自动生成（格式：CUSTOM_<MARKET>_<TIMESTAMP>）
+    - theme_id可选，不提供则自动生成（格式：CUSTOM_<TIMESTAMP>）
     - 如果向量化失败，主题仍会保存，但会返回错误提示
     
     流程：
-    1. 保存主题基本信息到 futu_investment_themes
-    2. 生成向量并保存到 investment_theme_embeddings
+    1. 生成向量
+    2. 保存主题信息和向量到 investment_theme_embeddings
     3. 返回创建结果
     
     示例：
@@ -1055,7 +1010,6 @@ async def create_theme(
     POST /api/investment-themes/create
     {
         "theme_name": "AI芯片",
-        "market": "US",
         "description": "AI芯片是指专门为人工智能计算设计的半导体芯片...",
         "theme_id": "AI_CHIP_US"  // 可选
     }
@@ -1091,13 +1045,11 @@ async def create_theme(
         logger.info(
             f"Admin {current_user.username} creating new theme",
             theme_name=request.theme_name,
-            market=request.market,
             theme_id=request.theme_id
         )
         
         result = await service.create_theme(
             theme_name=request.theme_name,
-            market=request.market,
             description=request.description,
             creator_username=current_user.username,
             theme_id=request.theme_id
