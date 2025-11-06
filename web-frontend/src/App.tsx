@@ -21,6 +21,7 @@ import LLMConfigPage from './pages/LLMConfigPage';
 import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import InvestmentThemesPage from './pages/InvestmentThemesPage';
 import CandlestickDemoPage from './pages/CandlestickDemoPage';
+import MarketWeekly from './pages/MarketWeekly';
 import './App.css';
 
 // 私有路由组件
@@ -113,6 +114,7 @@ const App: React.FC = () => {
                 }
               >
                 <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="market-weekly" element={<MarketWeekly />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="markets" element={<MarketsPage />} />
                 <Route path="markets/economic-events" element={<EconomicEventsPage />} />

@@ -18,7 +18,8 @@ import {
   FundOutlined,
   BuildOutlined,
   CalendarOutlined,
-  ControlOutlined
+  ControlOutlined,
+  BarChartOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -53,6 +54,11 @@ const Layout: React.FC = () => {
 
   // 菜单项配置
   const menuItems = [
+    {
+      key: '/market-weekly',
+      icon: <BarChartOutlined />,
+      label: 'Market Weekly',
+    },
     {
       key: '/dashboard',
       icon: <StockOutlined />,

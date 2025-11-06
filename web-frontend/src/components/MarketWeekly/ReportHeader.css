@@ -1,0 +1,85 @@
+.market-weekly-header {
+  margin-bottom: 48px;
+  padding-top: 24px;
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+
+.title-section {
+  flex: 1;
+}
+
+.report-title {
+  font-size: 48px !important;
+  font-weight: bold !important;
+  color: #1a1a1a !important;
+  margin-bottom: 8px !important;
+  line-height: 1.2 !important;
+}
+
+.report-subtitle {
+  font-size: 14px;
+  color: #666;
+  display: block;
+}
+
+.period-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.period-box {
+  background: #f5f5f5;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  padding: 20px 32px;
+  min-width: 400px;
+}
+
+.refresh-button {
+  height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.header-divider {
+  height: 3px;
+  background: linear-gradient(to right, #2C3E50 0%, #2C3E50 60%, transparent 100%);
+  margin-top: 24px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .header-content {
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .period-section {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .period-box {
+    width: 100%;
+    min-width: unset;
+  }
+}
+
+@media (max-width: 768px) {
+  .report-title {
+    font-size: 32px !important;
+  }
+
+  .period-box {
+    padding: 16px 20px;
+  }
+}
+

@@ -1,0 +1,221 @@
+.market-weekly-container {
+  min-height: 100vh;
+  background: #ffffff;
+  position: relative;
+}
+
+.market-weekly-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 60px 80px 60px;
+}
+
+/* Loading and Error States */
+.market-weekly-loading,
+.market-weekly-error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  padding: 40px;
+}
+
+/* Section Styles */
+.report-section {
+  margin-bottom: 60px;
+  scroll-margin-top: 80px; /* 为fixed header留出空间 */
+}
+
+.section-title {
+  font-size: 24px;
+  font-weight: bold;
+  color: #2C3E50;
+  border-bottom: 2px solid #2C3E50;
+  padding-bottom: 12px;
+  margin-bottom: 32px;
+}
+
+.section-content {
+  margin-bottom: 24px;
+}
+
+.section-intro {
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+  margin-bottom: 24px;
+}
+
+/* Subsection */
+.subsection {
+  margin-bottom: 48px;
+  scroll-margin-top: 80px;
+}
+
+.subsection-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #34495E;
+  margin-bottom: 20px;
+  margin-top: 32px;
+}
+
+/* Executive Summary */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.summary-card {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.summary-card h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+
+.performer-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2C3E50;
+  margin-bottom: 8px;
+}
+
+.performer-change {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 0;
+}
+
+.performer-change.positive {
+  color: #52c41a;
+}
+
+.performer-change.negative {
+  color: #f5222d;
+}
+
+.regional-overview {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.regional-overview h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2C3E50;
+  margin-bottom: 16px;
+}
+
+.regional-overview ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.regional-overview li {
+  padding: 8px 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #333;
+}
+
+.regional-overview strong {
+  color: #2C3E50;
+  font-weight: 600;
+}
+
+/* Chart Placeholder */
+.chart-placeholder {
+  background: #f5f5f5;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: 60px 24px;
+  text-align: center;
+  color: #8c8c8c;
+  margin: 20px 0;
+}
+
+.chart-placeholder p {
+  margin: 8px 0;
+}
+
+/* Chart Container (for real charts) */
+.chart-container {
+  background: #ffffff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 24px;
+  margin: 20px 0;
+}
+
+.chart-caption {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* Footer */
+.report-footer {
+  text-align: center;
+  padding: 32px 0;
+  color: #999;
+  font-size: 12px;
+}
+
+.report-footer hr {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 24px 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1600px) {
+  .market-weekly-content {
+    max-width: 1200px;
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .market-weekly-content {
+    max-width: 100%;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+}
+
+@media (max-width: 768px) {
+  .market-weekly-content {
+    padding: 20px 16px 60px;
+  }
+
+  .section-title {
+    font-size: 20px;
+  }
+
+  .subsection-title {
+    font-size: 16px;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

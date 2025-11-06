@@ -160,7 +160,7 @@ class CreateMarketDataTaskRequest(BaseModel):
     )
     fetch_realtime: bool = Field(default=True, description="是否获取实时数据")
     fetch_eod: bool = Field(default=True, description="是否获取EOD历史数据")
-    eod_days: int = Field(default=5, description="获取最近几天的EOD数据", ge=1, le=30)
+    eod_days: int = Field(default=5, description="获取最近几天的EOD数据", ge=1, le=120)
 
 
 class CreateEarningsCalendarTaskRequest(BaseModel):

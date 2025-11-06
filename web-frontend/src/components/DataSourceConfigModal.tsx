@@ -1403,12 +1403,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               <Form.Item
                 label="EOD Days"
                 name={['taskParams', 'eod_days']}
-                extra="Number of recent days to fetch EOD data (1-30 days)."
+                extra="Number of recent days to fetch EOD data (1-120 days)."
                 initialValue={5}
               >
                 <InputNumber 
                   min={1} 
-                  max={30} 
+                  max={120} 
                   placeholder="5" 
                   style={{ width: '100%' }}
                 />
