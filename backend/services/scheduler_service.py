@@ -58,6 +58,7 @@ class SchedulerService:
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
+            'watchlist_fundamentals': self._execute_watchlist_fundamentals_task,  # 🔥 新增：Watchlist 基本面批量更新任务
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
@@ -1717,7 +1718,7 @@ class SchedulerService:
                     # 直接返回Celery任务的结果
                     logger.info("EODHD基本面数据获取任务执行成功", 
                                task_id=task.id,
-                               message=result.get('message'))
+                               result_message=result.get('message'))
                     return result
                 else:
                     # 任务执行失败
@@ -1746,6 +1747,130 @@ class SchedulerService:
                 
         except Exception as e:
             error_msg = f"执行EODHD基本面数据获取任务失败: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': error_msg,
+                'data': None
+            }
+    
+    async def _execute_watchlist_fundamentals_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 Watchlist Fundamentals 批量更新任务（通过Celery异步执行）
+        
+        此任务会批量更新 target_tracking_config 表中所有活跃股票的基本面数据
+        
+        Args:
+            params: 任务参数
+                - data_types: 要更新的数据类型列表（可选，默认全部12种）
+                - skip_recent_hours: 跳过最近N小时内已更新的股票（默认24小时）
+                - wait_for_completion: 是否等待任务完成（默认: False，后台执行）
+                - timeout: 任务超时时间（秒，默认: 3600 = 1小时）
+        
+        Returns:
+            Dict包含任务执行结果
+        """
+        import asyncio
+        from celery.result import AsyncResult
+        
+        try:
+            logger.info("提交 Watchlist Fundamentals 批量更新任务到 Celery", params=params)
+            
+            # 获取参数
+            data_types = params.get('data_types')  # None 表示使用默认（全部12种）
+            skip_recent_hours = params.get('skip_recent_hours', 24)
+            wait_for_completion = params.get('wait_for_completion', True)  # 默认等待完成以获取详细结果
+            timeout = params.get('timeout', 3600)  # 默认1小时超时
+            
+            logger.info(f"准备批量更新 watchlist fundamentals 数据",
+                       data_types=data_types or "all",
+                       skip_recent_hours=skip_recent_hours)
+            
+            # 导入Celery任务
+            from backend.tasks.data_tasks import update_watchlist_fundamentals_batch_task
+            
+            # 提交Celery任务
+            task = update_watchlist_fundamentals_batch_task.apply_async(
+                kwargs={
+                    'data_types': data_types,
+                    'skip_recent_hours': skip_recent_hours
+                }
+            )
+            
+            logger.info(f"Watchlist fundamentals 批量更新任务已提交到 Celery: task_id={task.id}")
+            
+            # 如果不等待完成，立即返回
+            if not wait_for_completion:
+                return {
+                    'success': True,
+                    'message': f"Watchlist fundamentals 批量更新任务已提交到 Celery 队列（任务ID: {task.id}）",
+                    'data': {
+                        'task_id': task.id,
+                        'status': 'PENDING',
+                        'data_types': data_types or 'all',
+                        'skip_recent_hours': skip_recent_hours
+                    }
+                }
+            
+            # 等待任务完成（异步等待，不阻塞事件循环）
+            logger.info(f"等待 Celery 任务完成: {task.id} (超时: {timeout}秒)")
+            
+            try:
+                # 在线程池中执行阻塞的 task.get()
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,  # 使用默认线程池
+                    lambda: task.get(timeout=timeout, propagate=False)
+                )
+                
+                # 检查任务结果
+                if isinstance(result, Exception):
+                    # 任务执行失败
+                    error_msg = f"Watchlist fundamentals 批量更新任务执行失败: {str(result)}"
+                    logger.error(error_msg, task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': error_msg,
+                        'data': {
+                            'task_id': task.id,
+                            'error': str(result)
+                        }
+                    }
+                
+                # 任务执行成功，返回结果
+                if result and result.get('success'):
+                    # 直接返回Celery任务的结果
+                    logger.info("Watchlist fundamentals 批量更新任务执行成功", 
+                               task_id=task.id,
+                               result_message=result.get('message'))
+                    return result
+                else:
+                    # 任务执行失败
+                    error_msg = result.get('message', '未知错误') if result else '任务返回结果为空'
+                    logger.error(f"Watchlist fundamentals 批量更新失败: {error_msg}", task_id=task.id)
+                    return {
+                        'success': False,
+                        'message': f"Watchlist fundamentals 批量更新失败: {error_msg}",
+                        'data': {'task_id': task.id}
+                    }
+                    
+            except asyncio.TimeoutError:
+                # 任务超时
+                error_msg = f"Watchlist fundamentals 批量更新任务超时（超过{timeout}秒）"
+                logger.error(error_msg, task_id=task.id)
+                # 尝试撤销任务
+                try:
+                    task.revoke(terminate=True)
+                except:
+                    pass
+                return {
+                    'success': False,
+                    'message': error_msg,
+                    'data': {'task_id': task.id}
+                }
+                
+        except Exception as e:
+            error_msg = f"执行 Watchlist fundamentals 批量更新任务失败: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {
                 'success': False,

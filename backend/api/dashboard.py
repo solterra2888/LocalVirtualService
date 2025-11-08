@@ -14,7 +14,6 @@ import time
 from backend.schemas.user import UserResponse
 from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
-from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig
 from backend.utils.database_config import get_database_config
@@ -841,10 +840,10 @@ async def add_to_watchlist(
         if result:
             watchlist_id = result[0]
             
-            # 异步更新EODHD fundamentals数据
-            fundamentals_update_result = None
+            # 🔥 异步更新EODHD fundamentals数据（通过 Celery 后台任务）
+            fundamentals_task_result = None
             try:
-                logger.info(f"Starting to update EODHD fundamentals data for {symbol} in watchlist", 
+                logger.info(f"准备提交 Celery 任务更新 {symbol} 的 fundamentals 数据", 
                            user=current_user.username, symbol=symbol)
                 
                 # 检查fundamentals数据是否在24小时内更新过
@@ -856,20 +855,20 @@ async def add_to_watchlist(
                 freshness_result = db_manager.fetch_one(freshness_check_query, [symbol])
                 
                 if freshness_result and freshness_result[0]:
-                    # 数据在24小时内更新过，跳过EODHD API调用
+                    # 数据在24小时内更新过，跳过更新
                     logger.info(f"Fundamentals data for {symbol} is fresh, skipping update", 
                                user=current_user.username, symbol=symbol,
                                last_update=freshness_result[0])
                     
-                    fundamentals_update_result = {
+                    fundamentals_task_result = {
                         "success": True,
-                        "message": f"Data is fresh, skipping update. Last update time: {freshness_result[0]}",
+                        "message": f"Data is fresh, skipping update. Last update: {freshness_result[0]}",
                         "skipped": True,
                         "last_update": freshness_result[0].isoformat() if freshness_result[0] else None
                     }
                 else:
-                    # 数据需要更新，继续执行EODHD API调用
-                    logger.info(f"Fundamentals data for {symbol} needs to be updated, starting to get data from EODHD", 
+                    # 数据需要更新，提交 Celery 任务
+                    logger.info(f"Fundamentals data for {symbol} needs update, submitting Celery task", 
                                user=current_user.username, symbol=symbol)
                     
                     # 获取公司的exchange信息
@@ -877,69 +876,35 @@ async def add_to_watchlist(
                     exchange_result = db_manager.fetch_one(exchange_query, [symbol])
                     exchange = exchange_result[0] if exchange_result else 'US'
                     
-                    # 初始化EODHD基本面数据服务
-                    fundamentals_service = EODHDFundamentalsService()
+                    # 导入并提交 Celery 任务（异步执行，不阻塞）
+                    from backend.tasks.data_tasks import update_single_ticker_fundamentals_task
                     
-                    # 获取完整的基本面数据
-                    full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                    # 提交任务到 Celery
+                    task = update_single_ticker_fundamentals_task.apply_async(
+                        args=[symbol, exchange]
+                    )
                     
-                    if full_data:
-                        # 构建保存数据的格式
-                        company_data = {
-                            'symbol': symbol,
-                            'exchange': exchange,
-                            'general_data': full_data.get('General', full_data),
-                            'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
-                            'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
-                            'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
-                            'full_data': full_data
-                        }
-                        
-                        # 使用批量保存方法
-                        save_result = fundamentals_service.batch_save_companies_data([company_data])
-                        
-                        # 构建更新结果
-                        data_updated = {
-                            'company_info': save_result.get('companies_saved', 0) > 0,
-                            'address': save_result.get('addresses_saved', 0) > 0,
-                            'officers': save_result.get('officers_saved', 0) > 0,
-                            'financials': save_result.get('financials_saved', 0) > 0,
-                            'highlights': save_result.get('highlights_saved', 0) > 0,
-                            'valuations': save_result.get('valuations_saved', 0) > 0,
-                            'technicals': save_result.get('technicals_saved', 0) > 0,
-                            'earnings': save_result.get('earnings_saved', 0) > 0,
-                            'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
-                            'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
-                            'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
-                            'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
-                        }
-                        
-                        updated_components = [k for k, v in data_updated.items() if v]
-                        fundamentals_update_result = {
-                            "success": True,
-                            "message": f"Successfully updated fundamentals data for {symbol}, updated {len(updated_components)} components",
-                            "data_updated": data_updated,
-                            "updated_components": updated_components
-                        }
-                        
-                        logger.info(f"Successfully updated EODHD fundamentals data for {symbol} in watchlist", 
-                                   user=current_user.username, symbol=symbol, 
-                                   updated_components=updated_components)
-                    else:
-                        fundamentals_update_result = {
-                            "success": False,
-                            "message": f"Failed to get EODHD fundamentals data for {symbol}"
-                        }
-                        logger.warning(f"Failed to get EODHD fundamentals data for {symbol} in watchlist", 
-                                      user=current_user.username, symbol=symbol)
+                    fundamentals_task_result = {
+                        "success": True,
+                        "task_id": task.id,
+                        "message": f"Fundamentals update task submitted for {symbol}.{exchange}"
+                    }
+                    
+                    logger.info(f"成功提交 fundamentals 更新任务", 
+                               user=current_user.username,
+                               symbol=symbol,
+                               exchange=exchange,
+                               task_id=task.id)
                     
             except Exception as e:
-                fundamentals_update_result = {
+                fundamentals_task_result = {
                     "success": False,
-                    "message": f"Failed to update fundamentals data for {symbol}: {str(e)}"
+                    "message": f"Failed to submit fundamentals update task: {str(e)}"
                 }
-                logger.error(f"Failed to update EODHD fundamentals data for {symbol} in watchlist", 
-                           user=current_user.username, symbol=symbol, error=str(e))
+                logger.error(f"提交 fundamentals 更新任务失败", 
+                           user=current_user.username,
+                           symbol=symbol,
+                           error=str(e))
             
             # 🔥 异步获取该 ticker 的全部历史 EOD 数据（通过 Celery 后台任务）
             eod_task_result = None
@@ -985,12 +950,18 @@ async def add_to_watchlist(
             
             # 构建响应消息
             response_message = f"Successfully added {symbol} to watchlist"
-            if fundamentals_update_result:
-                if fundamentals_update_result["success"]:
-                    response_message += f". {fundamentals_update_result['message']}"
-                else:
-                    response_message += f". Note: {fundamentals_update_result['message']}"
             
+            # 添加 fundamentals 任务信息
+            if fundamentals_task_result:
+                if fundamentals_task_result.get("skipped"):
+                    response_message += f". Fundamentals data is fresh (last update: {fundamentals_task_result.get('last_update', 'N/A')})"
+                elif fundamentals_task_result["success"]:
+                    task_id = fundamentals_task_result.get('task_id', '')
+                    response_message += f". Fundamentals update is being processed in background (task: {task_id[:8]}...)"
+                else:
+                    response_message += f". Note: {fundamentals_task_result['message']}"
+            
+            # 添加 EOD 历史数据任务信息
             if eod_task_result and eod_task_result["success"]:
                 response_message += f". Historical data is being fetched in background (task: {eod_task_result['task_id'][:8]}...)"
             
@@ -999,7 +970,7 @@ async def add_to_watchlist(
                 "watchlist_id": watchlist_id,
                 "symbol": symbol,
                 "company_name": stock_info[1],
-                "fundamentals_update": fundamentals_update_result,
+                "fundamentals_task": fundamentals_task_result,
                 "eod_task": eod_task_result
             }
         else:

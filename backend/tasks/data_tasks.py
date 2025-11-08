@@ -623,6 +623,466 @@ def fetch_ipo_calendar_task(self, start_date=None, end_date=None, days=None, fet
 
 
 
+@app.task(bind=True, name='update_single_ticker_fundamentals', queue='data_fetching')
+def update_single_ticker_fundamentals_task(self, symbol: str, exchange: str = 'US'):
+    """
+    异步更新单个 ticker 的 fundamentals 数据 Celery 任务
+    
+    适用场景：
+    - 用户添加新股票到 watchlist 时立即更新基本面数据
+    - 不阻塞用户操作，后台异步执行
+    - 避免在 API 请求线程中执行耗时的 EODHD API 调用
+    
+    Args:
+        symbol: 股票代码（如 AAPL）
+        exchange: 交易所代码（如 US, HK, SHG）
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'symbol': str,
+                'exchange': str,
+                'updated_components': list,
+                'execution_time': float
+            }
+    """
+    import time
+    
+    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'symbol': symbol,
+                'exchange': exchange,
+                'message': log_message or '',
+                'updated_components': kwargs.get('updated_components', [])
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_fundamentals_task")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_fundamentals_task")
+    
+    try:
+        start_time = time.time()
+        
+        info(f"开始更新单个 ticker 的 fundamentals 数据: {symbol}.{exchange}", 
+             task_id=self.request.id,
+             symbol=symbol,
+             exchange=exchange,
+             source="celery_fundamentals_task")
+        
+        update_progress(
+            status='processing',
+            progress=10,
+            log_message=f"正在初始化 fundamentals 服务..."
+        )
+        
+        # 导入服务
+        from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+        fundamentals_service = EODHDFundamentalsService()
+        
+        update_progress(
+            status='processing',
+            progress=30,
+            log_message=f"正在从 EODHD API 获取 {symbol} 的完整基本面数据..."
+        )
+        
+        # 获取完整的基本面数据
+        full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+        
+        if not full_data:
+            error_msg = f"未能从 EODHD 获取 {symbol}.{exchange} 的基本面数据"
+            error(error_msg, 
+                  task_id=self.request.id,
+                  symbol=symbol,
+                  exchange=exchange,
+                  source="celery_fundamentals_task")
+            
+            update_progress(
+                status='failed',
+                progress=0,
+                log_message=error_msg
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg,
+                'symbol': symbol,
+                'exchange': exchange,
+                'updated_components': [],
+                'execution_time': time.time() - start_time
+            }
+        
+        update_progress(
+            status='processing',
+            progress=60,
+            log_message=f"获取成功，正在保存到数据库..."
+        )
+        
+        # 构建保存数据的格式
+        company_data = {
+            'symbol': symbol,
+            'exchange': exchange,
+            'general_data': full_data.get('General', full_data),
+            'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+            'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+            'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+            'full_data': full_data
+        }
+        
+        # 使用批量保存方法
+        save_result = fundamentals_service.batch_save_companies_data([company_data])
+        
+        # 构建更新结果
+        data_updated = {
+            'company_info': save_result.get('companies_saved', 0) > 0,
+            'address': save_result.get('addresses_saved', 0) > 0,
+            'officers': save_result.get('officers_saved', 0) > 0,
+            'financials': save_result.get('financials_saved', 0) > 0,
+            'highlights': save_result.get('highlights_saved', 0) > 0,
+            'valuations': save_result.get('valuations_saved', 0) > 0,
+            'technicals': save_result.get('technicals_saved', 0) > 0,
+            'earnings': save_result.get('earnings_saved', 0) > 0,
+            'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
+            'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
+            'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
+            'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
+        }
+        
+        updated_components = [k for k, v in data_updated.items() if v]
+        execution_time = time.time() - start_time
+        
+        success_msg = f"成功更新 {symbol}.{exchange} 的基本面数据，更新了 {len(updated_components)} 个组件（耗时 {execution_time:.2f} 秒）"
+        info(success_msg, 
+             task_id=self.request.id,
+             symbol=symbol,
+             exchange=exchange,
+             updated_components=updated_components,
+             execution_time=execution_time,
+             source="celery_fundamentals_task")
+        
+        update_progress(
+            status='completed',
+            progress=100,
+            log_message=success_msg,
+            updated_components=updated_components
+        )
+        
+        return {
+            'success': True,
+            'message': success_msg,
+            'symbol': symbol,
+            'exchange': exchange,
+            'updated_components': updated_components,
+            'data_updated': data_updated,
+            'execution_time': execution_time
+        }
+        
+    except Exception as e:
+        error_msg = f"更新 {symbol}.{exchange} 基本面数据任务异常: {str(e)}"
+        error(error_msg, 
+              task_id=self.request.id,
+              symbol=symbol,
+              exchange=exchange,
+              exception=str(e),
+              source="celery_fundamentals_task")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        return {
+            'success': False,
+            'message': error_msg,
+            'symbol': symbol,
+            'exchange': exchange,
+            'updated_components': [],
+            'execution_time': 0
+        }
+
+
+@app.task(bind=True, name='update_watchlist_fundamentals_batch', queue='data_fetching')
+def update_watchlist_fundamentals_batch_task(self, data_types: list = None, skip_recent_hours: int = 24):
+    """
+    异步批量更新 watchlist 中所有股票的 fundamentals 数据 Celery 任务
+    
+    适用场景：
+    - 定期更新所有 watchlist 股票的基本面数据
+    - 确保用户 watchlist 中的数据保持最新
+    - 避免在用户查询时才触发更新
+    
+    Args:
+        data_types: 要更新的数据类型列表（默认全部12种）
+        skip_recent_hours: 跳过最近N小时内已更新的股票（默认24小时）
+    
+    Returns:
+        Dict: 包含执行结果
+            {
+                'success': bool,
+                'message': str,
+                'total_stocks': int,
+                'updated_stocks': int,
+                'skipped_stocks': int,
+                'failed_stocks': int,
+                'execution_time': float
+            }
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+        """更新任务进度到 Redis"""
+        try:
+            meta = {
+                'status': status or 'processing',
+                'progress': progress or 0,
+                'message': log_message or '',
+                'total_stocks': kwargs.get('total_stocks', 0),
+                'updated_stocks': kwargs.get('updated_stocks', 0),
+                'skipped_stocks': kwargs.get('skipped_stocks', 0),
+                'failed_stocks': kwargs.get('failed_stocks', 0)
+            }
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=meta
+            )
+            
+            if log_message:
+                info(f"Task {self.request.id}: {log_message}", source="celery_watchlist_fundamentals_batch")
+                
+        except Exception as e:
+            error(f"更新任务状态失败: {str(e)}", source="celery_watchlist_fundamentals_batch")
+    
+    try:
+        start_time = time.time()
+        
+        # 设置默认数据类型（全部12种）
+        if data_types is None:
+            data_types = [
+                'General', 'Financials', 'Highlights', 'Valuation', 'Technicals',
+                'Holders', 'outstandingShares', 'Earnings', 'SharesStats',
+                'AnalystRatings', 'SplitsDividends', 'InsiderTransactions'
+            ]
+        
+        info(f"开始批量更新 watchlist fundamentals 数据", 
+             task_id=self.request.id,
+             data_types=data_types,
+             skip_recent_hours=skip_recent_hours,
+             source="celery_watchlist_fundamentals_batch")
+        
+        update_progress(
+            status='starting',
+            progress=5,
+            log_message=f"正在从 target_tracking_config 表获取 watchlist 股票列表..."
+        )
+        
+        # 从数据库获取所有 watchlist 股票（去重）
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 查询所有活跃的 watchlist 股票，并关联 companies 表获取最后更新时间
+        query = f"""
+        SELECT DISTINCT 
+            ttc.symbol,
+            c.exchange,
+            c.updated_at as last_update
+        FROM target_tracking_config ttc
+        LEFT JOIN companies c ON ttc.symbol = c.code
+        WHERE ttc.enabled = TRUE
+        ORDER BY c.updated_at ASC NULLS FIRST
+        """
+        
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            watchlist_stocks = cursor.fetchall()
+        
+        total_stocks = len(watchlist_stocks)
+        
+        if total_stocks == 0:
+            info("Watchlist 为空，无需更新", source="celery_watchlist_fundamentals_batch")
+            return {
+                'success': True,
+                'message': 'Watchlist 为空，无需更新',
+                'total_stocks': 0,
+                'updated_stocks': 0,
+                'skipped_stocks': 0,
+                'failed_stocks': 0,
+                'execution_time': time.time() - start_time
+            }
+        
+        info(f"找到 {total_stocks} 只 watchlist 股票", 
+             total=total_stocks,
+             source="celery_watchlist_fundamentals_batch")
+        
+        update_progress(
+            status='processing',
+            progress=10,
+            log_message=f"找到 {total_stocks} 只股票，开始批量更新...",
+            total_stocks=total_stocks
+        )
+        
+        # 过滤掉最近已更新的股票
+        cutoff_time = datetime.now() - timedelta(hours=skip_recent_hours)
+        stocks_to_update = []
+        skipped_stocks = 0
+        
+        for symbol, exchange, last_update in watchlist_stocks:
+            if last_update and last_update > cutoff_time:
+                skipped_stocks += 1
+                info(f"跳过最近已更新的股票: {symbol} (上次更新: {last_update})",
+                     source="celery_watchlist_fundamentals_batch")
+            else:
+                # 如果 exchange 为空，默认使用 US
+                stocks_to_update.append((symbol, exchange or 'US'))
+        
+        info(f"过滤后需要更新 {len(stocks_to_update)} 只股票，跳过 {skipped_stocks} 只",
+             to_update=len(stocks_to_update),
+             skipped=skipped_stocks,
+             source="celery_watchlist_fundamentals_batch")
+        
+        if len(stocks_to_update) == 0:
+            return {
+                'success': True,
+                'message': f'所有 {total_stocks} 只股票都在 {skip_recent_hours} 小时内更新过，无需更新',
+                'total_stocks': total_stocks,
+                'updated_stocks': 0,
+                'skipped_stocks': skipped_stocks,
+                'failed_stocks': 0,
+                'execution_time': time.time() - start_time
+            }
+        
+        update_progress(
+            status='processing',
+            progress=15,
+            log_message=f"开始提交 {len(stocks_to_update)} 个更新任务...",
+            total_stocks=total_stocks,
+            skipped_stocks=skipped_stocks
+        )
+        
+        # 批量提交单个 ticker 更新任务
+        from backend.tasks.data_tasks import update_single_ticker_fundamentals_task
+        from celery import group
+        
+        # 创建任务组（并发执行，但控制并发数）
+        update_tasks = []
+        for symbol, exchange in stocks_to_update:
+            task = update_single_ticker_fundamentals_task.s(symbol, exchange)
+            update_tasks.append(task)
+        
+        # 使用 group 并发执行（Celery 会自动控制并发数）
+        job = group(update_tasks)
+        result_group = job.apply_async()
+        
+        info(f"已提交 {len(update_tasks)} 个更新任务到 Celery",
+             source="celery_watchlist_fundamentals_batch")
+        
+        update_progress(
+            status='processing',
+            progress=30,
+            log_message=f"已提交 {len(update_tasks)} 个任务，等待执行完成...",
+            total_stocks=total_stocks,
+            skipped_stocks=skipped_stocks
+        )
+        
+        # 等待所有任务完成（设置超时：每只股票最多2分钟）
+        timeout = len(stocks_to_update) * 120  # 2分钟/股票
+        try:
+            results = result_group.get(timeout=timeout, propagate=False)
+        except Exception as e:
+            error(f"等待任务完成时出错: {str(e)}", source="celery_watchlist_fundamentals_batch")
+            results = []
+        
+        # 统计结果
+        updated_stocks = 0
+        failed_stocks = 0
+        
+        for result in results:
+            if isinstance(result, dict) and result.get('success'):
+                updated_stocks += 1
+            else:
+                failed_stocks += 1
+        
+        execution_time = time.time() - start_time
+        
+        success_msg = (
+            f"Watchlist fundamentals 批量更新完成: "
+            f"总计 {total_stocks} 只，更新 {updated_stocks} 只，"
+            f"跳过 {skipped_stocks} 只，失败 {failed_stocks} 只 "
+            f"（耗时 {execution_time:.2f} 秒）"
+        )
+        
+        info(success_msg,
+             task_id=self.request.id,
+             total=total_stocks,
+             updated=updated_stocks,
+             skipped=skipped_stocks,
+             failed=failed_stocks,
+             execution_time=execution_time,
+             source="celery_watchlist_fundamentals_batch")
+        
+        update_progress(
+            status='completed',
+            progress=100,
+            log_message=success_msg,
+            total_stocks=total_stocks,
+            updated_stocks=updated_stocks,
+            skipped_stocks=skipped_stocks,
+            failed_stocks=failed_stocks
+        )
+        
+        return {
+            'success': True,
+            'message': success_msg,
+            'total_stocks': total_stocks,
+            'updated_stocks': updated_stocks,
+            'skipped_stocks': skipped_stocks,
+            'failed_stocks': failed_stocks,
+            'execution_time': execution_time,
+            'data_types': data_types
+        }
+        
+    except Exception as e:
+        error_msg = f"Watchlist fundamentals 批量更新任务异常: {str(e)}"
+        error(error_msg,
+              task_id=self.request.id,
+              exception=str(e),
+              source="celery_watchlist_fundamentals_batch")
+        
+        update_progress(
+            status='failed',
+            progress=0,
+            log_message=error_msg
+        )
+        
+        return {
+            'success': False,
+            'message': error_msg,
+            'total_stocks': 0,
+            'updated_stocks': 0,
+            'skipped_stocks': 0,
+            'failed_stocks': 0,
+            'execution_time': 0
+        }
+
+
 @app.task(bind=True, name='fetch_single_ticker_eod_history', queue='data_fetching')
 def fetch_single_ticker_eod_history_task(self, ticker: str, days_back: int = None):
     """

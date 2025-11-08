@@ -39,7 +39,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -152,6 +152,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 6 * * 0',
       defaultName: 'IPO Calendar Auto Fetch',
       description: 'Get IPO calendar data weekly from EODHD API (all exchanges). Note: EODHD API does not support exchange filtering - all exchanges data will be returned.'
+    },
+    watchlist_fundamentals: {
+      icon: <DatabaseOutlined style={{ color: '#1890ff' }} />,
+      params: ['data_types', 'skip_recent_hours'],
+      defaultSchedule: '0 2 * * 0',
+      defaultName: 'Watchlist Fundamentals Weekly Update',
+      description: 'Automatically update fundamentals data for all watchlist stocks (weekly on Sunday 2 AM, skips stocks updated within 24 hours)'
     }
   };
 
@@ -336,6 +343,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             end_date: data.taskParams?.end_date
           };
           result = await schedulerAPI.createIPOCalendarTask(ipoCalendarParams);
+        } else if (dataSourceType === 'watchlist_fundamentals') {
+          // Watchlist Fundamentals 任务的专用创建逻辑
+          const watchlistFundamentalsParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            data_types: data.taskParams?.data_types,  // undefined 表示全部12种
+            skip_recent_hours: data.taskParams?.skip_recent_hours || 24
+          };
+          result = await schedulerAPI.createWatchlistFundamentalsTask(watchlistFundamentalsParams);
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
@@ -1729,6 +1747,83 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               >
                 <Input placeholder="e.g., 2025-12-10" />
               </Form.Item>
+            </>
+          );
+
+        case 'watchlist_fundamentals':
+          return (
+            <>
+              <Alert
+                message="Watchlist Fundamentals Auto-Update"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically update fundamentals data for all watchlist stocks. Ideal for maintaining up-to-date company information with intelligent skip logic to avoid unnecessary API calls."
+              />
+              
+              <Form.Item
+                label="Data Types to Update"
+                name={['taskParams', 'data_types']}
+                extra="Select which data types to update. Leave empty to update all 12 types (General, Financials, Highlights, Valuation, Technicals, Holders, outstandingShares, Earnings, SharesStats, AnalystRatings, SplitsDividends, InsiderTransactions)."
+              >
+                <Select 
+                  mode="multiple"
+                  placeholder="Leave empty for all 12 data types"
+                  allowClear
+                  style={{ width: '100%' }}
+                >
+                  <Option value="General">📊 General (Company info, address, officers)</Option>
+                  <Option value="Financials">💰 Financials (Balance sheet, income statement, cash flow)</Option>
+                  <Option value="Highlights">⭐ Highlights (Key metrics: market cap, P/E, earnings)</Option>
+                  <Option value="Valuation">📈 Valuation (P/E ratios, enterprise value)</Option>
+                  <Option value="Technicals">📊 Technicals (Beta, 52-week range, MA)</Option>
+                  <Option value="Holders">👥 Holders (Institutional holdings, ownership)</Option>
+                  <Option value="outstandingShares">📈 Outstanding Shares (Shares data)</Option>
+                  <Option value="Earnings">💸 Earnings (Annual earnings, estimates)</Option>
+                  <Option value="SharesStats">📊 Shares Stats (Float, short interest)</Option>
+                  <Option value="AnalystRatings">🎯 Analyst Ratings (Buy/sell, target price)</Option>
+                  <Option value="SplitsDividends">💰 Splits & Dividends (Dividend, splits)</Option>
+                  <Option value="InsiderTransactions">🔐 Insider Transactions (Executive trades)</Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                label="Skip Recent Hours"
+                name={['taskParams', 'skip_recent_hours']}
+                extra="Skip stocks updated within the last N hours to avoid redundant API calls. Default is 24 hours."
+                initialValue={24}
+              >
+                <InputNumber 
+                  min={1} 
+                  max={168} 
+                  placeholder="24" 
+                  style={{ width: '100%' }}
+                  addonAfter="hours"
+                />
+              </Form.Item>
+
+              <Alert
+                message="Smart Update Strategy"
+                type="success"
+                showIcon
+                style={{ marginTop: 16 }}
+                description={
+                  <div>
+                    <p><strong>Main Scheduler (Recommended):</strong></p>
+                    <ul style={{ marginBottom: 8, paddingLeft: 20 }}>
+                      <li>Weekly on Sunday 2 AM</li>
+                      <li>Updates all 12 data types</li>
+                      <li>Skips stocks updated within 24 hours</li>
+                    </ul>
+                    <p><strong>Earnings Season Fast Track (Optional):</strong></p>
+                    <ul style={{ paddingLeft: 20 }}>
+                      <li>Manual or temporary schedule during earnings season (Jan, Apr, Jul, Oct)</li>
+                      <li>Focus on: Earnings, Financials, Highlights, Valuation</li>
+                      <li>Run 2-3 times per week for faster updates</li>
+                    </ul>
+                  </div>
+                }
+              />
             </>
           );
           

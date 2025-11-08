@@ -51,8 +51,12 @@ task_routes = {
     # 长时间运行的数据获取任务（data_fetching队列）
     'fetch_futu_themes': {'queue': 'data_fetching'},
     'fetch_eodhd_fundamentals': {'queue': 'data_fetching'},  # 🔥 新增：基本面数据获取
+    'update_single_ticker_fundamentals': {'queue': 'data_fetching'},  # 🔥 新增：单个ticker基本面数据更新
+    'update_watchlist_fundamentals_batch': {'queue': 'data_fetching'},  # 🔥 新增：Watchlist批量基本面数据更新
     'fetch_eodhd_eod_stock_prices': {'queue': 'data_fetching'},  # 🔥 新增：历史股价数据获取
+    'fetch_single_ticker_eod_history': {'queue': 'data_fetching'},  # 🔥 新增：单个ticker历史数据获取
     'fetch_earnings_calendar': {'queue': 'data_fetching'},  # 🔥 新增：财报日历数据获取（13000+条记录）
+    'fetch_ipo_calendar': {'queue': 'data_fetching'},  # 🔥 新增：IPO日历数据获取
 }
 
 # Worker配置

@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar';
+  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -148,6 +148,15 @@ export interface CreateIPOCalendarTaskParams {
   fetch_next_week?: boolean;
   // 注意：EODHD API 不支持 exchanges 参数，已移除
   // 如果需要过滤特定交易所，可以在查询数据库时使用 WHERE 条件
+}
+
+export interface CreateWatchlistFundamentalsTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  data_types?: string[];
+  skip_recent_hours?: number;
 }
 
 export interface CronPreset {
@@ -725,6 +734,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认 IPO 日历定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建 Watchlist Fundamentals 定时任务
+   */
+  async createWatchlistFundamentalsTask(params: CreateWatchlistFundamentalsTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/watchlist-fundamentals', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建 Watchlist Fundamentals 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建 Watchlist Fundamentals 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建 Watchlist Fundamentals 定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认 Watchlist Fundamentals 定时任务
+   */
+  async createDefaultWatchlistFundamentalsTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/watchlist-fundamentals/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认 Watchlist Fundamentals 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认 Watchlist Fundamentals 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认 Watchlist Fundamentals 定时任务失败'
       };
     }
   }

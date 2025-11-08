@@ -66,7 +66,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'other';
+  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -311,6 +311,24 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/finviz-screener',
           params: {},
           icon: <FilterOutlined />
+        }
+      ]
+    },
+    {
+      id: 'watchlist_fundamentals',
+      name: 'Watchlist Fundamentals',
+      type: 'watchlist_fundamentals',
+      description: 'Automatically update fundamentals data for all watchlist stocks (weekly)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_watchlist_fundamentals_schedule',
+          name: 'Configure Watchlist Fundamentals Update',
+          description: 'Set up periodic fundamentals update for your watchlist stocks (weekly on Sunday 2 AM)',
+          endpoint: '/scheduler/tasks/watchlist-fundamentals',
+          params: {},
+          icon: <DatabaseOutlined />
         }
       ]
     }
@@ -764,7 +782,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1263,7 +1281,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals'}
           dataSourceName={selectedDataSource.name}
         />
       )}

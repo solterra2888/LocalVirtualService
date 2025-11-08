@@ -94,23 +94,23 @@ class UnifiedLogger:
         if not is_celery_worker:
             self.info(f"日志系统初始化完成 - 级别: {level}, 文件输出: {log_to_file}, 控制台输出: {log_to_console}")
     
-    def debug(self, message: str, source: str = None, **kwargs):
+    def debug(self, msg: str, source: str = None, **kwargs):
         """调试级别日志"""
-        self._log(logging.DEBUG, message, source, **kwargs)
+        self._log(logging.DEBUG, msg, source, **kwargs)
     
-    def info(self, message: str, source: str = None, **kwargs):
+    def info(self, msg: str, source: str = None, **kwargs):
         """信息级别日志"""
-        self._log(logging.INFO, message, source, **kwargs)
+        self._log(logging.INFO, msg, source, **kwargs)
     
-    def warning(self, message: str, source: str = None, **kwargs):
+    def warning(self, msg: str, source: str = None, **kwargs):
         """警告级别日志"""
-        self._log(logging.WARNING, message, source, **kwargs)
+        self._log(logging.WARNING, msg, source, **kwargs)
     
-    def error(self, message: str, source: str = None, **kwargs):
+    def error(self, msg: str, source: str = None, **kwargs):
         """错误级别日志"""
-        self._log(logging.ERROR, message, source, **kwargs)
+        self._log(logging.ERROR, msg, source, **kwargs)
     
-    def _log(self, level: int, message: str, source: str = None, **kwargs):
+    def _log(self, level: int, msg: str, source: str = None, **kwargs):
         """内部日志记录方法"""
         if not self._initialized:
             # 如果未初始化，使用默认配置
@@ -118,9 +118,9 @@ class UnifiedLogger:
         
         # 格式化消息
         if source:
-            formatted_message = f"[{source}] {message}"
+            formatted_message = f"[{source}] {msg}"
         else:
-            formatted_message = message
+            formatted_message = msg
         
         # 添加额外信息
         if kwargs:
@@ -199,33 +199,33 @@ def init_logging(**kwargs):
 
 
 # 便捷函数
-def debug(message: str, source: str = None, **kwargs):
+def debug(msg: str, source: str = None, **kwargs):
     """调试日志"""
     # 避免参数名冲突：如果kwargs中有'message'，则重命名
     if 'message' in kwargs:
         kwargs['extra_message'] = kwargs.pop('message')
-    logger.debug(message, source, **kwargs)
+    logger.debug(msg, source, **kwargs)
 
 
-def info(message: str, source: str = None, **kwargs):
+def info(msg: str, source: str = None, **kwargs):
     """信息日志"""
     # 避免参数名冲突：如果kwargs中有'message'，则重命名
     if 'message' in kwargs:
         kwargs['extra_message'] = kwargs.pop('message')
-    logger.info(message, source, **kwargs)
+    logger.info(msg, source, **kwargs)
 
 
-def warning(message: str, source: str = None, **kwargs):
+def warning(msg: str, source: str = None, **kwargs):
     """警告日志"""
     # 避免参数名冲突：如果kwargs中有'message'，则重命名
     if 'message' in kwargs:
         kwargs['extra_message'] = kwargs.pop('message')
-    logger.warning(message, source, **kwargs)
+    logger.warning(msg, source, **kwargs)
 
 
-def error(message: str, source: str = None, **kwargs):
+def error(msg: str, source: str = None, **kwargs):
     """错误日志"""
     # 避免参数名冲突：如果kwargs中有'message'，则重命名
     if 'message' in kwargs:
         kwargs['extra_message'] = kwargs.pop('message')
-    logger.error(message, source, **kwargs) 
+    logger.error(msg, source, **kwargs)

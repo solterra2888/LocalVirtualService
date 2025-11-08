@@ -395,6 +395,31 @@ async def create_default_earnings_calendar_task_proxy(request: Request, current_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create default earnings calendar task: {str(e)}")
 
+@router.post("/tasks/watchlist-fundamentals", summary="create watchlist fundamentals task")
+async def create_watchlist_fundamentals_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 Watchlist Fundamentals 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/watchlist-fundamentals", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create watchlist fundamentals task: {str(e)}")
+
+@router.post("/tasks/watchlist-fundamentals/default", summary="create default watchlist fundamentals task")
+async def create_default_watchlist_fundamentals_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 Watchlist Fundamentals 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/watchlist-fundamentals/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default watchlist fundamentals task: {str(e)}")
+
 @router.post("/tasks/ipo-calendar", summary="create IPO calendar task")
 async def create_ipo_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建 IPO 日历定时任务"""

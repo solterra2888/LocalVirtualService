@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -180,6 +180,24 @@ class CreateIPOCalendarTaskRequest(BaseModel):
     
     # 注意：EODHD API 不支持 exchanges 参数，已移除
     # 如果需要过滤特定交易所，可以在查询数据库时使用 WHERE 条件
+
+
+class CreateWatchlistFundamentalsTaskRequest(BaseModel):
+    """创建 Watchlist Fundamentals 定时任务请求模型"""
+    name: str = Field(default="Watchlist Fundamentals Weekly Update", description="任务名称")
+    cron_expression: str = Field(default="0 2 * * 0", description="Cron表达式（默认每周日凌晨2点）")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    data_types: Optional[List[str]] = Field(
+        default=None,
+        description="要更新的数据类型列表（不指定则更新全部12种）：General, Financials, Highlights, Valuation, Technicals, Holders, outstandingShares, Earnings, SharesStats, AnalystRatings, SplitsDividends, InsiderTransactions"
+    )
+    skip_recent_hours: int = Field(
+        default=24,
+        description="跳过最近N小时内已更新的股票（默认24小时）",
+        ge=1,
+        le=168
+    )
 
 
 # ============ 定时任务管理API ============
@@ -1229,6 +1247,129 @@ async def create_ipo_calendar_task(
         raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
     except Exception as e:
         logger.error("创建 IPO 日历定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/watchlist-fundamentals", summary="创建 Watchlist Fundamentals 定时任务")
+async def create_watchlist_fundamentals_task(
+    request: CreateWatchlistFundamentalsTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 Watchlist Fundamentals 定期更新定时任务
+    
+    默认配置：
+    - 每周日凌晨2点执行 (0 2 * * 0)
+    - 更新所有 watchlist 股票的基本面数据
+    - 跳过24小时内已更新的股票
+    - 支持自定义数据类型和更新频率
+    
+    使用场景：
+    - 常规时期：每周更新所有12种数据类型
+    - 财报季：可创建额外任务，每周2-3次更新 Earnings 相关数据
+    """
+    try:
+        logger.info("创建 Watchlist Fundamentals 定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression,
+                   data_types=request.data_types,
+                   skip_recent_hours=request.skip_recent_hours)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # Watchlist Fundamentals 任务参数
+        task_params = {
+            'data_types': request.data_types,  # None 表示全部12种
+            'skip_recent_hours': request.skip_recent_hours
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="watchlist_fundamentals",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("Watchlist Fundamentals 定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("Watchlist Fundamentals 定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except ValueError as e:
+        logger.error("Watchlist Fundamentals 定时任务创建参数错误", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+    except Exception as e:
+        logger.error("创建 Watchlist Fundamentals 定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/watchlist-fundamentals/default", summary="创建默认 Watchlist Fundamentals 定时任务")
+async def create_default_watchlist_fundamentals_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的 Watchlist Fundamentals 定时任务
+    
+    默认配置：
+    - 每周日凌晨2点执行 (0 2 * * 0)
+    - 更新所有12种数据类型
+    - 跳过24小时内已更新的股票
+    """
+    try:
+        logger.info("创建默认 Watchlist Fundamentals 定时任务请求", user=current_user.username)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        result = await scheduler_service.create_cron_task(
+            task_name="Watchlist Fundamentals Weekly Update",
+            task_type="watchlist_fundamentals",
+            cron_expression="0 2 * * 0",  # 每周日凌晨2点
+            timezone="America/New_York",
+            enabled=True,
+            task_params={
+                'data_types': None,  # 全部12种
+                'skip_recent_hours': 24
+            },
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("默认 Watchlist Fundamentals 定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("默认 Watchlist Fundamentals 定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except Exception as e:
+        logger.error("创建默认 Watchlist Fundamentals 定时任务失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
