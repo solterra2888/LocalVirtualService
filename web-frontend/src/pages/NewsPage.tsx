@@ -689,14 +689,18 @@ const NewsPage: React.FC = () => {
                           >
                             <List.Item.Meta
                               avatar={
-                                <Space align="center" style={{ minWidth: '120px' }}>
-                                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                                    <CalendarOutlined /> {item.date ? dayjs(item.date).format('YYYY-MM-DD') : 'N/A'}
-                                  </Text>
-                                  <Text type="secondary" style={{ fontSize: '11px' }}>
-                                    {item.date ? dayjs(item.date).format('HH:mm:ss') : 'N/A'}
-                                  </Text>
-                                </Space>
+                                <Text 
+                                  type="secondary" 
+                                  style={{ fontSize: '10px', whiteSpace: 'nowrap' }}
+                                >
+                                  <CalendarOutlined />{' '}
+                                  {item.date ? dayjs(item.date).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}
+                                  {item.updated_at && (
+                                    <span style={{ marginLeft: '8px', color: '#999' }}>
+                                      | Updated: {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm:ss')}
+                                    </span>
+                                  )}
+                                </Text>
                               }
                               title={
                                 <Space>

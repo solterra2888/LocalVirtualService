@@ -4,6 +4,7 @@
 经济事件数据服务
 
 基于EODHD API的经济事件数据获取和管理服务
+支持从数据库读取已存储的经济事件数据
 """
 
 import requests
@@ -18,6 +19,9 @@ from urllib3.util.retry import Retry
 from backend.utils.logger import info, error, warning, get_logger
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
+from backend.database.db_manager import DatabaseManager
+from config.settings import config
+import psycopg2.extras
 
 
 class EconomicEventsService:
@@ -41,6 +45,16 @@ class EconomicEventsService:
         
         # 设置默认请求参数
         self.session = self.create_robust_session()
+        
+        # 初始化数据库管理器
+        db_config = config.get_db_config()
+        self.db_manager = DatabaseManager({
+            'db_host': db_config['host'],
+            'db_port': db_config['port'],
+            'db_name': db_config['name'],
+            'db_user': db_config['user'],
+            'db_password': db_config['password']
+        })
         
         info("经济事件API服务初始化完成", source="economic_events")
     
@@ -311,5 +325,162 @@ class EconomicEventsService:
                 formatted['calculated_change_pct'] = None
         
         return formatted
+    
+    def get_economic_events_from_db(
+        self,
+        from_date: Union[str, datetime] = None,
+        to_date: Union[str, datetime] = None,
+        country: str = None,
+        offset: int = 0,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        从数据库获取经济事件数据
+        
+        Args:
+            from_date: 开始日期 (YYYY-MM-DD 或 datetime对象)
+            to_date: 结束日期 (YYYY-MM-DD 或 datetime对象)
+            country: 国家代码 (ISO 3166格式，2个字符)，可以是逗号分隔的多个国家
+            offset: 偏移量
+            limit: 限制数量
+        
+        Returns:
+            经济事件数据列表
+        """
+        info(f"从数据库获取经济事件数据: from_date={from_date}, to_date={to_date}, country={country}", source="economic_events")
+        
+        # 构建SQL查询
+        query = "SELECT * FROM economic_events WHERE 1=1"
+        params = []
+        
+        # 处理日期参数
+        if from_date:
+            if isinstance(from_date, datetime):
+                from_date_str = from_date.strftime('%Y-%m-%d')
+            else:
+                from_date_str = from_date
+            query += " AND date >= %s"
+            params.append(from_date_str)
+        
+        if to_date:
+            if isinstance(to_date, datetime):
+                to_date_str = to_date.strftime('%Y-%m-%d')
+            else:
+                to_date_str = to_date
+            query += " AND date <= %s"
+            params.append(to_date_str)
+        
+        # 处理国家参数（支持多个国家）
+        if country:
+            # 分割国家代码（支持逗号分隔）
+            countries = [c.strip() for c in country.split(',') if c.strip()]
+            if countries:
+                placeholders = ','.join(['%s'] * len(countries))
+                query += f" AND country IN ({placeholders})"
+                params.extend(countries)
+        
+        # 添加排序、分页
+        query += " ORDER BY date DESC, time DESC NULLS LAST"
+        query += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                error("无法连接到数据库", source="economic_events")
+                return []
+            
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            conn.close()
+            
+            # 转换为字典列表
+            events = []
+            for row in results:
+                event = dict(row)
+                # 转换为前端期望的格式
+                formatted_event = {
+                    'date': event.get('date', ''),
+                    'time': event.get('time', ''),
+                    'country': event.get('country', ''),
+                    'event': event.get('event', ''),
+                    'period': event.get('period', ''),
+                    'actual': event.get('actual', ''),
+                    'previous': event.get('previous', ''),
+                    'forecast': event.get('forecast', ''),
+                    'change_val': event.get('change_val'),
+                    'change_percentage': event.get('change_percentage'),
+                    'impact': event.get('impact', 1),
+                    'comparison': event.get('comparison', '')
+                }
+                events.append(formatted_event)
+            
+            info(f"从数据库获取到 {len(events)} 条经济事件数据", source="economic_events")
+            return events
+            
+        except Exception as e:
+            error(f"从数据库获取经济事件数据失败: {str(e)}", source="economic_events")
+            return []
+    
+    def get_available_countries_from_db(self) -> List[Dict[str, str]]:
+        """
+        从数据库获取可用的国家列表
+        
+        Returns:
+            国家列表，格式为 [{'code': 'US', 'name': 'United States'}, ...]
+        """
+        info("从数据库获取可用国家列表", source="economic_events")
+        
+        query = """
+            SELECT DISTINCT country 
+            FROM economic_events 
+            WHERE country IS NOT NULL AND country != ''
+            ORDER BY country
+        """
+        
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                error("无法连接到数据库", source="economic_events")
+                return []
+            
+            cursor = conn.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+            conn.close()
+            
+            # 国家代码到国家名称的映射
+            country_names = {
+                'US': 'United States', 'CN': 'China', 'JP': 'Japan', 
+                'DE': 'Germany', 'GB': 'United Kingdom', 'FR': 'France',
+                'IT': 'Italy', 'CA': 'Canada', 'AU': 'Australia', 'KR': 'South Korea',
+                'IN': 'India', 'BR': 'Brazil', 'RU': 'Russia', 'MX': 'Mexico',
+                'ES': 'Spain', 'NL': 'Netherlands', 'CH': 'Switzerland', 'SE': 'Sweden',
+                'BE': 'Belgium', 'NO': 'Norway', 'AT': 'Austria', 'FI': 'Finland',
+                'DK': 'Denmark', 'PL': 'Poland', 'IE': 'Ireland', 'PT': 'Portugal',
+                'CZ': 'Czech Republic', 'NZ': 'New Zealand', 'IL': 'Israel', 'SG': 'Singapore',
+                'HK': 'Hong Kong', 'TW': 'Taiwan', 'TH': 'Thailand', 'MY': 'Malaysia',
+                'ID': 'Indonesia', 'PH': 'Philippines', 'VN': 'Vietnam', 'SA': 'Saudi Arabia',
+                'AE': 'United Arab Emirates', 'ZA': 'South Africa', 'EG': 'Egypt', 'NG': 'Nigeria',
+                'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colombia', 'PE': 'Peru',
+                'TR': 'Turkey', 'GR': 'Greece', 'HU': 'Hungary', 'RO': 'Romania'
+            }
+            
+            countries = []
+            for row in results:
+                country_code = row[0]
+                country_name = country_names.get(country_code, country_code)
+                countries.append({
+                    'code': country_code,
+                    'name': country_name
+                })
+            
+            info(f"从数据库获取到 {len(countries)} 个国家", source="economic_events")
+            return countries
+            
+        except Exception as e:
+            error(f"从数据库获取国家列表失败: {str(e)}", source="economic_events")
+            return []
 
 

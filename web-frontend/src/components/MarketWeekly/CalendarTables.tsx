@@ -5,6 +5,12 @@ import type { EconomicEvent, EarningsEvent, IPOEvent } from '../../types/marketW
 
 // 经济日历表格
 export const EconomicCalendarTable: React.FC<{ data: EconomicEvent[] }> = ({ data }) => {
+  const countryLabels: Record<string, { label: string; color: string }> = {
+    US: { label: 'United States', color: 'blue' },
+    CN: { label: 'China', color: 'red' },
+    HK: { label: 'Hong Kong', color: 'volcano' }
+  };
+
   const columns: ColumnsType<EconomicEvent> = [
     {
       title: 'Date',
@@ -26,8 +32,38 @@ export const EconomicCalendarTable: React.FC<{ data: EconomicEvent[] }> = ({ dat
       title: 'Country',
       dataIndex: 'country',
       key: 'country',
-      width: 80,
-      render: (country: string) => <Tag>{country}</Tag>
+      width: 120,
+      render: (country: string) => {
+        const code = (country || '').toUpperCase();
+        const info = countryLabels[code];
+        if (info) {
+          return <Tag color={info.color}>{info.label}</Tag>;
+        }
+        return <Tag>{code || '-'}</Tag>;
+      }
+    },
+    {
+      title: 'Impact',
+      dataIndex: 'impact',
+      key: 'impact',
+      width: 90,
+      align: 'center',
+      render: (impact?: number) => {
+        if (!impact || impact < 1 || impact > 3) return '-';
+
+        const colors = ['', '#52c41a', '#faad14', '#f5222d'];
+        return (
+          <span
+            style={{
+              color: colors[impact],
+              fontWeight: 600,
+              letterSpacing: '1px'
+            }}
+          >
+            {'★'.repeat(impact)}
+          </span>
+        );
+      }
     },
     {
       title: 'Actual',
@@ -53,7 +89,7 @@ export const EconomicCalendarTable: React.FC<{ data: EconomicEvent[] }> = ({ dat
   ];
 
   if (!data || data.length === 0) {
-    return <Empty description="No high/medium-impact US economic events scheduled for next week" />;
+    return <Empty description="No high/medium-impact economic events scheduled for the US, China, or Hong Kong next week" />;
   }
 
   return (
@@ -63,7 +99,7 @@ export const EconomicCalendarTable: React.FC<{ data: EconomicEvent[] }> = ({ dat
       rowKey={(record, index) => `${record.date}-${index}`}
       pagination={false}
       size="small"
-      scroll={{ x: 800 }}
+      scroll={{ x: 960 }}
       className="calendar-table"
     />
   );

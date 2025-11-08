@@ -54,6 +54,8 @@ export interface FilteredNews {
   title: string;
   content?: string;
   date: string;
+  updated_at?: string;
+  created_at?: string;
   source: string;
   link?: string;
   analysis_result?: any;

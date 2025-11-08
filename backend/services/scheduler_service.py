@@ -1238,13 +1238,27 @@ class SchedulerService:
             }
     
     async def _execute_economic_events_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行经济事件获取任务"""
+        """
+        执行经济事件获取任务
+        
+        Args:
+            params: 任务参数
+                - start_date: 开始日期 (YYYY-MM-DD)，可选
+                - end_date: 结束日期 (YYYY-MM-DD)，可选
+                - days: 从今天开始的天数，可选（默认30天）
+                - fetch_next_week: 是否获取下周数据，可选（默认False）
+                - country: 国家代码，可选
+        
+        Returns:
+            Dict包含任务执行结果
+        """
         try:
             logger.info(f"开始执行经济事件获取任务 | params={params}")
             
             # 关键：在线程池中执行同步方法（避免阻塞事件循环）
             import asyncio
             import concurrent.futures
+            from datetime import datetime, timedelta
             
             def _fetch_and_store_economic_events():
                 """同步方法：获取并存储经济事件数据"""
@@ -1256,26 +1270,86 @@ class SchedulerService:
                 api_client = EconomicEventsService()
                 market_service = create_market_data_service()
                 
-                # 构建API请求参数
-                api_params = {}
-                if 'from_date' in params:
-                    api_params['from_date'] = params['from_date']
-                if 'to_date' in params:
-                    api_params['to_date'] = params['to_date']
+                # 计算日期范围（参考 Earnings Calendar 的方式）
+                from_date = None
+                to_date = None
+                
+                if 'start_date' in params and 'end_date' in params:
+                    # 使用指定的日期范围
+                    from_date = params['start_date']
+                    to_date = params['end_date']
+                elif 'fetch_next_week' in params and params['fetch_next_week']:
+                    # 获取下周数据（周一到周日）
+                    today = datetime.now()
+                    days_until_monday = (7 - today.weekday()) % 7
+                    if days_until_monday == 0:
+                        days_until_monday = 7
+                    next_monday = today + timedelta(days=days_until_monday)
+                    next_sunday = next_monday + timedelta(days=6)
+                    from_date = next_monday.strftime('%Y-%m-%d')
+                    to_date = next_sunday.strftime('%Y-%m-%d')
+                elif 'days' in params:
+                    # 使用相对天数
+                    days = params['days']
+                    today = datetime.now()
+                    from_date = today.strftime('%Y-%m-%d')
+                    to_date = (today + timedelta(days=days)).strftime('%Y-%m-%d')
+                else:
+                    # 默认获取未来30天的数据
+                    today = datetime.now()
+                    from_date = today.strftime('%Y-%m-%d')
+                    to_date = (today + timedelta(days=30)).strftime('%Y-%m-%d')
+                
+                # 处理多个国家的情况
+                countries = []
                 if 'country' in params:
-                    api_params['country'] = params['country']
-                if 'limit' in params:
-                    api_params['limit'] = params['limit']
+                    country_param = params['country']
+                    if isinstance(country_param, list):
+                        # 如果是数组
+                        countries = country_param
+                    elif isinstance(country_param, str):
+                        # 如果是字符串，支持逗号分隔
+                        countries = [c.strip() for c in country_param.split(',') if c.strip()]
+                    else:
+                        countries = [str(country_param)]
                 
-                # 从API获取数据
-                events_data = api_client.get_economic_events(**api_params)
+                logger.info(f"经济事件请求参数: from_date={from_date}, to_date={to_date}, countries={countries if countries else 'All'}")
                 
-                if not events_data:
+                # 收集所有国家的数据
+                all_events_data = []
+                
+                if countries:
+                    # 对每个国家分别请求
+                    for country in countries:
+                        api_params = {
+                            'from_date': from_date,
+                            'to_date': to_date,
+                            'country': country,
+                            'limit': 1000
+                        }
+                        logger.info(f"获取国家 {country} 的经济事件数据")
+                        country_events = api_client.get_economic_events(**api_params)
+                        if country_events:
+                            all_events_data.extend(country_events)
+                            logger.info(f"国家 {country} 获取到 {len(country_events)} 条数据")
+                else:
+                    # 没有指定国家，获取所有国家
+                    api_params = {
+                        'from_date': from_date,
+                        'to_date': to_date,
+                        'limit': 1000
+                    }
+                    all_events_data = api_client.get_economic_events(**api_params)
+                
+                if not all_events_data:
                     return {
                         'success': True,
                         'message': '未获取到新数据',
                         'data': {'total_fetched': 0, 'new_records': 0}
                     }
+                
+                # 使用收集到的数据
+                events_data = all_events_data
                 
                 # 格式化数据并计算impact
                 formatted_data = []
@@ -1300,16 +1374,47 @@ class SchedulerService:
                     formatted_data.append(formatted_event)
                 
                 # 保存到数据库
-                inserted_count = market_service.batch_insert_economic_events(formatted_data)
+                batch_result = market_service.batch_insert_economic_events(formatted_data)
+                inserted_count = batch_result.get('inserted', 0)
+                updated_count = batch_result.get('updated', 0)
+                total_before_dedup = batch_result.get('total_before_dedup', len(formatted_data))
+                duplicates_removed = batch_result.get('duplicates_removed', 0)
                 
-                logger.info(f"经济事件任务执行完成: 获取{len(formatted_data)}条，保存{inserted_count}条")
+                # 构建消息
+                country_info = f" ({', '.join(countries)} 国家)" if countries else " (所有国家)"
+                
+                # 构建详细的执行信息
+                dedup_info = f"，去重移除{duplicates_removed}条" if duplicates_removed > 0 else ""
+                
+                logger.info(
+                    f"经济事件任务执行完成: API返回{len(events_data)}条，格式化{len(formatted_data)}条{dedup_info}，"
+                    f"新增{inserted_count}条，更新{updated_count}条 (日期范围: {from_date} 至 {to_date}{country_info})"
+                )
+                
+                # 构建用户友好的消息
+                message_parts = [
+                    f"成功获取并保存 {inserted_count} 条新增经济事件，更新 {updated_count} 条现有记录"
+                ]
+                if duplicates_removed > 0:
+                    message_parts.append(f"去重移除 {duplicates_removed} 条重复数据")
+                message_parts.append(f"(日期: {from_date} 至 {to_date}{country_info})")
                 
                 return {
                     'success': True,
-                    'message': f'成功获取并保存 {inserted_count} 条经济事件数据',
+                    'message': '，'.join(message_parts),
                     'data': {
-                        'total_fetched': len(formatted_data),
+                        'api_fetched': len(events_data),
+                        'formatted': len(formatted_data),
+                        'before_dedup': total_before_dedup,
+                        'duplicates_removed': duplicates_removed,
+                        'after_dedup': total_before_dedup - duplicates_removed,
                         'new_records': inserted_count,
+                        'updated_records': updated_count,
+                        'date_range': {
+                            'from_date': from_date,
+                            'to_date': to_date
+                        },
+                        'countries': countries if countries else None,
                         'params': params
                     }
                 }

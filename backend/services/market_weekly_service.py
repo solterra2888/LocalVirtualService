@@ -17,6 +17,7 @@ from typing import Dict, List, Any, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
+from backend.services.economic_events_service import EconomicEventsService
 
 logger = get_logger("market_weekly_service")
 
@@ -588,66 +589,262 @@ class MarketWeeklyService:
     
     def _get_economic_calendar(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """获取经济日历数据"""
-        # 注意：economic_events表可能不存在或列名不同，这里返回空列表避免错误
-        # TODO: 如果需要经济日历功能，需要先创建economic_events表
+        logger.info("Fetching economic calendar (next week)")
+        
+        target_countries = ['US', 'CN', 'HK']
+        from_date = start_date.date().strftime('%Y-%m-%d')
+        to_date = end_date.date().strftime('%Y-%m-%d')
+        
+        # 首选：通过EconomicEventsService读取已存储的数据
+        try:
+            events_service = EconomicEventsService()
+            raw_events = events_service.get_economic_events_from_db(
+                from_date=from_date,
+                to_date=to_date,
+                country=",".join(target_countries),
+                limit=200
+            )
+            formatted = self._format_economic_events(raw_events, target_countries)
+            if formatted:
+                logger.info(f"Found {len(formatted)} economic events via service")
+                return formatted
+            logger.info("Economic events service returned no results after filtering, falling back to legacy query")
+        except Exception as e:
+            logger.error(f"Error fetching economic events via service: {str(e)}")
+        
+        # 兜底：直接查询数据库
+        return self._get_economic_calendar_legacy(start_date, end_date, target_countries)
+    
+    def _get_economic_calendar_legacy(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        target_countries: List[str]
+    ) -> List[Dict]:
+        """Legacy fallback: directly query economic_events table"""
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
             
-            # 先检查表是否存在
+            # 确认表是否存在
             cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
                     WHERE table_name = 'economic_events'
                 )
             """)
-            table_exists = cursor.fetchone()[0]
-            
-            if not table_exists:
+            if not cursor.fetchone()[0]:
                 logger.warning("economic_events table does not exist, returning empty list")
                 cursor.close()
                 conn.close()
                 return []
             
-            # 表存在，尝试查询（不使用importance列）
             query = """
             SELECT 
-                date,
-                event,
-                country,
-                actual,
-                forecast,
-                previous
+                "date",
+                "time",
+                "event",
+                COALESCE("country", 'US') AS country,
+                "actual",
+                "forecast",
+                "previous",
+                "impact"
             FROM economic_events
-            WHERE date >= %s AND date <= %s
-              AND country = 'US'
-            ORDER BY date DESC
-            LIMIT 50;
+            WHERE "date" >= %s AND "date" <= %s
+              AND COALESCE("country", 'US') = ANY(%s)
+            ORDER BY "date" ASC, "time" NULLS LAST, country
+            LIMIT 200;
             """
             
-            cursor.execute(query, (start_date, end_date))
+            from_date = start_date.date().strftime('%Y-%m-%d')
+            to_date = end_date.date().strftime('%Y-%m-%d')
+            cursor.execute(query, (from_date, to_date, target_countries))
             
-            results = []
-            for row in cursor.fetchall():
-                results.append({
-                    'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
-                    'time': row[0].strftime('%H:%M') if hasattr(row[0], 'hour') else '',
-                    'event': row[1] or '',
-                    'country': row[2] or 'US',
-                    'actual': str(row[3]) if row[3] is not None else '-',
-                    'forecast': str(row[4]) if row[4] is not None else '-',
-                    'previous': str(row[5]) if row[5] is not None else '-'
-                })
-            
+            rows = cursor.fetchall()
             cursor.close()
             conn.close()
             
-            logger.info(f"Found {len(results)} economic events")
-            return results
+            raw_events = []
+            for row in rows:
+                raw_events.append({
+                    'date': row[0] if row[0] else '',
+                    'time': row[1] or '',
+                    'event': row[2] or '',
+                    'country': (row[3] or 'US').upper(),
+                    'actual': row[4],
+                    'forecast': row[5],
+                    'previous': row[6],
+                    'impact': row[7]
+                })
+            
+            formatted = self._format_economic_events(raw_events, target_countries)
+            if formatted:
+                logger.info(f"Found {len(formatted)} economic events via legacy query")
+            else:
+                logger.info("Legacy economic events query returned no results after filtering")
+            return formatted
         
         except Exception as e:
-            logger.error(f"Error fetching economic calendar: {str(e)}")
+            logger.error(f"Error fetching economic calendar via legacy query: {str(e)}")
             return []
+    
+    def _format_economic_events(
+        self,
+        raw_events: List[Dict[str, Any]],
+        target_countries: List[str]
+    ) -> List[Dict]:
+        """格式化并筛选经济事件数据"""
+        if not raw_events:
+            return []
+        
+        formatted_events: List[Dict[str, Any]] = []
+        for event in raw_events:
+            if not event:
+                continue
+            
+            date_str = (event.get('date') or event.get('event_date') or '').strip()
+            if not date_str:
+                continue
+            
+            country = (event.get('country') or 'US').upper()
+            if target_countries and country not in target_countries:
+                continue
+            
+            time_str = (event.get('time') or '').strip()
+            impact_value = self._normalize_event_impact(event.get('impact'))
+            
+            formatted_events.append({
+                'date': date_str,
+                'time': time_str,
+                'event': (event.get('event') or event.get('title') or event.get('name') or '').strip(),
+                'country': country,
+                'actual': self._normalize_event_value(event.get('actual')),
+                'forecast': self._normalize_event_value(event.get('forecast')),
+                'previous': self._normalize_event_value(event.get('previous')),
+                'impact': impact_value if impact_value > 0 else None,
+                '_impact_value': impact_value,
+                '_sort_key': (
+                    self._safe_parse_date(date_str),
+                    self._safe_parse_time(time_str),
+                    country
+                )
+            })
+        
+        if not formatted_events:
+            return []
+        
+        formatted_events.sort(key=lambda item: item['_sort_key'])
+        
+        prioritized = [item for item in formatted_events if item['_impact_value'] >= 2]
+        if not prioritized:
+            prioritized = formatted_events
+        
+        limited = prioritized[:40]
+        
+        normalized: List[Dict[str, Any]] = []
+        for item in limited:
+            normalized.append({
+                'date': item['date'],
+                'time': item['time'],
+                'event': item['event'],
+                'country': item['country'],
+                'actual': item['actual'],
+                'forecast': item['forecast'],
+                'previous': item['previous'],
+                'impact': item['impact']
+            })
+        
+        return normalized
+    
+    def _normalize_event_impact(self, impact_value: Any) -> int:
+        """将impact字段统一转换为整数等级"""
+        if impact_value is None:
+            return 0
+        
+        if isinstance(impact_value, (int, float)):
+            return int(impact_value)
+        
+        impact_str = str(impact_value).strip()
+        if not impact_str:
+            return 0
+        
+        if set(impact_str) == {'*'}:
+            return min(len(impact_str), 3)
+        
+        lower = impact_str.lower()
+        mapping = {
+            '3': 3,
+            'high': 3,
+            'very high': 3,
+            '重要': 3,
+            '2': 2,
+            'medium': 2,
+            'moderate': 2,
+            'medium-high': 2,
+            '1': 1,
+            'low': 1
+        }
+        if lower in mapping:
+            return mapping[lower]
+        
+        if 'high' in lower:
+            return 3
+        if 'medium' in lower or 'moderate' in lower:
+            return 2
+        if 'low' in lower:
+            return 1
+        
+        return 0
+    
+    def _normalize_event_value(self, value: Any) -> str:
+        """格式化实际值/预测值/前值"""
+        if value is None:
+            return '-'
+        
+        if isinstance(value, (int, float)):
+            value_str = f"{value}"
+        else:
+            value_str = str(value).strip()
+        
+        if not value_str:
+            return '-'
+        
+        if value_str.lower() in ('nan', 'none', 'null'):
+            return '-'
+        
+        return value_str
+    
+    def _safe_parse_date(self, date_str: str) -> datetime:
+        """安全地解析日期字符串以便排序"""
+        if not date_str:
+            return datetime.max
+        
+        for fmt in ('%Y-%m-%d', '%Y/%m/%d'):
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        
+        return datetime.max
+    
+    def _safe_parse_time(self, time_str: str):
+        """安全地解析时间字符串以便排序"""
+        if not time_str:
+            return datetime.min.time()
+        
+        normalized = time_str.strip().lower()
+        if normalized in ('all day', 'allday'):
+            return datetime.min.time()
+        if normalized in ('tentative', 'tbd', 'tba'):
+            return datetime.max.time()
+        
+        for fmt in ('%H:%M', '%H:%M:%S'):
+            try:
+                return datetime.strptime(time_str, fmt).time()
+            except ValueError:
+                continue
+        
+        return datetime.min.time()
     
     def _get_earnings_calendar(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """获取财报日历数据"""
@@ -926,6 +1123,251 @@ class MarketWeeklyService:
         if cache_key in _memory_cache:
             del _memory_cache[cache_key]
             logger.info(f"Cleared memory cache: {cache_key}")
+    
+    async def get_ohlc_data_batch(self, symbols: List[str], days: int = 90, request=None) -> Dict[str, Any]:
+        """
+        批量获取OHLC原始数据（用于前端渲染图表，支持请求中断检测）
+        
+        Args:
+            symbols: 股票代码列表，格式为 [{"symbol": "SPY.US", "label": "S&P 500"}, ...]
+            days: 天数
+            request: FastAPI Request对象，用于检测客户端断开
+        
+        Returns:
+            {
+                "status": "completed" | "cancelled",
+                "processed": int,
+                "total": int,
+                "results": [
+                    {
+                        "symbol": "SPY.US",
+                        "label": "S&P 500",
+                        "data": {
+                            "ohlc": [{time, open, high, low, close, volume}],
+                            "ema20": [{time, value}],
+                            "ema50": [{time, value}],
+                            "ema200": [{time, value}]
+                        },
+                        "success": true,
+                        "error": null
+                    }
+                ]
+            }
+        """
+        import pandas as pd
+        from datetime import datetime, timedelta
+        
+        results = []
+        total = len(symbols)
+        
+        logger.info(f"[Batch OHLC] Starting batch data fetch for {total} symbols")
+        
+        for i, symbol_info in enumerate(symbols):
+            # 🔥 检测客户端是否断开连接
+            if request:
+                is_disconnected = await request.is_disconnected()
+                if is_disconnected:
+                    logger.info(f"[Batch OHLC] Client disconnected. Processed {i}/{total}, stopping.")
+                    return {
+                        "status": "cancelled",
+                        "processed": i,
+                        "total": total,
+                        "results": results
+                    }
+            
+            symbol = symbol_info.get('symbol') if isinstance(symbol_info, dict) else symbol_info
+            label = symbol_info.get('label', symbol) if isinstance(symbol_info, dict) else symbol
+            
+            try:
+                logger.debug(f"[Batch OHLC] Fetching data {i+1}/{total}: {symbol}")
+                
+                # 获取历史数据
+                end_date = datetime.utcnow()
+                start_date = end_date - timedelta(days=days)
+                
+                conn = self.db_manager.get_connection()
+                cursor = conn.cursor()
+                
+                # 首先尝试从 stock_prices_eod 表获取数据
+                query_stock = """
+                SELECT date, open, high, low, close, volume
+                FROM stock_prices_eod
+                WHERE code = %s 
+                AND date >= %s 
+                AND date <= %s
+                AND period = 'd'
+                ORDER BY date ASC
+                """
+                
+                cursor.execute(query_stock, (symbol, start_date, end_date))
+                rows = cursor.fetchall()
+                
+                # 如果没有数据，尝试从 market_data_eod 表获取
+                if not rows:
+                    query_market = """
+                    SELECT date, open, high, low, close, volume
+                    FROM market_data_eod
+                    WHERE code = %s 
+                    AND date >= %s 
+                    AND date <= %s
+                    ORDER BY date ASC
+                    """
+                    
+                    cursor.execute(query_market, (symbol, start_date, end_date))
+                    rows = cursor.fetchall()
+                
+                cursor.close()
+                conn.close()
+                
+                if not rows:
+                    results.append({
+                        "symbol": symbol,
+                        "label": label,
+                        "data": None,
+                        "success": False,
+                        "error": "No data available"
+                    })
+                    continue
+                
+                # 转换为DataFrame计算EMA
+                df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
+                df['date'] = pd.to_datetime(df['date'])
+                df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
+                
+                # 计算EMA
+                df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+                df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+                df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+                
+                # 转换为前端需要的格式
+                ohlc_data = []
+                ema20_data = []
+                ema50_data = []
+                ema200_data = []
+                
+                for _, row in df.iterrows():
+                    timestamp = int(row['date'].timestamp())
+                    
+                    ohlc_data.append({
+                        "time": timestamp,
+                        "open": round(float(row['open']), 4),
+                        "high": round(float(row['high']), 4),
+                        "low": round(float(row['low']), 4),
+                        "close": round(float(row['close']), 4),
+                        "volume": int(row['volume']) if pd.notna(row['volume']) else 0
+                    })
+                    
+                    if pd.notna(row['ema20']):
+                        ema20_data.append({"time": timestamp, "value": round(float(row['ema20']), 4)})
+                    if pd.notna(row['ema50']):
+                        ema50_data.append({"time": timestamp, "value": round(float(row['ema50']), 4)})
+                    if pd.notna(row['ema200']):
+                        ema200_data.append({"time": timestamp, "value": round(float(row['ema200']), 4)})
+                
+                results.append({
+                    "symbol": symbol,
+                    "label": label,
+                    "data": {
+                        "ohlc": ohlc_data,
+                        "ema20": ema20_data,
+                        "ema50": ema50_data,
+                        "ema200": ema200_data
+                    },
+                    "success": True,
+                    "error": None
+                })
+                
+            except Exception as e:
+                logger.error(f"[Batch OHLC] Error fetching data for {symbol}: {str(e)}")
+                results.append({
+                    "symbol": symbol,
+                    "label": label,
+                    "data": None,
+                    "success": False,
+                    "error": str(e)
+                })
+            
+            # 每5个输出一次进度
+            if (i + 1) % 5 == 0:
+                logger.info(f"[Batch OHLC] Progress: {i+1}/{total} processed")
+        
+        logger.info(f"[Batch OHLC] Completed: {total}/{total} processed")
+        
+        return {
+            "status": "completed",
+            "processed": total,
+            "total": total,
+            "results": results
+        }
+    
+    async def generate_charts_batch(self, symbols: List[str], days: int = 90, request=None) -> List[Dict[str, Any]]:
+        """
+        批量生成candlestick图表图片（支持请求中断检测）
+        
+        Args:
+            symbols: 股票代码列表，格式为 [{"symbol": "SPY.US", "label": "S&P 500"}, ...]
+            days: 天数
+            request: FastAPI Request对象，用于检测客户端断开
+        
+        Returns:
+            图表数据列表，每个元素包含 {symbol, label, data, success, error}
+        """
+        import asyncio
+        
+        results = []
+        total = len(symbols)
+        
+        logger.info(f"[Batch Chart] Starting batch generation for {total} symbols")
+        
+        for i, symbol_info in enumerate(symbols):
+            # 🔥 检测客户端是否断开连接
+            if request:
+                is_disconnected = await request.is_disconnected()
+                if is_disconnected:
+                    logger.info(f"[Batch Chart] Client disconnected. Processed {i}/{total}, stopping.")
+                    return {
+                        "status": "cancelled",
+                        "processed": i,
+                        "total": total,
+                        "results": results
+                    }
+            
+            symbol = symbol_info.get('symbol') if isinstance(symbol_info, dict) else symbol_info
+            label = symbol_info.get('label', symbol) if isinstance(symbol_info, dict) else symbol
+            
+            try:
+                logger.debug(f"[Batch Chart] Generating chart {i+1}/{total}: {symbol}")
+                chart_data = self.generate_chart_image(symbol=symbol, label=label, days=days)
+                
+                results.append({
+                    "symbol": symbol,
+                    "label": label,
+                    "data": chart_data,
+                    "success": chart_data is not None,
+                    "error": None if chart_data else "No data available"
+                })
+            except Exception as e:
+                logger.error(f"[Batch Chart] Error generating chart for {symbol}: {str(e)}")
+                results.append({
+                    "symbol": symbol,
+                    "label": label,
+                    "data": None,
+                    "success": False,
+                    "error": str(e)
+                })
+            
+            # 每5个chart输出一次进度
+            if (i + 1) % 5 == 0:
+                logger.info(f"[Batch Chart] Progress: {i+1}/{total} charts processed")
+        
+        logger.info(f"[Batch Chart] Completed: {total}/{total} charts processed")
+        
+        return {
+            "status": "completed",
+            "processed": total,
+            "total": total,
+            "results": results
+        }
     
     def generate_chart_image(self, symbol: str, label: str, days: int = 90) -> Optional[str]:
         """

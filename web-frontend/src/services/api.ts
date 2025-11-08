@@ -44,7 +44,13 @@ apiClient.interceptors.response.use(
     });
     return response;
   },
-  (error: AxiosError) => {
+  (error: any) => {
+    // 🔥 检测是否为请求取消错误（用户主动取消或页面卸载）
+    if (axios.isCancel(error) || error?.code === 'ERR_CANCELED' || error?.message === 'canceled') {
+      console.log('Request cancelled:', error?.config?.url);
+      return Promise.reject(error); // 不显示错误提示，直接拒绝
+    }
+
     console.error('API Error:', {
       url: error.config?.url,
       status: error.response?.status,

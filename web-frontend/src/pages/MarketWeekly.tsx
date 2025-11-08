@@ -6,7 +6,6 @@ import CombinedWoWChart from '../components/MarketWeekly/CombinedWoWChart';
 import WoWBarChart from '../components/MarketWeekly/WoWBarChart';
 import RelativeLineChart from '../components/MarketWeekly/RelativeLineChart';
 import TechnicalViewsSection from '../components/MarketWeekly/TechnicalViewsSection';
-import WatchlistSection from '../components/MarketWeekly/WatchlistSection';
 import { EconomicCalendarTable, EarningsCalendarTable, IPOCalendarTable } from '../components/MarketWeekly/CalendarTables';
 import { marketWeeklyAPI } from '../services/marketWeekly';
 import type { MarketWeeklyReport } from '../types/marketWeekly';
@@ -304,8 +303,6 @@ const MarketWeekly: React.FC = () => {
             sectionId="sectors-technical"
             groupByRegion={false}
           />
-
-          <WatchlistSection sectionId="watchlist-technical" />
 
           <TechnicalViewsSection
             assets={reportData.technical_views.forex}

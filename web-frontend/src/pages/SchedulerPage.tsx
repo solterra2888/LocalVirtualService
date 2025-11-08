@@ -534,6 +534,32 @@ const SchedulerPage: React.FC = () => {
       return parts.length > 0 ? parts.join(', ') : null;
     }
 
+    // Format eodhd_events (economic_events) parameters - 使用与 earnings_calendar 相同的格式
+    if (sourceIdLower === 'eodhd_events') {
+      const parts: string[] = [];
+      
+      if (params.fetch_next_week) {
+        parts.push('📅 Next Week');
+      } else if (params.start_date && params.end_date) {
+        parts.push(`📅 ${params.start_date} to ${params.end_date}`);
+      } else if (params.days) {
+        parts.push(`📅 Next ${params.days} days`);
+      }
+      
+      if (params.country) {
+        // 支持数组或字符串
+        const countries = Array.isArray(params.country) 
+          ? params.country 
+          : (typeof params.country === 'string' ? params.country.split(',').map(c => c.trim()) : [params.country]);
+        
+        if (countries.length > 0) {
+          parts.push(`🌍 ${countries.join(', ')}`);
+        }
+      }
+      
+      return parts.length > 0 ? parts.join(' | ') : null;
+    }
+
     // Format ipo_calendar parameters
     if (sourceIdLower === 'ipo_calendar') {
       const parts: string[] = [];

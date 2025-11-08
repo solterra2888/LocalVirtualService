@@ -92,7 +92,6 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ className }) => {
       children: [
         { key: 'equity-technical', label: 'Equity Indices' },
         { key: 'sectors-technical', label: 'US Sectors' },
-        { key: 'watchlist-technical', label: 'My Watchlist' },
         { key: 'forex-technical', label: 'Foreign Exchange' },
         { key: 'commodities-technical', label: 'Commodities' },
         { key: 'yields-technical', label: 'Treasury Yields' }

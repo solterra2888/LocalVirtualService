@@ -81,7 +81,7 @@ export interface EconomicEvent {
   actual: string;
   forecast: string;
   previous: string;
-  importance?: string;
+  impact?: number;
 }
 
 // 财报日历事件
@@ -110,14 +110,6 @@ export interface NextWeekOutlook {
   ipo_calendar: IPOEvent[];
 }
 
-// 用户Watchlist股票
-export interface WatchlistStock {
-  symbol: string;
-  company_name: string;
-  primary_ticker: string;
-  user_notes?: string;
-}
-
 // 完整报告数据
 export interface MarketWeeklyReport {
   meta: ReportMeta;
@@ -131,12 +123,6 @@ export interface MarketWeeklyReport {
 export interface MarketWeeklyResponse {
   success: boolean;
   data: MarketWeeklyReport;
-  message?: string;
-}
-
-export interface WatchlistStocksResponse {
-  success: boolean;
-  data: WatchlistStock[];
   message?: string;
 }
 

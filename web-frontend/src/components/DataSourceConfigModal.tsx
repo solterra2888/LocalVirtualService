@@ -85,10 +85,10 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
-      params: ['limit'],
-      defaultSchedule: '0 9 * * 1-5',
+      params: ['days', 'fetch_next_week', 'start_date', 'end_date', 'country'],
+      defaultSchedule: '0 6 * * 0',
       defaultName: 'Economic Events Auto Fetch',
-      description: 'Get economic calendar event data including GDP, CPI and other important indicators'
+      description: 'Get economic calendar event data including GDP, CPI and other important indicators (similar to Earnings Calendar parameters)'
     },
     eodhd_macro: {
       icon: <BarChartOutlined style={{ color: '#722ed1' }} />,
@@ -852,17 +852,197 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'eodhd_events':
           return (
             <>
+              <Alert
+                message="Economic Events Fetcher"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically fetch economic calendar events from EODHD API. Similar to Earnings Calendar parameters - no limit parameter needed (fixed at 1000)."
+              />
+              
               <Form.Item
-                label="Data Limit"
-                name={['taskParams', 'limit']}
-                extra="Maximum number of events to fetch per time, up to 1000"
+                label="Fetch Mode"
+                name={['taskParams', 'fetch_next_week']}
+                valuePropName="checked"
+                extra="Enable to fetch next week's data specifically, or disable to use custom settings."
+                initialValue={false}
+              >
+                <Switch 
+                  checkedChildren="Next Week" 
+                  unCheckedChildren="Custom Period" 
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Days Ahead"
+                name={['taskParams', 'days']}
+                extra="Number of days ahead to fetch (1-90 days). Default is 30 days."
+                initialValue={30}
               >
                 <InputNumber 
                   min={1} 
-                  max={1000} 
-                  placeholder="100"
+                  max={90} 
+                  placeholder="30" 
                   style={{ width: '100%' }}
                 />
+              </Form.Item>
+
+              <Alert
+                message="Optional: Custom Date Range"
+                type="warning"
+                showIcon
+                style={{ marginTop: 16, marginBottom: 16 }}
+                description="You can also specify exact start and end dates. If provided, these will override the 'Days Ahead' setting."
+              />
+              
+              <Form.Item
+                label="Start Date"
+                name={['taskParams', 'start_date']}
+                extra="Optional: Specific start date (YYYY-MM-DD format)"
+              >
+                <Input placeholder="e.g., 2025-11-10" />
+              </Form.Item>
+              
+              <Form.Item
+                label="End Date"
+                name={['taskParams', 'end_date']}
+                extra="Optional: Specific end date (YYYY-MM-DD format)"
+              >
+                <Input placeholder="e.g., 2025-11-17" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Country Filter"
+                name={['taskParams', 'country']}
+                extra="Optional: Select one or more countries. Leave empty for all countries."
+              >
+                <Select 
+                  mode="multiple"
+                  placeholder="All countries" 
+                  allowClear
+                  showSearch
+                  maxTagCount="responsive"
+                  optionLabelProp="label"
+                  filterOption={(input, option) => {
+                    const label = String(option?.label || '');
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
+                >
+                  <Option value="US" label="🇺🇸 United States">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇺🇸</span>
+                      <span>United States (US)</span>
+                    </div>
+                  </Option>
+                  <Option value="CN" label="🇨🇳 China">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇳</span>
+                      <span>China (CN)</span>
+                    </div>
+                  </Option>
+                  <Option value="JP" label="🇯🇵 Japan">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇯🇵</span>
+                      <span>Japan (JP)</span>
+                    </div>
+                  </Option>
+                  <Option value="GB" label="🇬🇧 United Kingdom">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇬🇧</span>
+                      <span>United Kingdom (GB)</span>
+                    </div>
+                  </Option>
+                  <Option value="DE" label="🇩🇪 Germany">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇩🇪</span>
+                      <span>Germany (DE)</span>
+                    </div>
+                  </Option>
+                  <Option value="FR" label="🇫🇷 France">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇫🇷</span>
+                      <span>France (FR)</span>
+                    </div>
+                  </Option>
+                  <Option value="CA" label="🇨🇦 Canada">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇦</span>
+                      <span>Canada (CA)</span>
+                    </div>
+                  </Option>
+                  <Option value="AU" label="🇦🇺 Australia">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇦🇺</span>
+                      <span>Australia (AU)</span>
+                    </div>
+                  </Option>
+                  <Option value="KR" label="🇰🇷 South Korea">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇰🇷</span>
+                      <span>South Korea (KR)</span>
+                    </div>
+                  </Option>
+                  <Option value="IN" label="🇮🇳 India">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇳</span>
+                      <span>India (IN)</span>
+                    </div>
+                  </Option>
+                  <Option value="HK" label="🇭🇰 Hong Kong">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇭🇰</span>
+                      <span>Hong Kong (HK)</span>
+                    </div>
+                  </Option>
+                  <Option value="SG" label="🇸🇬 Singapore">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇸🇬</span>
+                      <span>Singapore (SG)</span>
+                    </div>
+                  </Option>
+                  <Option value="IT" label="🇮🇹 Italy">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇮🇹</span>
+                      <span>Italy (IT)</span>
+                    </div>
+                  </Option>
+                  <Option value="ES" label="🇪🇸 Spain">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇪🇸</span>
+                      <span>Spain (ES)</span>
+                    </div>
+                  </Option>
+                  <Option value="BR" label="🇧🇷 Brazil">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇧🇷</span>
+                      <span>Brazil (BR)</span>
+                    </div>
+                  </Option>
+                  <Option value="RU" label="🇷🇺 Russia">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇷🇺</span>
+                      <span>Russia (RU)</span>
+                    </div>
+                  </Option>
+                  <Option value="MX" label="🇲🇽 Mexico">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇲🇽</span>
+                      <span>Mexico (MX)</span>
+                    </div>
+                  </Option>
+                  <Option value="NL" label="🇳🇱 Netherlands">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇳🇱</span>
+                      <span>Netherlands (NL)</span>
+                    </div>
+                  </Option>
+                  <Option value="CH" label="🇨🇭 Switzerland">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🇨🇭</span>
+                      <span>Switzerland (CH)</span>
+                    </div>
+                  </Option>
+                </Select>
               </Form.Item>
             </>
           );

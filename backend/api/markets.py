@@ -441,91 +441,47 @@ async def get_economic_events(
     current_user=Depends(get_current_user)
 ):
     """
-    获取经济事件数据
+    获取经济事件数据（从数据库）
     
     - **from_date**: 开始日期，格式 YYYY-MM-DD
     - **to_date**: 结束日期，格式 YYYY-MM-DD  
-    - **country**: 国家代码 (ISO 3166)
+    - **country**: 国家代码 (ISO 3166)，支持多个国家用逗号分隔
     - **limit**: 返回数量限制 (1-1000)
     - **offset**: 偏移量
     """
     try:
         info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}, country={country}", source="markets_api")
         
-        # 处理多个国家代码（用逗号分隔）
-        countries = []
-        if country:
-            # 分割国家代码
-            countries = [c.strip() for c in country.split(',') if c.strip()]
-        
-        # 从API获取数据
+        # 从数据库获取数据
         events_service = get_economic_events_service()
-        all_events_data = []
+        events = events_service.get_economic_events_from_db(
+            from_date=from_date,
+            to_date=to_date,
+            country=country,
+            limit=limit,
+            offset=offset
+        )
         
-        if countries:
-            # 如果有指定国家，为每个国家分别请求
-            # 为了控制总数，将limit分配给每个国家（向上取整，确保至少每个国家有数据）
-            country_limit = max(1, limit // len(countries)) if len(countries) > 1 else limit
-            
-            for country_code in countries:
+        # 计算变化值
+        for event in events:
+            # 计算 calculated_change 和 calculated_change_pct
+            if event.get('actual') and event.get('previous'):
                 try:
-                    country_events = events_service.get_economic_events(
-                        from_date=from_date,
-                        to_date=to_date,
-                        country=country_code,
-                        limit=country_limit,
-                        offset=offset
-                    )
-                    all_events_data.extend(country_events)
-                except Exception as e:
-                    # 如果某个国家请求失败，记录错误但继续处理其他国家
-                    warning(f"获取国家 {country_code} 的经济事件失败: {str(e)}", source="markets_api")
-                    continue
-        else:
-            # 如果没有指定国家，获取所有国家
-            all_events_data = events_service.get_economic_events(
-                from_date=from_date,
-                to_date=to_date,
-                country=None,
-                limit=limit,
-                offset=offset
-            )
+                    actual_val = float(event['actual'])
+                    previous_val = float(event['previous'])
+                    change = actual_val - previous_val
+                    change_pct = (change / previous_val) * 100 if previous_val != 0 else 0
+                    event['calculated_change'] = round(change, 4)
+                    event['calculated_change_pct'] = round(change_pct, 2)
+                except (ValueError, TypeError):
+                    event['calculated_change'] = None
+                    event['calculated_change_pct'] = None
+            else:
+                event['calculated_change'] = None
+                event['calculated_change_pct'] = None
         
-        # 格式化事件数据
-        formatted_events = []
-        for event_data in all_events_data:
-            try:
-                formatted_event = events_service.format_event_data(event_data)
-                
-                # 计算impact值
-                impact = calculate_event_impact(formatted_event['event'])
-                formatted_event['impact'] = impact
-                
-                # 转换为响应模型格式
-                formatted_events.append({
-                    'date': formatted_event.get('date'),
-                    'time': formatted_event.get('time'),
-                    'country': formatted_event.get('country'),
-                    'event': formatted_event.get('event'),
-                    'period': formatted_event.get('period'),
-                    'actual': formatted_event.get('actual'),
-                    'previous': formatted_event.get('previous'),
-                    'forecast': formatted_event.get('forecast'),
-                    'calculated_change': formatted_event.get('calculated_change'),
-                    'calculated_change_pct': formatted_event.get('calculated_change_pct'),
-                    'impact': formatted_event.get('impact')
-                })
-            except Exception as e:
-                # 如果格式化某个事件失败，记录错误但继续处理其他事件
-                warning(f"格式化经济事件数据失败: {str(e)}", source="markets_api")
-                continue
-        
-        # 如果指定了多个国家，可能总数超过limit，需要截断
-        if len(formatted_events) > limit:
-            formatted_events = formatted_events[:limit]
-        
-        info(f"获取到 {len(formatted_events)} 条经济事件数据", source="markets_api")
-        return formatted_events
+        info(f"从数据库获取到 {len(events)} 条经济事件数据", source="markets_api")
+        return events
         
     except Exception as e:
         error(f"获取经济事件数据失败: {str(e)}", source="markets_api")
@@ -676,11 +632,8 @@ async def get_economic_events_countries(
         # 获取经济事件服务
         events_service = get_economic_events_service()
         
-        # 获取支持的国家代码列表
-        country_codes = events_service.get_supported_countries()
-        
-        # 转换为响应模型格式
-        countries = [{"code": code, "name": code} for code in country_codes]
+        # 从数据库获取可用的国家列表
+        countries = events_service.get_available_countries_from_db()
         
         return countries
         
@@ -814,6 +767,7 @@ async def fetch_economic_events(
         total_fetched = len(events_data)
         new_records = 0
         updated_records = 0
+        failed_records = 0
         
         for event_data in events_data:
             # 格式化事件数据
@@ -824,22 +778,22 @@ async def fetch_economic_events(
             formatted_event['impact'] = impact
             
             # 存储到数据库
-            event_id = market_service.insert_economic_event(formatted_event)
-            if event_id > 0:
+            upsert_result = market_service.insert_economic_event(formatted_event)
+            if upsert_result.get('inserted'):
                 new_records += 1
+            elif upsert_result.get('id'):
+                updated_records += 1
             else:
-                # 可能是重复数据，尝试更新
-                updated = market_service.update_economic_event(formatted_event)
-                if updated:
-                    updated_records += 1
+                failed_records += 1
         
-        info(f"经济事件数据获取完成: 获取{total_fetched}条，新增{new_records}条，更新{updated_records}条", source="markets_api")
+        info(f"经济事件数据获取完成: 获取{total_fetched}条，新增{new_records}条，更新{updated_records}条，失败{failed_records}条", source="markets_api")
         
         return {
             "message": f"经济事件数据获取完成",
             "total_fetched": total_fetched,
             "new_records": new_records,
-            "updated_records": updated_records
+            "updated_records": updated_records,
+            "failed_records": failed_records
         }
         
     except Exception as e:

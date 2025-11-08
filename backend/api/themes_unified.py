@@ -785,7 +785,9 @@ async def filter_news_by_themes(
                 n.source,
                 n.link,
                 n.analysis_result,
-                n.analysis_status
+                n.analysis_status,
+                n.created_at,
+                n.updated_at
             {' '.join(join_clauses)}
             WHERE {where_clause}
             ORDER BY n.date DESC
@@ -836,6 +838,8 @@ async def filter_news_by_themes(
                 'link': row[5],
                 'analysis_result': row[6],
                 'analysis_status': row[7],
+                'created_at': row[8].isoformat() if row[8] else None,
+                'updated_at': row[9].isoformat() if row[9] else None,
                 'themes': themes
             })
         

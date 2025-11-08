@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import psycopg2.extras
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -387,6 +388,470 @@ class MarketDataService:
                 conn.close()
         
         return {'success_count': success_count, 'failed_count': failed_count}
+    
+    # ==== 经济事件数据 ====
+    
+    def _ensure_economic_events_table(self, cursor) -> None:
+        """确保economic_events表存在"""
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS economic_events (
+            id SERIAL PRIMARY KEY,
+            date VARCHAR(20) NOT NULL,
+            time VARCHAR(20) NOT NULL DEFAULT '',
+            country VARCHAR(10) NOT NULL DEFAULT 'US',
+            event TEXT NOT NULL,
+            period VARCHAR(50),
+            actual VARCHAR(100),
+            previous VARCHAR(100),
+            forecast VARCHAR(100),
+            change_val NUMERIC,
+            change_percentage NUMERIC,
+            impact SMALLINT,
+            comparison VARCHAR(100),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        # 确保唯一约束存在
+        cursor.execute("""
+        DO $$ 
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint 
+                WHERE conname = 'economic_events_unique_constraint'
+            ) THEN
+                ALTER TABLE economic_events 
+                ADD CONSTRAINT economic_events_unique_constraint 
+                UNIQUE (date, time, country, event);
+            END IF;
+        END $$;
+        """)
+        
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_economic_events_date
+        ON economic_events (date)
+        """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_economic_events_country
+        ON economic_events (country)
+        """)
+    
+    def _parse_event_impact(self, impact_value: Any) -> Optional[int]:
+        """解析impact字段为整数"""
+        if impact_value is None:
+            return None
+        
+        if isinstance(impact_value, (int, float)):
+            impact_int = int(impact_value)
+            if impact_int < 1:
+                return None
+            return min(impact_int, 3)
+        
+        impact_str = str(impact_value).strip()
+        if not impact_str:
+            return None
+        
+        if set(impact_str) == {'*'}:
+            return min(len(impact_str), 3)
+        
+        lower = impact_str.lower()
+        mapping = {
+            '3': 3,
+            'high': 3,
+            'very high': 3,
+            '重要': 3,
+            '2': 2,
+            'medium': 2,
+            'moderate': 2,
+            'medium-high': 2,
+            '1': 1,
+            'low': 1,
+        }
+        if lower in mapping:
+            return mapping[lower]
+        
+        if 'high' in lower:
+            return 3
+        if 'medium' in lower or 'moderate' in lower:
+            return 2
+        if 'low' in lower:
+            return 1
+        
+        return None
+    
+    def _normalize_economic_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """规范化经济事件数据，确保字段完整"""
+        if not event:
+            return None
+        
+        date_raw = event.get('date') or event.get('event_date')
+        if not date_raw:
+            return None
+        date_str = str(date_raw).strip()
+        if not date_str:
+            return None
+        
+        time_str = str(event.get('time') or '').strip()
+        country = str(event.get('country') or 'US').upper()
+        event_name = str(event.get('event') or event.get('name') or '').strip()
+        if not event_name:
+            return None
+        
+        period = str(event.get('period') or '').strip() or None
+        
+        def normalize_text_field(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            value_str = str(value).strip()
+            return value_str if value_str else None
+        
+        actual = normalize_text_field(event.get('actual'))
+        previous = normalize_text_field(event.get('previous'))
+        forecast = normalize_text_field(event.get('forecast') or event.get('estimate'))
+        
+        change_val_source = (
+            event.get('change_val') or
+            event.get('change') or
+            event.get('calculated_change')
+        )
+        change_val = self.safe_float(change_val_source)
+        
+        change_pct_source = (
+            event.get('change_percentage') or
+            event.get('calculated_change_pct') or
+            event.get('change_pct')
+        )
+        change_pct = self.safe_float(change_pct_source)
+        
+        impact = self._parse_event_impact(event.get('impact'))
+        comparison = normalize_text_field(event.get('comparison'))
+        
+        return {
+            'date': date_str,
+            'time': time_str or '',
+            'country': country or 'US',
+            'event': event_name,
+            'period': period,
+            'actual': actual,
+            'previous': previous,
+            'forecast': forecast,
+            'change_val': change_val,
+            'change_percentage': change_pct,
+            'impact': impact,
+            'comparison': comparison
+        }
+    
+    def insert_economic_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        插入或更新单条经济事件数据
+        
+        Returns:
+            {
+                'id': Optional[int],
+                'inserted': bool
+            }
+        """
+        result = {'id': None, 'inserted': False}
+        normalized = self._normalize_economic_event(event_data)
+        if not normalized:
+            logger.debug("跳过无效的经济事件记录: %s", event_data)
+            return result
+        
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                logger.error("无法获取数据库连接")
+                return result
+            
+            cursor = conn.cursor()
+            self._ensure_economic_events_table(cursor)
+            
+            insert_sql = """
+            INSERT INTO economic_events
+            (date, time, country, event, period, actual, previous, forecast,
+             change_val, change_percentage, impact, comparison)
+            VALUES
+            (%(date)s, %(time)s, %(country)s, %(event)s, %(period)s, %(actual)s,
+             %(previous)s, %(forecast)s, %(change_val)s, %(change_percentage)s,
+             %(impact)s, %(comparison)s)
+            ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
+            DO UPDATE SET
+                period = EXCLUDED.period,
+                actual = EXCLUDED.actual,
+                previous = EXCLUDED.previous,
+                forecast = EXCLUDED.forecast,
+                change_val = EXCLUDED.change_val,
+                change_percentage = EXCLUDED.change_percentage,
+                impact = EXCLUDED.impact,
+                comparison = EXCLUDED.comparison,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, (xmax = 0) AS inserted_flag;
+            """
+            
+            cursor.execute(insert_sql, normalized)
+            fetch_result = cursor.fetchone()
+            conn.commit()
+            
+            if fetch_result:
+                result['id'] = fetch_result[0]
+                result['inserted'] = bool(fetch_result[1])
+            
+            return result
+        
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"插入经济事件失败: {str(e)}")
+            return result
+        
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    
+    def batch_insert_economic_events(self, events: List[Dict[str, Any]]) -> Dict[str, int]:
+        """
+        批量插入经济事件数据
+        
+        Returns:
+            {
+                'processed': int,
+                'inserted': int,
+                'updated': int
+            }
+        """
+        if not events:
+            return {'processed': 0, 'inserted': 0, 'updated': 0}
+        
+        normalized_records = []
+        for event in events:
+            normalized = self._normalize_economic_event(event)
+            if normalized:
+                normalized_records.append(normalized)
+        
+        if not normalized_records:
+            logger.warning("没有可插入的经济事件数据")
+            return {'processed': 0, 'inserted': 0, 'updated': 0, 'total_before_dedup': 0, 'duplicates_removed': 0}
+        
+        # 记录去重前的数量
+        total_before_dedup = len(normalized_records)
+        
+        # 去重：基于 (date, time, country, event) 的唯一性
+        # 保留最后一个重复记录（通常是最新的数据）
+        unique_records = {}
+        for record in normalized_records:
+            key = (record['date'], record['time'], record['country'], record['event'])
+            unique_records[key] = record
+        
+        normalized_records = list(unique_records.values())
+        duplicates_removed = total_before_dedup - len(normalized_records)
+        logger.info(f"去重: 原始{total_before_dedup}条 → 去重后{len(normalized_records)}条 (移除{duplicates_removed}条重复)")
+        
+        if not normalized_records:
+            logger.warning("去重后没有可插入的经济事件数据")
+            return {'processed': 0, 'inserted': 0, 'updated': 0, 'total_before_dedup': total_before_dedup, 'duplicates_removed': duplicates_removed}
+        
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                logger.error("无法获取数据库连接")
+                return {'processed': 0, 'inserted': 0, 'updated': 0}
+            
+            cursor = conn.cursor()
+            self._ensure_economic_events_table(cursor)
+            
+            insert_sql = """
+            INSERT INTO economic_events
+            (date, time, country, event, period, actual, previous, forecast,
+             change_val, change_percentage, impact, comparison)
+            VALUES %s
+            ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
+            DO UPDATE SET
+                period = EXCLUDED.period,
+                actual = EXCLUDED.actual,
+                previous = EXCLUDED.previous,
+                forecast = EXCLUDED.forecast,
+                change_val = EXCLUDED.change_val,
+                change_percentage = EXCLUDED.change_percentage,
+                impact = EXCLUDED.impact,
+                comparison = EXCLUDED.comparison,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING (xmax = 0) AS inserted_flag;
+            """
+            
+            values = [
+                (
+                    record['date'],
+                    record['time'],
+                    record['country'],
+                    record['event'],
+                    record['period'],
+                    record['actual'],
+                    record['previous'],
+                    record['forecast'],
+                    record['change_val'],
+                    record['change_percentage'],
+                    record['impact'],
+                    record['comparison']
+                )
+                for record in normalized_records
+            ]
+            
+            # 使用 execute_values 进行批量插入
+            # 注意：execute_values 的 fetch 参数对 RETURNING 支持有限
+            psycopg2.extras.execute_values(
+                cursor,
+                insert_sql,
+                values,
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                page_size=100  # 分批处理，避免单次过大
+            )
+            
+            # 获取返回结果
+            try:
+                results = cursor.fetchall()
+            except Exception as fetch_error:
+                logger.warning(f"获取RETURNING结果失败: {fetch_error}, 将使用备选方案统计")
+                results = []
+            
+            conn.commit()
+            
+            # 统计插入和更新数量
+            if results:
+                inserted = sum(1 for row in results if row and row[0])
+                processed = len(results)
+                updated = processed - inserted
+            else:
+                # 如果无法获取RETURNING结果，假设全部成功插入
+                processed = len(values)
+                inserted = processed
+                updated = 0
+                logger.info(f"无法统计具体插入/更新数量，假设全部插入成功：{processed}条")
+            
+            logger.info(f"经济事件批量写入完成：新增{inserted}条，更新{updated}条，总计{processed}条")
+            return {
+                'processed': processed, 
+                'inserted': inserted, 
+                'updated': updated,
+                'total_before_dedup': total_before_dedup,
+                'duplicates_removed': duplicates_removed
+            }
+        
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"批量插入经济事件失败: {str(e)}")
+            return {
+                'processed': 0, 
+                'inserted': 0, 
+                'updated': 0,
+                'total_before_dedup': total_before_dedup if 'total_before_dedup' in locals() else 0,
+                'duplicates_removed': duplicates_removed if 'duplicates_removed' in locals() else 0
+            }
+        
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    
+    def update_economic_event(self, event_data: Dict[str, Any]) -> bool:
+        """显式更新经济事件记录"""
+        normalized = self._normalize_economic_event(event_data)
+        if not normalized:
+            return False
+        
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                logger.error("无法获取数据库连接")
+                return False
+            
+            cursor = conn.cursor()
+            self._ensure_economic_events_table(cursor)
+            
+            update_sql = """
+            UPDATE economic_events
+            SET period = %(period)s,
+                actual = %(actual)s,
+                previous = %(previous)s,
+                forecast = %(forecast)s,
+                change_val = %(change_val)s,
+                change_percentage = %(change_percentage)s,
+                impact = %(impact)s,
+                comparison = %(comparison)s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE date = %(date)s
+              AND time = %(time)s
+              AND country = %(country)s
+              AND event = %(event)s
+            """
+            
+            cursor.execute(update_sql, normalized)
+            conn.commit()
+            return cursor.rowcount > 0
+        
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"更新经济事件失败: {str(e)}")
+            return False
+        
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    
+    def delete_old_events(self, retain_days: int = 365) -> int:
+        """删除指定天数之前的旧经济事件数据"""
+        if retain_days <= 0:
+            logger.warning("保留天数必须大于0，已忽略删除操作")
+            return 0
+        
+        cutoff_date = (datetime.utcnow().date() - timedelta(days=retain_days)).strftime('%Y-%m-%d')
+        
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                logger.error("无法获取数据库连接")
+                return 0
+            
+            cursor = conn.cursor()
+            self._ensure_economic_events_table(cursor)
+            
+            delete_sql = """
+            DELETE FROM economic_events
+            WHERE TO_DATE(date, 'YYYY-MM-DD') < %s
+            """
+            cursor.execute(delete_sql, (cutoff_date,))
+            deleted = cursor.rowcount
+            conn.commit()
+            
+            logger.info(f"删除了 {deleted} 条{retain_days}天前的经济事件数据")
+            return deleted
+        
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"清理旧经济事件数据失败: {str(e)}")
+            return 0
+        
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def fetch_and_store_market_data(self, 
                                     asset_types: Optional[List[str]] = None,

@@ -5,9 +5,7 @@
 import apiClient from './api';
 import {
   MarketWeeklyResponse,
-  WatchlistStocksResponse,
-  MarketWeeklyReport,
-  WatchlistStock
+  MarketWeeklyReport
 } from '../types/marketWeekly';
 
 class MarketWeeklyAPI {
@@ -118,30 +116,6 @@ class MarketWeeklyAPI {
   }
 
   /**
-   * 获取用户的Watchlist股票列表
-   * @param userId - 用户ID
-   */
-  async getWatchlistStocks(userId?: number): Promise<WatchlistStock[]> {
-    try {
-      const response = await apiClient.get<WatchlistStocksResponse>(
-        '/market-weekly/watchlist-stocks',
-        {
-          params: userId ? { user_id: userId } : {}
-        }
-      );
-
-      if (response.data.success) {
-        return response.data.data;
-      } else {
-        throw new Error(response.data.message || 'Failed to fetch watchlist stocks');
-      }
-    } catch (error) {
-      console.error('Error fetching watchlist stocks:', error);
-      throw error;
-    }
-  }
-
-  /**
    * 刷新报告数据（触发重新生成）
    * @param period - 报告周期，默认'latest'
    */
@@ -169,10 +143,168 @@ class MarketWeeklyAPI {
   }
 
   /**
-   * 获取图表图片（base64）
+   * 批量获取OHLC原始数据（用于前端图表渲染）- 支持请求取消
+   * @param symbols - 股票代码列表 [{ symbol: 'SPY.US', label: 'S&P 500' }, ...]
+   * @param days - 天数
+   * @param signal - AbortSignal 用于取消请求
+   */
+  async getOHLCDataInBatch(
+    symbols: Array<{ symbol: string; label?: string }>,
+    days: number = 90,
+    signal?: AbortSignal
+  ): Promise<{
+    status: 'completed' | 'cancelled';
+    processed: number;
+    total: number;
+    results: Array<{
+      symbol: string;
+      label: string;
+      data: {
+        ohlc: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>;
+        ema20: Array<{ time: number; value: number }>;
+        ema50: Array<{ time: number; value: number }>;
+        ema200: Array<{ time: number; value: number }>;
+      } | null;
+      success: boolean;
+      error: string | null;
+    }>;
+  }> {
+    try {
+      console.log(`[MarketWeeklyAPI] Batch OHLC request: ${symbols.length} datasets`);
+      
+      const response = await apiClient.post(
+        '/market-weekly/ohlc-data/batch',
+        {
+          symbols: symbols.map(s => ({
+            symbol: s.symbol,
+            label: s.label || s.symbol
+          })),
+          days
+        },
+        {
+          signal // 🔥 传入AbortSignal用于取消请求
+        }
+      );
+
+      if (response.data.success || response.data.status === 'cancelled') {
+        const { status, processed, total, results } = response.data;
+        
+        if (status === 'cancelled') {
+          console.log(`[MarketWeeklyAPI] Batch OHLC request cancelled. Processed ${processed}/${total}`);
+        } else {
+          console.log(`[MarketWeeklyAPI] Batch OHLC request completed. ${processed}/${total} datasets`);
+        }
+        
+        return {
+          status,
+          processed,
+          total,
+          results: results || []
+        };
+      } else {
+        throw new Error(response.data.message || 'Failed to fetch batch OHLC data');
+      }
+    } catch (error: any) {
+      // 如果是取消错误，不要抛出异常
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        console.log('[MarketWeeklyAPI] Batch OHLC request cancelled by client');
+        return {
+          status: 'cancelled',
+          processed: 0,
+          total: symbols.length,
+          results: []
+        };
+      }
+      
+      console.error('Error fetching batch OHLC data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量获取图表图片（base64）- 支持请求取消
+   * 
+   * ⚠️ 已过时：建议使用 getOHLCDataInBatch 获取原始数据，在前端渲染图表
+   * 
+   * @param symbols - 股票代码列表 [{ symbol: 'SPY.US', label: 'S&P 500' }, ...]
+   * @param days - 天数
+   * @param signal - AbortSignal 用于取消请求
+   */
+  async getChartsInBatch(
+    symbols: Array<{ symbol: string; label?: string }>,
+    days: number = 90,
+    signal?: AbortSignal
+  ): Promise<{
+    status: 'completed' | 'cancelled';
+    processed: number;
+    total: number;
+    results: Array<{
+      symbol: string;
+      label: string;
+      data: string | null;
+      success: boolean;
+      error: string | null;
+    }>;
+  }> {
+    try {
+      console.log(`[MarketWeeklyAPI] Batch request: ${symbols.length} charts`);
+      
+      const response = await apiClient.post(
+        '/market-weekly/charts/batch',
+        {
+          symbols: symbols.map(s => ({
+            symbol: s.symbol,
+            label: s.label || s.symbol
+          })),
+          days
+        },
+        {
+          signal // 🔥 传入AbortSignal用于取消请求
+        }
+      );
+
+      if (response.data.success || response.data.status === 'cancelled') {
+        const { status, processed, total, results } = response.data;
+        
+        if (status === 'cancelled') {
+          console.log(`[MarketWeeklyAPI] Batch request cancelled. Processed ${processed}/${total}`);
+        } else {
+          console.log(`[MarketWeeklyAPI] Batch request completed. ${processed}/${total} charts`);
+        }
+        
+        return {
+          status,
+          processed,
+          total,
+          results: results || []
+        };
+      } else {
+        throw new Error(response.data.message || 'Failed to fetch batch charts');
+      }
+    } catch (error: any) {
+      // 如果是取消错误，不要抛出异常
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        console.log('[MarketWeeklyAPI] Batch request cancelled by client');
+        return {
+          status: 'cancelled',
+          processed: 0,
+          total: symbols.length,
+          results: []
+        };
+      }
+      
+      console.error('Error fetching batch charts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取图表图片（base64）- 单个图表
    * @param symbol - 股票代码
    * @param label - 图表标题
    * @param days - 天数
+   * 
+   * Note: 对于多个图表，建议使用 getChartsInBatch 方法
    */
   async getChartImage(symbol: string, label?: string, days: number = 90): Promise<string> {
     try {
