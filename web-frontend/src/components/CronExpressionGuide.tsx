@@ -70,9 +70,9 @@ const CronExpressionGuide: React.FC<CronExpressionGuideProps> = ({
     },
     {
       field: 'Day of Week',
-      range: '0-7',
+      range: '0-6',
       examples: ['1', '5', '*', '1-5', '0,6'],
-      description: '0 and 7 both mean Sunday, 1-6 means Monday to Saturday'
+      description: '0 means Sunday, 1-6 means Monday to Saturday'
     }
   ];
 

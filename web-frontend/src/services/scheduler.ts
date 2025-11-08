@@ -888,8 +888,8 @@ export class SchedulerAPI {
     if (!isValidPart(month, 1, 12)) {
       return { valid: false, message: '月份值无效（1-12）' };
     }
-    if (!isValidPart(dayOfWeek, 0, 7)) {
-      return { valid: false, message: '星期值无效（0-7，0和7都表示周日）' };
+    if (!isValidPart(dayOfWeek, 0, 6)) {
+      return { valid: false, message: '星期值无效（0-6，其中0表示周日）' };
     }
 
     return { valid: true };
