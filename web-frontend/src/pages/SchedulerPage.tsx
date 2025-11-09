@@ -10,6 +10,7 @@ import {
   Switch,
   Statistic,
   Alert,
+  Result,
   message,
   Modal,
   Form,
@@ -19,7 +20,6 @@ import {
   Tabs,
   DatePicker,
   InputNumber,
-
   Table,
   Badge,
   Popconfirm
@@ -51,9 +51,7 @@ import { api } from '../services/api';
 import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
 import { useAuthStore } from '../store/authStore';
-
-import DatabaseTableViewer from '../components/DatabaseTableViewer';
-import TaskExecutionHistory from '../components/TaskExecutionHistory';
+import { useNavigate } from 'react-router-dom';
 
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
 import TaskStatusModal from '../components/TaskStatusModal';
@@ -98,6 +96,7 @@ interface NewsTheme {
 
 const SchedulerPage: React.FC = () => {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const [dataSources, setDataSources] = useState<DataSource[]>([
     {
       id: 'eodhd_news',
@@ -366,41 +365,12 @@ const SchedulerPage: React.FC = () => {
   
   const [form] = Form.useForm();
   
-  // Active tab state for refresh functionality
-  const [activeTab, setActiveTab] = useState<string>(user?.is_admin ? 'scheduler_config' : 'task_management');
-  
-  // Update activeTab when user changes
-  useEffect(() => {
-    if (user?.is_admin) {
-      setActiveTab('scheduler_config');
-    } else {
-      setActiveTab('task_management');
-    }
-  }, [user?.is_admin]);
-  
-  // Refresh triggers for child components
-  const [taskManagementRefreshTrigger, setTaskManagementRefreshTrigger] = useState<number>(0);
-  const [executionHistoryRefreshTrigger, setExecutionHistoryRefreshTrigger] = useState<number>(0);
-
   // Load scheduled task data when page loads
   useEffect(() => {
     loadScheduledTasks();
   }, []);
 
   // Handle tab change and refresh data
-  const handleTabChange = (key: string) => {
-    setActiveTab(key);
-    
-    // Refresh data when switching to specific tabs
-    if (key === 'scheduler_config') {
-      loadScheduledTasks();
-    } else if (key === 'task_management') {
-      setTaskManagementRefreshTrigger(prev => prev + 1);
-    } else if (key === 'execution_history') {
-      setExecutionHistoryRefreshTrigger(prev => prev + 1);
-    }
-  };
-
   // View task status
   // const handleViewTaskStatus = (task: ScheduledTask) => {
   //   setSelectedTask(task);
@@ -634,7 +604,8 @@ const SchedulerPage: React.FC = () => {
       setLoading(true);
       const response = await schedulerAPI.getTasks();
       if (response.success && response.data) {
-        setScheduledTasks(response.data);
+        const filteredTasks = response.data.filter(task => task.type !== 'futu_themes');
+        setScheduledTasks(filteredTasks);
       } else {
         message.error(response.message);
       }
@@ -933,6 +904,25 @@ const SchedulerPage: React.FC = () => {
   const runningSources = dataSources.filter(s => s.status === 'running').length;
   const enabledTasks = scheduledTasks.filter(t => t.enabled).length;
 
+  if (!user?.is_admin) {
+    return (
+      <div style={{ padding: '24px' }}>
+        <Card>
+          <Result
+            status="info"
+            title="Scheduler configuration requires admin access"
+            subTitle="Task Management and Execution History have moved to Scheduler Logs."
+            extra={
+              <Button type="primary" onClick={() => navigate('/scheduler/logs')}>
+                Go to Scheduler Logs
+              </Button>
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
+
 
   return (
     <div style={{ padding: '24px' }}>
@@ -941,7 +931,7 @@ const SchedulerPage: React.FC = () => {
         <div>
           <Title level={2} style={{ margin: 0 }}>
             <DatabaseOutlined style={{ marginRight: '8px' }} />
-            Data Source Management
+            Scheduler Management
           </Title>
           <Text type="secondary" style={{ margin: '8px 0 0 0', display: 'block' }}>
             Simplified data fetching scheduler - Manage EODHD, Alpha Vantage, Finviz and other data sources
@@ -958,314 +948,267 @@ const SchedulerPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* Main content area - using Tabs layout */}
+      {/* Main content area - simplified without Tabs */}
       <Card>
-        <Tabs 
-          activeKey={activeTab}
-          onChange={handleTabChange}
-          size="large"
-          items={[
-            // 只有管理员才能看到Scheduler Configuration
-            ...(user?.is_admin ? [{
-              key: 'scheduler_config',
-              label: (
-                <Space>
-                  <SettingOutlined />
-                  Scheduler Configuration
-                </Space>
-              ),
-              children: (
-                <div>
-                  {/* Statistics cards */}
-                  <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-                    <Col xs={24} sm={8} md={6}>
-                      <Card>
-                        <Statistic
-                          title="Total Data Sources"
-                          value={dataSources.length}
-                          prefix={<DatabaseOutlined />}
-                          valueStyle={{ color: '#1890ff' }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={8} md={6}>
-                      <Card>
-                        <Statistic
-                          title="Enabled"
-                          value={enabledSources}
-                          prefix={<CheckCircleOutlined />}
-                          valueStyle={{ color: '#52c41a' }}
-                          suffix={`/ ${dataSources.length}`}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={8} md={6}>
-                      <Card>
-                        <Statistic
-                          title="Running"
-                          value={runningSources}
-                          prefix={<SyncOutlined spin={runningSources > 0} />}
-                          valueStyle={{ color: '#faad14' }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={8} md={6}>
-                      <Card>
-                        <Statistic
-                          title="Scheduled Tasks"
-                          value={scheduledTasks.length}
-                          prefix={<ScheduleOutlined />}
-                          valueStyle={{ color: '#722ed1' }}
-                          suffix={`(${enabledTasks} enabled)`}
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
+        {/* Statistics cards */}
+        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+          <Col xs={24} sm={8} md={6}>
+            <Card>
+              <Statistic
+                title="Total Data Sources"
+                value={dataSources.length}
+                prefix={<DatabaseOutlined />}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={8} md={6}>
+            <Card>
+              <Statistic
+                title="Enabled"
+                value={enabledSources}
+                prefix={<CheckCircleOutlined />}
+                valueStyle={{ color: '#52c41a' }}
+                suffix={`/ ${dataSources.length}`}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={8} md={6}>
+            <Card>
+              <Statistic
+                title="Running"
+                value={runningSources}
+                prefix={<SyncOutlined spin={runningSources > 0} />}
+                valueStyle={{ color: '#faad14' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={8} md={6}>
+            <Card>
+              <Statistic
+                title="Scheduled Tasks"
+                value={scheduledTasks.length}
+                prefix={<ScheduleOutlined />}
+                valueStyle={{ color: '#722ed1' }}
+                suffix={`(${enabledTasks} enabled)`}
+              />
+            </Card>
+          </Col>
+        </Row>
 
-                  {/* Data source cards */}
-                  <Row gutter={[16, 16]}>
-                    {dataSources.map(source => (
-                      <Col xs={24} lg={12} xl={8} key={source.id}>
-                        <Card
-                          title={
-                            <Space>
-                              <span>{source.name}</span>
-                              {getStatusTag(source.status)}
-                            </Space>
-                          }
-                          extra={
-                            source.id === 'eodhd_fundamentals' ? null : (
-                              <Tooltip title={
-                                source.description.includes('Coming soon') 
-                                  ? 'This data source is coming soon' 
-                                  : !source.enabled && scheduledTasks.filter(task => {
-                                      const taskType = task.type.toLowerCase();
-                                      const sourceIdLower = source.id.toLowerCase();
-                                      return (
-                                        (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
-                                        (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
-                                        (sourceIdLower === 'market_data' && taskType === 'market_data') ||
-                                        (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
-                                        (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
-                                        (sourceIdLower.includes('events') && taskType.includes('events')) ||
-                                        (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
-                                      );
-                                    }).length === 0
-                                  ? 'Please configure data fetch strategy first'
-                                  : undefined
-                              }>
-                                <Switch
-                                  checked={source.enabled}
-                                  onChange={(checked) => toggleDataSource(source.id, checked)}
-                                  disabled={source.description.includes('Coming soon') || loading}
-                                  loading={loading && source.status === 'running'}
-                                />
-                              </Tooltip>
-                            )
-                          }
-                          style={{ 
-                            height: '100%',
-                            opacity: source.enabled ? 1 : 0.6
-                          }}
-                        >
-                          <div style={{ marginBottom: '16px' }}>
-                            <Text type="secondary">{source.description}</Text>
-                          </div>
-
-                          {source.lastRun && (
-                            <div style={{ marginBottom: '16px' }}>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                Last Run: {source.lastRun}
-                              </Text>
-                            </div>
-                          )}
-
-                          {/* Cron Expression Display with Configuration Icon */}
-                          {(() => {
-                            const cronInfo = getCronInfo(source.id);
-                            if (cronInfo) {
-                              // Format configuration content for tooltip (excluding cron expression)
-                              const formattedParams = formatTaskParams(source.id, cronInfo.params);
-                              const configContent = (
-                                <div style={{ maxWidth: '400px', color: '#fff' }}>
-                                  <div style={{ marginBottom: '10px' }}>
-                                    <Space>
-                                      <ScheduleOutlined style={{ color: '#1890ff' }} />
-                                      <span style={{ fontSize: '13px', fontWeight: 'bold' }}>Configuration Details</span>
-                                    </Space>
-                                  </div>
-                                  <div style={{ marginBottom: '8px', fontSize: '12px' }}>
-                                    Timezone: <span style={{ color: '#1890ff' }}>{cronInfo.timezone}</span>
-                                  </div>
-                                  {cronInfo.description && (
-                                    <div style={{ marginBottom: '8px', fontSize: '12px' }}>
-                                      Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
-                                    </div>
-                                  )}
-                                  {formattedParams && (
-                                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                                      <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>
-                                        Configuration Parameters:
-                                      </div>
-                                      <pre style={{ 
-                                        margin: 0, 
-                                        fontSize: '11px', 
-                                        fontFamily: 'monospace',
-                                        whiteSpace: 'pre-wrap',
-                                        color: '#1890ff',
-                                        backgroundColor: 'rgba(0,0,0,0.3)',
-                                        padding: '8px',
-                                        borderRadius: '4px',
-                                        maxHeight: '200px',
-                                        overflow: 'auto'
-                                      }}>
-                                        {formattedParams}
-                                      </pre>
-                                      {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
-                                        <div style={{ marginTop: '10px' }}>
-                                          <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '4px' }}>
-                                            Full JSON:
-                                          </div>
-                                          <pre style={{ 
-                                            margin: 0, 
-                                            fontSize: '10px', 
-                                            fontFamily: 'monospace',
-                                            whiteSpace: 'pre-wrap',
-                                            color: '#52c41a',
-                                            backgroundColor: 'rgba(0,0,0,0.3)',
-                                            padding: '6px',
-                                            borderRadius: '4px',
-                                            maxHeight: '150px',
-                                            overflow: 'auto'
-                                          }}>
-                                            {JSON.stringify(cronInfo.params, null, 2)}
-                                          </pre>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-
+        {/* Data source cards */}
+        <Row gutter={[16, 16]}>
+          {dataSources.map(source => (
+            <Col xs={24} lg={12} xl={8} key={source.id}>
+              <Card
+                title={
+                  <Space>
+                    <span>{source.name}</span>
+                    {getStatusTag(source.status)}
+                  </Space>
+                }
+                extra={
+                  source.id === 'eodhd_fundamentals' ? null : (
+                    <Tooltip
+                      title={
+                        source.description.includes('Coming soon') 
+                          ? 'This data source is coming soon' 
+                          : !source.enabled && scheduledTasks.filter(task => {
+                              const taskType = task.type.toLowerCase();
+                              const sourceIdLower = source.id.toLowerCase();
                               return (
-                                <div style={{ 
-                                  marginBottom: '16px', 
-                                  padding: '12px', 
-                                  backgroundColor: cronInfo.isValid ? '#f6f8fa' : '#fff2f0', 
-                                  borderRadius: '6px', 
-                                  border: `1px solid ${cronInfo.isValid ? '#e1e4e8' : '#ffccc7'}` 
-                                }}>
-                                  <div style={{ marginBottom: '8px' }}>
-                                    <Space>
-                                      <ScheduleOutlined style={{ color: cronInfo.isValid ? '#1890ff' : '#ff4d4f' }} />
-                                      <Text strong style={{ fontSize: '13px' }}>Current Schedule:</Text>
-                                      {cronInfo.isValid ? (
-                                        <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '12px' }} />
-                                      ) : (
-                                        <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '12px' }} />
-                                      )}
-                                    </Space>
-                                  </div>
-                                  <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <Text code style={{ 
-                                      fontSize: '12px', 
-                                      backgroundColor: '#fff', 
-                                      padding: '2px 6px', 
-                                      borderRadius: '3px',
-                                      color: cronInfo.isValid ? '#000' : '#ff4d4f'
-                                    }}>
-                                      {cronInfo.expression}
-                                    </Text>
-                                    <Tooltip 
-                                      title={configContent}
-                                      placement="top"
-                                      overlayStyle={{ maxWidth: '450px' }}
-                                      overlayInnerStyle={{ 
-                                        backgroundColor: 'rgba(0,0,0,0.85)',
-                                        padding: '12px',
-                                        borderRadius: '6px'
-                                      }}
-                                    >
-                                      <SettingOutlined 
-                                        style={{ 
-                                          color: cronInfo.isValid ? '#1890ff' : '#ff4d4f', 
-                                          fontSize: '16px',
-                                          cursor: 'pointer',
-                                          transition: 'color 0.3s'
-                                        }} 
-                                      />
-                                    </Tooltip>
-                                  </div>
-                                  {!cronInfo.isValid && cronInfo.validationMessage && (
-                                    <div style={{ marginBottom: '4px' }}>
-                                      <Text type="danger" style={{ fontSize: '11px' }}>
-                                        {cronInfo.validationMessage}
-                                      </Text>
-                                    </div>
-                                  )}
-                                </div>
+                                (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+                                (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+                                (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+                                (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
+                                (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
+                                (sourceIdLower.includes('events') && taskType.includes('events')) ||
+                                (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
                               );
-                            }
-                            return null;
-                          })()}
-
-                          <Space direction="vertical" style={{ width: '100%' }}>
-                            {source.quickActions.map(action => (
-                              <Tooltip key={action.id} title={action.description}>
-                                <Button
-                                  block
-                                  icon={action.icon}
-                                  onClick={() => showQuickActionModal(action, source)}
-                                  disabled={
-                                    // Configuration buttons should always be clickable
-                                    action.id.includes('configure') 
-                                      ? false 
-                                      : !source.enabled
-                                  }
-                                  loading={source.status === 'running'}
-                                >
-                                  {action.name}
-                                </Button>
-                              </Tooltip>
-                            ))}
-                          </Space>
-                        </Card>
-                      </Col>
-                    ))}
-                  </Row>
+                            }).length === 0
+                          ? 'Please configure data fetch strategy first'
+                          : undefined
+                      }
+                    >
+                      <Switch
+                        checked={source.enabled}
+                        onChange={(checked) => toggleDataSource(source.id, checked)}
+                        disabled={source.description.includes('Coming soon') || loading}
+                        loading={loading && source.status === 'running'}
+                      />
+                    </Tooltip>
+                  )
+                }
+                style={{ 
+                  height: '100%',
+                  opacity: source.enabled ? 1 : 0.6
+                }}
+              >
+                <div style={{ marginBottom: '16px' }}>
+                  <Text type="secondary">{source.description}</Text>
                 </div>
-              )
-            }] : []),
-            {
-              key: 'task_management',
-              label: (
-                <Space>
-                  <ScheduleOutlined />
-                  Task Management
+
+                {source.lastRun && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      Last Run: {source.lastRun}
+                    </Text>
+                  </div>
+                )}
+
+                {/* Cron Expression Display with Configuration Icon */}
+                {(() => {
+                  const cronInfo = getCronInfo(source.id);
+                  if (cronInfo) {
+                    // Format configuration content for tooltip (excluding cron expression)
+                    const formattedParams = formatTaskParams(source.id, cronInfo.params);
+                    const configContent = (
+                      <div style={{ maxWidth: '400px', color: '#fff' }}>
+                        <div style={{ marginBottom: '10px' }}>
+                          <Space>
+                            <ScheduleOutlined style={{ color: '#1890ff' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 'bold' }}>Configuration Details</span>
+                          </Space>
+                        </div>
+                        <div style={{ marginBottom: '8px', fontSize: '12px' }}>
+                          Timezone: <span style={{ color: '#1890ff' }}>{cronInfo.timezone}</span>
+                        </div>
+                        {cronInfo.description && (
+                          <div style={{ marginBottom: '8px', fontSize: '12px' }}>
+                            Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
+                          </div>
+                        )}
+                        {formattedParams && (
+                          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>
+                              Configuration Parameters:
+                            </div>
+                            <pre style={{ 
+                              margin: 0, 
+                              fontSize: '11px', 
+                              fontFamily: 'monospace',
+                              whiteSpace: 'pre-wrap',
+                              color: '#1890ff',
+                              backgroundColor: 'rgba(0,0,0,0.3)',
+                              padding: '8px',
+                              borderRadius: '4px',
+                              maxHeight: '200px',
+                              overflow: 'auto'
+                            }}>
+                              {formattedParams}
+                            </pre>
+                            {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+                              <div style={{ marginTop: '10px' }}>
+                                <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '4px' }}>
+                                  Full JSON:
+                                </div>
+                                <pre style={{ 
+                                  margin: 0, 
+                                  fontSize: '10px', 
+                                  fontFamily: 'monospace',
+                                  whiteSpace: 'pre-wrap',
+                                  color: '#52c41a',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  padding: '6px',
+                                  borderRadius: '4px',
+                                  maxHeight: '150px',
+                                  overflow: 'auto'
+                                }}>
+                                  {JSON.stringify(cronInfo.params, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+
+                    return (
+                      <div style={{ 
+                        marginBottom: '16px', 
+                        padding: '12px', 
+                        backgroundColor: cronInfo.isValid ? '#f6f8fa' : '#fff2f0', 
+                        borderRadius: '6px', 
+                        border: `1px solid ${cronInfo.isValid ? '#e1e4e8' : '#ffccc7'}` 
+                      }}>
+                        <div style={{ marginBottom: '8px' }}>
+                          <Space>
+                            <ScheduleOutlined style={{ color: cronInfo.isValid ? '#1890ff' : '#ff4d4f' }} />
+                            <Text strong style={{ fontSize: '13px' }}>Current Schedule:</Text>
+                            {cronInfo.isValid ? (
+                              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '12px' }} />
+                            ) : (
+                              <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '12px' }} />
+                            )}
+                          </Space>
+                        </div>
+                        <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Text code style={{ 
+                            fontSize: '12px', 
+                            backgroundColor: '#fff', 
+                            padding: '2px 6px', 
+                            borderRadius: '3px',
+                            color: cronInfo.isValid ? '#000' : '#ff4d4f'
+                          }}>
+                            {cronInfo.expression}
+                          </Text>
+                          <Tooltip 
+                            title={configContent}
+                            placement="top"
+                            overlayStyle={{ maxWidth: '450px' }}
+                            overlayInnerStyle={{ 
+                              backgroundColor: 'rgba(0,0,0,0.85)',
+                              padding: '12px',
+                              borderRadius: '6px'
+                            }}
+                          >
+                            <SettingOutlined 
+                              style={{ 
+                                color: cronInfo.isValid ? '#1890ff' : '#ff4d4f', 
+                                fontSize: '16px',
+                                cursor: 'pointer',
+                                transition: 'color 0.3s'
+                              }} 
+                            />
+                          </Tooltip>
+                        </div>
+                        {!cronInfo.isValid && cronInfo.validationMessage && (
+                          <div style={{ marginBottom: '4px' }}>
+                            <Text type="danger" style={{ fontSize: '11px' }}>
+                              {cronInfo.validationMessage}
+                            </Text>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {source.quickActions.map(action => (
+                    <Tooltip key={action.id} title={action.description}>
+                      <Button
+                        block
+                        icon={action.icon}
+                        onClick={() => showQuickActionModal(action, source)}
+                        disabled={
+                          // Configuration buttons should always be clickable
+                          action.id.includes('configure') 
+                            ? false 
+                            : !source.enabled
+                        }
+                        loading={source.status === 'running'}
+                      >
+                        {action.name}
+                      </Button>
+                    </Tooltip>
+                  ))}
                 </Space>
-              ),
-              children: (
-                <DatabaseTableViewer refreshTrigger={taskManagementRefreshTrigger} />
-              )
-            },
-            {
-              key: 'execution_history',
-              label: (
-                <Space>
-                  <BarChartOutlined />
-                  Execution History
-                </Space>
-              ),
-              children: (
-                <TaskExecutionHistory 
-                  showTaskFilter={true} 
-                  height={600} 
-                  refreshTrigger={executionHistoryRefreshTrigger} 
-                />
-              )
-            }
-          ]} 
-        />
+              </Card>
+            </Col>
+          ))}
+        </Row>
       </Card>
 
 

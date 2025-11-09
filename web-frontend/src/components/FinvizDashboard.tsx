@@ -1256,28 +1256,61 @@ const FinvizDashboard: React.FC = () => {
                 >
                   <List.Item.Meta
                     avatar={
-                      <Text type="secondary" style={{ fontSize: '10px', whiteSpace: 'nowrap' }}>
-                        <CalendarOutlined /> {item.date ? `${new Date(item.date).toLocaleDateString()} ${new Date(item.date).toLocaleTimeString()}` : 'N/A'}
-                        {item.updated_at && (
-                          <span style={{ marginLeft: '8px', color: '#999' }}>
-                            | Updated: {`${new Date(item.updated_at).toLocaleDateString()} ${new Date(item.updated_at).toLocaleTimeString()}`}
-                          </span>
-                        )}
+                      <Text
+                        type="secondary"
+                        style={{
+                          fontSize: '10px',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        {(() => {
+                          const segments = [
+                            <span
+                              key="date"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              <CalendarOutlined />{' '}
+                              {item.date
+                                ? `${new Date(item.date).toLocaleDateString()} ${new Date(
+                                    item.date
+                                  ).toLocaleTimeString()}`
+                                : 'N/A'}
+                            </span>,
+                            item.updated_at && (
+                              <span key="updated">
+                                Updated:{' '}
+                                {`${new Date(item.updated_at).toLocaleDateString()} ${new Date(
+                                  item.updated_at
+                                ).toLocaleTimeString()}`}
+                              </span>
+                            ),
+                            item.source && <span key="source">{item.source}</span>,
+                          ].filter(Boolean) as React.ReactNode[];
+
+                          return segments.map((segment, index) => (
+                            <React.Fragment key={index}>
+                              {index > 0 && <span style={{ color: '#d9d9d9' }}>|</span>}
+                              {segment}
+                            </React.Fragment>
+                          ));
+                        })()}
                       </Text>
                     }
                     title={
                       <Space>
-                        <span 
-                          style={{ 
-                            fontSize: '14px', 
+                        <span
+                          style={{
+                            fontSize: '14px',
                             cursor: 'pointer',
                             color: '#1890ff',
                             textDecoration: 'underline',
-                            maxWidth: '800px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            display: 'inline-block'
+                            maxWidth: 'min(800px, 100%)',
+                            whiteSpace: 'normal',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
                           }}
                           title={item.title}
                           onClick={() => {
@@ -1287,9 +1320,6 @@ const FinvizDashboard: React.FC = () => {
                         >
                           {item.title}
                         </span>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          - {item.source}
-                        </Text>
                       </Space>
                     }
                     description={null}

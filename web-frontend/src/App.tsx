@@ -15,6 +15,7 @@ import TasksPage from './pages/TasksPage';
 import UsersPage from './pages/UsersPage';
 import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
+import SchedulerLogsPage from './pages/SchedulerLogsPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
@@ -125,6 +126,7 @@ const App: React.FC = () => {
                 <Route path="fundamentals" element={<FundamentalsPage />} />
                 <Route path="eod-fetch" element={<EODFetchPage />} />
                 <Route path="scheduler" element={<SchedulerPage />} />
+                <Route path="scheduler/logs" element={<SchedulerLogsPage />} />
                 <Route path="prompt-templates" element={<PromptTemplatesPage />} />
                 <Route path="investment-themes" element={<InvestmentThemesPage />} />
                 <Route path="candlestick-demo" element={<CandlestickDemoPage />} />

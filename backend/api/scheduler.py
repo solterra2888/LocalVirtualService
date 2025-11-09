@@ -1721,6 +1721,30 @@ async def get_all_execution_logs(
         raise HTTPException(status_code=500, detail=f"获取所有任务执行日志失败: {str(e)}")
 
 
+@router.get("/execution-logs/summary", summary="获取任务执行日志统计")
+async def get_execution_logs_summary(
+    days: int = Query(default=7, ge=1, le=90, description="统计时间范围（天）"),
+    timezone_name: str = Query(default="America/New_York", alias="timezone", description="展示所用时区")
+):
+    """
+    获取不同任务在指定时间范围内的执行统计，支持一周或一个月等视图
+    """
+    try:
+        logger.info("获取执行日志统计请求", days=days, timezone=timezone_name)
+
+        scheduler_service = await get_scheduler_service()
+        summary = await scheduler_service.get_execution_summary(days=days, tz_name=timezone_name)
+
+        return {
+            "success": True,
+            "message": "获取执行日志统计成功",
+            "data": summary
+        }
+    except Exception as e:
+        logger.error("获取执行日志统计失败", exception=str(e), days=days, timezone=timezone_name)
+        raise HTTPException(status_code=500, detail=f"获取执行日志统计失败: {str(e)}")
+
+
 @router.get("/execution-logs/download", summary="下载执行日志CSV")
 async def download_execution_logs_csv(
     task_id: Optional[str] = Query(default=None, description="任务ID，不提供则下载所有任务日志"),

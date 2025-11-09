@@ -237,6 +237,7 @@ const RelativeLineChart: React.FC<RelativeLineChartProps> = ({
               dataKey={assetName}
               stroke={COLORS[index % COLORS.length]}
               strokeWidth={2}
+              strokeOpacity={0.5}
               dot={false}
               activeDot={{ r: 5 }}
               connectNulls={true}

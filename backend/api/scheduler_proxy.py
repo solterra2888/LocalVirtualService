@@ -518,6 +518,22 @@ async def get_all_execution_logs_proxy(limit: int = 50, offset: int = 0, current
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy get all execution logs: {str(e)}")
 
+@router.get("/execution-logs/summary", summary="get execution summary statistics")
+async def get_execution_summary_proxy(
+    days: int = 7,
+    timezone: str = "America/New_York",
+    current_user=Depends(get_current_user)
+):
+    """代理获取任务执行统计摘要"""
+    try:
+        params = {"days": days, "timezone": timezone}
+        result = await scheduler_client.get("/scheduler/execution-logs/summary", params=params)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy get execution summary: {str(e)}")
+
 @router.get("/execution-logs/download", summary="download execution logs csv")
 async def download_execution_logs_csv_proxy(
     task_id: Optional[str] = None, 

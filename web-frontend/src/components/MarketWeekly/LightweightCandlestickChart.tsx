@@ -108,35 +108,38 @@ const LightweightCandlestickChart: React.FC<LightweightCandlestickChartProps> = 
 
     // 创建Candlestick系列
     const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#FFFFFF',
-      downColor: '#EF5350',
-      borderUpColor: '#4CAF50',
-      borderDownColor: '#EF5350',
-      wickUpColor: '#4CAF50',
-      wickDownColor: '#EF5350',
+      upColor: 'rgba(0, 0, 0, 0)',
+      downColor: '#EA6D61',
+      borderUpColor: '#999999',
+      borderDownColor: '#EA6D61',
+      wickUpColor: '#999999',
+      wickDownColor: '#EA6D61',
     });
 
     candlestickSeriesRef.current = candlestickSeries;
 
     // 创建EMA系列
     const ema20Series = chart.addLineSeries({
-      color: '#2196F3',
-      lineWidth: 2,
-      title: 'EMA 20',
+      color: 'rgba(33, 150, 243, 0.3)',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     ema20SeriesRef.current = ema20Series;
 
     const ema50Series = chart.addLineSeries({
-      color: '#FF9800',
-      lineWidth: 2,
-      title: 'EMA 50',
+      color: 'rgba(255, 152, 0, 0.3)',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     ema50SeriesRef.current = ema50Series;
 
     const ema200Series = chart.addLineSeries({
-      color: '#9C27B0',
-      lineWidth: 2,
-      title: 'EMA 200',
+      color: 'rgba(156, 39, 176, 0.3)',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     ema200SeriesRef.current = ema200Series;
 
@@ -206,10 +209,41 @@ const LightweightCandlestickChart: React.FC<LightweightCandlestickChartProps> = 
         ref={chartContainerRef}
         style={{
           width: '100%',
+          position: 'relative',
           border: '1px solid #e8e8e8',
           borderRadius: '4px',
         }}
-      />
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: '8px',
+            left: '12px',
+            display: 'flex',
+            gap: '12px',
+            fontSize: '11px',
+            color: '#555',
+            background: 'rgba(255, 255, 255, 0.85)',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            border: '1px solid rgba(0, 0, 0, 0.08)',
+            zIndex: 2,
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '2px', background: 'rgba(33, 150, 243, 0.3)', display: 'inline-block' }} />
+            EMA 20
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '2px', background: 'rgba(255, 152, 0, 0.3)', display: 'inline-block' }} />
+            EMA 50
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '2px', background: 'rgba(156, 39, 176, 0.3)', display: 'inline-block' }} />
+            EMA 200
+          </span>
+        </div>
+      </div>
       <div style={{ marginTop: '8px', fontSize: '12px', color: '#666', textAlign: 'center' }}>
         {label} - 90 Day Chart with EMAs (20, 50, 200)
       </div>

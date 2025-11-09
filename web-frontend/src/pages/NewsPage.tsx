@@ -689,17 +689,42 @@ const NewsPage: React.FC = () => {
                           >
                             <List.Item.Meta
                               avatar={
-                                <Text 
-                                  type="secondary" 
-                                  style={{ fontSize: '10px', whiteSpace: 'nowrap' }}
+                                <Text
+                                  type="secondary"
+                                  style={{
+                                    fontSize: '10px',
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
                                 >
-                                  <CalendarOutlined />{' '}
-                                  {item.date ? dayjs(item.date).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}
-                                  {item.updated_at && (
-                                    <span style={{ marginLeft: '8px', color: '#999' }}>
-                                      | Updated: {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm:ss')}
-                                    </span>
-                                  )}
+                                  {(() => {
+                                    const segments = [
+                                      <span
+                                        key="date"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                      >
+                                        <CalendarOutlined />{' '}
+                                        {item.date ? dayjs(item.date).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}
+                                      </span>,
+                                      item.updated_at && (
+                                        <span key="updated">
+                                          Updated: {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm:ss')}
+                                        </span>
+                                      ),
+                                      item.source && (
+                                        <span key="source">{newsUtils.getSourceDisplayName(item.source)}</span>
+                                      ),
+                                    ].filter(Boolean) as React.ReactNode[];
+
+                                    return segments.map((segment, index) => (
+                                      <React.Fragment key={index}>
+                                        {index > 0 && <span style={{ color: '#d9d9d9' }}>|</span>}
+                                        {segment}
+                                      </React.Fragment>
+                                    ));
+                                  })()}
                                 </Text>
                               }
                               title={
@@ -710,20 +735,16 @@ const NewsPage: React.FC = () => {
                                       cursor: 'pointer',
                                       color: '#1890ff',
                                       textDecoration: 'underline',
-                                      maxWidth: '800px',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
+                                      maxWidth: 'min(800px, 100%)',
+                                      whiteSpace: 'normal',
+                                      wordBreak: 'break-word',
+                                      overflowWrap: 'anywhere',
                                     }}
                                     title={item.title}
                                     onClick={() => showNewsDetail(item.id)}
                                   >
                                     {item.title}
                                   </span>
-                                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                                    - {newsUtils.getSourceDisplayName(item.source)}
-                                  </Text>
                                 </Space>
                               }
                               description={null}

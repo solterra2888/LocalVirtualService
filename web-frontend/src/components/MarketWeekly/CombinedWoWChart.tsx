@@ -57,7 +57,8 @@ const SubChart: React.FC<SubChartProps> = ({ data, title }) => {
   const CustomLabel = (props: any) => {
     const { x, y, width, height, value } = props;
     const isPositive = value >= 0;
-    const labelX = isPositive ? x + width + 5 : x - 5;
+    const labelOffset = 12;
+    const labelX = isPositive ? x + width + labelOffset : x - labelOffset;
     
     return (
       <text

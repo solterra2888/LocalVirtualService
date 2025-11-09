@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   Table,
@@ -10,11 +10,12 @@ import {
   Row,
   Col,
   Statistic,
-  Progress,
   Empty,
   message,
   Modal,
-  Descriptions
+  Descriptions,
+  Radio,
+  Skeleton
 } from 'antd';
 import {
   ClockCircleOutlined,
@@ -27,35 +28,61 @@ import {
   PlayCircleOutlined,
   TrophyOutlined,
   DownloadOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  LineChartOutlined
 } from '@ant-design/icons';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  Legend,
+  BarChart,
+  Bar
+} from 'recharts';
 import dayjs, { Dayjs } from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { schedulerAPI, ExecutionLog, ScheduledTask } from '../services/scheduler';
+import { schedulerAPI, ExecutionLog, ExecutionSummaryData } from '../services/scheduler';
 
 dayjs.extend(relativeTime);
 
 const { Text } = Typography;
-const { Option } = Select;
+
+const metricLabelMap: Record<'success_count' | 'total_runs' | 'failure_count', string> = {
+  success_count: 'Success Count',
+  total_runs: 'Total Runs',
+  failure_count: 'Failure Count'
+};
+
+const colorPalette = [
+  '#1890ff',
+  '#52c41a',
+  '#fa8c16',
+  '#722ed1',
+  '#13c2c2',
+  '#eb2f96',
+  '#fa541c',
+  '#2f54eb',
+  '#a0d911',
+  '#9254de'
+];
 
 // Use ExecutionLog type imported from scheduler service
 
 interface TaskExecutionHistoryProps {
-  taskId?: string;
-  showTaskFilter?: boolean;
   height?: number;
   refreshTrigger?: number; // Add refresh trigger prop
 }
 
 const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
-  taskId,
-  showTaskFilter = true,
   height = 600,
   refreshTrigger
 }) => {
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(taskId);
   const [dateRange] = useState<[Dayjs, Dayjs]>([
     dayjs().subtract(7, 'day'),
     dayjs()
@@ -63,38 +90,225 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedLog, setSelectedLog] = useState<ExecutionLog | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
-  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
+  const [summaryData, setSummaryData] = useState<ExecutionSummaryData | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryRange, setSummaryRange] = useState<'7d' | '30d'>('7d');
+  const [chartType, setChartType] = useState<'line' | 'bar'>('line');
+  const [chartMetric, setChartMetric] = useState<'success_count' | 'total_runs' | 'failure_count'>('success_count');
+  const [selectedSummaryTasks, setSelectedSummaryTasks] = useState<string[]>([]);
 
-  const loadTasks = useCallback(async () => {
-    try {
-      const response = await schedulerAPI.getTasks();
-      if (response.success && response.data) {
-        setTasks(response.data);
-      } else {
-        console.error('Failed to get task list:', response.message);
-        message.error('Failed to get task list');
-      }
-    } catch (error) {
-      console.error('Failed to get task list:', error);
-      message.error('Failed to get task list');
+  const taskColorMap = useMemo(() => {
+    if (!summaryData) return {};
+    const map: Record<string, string> = {};
+    summaryData.tasks.forEach((task, index) => {
+      map[task.task_type] = colorPalette[index % colorPalette.length];
+    });
+    return map;
+  }, [summaryData]);
+
+  const summaryTaskOptions = useMemo(() => {
+    if (!summaryData) return [];
+    return summaryData.tasks.map((task) => ({
+      label: task.task_name || task.task_type,
+      value: task.task_type
+    }));
+  }, [summaryData]);
+
+  const selectedSummaryTaskData = useMemo(() => {
+    if (!summaryData || selectedSummaryTasks.length === 0) return [];
+    return summaryData.tasks.filter((task) => selectedSummaryTasks.includes(task.task_type));
+  }, [summaryData, selectedSummaryTasks]);
+
+  const aggregatedSummaryTotals = useMemo(() => {
+    if (!summaryData) return null;
+    const totals = summaryData.tasks.reduce(
+      (acc, task) => {
+        acc.totalRuns += task.totals?.total_runs || 0;
+        acc.success += task.totals?.success_count || 0;
+        acc.failure += task.totals?.failure_count || 0;
+        return acc;
+      },
+      { totalRuns: 0, success: 0, failure: 0 }
+    );
+    const successRate = totals.totalRuns > 0 ? (totals.success / totals.totalRuns) * 100 : 0;
+    return {
+      ...totals,
+      successRate
+    };
+  }, [summaryData]);
+
+  const { chartData, hasSummaryChartData } = useMemo(() => {
+    if (!summaryData || selectedSummaryTasks.length === 0) {
+      return { chartData: [], hasSummaryChartData: false };
     }
-  }, []);
+
+    const dateMap: Record<string, any> = {};
+    const selectedSet = new Set(selectedSummaryTasks);
+
+    summaryData.tasks.forEach((task) => {
+      if (!selectedSet.has(task.task_type)) {
+        return;
+      }
+      task.daily_stats.forEach((stat) => {
+        if (!dateMap[stat.date]) {
+          dateMap[stat.date] = {
+            date: stat.date,
+            dateLabel: dayjs(stat.date).format('MM-DD'),
+            meta: {}
+          };
+        }
+        const metricValue =
+          chartMetric === 'total_runs'
+            ? stat.total_runs
+            : chartMetric === 'failure_count'
+            ? stat.failure_count
+            : stat.success_count;
+        dateMap[stat.date][task.task_type] = metricValue;
+        dateMap[stat.date].meta[task.task_type] = stat;
+      });
+    });
+
+    const sorted = Object.values(dateMap).sort(
+      (a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf()
+    );
+
+    return {
+      chartData: sorted,
+      hasSummaryChartData: sorted.length > 0
+    };
+  }, [summaryData, selectedSummaryTasks, chartMetric]);
+
+  const renderChartTooltip = useCallback(
+    ({ active, payload }: any) => {
+      if (!active || !payload || payload.length === 0) {
+        return null;
+      }
+
+      const dataPoint = payload[0].payload;
+      const meta = dataPoint.meta || {};
+      const formattedDate = dayjs(dataPoint.date).format('YYYY-MM-DD');
+
+      return (
+        <div
+          style={{
+            background: '#fff',
+            padding: 12,
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            minWidth: 200
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>{formattedDate}</div>
+          <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+            Metric: {metricLabelMap[chartMetric]}
+          </div>
+          {payload.map((item: any) => {
+            const taskKey = item.dataKey;
+            const taskMeta = meta[taskKey];
+            return (
+              <div key={taskKey} style={{ marginBottom: 8 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontWeight: 500,
+                    color: item.color || '#333'
+                  }}
+                >
+                  <span>{item.name}</span>
+                  <span>{item.value ?? 0}</span>
+                </div>
+                {taskMeta && (
+                  <div style={{ fontSize: 11, color: '#595959', marginTop: 4 }}>
+                    <div>Total Runs: {taskMeta.total_runs}</div>
+                    <div>Success: {taskMeta.success_count}</div>
+                    {taskMeta.failure_count > 0 && (
+                      <div style={{ color: '#ff4d4f' }}>Failure: {taskMeta.failure_count}</div>
+                    )}
+                    {typeof taskMeta.success_rate === 'number' && (
+                      <div>Success Rate: {(taskMeta.success_rate * 100).toFixed(1)}%</div>
+                    )}
+                    {typeof taskMeta.avg_duration_ms === 'number' && (
+                      <div>
+                        Avg Duration: {formatDuration(Math.round(taskMeta.avg_duration_ms))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    },
+    [chartMetric]
+  );
+
+  const loadExecutionSummary = useCallback(
+    async (range: '7d' | '30d') => {
+      try {
+        setSummaryLoading(true);
+        const days = range === '30d' ? 30 : 7;
+        const browserTimezone =
+          typeof Intl !== 'undefined' && Intl.DateTimeFormat
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
+            : 'America/New_York';
+
+        const response = await schedulerAPI.getExecutionSummary(days, browserTimezone);
+        if (response.success && response.data) {
+          const tasksData = (response.data.tasks || []).filter(
+            (task) => task.task_type !== 'futu_themes'
+          );
+          const filteredSummary = {
+            ...response.data,
+            tasks: tasksData
+          };
+          setSummaryData(filteredSummary);
+          setSelectedSummaryTasks((prev) => {
+            const retained = prev.filter((taskType) =>
+              tasksData.some((task) => task.task_type === taskType)
+            );
+            if (retained.length > 0) {
+              return retained;
+            }
+            if (tasksData.length === 0) {
+              return [];
+            }
+            return filteredSummary.tasks.map((task) => task.task_type);
+          });
+        } else {
+          setSummaryData(null);
+          message.error(response.message || 'Failed to get execution summary');
+        }
+      } catch (error) {
+        console.error('Failed to load execution summary:', error);
+        setSummaryData(null);
+        message.error('Failed to load execution summary');
+      } finally {
+        setSummaryLoading(false);
+      }
+    },
+    []
+  );
 
   const loadExecutionLogs = useCallback(async () => {
     try {
       setLoading(true);
       
-      let response;
-      if (selectedTaskId && selectedTaskId !== 'all') {
-        // Get execution logs for specific task
-        response = await schedulerAPI.getTaskLogs(selectedTaskId, 50, 0);
-      } else {
-        // Get execution logs for all tasks
-        response = await schedulerAPI.getAllExecutionLogs(50, 0);
-      }
+      // Get execution logs for all tasks
+      const response = await schedulerAPI.getAllExecutionLogs(50, 0);
 
       if (response.success && response.data) {
-        let filteredLogs = response.data.logs;
+        let filteredLogs = response.data.logs.filter(
+          (log: ExecutionLog) => log.task_type !== 'futu_themes'
+        );
+        
+        // Filter by selected tasks
+        if (selectedSummaryTasks.length > 0) {
+          filteredLogs = filteredLogs.filter((log: ExecutionLog) => 
+            selectedSummaryTasks.includes(log.task_type)
+          );
+        }
         
         // Filter by status
         if (statusFilter && statusFilter !== 'all') {
@@ -123,23 +337,23 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [selectedTaskId, statusFilter, dateRange]);
+  }, [selectedSummaryTasks, statusFilter, dateRange]);
 
   useEffect(() => {
     loadExecutionLogs();
-  }, [selectedTaskId, dateRange, statusFilter, loadExecutionLogs]);
+  }, [selectedSummaryTasks, dateRange, statusFilter, loadExecutionLogs]);
 
   useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+    loadExecutionSummary(summaryRange);
+  }, [summaryRange, loadExecutionSummary]);
 
   // Refresh data when refreshTrigger changes
   useEffect(() => {
     if (refreshTrigger !== undefined) {
       loadExecutionLogs();
-      loadTasks();
+      loadExecutionSummary(summaryRange);
     }
-  }, [refreshTrigger, loadExecutionLogs, loadTasks]);
+  }, [refreshTrigger, loadExecutionLogs, loadExecutionSummary, summaryRange]);
 
   const getStatusIcon = (status: string) => {
     const statusConfig = {
@@ -191,9 +405,11 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   const handleDownloadCSV = async () => {
     try {
-      console.log('Starting CSV download, task ID:', selectedTaskId);
+      console.log('Starting CSV download, selected tasks:', selectedSummaryTasks);
       message.loading('Generating CSV file...', 0);
-      await schedulerAPI.downloadExecutionLogsCSV(selectedTaskId, 1000, 0);
+      // Download all tasks if none selected, otherwise download first selected task
+      const taskId = selectedSummaryTasks.length > 0 ? selectedSummaryTasks[0] : undefined;
+      await schedulerAPI.downloadExecutionLogsCSV(taskId, 1000, 0);
       message.destroy();
       message.success('CSV file downloaded successfully');
     } catch (error: any) {
@@ -244,19 +460,6 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       console.error('Failed to clear logs:', error);
       message.error(`Failed to clear logs: ${error?.message || 'Unknown error'}`);
     }
-  };
-
-  // Statistics data
-  const stats = {
-    total: logs.length,
-    success: logs.filter(log => log.status === 'success').length,
-    failed: logs.filter(log => ['failed', 'error'].includes(log.status)).length,
-    avgDuration: logs.length > 0 
-      ? logs.filter(log => log.duration_ms).reduce((acc, log) => acc + (log.duration_ms || 0), 0) / logs.filter(log => log.duration_ms).length
-      : 0,
-    successRate: logs.length > 0 
-      ? (logs.filter(log => log.status === 'success').length / logs.length * 100)
-      : 0
   };
 
   const columns = [
@@ -373,129 +576,220 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   return (
     <div>
-      {/* Filters */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={[16, 16]} align="middle">
-          {showTaskFilter && (
-            <Col xs={24} sm={8}>
-              <Space>
-                <Text strong>Task:</Text>
-                <Select
-                  placeholder="Select task"
-                  style={{ width: 200 }}
-                  allowClear
-                  value={selectedTaskId}
-                  onChange={setSelectedTaskId}
-                  loading={loading}
-                >
-                  <Option value="all">All Tasks</Option>
-                  {tasks.map((task) => (
-                    <Option key={task.id} value={task.id}>
-                      {task.name}
-                    </Option>
-                  ))}
-                </Select>
-              </Space>
-            </Col>
+      <Card
+        size="small"
+        style={{ marginBottom: 16 }}
+        bodyStyle={{ overflow: 'visible' }}
+        title={
+          <Space>
+            {chartType === 'line' ? <LineChartOutlined /> : <BarChartOutlined />}
+            Execution Overview
+          </Space>
+        }
+        extra={
+          <Button
+            icon={<ReloadOutlined />}
+            size="small"
+            onClick={() => loadExecutionSummary(summaryRange)}
+            loading={summaryLoading}
+          >
+            Refresh
+          </Button>
+        }
+      >
+        <Space wrap size="middle" style={{ marginBottom: 16 }}>
+          <Radio.Group
+            value={summaryRange}
+            onChange={(e) => setSummaryRange(e.target.value as '7d' | '30d')}
+            size="small"
+          >
+            <Radio.Button value="7d">Past 7 Days</Radio.Button>
+            <Radio.Button value="30d">Past 30 Days</Radio.Button>
+          </Radio.Group>
+          <Radio.Group
+            value={chartType}
+            onChange={(e) => setChartType(e.target.value as 'line' | 'bar')}
+            size="small"
+          >
+            <Radio.Button value="line">
+              <LineChartOutlined /> Line
+            </Radio.Button>
+            <Radio.Button value="bar">
+              <BarChartOutlined /> Bar
+            </Radio.Button>
+          </Radio.Group>
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="Select Tasks"
+            value={selectedSummaryTasks}
+            onChange={(value) => setSelectedSummaryTasks(value as string[])}
+            options={summaryTaskOptions}
+            style={{ minWidth: 220 }}
+            size="small"
+            maxTagCount="responsive"
+          />
+          <Select
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { label: 'All Status', value: 'all' },
+              { label: 'Success', value: 'success' },
+              { label: 'Failed', value: 'failed' },
+              { label: 'Error', value: 'error' },
+              { label: 'Running', value: 'running' },
+              { label: 'Timeout', value: 'timeout' },
+              { label: 'Cancelled', value: 'cancelled' }
+            ]}
+            style={{ width: 120 }}
+            size="small"
+          />
+          <Select
+            value={chartMetric}
+            onChange={(value) =>
+              setChartMetric(value as 'success_count' | 'total_runs' | 'failure_count')
+            }
+            options={[
+              { label: 'Success Count', value: 'success_count' },
+              { label: 'Total Runs', value: 'total_runs' },
+              { label: 'Failure Count', value: 'failure_count' }
+            ]}
+            style={{ width: 160 }}
+            size="small"
+          />
+          {summaryData && (
+            <Tag color="geekblue" style={{ marginLeft: 0 }}>
+              Timezone: {summaryData.timezone}
+            </Tag>
           )}
-          
-          <Col xs={24} sm={8}>
-            <Space>
-              <Text strong>Status:</Text>
-              <Select
-                value={statusFilter}
-                onChange={setStatusFilter}
-                style={{ width: 100 }}
-              >
-                <Option value="all">All</Option>
-                <Option value="success">Success</Option>
-                <Option value="failed">Failed</Option>
-                <Option value="error">Error</Option>
-                <Option value="running">Running</Option>
-              </Select>
-            </Space>
-          </Col>
-          
-          <Col xs={24} sm={8}>
-            <Space>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={loadExecutionLogs}
-                loading={loading}
-                size="small"
-              >
-                Refresh
-              </Button>
-            </Space>
-          </Col>
-        </Row>
-      </Card>
+        </Space>
 
-      {/* Statistics cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={6}>
-          <Card>
-            <Statistic
-              title="Total Executions"
-              value={stats.total}
-              prefix={<ClockCircleOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card>
-            <Statistic
-              title="Success Count"
-              value={stats.success}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card>
-            <Statistic
-              title="Failure Count"
-              value={stats.failed}
-              prefix={<ExclamationCircleOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card>
-            <Statistic
-              title="Success Rate"
-              value={stats.successRate.toFixed(1)}
-              suffix="%"
-              prefix={<TrophyOutlined />}
-              valueStyle={{ 
-                color: stats.successRate >= 90 ? '#52c41a' : 
-                       stats.successRate >= 70 ? '#faad14' : '#ff4d4f' 
-              }}
-            />
-          </Card>
-        </Col>
-      </Row>
+        {aggregatedSummaryTotals && (
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={12} sm={6}>
+              <Statistic
+                title="Total Runs"
+                value={aggregatedSummaryTotals.totalRuns}
+                prefix={<ClockCircleOutlined />}
+              />
+            </Col>
+            <Col xs={12} sm={6}>
+              <Statistic
+                title="Success"
+                value={aggregatedSummaryTotals.success}
+                prefix={<CheckCircleOutlined />}
+                valueStyle={{ color: '#52c41a' }}
+              />
+            </Col>
+            <Col xs={12} sm={6}>
+              <Statistic
+                title="Failures"
+                value={aggregatedSummaryTotals.failure}
+                prefix={<ExclamationCircleOutlined />}
+                valueStyle={{ color: '#ff4d4f' }}
+              />
+            </Col>
+            <Col xs={12} sm={6}>
+              <Statistic
+                title="Success Rate"
+                value={aggregatedSummaryTotals.successRate.toFixed(1)}
+                suffix="%"
+                prefix={<TrophyOutlined />}
+                valueStyle={{
+                  color:
+                    aggregatedSummaryTotals.successRate >= 90
+                      ? '#52c41a'
+                      : aggregatedSummaryTotals.successRate >= 70
+                      ? '#faad14'
+                      : '#ff4d4f'
+                }}
+              />
+            </Col>
+          </Row>
+        )}
 
-      {/* Success rate progress bar */}
-      {stats.total > 0 && (
-        <Card size="small" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Text strong>Execution Success Rate:</Text>
-            <Progress
-              percent={stats.successRate}
-              status={stats.successRate >= 90 ? 'success' : stats.successRate >= 70 ? 'active' : 'exception'}
-              strokeColor={stats.successRate >= 90 ? '#52c41a' : stats.successRate >= 70 ? '#faad14' : '#ff4d4f'}
-              style={{ flex: 1 }}
-            />
-            <Text style={{ fontSize: '12px' }}>
-              Average Duration: {formatDuration(stats.avgDuration)}
-            </Text>
+        {summaryLoading ? (
+          <Skeleton active paragraph={{ rows: 6 }} />
+        ) : hasSummaryChartData ? (
+          <div style={{ width: '100%', height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              {chartType === 'line' ? (
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="dateLabel" />
+                  <YAxis
+                    allowDecimals={false}
+                    label={{
+                      value: metricLabelMap[chartMetric],
+                      angle: -90,
+                      position: 'insideLeft'
+                    }}
+                  />
+                  <RechartsTooltip
+                    content={renderChartTooltip}
+                    wrapperStyle={{ zIndex: 2000 }}
+                    allowEscapeViewBox={{ x: false, y: true }}
+                  />
+                  <Legend />
+                  {selectedSummaryTaskData.map((task) => (
+                    <Line
+                      key={task.task_type}
+                      type="monotone"
+                      dataKey={task.task_type}
+                      name={task.task_name || task.task_type}
+                      stroke={taskColorMap[task.task_type] || '#1890ff'}
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      activeDot={{ r: 4 }}
+                    />
+                  ))}
+                </LineChart>
+              ) : (
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="dateLabel" />
+                  <YAxis
+                    allowDecimals={false}
+                    label={{
+                      value: metricLabelMap[chartMetric],
+                      angle: -90,
+                      position: 'insideLeft'
+                    }}
+                  />
+                  <RechartsTooltip
+                    content={renderChartTooltip}
+                    wrapperStyle={{ zIndex: 2000 }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                  />
+                  <Legend />
+                  {selectedSummaryTaskData.map((task) => (
+                    <Bar
+                      key={task.task_type}
+                      dataKey={task.task_type}
+                      name={task.task_name || task.task_type}
+                      stackId="runs"
+                      fill={taskColorMap[task.task_type] || '#1890ff'}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  ))}
+                </BarChart>
+              )}
+            </ResponsiveContainer>
           </div>
-        </Card>
-      )}
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <Space direction="vertical">
+                <Text type="secondary">No execution summary data</Text>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Select schedulers or adjust the time range
+                </Text>
+              </Space>
+            }
+          />
+        )}
+      </Card>
 
       {/* Execution logs table */}
       <Card 
@@ -503,9 +797,14 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
           <Space>
             <BarChartOutlined />
             Task Execution History
-            {selectedTaskId && (
+            {selectedSummaryTasks.length > 0 && (
               <Tag color="blue">
-                Task filtering enabled
+                {selectedSummaryTasks.length} task(s) selected
+              </Tag>
+            )}
+            {statusFilter !== 'all' && (
+              <Tag color="green">
+                Status: {statusFilter}
               </Tag>
             )}
           </Space>
@@ -556,7 +855,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               <Space direction="vertical">
                 <Text type="secondary">No execution records</Text>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
-                  {selectedTaskId ? 'No execution records for this task' : 'Please select a task or adjust filter conditions'}
+                  {selectedSummaryTasks.length > 0 
+                    ? 'No execution records for selected tasks' 
+                    : 'Please select tasks or adjust filter conditions'}
                 </Text>
               </Space>
             }

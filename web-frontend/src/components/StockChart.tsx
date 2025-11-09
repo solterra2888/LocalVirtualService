@@ -293,6 +293,9 @@ const StockChart: React.FC<StockChartProps> = ({
           onDoubleClickCandlestick={handleDoubleClickCandlestick}
           externalEvents={events}
           externalEventsLoading={eventsLoading}
+          onEventCreate={addEvent}
+          onEventUpdate={updateEvent}
+          onEventDelete={deleteEvent}
         />
       </div>
 

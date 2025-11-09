@@ -53,11 +53,14 @@ interface CandlestickChartProps {
   // 外部传入的事件数据（用于避免多个useChartEvents实例导致的状态不同步）
   externalEvents?: ChartEvent[];
   externalEventsLoading?: boolean;
+  onEventCreate?: (eventData: EventFormData) => Promise<void>;
+  onEventUpdate?: (eventId: string, eventData: EventFormData) => Promise<void>;
+  onEventDelete?: (eventId: string) => Promise<void>;
 }
 
-// 默认加载1年数据，初始显示最近3个月
+// 默认加载1年数据，初始显示最近6个月
 const DEFAULT_DATA_DAYS = 365; // 1年
-const INITIAL_DISPLAY_MONTHS = 3; // 初始显示最近3个月
+const INITIAL_DISPLAY_MONTHS = 6; // 初始显示最近6个月
 
 // 生成模拟数据用于离线测试
 const generateMockData = (days: number = 90): CandlestickDataPoint[] => {
@@ -111,7 +114,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   onDataLoaded,
   onDoubleClickCandlestick,
   externalEvents,
-  externalEventsLoading
+  externalEventsLoading,
+  onEventCreate,
+  onEventUpdate,
+  onEventDelete
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -143,9 +149,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // 优先使用外部传入的events，如果没有则使用内部的
   const events = externalEvents !== undefined ? externalEvents : internalChartEvents.events;
   const eventsLoading = externalEventsLoading !== undefined ? externalEventsLoading : internalChartEvents.loading;
-  const addEvent = internalChartEvents.addEvent;
-  const updateEvent = internalChartEvents.updateEvent;
-  const deleteEvent = internalChartEvents.deleteEvent;
+  const internalAddEvent = internalChartEvents.addEvent;
+  const internalUpdateEvent = internalChartEvents.updateEvent;
+  const internalDeleteEvent = internalChartEvents.deleteEvent;
 
   console.log('[CandlestickChart] Events source:', {
     usingExternal: externalEvents !== undefined,
@@ -329,11 +335,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       
       // 创建 K 线图系列
       const candlestickSeries = chart.addCandlestickSeries({
-        upColor: '#26a69a',
-        downColor: '#ef5350',
-        borderVisible: false,
-        wickUpColor: '#26a69a',
-        wickDownColor: '#ef5350',
+        upColor: 'rgba(0, 0, 0, 0)',
+        downColor: '#EA6D61',
+        borderUpColor: '#999999',
+        borderDownColor: '#EA6D61',
+        wickUpColor: '#999999',
+        wickDownColor: '#EA6D61',
       });
       candlestickSeriesRef.current = candlestickSeries;
       
@@ -367,17 +374,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
       // 创建 EMA 20 系列
       const ema20Series = chart.addLineSeries({
-        color: '#2196F3',
-        lineWidth: 2,
-        title: 'EMA 20',
+        color: 'rgba(33, 150, 243, 0.3)',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
       });
       ema20SeriesRef.current = ema20Series;
 
       // 创建 EMA 50 系列
       const ema50Series = chart.addLineSeries({
-        color: '#FF9800',
-        lineWidth: 2,
-        title: 'EMA 50',
+        color: 'rgba(255, 152, 0, 0.3)',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
       });
       ema50SeriesRef.current = ema50Series;
 
@@ -473,10 +482,18 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const handleSaveEvent = useCallback(async (eventData: EventFormData) => {
     try {
       if (editingEvent) {
-        await updateEvent(editingEvent.id, eventData);
+        if (onEventUpdate) {
+          await onEventUpdate(editingEvent.id, eventData);
+        } else {
+          await internalUpdateEvent(editingEvent.id, eventData);
+        }
         message.success('Event updated successfully');
       } else {
-        await addEvent(eventData);
+        if (onEventCreate) {
+          await onEventCreate(eventData);
+        } else {
+          await internalAddEvent(eventData);
+        }
         message.success('Event added successfully');
         // 创建新事件后，如果是内部控制模式，自动显示事件图标
         if (!onToggleEvents) {
@@ -489,18 +506,22 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     } catch (error) {
       message.error('Failed to save event');
     }
-  }, [editingEvent, updateEvent, addEvent, onToggleEvents]);
+  }, [editingEvent, onEventUpdate, onEventCreate, internalUpdateEvent, internalAddEvent, onToggleEvents]);
 
   const handleDeleteEvent = useCallback(async (eventId: string) => {
     try {
-      await deleteEvent(eventId);
+      if (onEventDelete) {
+        await onEventDelete(eventId);
+      } else {
+        await internalDeleteEvent(eventId);
+      }
       message.success('Event deleted successfully');
       setEventModalVisible(false);
       setEditingEvent(null);
     } catch (error) {
       message.error('Failed to delete event');
     }
-  }, [deleteEvent]);
+  }, [onEventDelete, internalDeleteEvent]);
 
   // 计算事件标记在图表上的位置
   const calculateEventMarkerPositions = useCallback(() => {
@@ -1206,12 +1227,40 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           minHeight: '300px',
           position: 'relative',
           backgroundColor: '#ffffff',
+          border: '1px solid #e8e8e8',
+          borderRadius: '4px',
           display: 'block',
           overflow: 'hidden',
           visibility: 'visible'
         }} 
         id="candlestick-chart-container"
       />
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          left: '16px',
+          display: 'flex',
+          gap: '14px',
+          fontSize: '11px',
+          color: '#555',
+          background: 'rgba(255, 255, 255, 0.85)',
+          padding: '4px 10px',
+          borderRadius: '4px',
+          border: '1px solid rgba(0, 0, 0, 0.08)',
+          zIndex: 6,
+          pointerEvents: 'none',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '12px', height: '2px', background: 'rgba(33, 150, 243, 0.3)', display: 'inline-block' }} />
+          EMA 20
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '12px', height: '2px', background: 'rgba(255, 152, 0, 0.3)', display: 'inline-block' }} />
+          EMA 50
+        </span>
+      </div>
       {/* 事件标记叠加层 */}
       {showEvents && events.length > 0 && eventMarkerPositions.size > 0 && (
         <div style={{

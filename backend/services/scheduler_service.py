@@ -8,7 +8,7 @@ import json
 import pytz
 import redis
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -2732,6 +2732,181 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"获取任务执行日志失败: {str(e)}")
             return []
+
+    async def get_execution_summary(self, days: int = 7, tz_name: str = "America/New_York") -> Dict[str, Any]:
+        """根据时间范围获取任务执行统计数据"""
+        normalized_days = max(1, min(days, 90))  # 限制最大查询范围，避免一次性返回过多数据
+
+        try:
+            target_tz = pytz.timezone(tz_name)
+        except Exception:
+            logger.warning(f"提供的时区 {tz_name} 无效，回退为 UTC")
+            target_tz = pytz.UTC
+            tz_name = "UTC"
+
+        end_dt_local = datetime.now(target_tz)
+        start_dt_local = (end_dt_local - timedelta(days=normalized_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 转换为UTC时间用于数据库查询
+        end_dt_utc = end_dt_local.astimezone(timezone.utc)
+        start_dt_utc = start_dt_local.astimezone(timezone.utc)
+
+        logger.info(
+            "开始统计任务执行数据",
+            days=normalized_days,
+            timezone=tz_name,
+            start=start_dt_utc.isoformat(),
+            end=end_dt_utc.isoformat()
+        )
+
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                logger.error("无法连接到数据库获取执行统计")
+                return {}
+
+            cursor = conn.cursor()
+            try:
+                # 获取任务配置（确保无执行日志的任务也会包含在统计中）
+                cursor.execute("""
+                    SELECT type, name
+                    FROM task_scheduling
+                    ORDER BY type
+                """)
+                task_config_rows = cursor.fetchall()
+                task_configs = {}
+                for task_type, task_name in task_config_rows:
+                    if task_type not in task_configs:
+                        task_configs[task_type] = task_name
+
+                date_list = [
+                    (start_dt_local + timedelta(days=i)).date()
+                    for i in range(normalized_days)
+                ]
+
+                query = """
+                    SELECT 
+                        task_type,
+                        task_name,
+                        DATE(timezone(%s, started_at)) AS local_date,
+                        COUNT(*) AS total_runs,
+                        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
+                        SUM(CASE WHEN status IN ('failed', 'error') THEN 1 ELSE 0 END) AS failure_count,
+                        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_count,
+                        SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) AS timeout_count,
+                        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
+                        AVG(duration_ms) AS avg_duration_ms
+                    FROM task_execution_logs
+                    WHERE started_at BETWEEN %s AND %s
+                    GROUP BY task_type, task_name, local_date
+                    ORDER BY local_date ASC, task_type ASC
+                """
+
+                cursor.execute(query, (tz_name, start_dt_utc, end_dt_utc))
+                rows = cursor.fetchall()
+
+                summary: Dict[str, Any] = {}
+                totals: Dict[str, Dict[str, Any]] = {}
+
+                for row in rows:
+                    task_type, task_name, local_date, total_runs, success_count, failure_count, running_count, timeout_count, cancelled_count, avg_duration = row
+                    date_key = local_date.isoformat()
+                    task_key = task_type
+
+                    if task_key not in summary:
+                        summary[task_key] = {
+                            "task_type": task_type,
+                            "task_name": task_name,
+                            "daily_stats": [],
+                        }
+                        totals[task_key] = {
+                            "total_runs": 0,
+                            "success_count": 0,
+                            "failure_count": 0,
+                            "running_count": 0,
+                            "timeout_count": 0,
+                            "cancelled_count": 0,
+                        }
+
+                    summary[task_key]["daily_stats"].append({
+                        "date": date_key,
+                        "total_runs": int(total_runs),
+                        "success_count": int(success_count or 0),
+                        "failure_count": int(failure_count or 0),
+                        "running_count": int(running_count or 0),
+                        "timeout_count": int(timeout_count or 0),
+                        "cancelled_count": int(cancelled_count or 0),
+                        "avg_duration_ms": float(avg_duration) if avg_duration is not None else None,
+                        "success_rate": float(success_count) / total_runs if total_runs else None
+                    })
+
+                    totals_info = totals[task_key]
+                    totals_info["total_runs"] += int(total_runs)
+                    totals_info["success_count"] += int(success_count or 0)
+                    totals_info["failure_count"] += int(failure_count or 0)
+                    totals_info["running_count"] += int(running_count or 0)
+                    totals_info["timeout_count"] += int(timeout_count or 0)
+                    totals_info["cancelled_count"] += int(cancelled_count or 0)
+
+                # 确保所有任务都包含在结果中，即使查询范围内没有执行记录
+                for task_type, task_name in task_configs.items():
+                    if task_type not in summary:
+                        summary[task_type] = {
+                            "task_type": task_type,
+                            "task_name": task_name,
+                            "daily_stats": [],
+                        }
+                        totals[task_type] = {
+                            "total_runs": 0,
+                            "success_count": 0,
+                            "failure_count": 0,
+                            "running_count": 0,
+                            "timeout_count": 0,
+                            "cancelled_count": 0,
+                        }
+                    elif not summary[task_type].get("task_name"):
+                        summary[task_type]["task_name"] = task_name
+
+                    existing_stats = {stat["date"]: stat for stat in summary[task_type]["daily_stats"]}
+                    for date_value in date_list:
+                        date_key = date_value.isoformat()
+                        if date_key not in existing_stats:
+                            empty_stat = {
+                                "date": date_key,
+                                "total_runs": 0,
+                                "success_count": 0,
+                                "failure_count": 0,
+                                "running_count": 0,
+                                "timeout_count": 0,
+                                "cancelled_count": 0,
+                                "avg_duration_ms": None,
+                                "success_rate": None
+                            }
+                            summary[task_type]["daily_stats"].append(empty_stat)
+                    summary[task_type]["daily_stats"].sort(key=lambda item: item["date"])
+
+                # 将 totals 合并到 summary 中
+                for task_key, totals_info in totals.items():
+                    total_runs = totals_info["total_runs"]
+                    success_count = totals_info["success_count"]
+                    summary[task_key]["totals"] = {
+                        **totals_info,
+                        "success_rate": (success_count / total_runs) if total_runs else None
+                    }
+
+                return {
+                    "timezone": tz_name,
+                    "days": normalized_days,
+                    "start": start_dt_local.date().isoformat(),
+                    "end": end_dt_local.date().isoformat(),
+                    "tasks": list(summary.values())
+                }
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"获取执行统计数据失败: {str(e)}")
+            return {}
 
     async def clear_execution_logs(self) -> bool:
         """清空所有任务执行日志"""

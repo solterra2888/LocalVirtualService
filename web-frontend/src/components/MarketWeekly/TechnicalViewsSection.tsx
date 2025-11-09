@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Collapse, Empty, Spin, Alert } from 'antd';
+import { Empty, Spin, Alert } from 'antd';
 import { marketWeeklyAPI } from '../../services/marketWeekly';
 import LightweightCandlestickChart from './LightweightCandlestickChart';
 import type { AssetInfo } from '../../types/marketWeekly';
+import './TechnicalViewsSection.css';
 
 // OHLC数据类型
 interface OHLCData {
@@ -27,9 +28,16 @@ interface ChartComponentProps {
   label: string;
   chartData: ChartData | null;
   loading: boolean;
+  chartHeight?: number;
 }
 
-const ChartComponent: React.FC<ChartComponentProps> = ({ symbol, label, chartData, loading }) => {
+const ChartComponent: React.FC<ChartComponentProps> = ({
+  symbol,
+  label,
+  chartData,
+  loading,
+  chartHeight = 320
+}) => {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 0' }}>
@@ -83,7 +91,7 @@ const ChartComponent: React.FC<ChartComponentProps> = ({ symbol, label, chartDat
   }
 
   // 使用 Lightweight Charts 渲染
-  return <LightweightCandlestickChart data={chartData.data} label={label} height={400} />;
+  return <LightweightCandlestickChart data={chartData.data} label={label} height={chartHeight} />;
 };
 
 interface TechnicalViewsSectionProps {
@@ -169,34 +177,28 @@ const SimpleTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps> = ({
     );
   }
 
-  // 默认展开所有面板
-  const defaultActiveKeys = assets.map(asset => asset.symbol);
-
   return (
-    <Collapse
-      defaultActiveKey={defaultActiveKeys}
-      bordered={false}
-      style={{ background: 'transparent' }}
-    >
+    <div className="technical-grid">
       {assets.map((asset) => {
         const primaryTicker = asset.primary_ticker || asset.symbol;
         const chartData = chartsData.get(primaryTicker) || null;
         
         return (
-          <Collapse.Panel
-            key={asset.symbol}
-            header={<span style={{ fontWeight: 600, fontSize: '13px' }}>{asset.name}</span>}
-          >
+          <div key={asset.symbol} className="technical-card">
+            <h4 className="technical-card-title">{asset.name}</h4>
+            <div className="technical-card-content">
             <ChartComponent
-              symbol={asset.symbol}
-              label={asset.name}
-              chartData={chartData}
-              loading={loading}
-            />
-          </Collapse.Panel>
+                symbol={asset.symbol}
+                label={asset.name}
+                chartData={chartData}
+                loading={loading}
+              chartHeight={320}
+              />
+            </div>
+          </div>
         );
       })}
-    </Collapse>
+    </div>
   );
 };
 
@@ -278,45 +280,39 @@ const EquityIndicesTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps
     Other: assets.filter(a => !['US', 'Europe', 'Asia'].includes(a.region || ''))
   };
 
-  // 默认展开所有区域
-  const defaultActiveKeys = Object.keys(regions).filter(region => regions[region as keyof typeof regions].length > 0);
-
   return (
-    <Collapse
-      defaultActiveKey={defaultActiveKeys}
-      bordered={false}
-      style={{ background: 'transparent' }}
-    >
+    <div className="technical-region-groups">
       {Object.entries(regions).map(([region, regionAssets]) => {
         if (regionAssets.length === 0) return null;
         
         return (
-          <Collapse.Panel
-            key={region}
-            header={<span style={{ fontWeight: 600, fontSize: '13px' }}>{region} Markets</span>}
-          >
-            {regionAssets.map((asset) => {
-              const primaryTicker = asset.primary_ticker || asset.symbol;
-              const chartData = chartsData.get(primaryTicker) || null;
-              
-              return (
-                <div key={asset.symbol} style={{ marginBottom: '40px' }}>
-                  <h5 style={{ fontSize: '13px', fontWeight: 600, color: '#666', marginBottom: '12px' }}>
-                    {asset.name}
-                  </h5>
-                  <ChartComponent
-                    symbol={asset.symbol}
-                    label={asset.name}
-                    chartData={chartData}
-                    loading={loading}
-                  />
-                </div>
-              );
-            })}
-          </Collapse.Panel>
+          <div key={region} className="technical-region-block">
+            <h4 className="technical-region-title">{region} Markets</h4>
+            <div className="technical-grid">
+              {regionAssets.map((asset) => {
+                const primaryTicker = asset.primary_ticker || asset.symbol;
+                const chartData = chartsData.get(primaryTicker) || null;
+
+                return (
+                  <div key={asset.symbol} className="technical-card">
+                    <h5 className="technical-card-subtitle">{asset.name}</h5>
+                    <div className="technical-card-content">
+                    <ChartComponent
+                        symbol={asset.symbol}
+                        label={asset.name}
+                        chartData={chartData}
+                        loading={loading}
+                      chartHeight={320}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         );
       })}
-    </Collapse>
+    </div>
   );
 };
 

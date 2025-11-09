@@ -19,7 +19,8 @@ import {
   BuildOutlined,
   CalendarOutlined,
   ControlOutlined,
-  BarChartOutlined
+  BarChartOutlined,
+  HistoryOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -133,12 +134,17 @@ const Layout: React.FC = () => {
     {
       key: 'settings',
       icon: <SettingOutlined />,
-      label: 'Settings',
+      label: 'System',
       children: [
         {
           key: '/scheduler',
           icon: <ControlOutlined />,
-          label: 'Data Source Management',
+          label: 'Scheduler Management',
+        },
+        {
+          key: '/scheduler/logs',
+          icon: <HistoryOutlined />,
+          label: 'Scheduler Logs',
         },
         ...(user?.is_admin ? [
           {

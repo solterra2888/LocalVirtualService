@@ -203,6 +203,43 @@ export interface ExecutionLog {
   execution_params?: any;
 }
 
+export interface ExecutionSummaryDailyStat {
+  date: string;
+  total_runs: number;
+  success_count: number;
+  failure_count: number;
+  running_count: number;
+  timeout_count: number;
+  cancelled_count: number;
+  avg_duration_ms?: number | null;
+  success_rate?: number | null;
+}
+
+export interface ExecutionSummaryTask {
+  task_type: string;
+  task_name: string;
+  daily_stats: ExecutionSummaryDailyStat[];
+  totals: {
+    total_runs: number;
+    success_count: number;
+    failure_count: number;
+    running_count: number;
+    timeout_count: number;
+    cancelled_count: number;
+    success_rate?: number | null;
+  };
+}
+
+export interface ExecutionSummaryData {
+  timezone: string;
+  days: number;
+  start: string;
+  end: string;
+  tasks: ExecutionSummaryTask[];
+}
+
+export interface ExecutionSummaryResponse extends APIResponse<ExecutionSummaryData> {}
+
 export interface ExecutionLogsResponse extends APIResponse<{
   logs: ExecutionLog[];
   total: number;
@@ -996,6 +1033,25 @@ export class SchedulerAPI {
     } catch (error) {
       console.error('获取所有任务执行日志失败:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 获取执行日志统计
+   */
+  async getExecutionSummary(days: number = 7, timezone: string = 'America/New_York'): Promise<ExecutionSummaryResponse> {
+    try {
+      const response = await api.get<ExecutionSummaryResponse>('/scheduler/execution-logs/summary', {
+        days,
+        timezone
+      });
+      return response;
+    } catch (error: any) {
+      console.error('获取执行日志统计失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '获取执行日志统计失败'
+      };
     }
   }
 
