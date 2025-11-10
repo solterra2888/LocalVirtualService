@@ -105,14 +105,14 @@
 }
 
 /* Modal全屏样式优化 */
-.ant-modal-root .ant-modal {
+.mobile-news-modal .ant-modal {
   max-width: 100vw !important;
   margin: 0 !important;
   padding: 0 !important;
   bottom: 0 !important;
 }
 
-.ant-modal-root .ant-modal-content {
+.mobile-news-modal .ant-modal-content {
   border-radius: 0 !important;
 }
 

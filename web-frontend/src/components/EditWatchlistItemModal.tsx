@@ -105,6 +105,7 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
         </Space>
       }
       open={open}
+      centered
       onCancel={() => {
         resetForm();
         onCancel();

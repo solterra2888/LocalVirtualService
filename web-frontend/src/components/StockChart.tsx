@@ -20,7 +20,6 @@ interface StockChartProps {
   sector?: string;
   industry?: string;
   exchange?: string;
-  onCompanyNameClick?: () => void;
 }
 
 // 格式化价格变化颜色
@@ -39,8 +38,7 @@ const StockChart: React.FC<StockChartProps> = ({
   onRemoveFromWatchlist,
   sector,
   industry,
-  exchange,
-  onCompanyNameClick
+  exchange
 }) => {
   // 事件管理状态
   const [showEvents, setShowEvents] = useState<boolean>(true);
@@ -131,21 +129,7 @@ const StockChart: React.FC<StockChartProps> = ({
             <div style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <Title level={4} style={{ margin: 0 }}>
-                  {onCompanyNameClick ? (
-                    <span 
-                      style={{ 
-                        cursor: 'pointer', 
-                        color: '#1890ff',
-                        textDecoration: 'underline'
-                      }}
-                      onClick={onCompanyNameClick}
-                      title="Click to view fundamentals overview"
-                    >
-                      {companyName || symbol}
-                    </span>
-                  ) : (
-                    companyName || symbol
-                  )}
+                  {companyName || symbol}
                   {' '}({symbol})
                 </Title>
                 <Space size="small">

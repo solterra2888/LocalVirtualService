@@ -129,6 +129,7 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
         onCancel={handleClose}
         footer={null}
         width="100%"
+        rootClassName="mobile-news-modal"
         style={{ 
           top: 0, 
           paddingBottom: 0,

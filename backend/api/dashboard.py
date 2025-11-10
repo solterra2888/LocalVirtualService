@@ -1683,6 +1683,7 @@ async def search_stocks(
             c.name as company,
             c.sector,
             c.industry,
+            c.exchange,
             c.id as company_id
         FROM companies c
         WHERE c.ticker_active = true
@@ -1720,7 +1721,8 @@ async def search_stocks(
                 "company": row[1],
                 "sector": row[2],
                 "industry": row[3],
-                "company_id": row[4]
+                "exchange": row[4],
+                "company_id": row[5]
             }
             stocks.append(stock)
         

@@ -85,6 +85,7 @@ export interface StockSearchResult {
   company: string;
   sector: string;
   industry: string;
+  exchange?: string;
   company_id?: number;
 }
 

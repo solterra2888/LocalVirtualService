@@ -345,6 +345,7 @@ const NewsFeedTimeline: React.FC<NewsFeedTimelineProps> = ({
           </Space>
         }
         open={detailModalVisible}
+        centered
         onCancel={closeDetailModal}
         footer={[
           <Button key="close" onClick={closeDetailModal}>

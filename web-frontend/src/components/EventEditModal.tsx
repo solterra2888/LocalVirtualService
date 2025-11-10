@@ -154,6 +154,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         </Space>
       }
       open={visible}
+      centered
       onCancel={handleCancel}
       onOk={handleSave}
       confirmLoading={loading}

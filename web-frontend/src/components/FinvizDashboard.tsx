@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Layout, 
-  Tree, 
-  Input, 
-  Tabs, 
-  List, 
-  Typography, 
-  Tag, 
-  Empty, 
-  Spin, 
-  message, 
-  Space, 
+  Layout,
+  Tree,
+  Input,
+  Tabs,
+  List,
+  Typography,
+  Tag,
+  Empty,
+  Spin,
+  message,
+  Space,
   Card,
   Statistic,
   Row,
@@ -19,7 +19,9 @@ import {
   Skeleton,
   Select,
   Modal,
-  Dropdown
+  Dropdown,
+  Divider,
+  Progress
 } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
@@ -50,6 +52,11 @@ import {
   SettingOutlined,
   DownloadOutlined,
   EyeOutlined,
+  DashboardOutlined,
+  InfoCircleOutlined,
+  LineChartOutlined,
+  DollarOutlined,
+  BarChartOutlined,
   FilePdfOutlined,
   FileExcelOutlined,
   FileWordOutlined,
@@ -60,21 +67,22 @@ import {
   MenuUnfoldOutlined,
   RobotOutlined,
   EditOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  CalculatorOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
+import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
 import { filesAPI } from '../services/files';
 import { newsAPI } from '../services/news';
 import type { NewsTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
-import FundamentalsOverviewModal from './FundamentalsOverviewModal';
 import StockChart from './StockChart';
 import type { DataNode } from 'antd/es/tree';
 
 const { Content, Sider } = Layout;
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
 
@@ -179,7 +187,7 @@ const FinvizDashboard: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<number | string>('all');
   const [exchangeFilter, setExchangeFilter] = useState<string>('all');
   const [sectorFilter, setSectorFilter] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<string>('news');
+  const [activeTab, setActiveTab] = useState<string>('overview');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [watchlistCollapsed, setWatchlistCollapsed] = useState<boolean>(false);
   
@@ -192,6 +200,11 @@ const FinvizDashboard: React.FC = () => {
   const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
   const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [contentLoading, setContentLoading] = useState<boolean>(false);
+  const [overviewData, setOverviewData] = useState<CompanyFundamentalsResponse | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState<boolean>(false);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [overviewCache, setOverviewCache] = useState<Map<string, CompanyFundamentalsResponse>>(new Map());
+  const [overviewLastError, setOverviewLastError] = useState<string | null>(null);
   
   // 分页相关状态
   const [newsOffset, setNewsOffset] = useState<number>(0);
@@ -416,9 +429,6 @@ const FinvizDashboard: React.FC = () => {
   const [contextMenuVisible, setContextMenuVisible] = useState<boolean>(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuItem, setContextMenuItem] = useState<WatchlistItem | null>(null);
-  const [fundamentalsModalVisible, setFundamentalsModalVisible] = useState<boolean>(false);
-  const [selectedTickerForFundamentals, setSelectedTickerForFundamentals] = useState<string>('');
-  const [selectedCompanyNameForFundamentals, setSelectedCompanyNameForFundamentals] = useState<string>('');
   const [analysisModalVisible, setAnalysisModalVisible] = useState<boolean>(false);
   const [selectedNewsForAnalysis, setSelectedNewsForAnalysis] = useState<DashboardNewsItem | null>(null);
   
@@ -509,12 +519,39 @@ const FinvizDashboard: React.FC = () => {
         setSelectedType('stock');
         setSelectedStock(firstStock);
         setSelectedGroup('');
+        setActiveTab('overview');
+        
+        const query = getOverviewQueryForStock(firstStock);
+        if (query) {
+          const normalizedQuery = query.toUpperCase();
+          if (overviewCache.has(normalizedQuery)) {
+            setOverviewData(overviewCache.get(normalizedQuery) || null);
+            setOverviewError(null);
+            setOverviewLoading(false);
+          } else {
+            setOverviewData(null);
+            setOverviewError(null);
+            setOverviewLoading(true);
+          }
+        } else {
+          setOverviewData(null);
+          setOverviewError('No valid ticker available for overview');
+          setOverviewLoading(false);
+        }
         
         logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlistGroups, loading]);
+
+  useEffect(() => {
+    if (selectedType !== 'stock') {
+      setOverviewData(null);
+      setOverviewError(null);
+      setOverviewLoading(false);
+    }
+  }, [selectedType]);
 
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
@@ -527,6 +564,12 @@ const FinvizDashboard: React.FC = () => {
     } else if (selectedKey && activeTab === 'reports' && selectedStock) {
       const timer = setTimeout(() => {
         loadResearchReports(selectedStock.symbol);
+      }, 300); // 300ms 防抖
+      
+      return () => clearTimeout(timer);
+    } else if (selectedKey && activeTab === 'overview' && selectedStock) {
+      const timer = setTimeout(() => {
+        loadStockOverview(selectedStock);
       }, 300); // 300ms 防抖
       
       return () => clearTimeout(timer);
@@ -598,6 +641,67 @@ const FinvizDashboard: React.FC = () => {
       setPricesLoading(false);
     }
   };
+
+  const getOverviewQueryForStock = (stock: WatchlistStockInfo | null): string | null => {
+    if (!stock) return null;
+    if (stock.primaryticker && stock.primaryticker.trim()) {
+      return stock.primaryticker.trim();
+    }
+    if (stock.symbol && stock.symbol.trim()) {
+      return stock.symbol.trim();
+    }
+    return null;
+  };
+
+  const loadStockOverview = useCallback(
+    async (stock: WatchlistStockInfo) => {
+      const query = getOverviewQueryForStock(stock);
+      if (!query) {
+        setOverviewData(null);
+        const errorMessage = 'No valid ticker available for overview';
+        setOverviewError(errorMessage);
+        if (overviewLastError !== errorMessage) {
+          message.warning(errorMessage);
+          setOverviewLastError(errorMessage);
+        }
+        return;
+      }
+
+      const normalizedQuery = query.toUpperCase();
+      if (overviewCache.has(normalizedQuery)) {
+        setOverviewData(overviewCache.get(normalizedQuery) || null);
+        setOverviewError(null);
+        setOverviewLoading(false);
+        return;
+      }
+
+      setOverviewLoading(true);
+      setOverviewError(null);
+      setOverviewData(null);
+      try {
+        const data = await fundamentalsAPI.searchCompany(query);
+        setOverviewData(data);
+        setOverviewCache(prev => {
+          const next = new Map(prev);
+          next.set(normalizedQuery, data);
+          return next;
+        });
+        setOverviewLastError(null);
+      } catch (error: unknown) {
+        logger.logError('Failed to load company overview', 'finviz-dashboard', error);
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to load company overview';
+        setOverviewError(errorMessage);
+        if (overviewLastError !== errorMessage) {
+          message.error(errorMessage);
+          setOverviewLastError(errorMessage);
+        }
+      } finally {
+        setOverviewLoading(false);
+      }
+    },
+    [overviewCache, overviewLastError, logger]
+  );
 
   const filterTreeData = () => {
     const filteredGroups = watchlistGroups.filter(group => {
@@ -762,6 +866,10 @@ const FinvizDashboard: React.FC = () => {
       setSelectedGroup('');
       setNewsData([]);
       setResearchReports([]);
+      setOverviewData(null);
+      setOverviewError(null);
+      setOverviewLoading(false);
+      setActiveTab('overview');
       return;
     }
 
@@ -773,6 +881,10 @@ const FinvizDashboard: React.FC = () => {
       const groupName = key.replace('group-', '');
       setSelectedGroup(groupName);
       setSelectedStock(null);
+      setOverviewData(null);
+      setOverviewError(null);
+      setOverviewLoading(false);
+      setActiveTab('news');
       logger.logInfo(`选择了分组: ${groupName}`, 'finviz-dashboard');
     } else if (key.startsWith('stock-')) {
       setSelectedType('stock');
@@ -788,6 +900,32 @@ const FinvizDashboard: React.FC = () => {
       setSelectedStock(foundStock);
       setSelectedGroup('');
       setResearchReports([]); // 清空研究报告数据
+      
+      if (foundStock) {
+        const query = getOverviewQueryForStock(foundStock);
+        if (query) {
+          const normalizedQuery = query.toUpperCase();
+          if (overviewCache.has(normalizedQuery)) {
+            setOverviewData(overviewCache.get(normalizedQuery) || null);
+            setOverviewError(null);
+            setOverviewLoading(false);
+          } else {
+            setOverviewData(null);
+            setOverviewError(null);
+            setOverviewLoading(true);
+          }
+        } else {
+          setOverviewData(null);
+          setOverviewError('No valid ticker available for overview');
+          setOverviewLoading(false);
+        }
+        setActiveTab('overview');
+      } else {
+        setOverviewData(null);
+        setOverviewError(null);
+        setOverviewLoading(false);
+        setActiveTab('news');
+      }
       logger.logInfo(`选择了股票: ${foundStock?.custom_name || foundStock?.company} (${foundStock?.symbol})`, 'finviz-dashboard');
     }
   };
@@ -1126,6 +1264,7 @@ const FinvizDashboard: React.FC = () => {
         okText: 'Delete',
         okType: 'danger',
         cancelText: 'Cancel',
+        centered: true,
         onOk: async () => {
           await handleRemoveFromWatchlist(contextMenuItem.watchlist_id, contextMenuItem.symbol);
         },
@@ -1147,13 +1286,6 @@ const FinvizDashboard: React.FC = () => {
       danger: true,
     },
   ];
-
-  // 处理公司名称点击，显示基本面信息
-  const handleCompanyNameClick = (ticker: string, companyName: string) => {
-    setSelectedTickerForFundamentals(ticker);
-    setSelectedCompanyNameForFundamentals(companyName);
-    setFundamentalsModalVisible(true);
-  };
 
   const getSentimentColor = (polarity?: number) => {
     if (!polarity) return 'default';
@@ -1399,6 +1531,629 @@ const FinvizDashboard: React.FC = () => {
     </div>
   );
 
+  const renderOverviewTab = () => {
+    if (overviewLoading) {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            minHeight: '240px'
+          }}
+        >
+          <Spin tip="Loading overview..." />
+        </div>
+      );
+    }
+
+    if (overviewError) {
+      return (
+        <Card>
+          <Empty description={overviewError} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        </Card>
+      );
+    }
+
+    if (!overviewData || !overviewData.company) {
+      return (
+        <Empty
+          description="Select a stock to view company overview"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      );
+    }
+
+    const { company, highlights, valuations, analyst_ratings, technicals, balance_sheet } =
+      overviewData;
+    const currencyCode = company.currencycode || 'USD';
+    const latestBalanceSheet =
+      Array.isArray(balance_sheet) && balance_sheet.length > 0 ? balance_sheet[0] : null;
+
+    return (
+      <div>
+        <Card
+          title={
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <InfoCircleOutlined style={{ color: '#1890ff' }} />
+              Basic Information
+            </span>
+          }
+          style={{ marginBottom: 24 }}
+        >
+          <Row gutter={[24, 16]}>
+            <Col xs={24} lg={12}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '16px'
+                }}
+              >
+                <div>
+                  <Text strong>Company Name:</Text>
+                  <br />
+                  <Text>{company.name || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Stock Code:</Text>
+                  <br />
+                  <Text>{company.code || company.primaryticker || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Exchange:</Text>
+                  <br />
+                  <Text>{company.exchange || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Currency:</Text>
+                  <br />
+                  <Text>{currencyCode}</Text>
+                </div>
+                <div>
+                  <Text strong>Country:</Text>
+                  <br />
+                  <Text>{company.countryname || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Sector:</Text>
+                  <br />
+                  <Text>{company.sector || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Industry:</Text>
+                  <br />
+                  <Text>{company.industry || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text strong>Employees:</Text>
+                  <br />
+                  <Text>
+                    {company.fulltimeemployees
+                      ? company.fulltimeemployees.toLocaleString()
+                      : 'N/A'}
+                  </Text>
+                </div>
+                <div>
+                  <Text strong>Type:</Text>
+                  <br />
+                  <Text>{company.type || 'N/A'}</Text>
+                </div>
+              </div>
+            </Col>
+            <Col xs={24} lg={12}>
+              <div>
+                <Text strong>Contact Information:</Text>
+                <div style={{ marginTop: 8 }}>
+                  {company.phone && (
+                    <div style={{ marginBottom: 4 }}>
+                      <Text>Phone: {company.phone}</Text>
+                    </div>
+                  )}
+                  {company.weburl && (
+                    <div style={{ marginBottom: 4 }}>
+                      <Text>Website: </Text>
+                      <a href={company.weburl} target="_blank" rel="noopener noreferrer">
+                        {company.weburl}
+                      </a>
+                    </div>
+                  )}
+                  {company.address && (
+                    <div>
+                      <Text>Address: {company.address}</Text>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Col>
+            {company.description && (
+              <Col span={24}>
+                <Divider />
+                <div>
+                  <Text strong>Company Description:</Text>
+                  <Paragraph style={{ marginTop: 8, fontSize: '14px', lineHeight: '1.6' }}>
+                    {company.description}
+                  </Paragraph>
+                </div>
+              </Col>
+            )}
+          </Row>
+        </Card>
+
+        {highlights && (
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BarChartOutlined style={{ color: '#52c41a' }} />
+                Key Metrics
+              </span>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            <Row gutter={[16, 16]}>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Market Cap"
+                  value={fundamentalsUtils.formatCurrency(highlights.marketcapitalization, currencyCode)}
+                  prefix={<DollarOutlined />}
+                  valueStyle={{ color: '#1890ff', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="P/E Ratio"
+                  value={fundamentalsUtils.formatNumber(highlights.peratio)}
+                  prefix={<LineChartOutlined />}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(highlights.peratio),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Revenue (TTM)"
+                  value={fundamentalsUtils.formatCurrency(highlights.revenuettm, currencyCode)}
+                  prefix={<BankOutlined />}
+                  valueStyle={{ color: '#52c41a', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="EPS (TTM)"
+                  value={fundamentalsUtils.formatNumber(highlights.earningsshare)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(highlights.earningsshare),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Dividend Yield"
+                  value={fundamentalsUtils.formatPercentage(highlights.dividendyield)}
+                  valueStyle={{ color: '#faad14', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="ROE (TTM)"
+                  value={fundamentalsUtils.formatPercentage(highlights.returnonequityttm)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(highlights.returnonequityttm),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Profit Margin"
+                  value={fundamentalsUtils.formatPercentage(highlights.profitmargin)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(highlights.profitmargin),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Operating Margin"
+                  value={fundamentalsUtils.formatPercentage(highlights.operatingmarginttm)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(highlights.operatingmarginttm),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {analyst_ratings && analyst_ratings.length > 0 && (
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <StarOutlined style={{ color: '#722ed1' }} />
+                Analyst Ratings
+              </span>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            <Row gutter={[16, 16]}>
+              <Col span={24}>
+                {analyst_ratings.map((rating, index) => {
+                  const safeRating = rating?.rating || 'N/A';
+                  const safeAnalystName = rating?.analyst_name || 'Unknown Analyst';
+                  const safeTargetPrice = rating?.target_price;
+                  const safeRatingDate = rating?.rating_date;
+                  const safeBrokerage = rating?.brokerage;
+                  const safeRatingValue = rating?.rating_value;
+                  const safeTotalAnalysts = rating?.total_analysts || 0;
+                  const safeRatingBreakdown = rating?.rating_breakdown;
+
+                  return (
+                    <div
+                      key={`${safeAnalystName}-${index}`}
+                      style={{
+                        marginBottom: '16px',
+                        padding: '16px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: '8px',
+                        backgroundColor: '#fafafa'
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 12,
+                          gap: 16,
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        <div>
+                          <Text strong style={{ fontSize: '16px' }}>
+                            {safeAnalystName}
+                          </Text>
+                          {safeRatingValue && (
+                            <Text type="secondary" style={{ marginLeft: 8, fontSize: '14px' }}>
+                              (Rating: {safeRatingValue.toFixed(2)})
+                            </Text>
+                          )}
+                        </div>
+                        <Tag
+                          color={fundamentalsUtils.getRatingColor(safeRating)}
+                          style={{ fontSize: '14px', padding: '4px 12px' }}
+                        >
+                          {safeRating}
+                        </Tag>
+                      </div>
+
+                      <Row gutter={[16, 8]} style={{ marginBottom: 12 }}>
+                        <Col xs={24} sm={12}>
+                          <Text strong>Target Price: </Text>
+                          <Text>
+                            {safeTargetPrice
+                              ? fundamentalsUtils.formatCurrency(safeTargetPrice, currencyCode)
+                              : 'N/A'}
+                          </Text>
+                        </Col>
+                        <Col xs={24} sm={12}>
+                          <Text strong>Date: </Text>
+                          <Text>{fundamentalsUtils.formatDate(safeRatingDate)}</Text>
+                        </Col>
+                      </Row>
+
+                      {safeRatingBreakdown && safeTotalAnalysts > 0 && (
+                        <div style={{ marginTop: 12 }}>
+                          <Text strong style={{ fontSize: '14px', marginBottom: 8, display: 'block' }}>
+                            Rating Distribution ({safeTotalAnalysts} analysts):
+                          </Text>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {safeRatingBreakdown.strong_buy?.count > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div
+                                  style={{
+                                    width: '12px',
+                                    height: '12px',
+                                    backgroundColor: '#52c41a',
+                                    borderRadius: '2px'
+                                  }}
+                                ></div>
+                                <Text style={{ fontSize: '12px' }}>
+                                  Strong Buy: {safeRatingBreakdown.strong_buy.count} (
+                                  {safeRatingBreakdown.strong_buy.percentage}%)
+                                </Text>
+                              </div>
+                            )}
+                            {safeRatingBreakdown.buy?.count > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div
+                                  style={{
+                                    width: '12px',
+                                    height: '12px',
+                                    backgroundColor: '#73d13d',
+                                    borderRadius: '2px'
+                                  }}
+                                ></div>
+                                <Text style={{ fontSize: '12px' }}>
+                                  Buy: {safeRatingBreakdown.buy.count} ({safeRatingBreakdown.buy.percentage}%)
+                                </Text>
+                              </div>
+                            )}
+                            {safeRatingBreakdown.hold?.count > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div
+                                  style={{
+                                    width: '12px',
+                                    height: '12px',
+                                    backgroundColor: '#faad14',
+                                    borderRadius: '2px'
+                                  }}
+                                ></div>
+                                <Text style={{ fontSize: '12px' }}>
+                                  Hold: {safeRatingBreakdown.hold.count} ({safeRatingBreakdown.hold.percentage}%)
+                                </Text>
+                              </div>
+                            )}
+                            {safeRatingBreakdown.sell?.count > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div
+                                  style={{
+                                    width: '12px',
+                                    height: '12px',
+                                    backgroundColor: '#ff7a45',
+                                    borderRadius: '2px'
+                                  }}
+                                ></div>
+                                <Text style={{ fontSize: '12px' }}>
+                                  Sell: {safeRatingBreakdown.sell.count} ({safeRatingBreakdown.sell.percentage}%)
+                                </Text>
+                              </div>
+                            )}
+                            {safeRatingBreakdown.strong_sell?.count > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div
+                                  style={{
+                                    width: '12px',
+                                    height: '12px',
+                                    backgroundColor: '#ff4d4f',
+                                    borderRadius: '2px'
+                                  }}
+                                ></div>
+                                <Text style={{ fontSize: '12px' }}>
+                                  Strong Sell: {safeRatingBreakdown.strong_sell.count} (
+                                  {safeRatingBreakdown.strong_sell.percentage}%)
+                                </Text>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {safeBrokerage && (
+                        <div style={{ marginTop: 8, fontSize: '12px', color: '#666' }}>
+                          <Text>
+                            {safeBrokerage === 'Multiple Brokers' ? safeBrokerage : `Firm: ${safeBrokerage}`}
+                          </Text>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {valuations && (
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CalculatorOutlined style={{ color: '#faad14' }} />
+                Valuation Metrics
+              </span>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            <Row gutter={[16, 16]}>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Trailing P/E"
+                  value={fundamentalsUtils.formatNumber(valuations.trailingpe)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(valuations.trailingpe),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Forward P/E"
+                  value={fundamentalsUtils.formatNumber(valuations.forwardpe)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(valuations.forwardpe),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Price/Sales (TTM)"
+                  value={fundamentalsUtils.formatNumber(valuations.pricesalesttm)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(valuations.pricesalesttm),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Price/Book (MRQ)"
+                  value={fundamentalsUtils.formatNumber(valuations.pricebookmrq)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(valuations.pricebookmrq),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={24} sm={12} lg={12}>
+                <Statistic
+                  title="Enterprise Value"
+                  value={fundamentalsUtils.formatCurrency(valuations.enterprisevalue, currencyCode)}
+                  valueStyle={{ color: '#1890ff', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={24} sm={12} lg={12}>
+                <Statistic
+                  title="EV/Revenue"
+                  value={fundamentalsUtils.formatNumber(valuations.enterprisevaluerevenue)}
+                  valueStyle={{
+                    color: fundamentalsUtils.getRatioColor(valuations.enterprisevaluerevenue),
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {technicals && (
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <DashboardOutlined style={{ color: '#13c2c2' }} />
+                Technical Indicators
+              </span>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            <Row gutter={[16, 16]}>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Beta"
+                  value={fundamentalsUtils.formatNumber(technicals.beta)}
+                  valueStyle={{
+                    color:
+                      technicals.beta && technicals.beta > 1 ? '#ff4d4f' : '#52c41a',
+                    fontSize: '16px'
+                  }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="52-Week High"
+                  value={fundamentalsUtils.formatCurrency(technicals['52WeekHigh'], currencyCode)}
+                  valueStyle={{ color: '#52c41a', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="52-Week Low"
+                  value={fundamentalsUtils.formatCurrency(technicals['52WeekLow'], currencyCode)}
+                  valueStyle={{ color: '#ff4d4f', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="50-Day MA"
+                  value={fundamentalsUtils.formatCurrency(technicals['50DayMA'], currencyCode)}
+                  valueStyle={{ color: '#1890ff', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="200-Day MA"
+                  value={fundamentalsUtils.formatCurrency(technicals['200DayMA'], currencyCode)}
+                  valueStyle={{ color: '#1890ff', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Short Ratio"
+                  value={fundamentalsUtils.formatNumber(technicals.shortratio)}
+                  valueStyle={{ color: '#faad14', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Short Interest"
+                  value={fundamentalsUtils.formatNumber(technicals.sharesshort)}
+                  valueStyle={{ color: '#faad14', fontSize: '16px' }}
+                />
+              </Col>
+              <Col xs={12} sm={8} lg={6}>
+                <Statistic
+                  title="Short % Float"
+                  value={fundamentalsUtils.formatPercentage(technicals.shortpercent)}
+                  valueStyle={{ color: '#faad14', fontSize: '16px' }}
+                />
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {highlights && latestBalanceSheet && (
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <HeartOutlined style={{ color: '#ff4d4f' }} />
+                Financial Health Assessment
+              </span>
+            }
+          >
+            <Row gutter={[16, 16]}>
+              <Col span={24}>
+                {(() => {
+                  const currentAssets = latestBalanceSheet.totalcurrentassets
+                    ? Number(latestBalanceSheet.totalcurrentassets)
+                    : null;
+                  const currentLiabilities = latestBalanceSheet.totalcurrentliabilities
+                    ? Number(latestBalanceSheet.totalcurrentliabilities)
+                    : null;
+                  const currentRatio =
+                    currentAssets && currentLiabilities
+                      ? currentAssets / currentLiabilities
+                      : null;
+
+                  const healthScore = fundamentalsUtils.getFinancialHealthScore(
+                    currentRatio,
+                    null,
+                    highlights.returnonequityttm ?? null,
+                    highlights.profitmargin ?? null
+                  );
+
+                  return (
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ marginBottom: 16 }}>
+                        <Text style={{ fontSize: '16px', marginRight: 16 }}>
+                          Overall Financial Health:
+                        </Text>
+                        <Tag color={healthScore.color} style={{ fontSize: '16px', padding: '8px 16px' }}>
+                          {healthScore.level}
+                        </Tag>
+                      </div>
+                      <Progress
+                        percent={healthScore.score}
+                        strokeColor={healthScore.color}
+                        style={{ maxWidth: '400px', margin: '0 auto' }}
+                        strokeWidth={8}
+                      />
+                      <div style={{ marginTop: 16, fontSize: '14px', color: '#666' }}>
+                        Score: {healthScore.score}/100
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Col>
+            </Row>
+          </Card>
+        )}
+      </div>
+    );
+  };
+
   const renderResearchReportsTab = () => (
     <div>
       {contentLoading ? (
@@ -1514,7 +2269,6 @@ const FinvizDashboard: React.FC = () => {
         sector={selectedStock.sector}
         industry={selectedStock.industry}
         exchange={selectedStock.exchange}
-        onCompanyNameClick={() => handleCompanyNameClick(selectedStock.symbol, selectedStock.company || selectedStock.symbol)}
       />
     </div>
     );
@@ -1819,10 +2573,25 @@ const FinvizDashboard: React.FC = () => {
                       loadResearchReports(selectedStock.symbol);
                     } else if (key === 'news') {
                       loadRelatedNews();
+                    } else if (key === 'overview' && selectedStock) {
+                      loadStockOverview(selectedStock);
                     }
                   }}
                   size="large"
                 >
+                  {selectedType === 'stock' && (
+                    <TabPane
+                      tab={
+                        <span>
+                          <DashboardOutlined />
+                          Overview
+                        </span>
+                      }
+                      key="overview"
+                    >
+                      {renderOverviewTab()}
+                    </TabPane>
+                  )}
                   <TabPane 
                     tab={
                       <span>
@@ -1890,13 +2659,6 @@ const FinvizDashboard: React.FC = () => {
         onSuccess={handleEditSuccess}
       />
 
-      {/* 基本面信息概览模态框 */}
-      <FundamentalsOverviewModal
-        visible={fundamentalsModalVisible}
-        onCancel={() => setFundamentalsModalVisible(false)}
-        ticker={selectedTickerForFundamentals}
-        companyName={selectedCompanyNameForFundamentals}
-      />
 
       {/* AI分析详情模态框 */}
       <Modal
@@ -1907,6 +2669,7 @@ const FinvizDashboard: React.FC = () => {
           </Space>
         }
         open={analysisModalVisible}
+        centered
         onCancel={() => {
           setAnalysisModalVisible(false);
           setSelectedNewsForAnalysis(null);

@@ -139,6 +139,7 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
     <Modal
       title="Add Stock to Watchlist"
       open={open}
+      centered
       onCancel={() => {
         resetModal();
         onCancel();
@@ -164,6 +165,13 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
           ) : (
             <List
               dataSource={searchResults}
+              locale={{
+                emptyText: (
+                  <Text italic type="secondary">
+                    "No stocks found"
+                  </Text>
+                )
+              }}
               renderItem={(stock) => (
                 <List.Item
                   style={{ 
@@ -181,6 +189,9 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
                     }
                     description={
                       <Space>
+                        {stock.exchange && (
+                          <Tag color="default">{stock.exchange}</Tag>
+                        )}
                         <Tag color="blue">{stock.sector}</Tag>
                         <Tag color="green">{stock.industry}</Tag>
                       </Space>
