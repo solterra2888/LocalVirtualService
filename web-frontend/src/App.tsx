@@ -4,9 +4,12 @@ import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useAuthStore } from './store/authStore';
 import { LoggerProvider } from './contexts/LoggerContext';
+import { useDeviceDetection } from './hooks/useDeviceDetection';
 import Layout from './components/Layout';
+import MobileLayout from './components/MobileLayout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
+import MobileDashboardPage from './pages/MobileDashboardPage';
 import MarketsPage from './pages/MarketsPage';
 import EconomicEventsPage from './pages/EconomicEventsPage';
 import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
@@ -79,6 +82,70 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
+// 内部组件，用于自动选择布局
+const AppContent: React.FC = () => {
+  const { isMobile } = useDeviceDetection();
+  const LayoutComponent = isMobile ? MobileLayout : Layout;
+  const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
+
+  return (
+    <div className="App">
+      <Routes>
+        {/* 登录页面 */}
+        <Route path="/login" element={<LoginPage />} />
+        
+        {/* 私有路由 */}
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <LayoutComponent />
+            </PrivateRoute>
+          }
+        >
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="market-weekly" element={<MarketWeekly />} />
+          <Route path="dashboard" element={<DashboardComponent />} />
+          <Route path="markets" element={<MarketsPage />} />
+          <Route path="markets/economic-events" element={<EconomicEventsPage />} />
+          <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
+          <Route path="files" element={<FilesPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="news" element={<NewsPage />} />
+          <Route path="fundamentals" element={<FundamentalsPage />} />
+          <Route path="eod-fetch" element={<EODFetchPage />} />
+          <Route path="scheduler" element={<SchedulerPage />} />
+          <Route path="scheduler/logs" element={<SchedulerLogsPage />} />
+          <Route path="prompt-templates" element={<PromptTemplatesPage />} />
+          <Route path="investment-themes" element={<InvestmentThemesPage />} />
+          <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
+          
+          {/* 管理员路由 */}
+          <Route
+            path="users"
+            element={
+              <AdminRoute>
+                <UsersPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="llm-config"
+            element={
+              <AdminRoute>
+                <LLMConfigPage />
+              </AdminRoute>
+            }
+          />
+        </Route>
+        
+        {/* 404页面 */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const { initializeAuth } = useAuthStore();
 
@@ -100,60 +167,7 @@ const App: React.FC = () => {
     >
       <LoggerProvider>
         <Router>
-          <div className="App">
-            <Routes>
-              {/* 登录页面 */}
-              <Route path="/login" element={<LoginPage />} />
-              
-              {/* 私有路由 */}
-              <Route
-                path="/"
-                element={
-                  <PrivateRoute>
-                    <Layout />
-                  </PrivateRoute>
-                }
-              >
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="market-weekly" element={<MarketWeekly />} />
-                <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="markets" element={<MarketsPage />} />
-                <Route path="markets/economic-events" element={<EconomicEventsPage />} />
-                <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
-                <Route path="files" element={<FilesPage />} />
-                <Route path="tasks" element={<TasksPage />} />
-                <Route path="news" element={<NewsPage />} />
-                <Route path="fundamentals" element={<FundamentalsPage />} />
-                <Route path="eod-fetch" element={<EODFetchPage />} />
-                <Route path="scheduler" element={<SchedulerPage />} />
-                <Route path="scheduler/logs" element={<SchedulerLogsPage />} />
-                <Route path="prompt-templates" element={<PromptTemplatesPage />} />
-                <Route path="investment-themes" element={<InvestmentThemesPage />} />
-                <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
-                
-                {/* 管理员路由 */}
-                <Route
-                  path="users"
-                  element={
-                    <AdminRoute>
-                      <UsersPage />
-                    </AdminRoute>
-                  }
-                />
-                <Route
-                  path="llm-config"
-                  element={
-                    <AdminRoute>
-                      <LLMConfigPage />
-                    </AdminRoute>
-                  }
-                />
-              </Route>
-              
-              {/* 404页面 */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </div>
+          <AppContent />
         </Router>
       </LoggerProvider>
     </ConfigProvider>

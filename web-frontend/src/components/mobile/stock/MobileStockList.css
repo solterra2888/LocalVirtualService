@@ -1,0 +1,69 @@
+.mobile-stock-list {
+  background: #f5f5f5;
+}
+
+.stock-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stock-list-item:active {
+  background-color: #f5f5f5;
+}
+
+.stock-item-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stock-symbol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stock-name {
+  line-height: 1.4;
+}
+
+.stock-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin-left: 16px;
+}
+
+.stock-price {
+  font-weight: 600;
+}
+
+.stock-change {
+  display: flex;
+  align-items: center;
+}
+
+/* 优化滚动体验 */
+.mobile-stock-list .ant-list {
+  background: transparent;
+}
+
+.mobile-stock-list .ant-list-item {
+  padding: 0;
+  border: none;
+}
+
+/* Loading状态优化 */
+.mobile-stock-list .ant-spin-container {
+  min-height: 200px;
+}
+

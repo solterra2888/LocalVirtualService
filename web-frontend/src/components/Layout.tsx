@@ -58,7 +58,7 @@ const Layout: React.FC = () => {
     {
       key: '/dashboard',
       icon: <StockOutlined />,
-      label: 'Target Tracking',
+      label: 'Watchlist',
     },
     {
       key: '/news',

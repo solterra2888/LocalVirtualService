@@ -1,0 +1,93 @@
+.mobile-stock-detail {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding-bottom: 20px;
+}
+
+.mobile-stock-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.mobile-stock-header .back-button {
+  font-size: 20px;
+  padding: 4px 8px;
+}
+
+.mobile-stock-header .header-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mobile-stock-info {
+  background: #ffffff;
+  padding: 20px 16px;
+  margin-bottom: 12px;
+}
+
+.stock-info-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.stock-info-price {
+  margin-bottom: 20px;
+}
+
+.stock-info-metrics {
+  display: flex;
+  gap: 40px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-stock-tabs {
+  background: #ffffff;
+}
+
+.mobile-stock-tabs .ant-tabs-nav {
+  padding: 0 16px;
+  margin: 0;
+}
+
+.mobile-stock-tabs .ant-tabs-tab {
+  font-size: 16px;
+  padding: 12px 0;
+}
+
+.mobile-tab-content {
+  background: #f5f5f5;
+  min-height: 400px;
+}
+
+.mobile-chart-container {
+  background: #ffffff;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.mobile-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 60px 0;
+  background: #ffffff;
+  margin: 12px 16px;
+  border-radius: 8px;
+}
+
