@@ -111,6 +111,7 @@ const MobileStockChart: React.FC<MobileStockChartProps> = ({ symbol, primaryTick
       layout: {
         background: { color: '#ffffff' },
         textColor: '#333',
+        fontSize: 11,
       },
       grid: {
         vertLines: { color: '#f0f0f0' },
@@ -242,7 +243,7 @@ const MobileStockChart: React.FC<MobileStockChartProps> = ({ symbol, primaryTick
           ref={chartContainerRef} 
           className="chart-container"
           style={{ 
-            minHeight: '240px',
+            minHeight: '280px',
             display: error && !loading ? 'none' : 'block'
           }}
         />

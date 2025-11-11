@@ -21,7 +21,6 @@ import {
   Modal,
   Dropdown,
   Divider,
-  Progress
 } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
@@ -1564,11 +1563,8 @@ const FinvizDashboard: React.FC = () => {
       );
     }
 
-    const { company, highlights, valuations, analyst_ratings, technicals, balance_sheet } =
-      overviewData;
+    const { company, highlights, valuations, analyst_ratings, technicals } = overviewData;
     const currencyCode = company.currencycode || 'USD';
-    const latestBalanceSheet =
-      Array.isArray(balance_sheet) && balance_sheet.length > 0 ? balance_sheet[0] : null;
 
     return (
       <div>
@@ -2093,63 +2089,6 @@ const FinvizDashboard: React.FC = () => {
             </Row>
           </Card>
         )}
-
-        {highlights && latestBalanceSheet && (
-          <Card
-            title={
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <HeartOutlined style={{ color: '#ff4d4f' }} />
-                Financial Health Assessment
-              </span>
-            }
-          >
-            <Row gutter={[16, 16]}>
-              <Col span={24}>
-                {(() => {
-                  const currentAssets = latestBalanceSheet.totalcurrentassets
-                    ? Number(latestBalanceSheet.totalcurrentassets)
-                    : null;
-                  const currentLiabilities = latestBalanceSheet.totalcurrentliabilities
-                    ? Number(latestBalanceSheet.totalcurrentliabilities)
-                    : null;
-                  const currentRatio =
-                    currentAssets && currentLiabilities
-                      ? currentAssets / currentLiabilities
-                      : null;
-
-                  const healthScore = fundamentalsUtils.getFinancialHealthScore(
-                    currentRatio,
-                    null,
-                    highlights.returnonequityttm ?? null,
-                    highlights.profitmargin ?? null
-                  );
-
-                  return (
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ marginBottom: 16 }}>
-                        <Text style={{ fontSize: '16px', marginRight: 16 }}>
-                          Overall Financial Health:
-                        </Text>
-                        <Tag color={healthScore.color} style={{ fontSize: '16px', padding: '8px 16px' }}>
-                          {healthScore.level}
-                        </Tag>
-                      </div>
-                      <Progress
-                        percent={healthScore.score}
-                        strokeColor={healthScore.color}
-                        style={{ maxWidth: '400px', margin: '0 auto' }}
-                        strokeWidth={8}
-                      />
-                      <div style={{ marginTop: 16, fontSize: '14px', color: '#666' }}>
-                        Score: {healthScore.score}/100
-                      </div>
-                    </div>
-                  );
-                })()}
-              </Col>
-            </Row>
-          </Card>
-        )}
       </div>
     );
   };
@@ -2405,7 +2344,7 @@ const FinvizDashboard: React.FC = () => {
                     onChange={setPriorityFilter}
                     size="small"
                     style={{ flex: 1, border: 'none' }}
-                    bordered={false}
+                    variant="borderless"
                   >
                     {PRIORITY_FILTER_OPTIONS.map(option => (
                       <Option key={option.value} value={option.value}>
@@ -2422,7 +2361,7 @@ const FinvizDashboard: React.FC = () => {
                     onChange={setExchangeFilter}
                     size="small"
                     style={{ flex: 1, border: 'none' }}
-                    bordered={false}
+                    variant="borderless"
                   >
                     <Option key="all" value="all">
                       <span style={{ fontSize: '12px' }}>All</span>
@@ -2440,7 +2379,7 @@ const FinvizDashboard: React.FC = () => {
                     onChange={setSectorFilter}
                     size="small"
                     style={{ flex: 1, border: 'none' }}
-                    bordered={false}
+                    variant="borderless"
                   >
                     <Option key="all" value="all">
                       <span style={{ fontSize: '12px' }}>Sectors</span>
@@ -2723,7 +2662,7 @@ const FinvizDashboard: React.FC = () => {
                     {summaryResult && typeof summaryResult.content === 'string' && (
                       <>
                         <Card 
-                          title="AI Analysis (Summary)" 
+                          title="AI Analysis" 
                           size="small"
                           headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
                         >

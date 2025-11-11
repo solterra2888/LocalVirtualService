@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-desi
 import type { WatchlistItem, StockPriceData, DashboardNewsItem, ResearchReport } from '../../../services/dashboard';
 import { dashboardAPI } from '../../../services/dashboard';
 import MobileStockChart from './MobileStockChart';
+import MobileStockOverview from './MobileStockOverview';
 import MobileNewsList from '../news/MobileNewsList';
 import MobileResearchReports from '../reports/MobileResearchReports';
 import './MobileStockDetail.css';
@@ -24,7 +25,7 @@ interface MobileStockDetailProps {
  * 显示股票信息、图表、新闻和研报
  */
 const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) => {
-  const [activeTab, setActiveTab] = useState<string>('news');
+  const [activeTab, setActiveTab] = useState<string>('overview');
   const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
   const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -84,18 +85,25 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
 
   const tabItems = [
     {
-      key: 'news',
-      label: 'News',
+      key: 'overview',
+      label: 'Overview',
       children: (
-        <div className="mobile-tab-content">
-          {/* 日走势图 */}
-          <div className="mobile-chart-container">
+        <div className="mobile-tab-content mobile-overview-content">
+          <section className="mobile-overview-section mobile-chart-section">
             <MobileStockChart 
               symbol={stock.symbol} 
               primaryTicker={stock.primaryticker}
             />
-          </div>
-          
+          </section>
+          <MobileStockOverview stock={stock} />
+        </div>
+      ),
+    },
+    {
+      key: 'news',
+      label: 'News',
+      children: (
+        <div className="mobile-tab-content">
           {/* 新闻列表 */}
           {loading ? (
             <div className="mobile-loading">
@@ -143,7 +151,7 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
           className="back-button"
         />
         <div className="header-title">
-          <Text strong>{stock.symbol}</Text>
+          <Text strong>{stock.custom_name || stock.company || stock.symbol}</Text>
         </div>
         <div style={{ width: 32 }} /> {/* Placeholder for centering */}
       </div>
@@ -153,10 +161,10 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
         <div className="stock-info-header">
           <div>
             <Title level={4} style={{ margin: 0, fontSize: '22px', fontWeight: 600 }}>
-              {stock.symbol}
+              {stock.custom_name || stock.company || stock.symbol}
             </Title>
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              {stock.custom_name || stock.company || stock.symbol}
+              {stock.symbol}
             </Text>
           </div>
         </div>
@@ -192,7 +200,7 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
                 </Text>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
                   {stock.priceData?.last_updated ? 
-                    new Date(stock.priceData.last_updated).toLocaleString('en-US', {
+                    new Date(stock.priceData.last_updated).toLocaleString(undefined, {
                       month: 'short',
                       day: 'numeric',
                       hour: '2-digit',

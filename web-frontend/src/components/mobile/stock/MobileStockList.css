@@ -31,6 +31,22 @@
   gap: 8px;
 }
 
+.stock-exchange-code {
+  font-size: 12px;
+  color: #595959;
+  background-color: #f0f0f0;
+  border-radius: 12px;
+  padding: 2px 8px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.stock-priority-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .stock-name {
   line-height: 1.4;
 }

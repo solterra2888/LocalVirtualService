@@ -1142,20 +1142,20 @@ async def create_default_earnings_calendar_task(
         scheduler_service = await get_scheduler_service()
         
         result = await scheduler_service.create_cron_task(
-            task_name="IPO Calendar Auto Fetch",
-            task_type="ipo_calendar",
+            task_name="Earnings Calendar Auto Fetch",
+            task_type="earnings_calendar",
             cron_expression="0 6 * * 0",  # 每周日早上6点
             timezone="America/New_York",
             enabled=True,
             task_params={
-                'days': 30,
-                'exchanges': ['US', 'HK']  # 默认获取 US 和 HK 交易所
+                'days': 7,
+                'fetch_next_week': False
             },
             created_by=current_user.username
         )
         
         if result['success']:
-            logger.info("默认 IPO 日历定时任务创建成功", 
+            logger.info("默认财报日历定时任务创建成功", 
                        task_id=result['task_id'],
                        user=current_user.username)
             return {
@@ -1167,7 +1167,7 @@ async def create_default_earnings_calendar_task(
                 }
             }
         else:
-            logger.error("默认 IPO 日历定时任务创建失败", 
+            logger.error("默认财报日历定时任务创建失败", 
                         failure_reason=result.get('message', '未知错误'),
                         user=current_user.username)
             raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
@@ -1175,7 +1175,7 @@ async def create_default_earnings_calendar_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("创建默认 IPO 日历定时任务失败", 
+        logger.error("创建默认财报日历定时任务失败", 
                     exception=str(e), 
                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")

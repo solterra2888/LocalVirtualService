@@ -1,15 +1,5 @@
 import React, { useEffect } from 'react';
-import {
-  Modal,
-  Typography,
-  Tag,
-  Button,
-  Space,
-  message,
-  Form,
-  Radio,
-  Input
-} from 'antd';
+import { Modal, Typography, Button, Space, message, Form, Radio, Input } from 'antd';
 import {
   EditOutlined,
   StarFilled,
@@ -115,10 +105,12 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
       destroyOnClose
     >
       <div style={{ marginBottom: '16px' }}>
-        <Text strong>Stock: </Text>
-        <Tag color="blue" style={{ marginLeft: '8px' }}>
-          {item.symbol} - {item.company || item.custom_name || item.symbol}
-        </Tag>
+        <Text strong>Stock:</Text>
+        <div style={{ marginTop: '8px' }}>
+          <Text>
+            {item.symbol} - {item.company || item.custom_name || item.symbol}
+          </Text>
+        </div>
       </div>
       
       <Form

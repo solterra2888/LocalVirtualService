@@ -1467,6 +1467,58 @@ async def get_stock_historical_data(
                 "volume": int(row[5]) if row[5] else 0
             })
         
+        # 优化：如果最后一天是今天，尝试用实时数据替换/补充
+        # 这样 candlestick 图表的最后一根 K 线会显示实时价格
+        today_str = datetime.now().date().strftime('%Y-%m-%d')
+        has_today_data = any(item['date'] == today_str for item in historical_data)
+        
+        # 查询实时价格数据
+        realtime_query = """
+        SELECT 
+            code,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            last_updated
+        FROM stock_prices_realtime 
+        WHERE code = %s
+        LIMIT 1
+        """
+        
+        realtime_result = db_manager.fetch_one(realtime_query, [symbol])
+        
+        # 如果没有找到，并且 symbol 不包含 .US 后缀，尝试添加后缀
+        if not realtime_result and not symbol.endswith('.US'):
+            symbol_with_us = f"{symbol}.US"
+            realtime_result = db_manager.fetch_one(realtime_query, [symbol_with_us])
+        
+        if realtime_result:
+            # 提取实时数据
+            realtime_data = {
+                "date": today_str,
+                "open": float(realtime_result[1]) if realtime_result[1] else 0,
+                "high": float(realtime_result[2]) if realtime_result[2] else 0,
+                "low": float(realtime_result[3]) if realtime_result[3] else 0,
+                "close": float(realtime_result[4]) if realtime_result[4] else 0,
+                "volume": int(realtime_result[5]) if realtime_result[5] else 0
+            }
+            
+            # 如果有实时数据且数据有效（收盘价 > 0）
+            if realtime_data['close'] > 0:
+                if has_today_data:
+                    # 替换今天的 EOD 数据为实时数据
+                    for i, item in enumerate(historical_data):
+                        if item['date'] == today_str:
+                            historical_data[i] = realtime_data
+                            print(f"✅ 用实时数据替换了今天 {today_str} 的 K 线数据")
+                            break
+                else:
+                    # 添加今天的实时数据作为新的 K 线
+                    historical_data.append(realtime_data)
+                    print(f"✅ 添加了今天 {today_str} 的实时 K 线数据")
+        
         return {
             "success": True,
             "data": historical_data,

@@ -11,7 +11,6 @@ import {
   Tabs,
   Table,
   Statistic,
-  Progress,
   Tag,
   Space,
   Divider,
@@ -35,7 +34,6 @@ import {
   CalculatorOutlined,
   StarOutlined,
   DashboardOutlined,
-  HeartOutlined,
   TableOutlined,
   MoneyCollectOutlined,
   FundOutlined,
@@ -2067,57 +2065,6 @@ const FundamentalsPage: React.FC = () => {
                   value={fundamentalsUtils.formatPercentage(state.fundamentalsData.technicals.shortpercent)}
                   valueStyle={{ color: '#faad14', fontSize: '16px' }}
                 />
-              </Col>
-            </Row>
-          </Card>
-        )}
-
-        {/* Financial Health Score */}
-        {highlights && (
-          <Card 
-            title={
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <HeartOutlined style={{ color: '#ff4d4f' }} />
-                Financial Health Assessment
-              </span>
-            } 
-            style={{ marginBottom: 24 }}
-          >
-            <Row gutter={[16, 16]}>
-              <Col span={24}>
-                {(() => {
-                  const latestBalanceSheet = state.fundamentalsData?.balance_sheet[0];
-                  const currentRatio = latestBalanceSheet?.totalcurrentassets && latestBalanceSheet?.totalcurrentliabilities 
-                    ? Number(latestBalanceSheet.totalcurrentassets) / Number(latestBalanceSheet.totalcurrentliabilities) 
-                    : null;
-                  
-                  const healthScore = fundamentalsUtils.getFinancialHealthScore(
-                    currentRatio,
-                    null, // debt to equity ratio would need calculation
-                    highlights.returnonequityttm ?? null,
-                    highlights.profitmargin ?? null
-                  );
-                  
-                  return (
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ marginBottom: 16 }}>
-                        <Text style={{ fontSize: '16px', marginRight: 16 }}>Overall Financial Health:</Text>
-                        <Tag color={healthScore.color} style={{ fontSize: '16px', padding: '8px 16px' }}>
-                          {healthScore.level}
-                        </Tag>
-                      </div>
-                      <Progress
-                        percent={healthScore.score}
-                        strokeColor={healthScore.color}
-                        style={{ maxWidth: '400px', margin: '0 auto' }}
-                        strokeWidth={8}
-                      />
-                      <div style={{ marginTop: 16, fontSize: '14px', color: '#666' }}>
-                        Score: {healthScore.score}/100
-                      </div>
-                    </div>
-                  );
-                })()}
               </Col>
             </Row>
           </Card>

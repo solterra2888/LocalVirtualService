@@ -19,3 +19,35 @@
   z-index: 10;
 }
 
+.mobile-dashboard-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-dashboard-priority-select {
+  flex: 1;
+}
+
+.mobile-dashboard-exchange-tabs {
+  margin-top: 12px;
+}
+
+.mobile-dashboard-exchange-tabs .ant-tabs-nav {
+  margin: 0;
+}
+
+.mobile-dashboard-exchange-tabs .ant-tabs-tab {
+  padding: 6px 12px;
+}
+
+.mobile-stock-actions-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-stock-actions-button {
+  height: 44px;
+}
+

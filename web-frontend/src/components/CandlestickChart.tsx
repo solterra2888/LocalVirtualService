@@ -418,7 +418,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     // 获取鼠标在容器内的相对坐标
     const rect = chartContainerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
 
     // 使用lightweight-charts的coordinateToTime方法将X坐标转换为时间戳
     const timeScale = chartRef.current.timeScale();

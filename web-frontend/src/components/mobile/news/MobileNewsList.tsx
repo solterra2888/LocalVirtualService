@@ -131,14 +131,14 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
         width="100%"
         rootClassName="mobile-news-modal"
         style={{ 
-          top: 0, 
+          top: '4vh', 
           paddingBottom: 0,
           maxWidth: '100vw'
         }}
         styles={{
           body: { 
             padding: 0,
-            maxHeight: 'calc(100vh - 56px)',
+            maxHeight: '75vh',
             overflowY: 'auto'
           }
         }}
@@ -191,7 +191,7 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
                 {hasSummaryContent && (
                   <div className="news-detail-section">
                     <Text strong style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}>
-                      AI Analysis (Summary)
+                      AI Analysis
                     </Text>
                     <MarkdownRenderer content={summaryContent || ''} />
                   </div>

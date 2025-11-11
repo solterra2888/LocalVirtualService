@@ -896,7 +896,7 @@ const NewsPage: React.FC = () => {
                     {summaryResult && typeof summaryResult.content === 'string' && (
                       <>
                         <Card 
-                          title="AI Analysis (Summary)" 
+                          title="AI Analysis" 
                           size="small"
                           headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
                         >

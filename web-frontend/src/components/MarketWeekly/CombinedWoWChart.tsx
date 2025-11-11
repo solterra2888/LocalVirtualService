@@ -57,9 +57,11 @@ const SubChart: React.FC<SubChartProps> = ({ data, title }) => {
   const CustomLabel = (props: any) => {
     const { x, y, width, height, value } = props;
     const isPositive = value >= 0;
-    const labelOffset = 12;
-    const labelX = isPositive ? x + width + labelOffset : x - labelOffset;
-    
+    const labelOffset = 10;
+    const barStartX = isPositive ? x : x + width;
+    const barEndX = isPositive ? x + width : x;
+    const labelX = isPositive ? barEndX + labelOffset : barStartX - labelOffset;
+
     return (
       <text
         x={labelX}
@@ -86,7 +88,7 @@ const SubChart: React.FC<SubChartProps> = ({ data, title }) => {
           <BarChart
             data={sortedData}
             layout="vertical"
-            margin={{ top: 5, right: 60, left: 5, bottom: 5 }}
+            margin={{ top: 5, right: 60, left: 65, bottom: 5 }}
           >
             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e8e8e8" />
             <XAxis
