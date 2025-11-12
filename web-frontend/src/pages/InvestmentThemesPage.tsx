@@ -24,7 +24,8 @@ import {
   Menu,
   Alert,
   Switch,
-  Form
+  Form,
+  Upload
 } from 'antd';
 import {
   ReloadOutlined,
@@ -41,7 +42,10 @@ import {
   CheckCircleOutlined,
   StopOutlined,
   PlusOutlined,
-  RobotOutlined
+  RobotOutlined,
+  UploadOutlined,
+  InboxOutlined,
+  DownloadOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -56,18 +60,22 @@ import {
   deleteTheme,
   batchDeleteThemes,
   generateThemeDescription,
-  createTheme
+  createTheme,
+  batchUploadThemes,
+  getThemeAssociations,
+  verifyTicker
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
   ThemeMatch,
+  ThemeAssociation,
   getDescriptionSourceLabel
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useAuthStore } from '../store/authStore';
 
 const { Title, Text, Paragraph } = Typography;
-const { TextArea } = Input;
+const { TextArea, Search } = Input;
 
 interface PageState {
   loading: boolean;
@@ -88,11 +96,37 @@ interface PageState {
   createModalVisible: boolean;
   createStep: number;
   newThemeName: string;
+  newThemeCategory: string;
   newThemeId: string;
+  newThemeMarket: string;
+  newThemeTickers: string;
   newThemeDescription: string;
   generatingDescription: boolean;
   creatingTheme: boolean;
   helpModalVisible: boolean;
+  // 批量上传相关
+  batchUploadModalVisible: boolean;
+  uploadingFile: boolean;
+  uploadedFile: File | null;
+  batchUploadMarket: string;  // 新增：market 选择
+  uploadPreview: {
+    theme_name: string;  // 主题名称（整个文件中唯一）
+    total_themes: number;  // 要创建的主题数量（= category 数量）
+    total_tickers: number;
+    categories: Record<string, number>;  // category -> ticker count
+    categories_sample: string[];  // 前5个category
+  } | null;
+  batchTaskId: string | null;
+  batchTaskProgress: number;
+  batchTaskStatus: string;
+  batchTaskDetails: any[];
+  // 主题关联查看
+  associationModalVisible: boolean;
+  associationLoading: boolean;
+  associationTheme: InvestmentTheme | null;
+  associationData: ThemeAssociation[];
+  verifyingTickers: Set<string>;  // 正在验证的tickers
+  searchKeyword: string;
 }
 
 const InvestmentThemesPage: React.FC = () => {
@@ -118,23 +152,44 @@ const InvestmentThemesPage: React.FC = () => {
     createModalVisible: false,
     createStep: 1,
     newThemeName: '',
+    newThemeCategory: '',
     newThemeId: '',
+    newThemeMarket: 'US',
+    newThemeTickers: '',
     newThemeDescription: '',
     generatingDescription: false,
     creatingTheme: false,
-    helpModalVisible: false
+    helpModalVisible: false,
+    // 批量上传相关
+    batchUploadModalVisible: false,
+    uploadingFile: false,
+    uploadedFile: null,
+    batchUploadMarket: 'US',  // 默认 US 市场
+    uploadPreview: null,
+    batchTaskId: null,
+    batchTaskProgress: 0,
+    batchTaskStatus: '',
+    batchTaskDetails: [],
+    associationModalVisible: false,
+    associationLoading: false,
+    associationTheme: null,
+    associationData: [],
+    verifyingTickers: new Set(),
+    searchKeyword: ''
   });
 
 
   // Load theme list
-  const loadThemes = async (page?: number, pageSize?: number) => {
+  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       const currentPage = page || state.currentPage;
       const currentPageSize = pageSize || state.pageSize;
+      const effectiveSearch = searchKeyword !== undefined ? searchKeyword : state.searchKeyword;
       const response = await listThemes(
         currentPageSize,
-        (currentPage - 1) * currentPageSize
+        (currentPage - 1) * currentPageSize,
+        effectiveSearch
       );
       
       setState(prev => ({
@@ -150,6 +205,191 @@ const InvestmentThemesPage: React.FC = () => {
       setState(prev => ({ ...prev, loading: false }));
     }
   };
+
+  const handleSearchThemes = (value: string) => {
+    const trimmed = value.trim();
+    setState(prev => ({
+      ...prev,
+      searchKeyword: trimmed,
+      currentPage: 1
+    }));
+    loadThemes(1, state.pageSize, trimmed);
+  };
+
+  const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = event.target;
+    setState(prev => ({
+      ...prev,
+      searchKeyword: value
+    }));
+
+    if (value === '') {
+      loadThemes(1, state.pageSize, '');
+    }
+  };
+
+  const showAssociationsModal = async (theme: InvestmentTheme) => {
+    setState(prev => ({
+      ...prev,
+      associationModalVisible: true,
+      associationLoading: true,
+      associationTheme: theme,
+      associationData: []
+    }));
+
+    try {
+      const response = await getThemeAssociations(theme.theme_id);
+      setState(prev => ({
+        ...prev,
+        associationLoading: false,
+        associationData: response.associations
+      }));
+    } catch (error) {
+      message.error(`Failed to load theme associations: ${getErrorMessage(error)}`);
+      setState(prev => ({
+        ...prev,
+        associationLoading: false
+      }));
+    }
+  };
+
+  const handleCloseAssociationsModal = () => {
+    setState(prev => ({
+      ...prev,
+      associationModalVisible: false,
+      associationLoading: false,
+      associationTheme: null,
+      associationData: [],
+      verifyingTickers: new Set()
+    }));
+  };
+
+  // 验证单个ticker
+  const handleVerifyTicker = React.useCallback(async (ticker: string) => {
+    console.log('🔍 handleVerifyTicker called with ticker:', ticker);
+    console.log('🔍 Current associationTheme:', state.associationTheme);
+    
+    if (!state.associationTheme) {
+      console.warn('⚠️ No associationTheme found, returning');
+      return;
+    }
+
+    console.log('✅ Starting verification for:', ticker, 'theme_id:', state.associationTheme.theme_id);
+
+    // 添加到验证中状态
+    setState(prev => ({
+      ...prev,
+      verifyingTickers: new Set(prev.verifyingTickers).add(ticker)
+    }));
+
+    try {
+      console.log('📡 Calling verifyTicker API...');
+      const response = await verifyTicker(state.associationTheme.theme_id, ticker);
+      console.log('📡 API response:', response);
+
+      if (response.success) {
+        message.success(response.message);
+
+        // 更新association数据中的is_verified状态
+        setState(prev => {
+          const newVerifyingTickers = new Set(prev.verifyingTickers);
+          newVerifyingTickers.delete(ticker);
+
+          return {
+            ...prev,
+            associationData: prev.associationData.map(item =>
+              item.ticker === ticker
+                ? { ...item, is_verified: true }
+                : item
+            ),
+            verifyingTickers: newVerifyingTickers
+          };
+        });
+
+        // 刷新主题列表（更新verified_tickers计数）
+        loadThemes();
+      } else {
+        message.error(response.message);
+
+        // 从验证中状态移除
+        setState(prev => {
+          const newVerifyingTickers = new Set(prev.verifyingTickers);
+          newVerifyingTickers.delete(ticker);
+          return { ...prev, verifyingTickers: newVerifyingTickers };
+        });
+      }
+    } catch (error) {
+      message.error(`验证失败: ${getErrorMessage(error)}`);
+
+      // 从验证中状态移除
+      setState(prev => {
+        const newVerifyingTickers = new Set(prev.verifyingTickers);
+        newVerifyingTickers.delete(ticker);
+        return { ...prev, verifyingTickers: newVerifyingTickers };
+      });
+    }
+  }, [state.associationTheme, loadThemes]);
+
+  const associationColumns = React.useMemo<ColumnsType<ThemeAssociation>>(() => [
+    {
+      title: 'Ticker',
+      dataIndex: 'ticker',
+      key: 'ticker',
+      render: (ticker: string) => <Text strong>{ticker}</Text>
+    },
+    {
+      title: 'Market',
+      dataIndex: 'market',
+      key: 'market',
+      render: (market?: string | null) => market || '-'
+    },
+    {
+      title: 'Verified',
+      dataIndex: 'is_verified',
+      key: 'is_verified',
+      render: (isVerified?: boolean | null) => (
+        <Tag color={isVerified ? 'green' : 'default'}>
+          {isVerified ? 'Yes' : 'No'}
+        </Tag>
+      )
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 120,
+      render: (_: any, record: ThemeAssociation) => {
+        if (record.is_verified) {
+          return <Text type="secondary">-</Text>;
+        }
+        
+        const isVerifying = state.verifyingTickers.has(record.ticker);
+        
+        return (
+          <Tooltip title="Verify ticker and fetch data from EODHD if needed">
+            <Button
+              type="link"
+              size="small"
+              icon={isVerifying ? <SyncOutlined spin /> : <CheckCircleOutlined />}
+              onClick={() => handleVerifyTicker(record.ticker)}
+              loading={isVerifying}
+              disabled={isVerifying}
+            >
+              {isVerifying ? 'Verifying' : 'Verify'}
+            </Button>
+          </Tooltip>
+        );
+      }
+    }
+  ], [state.verifyingTickers, handleVerifyTicker]);
+
+  const associationDataSource = React.useMemo(
+    () =>
+      state.associationData.map((item, index) => ({
+        key: `${item.ticker}-${index}`,
+        ...item
+      })),
+    [state.associationData]
+  );
 
   // 🌟 Sync Theme Data (merged functionality - using Celery async tasks)
   const handleSyncThemes = async () => {
@@ -866,11 +1106,26 @@ const InvestmentThemesPage: React.FC = () => {
       message.error('Please enter theme name');
       return;
     }
+    
+    if (!state.newThemeCategory.trim()) {
+      message.error('Please enter category');
+      return;
+    }
 
     setState(prev => ({ ...prev, generatingDescription: true }));
 
     try {
-      const result = await generateThemeDescription(state.newThemeName);
+      // 解析 tickers（逗号分隔）
+      const tickersArray = state.newThemeTickers
+        ? state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean)
+        : undefined;
+      
+      const result = await generateThemeDescription(
+        state.newThemeName, 
+        state.newThemeCategory,
+        state.newThemeMarket || undefined,
+        tickersArray
+      );
       
       if (result.success) {
         setState(prev => ({
@@ -900,10 +1155,18 @@ const InvestmentThemesPage: React.FC = () => {
     setState(prev => ({ ...prev, creatingTheme: true }));
 
     try {
+      // 解析 tickers（逗号分隔）
+      const tickersArray = state.newThemeTickers
+        ? state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean)
+        : undefined;
+      
       const result = await createTheme(
         state.newThemeName,
+        state.newThemeCategory,
         state.newThemeDescription,
-        state.newThemeId || undefined
+        state.newThemeId || undefined,
+        state.newThemeMarket || undefined,
+        tickersArray
       );
       
       if (result.theme_saved) {
@@ -919,7 +1182,10 @@ const InvestmentThemesPage: React.FC = () => {
           createModalVisible: false,
           createStep: 1,
           newThemeName: '',
+          newThemeCategory: '',
           newThemeId: '',
+          newThemeMarket: 'US',
+          newThemeTickers: '',
           newThemeDescription: '',
           creatingTheme: false
         }));
@@ -949,7 +1215,10 @@ const InvestmentThemesPage: React.FC = () => {
           createModalVisible: false,
           createStep: 1,
           newThemeName: '',
+          newThemeCategory: '',
           newThemeId: '',
+          newThemeMarket: 'US',
+          newThemeTickers: '',
           newThemeDescription: '',
           generatingDescription: false,
           creatingTheme: false
@@ -958,21 +1227,233 @@ const InvestmentThemesPage: React.FC = () => {
     });
   };
 
+  // Batch Upload: Handle file selection
+  const handleFileSelect = (file: File) => {
+    // 验证文件格式
+    const validExtensions = ['csv', 'xlsx', 'xls'];
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (!extension || !validExtensions.includes(extension)) {
+      message.error('Invalid file format. Only .csv, .xlsx, .xls are supported.');
+      return false;
+    }
+    
+    // 验证文件大小（10MB）
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('File size exceeds 10MB limit.');
+      return false;
+    }
+    
+    setState(prev => ({
+      ...prev,
+      uploadedFile: file,
+    }));
+    
+    return false; // 阻止自动上传
+  };
+
+  // Batch Upload: Start batch upload
+  const handleStartBatchUpload = async () => {
+    if (!state.uploadedFile) {
+      message.error('No file selected');
+      return;
+    }
+    
+    setState(prev => ({ ...prev, uploadingFile: true }));
+    
+    try {
+      const result = await batchUploadThemes(state.uploadedFile, state.batchUploadMarket);
+      
+      if (result.success) {
+        message.success(result.message);
+        
+        setState(prev => ({
+          ...prev,
+          uploadingFile: false,
+          batchTaskId: result.task_id,
+          uploadPreview: result.preview,
+        }));
+        
+        // 开始轮询任务进度
+        startPollingBatchTask(result.task_id);
+      } else {
+        message.error('Upload failed');
+        setState(prev => ({ ...prev, uploadingFile: false }));
+      }
+    } catch (error) {
+      message.error(getErrorMessage(error));
+      setState(prev => ({ ...prev, uploadingFile: false }));
+    }
+  };
+
+  // Batch Upload: Poll task status
+  const startPollingBatchTask = async (taskId: string) => {
+    try {
+      await pollTaskUntilComplete(
+        taskId,
+        (progress: any) => {
+          setState(prev => ({
+            ...prev,
+            batchTaskProgress: progress.progress || 0,
+            batchTaskStatus: progress.message || 'Processing...',
+          }));
+        }
+      );
+
+      // 任务完成，获取最终结果
+      const finalStatus = await import('../services/investmentThemes').then(m => m.getTaskStatus(taskId));
+      const result = finalStatus.result as any;
+      
+      if (result && result.success) {
+        message.success(
+          `Batch upload completed: ${result.statistics?.created || 0} created, ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped`
+        );
+        
+        setState(prev => ({
+          ...prev,
+          batchTaskDetails: result.details || [],
+          batchTaskProgress: 100,
+        }));
+        
+        // 刷新主题列表
+        loadThemes(state.currentPage);
+      } else {
+        const errorMsg = (result as any)?.error || 'Unknown error';
+        message.error(`Batch upload failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  // Batch Upload: Close modal
+  const handleCloseBatchUploadModal = () => {
+    setState(prev => ({
+      ...prev,
+      batchUploadModalVisible: false,
+      uploadedFile: null,
+      batchUploadMarket: 'US',  // 重置为默认值
+      uploadPreview: null,
+      batchTaskId: null,
+      batchTaskProgress: 0,
+      batchTaskStatus: '',
+      batchTaskDetails: [],
+      uploadingFile: false,
+    }));
+  };
+
+  const handleDownloadTemplate = () => {
+    const headers = ['theme', 'category', 'ticker', 'company'];
+    const sampleRows = [
+      ['crypto', 'ETF', 'ARKB', 'ARK 21Shares Bitcoin ETF'],
+      ['crypto', 'ETF', 'GBTC', 'Grayscale Bitcoin Trust (BTC)'],
+      ['crypto', 'Exchange_Custody', 'COIN', 'Coinbase Global Inc'],
+      ['crypto', 'Exchange_Custody', 'HOOD', 'Robinhood Markets Inc'],
+      ['crypto', 'Miner_AI_Transition', 'IREN', 'Iris Energy Ltd'],
+      ['crypto', 'Miner_AI_Transition', 'HIVE', 'HIVE Digital Technologies Ltd'],
+      ['crypto', 'Payment', 'PYPL', 'PayPal Holdings Inc'],
+      ['crypto', 'Treasury', 'MSTR', 'MicroStrategy Inc']
+    ];
+
+    const createRow = (row: string[]) =>
+      `<tr>${row.map(cell => `<td style="mso-number-format:'@';">${cell}</td>`).join('')}</tr>`;
+
+    const tableHtml =
+      `<table border="1"><thead>${createRow(headers)}</thead><tbody>${sampleRows.map(createRow).join('')}</tbody></table>`;
+
+    const blob = new Blob(['\ufeff' + tableHtml], {
+      type: 'application/vnd.ms-excel'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'investment_theme_batch_template.xls';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Table column definitions
   const columns: ColumnsType<InvestmentTheme> = [
     {
       title: 'Theme Name',
       dataIndex: 'theme_name',
       key: 'theme_name',
-      width: 200,
-      fixed: 'left',
+      ellipsis: true,
       render: (name: string) => <Text strong>{name}</Text>
+    },
+    {
+      title: 'Category',
+      dataIndex: 'category',
+      key: 'category',
+      render: (category?: string) =>
+        category ? <Text>{category}</Text> : <Text type="secondary">Not set</Text>
+    },
+    {
+      title: 'Created By',
+      dataIndex: 'created_by',
+      key: 'created_by',
+      render: (createdBy?: string) =>
+        createdBy ? <Text>{createdBy}</Text> : <Text type="secondary">Unknown</Text>
+    },
+    {
+      title: 'Tickers',
+      dataIndex: 'tickers',
+      key: 'tickers',
+      render: (tickers: string[] | undefined, record: InvestmentTheme) => {
+        if (!tickers || tickers.length === 0) {
+          return <Text type="secondary">None</Text>;
+        }
+        const displayTickers = tickers.slice(0, 5);
+        const extraCount = tickers.length - displayTickers.length;
+        return (
+          <Space size={[0, 4]} wrap>
+            {displayTickers.map(ticker => (
+              <Tooltip title="View associated tickers" key={ticker}>
+                <Tag
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => showAssociationsModal(record)}
+                >
+                  {ticker}
+                </Tag>
+              </Tooltip>
+            ))}
+            {extraCount > 0 && (
+              <Tooltip title="View remaining tickers">
+                <Tag
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => showAssociationsModal(record)}
+                >
+                  +{extraCount}
+                </Tag>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      }
+    },
+    {
+      title: 'Verified %',
+      dataIndex: 'verified_tickers',
+      key: 'verified_percent',
+      render: (_: any, record: InvestmentTheme) => {
+        const verified = record.verified_tickers ?? 0;
+        const total = record.total_tickers ?? (record.tickers?.length ?? 0);
+        const percent = total > 0 ? (verified / total) * 100 : 0;
+        return (
+          <Tooltip title={`${verified}/${total} verified`}>
+            <Tag color={percent === 100 ? 'green' : percent === 0 ? 'default' : 'blue'}>
+              {percent.toFixed(0)}%
+            </Tag>
+          </Tooltip>
+        );
+      }
     },
     {
       title: 'Description Preview',
       dataIndex: 'description_preview',
       key: 'description_preview',
-      width: 250,
       ellipsis: true,
       render: (text: string, record: InvestmentTheme) => (
         <Text 
@@ -985,20 +1466,9 @@ const InvestmentThemesPage: React.FC = () => {
       )
     },
     {
-      title: 'Source',
-      dataIndex: 'description_source',
-      key: 'description_source',
-      width: 110,
-      render: (source: string) => {
-        const label = getDescriptionSourceLabel(source);
-        return <Tag color={label.color}>{label.text}</Tag>;
-      }
-    },
-    {
       title: 'Vectorized',
       dataIndex: 'has_embedding',
       key: 'has_embedding',
-      width: 110,
       render: (hasEmbedding: boolean, record: InvestmentTheme) => (
         <Tooltip title={hasEmbedding ? `Embedding model: ${record.embedding_model || 'text-embedding-v3'}` : 'Not vectorized yet'}>
           <Tag color={hasEmbedding ? 'green' : 'default'} icon={hasEmbedding ? <CheckCircleOutlined /> : null}>
@@ -1011,7 +1481,6 @@ const InvestmentThemesPage: React.FC = () => {
       title: 'Enabled',
       dataIndex: 'is_enabled_for_matching',
       key: 'is_enabled_for_matching',
-      width: 90,
       render: (_: any, record: InvestmentTheme) => (
         <Tooltip title={isAdmin ? "Click to toggle" : "View only"}>
           <Switch
@@ -1028,7 +1497,6 @@ const InvestmentThemesPage: React.FC = () => {
       title: 'Updated',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 140,
       render: (date: string) => date ? new Date(date).toLocaleString('en-US', { 
         month: 'short', 
         day: 'numeric', 
@@ -1039,8 +1507,6 @@ const InvestmentThemesPage: React.FC = () => {
     ...(isAdmin ? [{
       title: 'Actions',
       key: 'actions',
-      width: 120,
-      fixed: 'right' as const,
       render: (_: any, record: InvestmentTheme) => (
         <Space size="small">
           <Tooltip title="Edit Description">
@@ -1066,6 +1532,8 @@ const InvestmentThemesPage: React.FC = () => {
   ];
 
 
+  const uploadPreview = state.uploadPreview;
+
   return (
     <div style={{ padding: '24px' }}>
       {/* Page Title */}
@@ -1073,7 +1541,7 @@ const InvestmentThemesPage: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <Title level={2}>
-              <FundOutlined /> Investment Themes Vector Retrieval
+              <FundOutlined /> Investment Themes Settings
             </Title>
             <Paragraph type="secondary">
               Intelligent theme matching system based on Reverse Capital Embedding technique, automatically associating news with 150+ investment themes through semantic analysis
@@ -1110,6 +1578,16 @@ const InvestmentThemesPage: React.FC = () => {
                   </Button>
                 </Tooltip>
                 
+                <Tooltip title="Batch upload themes from CSV/Excel file">
+                  <Button
+                    type="default"
+                    icon={<UploadOutlined />}
+                    onClick={() => setState(prev => ({ ...prev, batchUploadModalVisible: true }))}
+                  >
+                    Batch Upload
+                  </Button>
+                </Tooltip>
+                
                 <Tooltip title="Delete selected themes (soft delete)">
                   <Button
                     danger
@@ -1123,7 +1601,7 @@ const InvestmentThemesPage: React.FC = () => {
               </>
             )}
             
-            <Tooltip title="Generate descriptions and vectors for new themes, suitable after Futu crawler adds new themes">
+            <Tooltip title="Generate descriptions and vectors for new themes, suitable after adding new themes">
               <Button
                 type={isAdmin ? "default" : "primary"}
                 icon={<SyncOutlined />}
@@ -1209,7 +1687,23 @@ const InvestmentThemesPage: React.FC = () => {
       </Card>
 
       {/* Theme List Table */}
-      <Card title="Investment Themes List" extra={<Text type="secondary">Total: {state.total}</Text>}>
+      <Card
+        title="Investment Themes List"
+        extra={
+          <Space size="middle">
+            <Text type="secondary">Total: {state.total}</Text>
+            <Search
+              placeholder="Search theme or category"
+              allowClear
+              enterButton
+              value={state.searchKeyword}
+              onChange={handleSearchInputChange}
+              onSearch={handleSearchThemes}
+              style={{ width: 260 }}
+            />
+          </Space>
+        }
+      >
         <Table
           columns={columns}
           dataSource={state.themes}
@@ -1247,6 +1741,39 @@ const InvestmentThemesPage: React.FC = () => {
           size="small"
         />
       </Card>
+
+      {/* Theme Associations Modal */}
+      <Modal
+        open={state.associationModalVisible}
+        title={
+          state.associationTheme
+            ? `Theme Associations - ${state.associationTheme.theme_name || state.associationTheme.theme_id}`
+            : 'Theme Associations'
+        }
+        onCancel={handleCloseAssociationsModal}
+        footer={null}
+        width={520}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="Reminder"
+          description={
+            <span>
+              Unverified tickers cannot join matching, screening, or attribution features. Please double‑check ticker accuracy and ensure the correct market suffix (e.g. <Text code>NVDA.US</Text>).
+            </span>
+          }
+        />
+        <Table
+          columns={associationColumns}
+          dataSource={associationDataSource}
+          size="small"
+          pagination={false}
+          loading={state.associationLoading}
+          locale={{ emptyText: state.associationLoading ? 'Loading...' : 'No associations found' }}
+        />
+      </Modal>
 
       {/* Test Match Modal */}
       <Modal
@@ -1402,7 +1929,7 @@ const InvestmentThemesPage: React.FC = () => {
           <div>
             <Alert
               message="Step 1: Basic Information"
-              description="Fill in the theme name and market, then let AI generate a detailed description."
+              description="Fill in the theme name, category, and optionally associate stock tickers."
               type="info"
               showIcon
               style={{ marginBottom: 24 }}
@@ -1418,6 +1945,49 @@ const InvestmentThemesPage: React.FC = () => {
                   showCount
                 />
               </Form.Item>
+              
+              <Form.Item label="Category" required>
+                <Input
+                  placeholder="e.g. Technology, Healthcare, Finance, Energy"
+                  value={state.newThemeCategory}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeCategory: e.target.value }))}
+                  maxLength={100}
+                  showCount
+                />
+              </Form.Item>
+              
+              <Divider style={{ margin: '16px 0' }} />
+              
+              <Form.Item 
+                label="Associated Stocks (Optional)" 
+                help="Select market and enter ticker symbols to associate with this theme"
+              >
+                <Space direction="vertical" style={{ width: '100%' }} size="small">
+                  <Select
+                    value={state.newThemeMarket}
+                    onChange={(value) => setState(prev => ({ ...prev, newThemeMarket: value }))}
+                    style={{ width: 200 }}
+                  >
+                    <Select.Option value="US">🇺🇸 US Market</Select.Option>
+                    <Select.Option value="HK">🇭🇰 HK Market</Select.Option>
+                  </Select>
+                  
+                  <Input
+                    placeholder={`Enter tickers separated by commas (e.g. ${state.newThemeMarket === 'US' ? 'NVDA, AMD, INTC' : '0700, 9988, 3690'})`}
+                    value={state.newThemeTickers}
+                    onChange={(e) => setState(prev => ({ ...prev, newThemeTickers: e.target.value }))}
+                    maxLength={500}
+                  />
+                  
+                  {state.newThemeTickers && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Preview: {state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).map(t => `${t}.${state.newThemeMarket}`).join(', ')}
+                    </Text>
+                  )}
+                </Space>
+              </Form.Item>
+              
+              <Divider style={{ margin: '16px 0' }} />
               
               <Form.Item 
                 label="Theme ID (Optional)" 
@@ -1442,7 +2012,7 @@ const InvestmentThemesPage: React.FC = () => {
                   icon={<RobotOutlined />}
                   onClick={handleGenerateDescription}
                   loading={state.generatingDescription}
-                  disabled={!state.newThemeName.trim()}
+                  disabled={!state.newThemeName.trim() || !state.newThemeCategory.trim()}
                 >
                   {state.generatingDescription ? 'Generating...' : 'Generate Description with AI'}
                 </Button>
@@ -1472,6 +2042,14 @@ const InvestmentThemesPage: React.FC = () => {
               <div>
                 <Text strong>Theme Name:</Text> <Text>{state.newThemeName}</Text>
               </div>
+              <div>
+                <Text strong>Category:</Text> <Text>{state.newThemeCategory}</Text>
+              </div>
+              {state.newThemeTickers && (
+                <div>
+                  <Text strong>Associated Stocks:</Text> <Text>{state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).map(t => `${t}.${state.newThemeMarket}`).join(', ')}</Text>
+                </div>
+              )}
               {state.newThemeId && (
                 <div>
                   <Text strong>Theme ID:</Text> <Text code>{state.newThemeId}</Text>
@@ -1532,7 +2110,7 @@ const InvestmentThemesPage: React.FC = () => {
         title={
           <Space>
             <InfoCircleOutlined style={{ color: '#1890ff' }} />
-            <span>Investment Themes Vector Retrieval - User Guide</span>
+            <span>Investment Themes Settings - User Guide</span>
           </Space>
         }
         open={state.helpModalVisible}
@@ -1781,6 +2359,165 @@ const InvestmentThemesPage: React.FC = () => {
             `
           }}
         />
+      </Modal>
+
+      {/* Batch Upload Modal */}
+      <Modal
+        title={
+          <Space>
+            <UploadOutlined />
+            <span>Batch Upload Investment Themes</span>
+          </Space>
+        }
+        open={state.batchUploadModalVisible}
+        onCancel={handleCloseBatchUploadModal}
+        width={800}
+        footer={
+          state.batchTaskId ? (
+            <Button onClick={handleCloseBatchUploadModal}>Close</Button>
+          ) : (
+            <>
+              <Button onClick={handleCloseBatchUploadModal}>Cancel</Button>
+              <Button
+                type="primary"
+                onClick={handleStartBatchUpload}
+                loading={state.uploadingFile}
+                disabled={!state.uploadedFile}
+              >
+                Start Upload
+              </Button>
+            </>
+          )
+        }
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          {/* File Upload Area */}
+          {!state.batchTaskId && (
+            <>
+              <Alert
+                message="File Format Requirements"
+                description={
+                  <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+                    <li>Support: CSV (.csv) or Excel (.xlsx, .xls) files</li>
+                    <li>Required columns: <code>theme</code>, <code>category</code>, <code>ticker</code></li>
+                    <li>Optional column: <code>company</code> (company name)</li>
+                    <li><strong>Important:</strong> <code>theme</code> column must have only ONE unique value throughout the file</li>
+                    <li>Multiple <code>category</code> values → Multiple themes will be created</li>
+                    <li>Example: theme='crypto' with 8 categories → Creates 8 themes</li>
+                    <li>Maximum file size: 10MB</li>
+                  </ul>
+                }
+                type="info"
+                showIcon
+              />
+
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={handleDownloadTemplate}
+                type="default"
+              >
+                Download Excel Template
+              </Button>
+
+              {/* Market Selection */}
+              <div>
+                <Text strong style={{ marginRight: 8 }}>Market:</Text>
+                <Select
+                  value={state.batchUploadMarket}
+                  onChange={(value) => setState(prev => ({ ...prev, batchUploadMarket: value }))}
+                  style={{ width: 120 }}
+                  disabled={state.uploadingFile || !!state.batchTaskId}
+                >
+                  <Select.Option value="US">US Market</Select.Option>
+                  <Select.Option value="HK">HK Market</Select.Option>
+                  <Select.Option value="CN">CN Market</Select.Option>
+                </Select>
+              </div>
+
+              <Upload.Dragger
+                name="file"
+                multiple={false}
+                beforeUpload={handleFileSelect}
+                onRemove={() => setState(prev => ({ ...prev, uploadedFile: null }))}
+                fileList={state.uploadedFile ? [state.uploadedFile as any] : []}
+                accept=".csv,.xlsx,.xls"
+              >
+                <p className="ant-upload-drag-icon">
+                  <InboxOutlined />
+                </p>
+                <p className="ant-upload-text">Click or drag file to this area to upload</p>
+                <p className="ant-upload-hint">
+                  Only CSV or Excel files are supported. The file will be validated before processing.
+                </p>
+              </Upload.Dragger>
+
+              {state.uploadedFile && (
+                <Alert
+                  message={`File selected: ${state.uploadedFile.name} (${(state.uploadedFile.size / 1024).toFixed(2)} KB)`}
+                  type="success"
+                  showIcon
+                />
+              )}
+            </>
+          )}
+
+          {/* Upload Preview */}
+          {uploadPreview && (
+            <>
+              <Divider>Upload Preview</Divider>
+              
+              {/* Theme Name */}
+              <Card size="small">
+                <Text strong>Theme Name:</Text> <Tag color="blue">{uploadPreview.theme_name}</Tag>
+                <br />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  All themes will use this name with different categories
+                </Text>
+              </Card>
+              
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Card size="small">
+                    <Text strong>Themes to Create:</Text> {uploadPreview.total_themes}
+                    <br />
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      (= Number of categories)
+                    </Text>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card size="small">
+                    <Text strong>Total Tickers:</Text> {uploadPreview.total_tickers}
+                  </Card>
+                </Col>
+              </Row>
+
+              {/* Categories Distribution */}
+              <Card size="small" title={`Categories Distribution (${uploadPreview.total_themes} categories → ${uploadPreview.total_themes} themes)`}>
+                <Space wrap>
+                  {Object.entries(uploadPreview.categories).map(([category, count]) => (
+                    <Tag key={category} color="green">
+                      {category}: {count} tickers
+                    </Tag>
+                  ))}
+                </Space>
+              </Card>
+
+            </>
+          )}
+
+          {/* Progress Display */}
+          {state.batchTaskId && (
+            <>
+              <Divider>Processing Progress</Divider>
+              <Progress
+                percent={state.batchTaskProgress}
+                status={state.batchTaskProgress === 100 ? 'success' : 'active'}
+              />
+              <Text type="secondary">{state.batchTaskStatus}</Text>
+            </>
+          )}
+        </Space>
       </Modal>
     </div>
   );

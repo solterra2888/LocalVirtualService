@@ -10,6 +10,7 @@ import {
   NewsThemesResponse,
   ThemeListResponse,
   TaskStatusResponse,
+  ThemeAssociationsResponse,
 } from '../types/investmentThemes';
 
 /**
@@ -49,11 +50,54 @@ export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
  */
 export async function listThemes(
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  search?: string
 ): Promise<ThemeListResponse> {
   const params: Record<string, any> = { limit, offset };
+  if (search !== undefined && search !== null && search !== '') {
+    params.search = search;
+  }
 
   return await api.get<ThemeListResponse>('/investment-themes/themes', params);
+}
+
+/**
+ * Get theme-company associations for a theme
+ */
+export async function getThemeAssociations(
+  themeId: string
+): Promise<ThemeAssociationsResponse> {
+  return await api.get<ThemeAssociationsResponse>(
+    `/investment-themes/${themeId}/associations`
+  );
+}
+
+/**
+ * Verify ticker for a theme (Admin only)
+ * If ticker not in database, fetch from EODHD and save
+ */
+export async function verifyTicker(
+  themeId: string,
+  ticker: string
+): Promise<{
+  success: boolean;
+  message: string;
+  ticker: string;
+  is_verified: boolean;
+  company_info?: {
+    id?: number;
+    code: string;
+    name: string;
+    exchange: string;
+    primaryticker: string;
+  };
+  data_updated?: Record<string, boolean>;
+  execution_time?: number;
+}> {
+  return await api.post(`/investment-themes/${themeId}/verify-ticker`, {
+    theme_id: themeId,
+    ticker: ticker
+  });
 }
 
 /**
@@ -221,7 +265,10 @@ export async function batchDeleteThemes(
  * Generate theme description using LLM (Admin only)
  */
 export async function generateThemeDescription(
-  themeName: string
+  themeName: string,
+  category: string,
+  market?: string,
+  tickers?: string[]
 ): Promise<{
   success: boolean;
   description: string;
@@ -230,6 +277,9 @@ export async function generateThemeDescription(
 }> {
   return await api.post('/investment-themes/generate-description', {
     theme_name: themeName,
+    category: category,
+    market: market,
+    tickers: tickers,
   });
 }
 
@@ -238,20 +288,71 @@ export async function generateThemeDescription(
  */
 export async function createTheme(
   themeName: string,
+  category: string,
   description: string,
-  themeId?: string
+  themeId?: string,
+  market?: string,
+  tickers?: string[]
 ): Promise<{
   success: boolean;
   message: string;
   theme_id: string;
   theme_saved: boolean;
   embedding_created: boolean;
+  associations_created?: number;
   error?: string;
 }> {
   return await api.post('/investment-themes/create', {
     theme_name: themeName,
+    category: category,
     description,
     theme_id: themeId,
+    market: market,
+    tickers: tickers,
   });
+}
+
+/**
+ * Batch upload themes from CSV/Excel file (Admin only)
+ */
+export async function batchUploadThemes(
+  file: File,
+  market: string = 'US'
+): Promise<{
+  success: boolean;
+  message: string;
+  task_id: string;
+  theme_name: string;
+  preview: {
+    theme_name: string;
+    total_themes: number;
+    total_tickers: number;
+    categories: Record<string, number>;
+    categories_sample: string[];
+  };
+  status_url: string;
+}> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('market', market);
+  
+  // 使用 fetch 直接调用，因为需要特殊处理 multipart/form-data
+  const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+  const token = localStorage.getItem('access_token');
+  
+  const response = await fetch(`${API_BASE_URL}/investment-themes/batch-upload`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail?.message || error.detail || 'Batch upload failed');
+  }
+  
+  return await response.json();
 }
 

@@ -66,7 +66,9 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
       ],
       'theme_analysis': [
         // investment_theme_embeddings fields (simplified after removing futu dependencies)
-        'theme_id', 'theme_name',
+        'theme_id', 'theme_name', 'category',
+        // Stock association fields
+        'stock_symbols', 'company_names',
         // Template parameters
         'language', 'format', 'temperature', 'model', 'provider'
       ]
@@ -135,6 +137,7 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
       // Investment theme variables (投资主题变量 - from investment_theme_embeddings)
       theme_id: ['CUSTOM_1730901234567', 'CUSTOM_1730901234568', 'CUSTOM_1730901234569'],
       theme_name: ['Electric Vehicles', 'Artificial Intelligence', '5G Technology'],
+      category: ['Technology', 'Healthcare', 'Finance', 'Energy'],
       
       // LLM configuration variables (LLM配置变量)
       temperature: ['0.7', '0.3', '1.0'],
@@ -197,7 +200,8 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
     ];
 
     const themeVars = [
-      { name: 'theme_name', description: 'Theme Name - from investment_theme_embeddings' }
+      { name: 'theme_name', description: 'Theme Name - from investment_theme_embeddings' },
+      { name: 'category', description: 'Theme Category - from investment_theme_embeddings' }
     ];
 
     // 根据当前分类过滤变量

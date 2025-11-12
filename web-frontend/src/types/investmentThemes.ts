@@ -8,6 +8,7 @@
 export interface InvestmentTheme {
   theme_id: string;
   theme_name: string;
+  category?: string;  // Theme category/classification
   description_preview?: string;  // Theme description preview (LLM-generated or manually written)
   description_source?: 'llm_generated' | 'manual' | 'scraped' | 'simple_template';  // Description source
   embedding_model?: string;
@@ -22,6 +23,32 @@ export interface InvestmentTheme {
   
   // Vector embedding status
   has_embedding?: boolean;  // Whether this theme has been vectorized
+  
+  // Associated tickers
+  tickers?: string[];  // Linked stock tickers (full symbols)
+  verified_tickers?: number;
+  total_tickers?: number;
+  created_by?: string;
+}
+
+/**
+ * Theme-Company Association
+ */
+export interface ThemeAssociation {
+  ticker: string;
+  market?: string | null;
+  is_verified?: boolean | null;
+  association_weight?: number | null;
+}
+
+/**
+ * Theme Associations Response
+ */
+export interface ThemeAssociationsResponse {
+  success: boolean;
+  theme_id: string;
+  associations: ThemeAssociation[];
+  count: number;
 }
 
 /**

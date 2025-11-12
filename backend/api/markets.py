@@ -1057,9 +1057,17 @@ async def search_company_fundamentals(
             company_result = cursor.fetchall()
         
         if not company_result:
+            # 提供更友好的错误信息，建议用户启用自动更新功能
+            error_detail = f"数据库中未找到 {request.query} 的数据。建议启用自动更新功能以从EODHD获取最新数据。"
+            
+            info(f"搜索失败 - 数据库中未找到公司",
+                 query=request.query,
+                 user=current_user.username,
+                 source="markets_api")
+            
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no data found: {request.query}"
+                detail=error_detail
             )
         
         company = dict(company_result[0])
@@ -1551,11 +1559,104 @@ async def update_company_fundamentals(
             cursor.execute(query_sql, (request.query, request.query, search_pattern, request.query, request.query))
             company_result = cursor.fetchall()
         
+        # 如果在数据库中未找到公司，尝试从EODHD直接获取数据
         if not company_result:
+            info(f"数据库中未找到公司: {request.query}，尝试从EODHD获取数据",
+                 user=current_user.username)
+            
+            # 解析ticker格式，提取symbol和exchange
+            from backend.config.exchange_config import format_ticker_for_eodhd
+            
+            # 格式化ticker为EODHD格式（如果用户输入TLN.US，会被格式化为TLN.US）
+            formatted_ticker = format_ticker_for_eodhd(request.query.strip())
+            
+            # 分离symbol和exchange
+            if '.' in formatted_ticker:
+                symbol, exchange = formatted_ticker.rsplit('.', 1)
+            else:
+                # 如果没有交易所后缀，默认使用US
+                symbol = formatted_ticker
+                exchange = 'US'
+            
+            info(f"尝试从EODHD获取ticker: {symbol}.{exchange}",
+                 user=current_user.username)
+            
+            # 初始化EODHD基本面数据服务
+            fundamentals_service = EODHDFundamentalsService()
+            
+            # 尝试从EODHD获取基本面数据
+            full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+            
+            if not full_data:
+                return CompanyFundamentalsUpdateResponse(
+                    success=False,
+                    message=f"未找到公司: {request.query}。数据库和EODHD均无此ticker的数据，请确认ticker是否正确。",
+                    execution_time=time.time() - start_time
+                )
+            
+            info(f"成功从EODHD获取 {symbol}.{exchange} 的数据，开始保存到数据库",
+                 user=current_user.username)
+            
+            # 构建保存数据的格式
+            company_data = {
+                'symbol': symbol,
+                'exchange': exchange,
+                'general_data': full_data.get('General', full_data),
+                'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                'full_data': full_data
+            }
+            
+            # 保存数据到数据库
+            save_result = fundamentals_service.batch_save_companies_data([company_data])
+            
+            # 构建响应数据
+            data_updated = {
+                'company_info': save_result.get('companies_saved', 0) > 0,
+                'address': save_result.get('addresses_saved', 0) > 0,
+                'officers': save_result.get('officers_saved', 0) > 0,
+                'financials': save_result.get('financials_saved', 0) > 0,
+                'highlights': save_result.get('highlights_saved', 0) > 0,
+                'valuations': save_result.get('valuations_saved', 0) > 0,
+                'technicals': save_result.get('technicals_saved', 0) > 0,
+                'earnings': save_result.get('earnings_saved', 0) > 0,
+                'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
+                'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
+                'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
+                'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
+            }
+            
+            execution_time = time.time() - start_time
+            
+            # 获取保存后的公司信息
+            general_data = full_data.get('General', full_data)
+            company_name = general_data.get('Name', symbol)
+            
+            # 构建成功消息
+            updated_components = [k for k, v in data_updated.items() if v]
+            success_message = f"成功从EODHD获取并保存新公司 {company_name} ({symbol}.{exchange}) 的基本面数据"
+            if updated_components:
+                success_message += f"，保存了 {len(updated_components)} 个数据组件: {', '.join(updated_components)}"
+            
+            info(f"完成新公司基本面数据获取和保存",
+                 symbol=f"{symbol}.{exchange}",
+                 company_name=company_name,
+                 execution_time=execution_time,
+                 data_updated=data_updated,
+                 user=current_user.username)
+            
             return CompanyFundamentalsUpdateResponse(
-                success=False,
-                message=f"未找到公司: {request.query}",
-                execution_time=time.time() - start_time
+                success=True,
+                message=success_message,
+                company_info={
+                    'code': symbol,
+                    'exchange': exchange,
+                    'name': company_name,
+                    'primaryticker': f"{symbol}.{exchange}"
+                },
+                data_updated=data_updated,
+                execution_time=execution_time
             )
         
         company = dict(company_result[0])

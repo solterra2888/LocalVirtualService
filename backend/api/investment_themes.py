@@ -5,10 +5,14 @@
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+import os
+import tempfile
+import shutil
 from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
+from backend.services.theme_company_association_service import ThemeCompanyAssociationService
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.auth.jwt_utils import get_current_admin_user, TokenData
@@ -83,13 +87,52 @@ class BatchDeleteThemeRequest(BaseModel):
 class GenerateDescriptionRequest(BaseModel):
     """生成主题描述请求"""
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
+    category: str = Field(..., min_length=1, max_length=100, description="主题分类/类别")
+    market: Optional[str] = Field(None, description="市场代码（US/HK/CN）")
+    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表（简写，如 ['NVDA', 'AMD']）")
 
 
 class CreateThemeRequest(BaseModel):
     """创建主题请求"""
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
+    category: str = Field(..., min_length=1, max_length=100, description="主题分类/类别")
     description: str = Field(..., min_length=10, max_length=2000, description="主题描述")
     theme_id: Optional[str] = Field(None, max_length=50, description="主题ID（可选，不提供则自动生成）")
+    market: Optional[str] = Field(None, description="市场代码（US/HK/CN）")
+    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表（简写，如 ['NVDA', 'AMD']）")
+
+
+class VerifyTickerRequest(BaseModel):
+    """验证ticker请求"""
+    theme_id: str = Field(..., description="主题ID")
+    ticker: str = Field(..., description="要验证的ticker（完整格式，如 TLN.US）")
+
+
+class VerifyTickerResponse(BaseModel):
+    """验证ticker响应"""
+    success: bool
+    message: str
+    ticker: str
+    is_verified: bool
+    company_info: Optional[Dict[str, Any]] = None
+    data_updated: Optional[Dict[str, bool]] = None
+    execution_time: Optional[float] = None
+
+
+class ThemeAssociationResponseItem(BaseModel):
+    """主题关联股票信息"""
+    ticker: str
+    market: Optional[str] = None
+    is_verified: Optional[bool] = None
+    association_weight: Optional[float] = None
+
+
+class ThemeAssociationsResponse(BaseModel):
+    """主题关联股票响应"""
+    success: bool
+    theme_id: str
+    associations: List[ThemeAssociationResponseItem]
+    count: int
 
 
 # ==================== API Endpoints ====================
@@ -309,6 +352,7 @@ async def get_news_themes(news_id: int):
 @router.get("/themes")
 async def list_all_themes(
     market: Optional[str] = None,
+    search: Optional[str] = Query(None, description="Search keyword for theme name or category"),
     limit: int = 100,
     offset: int = 0
 ):
@@ -337,52 +381,103 @@ async def list_all_themes(
         
         cursor = conn.cursor()
         
-        # 构建查询
-        params = []
-        
         # 获取总数
-        cursor.execute("""
+        filters = []
+        filter_params: List[Any] = []
+
+        search_value = search.strip() if search else None
+        if search_value:
+            filters.append("(ite.theme_name ILIKE %s OR ite.category ILIKE %s)")
+            pattern = f"%{search_value}%"
+            filter_params.extend([pattern, pattern])
+
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+        cursor.execute(f"""
             SELECT COUNT(*) 
-            FROM investment_theme_embeddings
-        """, params)
+            FROM investment_theme_embeddings ite
+            {where_clause}
+        """, filter_params)
         total_count = cursor.fetchone()[0]
         
         # 获取列表（直接从 investment_theme_embeddings 查询所有字段）
-        params.extend([limit, offset])
-        cursor.execute("""
+        list_params = list(filter_params)
+        list_params.extend([limit, offset])
+        cursor.execute(f"""
             SELECT 
                 ite.theme_id,
                 ite.theme_name,
+                ite.category,
                 ite.embedding_model,
                 ite.created_at,
                 ite.updated_at,
                 ite.version,
                 ite.last_manual_edit_at,
                 ite.last_manual_edit_by,
+                ite.created_by,
                 ite.description,
                 ite.description_source,
                 ite.is_enabled_for_matching
             FROM investment_theme_embeddings ite
+            {where_clause}
             ORDER BY ite.theme_name
             LIMIT %s OFFSET %s
-        """, params)
+        """, list_params)
         
         themes = []
-        for row in cursor.fetchall():
+        rows = cursor.fetchall()
+        for row in rows:
             themes.append({
                 'theme_id': row[0],
                 'theme_name': row[1],
-                'embedding_model': row[2],
-                'created_at': row[3].isoformat() if row[3] else None,
-                'updated_at': row[4].isoformat() if row[4] else None,
-                'version': row[5],
-                'last_manual_edit_at': row[6].isoformat() if row[6] else None,
-                'last_manual_edit_by': row[7],
-                'description_preview': row[8],
-                'description_source': row[9],
-                'is_enabled_for_matching': row[10] if row[10] is not None else True,
-                'has_embedding': True
+                'category': row[2],
+                'embedding_model': row[3],
+                'created_at': row[4].isoformat() if row[4] else None,
+                'updated_at': row[5].isoformat() if row[5] else None,
+                'version': row[6],
+                'last_manual_edit_at': row[7].isoformat() if row[7] else None,
+                'last_manual_edit_by': row[8],
+                'created_by': row[9],
+                'description_preview': row[10],
+                'description_source': row[11],
+                'is_enabled_for_matching': row[12] if row[12] is not None else True,
+                'has_embedding': True,
+                'tickers': []
             })
+        
+        if themes:
+            theme_ids = [theme['theme_id'] for theme in themes]
+            cursor.execute("""
+                SELECT 
+                    theme_id,
+                    ARRAY_AGG(ticker ORDER BY created_at DESC) AS tickers,
+                    COUNT(*) FILTER (WHERE is_verified = TRUE) AS verified_count,
+                    COUNT(*) AS total_count
+                FROM theme_company_associations
+                WHERE theme_id = ANY(%s)
+                GROUP BY theme_id
+            """, (theme_ids,))
+            
+            ticker_rows = cursor.fetchall()
+            ticker_map = {
+                row[0]: {
+                    "tickers": [ticker for ticker in row[1] if ticker],
+                    "verified_count": row[2] or 0,
+                    "total_count": row[3] or 0
+                }
+                for row in ticker_rows
+            }
+            
+            for theme in themes:
+                counts = ticker_map.get(theme['theme_id'])
+                if counts:
+                    theme['tickers'] = counts["tickers"]
+                    theme['verified_tickers'] = counts["verified_count"]
+                    theme['total_tickers'] = counts["total_count"]
+                else:
+                    theme['tickers'] = []
+                    theme['verified_tickers'] = 0
+                    theme['total_tickers'] = 0
         
         cursor.close()
         conn.close()
@@ -398,6 +493,244 @@ async def list_all_themes(
     except Exception as e:
         logger.error(f"Getting theme list failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Getting failed: {str(e)}")
+
+
+@router.get("/{theme_id}/associations", response_model=ThemeAssociationsResponse)
+async def get_theme_associations(theme_id: str) -> ThemeAssociationsResponse:
+    """
+    获取主题关联的股票列表
+    """
+    try:
+        db_config = get_database_config()
+        association_service = ThemeCompanyAssociationService(db_config)
+        association_records = association_service.get_associations_by_theme(theme_id)
+
+        associations = [
+            ThemeAssociationResponseItem(
+                ticker=item.get("ticker"),
+                market=item.get("market"),
+                is_verified=item.get("is_verified"),
+                association_weight=item.get("association_weight")
+            )
+            for item in association_records
+            if item.get("ticker")
+        ]
+
+        return ThemeAssociationsResponse(
+            success=True,
+            theme_id=theme_id,
+            associations=associations,
+            count=len(associations)
+        )
+    except Exception as e:
+        logger.error(f"Getting theme associations failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取主题关联失败: {str(e)}")
+
+
+@router.post("/{theme_id}/verify-ticker", response_model=VerifyTickerResponse)
+async def verify_ticker(
+    theme_id: str,
+    request: VerifyTickerRequest,
+    current_user=Depends(get_current_admin_user)
+) -> VerifyTickerResponse:
+    """
+    验证主题关联的ticker，如果数据库中不存在则从EODHD获取数据
+    
+    验证逻辑：
+    1. 检查ticker是否在companies表中（通过primaryticker字段）
+    2. 如果不存在，尝试从EODHD获取fundamentals数据
+    3. 如果EODHD有数据，保存到companies表，并更新theme_company_associations的is_verified为true
+    4. 如果EODHD没有数据，is_verified保持false，提示用户ticker可能不正确
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        from backend.database.db_manager import DatabaseManager
+        from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+        from backend.config.exchange_config import format_ticker_for_eodhd
+        
+        ticker = request.ticker.strip()
+        
+        logger.info(f"开始验证ticker: {ticker} (theme_id: {theme_id})",
+                   user=current_user.username if hasattr(current_user, 'username') else None)
+        
+        # 获取数据库连接
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 1. 首先检查ticker是否在companies表中
+        check_sql = """
+        SELECT id, code, name, exchange, primaryticker
+        FROM companies
+        WHERE UPPER(primaryticker) = UPPER(%s)
+        LIMIT 1
+        """
+        
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(check_sql, (ticker,))
+            company_result = cursor.fetchone()
+        
+        # 如果在数据库中找到了
+        if company_result:
+            logger.info(f"Ticker {ticker} 在数据库中找到")
+            
+            # 更新theme_company_associations的is_verified状态为true
+            update_sql = """
+            UPDATE theme_company_associations
+            SET is_verified = TRUE,
+                company_name = %s,
+                updated_at = NOW()
+            WHERE theme_id = %s AND ticker = %s
+            """
+            
+            with db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(update_sql, (company_result[2], theme_id, ticker))
+                conn.commit()
+            
+            execution_time = time.time() - start_time
+            
+            return VerifyTickerResponse(
+                success=True,
+                message=f"Ticker {ticker} 验证成功（数据库中已存在）",
+                ticker=ticker,
+                is_verified=True,
+                company_info={
+                    "id": company_result[0],
+                    "code": company_result[1],
+                    "name": company_result[2],
+                    "exchange": company_result[3],
+                    "primaryticker": company_result[4]
+                },
+                execution_time=execution_time
+            )
+        
+        # 2. 数据库中未找到，尝试从EODHD获取
+        logger.info(f"数据库中未找到ticker {ticker}，尝试从EODHD获取")
+        
+        # 解析ticker格式
+        formatted_ticker = format_ticker_for_eodhd(ticker)
+        
+        if '.' in formatted_ticker:
+            symbol, exchange = formatted_ticker.rsplit('.', 1)
+        else:
+            symbol = formatted_ticker
+            exchange = 'US'
+        
+        logger.info(f"尝试从EODHD获取: {symbol}.{exchange}")
+        
+        # 初始化EODHD服务
+        fundamentals_service = EODHDFundamentalsService()
+        
+        # 从EODHD获取数据
+        full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+        
+        if not full_data:
+            # EODHD也没有数据
+            execution_time = time.time() - start_time
+            
+            logger.warning(f"EODHD也没有ticker {ticker} 的数据")
+            
+            return VerifyTickerResponse(
+                success=False,
+                message=f"未找到ticker {ticker} 的数据。数据库和EODHD均无此ticker，请确认ticker是否正确。",
+                ticker=ticker,
+                is_verified=False,
+                execution_time=execution_time
+            )
+        
+        # 3. EODHD有数据，保存到数据库
+        logger.info(f"成功从EODHD获取 {symbol}.{exchange} 的数据，开始保存")
+        
+        # 构建保存数据的格式
+        company_data = {
+            'symbol': symbol,
+            'exchange': exchange,
+            'general_data': full_data.get('General', full_data),
+            'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+            'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+            'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+            'full_data': full_data
+        }
+        
+        # 保存到数据库
+        save_result = fundamentals_service.batch_save_companies_data([company_data])
+        
+        # 4. 更新theme_company_associations的is_verified状态
+        general_data = full_data.get('General', full_data)
+        company_name = general_data.get('Name', symbol)
+        
+        update_sql = """
+        UPDATE theme_company_associations
+        SET is_verified = TRUE,
+            company_name = %s,
+            updated_at = NOW()
+        WHERE theme_id = %s AND ticker = %s
+        """
+        
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(update_sql, (company_name, theme_id, ticker))
+            conn.commit()
+        
+        # 构建响应数据
+        data_updated = {
+            'company_info': save_result.get('companies_saved', 0) > 0,
+            'address': save_result.get('addresses_saved', 0) > 0,
+            'officers': save_result.get('officers_saved', 0) > 0,
+            'financials': save_result.get('financials_saved', 0) > 0,
+            'highlights': save_result.get('highlights_saved', 0) > 0,
+            'valuations': save_result.get('valuations_saved', 0) > 0,
+            'technicals': save_result.get('technicals_saved', 0) > 0,
+            'earnings': save_result.get('earnings_saved', 0) > 0,
+            'outstanding_shares': save_result.get('outstanding_shares_saved', 0) > 0,
+            'analyst_ratings': save_result.get('analyst_ratings_saved', 0) > 0,
+            'splits_dividends': save_result.get('splits_dividends_saved', 0) > 0,
+            'insider_transactions': save_result.get('insider_transactions_saved', 0) > 0
+        }
+        
+        execution_time = time.time() - start_time
+        
+        updated_components = [k for k, v in data_updated.items() if v]
+        success_message = f"成功从EODHD获取并保存 {company_name} ({ticker}) 的数据"
+        if updated_components:
+            success_message += f"，保存了 {len(updated_components)} 个数据组件"
+        
+        logger.info(f"完成ticker验证和数据保存: {ticker}",
+                   execution_time=execution_time,
+                   user=current_user.username if hasattr(current_user, 'username') else None)
+        
+        return VerifyTickerResponse(
+            success=True,
+            message=success_message,
+            ticker=ticker,
+            is_verified=True,
+            company_info={
+                'code': symbol,
+                'exchange': exchange,
+                'name': company_name,
+                'primaryticker': ticker
+            },
+            data_updated=data_updated,
+            execution_time=execution_time
+        )
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        logger.error(f"验证ticker失败: {str(e)}",
+                    ticker=ticker,
+                    theme_id=theme_id,
+                    execution_time=execution_time)
+        
+        return VerifyTickerResponse(
+            success=False,
+            message=f"验证ticker失败: {str(e)}",
+            ticker=ticker,
+            is_verified=False,
+            execution_time=execution_time
+        )
 
 
 @router.get("/task-status/{task_id}")
@@ -617,7 +950,6 @@ async def update_theme_enabled_status(
     ```
     PATCH /api/investment-themes/BK1001/enabled
     {
-        "market": "HK",
         "is_enabled": false
     }
     ```
@@ -629,13 +961,11 @@ async def update_theme_enabled_status(
         logger.info(
             f"Admin {current_user.username} updating theme status",
             theme_id=theme_id,
-            market=request.market,
             is_enabled=request.is_enabled
         )
         
         result = service.update_theme_enabled_status(
             theme_id=theme_id,
-            market=request.market,
             is_enabled=request.is_enabled,
             operator_username=current_user.username
         )
@@ -667,16 +997,15 @@ async def batch_update_theme_enabled_status(
     POST /api/investment-themes/batch-enabled
     {
         "theme_ids": ["BK1001", "BK1002"],
-        "markets": ["HK", "HK"],
         "is_enabled": false
     }
     ```
     """
     try:
-        if len(request.theme_ids) != len(request.markets):
+        if not request.theme_ids:
             raise HTTPException(
                 status_code=400,
-                detail="theme_ids和markets数组长度必须一致"
+                detail="主题ID列表不能为空"
             )
         
         db_config = get_database_config()
@@ -965,11 +1294,40 @@ async def generate_theme_description(
         
         logger.info(
             f"Admin {current_user.username} generating description for new theme",
-            theme_name=request.theme_name
+            theme_name=request.theme_name,
+            category=request.category,
+            market=request.market,
+            tickers=request.tickers
         )
         
+        # 如果提供了 tickers 和 market，验证并获取公司信息
+        stock_symbols = None
+        company_names = None
+        
+        if request.tickers and request.market:
+            try:
+                from backend.services.theme_company_association_service import ThemeCompanyAssociationService
+                
+                association_service = ThemeCompanyAssociationService(db_config)
+                validation_result = association_service.validate_and_complete_tickers(
+                    request.tickers,
+                    request.market
+                )
+                
+                if validation_result["valid"]:
+                    stock_symbols = ", ".join([v["full_ticker"] for v in validation_result["valid"]])
+                    company_names = ", ".join([v["company_name"] for v in validation_result["valid"]])
+                    logger.info(f"验证通过的股票: {stock_symbols}")
+                    
+            except Exception as e:
+                logger.warning(f"验证股票代码失败: {str(e)}")
+                # 继续执行，不影响描述生成
+        
         result = await service.generate_theme_description(
-            theme_name=request.theme_name
+            theme_name=request.theme_name,
+            category=request.category,
+            stock_symbols=stock_symbols,
+            company_names=company_names
         )
         
         if result["success"]:
@@ -1045,14 +1403,20 @@ async def create_theme(
         logger.info(
             f"Admin {current_user.username} creating new theme",
             theme_name=request.theme_name,
-            theme_id=request.theme_id
+            category=request.category,
+            theme_id=request.theme_id,
+            market=request.market,
+            tickers=request.tickers
         )
         
         result = await service.create_theme(
             theme_name=request.theme_name,
+            category=request.category,
             description=request.description,
             creator_username=current_user.username,
-            theme_id=request.theme_id
+            theme_id=request.theme_id,
+            market=request.market,
+            tickers=request.tickers
         )
         
         # 根据结果返回不同的状态码
@@ -1070,4 +1434,150 @@ async def create_theme(
     except Exception as e:
         logger.error(f"Create theme failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"创建主题失败: {str(e)}")
+
+
+@router.post("/batch-upload")
+async def batch_upload_themes(
+    file: UploadFile = File(...),
+    market: str = Form("US"),
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    批量上传主题文件（仅管理员）
+    
+    权限：仅管理员
+    
+    核心逻辑（重要）：
+    - theme 列必须只有一个唯一值（整个文件）
+    - 按 (theme, category) 组合分组，每个组合创建一个主题
+    - 例如：crypto.csv 中 theme='crypto'，8 个不同 category → 创建 8 个主题
+    
+    Args:
+        file: CSV或Excel文件
+        market: 市场选择（US/HK/CN），用户在前端选择
+    
+    文件格式要求：
+    - 必需列：theme, category, ticker
+    - 可选列：company
+    - theme 列必须只有一个唯一值
+    - category 可以有多个不同值
+    
+    文件格式示例（crypto.csv）:
+    ```csv
+    theme,category,ticker,company
+    crypto,ETF,ARKB,ARK 21Shares Bitcoin ETF
+    crypto,ETF,GBTC,Grayscale Bitcoin Trust (BTC)
+    crypto,Treasury,MSTR,MicroStrategy Inc
+    crypto,Treasury,MARA,Marathon Holdings Inc
+    ```
+    
+    说明：上述文件会创建 2 个主题：
+    1. Theme: crypto, Category: ETF, Tickers: ARKB,GBTC
+    2. Theme: crypto, Category: Treasury, Tickers: MSTR,MARA
+    
+    示例：
+    ```bash
+    curl -X POST "http://localhost:8000/api/investment-themes/batch-upload" \\
+      -H "Authorization: Bearer YOUR_TOKEN" \\
+      -F "file=@crypto.csv" \\
+      -F "market=US"
+    ```
+    
+    返回：
+    ```json
+    {
+        "success": true,
+        "message": "批量上传任务已提交，共 8 个主题（8 个 category）",
+        "task_id": "abc-123-def-456",
+        "theme_name": "crypto",
+        "preview": {
+            "theme_name": "crypto",
+            "total_themes": 8,
+            "total_tickers": 30,
+            "categories": {"ETF": 4, "Treasury": 9, ...},
+            "categories_sample": ["ETF", "Treasury", "Exchange_Custody", ...]
+        },
+        "status_url": "/api/investment-themes/task-status/abc-123-def-456"
+    }
+    ```
+    """
+    try:
+        logger.info(
+            f"Admin {current_user.username} uploading batch theme file: {file.filename}, market: {market}"
+        )
+        
+        # 1. 验证 market 参数
+        if market not in ['US', 'HK', 'CN']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid market: {market}. Must be US, HK, or CN."
+            )
+        
+        # 2. 验证文件格式
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="File name is empty")
+        
+        file_ext = file.filename.lower().split('.')[-1]
+        if file_ext not in ['csv', 'xlsx', 'xls']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file format: .{file_ext}. Only .csv, .xlsx, .xls are supported."
+            )
+        
+        # 3. 解析文件
+        from backend.utils.theme_file_parser import ThemeFileParser
+        
+        parser = ThemeFileParser()
+        
+        # 重置文件指针
+        await file.seek(0)
+        
+        parse_result = parser.parse_file(file, market=market)
+        
+        # 4. 如果解析失败，返回错误
+        if not parse_result.get('success'):
+            error_msg = parse_result.get('error', 'Unknown error')
+            logger.error(f"File parsing failed: {error_msg}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"File parsing failed: {error_msg}"
+            )
+        
+        theme_name = parse_result['theme_name']
+        themes_data = parse_result['data']
+        preview = parse_result['preview']
+        
+        logger.info(
+            f"File parsed successfully: theme='{theme_name}', "
+            f"{preview['total_themes']} categories (themes), "
+            f"{preview['total_tickers']} tickers"
+        )
+        
+        # 5. 提交 Celery 任务
+        from backend.tasks.theme_tasks import batch_create_themes_task
+        
+        task = batch_create_themes_task.apply_async(
+            kwargs={
+                'themes_data': themes_data,
+                'creator_username': current_user.username
+            }
+        )
+        
+        logger.info(f"Batch create themes task submitted: {task.id}")
+        
+        # 6. 返回结果
+        return {
+            "success": True,
+            "message": f"Batch upload started: {preview['total_themes']} themes ({preview['total_themes']} categories)",
+            "task_id": task.id,
+            "theme_name": theme_name,
+            "preview": preview,
+            "status_url": f"/api/investment-themes/task-status/{task.id}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch upload failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
 

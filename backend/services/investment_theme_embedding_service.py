@@ -45,6 +45,8 @@ class InvestmentThemeEmbeddingService:
         theme_id: str, 
         theme_name: str, 
         db_theme_id: int = None,
+        category: Optional[str] = None,
+        market: Optional[str] = None,  # 兼容旧调用
         force_regenerate: bool = False
     ) -> str:
         """
@@ -69,7 +71,7 @@ class InvestmentThemeEmbeddingService:
         try:
             # 步骤1: 从 investment_theme_embeddings 获取缓存的描述
             cursor.execute("""
-                SELECT id, description, description_source 
+                SELECT id, description, description_source, category
                 FROM investment_theme_embeddings
                 WHERE theme_id = %s
                 LIMIT 1
@@ -77,11 +79,14 @@ class InvestmentThemeEmbeddingService:
             
             result = cursor.fetchone()
             if result:
-                db_theme_id, cached_description, description_source = result
+                db_theme_id, cached_description, description_source, stored_category = result
             else:
                 # 找不到主题记录，使用简化版本
                 logger.warning(f"主题不存在: {theme_id}")
                 return f"Investment theme: {theme_name}. Investment category focusing on {theme_name.lower()} sector."
+            
+            category_value = category or stored_category or "General investing"
+            category_value = (category_value.strip() if isinstance(category_value, str) else str(category_value)).strip() or "General investing"
             
             # 步骤2: 如果有缓存的描述且不强制重新生成，直接返回
             if cached_description and not force_regenerate:
@@ -100,7 +105,10 @@ class InvestmentThemeEmbeddingService:
                     response = await llm_service.chat_completion_with_template(
                         template_code=self.llm_template_code,
                         variables={
-                            'theme_name': theme_name
+                            'theme_name': theme_name,
+                            'category': category_value,
+                            'stock_symbols': 'Not available',
+                            'company_names': 'Not available'
                         }
                     )
                     
@@ -120,7 +128,11 @@ class InvestmentThemeEmbeddingService:
             
             # 步骤5: 如果 LLM 生成失败，使用简单模板
             if not generated_description:
-                generated_description = f"Investment theme: {theme_name}. Investment category focusing on {theme_name.lower()} sector."
+                category_lower = category_value.lower()
+                generated_description = (
+                    f"Investment theme: {theme_name}. "
+                    f"Investment category focusing on {category_lower} sector."
+                )
                 logger.debug(f"使用简单模板: {theme_name}")
                 description_source_new = 'simple_template'
             
@@ -254,7 +266,7 @@ class InvestmentThemeEmbeddingService:
             
             # 1. 获取所有主题（从 investment_theme_embeddings 表）
             cursor.execute("""
-                SELECT DISTINCT id, theme_id, theme_name
+                SELECT DISTINCT id, theme_id, theme_name, category
                 FROM investment_theme_embeddings
                 ORDER BY theme_name
             """)
@@ -268,23 +280,26 @@ class InvestmentThemeEmbeddingService:
             
             logger.info(f"找到 {total_themes} 个投资主题")
             
-            # 2. 检查哪些主题需要生成向量
+            # 2. 检测数据库模式（确定使用 pgvector 还是 JSONB）
+            use_pgvector = self._detect_database_mode(cursor)
+            vector_column = 'embedding_vector' if use_pgvector else 'embedding_data'
+            
+            # 3. 检查哪些主题需要生成向量
             themes_to_process = []
             
             if force_update:
                 themes_to_process = themes
                 logger.info(f"强制更新模式，将处理所有 {total_themes} 个主题")
             else:
-                # 只处理向量为空的主题（embedding_vector IS NULL 或 embedding_data IS NULL）
+                # 只处理向量为空的主题（embedding_* 列为 NULL）
                 for theme in themes:
                     db_id = theme[0]
                     
                     # 检查是否已有向量数据
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT 
                             CASE 
-                                WHEN embedding_vector IS NOT NULL THEN TRUE
-                                WHEN embedding_data IS NOT NULL THEN TRUE
+                                WHEN {vector_column} IS NOT NULL THEN TRUE
                                 ELSE FALSE
                             END as has_embedding
                         FROM investment_theme_embeddings
@@ -307,9 +322,6 @@ class InvestmentThemeEmbeddingService:
                     "skipped": total_themes
                 }
             
-            # 3. 检测数据库模式
-            use_pgvector = self._detect_database_mode(cursor)
-            
             # 4. 批量生成向量（每次10个，Qwen API限制）
             batch_size = 10  # Qwen API要求批次大小不超过10
             processed_count = 0
@@ -317,20 +329,25 @@ class InvestmentThemeEmbeddingService:
             
             for i in range(0, len(themes_to_process), batch_size):
                 batch = themes_to_process[i:i+batch_size]
-                # 现在每个 theme 是 (id, theme_id, theme_name)
+                # 现在每个 theme 是 (id, theme_id, theme_name, category)
                 batch_db_ids = [theme[0] for theme in batch]
                 batch_theme_ids = [theme[1] for theme in batch]
                 batch_theme_names = [theme[2] for theme in batch]
+                batch_categories = [theme[3] for theme in batch]
                 
                 # 🔥 优化：构建增强版文本描述（包含股票信息）
                 # 🌟 支持缓存：如果 force_update=True，强制重新生成描述
                 # 🚀 使用并发处理加速描述生成
                 description_tasks = []
-                for db_id, theme_id, theme_name in zip(batch_db_ids, batch_theme_ids, batch_theme_names):
+                for db_id, theme_id, theme_name, category in zip(batch_db_ids, batch_theme_ids, batch_theme_names, batch_categories):
                     # 使用新的增强文本生成方法，传入数据库ID
                     # force_regenerate=force_update 确保强制更新时重新生成描述
                     task = self._generate_enriched_theme_text(
-                        cursor, theme_id, theme_name, db_id, 
+                        cursor=cursor,
+                        theme_id=theme_id,
+                        theme_name=theme_name,
+                        db_theme_id=db_id,
+                        category=category,
                         force_regenerate=force_update
                     )
                     description_tasks.append(task)
@@ -1053,17 +1070,29 @@ class InvestmentThemeEmbeddingService:
         try:
             cursor = conn.cursor()
             
-            # 检查主题是否存在
-            cursor.execute("""
-                SELECT theme_name, 
-                       CASE 
-                           WHEN embedding_vector IS NOT NULL THEN TRUE
-                           WHEN embedding_data IS NOT NULL THEN TRUE
-                           ELSE FALSE
-                       END as has_embedding
-                FROM investment_theme_embeddings
-                WHERE theme_id = %s
-            """, (theme_id,))
+            # 检测数据库模式以确定列名
+            use_pgvector = self._detect_database_mode(cursor)
+            
+            if use_pgvector:
+                cursor.execute("""
+                    SELECT theme_name, 
+                           CASE 
+                               WHEN embedding_vector IS NOT NULL THEN TRUE
+                               ELSE FALSE
+                           END as has_embedding
+                    FROM investment_theme_embeddings
+                    WHERE theme_id = %s
+                """, (theme_id,))
+            else:
+                cursor.execute("""
+                    SELECT theme_name, 
+                           CASE 
+                               WHEN embedding_data IS NOT NULL THEN TRUE
+                               ELSE FALSE
+                           END as has_embedding
+                    FROM investment_theme_embeddings
+                    WHERE theme_id = %s
+                """, (theme_id,))
             
             row = cursor.fetchone()
             if not row:
@@ -1363,7 +1392,10 @@ class InvestmentThemeEmbeddingService:
     
     async def generate_theme_description(
         self,
-        theme_name: str
+        theme_name: str,
+        category: str,
+        stock_symbols: Optional[str] = None,
+        company_names: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         使用LLM为新theme生成描述（预览，不保存）
@@ -1371,6 +1403,9 @@ class InvestmentThemeEmbeddingService:
         
         Args:
             theme_name: 主题名称
+            category: 主题分类/类别
+            stock_symbols: 相关股票代码（逗号分隔，如 "NVDA.US, AMD.US"）
+            company_names: 相关公司名称（逗号分隔，如 "NVIDIA, AMD"）
             
         Returns:
             {
@@ -1380,15 +1415,21 @@ class InvestmentThemeEmbeddingService:
                 "error": str (optional)
             }
         """
-        logger.info(f"为新主题生成描述: {theme_name}")
+        logger.info(f"为新主题生成描述: {theme_name}, 分类: {category}, 股票: {stock_symbols or 'N/A'}")
         
         try:
+            # 准备变量
+            variables = {
+                'theme_name': theme_name,
+                'category': category,
+                'stock_symbols': stock_symbols or 'Not available',
+                'company_names': company_names or 'Not available'
+            }
+            
             # 使用 theme_description_generator_v1 模板生成描述
             response = await llm_service.chat_completion_with_template(
                 template_code=self.llm_template_code,
-                variables={
-                    'theme_name': theme_name
-                }
+                variables=variables
             )
             
             if not response or not response.content:
@@ -1420,18 +1461,24 @@ class InvestmentThemeEmbeddingService:
     async def create_theme(
         self,
         theme_name: str,
+        category: str,
         description: str,
         creator_username: str,
-        theme_id: Optional[str] = None
+        theme_id: Optional[str] = None,
+        market: Optional[str] = None,
+        tickers: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         创建新的投资主题并生成向量
         
         Args:
             theme_name: 主题名称
+            category: 主题分类/类别
             description: 主题描述
             creator_username: 创建者用户名
             theme_id: 主题ID（可选，如果不提供则自动生成）
+            market: 市场代码（US/HK/CN，可选）
+            tickers: 关联的股票代码列表（简写，可选）
             
         Returns:
             {
@@ -1440,10 +1487,11 @@ class InvestmentThemeEmbeddingService:
                 "theme_id": str,
                 "theme_saved": bool,
                 "embedding_created": bool,
+                "associations_created": int,
                 "error": str (optional)
             }
         """
-        logger.info(f"创建新主题: {theme_name}")
+        logger.info(f"创建新主题: {theme_name}, 分类: {category}, 市场: {market or 'N/A'}, 股票数: {len(tickers) if tickers else 0}")
         
         conn = self.db_manager.get_connection()
         if not conn:
@@ -1525,11 +1573,11 @@ class InvestmentThemeEmbeddingService:
                     # 有向量且使用 pgvector
                     cursor.execute("""
                         INSERT INTO investment_theme_embeddings 
-                        (theme_id, theme_name, description, description_source,
+                        (theme_id, theme_name, category, description, description_source,
                          embedding_vector, embedding_model, is_enabled_for_matching,
                          created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, 'manual', %s, %s, TRUE, %s, NOW(), %s, 1)
-                    """, (theme_id, theme_name, description, embedding, 
+                        VALUES (%s, %s, %s, %s, 'manual', %s, %s, TRUE, %s, NOW(), %s, 1)
+                    """, (theme_id, theme_name, category, description, embedding, 
                           self.embedding_model, creator_username, creator_username))
                 elif not use_pgvector and embedding:
                     # 有向量且使用 JSONB
@@ -1537,21 +1585,21 @@ class InvestmentThemeEmbeddingService:
                     embedding_json = json.dumps(embedding)
                     cursor.execute("""
                         INSERT INTO investment_theme_embeddings 
-                        (theme_id, theme_name, description, description_source,
+                        (theme_id, theme_name, category, description, description_source,
                          embedding_data, embedding_model, is_enabled_for_matching,
                          created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, 'manual', %s::jsonb, %s, TRUE, %s, NOW(), %s, 1)
-                    """, (theme_id, theme_name, description, embedding_json,
+                        VALUES (%s, %s, %s, %s, 'manual', %s::jsonb, %s, TRUE, %s, NOW(), %s, 1)
+                    """, (theme_id, theme_name, category, description, embedding_json,
                           self.embedding_model, creator_username, creator_username))
                 else:
                     # 没有向量，只保存主题基本信息
                     cursor.execute("""
                         INSERT INTO investment_theme_embeddings 
-                        (theme_id, theme_name, description, description_source,
+                        (theme_id, theme_name, category, description, description_source,
                          is_enabled_for_matching,
                          created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, 'manual', FALSE, %s, NOW(), %s, 1)
-                    """, (theme_id, theme_name, description,
+                        VALUES (%s, %s, %s, %s, 'manual', FALSE, %s, NOW(), %s, 1)
+                    """, (theme_id, theme_name, category, description,
                           creator_username, creator_username))
                 
                 conn.commit()
@@ -1566,14 +1614,43 @@ class InvestmentThemeEmbeddingService:
             cursor.close()
             conn.close()
             
-            # 6. 返回结果
+            # 6. 创建主题-公司关联（如果提供了 tickers）
+            associations_created = 0
+            if tickers and market:
+                try:
+                    from backend.services.theme_company_association_service import ThemeCompanyAssociationService
+                    from backend.utils.database_config import get_database_config
+                    
+                    db_config = get_database_config()
+                    association_service = ThemeCompanyAssociationService(db_config)
+                    
+                    association_result = association_service.create_associations(
+                        theme_id=theme_id,
+                        tickers=tickers,
+                        market=market,
+                        created_by=creator_username,
+                        allow_unverified=True  # 允许创建未验证的关联
+                    )
+                    
+                    if association_result.get("success"):
+                        associations_created = association_result.get("created_count", 0)
+                        logger.info(f"创建关联成功: {associations_created} 个")
+                    else:
+                        logger.warning(f"创建关联失败: {association_result.get('error', 'Unknown error')}")
+                        
+                except Exception as assoc_error:
+                    logger.error(f"创建关联时出错: {str(assoc_error)}")
+                    # 不影响主题创建，继续返回
+            
+            # 7. 返回结果
             if embedding_success:
                 return {
                     "success": True,
                     "message": f"主题 '{theme_name}' 创建成功",
                     "theme_id": theme_id,
                     "theme_saved": True,
-                    "embedding_created": True
+                    "embedding_created": True,
+                    "associations_created": associations_created
                 }
             else:
                 return {
@@ -1582,6 +1659,7 @@ class InvestmentThemeEmbeddingService:
                     "theme_id": theme_id,
                     "theme_saved": True,
                     "embedding_created": False,
+                    "associations_created": associations_created,
                     "error": embedding_error
                 }
             
