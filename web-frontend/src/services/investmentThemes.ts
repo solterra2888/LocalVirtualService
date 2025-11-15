@@ -51,14 +51,51 @@ export async function getNewsThemes(newsId: number): Promise<ThemeMatch[]> {
 export async function listThemes(
   limit: number = 100,
   offset: number = 0,
-  search?: string
+  search?: string,
+  groups?: string[]
 ): Promise<ThemeListResponse> {
   const params: Record<string, any> = { limit, offset };
   if (search !== undefined && search !== null && search !== '') {
     params.search = search;
   }
+  
+  // FastAPI 的 Query(List[str]) 需要多个同名参数，如 ?group=crypto&group=market%20weekly
+  // axios 默认会将数组转换为 group[]=crypto&group[]=market%20weekly 或其他格式
+  // 我们需要手动构建 URL 参数来确保格式正确
+  if (groups !== undefined && groups !== null && groups.length > 0) {
+    // 手动构建查询字符串，确保每个 group 都是独立的参数
+    const queryParams = new URLSearchParams();
+    queryParams.append('limit', limit.toString());
+    queryParams.append('offset', offset.toString());
+    if (search) {
+      queryParams.append('search', search);
+    }
+    // 为每个 group 添加一个独立的参数（多个同名参数）
+    groups.forEach(group => {
+      queryParams.append('group', group);
+    });
+    
+    const url = `/investment-themes/themes?${queryParams.toString()}`;
+    // URL 已经包含查询参数，不再传递 params 对象
+    return await api.get<ThemeListResponse>(url, undefined);
+  }
 
   return await api.get<ThemeListResponse>('/investment-themes/themes', params);
+}
+
+/**
+ * Get all unique groups (for filter dropdown)
+ */
+export async function getAllGroups(): Promise<{
+  success: boolean;
+  groups: string[];
+  count: number;
+}> {
+  return await api.get<{
+    success: boolean;
+    groups: string[];
+    count: number;
+  }>('/investment-themes/groups');
 }
 
 /**
@@ -211,7 +248,8 @@ export async function batchUpdateThemeEnabledStatus(
 export async function updateThemeDescription(
   themeId: string,
   description: string,
-  version?: number
+  version?: number,
+  group?: string
 ): Promise<{
   success: boolean;
   message: string;
@@ -221,6 +259,7 @@ export async function updateThemeDescription(
 }> {
   return await api.patch(`/investment-themes/${themeId}/description`, {
     description,
+    group,
     version,
   });
 }
@@ -267,6 +306,7 @@ export async function batchDeleteThemes(
 export async function generateThemeDescription(
   themeName: string,
   category: string,
+  group?: string,
   market?: string,
   tickers?: string[]
 ): Promise<{
@@ -276,6 +316,7 @@ export async function generateThemeDescription(
   error?: string;
 }> {
   return await api.post('/investment-themes/generate-description', {
+    group: group,
     theme_name: themeName,
     category: category,
     market: market,
@@ -290,6 +331,7 @@ export async function createTheme(
   themeName: string,
   category: string,
   description: string,
+  group?: string,
   themeId?: string,
   market?: string,
   tickers?: string[]
@@ -303,6 +345,7 @@ export async function createTheme(
   error?: string;
 }> {
   return await api.post('/investment-themes/create', {
+    group: group,
     theme_name: themeName,
     category: category,
     description,
@@ -317,6 +360,7 @@ export async function createTheme(
  */
 export async function batchUploadThemes(
   file: File,
+  group?: string,
   market: string = 'US'
 ): Promise<{
   success: boolean;
@@ -334,6 +378,9 @@ export async function batchUploadThemes(
 }> {
   const formData = new FormData();
   formData.append('file', file);
+  if (group) {
+    formData.append('group', group);
+  }
   formData.append('market', market);
   
   // 使用 fetch 直接调用，因为需要特殊处理 multipart/form-data

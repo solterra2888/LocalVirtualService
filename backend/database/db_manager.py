@@ -201,6 +201,64 @@ class DatabaseManager:
             print(f"迁移primaryticker字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
+    def _migrate_add_sort_order_to_target_tracking_config(self, cursor):
+        """迁移：为target_tracking_config表添加sort_order字段"""
+        try:
+            # 检查表是否存在
+            cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'target_tracking_config'
+            )
+            """)
+            if not cursor.fetchone()[0]:
+                return
+            
+            # 检查字段是否已存在
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='target_tracking_config' AND column_name='sort_order'
+            """)
+            
+            if not cursor.fetchone():
+                cursor.execute("""
+                ALTER TABLE target_tracking_config 
+                ADD COLUMN sort_order INTEGER
+                """)
+                print("已添加sort_order字段到target_tracking_config表")
+            
+            # 使用现有priority/added_at初始化排序值（仅在为空或为0时更新）
+            cursor.execute("""
+            WITH ranked_watchlist AS (
+                SELECT 
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY user_id, COALESCE(group_name, 'default')
+                        ORDER BY priority DESC, added_at DESC, id DESC
+                    ) AS rn
+                FROM target_tracking_config
+            )
+            UPDATE target_tracking_config AS t
+            SET sort_order = ranked_watchlist.rn
+            FROM ranked_watchlist
+            WHERE ranked_watchlist.id = t.id
+              AND (t.sort_order IS NULL OR t.sort_order = 0)
+            """)
+            
+            # 创建索引以提升排序查询效率
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_target_tracking_config_user_group_sort
+                ON target_tracking_config (
+                    user_id,
+                    (COALESCE(group_name, 'default')),
+                    sort_order
+                )
+            """)
+        except Exception as e:
+            print(f"迁移sort_order字段时出错: {str(e)}")
+            # 不阻断整体迁移流程
+    
 
     
     def migrate_database_schema(self, conn):
@@ -361,6 +419,8 @@ class DatabaseManager:
             
             # 检查并添加target_tracking_config表的primaryticker列
             self._migrate_add_primaryticker_to_target_tracking_config(conn.cursor())
+            # 检查并添加target_tracking_config表的sort_order列
+            self._migrate_add_sort_order_to_target_tracking_config(conn.cursor())
             
             # 创建调度器相关表
             self._create_scheduler_tables(conn)

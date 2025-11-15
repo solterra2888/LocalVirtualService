@@ -24,6 +24,32 @@ class ThemeCompanyAssociationService:
         self.db_manager = DatabaseManager(db_config)
         logger.info("主题-公司关联服务初始化完成")
     
+    def _extract_market_from_ticker(self, full_ticker: str) -> str:
+        """
+        从完整的ticker中提取市场代码
+        
+        Args:
+            full_ticker: 完整的ticker，如 'NVDA.US', '688256.SHG', '000977.SHE'
+            
+        Returns:
+            市场代码 ('US', 'HK', 'CN')
+        """
+        if '.' not in full_ticker:
+            return 'US'  # 默认为US
+        
+        _, exchange_suffix = full_ticker.rsplit('.', 1)
+        exchange_suffix = exchange_suffix.upper()
+        
+        # 映射交易所代码到市场代码
+        exchange_to_market = {
+            'US': 'US', 'NASDAQ': 'US', 'NYSE': 'US', 'AMEX': 'US',
+            'HK': 'HK', 'HKEX': 'HK',
+            'CN': 'CN', 'SH': 'CN', 'SZ': 'CN',
+            'SHG': 'CN', 'SHE': 'CN',  # EODHD交易所代码
+        }
+        
+        return exchange_to_market.get(exchange_suffix, 'US')
+    
     def validate_and_complete_tickers(
         self,
         tickers: List[str],
@@ -33,8 +59,8 @@ class ThemeCompanyAssociationService:
         验证并补全 ticker 代码
         
         Args:
-            tickers: 股票代码列表（简写），如 ['NVDA', 'AMD', 'INTC']
-            market: 市场代码 ('US', 'HK', 'CN')
+            tickers: 股票代码列表，可以是简写（如 'NVDA'）或完整代码（如 'NVDA.US', '688256.SHG'）
+            market: 默认市场代码 ('US', 'HK', 'CN')，仅用于没有后缀的ticker
             
         Returns:
             {
@@ -65,9 +91,6 @@ class ThemeCompanyAssociationService:
                 "invalid": [{"input": "all", "error": f"Invalid market: {market}"}]
             }
         
-        # 确定市场后缀
-        suffix = f".{market}"
-        
         valid_tickers = []
         invalid_tickers = []
         
@@ -80,14 +103,19 @@ class ThemeCompanyAssociationService:
             cursor = conn.cursor()
             
             for ticker_input in tickers:
-                ticker_clean = ticker_input.strip().upper()
+                ticker_clean = ticker_input.strip()
                 if not ticker_clean:
                     continue
                 
-                # 补全完整的 ticker
-                full_ticker = f"{ticker_clean}{suffix}"
+                # 检查ticker是否已包含交易所后缀
+                if '.' in ticker_clean:
+                    # 已包含后缀，直接使用（如 NVDA.US, 688256.SHG, 000977.SHE）
+                    full_ticker = ticker_clean.upper()
+                else:
+                    # 没有后缀，使用提供的market参数添加后缀
+                    full_ticker = f"{ticker_clean.upper()}.{market}"
                 
-                # 从 companies 表查询（仅使用 primaryticker 进行验证，避免交易所歧义）
+                # 从 companies 表查询（仅使用 primaryticker 进行验证）
                 cursor.execute("""
                     SELECT 
                         name,
@@ -137,13 +165,12 @@ class ThemeCompanyAssociationService:
             if conn:
                 conn.close()
             # 返回所有 ticker 为无效，并包含 full_ticker
-            suffix = f".{market}"
             return {
                 "valid": [],
                 "invalid": [
                     {
-                        "input": ticker.strip().upper(),
-                        "full_ticker": f"{ticker.strip().upper()}{suffix}",
+                        "input": ticker.strip(),
+                        "full_ticker": ticker.strip().upper() if '.' in ticker else f"{ticker.strip().upper()}.{market}",
                         "error": f"Validation error: {str(e)}",
                         "exists": False
                     }
@@ -164,8 +191,8 @@ class ThemeCompanyAssociationService:
         
         Args:
             theme_id: 主题ID
-            tickers: 股票代码列表（简写）
-            market: 市场代码
+            tickers: 股票代码列表（可以是简写或完整代码，如 'NVDA' 或 'NVDA.US'）
+            market: 默认市场代码（仅用于没有后缀的ticker）
             created_by: 创建者用户名
             allow_unverified: 是否允许创建未验证的关联
             
@@ -185,7 +212,7 @@ class ThemeCompanyAssociationService:
                 "details": []
             }
         
-        # 先验证 tickers
+        # 先验证 tickers（现在支持完整ticker和简写ticker）
         validation_result = self.validate_and_complete_tickers(tickers, market)
         
         # 检查验证结果
@@ -220,6 +247,9 @@ class ThemeCompanyAssociationService:
                 full_ticker = ticker_info["full_ticker"]
                 company_name = ticker_info["company_name"]
                 
+                # 从 full_ticker 中提取实际的市场代码
+                ticker_market = self._extract_market_from_ticker(full_ticker)
+                
                 try:
                     cursor.execute("""
                         INSERT INTO theme_company_associations (
@@ -233,7 +263,7 @@ class ThemeCompanyAssociationService:
                     """, (
                         theme_id, 
                         full_ticker, 
-                        market,
+                        ticker_market,
                         1.0,  # 默认权重
                         'manual',
                         True,  # 已验证
@@ -272,6 +302,9 @@ class ThemeCompanyAssociationService:
                 for ticker_info in validation_result["invalid"]:
                     full_ticker = ticker_info["full_ticker"]
                     
+                    # 从 full_ticker 中提取实际的市场代码
+                    ticker_market = self._extract_market_from_ticker(full_ticker)
+                    
                     try:
                         cursor.execute("""
                             INSERT INTO theme_company_associations (
@@ -285,7 +318,7 @@ class ThemeCompanyAssociationService:
                         """, (
                             theme_id, 
                             full_ticker, 
-                            market,
+                            ticker_market,
                             1.0,
                             'manual',
                             False,  # 未验证

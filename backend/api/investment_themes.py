@@ -36,6 +36,7 @@ class ThemeMatchResponse(BaseModel):
     """主题匹配响应"""
     theme_id: str
     theme_name: str
+    category: Optional[str] = None
     similarity: float
     confidence: float
     rank: int
@@ -71,6 +72,7 @@ class BatchUpdateEnabledRequest(BaseModel):
 class UpdateDescriptionRequest(BaseModel):
     """更新主题描述请求"""
     description: str = Field(..., min_length=1, max_length=2000, description="新的描述内容")
+    group: Optional[str] = Field(None, max_length=100, description="主题分组（可选）")
     version: Optional[int] = Field(None, description="版本号（用于乐观锁）")
 
 
@@ -86,20 +88,22 @@ class BatchDeleteThemeRequest(BaseModel):
 
 class GenerateDescriptionRequest(BaseModel):
     """生成主题描述请求"""
+    group: Optional[str] = Field(None, max_length=100, description="主题分组（如 AI、crypto 等，可选）")
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
     category: str = Field(..., min_length=1, max_length=100, description="主题分类/类别")
-    market: Optional[str] = Field(None, description="市场代码（US/HK/CN）")
-    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表（简写，如 ['NVDA', 'AMD']）")
+    market: Optional[str] = Field(None, description="默认市场代码（US/HK/CN），仅用于没有后缀的ticker")
+    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表，支持完整格式（如 'NVDA.US', '688256.SHG'）或简写（如 'NVDA'）")
 
 
 class CreateThemeRequest(BaseModel):
     """创建主题请求"""
+    group: Optional[str] = Field(None, max_length=100, description="主题分组（如 AI、crypto 等，可选）")
     theme_name: str = Field(..., min_length=1, max_length=200, description="主题名称")
     category: str = Field(..., min_length=1, max_length=100, description="主题分类/类别")
     description: str = Field(..., min_length=10, max_length=2000, description="主题描述")
     theme_id: Optional[str] = Field(None, max_length=50, description="主题ID（可选，不提供则自动生成）")
-    market: Optional[str] = Field(None, description="市场代码（US/HK/CN）")
-    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表（简写，如 ['NVDA', 'AMD']）")
+    market: Optional[str] = Field(None, description="默认市场代码（US/HK/CN），仅用于没有后缀的ticker")
+    tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表，支持完整格式（如 'NVDA.US', '688256.SHG'）或简写（如 'NVDA'），可混合不同交易所")
 
 
 class VerifyTickerRequest(BaseModel):
@@ -314,6 +318,7 @@ async def get_news_themes(news_id: int):
             SELECT 
                 theme_id,
                 theme_name,
+                category,
                 similarity_score,
                 match_rank,
                 match_method,
@@ -328,10 +333,11 @@ async def get_news_themes(news_id: int):
             results.append({
                 'theme_id': row[0],
                 'theme_name': row[1],
-                'similarity': float(row[2]),
-                'rank': row[3],
-                'match_method': row[4],
-                'matched_at': row[5].isoformat() if row[5] else None
+                'category': row[2],
+                'similarity': float(row[3]),
+                'rank': row[4],
+                'match_method': row[5],
+                'matched_at': row[6].isoformat() if row[6] else None
             })
         
         cursor.close()
@@ -353,6 +359,7 @@ async def get_news_themes(news_id: int):
 async def list_all_themes(
     market: Optional[str] = None,
     search: Optional[str] = Query(None, description="Search keyword for theme name or category"),
+    group: Optional[List[str]] = Query(None, description="Filter by group name(s) - multiple selection supported"),
     limit: int = 100,
     offset: int = 0
 ):
@@ -361,12 +368,14 @@ async def list_all_themes(
     
     参数：
     - market: 市场过滤（HK/US/CN）
+    - search: 搜索关键词（主题名称或类别）
+    - group: 按组名筛选（支持多个，逗号分隔或多次传递）
     - limit: 每页数量
     - offset: 偏移量
     
     示例：
     ```
-    GET /api/investment-themes/themes?market=US&limit=20
+    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto
     ```
     """
     try:
@@ -390,6 +399,15 @@ async def list_all_themes(
             filters.append("(ite.theme_name ILIKE %s OR ite.category ILIKE %s)")
             pattern = f"%{search_value}%"
             filter_params.extend([pattern, pattern])
+        
+        # 添加 group 筛选（支持多个 group）
+        if group and len(group) > 0:
+            # 过滤掉空字符串
+            valid_groups = [g.strip() for g in group if g and g.strip()]
+            if valid_groups:
+                placeholders = ','.join(['%s'] * len(valid_groups))
+                filters.append(f"ite.\"group\" IN ({placeholders})")
+                filter_params.extend(valid_groups)
 
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
@@ -417,7 +435,8 @@ async def list_all_themes(
                 ite.created_by,
                 ite.description,
                 ite.description_source,
-                ite.is_enabled_for_matching
+                ite.is_enabled_for_matching,
+                ite."group"
             FROM investment_theme_embeddings ite
             {where_clause}
             ORDER BY ite.theme_name
@@ -441,6 +460,7 @@ async def list_all_themes(
                 'description_preview': row[10],
                 'description_source': row[11],
                 'is_enabled_for_matching': row[12] if row[12] is not None else True,
+                'group': row[13],
                 'has_embedding': True,
                 'tickers': []
             })
@@ -493,6 +513,54 @@ async def list_all_themes(
     except Exception as e:
         logger.error(f"Getting theme list failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Getting failed: {str(e)}")
+
+
+@router.get("/groups")
+async def get_all_groups():
+    """
+    获取所有唯一的 group 值（用于筛选器）
+    
+    返回所有 investment_theme_embeddings 表中唯一的 group 值列表
+    
+    示例：
+    ```
+    GET /api/investment-themes/groups
+    ```
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 查询所有唯一的非空 group 值
+        cursor.execute("""
+            SELECT DISTINCT "group"
+            FROM investment_theme_embeddings
+            WHERE "group" IS NOT NULL AND "group" != ''
+            ORDER BY "group"
+        """)
+        
+        groups = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "groups": groups,
+            "count": len(groups)
+        }
+        
+    except Exception as e:
+        logger.error(f"Getting groups list failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Getting groups failed: {str(e)}")
 
 
 @router.get("/{theme_id}/associations", response_model=ThemeAssociationsResponse)
@@ -1115,6 +1183,7 @@ async def update_theme_description(
             theme_id=theme_id,
             new_description=request.description,
             editor_username=current_user.username,
+            new_group=request.group,
             version=request.version
         )
         
@@ -1300,18 +1369,22 @@ async def generate_theme_description(
             tickers=request.tickers
         )
         
-        # 如果提供了 tickers 和 market，验证并获取公司信息
+        # 如果提供了 tickers，验证并获取公司信息
         stock_symbols = None
         company_names = None
         
-        if request.tickers and request.market:
+        if request.tickers:
             try:
                 from backend.services.theme_company_association_service import ThemeCompanyAssociationService
                 
                 association_service = ThemeCompanyAssociationService(db_config)
+                
+                # 使用默认市场或US（仅用于没有后缀的ticker）
+                default_market = request.market if request.market else 'US'
+                
                 validation_result = association_service.validate_and_complete_tickers(
                     request.tickers,
-                    request.market
+                    default_market
                 )
                 
                 if validation_result["valid"]:
@@ -1402,6 +1475,7 @@ async def create_theme(
         
         logger.info(
             f"Admin {current_user.username} creating new theme",
+            group=request.group,
             theme_name=request.theme_name,
             category=request.category,
             theme_id=request.theme_id,
@@ -1414,6 +1488,7 @@ async def create_theme(
             category=request.category,
             description=request.description,
             creator_username=current_user.username,
+            group=request.group,
             theme_id=request.theme_id,
             market=request.market,
             tickers=request.tickers
@@ -1439,6 +1514,7 @@ async def create_theme(
 @router.post("/batch-upload")
 async def batch_upload_themes(
     file: UploadFile = File(...),
+    group: Optional[str] = Form(None),
     market: str = Form("US"),
     current_user: TokenData = Depends(get_current_admin_user)
 ):
@@ -1503,7 +1579,7 @@ async def batch_upload_themes(
     """
     try:
         logger.info(
-            f"Admin {current_user.username} uploading batch theme file: {file.filename}, market: {market}"
+            f"Admin {current_user.username} uploading batch theme file: {file.filename}, group: {group}, market: {market}"
         )
         
         # 1. 验证 market 参数
@@ -1513,7 +1589,7 @@ async def batch_upload_themes(
                 detail=f"Invalid market: {market}. Must be US, HK, or CN."
             )
         
-        # 2. 验证文件格式
+        # 3. 验证文件格式
         if not file.filename:
             raise HTTPException(status_code=400, detail="File name is empty")
         
@@ -1524,7 +1600,7 @@ async def batch_upload_themes(
                 detail=f"Unsupported file format: .{file_ext}. Only .csv, .xlsx, .xls are supported."
             )
         
-        # 3. 解析文件
+        # 4. 解析文件
         from backend.utils.theme_file_parser import ThemeFileParser
         
         parser = ThemeFileParser()
@@ -1532,9 +1608,9 @@ async def batch_upload_themes(
         # 重置文件指针
         await file.seek(0)
         
-        parse_result = parser.parse_file(file, market=market)
+        parse_result = parser.parse_file(file, market=market, group=group)
         
-        # 4. 如果解析失败，返回错误
+        # 5. 如果解析失败，返回错误
         if not parse_result.get('success'):
             error_msg = parse_result.get('error', 'Unknown error')
             logger.error(f"File parsing failed: {error_msg}")
@@ -1548,12 +1624,12 @@ async def batch_upload_themes(
         preview = parse_result['preview']
         
         logger.info(
-            f"File parsed successfully: theme='{theme_name}', "
+            f"File parsed successfully: group='{group}', theme='{theme_name}', "
             f"{preview['total_themes']} categories (themes), "
             f"{preview['total_tickers']} tickers"
         )
         
-        # 5. 提交 Celery 任务
+        # 6. 提交 Celery 任务
         from backend.tasks.theme_tasks import batch_create_themes_task
         
         task = batch_create_themes_task.apply_async(
@@ -1565,7 +1641,7 @@ async def batch_upload_themes(
         
         logger.info(f"Batch create themes task submitted: {task.id}")
         
-        # 6. 返回结果
+        # 7. 返回结果
         return {
             "success": True,
             "message": f"Batch upload started: {preview['total_themes']} themes ({preview['total_themes']} categories)",

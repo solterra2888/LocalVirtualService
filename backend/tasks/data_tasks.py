@@ -155,8 +155,9 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
     异步获取 EODHD 历史股价数据 Celery 任务
     
     适用场景：
-    - 获取 watchlist 中所有股票的历史价格数据
-    - 执行时间 3-10分钟（取决于 watchlist 大小）
+    - 获取 watchlist 中所有股票的历史价格数据（从target_tracking_config表）
+    - 获取主题关联公司的历史价格数据（从theme_company_associations表）
+    - 执行时间 3-10分钟（取决于股票数量）
     - 避免阻塞 APScheduler
     
     Args:
@@ -168,6 +169,8 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
                 'success': bool,
                 'message': str,
                 'total_tickers': int,
+                'watchlist_tickers': int,
+                'theme_tickers': int,
                 'success_count': int,
                 'failed_count': int,
                 'total_records': int,

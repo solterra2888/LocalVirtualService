@@ -1023,12 +1023,19 @@ export class SchedulerAPI {
   /**
    * 获取所有任务执行日志
    */
-  async getAllExecutionLogs(limit: number = 50, offset: number = 0): Promise<ExecutionLogsResponse> {
+  async getAllExecutionLogs(limit: number = 50, offset: number = 0, taskTypes?: string[]): Promise<ExecutionLogsResponse> {
     try {
-      const response = await api.get<ExecutionLogsResponse>('/scheduler/execution-logs', {
+      const params: any = {
         limit,
         offset
-      });
+      };
+      
+      // 如果提供了 task_types，转换为逗号分隔的字符串
+      if (taskTypes && taskTypes.length > 0) {
+        params.task_types = taskTypes.join(',');
+      }
+      
+      const response = await api.get<ExecutionLogsResponse>('/scheduler/execution-logs', params);
       return response;
     } catch (error) {
       console.error('获取所有任务执行日志失败:', error);

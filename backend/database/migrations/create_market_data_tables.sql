@@ -160,7 +160,7 @@ INSERT INTO market_assets (code, name_en, name_zh, asset_type, category, descrip
 ('EWG.US', 'DAX (Germany)', '德国DAX', 'index', 'eu_equity', 'iShares MSCI Germany ETF'),
 ('EWQ.US', 'CAC 40 (France)', '法国CAC40', 'index', 'eu_equity', 'iShares MSCI France ETF'),
 ('EWJ.US', 'Nikkei 225', '日经225', 'index', 'asia_equity', 'iShares MSCI Japan ETF'),
-('2800.HK', 'Hang Seng', '恒生指数', 'index', 'asia_equity', 'Tracker Fund of Hong Kong')
+('HSI.INDX', 'Hang Seng', '恒生指数', 'index', 'asia_equity', 'Hang Seng Index')
 ON CONFLICT (code) DO NOTHING;
 
 -- 外汇数据

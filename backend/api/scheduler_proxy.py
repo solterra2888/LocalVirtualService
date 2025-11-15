@@ -507,10 +507,17 @@ async def get_task_logs_proxy(task_id: str, limit: int = 50, offset: int = 0, cu
         raise HTTPException(status_code=500, detail=f"failed to proxy get task logs: {str(e)}")
 
 @router.get("/execution-logs", summary="get all task execution logs")
-async def get_all_execution_logs_proxy(limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
+async def get_all_execution_logs_proxy(
+    limit: int = 50, 
+    offset: int = 0, 
+    task_types: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
     """代理获取所有任务执行日志"""
     try:
         params = {"limit": limit, "offset": offset}
+        if task_types:
+            params["task_types"] = task_types
         result = await scheduler_client.get("/scheduler/execution-logs", params=params)
         return result
     except HTTPException:

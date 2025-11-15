@@ -707,6 +707,7 @@ def batch_create_themes_task(
                         description=description,
                         creator_username=creator_username,
                         theme_id=theme_id,
+                        group=data.get('group'),
                         market=data['market'],
                         tickers=data['tickers']
                     )

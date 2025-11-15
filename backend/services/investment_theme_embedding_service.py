@@ -557,6 +557,7 @@ class InvestmentThemeEmbeddingService:
                     SELECT 
                         e.theme_id,
                         e.theme_name,
+                        e.category,
                         1 - (e.embedding_vector <=> %s::vector) as similarity
                     FROM investment_theme_embeddings e
                     WHERE e.is_enabled_for_matching = TRUE
@@ -576,6 +577,7 @@ class InvestmentThemeEmbeddingService:
                     SELECT 
                         e.theme_id,
                         e.theme_name,
+                        e.category,
                         e.embedding_data
                     FROM investment_theme_embeddings e
                     WHERE e.is_enabled_for_matching = TRUE
@@ -588,7 +590,8 @@ class InvestmentThemeEmbeddingService:
                 for row in cursor.fetchall():
                     theme_id = row[0]
                     theme_name = row[1]
-                    embedding_data = row[2]
+                    category = row[2]
+                    embedding_data = row[3]
                     
                     # 解析JSONB向量
                     if isinstance(embedding_data, str):
@@ -602,6 +605,7 @@ class InvestmentThemeEmbeddingService:
                     theme_similarities.append({
                         'theme_id': theme_id,
                         'theme_name': theme_name,
+                        'category': category,
                         'similarity': similarity
                     })
                 
@@ -615,7 +619,8 @@ class InvestmentThemeEmbeddingService:
                 for idx, row in enumerate(cursor.fetchall()):
                     theme_id = row[0]
                     theme_name = row[1]
-                    similarity = float(row[2])
+                    category = row[2]
+                    similarity = float(row[3])
                     
                     # 过滤低于阈值的结果
                     if similarity < min_similarity:
@@ -624,6 +629,7 @@ class InvestmentThemeEmbeddingService:
                     match_result = {
                         'theme_id': theme_id,
                         'theme_name': theme_name,
+                        'category': category,
                         'market': None,  # market 列已删除
                         'similarity': round(similarity, 4),
                         'confidence': round(similarity, 2),
@@ -647,6 +653,7 @@ class InvestmentThemeEmbeddingService:
                     match_result = {
                         'theme_id': theme['theme_id'],
                         'theme_name': theme['theme_name'],
+                        'category': theme['category'],
                         'market': None,  # market 列已删除
                         'similarity': round(similarity, 4),
                         'confidence': round(similarity, 2),
@@ -685,10 +692,12 @@ class InvestmentThemeEmbeddingService:
                     for match in results:
                         cursor.execute("""
                             INSERT INTO news_theme_matches 
-                            (news_id, theme_id, theme_name, similarity_score, match_rank, match_method)
-                            VALUES (%s, %s, %s, %s, %s, %s)
+                            (news_id, theme_id, theme_name, category, similarity_score, match_rank, match_method)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (news_id, theme_id) 
                             DO UPDATE SET 
+                                theme_name = EXCLUDED.theme_name,
+                                category = EXCLUDED.category,
                                 similarity_score = EXCLUDED.similarity_score,
                                 match_rank = EXCLUDED.match_rank,
                                 matched_at = NOW()
@@ -696,6 +705,7 @@ class InvestmentThemeEmbeddingService:
                             news_id,
                             match['theme_id'],
                             match['theme_name'],
+                            match.get('category'),  # 使用 get 以防万一 category 不存在
                             match['similarity'],
                             match['rank'],
                             'vector_search'
@@ -869,6 +879,7 @@ class InvestmentThemeEmbeddingService:
         theme_id: str,
         new_description: str,
         editor_username: str,
+        new_group: Optional[str] = None,
         version: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -878,6 +889,7 @@ class InvestmentThemeEmbeddingService:
             theme_id: 主题ID
             new_description: 新的描述内容
             editor_username: 编辑者用户名
+            new_group: 新的分组（可选）
             version: 乐观锁版本号（可选，用于并发控制）
             
         Returns:
@@ -936,16 +948,38 @@ class InvestmentThemeEmbeddingService:
                 }
             
             # 2.2 更新描述和元数据到 investment_theme_embeddings 表
-            cursor.execute("""
-                UPDATE investment_theme_embeddings
-                SET description = %s,
-                    description_source = 'manual',
-                    last_manual_edit_at = NOW(),
-                    last_manual_edit_by = %s,
-                    version = version + 1,
-                    updated_at = NOW()
-                WHERE theme_id = %s
-            """, (new_description, editor_username, theme_id))
+            # new_group 的处理逻辑：
+            # - 如果是空字符串（用户清空了 group）：设置为 NULL
+            # - 如果是非空字符串：使用该值
+            # - 如果是 None（不应该出现，因为前端总是发送值）：不更新
+            # 
+            # 注意：编辑弹窗中总是显示当前的 group 值，所以前端会始终发送 group 参数
+            if new_group is not None:
+                # 处理 group 值：空字符串转为 None，非空字符串使用原值
+                group_value = new_group.strip() if new_group.strip() else None
+                cursor.execute("""
+                    UPDATE investment_theme_embeddings
+                    SET description = %s,
+                        "group" = %s,
+                        description_source = 'manual',
+                        last_manual_edit_at = NOW(),
+                        last_manual_edit_by = %s,
+                        version = version + 1,
+                        updated_at = NOW()
+                    WHERE theme_id = %s
+                """, (new_description, group_value, editor_username, theme_id))
+            else:
+                # 如果未提供 new_group，只更新描述（理论上不应该走到这里）
+                cursor.execute("""
+                    UPDATE investment_theme_embeddings
+                    SET description = %s,
+                        description_source = 'manual',
+                        last_manual_edit_at = NOW(),
+                        last_manual_edit_by = %s,
+                        version = version + 1,
+                        updated_at = NOW()
+                    WHERE theme_id = %s
+                """, (new_description, editor_username, theme_id))
             
             conn.commit()
             logger.info(f"描述保存成功: {theme_id}")
@@ -1464,6 +1498,7 @@ class InvestmentThemeEmbeddingService:
         category: str,
         description: str,
         creator_username: str,
+        group: Optional[str] = None,
         theme_id: Optional[str] = None,
         market: Optional[str] = None,
         tickers: Optional[List[str]] = None
@@ -1476,6 +1511,7 @@ class InvestmentThemeEmbeddingService:
             category: 主题分类/类别
             description: 主题描述
             creator_username: 创建者用户名
+            group: 主题分组（如 AI、crypto 等，可选，不参与向量化）
             theme_id: 主题ID（可选，如果不提供则自动生成）
             market: 市场代码（US/HK/CN，可选）
             tickers: 关联的股票代码列表（简写，可选）
@@ -1491,7 +1527,7 @@ class InvestmentThemeEmbeddingService:
                 "error": str (optional)
             }
         """
-        logger.info(f"创建新主题: {theme_name}, 分类: {category}, 市场: {market or 'N/A'}, 股票数: {len(tickers) if tickers else 0}")
+        logger.info(f"创建新主题: 分组={group or 'N/A'}, {theme_name}, 分类: {category}, 市场: {market or 'N/A'}, 股票数: {len(tickers) if tickers else 0}")
         
         conn = self.db_manager.get_connection()
         if not conn:
@@ -1575,10 +1611,10 @@ class InvestmentThemeEmbeddingService:
                         INSERT INTO investment_theme_embeddings 
                         (theme_id, theme_name, category, description, description_source,
                          embedding_vector, embedding_model, is_enabled_for_matching,
-                         created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, %s, 'manual', %s, %s, TRUE, %s, NOW(), %s, 1)
+                         created_by, last_manual_edit_at, last_manual_edit_by, version, "group")
+                        VALUES (%s, %s, %s, %s, 'manual', %s, %s, TRUE, %s, NOW(), %s, 1, %s)
                     """, (theme_id, theme_name, category, description, embedding, 
-                          self.embedding_model, creator_username, creator_username))
+                          self.embedding_model, creator_username, creator_username, group))
                 elif not use_pgvector and embedding:
                     # 有向量且使用 JSONB
                     import json
@@ -1587,20 +1623,20 @@ class InvestmentThemeEmbeddingService:
                         INSERT INTO investment_theme_embeddings 
                         (theme_id, theme_name, category, description, description_source,
                          embedding_data, embedding_model, is_enabled_for_matching,
-                         created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, %s, 'manual', %s::jsonb, %s, TRUE, %s, NOW(), %s, 1)
+                         created_by, last_manual_edit_at, last_manual_edit_by, version, "group")
+                        VALUES (%s, %s, %s, %s, 'manual', %s::jsonb, %s, TRUE, %s, NOW(), %s, 1, %s)
                     """, (theme_id, theme_name, category, description, embedding_json,
-                          self.embedding_model, creator_username, creator_username))
+                          self.embedding_model, creator_username, creator_username, group))
                 else:
                     # 没有向量，只保存主题基本信息
                     cursor.execute("""
                         INSERT INTO investment_theme_embeddings 
                         (theme_id, theme_name, category, description, description_source,
                          is_enabled_for_matching,
-                         created_by, last_manual_edit_at, last_manual_edit_by, version)
-                        VALUES (%s, %s, %s, %s, 'manual', FALSE, %s, NOW(), %s, 1)
+                         created_by, last_manual_edit_at, last_manual_edit_by, version, "group")
+                        VALUES (%s, %s, %s, %s, 'manual', FALSE, %s, NOW(), %s, 1, %s)
                     """, (theme_id, theme_name, category, description,
-                          creator_username, creator_username))
+                          creator_username, creator_username, group))
                 
                 conn.commit()
                 embedding_success = embedding is not None
@@ -1616,7 +1652,7 @@ class InvestmentThemeEmbeddingService:
             
             # 6. 创建主题-公司关联（如果提供了 tickers）
             associations_created = 0
-            if tickers and market:
+            if tickers:
                 try:
                     from backend.services.theme_company_association_service import ThemeCompanyAssociationService
                     from backend.utils.database_config import get_database_config
@@ -1624,19 +1660,70 @@ class InvestmentThemeEmbeddingService:
                     db_config = get_database_config()
                     association_service = ThemeCompanyAssociationService(db_config)
                     
-                    association_result = association_service.create_associations(
-                        theme_id=theme_id,
-                        tickers=tickers,
-                        market=market,
-                        created_by=creator_username,
-                        allow_unverified=True  # 允许创建未验证的关联
-                    )
+                    # 将 tickers 按市场分组
+                    # 支持带后缀的 ticker (如 NVDA.US, 0700.HK) 和不带后缀的 ticker (如 NVDA)
+                    tickers_by_market = {}
                     
-                    if association_result.get("success"):
-                        associations_created = association_result.get("created_count", 0)
-                        logger.info(f"创建关联成功: {associations_created} 个")
-                    else:
-                        logger.warning(f"创建关联失败: {association_result.get('error', 'Unknown error')}")
+                    for ticker in tickers:
+                        ticker = ticker.strip()
+                        if not ticker:
+                            continue
+                        
+                        # 检查 ticker 是否包含市场后缀
+                        if '.' in ticker:
+                            # 带后缀：从后缀提取 market
+                            parts = ticker.rsplit('.', 1)
+                            if len(parts) == 2:
+                                ticker_code = parts[0]
+                                ticker_suffix = parts[1].upper()
+                                
+                                # 映射交易所代码到市场代码
+                                # 支持简化代码和EODHD完整代码
+                                exchange_to_market = {
+                                    'US': 'US', 'NASDAQ': 'US', 'NYSE': 'US', 'AMEX': 'US',
+                                    'HK': 'HK', 'HKEX': 'HK',
+                                    'CN': 'CN', 'SH': 'CN', 'SZ': 'CN',
+                                    'SHG': 'CN', 'SHE': 'CN',  # EODHD交易所代码
+                                }
+                                
+                                ticker_market = exchange_to_market.get(ticker_suffix)
+                                
+                                if ticker_market:
+                                    if ticker_market not in tickers_by_market:
+                                        tickers_by_market[ticker_market] = []
+                                    # 保存完整的 ticker（包含原始后缀）
+                                    tickers_by_market[ticker_market].append(ticker)
+                                else:
+                                    logger.warning(f"未识别的市场后缀: {ticker_suffix}，跳过 ticker: {ticker}")
+                            else:
+                                logger.warning(f"无效的 ticker 格式: {ticker}")
+                        else:
+                            # 不带后缀：使用传入的 market 参数（如果有）
+                            if market:
+                                if market not in tickers_by_market:
+                                    tickers_by_market[market] = []
+                                tickers_by_market[market].append(ticker)
+                            else:
+                                logger.warning(f"Ticker {ticker} 没有市场后缀且未指定 market 参数，跳过")
+                    
+                    # 为每个市场创建关联
+                    for ticker_market, market_tickers in tickers_by_market.items():
+                        association_result = association_service.create_associations(
+                            theme_id=theme_id,
+                            tickers=market_tickers,
+                            market=ticker_market,
+                            created_by=creator_username,
+                            allow_unverified=True  # 允许创建未验证的关联
+                        )
+                        
+                        if association_result.get("success"):
+                            created_count = association_result.get("created_count", 0)
+                            associations_created += created_count
+                            logger.info(f"创建 {ticker_market} 市场关联成功: {created_count} 个")
+                        else:
+                            logger.warning(f"创建 {ticker_market} 市场关联失败: {association_result.get('error', 'Unknown error')}")
+                    
+                    logger.info(f"总共创建关联: {associations_created} 个")
                         
                 except Exception as assoc_error:
                     logger.error(f"创建关联时出错: {str(assoc_error)}")

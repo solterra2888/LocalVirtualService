@@ -12,6 +12,7 @@ import sys
 import markdown2
 import investpy
 import pytz
+import json
 
 # WeasyPrint disabled due to system dependency issues
 WEASYPRINT_AVAILABLE = False
@@ -103,6 +104,44 @@ REGIONS = {
     "Asia": ["Nikkei 225", "Hang Seng"]
 }
 
+# Helper function to save EODHD data to JSON
+def save_eodhd_data_to_json(data, data_type, symbol_or_name=None, start_date=None, end_date=None):
+    """Save EODHD API response data to JSON file in jikun folder"""
+    try:
+        # Use the directory where this script is located (jikun folder)
+        jikun_dir = os.path.dirname(os.path.abspath(__file__))
+        if not os.path.exists(jikun_dir):
+            os.makedirs(jikun_dir)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Sanitize symbol/name for filename if provided
+        safe_name = None
+        if symbol_or_name:
+            safe_name = symbol_or_name.replace(".", "_").replace("/", "_").replace(" ", "_")
+        
+        # Build filename
+        if start_date and end_date:
+            name_part = safe_name if safe_name else 'data'
+            filename = f"eodhd_{data_type}_{name_part}_{start_date}_{end_date}_{timestamp}.json"
+        elif safe_name:
+            filename = f"eodhd_{data_type}_{safe_name}_{timestamp}.json"
+        else:
+            filename = f"eodhd_{data_type}_{timestamp}.json"
+        
+        filepath = os.path.join(jikun_dir, filename)
+        
+        # Save data to JSON
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        
+        print(f"  Saved EODHD data to: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"  Warning: Failed to save EODHD data to JSON: {e}")
+        return None
+
 # Styling
 def set_broker_style():
     plt.rcParams.update({
@@ -130,6 +169,10 @@ def fetch_eod(symbol, start_date, end_date, api_key, data_type="eod"):
         r = requests.get(url, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
+        
+        # Save raw EODHD data to JSON
+        if data:
+            save_eodhd_data_to_json(data, "eod", symbol, start_date, end_date)
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
             print(f"  Warning: {symbol} not found (404), skipping...")
@@ -190,6 +233,10 @@ def fetch_sp500_constituents(api_key):
         r.raise_for_status()
         data = r.json()
         
+        # Save raw EODHD data to JSON
+        if data:
+            save_eodhd_data_to_json(data, "sp500_constituents", "GSPC.INDX")
+        
         components = data.get('Components', {})
         if isinstance(components, dict):
             stocks = [item['Code'].upper() for item in components.values()
@@ -223,6 +270,11 @@ def fetch_earnings_calendar(start_date, end_date, api_key):
         r = requests.get(url, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
+        
+        # Save raw EODHD data to JSON
+        if data:
+            save_eodhd_data_to_json(data, "earnings_calendar", None, start_date, end_date)
+        
         if not data or not isinstance(data, dict):
             print("  No earnings data returned")
             return pd.DataFrame()
@@ -284,6 +336,10 @@ def fetch_ipo_calendar(start_date, end_date, api_key):
         r = requests.get(url, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
+        
+        # Save raw EODHD data to JSON
+        if data:
+            save_eodhd_data_to_json(data, "ipo_calendar", None, start_date, end_date)
         
         ipos = data.get('ipos', [])
         

@@ -1,7 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { Modifier } from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Layout,
-  Tree,
   Input,
   Tabs,
   List,
@@ -21,34 +36,24 @@ import {
   Modal,
   Dropdown,
   Divider,
+  Segmented,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
 import { 
   getClassificationFromAnalysis, 
   getClassificationTags, 
   hasValidClassification,
-  getClassificationSummary,
-  getRelatedSectors
+  getClassificationSummary
 } from '../utils/newsClassificationHelper';
 import {
   SearchOutlined, 
-  StockOutlined, 
   FileTextOutlined,
   CalendarOutlined,
   PlusOutlined,
   HeartOutlined,
-  ExperimentOutlined,
-  PhoneOutlined,
-  ShoppingOutlined,
-  SafetyOutlined,
-  ThunderboltOutlined,
   BankOutlined,
-  MedicineBoxOutlined,
-  ToolOutlined,
-  HomeOutlined,
-  LaptopOutlined,
-  SettingOutlined,
   DownloadOutlined,
   EyeOutlined,
   DashboardOutlined,
@@ -64,10 +69,14 @@ import {
   StarOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  MoreOutlined,
   RobotOutlined,
   EditOutlined,
   DeleteOutlined,
-  CalculatorOutlined
+  CalculatorOutlined,
+  HolderOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
@@ -78,8 +87,13 @@ import type { NewsTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
 import StockChart from './StockChart';
-import type { DataNode } from 'antd/es/tree';
-
+import {
+  EXCHANGE_FILTER_TABS,
+  matchesExchangeFilter,
+  resolveExchangeCode,
+  resolveBaseSymbol,
+  type ExchangeFilterValue
+} from '../utils/watchlistExchange';
 const { Content, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
@@ -96,67 +110,177 @@ const PRIORITY_FILTER_OPTIONS = [
   { label: 'Low Priority', value: 1, stars: 1 }
 ];
 
-// Helper function to get unique exchanges from watchlist data
-const getUniqueExchanges = (watchlistGroups: WatchlistGroup[]): string[] => {
-  const exchanges = new Set<string>();
-  watchlistGroups.forEach(group => {
-    group.items.forEach(item => {
-      if (item.exchange) {
-        exchanges.add(item.exchange);
-      }
-    });
-  });
-  return Array.from(exchanges).sort();
-};
-
-// Helper function to get unique sectors from watchlist data
-const getUniqueSectors = (watchlistGroups: WatchlistGroup[]): string[] => {
-  const sectors = new Set<string>();
-  watchlistGroups.forEach(group => {
-    group.items.forEach(item => {
-      if (item.sector) {
-        sectors.add(item.sector);
-      }
-    });
-  });
-  return Array.from(sectors).sort();
-};
-
 // 数据状态类型定义
 interface WatchlistStockInfo extends WatchlistItem {
   // 添加一些前端特有的属性（如果需要）
 }
 
-// Sector图标映射函数
-const getSectorIcon = (sector: string) => {
-  const sectorLower = sector?.toLowerCase() || '';
-  
-  switch (sectorLower) {
-    case 'basic materials':
-      return <ExperimentOutlined style={{ color: '#8B4513' }} />;
-    case 'communication services':
-      return <PhoneOutlined style={{ color: '#1890ff' }} />;
-    case 'consumer cyclical':
-      return <ShoppingOutlined style={{ color: '#52c41a' }} />;
-    case 'consumer defensive':
-      return <SafetyOutlined style={{ color: '#faad14' }} />;
-    case 'energy':
-      return <ThunderboltOutlined style={{ color: '#ff7a45' }} />;
-    case 'financial':
-      return <BankOutlined style={{ color: '#722ed1' }} />;
-    case 'healthcare':
-      return <MedicineBoxOutlined style={{ color: '#f5222d' }} />;
-    case 'industrials':
-      return <ToolOutlined style={{ color: '#13c2c2' }} />;
-    case 'real estate':
-      return <HomeOutlined style={{ color: '#eb2f96' }} />;
-    case 'technology':
-      return <LaptopOutlined style={{ color: '#2f54eb' }} />;
-    case 'utilities':
-      return <SettingOutlined style={{ color: '#52c41a' }} />;
-    default:
-      return <HeartOutlined style={{ color: '#ff4d4f' }} />;
-  }
+interface EnrichedWatchlistItem extends WatchlistItem {
+  groupName: string;
+  priceData?: StockPriceData;
+  resolvedExchange?: string;
+  resolvedSymbol?: string;
+}
+
+interface SortableWatchlistRowProps {
+  item: EnrichedWatchlistItem;
+  isSelected: boolean;
+  onSelect: (item: WatchlistStockInfo) => void;
+  onAction: (action: string, item: WatchlistItem) => void;
+  actionItems: MenuProps['items'];
+  resolvePriceData: (item: WatchlistItem) => StockPriceData | undefined;
+  renderStarsFn: (count: number, filled?: boolean) => React.ReactNode;
+  formatPrice: (price?: number) => string;
+  formatChange: (change?: number) => string;
+  getChangeColor: (change?: number) => string;
+  disabled?: boolean;
+}
+
+const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
+  item,
+  isSelected,
+  onSelect,
+  onAction,
+  actionItems,
+  resolvePriceData,
+  renderStarsFn,
+  formatPrice,
+  formatChange,
+  getChangeColor,
+  disabled = false,
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.watchlist_id,
+    disabled,
+  });
+
+  const transformStyle = CSS.Transform.toString(transform);
+
+  const containerStyle: React.CSSProperties = {
+    transform: transformStyle,
+    transition,
+    zIndex: isDragging ? 1000 : 'auto',
+  };
+
+  const priceData = item.priceData ?? resolvePriceData(item);
+  const change = priceData?.change_percent;
+  const hasChange = change !== undefined && change !== null;
+  const displaySymbol = item.resolvedSymbol ?? resolveBaseSymbol(item.symbol);
+  const changeColor = getChangeColor(change);
+  const displayName = item.custom_name || item.company || item.symbol;
+
+  return (
+    <div ref={setNodeRef} style={containerStyle} {...attributes}>
+      <div
+        onClick={() => {
+          if (!disabled) {
+            onSelect(item as WatchlistStockInfo);
+          }
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '8px 12px',
+          height: '60px',
+          borderRadius: '10px',
+          border: isSelected ? '1px solid #91d5ff' : '1px solid #f0f0f0',
+          background: isSelected ? '#e6f7ff' : '#ffffff',
+          boxShadow: isSelected
+            ? '0 2px 8px rgba(24, 144, 255, 0.15)'
+            : isDragging
+            ? '0 4px 12px rgba(0, 0, 0, 0.12)'
+            : '0 1px 2px rgba(0, 0, 0, 0.02)',
+          transition: 'all 0.2s ease',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled && !isDragging ? 0.7 : 1,
+        }}
+      >
+        <div
+          {...(!disabled ? listeners : undefined)}
+          onClick={event => event.stopPropagation()}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '100%',
+            padding: '0 4px',
+            color: '#bfbfbf',
+            cursor: disabled ? 'not-allowed' : 'grab',
+            userSelect: 'none',
+          }}
+        >
+          <HolderOutlined />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+          <Text
+            style={{
+              fontSize: '14px',
+              fontWeight: 500,
+              margin: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {displayName}
+          </Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+            <Text
+              type="secondary"
+              style={{
+                fontSize: '12px',
+                margin: 0,
+                textTransform: 'uppercase',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {displaySymbol}
+            </Text>
+            {item.priority ? renderStarsFn(item.priority) : null}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+          <Text strong style={{ fontSize: '14px', color: changeColor, margin: 0 }}>
+            {formatPrice(priceData?.close)}
+          </Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {hasChange &&
+              (change! >= 0 ? (
+                <ArrowUpOutlined style={{ color: '#cf1322', fontSize: '12px' }} />
+              ) : (
+                <ArrowDownOutlined style={{ color: '#3f8600', fontSize: '12px' }} />
+              ))}
+            <Text style={{ fontSize: '12px', color: changeColor, fontWeight: 500, margin: 0 }}>
+              {formatChange(change)}
+            </Text>
+          </div>
+        </div>
+
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: actionItems ?? [],
+            onClick: ({ key }) => onAction(key, item),
+          }}
+        >
+          <Button
+            type="text"
+            shape="circle"
+            size="small"
+            icon={<MoreOutlined />}
+            disabled={disabled}
+            onClick={event => {
+              event.stopPropagation();
+            }}
+          />
+        </Dropdown>
+      </div>
+    </div>
+  );
 };
 
 // 渲染星星图标的辅助函数
@@ -174,25 +298,30 @@ const renderStars = (count: number, filled: boolean = true) => {
   return <Space size={1}>{stars}</Space>;
 };
 
+const restrictToVerticalAxis: Modifier = ({ transform }) => {
+  if (!transform) {
+    return transform;
+  }
+
+  return {
+    ...transform,
+    x: 0,
+  };
+};
+
 const FinvizDashboard: React.FC = () => {
   const logger = useGlobalLogger();
   
   // 状态管理
-  const [selectedKey, setSelectedKey] = useState<string>('');
-  const [selectedType, setSelectedType] = useState<'group' | 'stock' | ''>('');
   const [selectedStock, setSelectedStock] = useState<WatchlistStockInfo | null>(null);
-  const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [searchValue, setSearchValue] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<number | string>('all');
-  const [exchangeFilter, setExchangeFilter] = useState<string>('all');
-  const [sectorFilter, setSectorFilter] = useState<string>('all');
+  const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilterValue>('all');
   const [activeTab, setActiveTab] = useState<string>('overview');
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [watchlistCollapsed, setWatchlistCollapsed] = useState<boolean>(false);
   
   // 数据状态
   const [watchlistGroups, setWatchlistGroups] = useState<WatchlistGroup[]>([]);
-  const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   
   // 右侧内容数据
@@ -214,6 +343,13 @@ const FinvizDashboard: React.FC = () => {
   // 价格数据
   const [stockPrices, setStockPrices] = useState<Map<string, StockPriceData>>(new Map());
   const [pricesLoading, setPricesLoading] = useState<boolean>(false);
+  const [isReordering, setIsReordering] = useState<boolean>(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
   
   // 自动刷新相关状态
   const [isPageVisible, setIsPageVisible] = useState<boolean>(true);
@@ -425,9 +561,6 @@ const FinvizDashboard: React.FC = () => {
   const [editingItem, setEditingItem] = useState<WatchlistItem | null>(null);
   
   // 右键菜单状态
-  const [contextMenuVisible, setContextMenuVisible] = useState<boolean>(false);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [contextMenuItem, setContextMenuItem] = useState<WatchlistItem | null>(null);
   const [analysisModalVisible, setAnalysisModalVisible] = useState<boolean>(false);
   const [selectedNewsForAnalysis, setSelectedNewsForAnalysis] = useState<DashboardNewsItem | null>(null);
   
@@ -492,35 +625,23 @@ const FinvizDashboard: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlistGroups, isPageVisible]);
 
-  // 搜索过滤
-  useEffect(() => {
-    filterTreeData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchValue, priorityFilter, exchangeFilter, sectorFilter, watchlistGroups, stockPrices]);
-
   // 确保初次加载时自动选择第一个股票
   useEffect(() => {
-    if (watchlistGroups.length > 0 && !selectedKey && !loading) {
+    if (watchlistGroups.length > 0 && !selectedStock && !loading) {
       const firstGroup = watchlistGroups.find(group => group.items.length > 0);
       if (firstGroup && firstGroup.items.length > 0) {
-        const firstStock = firstGroup.items[0];
-        const stockKey = `stock-${firstStock.watchlist_id}`;
-        
-        console.log('Auto-selecting first stock:', {
-          symbol: firstStock.symbol,
-          company: firstStock.company,
-          primaryticker: firstStock.primaryticker,
-          watchlist_id: firstStock.watchlist_id
-        });
-        
-        // 设置选中状态
-        setSelectedKey(stockKey);
-        setSelectedType('stock');
+        const firstStock = firstGroup.items[0] as WatchlistStockInfo;
+
         setSelectedStock(firstStock);
-        setSelectedGroup('');
+        setResearchReports([]);
+        setNewsData([]);
         setActiveTab('overview');
-        
-        const query = getOverviewQueryForStock(firstStock);
+
+        const query =
+          (firstStock.primaryticker && firstStock.primaryticker.trim()) ||
+          (firstStock.symbol && firstStock.symbol.trim()) ||
+          null;
+
         if (query) {
           const normalizedQuery = query.toUpperCase();
           if (overviewCache.has(normalizedQuery)) {
@@ -537,36 +658,27 @@ const FinvizDashboard: React.FC = () => {
           setOverviewError('No valid ticker available for overview');
           setOverviewLoading(false);
         }
-        
+
         logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchlistGroups, loading]);
-
-  useEffect(() => {
-    if (selectedType !== 'stock') {
-      setOverviewData(null);
-      setOverviewError(null);
-      setOverviewLoading(false);
-    }
-  }, [selectedType]);
+  }, [watchlistGroups, loading, selectedStock, overviewCache, logger]);
 
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
-    if (selectedKey && activeTab === 'news') {
+    if (selectedStock && activeTab === 'news') {
       const timer = setTimeout(() => {
         loadRelatedNews();
       }, 300); // 300ms 防抖
       
       return () => clearTimeout(timer);
-    } else if (selectedKey && activeTab === 'reports' && selectedStock) {
+    } else if (selectedStock && activeTab === 'reports') {
       const timer = setTimeout(() => {
         loadResearchReports(selectedStock.symbol);
       }, 300); // 300ms 防抖
       
       return () => clearTimeout(timer);
-    } else if (selectedKey && activeTab === 'overview' && selectedStock) {
+    } else if (selectedStock && activeTab === 'overview') {
       const timer = setTimeout(() => {
         loadStockOverview(selectedStock);
       }, 300); // 300ms 防抖
@@ -574,7 +686,7 @@ const FinvizDashboard: React.FC = () => {
       return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, selectedType, activeTab, selectedStock]);
+  }, [selectedStock, activeTab]);
 
   const loadUserWatchlist = async () => {
     setLoading(true);
@@ -602,6 +714,13 @@ const FinvizDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const normalizeGroupName = useCallback((groupName?: string | null) => {
+    if (!groupName || groupName.trim() === '') {
+      return 'default';
+    }
+    return groupName;
+  }, []);
 
   // 加载主题数据（用于关键词高亮）
   const loadThemes = async () => {
@@ -641,7 +760,7 @@ const FinvizDashboard: React.FC = () => {
     }
   };
 
-  const getOverviewQueryForStock = (stock: WatchlistStockInfo | null): string | null => {
+  const getOverviewQueryForStock = useCallback((stock: WatchlistStockInfo | null): string | null => {
     if (!stock) return null;
     if (stock.primaryticker && stock.primaryticker.trim()) {
       return stock.primaryticker.trim();
@@ -650,7 +769,7 @@ const FinvizDashboard: React.FC = () => {
       return stock.symbol.trim();
     }
     return null;
-  };
+  }, []);
 
   const loadStockOverview = useCallback(
     async (stock: WatchlistStockInfo) => {
@@ -699,170 +818,94 @@ const FinvizDashboard: React.FC = () => {
         setOverviewLoading(false);
       }
     },
-    [overviewCache, overviewLastError, logger]
+    [overviewCache, overviewLastError, logger, getOverviewQueryForStock]
   );
 
-  const filterTreeData = () => {
-    const filteredGroups = watchlistGroups.filter(group => {
-      // Apply all filters to items
-      let filteredItems = group.items;
-      
-      // Filter by priority
-      if (priorityFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.priority === priorityFilter);
-      }
-      
-      // Filter by exchange
-      if (exchangeFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.exchange === exchangeFilter);
-      }
-      
-      // Filter by sector
-      if (sectorFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.sector === sectorFilter);
-      }
-      
-      // If no items match the filters, hide the entire group
-      if (filteredItems.length === 0) {
-        return false;
-      }
-      
-      // Then filter by search value
-      if (!searchValue) return true;
-      
-      const groupMatch = group.group_name.toLowerCase().includes(searchValue.toLowerCase());
-      const stockMatch = filteredItems.some(item => 
-        item.symbol.toLowerCase().includes(searchValue.toLowerCase()) ||
-        (item.company && item.company.toLowerCase().includes(searchValue.toLowerCase())) ||
-        (item.custom_name && item.custom_name.toLowerCase().includes(searchValue.toLowerCase())) ||
-        (item.sector && item.sector.toLowerCase().includes(searchValue.toLowerCase()))
-      );
-      
-      return groupMatch || stockMatch;
-    });
+  const resolvePriceData = useCallback((stock: WatchlistItem): StockPriceData | undefined => {
+    let priceData = stockPrices.get(stock.symbol);
 
-    const treeNodes: DataNode[] = filteredGroups.map(group => {
-      // Get filtered items based on all filters
-      let filteredItems = group.items;
-      
-      // Apply all filters
-      if (priorityFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.priority === priorityFilter);
+    const stockWithTicker = stock as any;
+    if (!priceData && stockWithTicker?.primaryticker) {
+      priceData = stockPrices.get(stockWithTicker.primaryticker);
+    }
+
+    if (!priceData && stock.symbol?.includes('.')) {
+      const base = stock.symbol.split('.')[0];
+      priceData = stockPrices.get(base);
+    }
+
+    if (!priceData) {
+      const exchanges = ['.US', '.HK', '.SZ', '.SH', '.TW', '.JP'];
+      for (const suffix of exchanges) {
+        if (stock.symbol) {
+          priceData = stockPrices.get(`${stock.symbol}${suffix}`);
+          if (priceData) break;
+
+          if (stock.symbol.includes('.')) {
+            const base = stock.symbol.split('.')[0];
+            priceData = stockPrices.get(`${base}${suffix}`);
+            if (priceData) break;
+          }
+        }
       }
-      
-      if (exchangeFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.exchange === exchangeFilter);
-      }
-      
-      if (sectorFilter !== 'all') {
-        filteredItems = filteredItems.filter(item => item.sector === sectorFilter);
-      }
-      
-      // Apply search filter to items
-      if (searchValue) {
-        filteredItems = filteredItems.filter(item => 
-          item.symbol.toLowerCase().includes(searchValue.toLowerCase()) ||
-          (item.company && item.company.toLowerCase().includes(searchValue.toLowerCase())) ||
-          (item.custom_name && item.custom_name.toLowerCase().includes(searchValue.toLowerCase())) ||
-          (item.sector && item.sector.toLowerCase().includes(searchValue.toLowerCase()))
-        );
-      }
-      
-      // 获取分组中股票的主要sector (based on filtered items)
-      const sectors = filteredItems
-        .map(item => item.sector)
-        .filter((sector): sector is string => Boolean(sector))
-        .reduce((acc, sector) => {
-          acc[sector] = (acc[sector] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>);
-      
-      // 找到出现最频繁的sector
-      const sectorKeys = Object.keys(sectors);
-      const dominantSector = sectorKeys.length > 0 
-        ? sectorKeys.reduce((a, b) => sectors[a] > sectors[b] ? a : b)
-        : '';
-      
-      return {
-        title: group.group_name,
-        key: `group-${group.group_name}`,
-        icon: getSectorIcon(dominantSector),
-        children: filteredItems.map(item => {
+    }
+
+    return priceData;
+  }, [stockPrices]);
+
+  const filteredStocks = useMemo<EnrichedWatchlistItem[]>(() => {
+    const lowerSearch = searchValue.trim().toLowerCase();
+
+    return watchlistGroups
+      .flatMap<EnrichedWatchlistItem>(group =>
+        group.items.map(item => {
+          const priceData = resolvePriceData(item);
+          const resolvedExchange = resolveExchangeCode(item, priceData);
+          const resolvedSymbol = resolveBaseSymbol(item.symbol);
+
           return {
-            title: (
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                width: '100%',
-                minHeight: '40px',
-                padding: '4px 0'
-              }}>
-                <StockOutlined style={{ 
-                  marginRight: '8px', 
-                  color: '#1890ff', 
-                  flexShrink: 0,
-                  fontSize: '14px'
-                }} />
-                <div style={{ 
-                  flex: 1, 
-                  minWidth: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'center'
-                }}>
-                  <div style={{ 
-                    fontSize: '13px', 
-                    fontWeight: 'bold', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    lineHeight: '1.2'
-                  }}>
-                    {item.custom_name || item.company || item.symbol}
-                  </div>
-                  <div style={{ 
-                    fontSize: '11px', 
-                    color: '#666', 
-                    fontFamily: 'monospace', 
-                    letterSpacing: '0.5px',
-                    lineHeight: '1.2',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}>
-                    <span>{item.symbol}</span>
-                    {renderStars(item.priority)}
-                  </div>
-                </div>
-              </div>
-            ),
-            key: `stock-${item.watchlist_id}`,
-            isLeaf: true,
+            ...item,
+            groupName: group.group_name,
+            priceData,
+            resolvedExchange,
+            resolvedSymbol
           };
         })
-      };
-    });
+      )
+      .filter(item => {
+        if (priorityFilter !== 'all' && item.priority !== priorityFilter) {
+          return false;
+        }
 
-    setTreeData(treeNodes);
-    
-    // 设置所有分组节点为展开状态
-    const groupKeys = filteredGroups.map(group => `group-${group.group_name}`);
-    setExpandedKeys(groupKeys);
-  };
+        if (exchangeFilter !== 'all') {
+          if (!matchesExchangeFilter(exchangeFilter, item.resolvedExchange)) {
+            const baseSymbol = item.resolvedSymbol || resolveBaseSymbol(item.symbol);
+            const isHongKongCode = exchangeFilter === 'hk' && /^\d{4}$/.test(baseSymbol);
+            const isChinaCode = exchangeFilter === 'cn' && /^\d{6}$/.test(baseSymbol);
+            if (!isHongKongCode && !isChinaCode) {
+              return false;
+            }
+          }
+        }
 
-  const handleTreeSelect = (selectedKeys: React.Key[], info: any) => {
-    // 如果点击的是已选中的项目，保持选中状态不变
-    if (selectedKeys.length === 0 && selectedKey) {
-      // 重新设置选中状态，防止取消选择
-      setSelectedKey(selectedKey);
-      return;
-    }
-    
-    if (selectedKeys.length === 0) {
-      setSelectedKey('');
-      setSelectedType('');
+        if (!lowerSearch) {
+          return true;
+        }
+
+        const groupName = item.groupName?.toLowerCase() ?? '';
+
+        return (
+          item.symbol.toLowerCase().includes(lowerSearch) ||
+          (item.company && item.company.toLowerCase().includes(lowerSearch)) ||
+          (item.custom_name && item.custom_name.toLowerCase().includes(lowerSearch)) ||
+          (groupName && groupName.includes(lowerSearch))
+        );
+      });
+  }, [watchlistGroups, priorityFilter, exchangeFilter, searchValue, resolvePriceData]);
+
+  const handleSelectStock = useCallback((stock: WatchlistStockInfo | null) => {
+    if (!stock) {
       setSelectedStock(null);
-      setSelectedGroup('');
       setNewsData([]);
       setResearchReports([]);
       setOverviewData(null);
@@ -872,96 +915,81 @@ const FinvizDashboard: React.FC = () => {
       return;
     }
 
-    const key = selectedKeys[0] as string;
-    setSelectedKey(key);
+    setSelectedStock(stock);
+    setResearchReports([]);
 
-    if (key.startsWith('group-')) {
-      setSelectedType('group');
-      const groupName = key.replace('group-', '');
-      setSelectedGroup(groupName);
-      setSelectedStock(null);
-      setOverviewData(null);
-      setOverviewError(null);
-      setOverviewLoading(false);
-      setActiveTab('news');
-      logger.logInfo(`选择了分组: ${groupName}`, 'finviz-dashboard');
-    } else if (key.startsWith('stock-')) {
-      setSelectedType('stock');
-      const watchlistId = parseInt(key.replace('stock-', ''));
-      
-      // 在所有watchlist中查找对应的股票
-      let foundStock: WatchlistStockInfo | null = null;
-      for (const group of watchlistGroups) {
-        foundStock = group.items.find(item => item.watchlist_id === watchlistId) || null;
-        if (foundStock) break;
-      }
-      
-      setSelectedStock(foundStock);
-      setSelectedGroup('');
-      setResearchReports([]); // 清空研究报告数据
-      
-      if (foundStock) {
-        const query = getOverviewQueryForStock(foundStock);
-        if (query) {
-          const normalizedQuery = query.toUpperCase();
-          if (overviewCache.has(normalizedQuery)) {
-            setOverviewData(overviewCache.get(normalizedQuery) || null);
-            setOverviewError(null);
-            setOverviewLoading(false);
-          } else {
-            setOverviewData(null);
-            setOverviewError(null);
-            setOverviewLoading(true);
-          }
-        } else {
-          setOverviewData(null);
-          setOverviewError('No valid ticker available for overview');
-          setOverviewLoading(false);
-        }
-        setActiveTab('overview');
+    const query = getOverviewQueryForStock(stock);
+    if (query) {
+      const normalizedQuery = query.toUpperCase();
+      if (overviewCache.has(normalizedQuery)) {
+        setOverviewData(overviewCache.get(normalizedQuery) || null);
+        setOverviewError(null);
+        setOverviewLoading(false);
       } else {
         setOverviewData(null);
         setOverviewError(null);
-        setOverviewLoading(false);
-        setActiveTab('news');
+        setOverviewLoading(true);
       }
-      logger.logInfo(`选择了股票: ${foundStock?.custom_name || foundStock?.company} (${foundStock?.symbol})`, 'finviz-dashboard');
+    } else {
+      setOverviewData(null);
+      setOverviewError('No valid ticker available for overview');
+      setOverviewLoading(false);
     }
+
+    setActiveTab('overview');
+    logger.logInfo(`选择了股票: ${stock.custom_name || stock.company} (${stock.symbol})`, 'finviz-dashboard');
+  }, [logger, overviewCache, getOverviewQueryForStock]);
+
+  const formatPrice = (price?: number) => {
+    if (price === undefined || price === null) return '--';
+    return price.toFixed(2);
   };
 
+  const formatChange = (change?: number) => {
+    if (change === undefined || change === null) return '--';
+    const sign = change >= 0 ? '+' : '';
+    return `${sign}${change.toFixed(2)}%`;
+  };
+
+  const getChangeColor = (change?: number) => {
+    if (change === undefined || change === null) return '#8c8c8c';
+    return change >= 0 ? '#cf1322' : '#3f8600';
+  };
+
+  const watchlistActionItems = useMemo(() => ([
+    {
+      key: 'edit',
+      label: 'Edit',
+      icon: <EditOutlined />,
+    },
+    {
+      key: 'delete',
+      label: 'Delete',
+      icon: <DeleteOutlined />,
+      danger: true,
+    },
+  ]), []);
+
   const loadRelatedNews = async () => {
-    if (!selectedKey) return;
+    if (!selectedStock) return;
     
-    // 重置分页状态
     setNewsOffset(0);
     setHasMoreNews(true);
     
-    // 生成缓存键
-    const cacheKey = selectedType === 'stock' && selectedStock 
-      ? getCacheKey('stock', selectedStock.symbol)
-      : selectedType === 'group' && selectedGroup
-      ? getCacheKey('group', selectedGroup)
-      : null;
+    const cacheKey = getCacheKey('stock', selectedStock.symbol);
+    const cachedNews = getCachedNews(cacheKey);
     
-    // 检查缓存
-    if (cacheKey) {
-      const cachedNews = getCachedNews(cacheKey);
-      if (cachedNews) {
-        setNewsData(cachedNews);
-        setNewsOffset(NEWS_PAGE_SIZE);
-        setHasMoreNews(cachedNews.length === NEWS_PAGE_SIZE);
-        logger.logInfo(`使用缓存数据: ${cacheKey}`, 'finviz-dashboard');
-        return;
-      }
+    if (cachedNews) {
+      setNewsData(cachedNews);
+      setNewsOffset(NEWS_PAGE_SIZE);
+      setHasMoreNews(cachedNews.length === NEWS_PAGE_SIZE);
+      logger.logInfo(`使用缓存数据: ${cacheKey}`, 'finviz-dashboard');
+      return;
     }
     
     setContentLoading(true);
     try {
-      if (selectedType === 'stock' && selectedStock) {
-        await loadStockNews(selectedStock.symbol, cacheKey, true);
-      } else if (selectedType === 'group' && selectedGroup) {
-        await loadGroupNews(selectedGroup, cacheKey, true);
-      }
+      await loadStockNews(selectedStock.symbol, cacheKey, true);
     } catch (error) {
       message.error('Failed to load related news');
       logger.logError('Failed to load related news', 'finviz-dashboard', error);
@@ -1003,71 +1031,20 @@ const FinvizDashboard: React.FC = () => {
     }
   }, [newsOffset, NEWS_PAGE_SIZE, setCachedNews, logger]);
 
-  const loadGroupNews = useCallback(async (groupName: string, cacheKey?: string | null, reset: boolean = true) => {
-    try {
-      // 获取该分组下所有股票的新闻
-      const group = watchlistGroups.find(g => g.group_name === groupName);
-      if (!group || group.items.length === 0) {
-        setNewsData([]);
-        return;
-      }
-
-      // 获取分组中第一个股票的新闻作为示例
-      // 实际应用中可能需要合并多个股票的新闻
-      const firstStock = group.items[0];
-      if (firstStock.sector) {
-        const offset = reset ? 0 : newsOffset;
-        const news = await dashboardAPI.getSectorNews(firstStock.sector, { 
-          limit: NEWS_PAGE_SIZE, 
-          offset: offset 
-        });
-        
-        if (reset) {
-          setNewsData(news);
-          setNewsOffset(NEWS_PAGE_SIZE);
-        } else {
-          setNewsData(prev => [...prev, ...news]);
-          setNewsOffset(prev => prev + NEWS_PAGE_SIZE);
-        }
-        
-        // 检查是否还有更多数据
-        setHasMoreNews(news.length === NEWS_PAGE_SIZE);
-        
-        // 缓存数据（仅在重置时缓存）
-        if (cacheKey && reset) {
-          setCachedNews(cacheKey, news);
-        }
-        
-        logger.logInfo(`加载分组新闻: ${groupName}, ${news.length} 条 (offset: ${offset})`, 'finviz-dashboard');
-      } else {
-        setNewsData([]);
-      }
-    } catch (error) {
-      logger.logError(`加载分组新闻失败: ${groupName}`, 'finviz-dashboard', error);
-      if (reset) {
-        setNewsData([]);
-      }
-    }
-  }, [watchlistGroups, newsOffset, NEWS_PAGE_SIZE, setCachedNews, logger]);
-
   // 加载更多新闻
   const loadMoreNews = useCallback(async () => {
-    if (!hasMoreNews || loadingMoreNews || !selectedKey) return;
+    if (!hasMoreNews || loadingMoreNews || !selectedStock) return;
     
     setLoadingMoreNews(true);
     try {
-      if (selectedType === 'stock' && selectedStock) {
-        await loadStockNews(selectedStock.symbol, null, false);
-      } else if (selectedType === 'group' && selectedGroup) {
-        await loadGroupNews(selectedGroup, null, false);
-      }
+      await loadStockNews(selectedStock.symbol, null, false);
     } catch (error) {
       logger.logError('Failed to load more news', 'finviz-dashboard', error);
       message.error('Failed to load more news');
     } finally {
       setLoadingMoreNews(false);
     }
-  }, [hasMoreNews, loadingMoreNews, selectedKey, selectedType, selectedStock, selectedGroup, loadGroupNews, loadStockNews, logger]);
+  }, [hasMoreNews, loadingMoreNews, selectedStock, loadStockNews, logger]);
 
   // 滚动检测和自动加载更多新闻
   useEffect(() => {
@@ -1183,10 +1160,13 @@ const FinvizDashboard: React.FC = () => {
       
       // 如果删除的是当前选中的股票，清空选择
       if (selectedStock?.watchlist_id === watchlistId) {
-        setSelectedKey('');
-        setSelectedType('');
         setSelectedStock(null);
+        setResearchReports([]);
         setNewsData([]);
+        setOverviewData(null);
+        setOverviewError(null);
+        setOverviewLoading(false);
+        setActiveTab('overview');
       }
       
       logger.logInfo(`从watchlist移除: ${symbol}`, 'finviz-dashboard');
@@ -1194,6 +1174,230 @@ const FinvizDashboard: React.FC = () => {
       message.error('Failed to remove');
       logger.logError(`Failed to remove watchlist item: ${symbol}`, 'finviz-dashboard', error);
     }
+  };
+
+  const handleWatchlistAction = useCallback((action: string, item: WatchlistItem) => {
+    if (action === 'edit') {
+      setEditingItem(item);
+      setEditModalVisible(true);
+    } else if (action === 'delete') {
+      Modal.confirm({
+        title: 'Delete Watchlist Item',
+        content: `Are you sure you want to remove ${item.symbol} from your watchlist?`,
+        okText: 'Delete',
+        okType: 'danger',
+        cancelText: 'Cancel',
+        centered: true,
+        onOk: async () => {
+          await handleRemoveFromWatchlist(item.watchlist_id, item.symbol);
+        },
+      });
+    }
+  }, [handleRemoveFromWatchlist]);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const activeId = Number(active.id);
+    const overId = Number(over.id);
+
+    const flattened = watchlistGroups.flatMap(group =>
+      group.items.map(item => ({
+        ...item,
+        group_name: normalizeGroupName(group.group_name),
+        original_group_name: group.group_name,
+      }))
+    );
+
+    const oldIndex = flattened.findIndex(item => item.watchlist_id === activeId);
+    const newIndex = flattened.findIndex(item => item.watchlist_id === overId);
+
+    if (oldIndex === -1 || newIndex === -1) {
+      return;
+    }
+
+    const activeItemGroupKey = flattened[oldIndex].group_name;
+    const overItemGroupKey = flattened[newIndex].group_name;
+    const overItemOriginalGroup =
+      flattened[newIndex].original_group_name ?? flattened[newIndex].group_name;
+
+    const previousGroups = watchlistGroups.map(group => ({
+      group_name: group.group_name,
+      items: group.items.map(item => ({ ...item })),
+    }));
+    const previousSelected = selectedStock;
+
+    const reorderedFlatList = arrayMove(flattened, oldIndex, newIndex);
+
+    // 更新被拖拽项的分组信息（若有变化）
+    const movedItemIndex = reorderedFlatList.findIndex(item => item.watchlist_id === activeId);
+    if (movedItemIndex !== -1) {
+      reorderedFlatList[movedItemIndex] = {
+        ...reorderedFlatList[movedItemIndex],
+        group_name: overItemGroupKey,
+        original_group_name: overItemOriginalGroup ?? overItemGroupKey,
+      };
+    }
+
+    const groupOrder = watchlistGroups.map(group => ({
+      key: normalizeGroupName(group.group_name),
+      label: group.group_name,
+    }));
+
+    const groupIndexMap = new Map<string, number>();
+    groupOrder.forEach(({ key }, index) => {
+      if (!groupIndexMap.has(key)) {
+        groupIndexMap.set(key, index);
+      }
+    });
+
+    const updatedGroups: WatchlistGroup[] = groupOrder.map(({ label }) => ({
+      group_name: label,
+      items: [],
+    }));
+
+    reorderedFlatList.forEach(item => {
+      const normalizedKey = item.group_name;
+      let groupIndex = groupIndexMap.get(normalizedKey);
+
+      if (groupIndex === undefined) {
+        groupIndex = updatedGroups.length;
+        groupIndexMap.set(normalizedKey, groupIndex);
+        updatedGroups.push({
+          group_name: item.original_group_name ?? normalizedKey,
+          items: [],
+        });
+      }
+
+      const { group_name: _normalized, original_group_name: _original, ...rest } = item;
+      updatedGroups[groupIndex].items.push({ ...rest });
+    });
+
+    const reorderPayload: Array<{ watchlist_id: number; sort_order: number; group_name?: string | null }> = [];
+
+    const updatedGroupsWithSortOrder = updatedGroups.map(group => {
+      const itemsWithSortOrder = group.items.map((item, index) => {
+        const updatedItem = { ...item, sort_order: index + 1 };
+
+        const payloadGroupName =
+          group.group_name && group.group_name !== 'default' ? group.group_name : null;
+
+        reorderPayload.push({
+          watchlist_id: item.watchlist_id,
+          sort_order: index + 1,
+          group_name: payloadGroupName,
+        });
+
+        return updatedItem;
+      });
+
+      return {
+        ...group,
+        items: itemsWithSortOrder,
+      };
+    });
+
+    setWatchlistGroups(updatedGroupsWithSortOrder);
+
+    if (selectedStock) {
+      const updatedSelected = updatedGroupsWithSortOrder
+        .flatMap(group => group.items)
+        .find(item => item.watchlist_id === selectedStock.watchlist_id);
+
+      if (updatedSelected) {
+        setSelectedStock(updatedSelected as WatchlistStockInfo);
+      }
+    }
+
+    try {
+      setIsReordering(true);
+      await dashboardAPI.reorderWatchlist(reorderPayload);
+      logger.logInfo('Watchlist order updated', 'finviz-dashboard');
+      message.success('Watchlist order updated');
+    } catch (error) {
+      setWatchlistGroups(previousGroups);
+      if (previousSelected) {
+        setSelectedStock(previousSelected);
+      }
+      logger.logError('Failed to reorder watchlist', 'finviz-dashboard', error);
+      message.error('Failed to update watchlist order');
+    } finally {
+      setIsReordering(false);
+    }
+  }, [logger, normalizeGroupName, selectedStock, watchlistGroups]);
+
+  const renderWatchlistList = () => {
+    if (!loading && watchlistGroups.length === 0) {
+      return (
+        <Empty 
+          description="No stocks in your watchlist"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          style={{ margin: '40px 0' }}
+        >
+          <Button 
+            type="primary" 
+            icon={<PlusOutlined />}
+            onClick={() => setAddModalVisible(true)}
+          >
+            Add First Stock
+          </Button>
+        </Empty>
+      );
+    }
+
+    if (!loading && filteredStocks.length === 0) {
+      return (
+        <Empty 
+          description="No stocks match your filters"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          style={{ margin: '40px 0' }}
+        />
+      );
+    }
+
+    return (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis]}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={filteredStocks.map(item => item.watchlist_id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              opacity: isReordering ? 0.7 : 1,
+            }}
+          >
+            {filteredStocks.map(item => (
+              <SortableWatchlistRow
+                key={item.watchlist_id}
+                item={item}
+                isSelected={selectedStock?.watchlist_id === item.watchlist_id}
+                onSelect={stock => handleSelectStock(stock)}
+                onAction={handleWatchlistAction}
+                actionItems={watchlistActionItems}
+                resolvePriceData={resolvePriceData}
+                renderStarsFn={renderStars}
+                formatPrice={formatPrice}
+                formatChange={formatChange}
+                getChangeColor={getChangeColor}
+                disabled={isReordering || loading}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    );
   };
 
   // 添加成功后的回调
@@ -1220,71 +1424,6 @@ const FinvizDashboard: React.FC = () => {
       }
     }
   };
-
-  // 处理右键点击
-  const handleRightClick = (info: any) => {
-    const { event, node } = info;
-    event.preventDefault();
-    event.stopPropagation();
-
-    // 只处理股票节点（不是分组节点）
-    if (node.key && node.key.toString().startsWith('stock-')) {
-      const watchlistId = parseInt(node.key.toString().replace('stock-', ''));
-      
-      // 在所有watchlist中查找对应的股票
-      let foundItem: WatchlistItem | null = null;
-      for (const group of watchlistGroups) {
-        foundItem = group.items.find(item => item.watchlist_id === watchlistId) || null;
-        if (foundItem) break;
-      }
-      
-      if (foundItem) {
-        setContextMenuItem(foundItem);
-        setContextMenuPosition({ x: event.clientX, y: event.clientY });
-        setContextMenuVisible(true);
-      }
-    }
-  };
-
-  // 处理右键菜单项点击
-  const handleContextMenuClick = ({ key }: { key: string }) => {
-    setContextMenuVisible(false);
-    
-    if (!contextMenuItem) return;
-    
-    if (key === 'edit') {
-      setEditingItem(contextMenuItem);
-      setEditModalVisible(true);
-    } else if (key === 'delete') {
-      // 显示确认对话框
-      Modal.confirm({
-        title: 'Delete Watchlist Item',
-        content: `Are you sure you want to remove ${contextMenuItem.symbol} from your watchlist?`,
-        okText: 'Delete',
-        okType: 'danger',
-        cancelText: 'Cancel',
-        centered: true,
-        onOk: async () => {
-          await handleRemoveFromWatchlist(contextMenuItem.watchlist_id, contextMenuItem.symbol);
-        },
-      });
-    }
-  };
-
-  // 右键菜单配置
-  const contextMenuItems = [
-    {
-      key: 'edit',
-      label: 'Edit',
-      icon: <EditOutlined />,
-    },
-    {
-      key: 'delete',
-      label: 'Delete',
-      icon: <DeleteOutlined />,
-      danger: true,
-    },
-  ];
 
   const getSentimentColor = (polarity?: number) => {
     if (!polarity) return 'default';
@@ -1531,35 +1670,46 @@ const FinvizDashboard: React.FC = () => {
   );
 
   const renderOverviewTab = () => {
+    const chartSection = renderStockDetails();
+
     if (overviewLoading) {
       return (
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            minHeight: '240px'
-          }}
-        >
-          <Spin tip="Loading overview..." />
+        <div>
+          {chartSection}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              minHeight: '240px'
+            }}
+          >
+            <Spin tip="Loading overview..." />
+          </div>
         </div>
       );
     }
 
     if (overviewError) {
       return (
-        <Card>
-          <Empty description={overviewError} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        </Card>
+        <div>
+          {chartSection}
+          <Card>
+            <Empty description={overviewError} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          </Card>
+        </div>
       );
     }
 
     if (!overviewData || !overviewData.company) {
       return (
-        <Empty
-          description="Select a stock to view company overview"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
+        <div>
+          {chartSection}
+          <Empty
+            description="Select a stock to view company overview"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </div>
       );
     }
 
@@ -1568,6 +1718,7 @@ const FinvizDashboard: React.FC = () => {
 
     return (
       <div>
+        {chartSection}
         <Card
           title={
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2138,7 +2289,6 @@ const FinvizDashboard: React.FC = () => {
                 }
                 description={
                   <Space wrap>
-                    <Tag color="green">{report.sector}</Tag>
                     <Tag color="orange">{report.industry}</Tag>
                     <Tag color="blue">{report.ticker}</Tag>
                     <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -2195,65 +2345,21 @@ const FinvizDashboard: React.FC = () => {
     }
 
     return (
-      <div>
-      {/* Candlestick Chart */}
-      <StockChart 
-        key={`${selectedStock.symbol}-${selectedStock.watchlist_id}`}
-        symbol={selectedStock.symbol}
-        companyName={selectedStock.custom_name || selectedStock.company}
-        primaryTicker={selectedStock.primaryticker}
-        realTimePriceData={priceData}
-        onRefreshPrice={loadWatchlistPrices}
-        priceLoading={pricesLoading}
-        sector={selectedStock.sector}
-        industry={selectedStock.industry}
-        exchange={selectedStock.exchange}
-      />
-    </div>
-    );
-  };
-
-  const renderGroupStats = () => {
-    if (!selectedGroup) return null;
-
-    const group = watchlistGroups.find(g => g.group_name === selectedGroup);
-    if (!group) return null;
-
-    const sectorCount = group.items.reduce((acc, item) => {
-      const sector = item.sector || 'Unknown';
-      acc[sector] = (acc[sector] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topSector = Object.entries(sectorCount)
-      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'N/A';
-
-    return (
-      <Card size="small" style={{ marginBottom: '16px' }}>
-        <Row gutter={16}>
-          <Col span={8}>
-            <Statistic 
-              title="Stock Count" 
-              value={group.items.length}
-              valueStyle={{ fontSize: '16px' }}
-            />
-          </Col>
-          <Col span={8}>
-            <Statistic 
-              title="Top Sector" 
-              value={topSector}
-              valueStyle={{ fontSize: '16px' }}
-            />
-          </Col>
-          <Col span={8}>
-            <Statistic 
-              title="Sectors" 
-              value={Object.keys(sectorCount).length}
-              valueStyle={{ fontSize: '16px' }}
-            />
-          </Col>
-        </Row>
-      </Card>
+      <div style={{ marginBottom: 24 }}>
+        {/* Candlestick Chart */}
+        <StockChart 
+          key={`${selectedStock.symbol}-${selectedStock.watchlist_id}`}
+          symbol={selectedStock.symbol}
+          companyName={selectedStock.custom_name || selectedStock.company}
+          primaryTicker={selectedStock.primaryticker}
+          realTimePriceData={priceData}
+          onRefreshPrice={loadWatchlistPrices}
+          priceLoading={pricesLoading}
+          sector={selectedStock.sector}
+          industry={selectedStock.industry}
+          exchange={selectedStock.exchange}
+        />
+      </div>
     );
   };
 
@@ -2329,7 +2435,7 @@ const FinvizDashboard: React.FC = () => {
             {!watchlistCollapsed && (
               <>
                 <Input
-                  placeholder="Search groups, stocks, or sectors..."
+                  placeholder="Search stocks..."
                   prefix={<SearchOutlined />}
                   value={searchValue}
                   onChange={e => setSearchValue(e.target.value)}
@@ -2337,13 +2443,21 @@ const FinvizDashboard: React.FC = () => {
                   allowClear
                 />
                 
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
+                  <Segmented
+                    size="small"
+                    value={exchangeFilter}
+                    onChange={value => setExchangeFilter(value as ExchangeFilterValue)}
+                    options={EXCHANGE_FILTER_TABS}
+                    block
+                    style={{ flex: 1 }}
+                  />
                   <Select
                     placeholder="Priority"
                     value={priorityFilter}
                     onChange={setPriorityFilter}
                     size="small"
-                    style={{ flex: 1, border: 'none' }}
+                    style={{ width: 140, border: 'none' }}
                     variant="borderless"
                   >
                     {PRIORITY_FILTER_OPTIONS.map(option => (
@@ -2354,101 +2468,13 @@ const FinvizDashboard: React.FC = () => {
                       </Option>
                     ))}
                   </Select>
-                  
-                  <Select
-                    placeholder="Exchange"
-                    value={exchangeFilter}
-                    onChange={setExchangeFilter}
-                    size="small"
-                    style={{ flex: 1, border: 'none' }}
-                    variant="borderless"
-                  >
-                    <Option key="all" value="all">
-                      <span style={{ fontSize: '12px' }}>All</span>
-                    </Option>
-                    {getUniqueExchanges(watchlistGroups).map(exchange => (
-                      <Option key={exchange} value={exchange}>
-                        <span style={{ fontSize: '12px' }}>{exchange}</span>
-                      </Option>
-                    ))}
-                  </Select>
-                  
-                  <Select
-                    placeholder="Sector"
-                    value={sectorFilter}
-                    onChange={setSectorFilter}
-                    size="small"
-                    style={{ flex: 1, border: 'none' }}
-                    variant="borderless"
-                  >
-                    <Option key="all" value="all">
-                      <span style={{ fontSize: '12px' }}>Sectors</span>
-                    </Option>
-                    {getUniqueSectors(watchlistGroups).map(sector => (
-                      <Option key={sector} value={sector}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                          {getSectorIcon(sector)}
-                          <span style={{ fontSize: '12px' }}>{sector}</span>
-                        </div>
-                      </Option>
-                    ))}
-                  </Select>
                 </div>
               </>
             )}
             
             {!watchlistCollapsed && (
-              <Spin spinning={loading}>
-                {watchlistGroups.length === 0 && !loading ? (
-                  <Empty 
-                    description="No stocks in your watchlist"
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    style={{ margin: '40px 0' }}
-                  >
-                    <Button 
-                      type="primary" 
-                      icon={<PlusOutlined />}
-                      onClick={() => setAddModalVisible(true)}
-                    >
-                      Add First Stock
-                    </Button>
-                  </Empty>
-                ) : (
-                  <div>
-                    <Tree
-                      showIcon
-                      selectedKeys={selectedKey ? [selectedKey] : []}
-                      expandedKeys={expandedKeys}
-                      onExpand={setExpandedKeys}
-                      treeData={treeData}
-                      onSelect={handleTreeSelect}
-                      onRightClick={handleRightClick}
-                      style={{ background: 'transparent' }}
-                    />
-                    {contextMenuVisible && (
-                      <Dropdown
-                        menu={{ items: contextMenuItems, onClick: handleContextMenuClick }}
-                        trigger={['click']}
-                        open={contextMenuVisible}
-                        onOpenChange={(visible) => {
-                          setContextMenuVisible(visible);
-                        }}
-                      >
-                        <div
-                          style={{
-                            position: 'fixed',
-                            left: contextMenuPosition.x,
-                            top: contextMenuPosition.y,
-                            width: 1,
-                            height: 1,
-                            pointerEvents: 'none',
-                            zIndex: 9999
-                          }}
-                        />
-                      </Dropdown>
-                    )}
-                  </div>
-                )}
+              <Spin spinning={loading || pricesLoading}>
+                {renderWatchlistList()}
               </Spin>
             )}
             
@@ -2490,20 +2516,8 @@ const FinvizDashboard: React.FC = () => {
               }}>
                 <Spin size="large" tip="Loading watchlist..." />
               </div>
-            ) : selectedKey ? (
+            ) : selectedStock ? (
               <>
-                {selectedType === 'group' && (
-                  <div style={{ marginBottom: '24px' }}>
-                    <Title level={3}>
-                      {selectedGroup} 分组
-                    </Title>
-                  </div>
-                )}
-
-                {/* 详细信息卡片 */}
-                {selectedType === 'stock' && renderStockDetails()}
-                {selectedType === 'group' && renderGroupStats()}
-
                 <Tabs 
                   activeKey={activeTab}
                   onChange={(key) => {
@@ -2518,43 +2532,39 @@ const FinvizDashboard: React.FC = () => {
                   }}
                   size="large"
                 >
-                  {selectedType === 'stock' && (
-                    <TabPane
-                      tab={
-                        <span>
-                          <DashboardOutlined />
-                          Overview
-                        </span>
-                      }
-                      key="overview"
-                    >
-                      {renderOverviewTab()}
-                    </TabPane>
-                  )}
+                  <TabPane
+                    tab={
+                      <span>
+                        <DashboardOutlined />
+                        Overview
+                      </span>
+                    }
+                    key="overview"
+                  >
+                    {renderOverviewTab()}
+                  </TabPane>
                   <TabPane 
                     tab={
                       <span>
                         <FileTextOutlined />
-                        Related News
+                        News
                       </span>
                     } 
                     key="news"
                   >
                     {renderNewsTab()}
                   </TabPane>
-                  {selectedType === 'stock' && (
-                    <TabPane 
-                      tab={
-                        <span>
-                          <FileTextOutlined />
-                          Research Report
-                        </span>
-                      } 
-                      key="reports"
-                    >
-                      {renderResearchReportsTab()}
-                    </TabPane>
-                  )}
+                  <TabPane 
+                    tab={
+                      <span>
+                        <FileTextOutlined />
+                        Research Report
+                      </span>
+                    } 
+                    key="reports"
+                  >
+                    {renderResearchReportsTab()}
+                  </TabPane>
                 </Tabs>
               </>
             ) : (
@@ -2569,7 +2579,7 @@ const FinvizDashboard: React.FC = () => {
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
                     <span>
-                      Please select a stock or group from the left<br />
+                      Please select a stock from the left<br />
                       to view related news and details
                     </span>
                   }
@@ -2726,7 +2736,6 @@ const FinvizDashboard: React.FC = () => {
                                   }
 
                                   const tags = getClassificationTags(classification);
-                                  const relatedSectors = getRelatedSectors(classification);
 
                                   return (
                                     <>
@@ -2747,19 +2756,6 @@ const FinvizDashboard: React.FC = () => {
                                         </Space>
                                       </div>
 
-                                      {/* 相关行业 */}
-                                      {relatedSectors.length > 0 && (
-                                        <div>
-                                          <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Sectors:</Text>
-                                          <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                                            {relatedSectors.map(sector => (
-                                              <Tag key={sector} color="purple" style={{ fontSize: '9px' }}>
-                                                {sector}
-                                              </Tag>
-                                            ))}
-                                          </Space>
-                                        </div>
-                                      )}
                                     </>
                                   );
                                 })()}

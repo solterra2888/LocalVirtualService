@@ -13,6 +13,21 @@ interface ReportHeaderProps {
 }
 
 const ReportHeader: React.FC<ReportHeaderProps> = ({ meta, onRefresh, refreshing = false }) => {
+  // 格式化日期为中文格式：2025年1月15日（周三）
+  const formatDateChinese = (dateStr: string, includeWeekday: boolean = true) => {
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const weekday = weekdays[date.getDay()];
+    
+    if (includeWeekday) {
+      return `${year}年${month}月${day}日（${weekday}）`;
+    }
+    return `${year}年${month}月${day}日`;
+  };
+
   // 格式化生成时间（显示中国和美国时区）
   const formatGeneratedTime = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -68,6 +83,11 @@ const ReportHeader: React.FC<ReportHeaderProps> = ({ meta, onRefresh, refreshing
           <Text className="report-subtitle">
             Global Markets Analysis & Performance Review
           </Text>
+          <div style={{ marginTop: '8px', marginBottom: '4px' }}>
+            <Text style={{ fontSize: '11px', color: '#666', fontStyle: 'italic' }}>
+              数据截至：{formatDateChinese(meta.week_end)} • 周度对比：{formatDateChinese(meta.week_start, false)} 至 {formatDateChinese(meta.week_end, false)}（基于数据库中最新的交易日）
+            </Text>
+          </div>
           <div style={{ marginTop: '8px' }}>
             <Text style={{ fontSize: '11px', color: '#999' }}>
               Report Generated: 

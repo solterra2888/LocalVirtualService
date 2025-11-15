@@ -63,7 +63,8 @@ import {
   createTheme,
   batchUploadThemes,
   getThemeAssociations,
-  verifyTicker
+  verifyTicker,
+  getAllGroups
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
@@ -91,10 +92,12 @@ interface PageState {
   editModalVisible: boolean;
   editingTheme: InvestmentTheme | null;
   editDescription: string;
+  editGroup: string;
   editLoading: boolean;
   selectedRowKeys: React.Key[];
   createModalVisible: boolean;
   createStep: number;
+  newThemeGroup: string;
   newThemeName: string;
   newThemeCategory: string;
   newThemeId: string;
@@ -103,12 +106,12 @@ interface PageState {
   newThemeDescription: string;
   generatingDescription: boolean;
   creatingTheme: boolean;
-  helpModalVisible: boolean;
   // 批量上传相关
   batchUploadModalVisible: boolean;
   uploadingFile: boolean;
   uploadedFile: File | null;
-  batchUploadMarket: string;  // 新增：market 选择
+  batchUploadGroup: string;  // Group 分组（必填）
+  batchUploadMarket: string;  // market 选择
   uploadPreview: {
     theme_name: string;  // 主题名称（整个文件中唯一）
     total_themes: number;  // 要创建的主题数量（= category 数量）
@@ -124,9 +127,12 @@ interface PageState {
   associationModalVisible: boolean;
   associationLoading: boolean;
   associationTheme: InvestmentTheme | null;
-  associationData: ThemeAssociation[];
-  verifyingTickers: Set<string>;  // 正在验证的tickers
-  searchKeyword: string;
+    associationData: ThemeAssociation[];
+    verifyingTickers: Set<string>;  // 正在验证的tickers
+    searchKeyword: string;
+    selectedGroups: string[];  // 选中的 Group 筛选值（支持多选）
+    availableGroups: string[];  // 所有可用的 groups（从 API 获取）
+    loadingGroups: boolean;  // 是否正在加载 groups
 }
 
 const InvestmentThemesPage: React.FC = () => {
@@ -147,10 +153,12 @@ const InvestmentThemesPage: React.FC = () => {
     editModalVisible: false,
     editingTheme: null,
     editDescription: '',
+    editGroup: '',
     editLoading: false,
     selectedRowKeys: [],
     createModalVisible: false,
     createStep: 1,
+    newThemeGroup: '',
     newThemeName: '',
     newThemeCategory: '',
     newThemeId: '',
@@ -159,11 +167,11 @@ const InvestmentThemesPage: React.FC = () => {
     newThemeDescription: '',
     generatingDescription: false,
     creatingTheme: false,
-    helpModalVisible: false,
     // 批量上传相关
     batchUploadModalVisible: false,
     uploadingFile: false,
     uploadedFile: null,
+    batchUploadGroup: '',  // 默认为空，必须用户填写
     batchUploadMarket: 'US',  // 默认 US 市场
     uploadPreview: null,
     batchTaskId: null,
@@ -175,21 +183,26 @@ const InvestmentThemesPage: React.FC = () => {
     associationTheme: null,
     associationData: [],
     verifyingTickers: new Set(),
-    searchKeyword: ''
+    searchKeyword: '',
+    selectedGroups: [],
+    availableGroups: [],
+    loadingGroups: false
   });
 
 
   // Load theme list
-  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string) => {
+  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string, groups?: string[]) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       const currentPage = page || state.currentPage;
       const currentPageSize = pageSize || state.pageSize;
       const effectiveSearch = searchKeyword !== undefined ? searchKeyword : state.searchKeyword;
+      const effectiveGroups = groups !== undefined ? groups : state.selectedGroups;
       const response = await listThemes(
         currentPageSize,
         (currentPage - 1) * currentPageSize,
-        effectiveSearch
+        effectiveSearch,
+        effectiveGroups.length > 0 ? effectiveGroups : undefined
       );
       
       setState(prev => ({
@@ -213,7 +226,16 @@ const InvestmentThemesPage: React.FC = () => {
       searchKeyword: trimmed,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, trimmed);
+    loadThemes(1, state.pageSize, trimmed, state.selectedGroups);
+  };
+  
+  const handleGroupFilterChange = (groups: string[]) => {
+    setState(prev => ({
+      ...prev,
+      selectedGroups: groups,
+      currentPage: 1
+    }));
+    loadThemes(1, state.pageSize, state.searchKeyword, groups);
   };
 
   const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -224,9 +246,39 @@ const InvestmentThemesPage: React.FC = () => {
     }));
 
     if (value === '') {
-      loadThemes(1, state.pageSize, '');
+      loadThemes(1, state.pageSize, '', state.selectedGroups);
     }
   };
+  
+  // 加载所有可用的 groups（从 API 获取，不受分页限制）
+  const loadAvailableGroups = async () => {
+    if (state.loadingGroups || state.availableGroups.length > 0) {
+      return; // 已加载或正在加载，跳过
+    }
+    
+    setState(prev => ({ ...prev, loadingGroups: true }));
+    try {
+      const response = await getAllGroups();
+      if (response.success) {
+        setState(prev => ({
+          ...prev,
+          availableGroups: response.groups || [],
+          loadingGroups: false
+        }));
+      } else {
+        setState(prev => ({ ...prev, loadingGroups: false }));
+      }
+    } catch (error) {
+      console.error('Failed to load groups:', error);
+      setState(prev => ({ ...prev, loadingGroups: false }));
+    }
+  };
+  
+  // 组件加载时获取所有 groups
+  useEffect(() => {
+    loadAvailableGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 只在组件首次加载时执行
 
   const showAssociationsModal = async (theme: InvestmentTheme) => {
     setState(prev => ({
@@ -886,7 +938,8 @@ const InvestmentThemesPage: React.FC = () => {
       ...prev,
       editModalVisible: true,
       editingTheme: theme,
-      editDescription: theme.description_preview || ''
+      editDescription: theme.description_preview || '',
+      editGroup: theme.group || ''
     }));
   };
 
@@ -902,17 +955,20 @@ const InvestmentThemesPage: React.FC = () => {
     setState(prev => ({ ...prev, editLoading: true }));
 
     try {
+      // 始终发送 group 值（即使是空字符串，表示清空）
+      // 这样后端可以正确处理清空操作
       const result = await updateThemeDescription(
         state.editingTheme.theme_id,
         state.editDescription,
-        state.editingTheme.version
+        state.editingTheme.version,
+        state.editGroup.trim()  // 发送空字符串表示清空，非空字符串表示更新
       );
 
       if (result.description_saved) {
         if (result.embedding_updated) {
-          message.success('Description and vector updated successfully');
+          message.success('Description, group, and vector updated successfully');
         } else {
-          message.warning(`Description saved, but vector update failed: ${result.error || 'Unknown error'}`);
+          message.warning(`Description and group saved, but vector update failed: ${result.error || 'Unknown error'}`);
         }
         
         setState(prev => ({
@@ -920,6 +976,7 @@ const InvestmentThemesPage: React.FC = () => {
           editModalVisible: false,
           editingTheme: null,
           editDescription: '',
+          editGroup: '',
           editLoading: false
         }));
         
@@ -1123,7 +1180,8 @@ const InvestmentThemesPage: React.FC = () => {
       const result = await generateThemeDescription(
         state.newThemeName, 
         state.newThemeCategory,
-        state.newThemeMarket || undefined,
+        state.newThemeGroup.trim() || undefined, // group is now optional
+        undefined, // market parameter removed - users can input tickers with suffixes
         tickersArray
       );
       
@@ -1164,8 +1222,9 @@ const InvestmentThemesPage: React.FC = () => {
         state.newThemeName,
         state.newThemeCategory,
         state.newThemeDescription,
+        state.newThemeGroup.trim() || undefined, // group is now optional
         state.newThemeId || undefined,
-        state.newThemeMarket || undefined,
+        undefined, // market parameter removed - users can input tickers with suffixes
         tickersArray
       );
       
@@ -1181,6 +1240,7 @@ const InvestmentThemesPage: React.FC = () => {
           ...prev,
           createModalVisible: false,
           createStep: 1,
+          newThemeGroup: '',
           newThemeName: '',
           newThemeCategory: '',
           newThemeId: '',
@@ -1214,6 +1274,7 @@ const InvestmentThemesPage: React.FC = () => {
           ...prev,
           createModalVisible: false,
           createStep: 1,
+          newThemeGroup: '',
           newThemeName: '',
           newThemeCategory: '',
           newThemeId: '',
@@ -1262,7 +1323,11 @@ const InvestmentThemesPage: React.FC = () => {
     setState(prev => ({ ...prev, uploadingFile: true }));
     
     try {
-      const result = await batchUploadThemes(state.uploadedFile, state.batchUploadMarket);
+      const result = await batchUploadThemes(
+        state.uploadedFile, 
+        state.batchUploadGroup.trim() || undefined, // group is now optional
+        state.batchUploadMarket
+      );
       
       if (result.success) {
         message.success(result.message);
@@ -1332,6 +1397,7 @@ const InvestmentThemesPage: React.FC = () => {
       ...prev,
       batchUploadModalVisible: false,
       uploadedFile: null,
+      batchUploadGroup: '',  // 重置为空
       batchUploadMarket: 'US',  // 重置为默认值
       uploadPreview: null,
       batchTaskId: null,
@@ -1355,19 +1421,34 @@ const InvestmentThemesPage: React.FC = () => {
       ['crypto', 'Treasury', 'MSTR', 'MicroStrategy Inc']
     ];
 
-    const createRow = (row: string[]) =>
-      `<tr>${row.map(cell => `<td style="mso-number-format:'@';">${cell}</td>`).join('')}</tr>`;
+    // 将单元格值转义为CSV格式（处理包含逗号、引号或换行符的值）
+    const escapeCSV = (value: string): string => {
+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+        // 将值用双引号包裹，并将内部的双引号转义为两个双引号
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    };
 
-    const tableHtml =
-      `<table border="1"><thead>${createRow(headers)}</thead><tbody>${sampleRows.map(createRow).join('')}</tbody></table>`;
+    // 将行转换为CSV格式
+    const createCSVRow = (row: string[]): string => {
+      return row.map(escapeCSV).join(',');
+    };
 
-    const blob = new Blob(['\ufeff' + tableHtml], {
-      type: 'application/vnd.ms-excel'
+    // 生成CSV内容
+    const csvContent = [
+      createCSVRow(headers),
+      ...sampleRows.map(createCSVRow)
+    ].join('\n');
+
+    // 添加BOM以支持Excel正确识别UTF-8编码
+    const blob = new Blob(['\ufeff' + csvContent], {
+      type: 'text/csv;charset=utf-8;'
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'investment_theme_batch_template.xls';
+    link.download = 'investment_theme_batch_template.csv';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1391,11 +1472,12 @@ const InvestmentThemesPage: React.FC = () => {
         category ? <Text>{category}</Text> : <Text type="secondary">Not set</Text>
     },
     {
-      title: 'Created By',
-      dataIndex: 'created_by',
-      key: 'created_by',
-      render: (createdBy?: string) =>
-        createdBy ? <Text>{createdBy}</Text> : <Text type="secondary">Unknown</Text>
+      title: 'Group',
+      dataIndex: 'group',
+      key: 'group',
+      width: 120,
+      render: (group?: string) =>
+        group ? <Tag color="blue">{group}</Tag> : <Text type="secondary">-</Text>
     },
     {
       title: 'Tickers',
@@ -1493,17 +1575,6 @@ const InvestmentThemesPage: React.FC = () => {
         </Tooltip>
       )
     },
-    {
-      title: 'Updated',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      render: (date: string) => date ? new Date(date).toLocaleString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      }) : '-'
-    },
     ...(isAdmin ? [{
       title: 'Actions',
       key: 'actions',
@@ -1544,18 +1615,9 @@ const InvestmentThemesPage: React.FC = () => {
               <FundOutlined /> Investment Themes Settings
             </Title>
             <Paragraph type="secondary">
-              Intelligent theme matching system based on Reverse Capital Embedding technique, automatically associating news with 150+ investment themes through semantic analysis
+              Intelligent theme matching system based on Embedding technique, automatically associating news through semantic analysis. Only admin can create and edit themes.
             </Paragraph>
           </div>
-          <Button
-            type="primary"
-            ghost
-            icon={<InfoCircleOutlined />}
-            onClick={() => setState(prev => ({ ...prev, helpModalVisible: true }))}
-            style={{ marginTop: '8px' }}
-          >
-            How to Use
-          </Button>
         </div>
       </div>
 
@@ -1601,25 +1663,72 @@ const InvestmentThemesPage: React.FC = () => {
               </>
             )}
             
-            <Tooltip title="Generate descriptions and vectors for new themes, suitable after adding new themes">
-              <Button
-                type={isAdmin ? "default" : "primary"}
-                icon={<SyncOutlined />}
-                onClick={handleSyncThemes}
-              >
-                Sync Theme Data
-              </Button>
-            </Tooltip>
-            
-            <Tooltip title="Use LLM to enhance description quality, recommended when coverage < 90%">
-              <Button
-                type="default"
-                icon={<ExperimentOutlined />}
-                onClick={handleOptimizeDescriptions}
-              >
-                Optimize Descriptions
-              </Button>
-            </Tooltip>
+            {isAdmin && (
+              <>
+                <Tooltip title="Generate descriptions and vectors for new themes, suitable after adding new themes">
+                  <Button
+                    type="default"
+                    icon={<SyncOutlined />}
+                    onClick={handleSyncThemes}
+                  >
+                    Sync Theme Data
+                  </Button>
+                </Tooltip>
+                
+                <Tooltip title="Use LLM to enhance description quality, recommended when coverage < 90%">
+                  <Button
+                    type="default"
+                    icon={<ExperimentOutlined />}
+                    onClick={handleOptimizeDescriptions}
+                  >
+                    Optimize Descriptions
+                  </Button>
+                </Tooltip>
+                
+                {/* Advanced Options Dropdown Menu */}
+                <Dropdown
+                  overlay={
+                    <Menu>
+                      <Menu.Item
+                        key="force-vectors"
+                        icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
+                        onClick={handleForceUpdateVectors}
+                      >
+                        <Text type="danger">Force Update All Vectors</Text>
+                        <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                          Only for model upgrade (20-30 mins)
+                        </div>
+                      </Menu.Item>
+                      <Menu.Item
+                        key="force-descriptions"
+                        icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
+                        onClick={handleForceRegenerateDescriptions}
+                      >
+                        <Text type="danger">Regenerate All Descriptions</Text>
+                        <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                          Only after Prompt optimization (15-25 mins)
+                        </div>
+                      </Menu.Item>
+                      <Menu.Divider />
+                      <Menu.Item
+                        key="logs"
+                        icon={<InfoCircleOutlined />}
+                        disabled
+                      >
+                        View Execution Logs (In Development)
+                      </Menu.Item>
+                    </Menu>
+                  }
+                  trigger={['click']}
+                >
+                  <Button
+                    icon={<SettingOutlined />}
+                  >
+                    Advanced Options <DownOutlined />
+                  </Button>
+                </Dropdown>
+              </>
+            )}
             
             <Tooltip title="Enter news text to test theme matching in real-time">
               <Button
@@ -1629,49 +1738,6 @@ const InvestmentThemesPage: React.FC = () => {
                 Test Match
               </Button>
             </Tooltip>
-            
-            {/* Advanced Options Dropdown Menu */}
-            <Dropdown
-              overlay={
-                <Menu>
-                  <Menu.Item
-                    key="force-vectors"
-                    icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
-                    onClick={handleForceUpdateVectors}
-                  >
-                    <Text type="danger">Force Update All Vectors</Text>
-                    <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                      Only for model upgrade (20-30 mins)
-                    </div>
-                  </Menu.Item>
-                  <Menu.Item
-                    key="force-descriptions"
-                    icon={<WarningOutlined style={{ color: '#ff4d4f' }} />}
-                    onClick={handleForceRegenerateDescriptions}
-                  >
-                    <Text type="danger">Regenerate All Descriptions</Text>
-                    <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                      Only after Prompt optimization (15-25 mins)
-                    </div>
-                  </Menu.Item>
-                  <Menu.Divider />
-                  <Menu.Item
-                    key="logs"
-                    icon={<InfoCircleOutlined />}
-                    disabled
-                  >
-                    View Execution Logs (In Development)
-                  </Menu.Item>
-                </Menu>
-              }
-              trigger={['click']}
-            >
-              <Button
-                icon={<SettingOutlined />}
-              >
-                Advanced Options <DownOutlined />
-              </Button>
-            </Dropdown>
             
             <Button
               icon={<ReloadOutlined />}
@@ -1690,7 +1756,7 @@ const InvestmentThemesPage: React.FC = () => {
       <Card
         title="Investment Themes List"
         extra={
-          <Space size="middle">
+          <Space size="middle" wrap>
             <Text type="secondary">Total: {state.total}</Text>
             <Search
               placeholder="Search theme or category"
@@ -1701,6 +1767,27 @@ const InvestmentThemesPage: React.FC = () => {
               onSearch={handleSearchThemes}
               style={{ width: 260 }}
             />
+            <Space size="small">
+              <Text type="secondary">Group:</Text>
+              <Select
+                mode="multiple"
+                placeholder={state.loadingGroups ? "Loading groups..." : "Select groups"}
+                value={state.selectedGroups}
+                onChange={handleGroupFilterChange}
+                style={{ minWidth: 200 }}
+                size="small"
+                allowClear
+                maxTagCount="responsive"
+                loading={state.loadingGroups}
+                notFoundContent={state.loadingGroups ? "Loading..." : "No groups found"}
+              >
+                {state.availableGroups.map(group => (
+                  <Select.Option key={group} value={group}>
+                    {group}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Space>
           </Space>
         }
       >
@@ -1735,7 +1822,7 @@ const InvestmentThemesPage: React.FC = () => {
                 pageSize: pageSize || 20,
                 selectedRowKeys: []  // 清空选中项
               }));
-              loadThemes(page, pageSize || 20);  // 传递新的 pageSize
+              loadThemes(page, pageSize || 20, state.searchKeyword, state.selectedGroups);  // 传递新的 pageSize 和筛选条件
             }
           }}
           size="small"
@@ -1824,7 +1911,14 @@ const InvestmentThemesPage: React.FC = () => {
                         <Text strong style={{ fontSize: '16px' }}>#{result.rank}</Text>
                       </Col>
                       <Col span={14}>
-                        <Text strong>{result.theme_name}</Text>
+                        <Space direction="vertical" size={0} style={{ width: '100%' }}>
+                          <Text strong>{result.theme_name}</Text>
+                          {result.category && (
+                            <Text type="secondary" style={{ fontSize: '12px' }}>
+                              Category: {result.category}
+                            </Text>
+                          )}
+                        </Space>
                       </Col>
                       <Col span={8}>
                         <Tooltip title={`Similarity: ${result.similarity.toFixed(4)}`}>
@@ -1850,13 +1944,14 @@ const InvestmentThemesPage: React.FC = () => {
 
       {/* Edit Description Modal */}
       <Modal
-        title={`Edit Theme Description${state.editingTheme ? ` - ${state.editingTheme.theme_name}` : ''}`}
+        title={`Edit Theme${state.editingTheme ? ` - ${state.editingTheme.theme_name}` : ''}`}
         open={state.editModalVisible}
         onCancel={() => setState(prev => ({ 
           ...prev, 
           editModalVisible: false, 
           editingTheme: null,
-          editDescription: '' 
+          editDescription: '',
+          editGroup: ''
         }))}
         onOk={handleSubmitEdit}
         okText="Save & Re-vectorize"
@@ -1870,9 +1965,9 @@ const InvestmentThemesPage: React.FC = () => {
               message="Important Notes"
               description={
                 <ul style={{ marginBottom: 0, paddingLeft: '20px' }}>
-                  <li>Description will be saved immediately</li>
+                  <li>Description and group will be saved immediately</li>
                   <li>Vector will be regenerated automatically (may take a few seconds)</li>
-                  <li>If vectorization fails, description is still saved</li>
+                  <li>If vectorization fails, description and group are still saved</li>
                 </ul>
               }
               type="info"
@@ -1896,16 +1991,28 @@ const InvestmentThemesPage: React.FC = () => {
               )}
             </Space>
             <Divider />
-            <Form.Item label="Description" required style={{ marginBottom: 0 }}>
-              <TextArea
-                value={state.editDescription}
-                onChange={(e) => setState(prev => ({ ...prev, editDescription: e.target.value }))}
-                placeholder="Enter detailed theme description..."
-                autoSize={{ minRows: 6, maxRows: 12 }}
-                maxLength={2000}
-                showCount
-              />
-            </Form.Item>
+            <Form layout="vertical">
+              <Form.Item label="Group" help="Group name for classifying themes (e.g., AI, crypto, healthcare) - Optional">
+                <Input
+                  placeholder="e.g. AI, Energy (optional)"
+                  value={state.editGroup}
+                  onChange={(e) => setState(prev => ({ ...prev, editGroup: e.target.value }))}
+                  maxLength={100}
+                  showCount
+                />
+              </Form.Item>
+              
+              <Form.Item label="Description" required style={{ marginBottom: 0 }}>
+                <TextArea
+                  value={state.editDescription}
+                  onChange={(e) => setState(prev => ({ ...prev, editDescription: e.target.value }))}
+                  placeholder="Enter detailed theme description..."
+                  autoSize={{ minRows: 6, maxRows: 12 }}
+                  maxLength={2000}
+                  showCount
+                />
+              </Form.Item>
+            </Form>
           </div>
         )}
       </Modal>
@@ -1927,18 +2034,21 @@ const InvestmentThemesPage: React.FC = () => {
       >
         {state.createStep === 1 && (
           <div>
-            <Alert
-              message="Step 1: Basic Information"
-              description="Fill in the theme name, category, and optionally associate stock tickers."
-              type="info"
-              showIcon
-              style={{ marginBottom: 24 }}
-            />
-            
+
             <Form layout="vertical">
+              <Form.Item label="Group" help="Group name for classifying themes (e.g., AI, crypto, healthcare) - Optional">
+                <Input
+                  placeholder="e.g. AI, Energy (optional)"
+                  value={state.newThemeGroup}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeGroup: e.target.value }))}
+                  maxLength={100}
+                  showCount
+                />
+              </Form.Item>
+              
               <Form.Item label="Theme Name" required>
                 <Input
-                  placeholder="e.g. AI Chips, Clean Energy, Quantum Computing"
+                  placeholder="e.g. AI Healthcare, GS Power Up"
                   value={state.newThemeName}
                   onChange={(e) => setState(prev => ({ ...prev, newThemeName: e.target.value }))}
                   maxLength={200}
@@ -1948,7 +2058,7 @@ const InvestmentThemesPage: React.FC = () => {
               
               <Form.Item label="Category" required>
                 <Input
-                  placeholder="e.g. Technology, Healthcare, Finance, Energy"
+                  placeholder="e.g. AI Diagnostics, Uranium Mining"
                   value={state.newThemeCategory}
                   onChange={(e) => setState(prev => ({ ...prev, newThemeCategory: e.target.value }))}
                   maxLength={100}
@@ -1960,31 +2070,14 @@ const InvestmentThemesPage: React.FC = () => {
               
               <Form.Item 
                 label="Associated Stocks (Optional)" 
-                help="Select market and enter ticker symbols to associate with this theme"
+                help="Enter ticker symbols separated by commas. Supports US, HK, SH (Shanghai), SZ (Shenzhen) exchanges. Use full format like NVDA.US, 0700.HK, 688256.SHG, 000977.SHE. You can mix different exchanges in one theme."
               >
-                <Space direction="vertical" style={{ width: '100%' }} size="small">
-                  <Select
-                    value={state.newThemeMarket}
-                    onChange={(value) => setState(prev => ({ ...prev, newThemeMarket: value }))}
-                    style={{ width: 200 }}
-                  >
-                    <Select.Option value="US">🇺🇸 US Market</Select.Option>
-                    <Select.Option value="HK">🇭🇰 HK Market</Select.Option>
-                  </Select>
-                  
-                  <Input
-                    placeholder={`Enter tickers separated by commas (e.g. ${state.newThemeMarket === 'US' ? 'NVDA, AMD, INTC' : '0700, 9988, 3690'})`}
-                    value={state.newThemeTickers}
-                    onChange={(e) => setState(prev => ({ ...prev, newThemeTickers: e.target.value }))}
-                    maxLength={500}
-                  />
-                  
-                  {state.newThemeTickers && (
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      Preview: {state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).map(t => `${t}.${state.newThemeMarket}`).join(', ')}
-                    </Text>
-                  )}
-                </Space>
+                <Input
+                  placeholder="e.g. NVDA.US, AMD.US, 688256.SHG, 000977.SHE, 0700.HK"
+                  value={state.newThemeTickers}
+                  onChange={(e) => setState(prev => ({ ...prev, newThemeTickers: e.target.value }))}
+                  maxLength={500}
+                />
               </Form.Item>
               
               <Divider style={{ margin: '16px 0' }} />
@@ -2039,6 +2132,11 @@ const InvestmentThemesPage: React.FC = () => {
             />
             
             <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }} size="small">
+              {state.newThemeGroup && (
+                <div>
+                  <Text strong>Group:</Text> <Text>{state.newThemeGroup}</Text>
+                </div>
+              )}
               <div>
                 <Text strong>Theme Name:</Text> <Text>{state.newThemeName}</Text>
               </div>
@@ -2047,7 +2145,7 @@ const InvestmentThemesPage: React.FC = () => {
               </div>
               {state.newThemeTickers && (
                 <div>
-                  <Text strong>Associated Stocks:</Text> <Text>{state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).map(t => `${t}.${state.newThemeMarket}`).join(', ')}</Text>
+                  <Text strong>Associated Stocks:</Text> <Text>{state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).join(', ')}</Text>
                 </div>
               )}
               {state.newThemeId && (
@@ -2105,262 +2203,6 @@ const InvestmentThemesPage: React.FC = () => {
         )}
       </Modal>
 
-      {/* Help Modal */}
-      <Modal
-        title={
-          <Space>
-            <InfoCircleOutlined style={{ color: '#1890ff' }} />
-            <span>Investment Themes Settings - User Guide</span>
-          </Space>
-        }
-        open={state.helpModalVisible}
-        onCancel={() => setState(prev => ({ ...prev, helpModalVisible: false }))}
-        footer={null}
-        width={900}
-        style={{ top: 20 }}
-      >
-        <div 
-          dangerouslySetInnerHTML={{ 
-            __html: `
-              <style>
-                .help-guide {
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  line-height: 1.8;
-                  color: #333;
-                }
-                .help-guide h3 {
-                  color: #1890ff;
-                  border-left: 4px solid #1890ff;
-                  padding-left: 12px;
-                  margin-top: 24px;
-                  margin-bottom: 12px;
-                }
-                .help-guide h4 {
-                  color: #52c41a;
-                  margin-top: 16px;
-                  margin-bottom: 8px;
-                }
-                .help-guide .flow-step {
-                  background: #f0f9ff;
-                  border: 2px solid #91d5ff;
-                  border-radius: 8px;
-                  padding: 16px;
-                  margin: 12px 0;
-                  position: relative;
-                  padding-left: 50px;
-                }
-                .help-guide .flow-step::before {
-                  content: counter(step-counter);
-                  counter-increment: step-counter;
-                  position: absolute;
-                  left: 16px;
-                  top: 16px;
-                  background: #1890ff;
-                  color: white;
-                  width: 28px;
-                  height: 28px;
-                  border-radius: 50%;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  font-weight: bold;
-                  font-size: 14px;
-                }
-                .help-guide .flow-container {
-                  counter-reset: step-counter;
-                }
-                .help-guide .icon-badge {
-                  display: inline-block;
-                  background: #1890ff;
-                  color: white;
-                  padding: 2px 8px;
-                  border-radius: 4px;
-                  font-size: 12px;
-                  font-weight: bold;
-                  margin-right: 8px;
-                }
-                .help-guide .tip {
-                  background: #fff7e6;
-                  border-left: 4px solid #faad14;
-                  padding: 12px;
-                  margin: 12px 0;
-                  border-radius: 4px;
-                }
-                .help-guide .warning {
-                  background: #fff1f0;
-                  border-left: 4px solid #ff4d4f;
-                  padding: 12px;
-                  margin: 12px 0;
-                  border-radius: 4px;
-                }
-                .help-guide table {
-                  width: 100%;
-                  border-collapse: collapse;
-                  margin: 12px 0;
-                }
-                .help-guide table th {
-                  background: #f0f9ff;
-                  padding: 10px;
-                  text-align: left;
-                  border: 1px solid #d9e7ff;
-                  font-weight: bold;
-                }
-                .help-guide table td {
-                  padding: 10px;
-                  border: 1px solid #d9e7ff;
-                }
-                .help-guide .feature-card {
-                  background: #f6ffed;
-                  border: 2px solid #b7eb8f;
-                  border-radius: 8px;
-                  padding: 16px;
-                  margin: 12px 0;
-                }
-                .help-guide .feature-card h4 {
-                  margin-top: 0;
-                }
-                .help-guide ul {
-                  padding-left: 24px;
-                }
-                .help-guide ul li {
-                  margin: 8px 0;
-                }
-              </style>
-              
-              <div class="help-guide">
-                <h3>📖 What is This System?</h3>
-                <p>
-                  This is an <strong>Intelligent Investment Theme Matching System</strong> that automatically associates financial news with 150+ investment themes 
-                  (like "Electric Vehicles", "AI Chips", "Clean Energy", etc.) through semantic similarity analysis.
-                </p>
-                
-                <h4>🚀 Key Advantages:</h4>
-                <ul>
-                  <li>⚡ <strong>Ultra Fast:</strong> 50-100ms response time (20x faster than LLM)</li>
-                  <li>💰 <strong>Ultra Low Cost:</strong> ¥0.14 per 1000 news (99% cheaper than LLM)</li>
-                  <li>🎯 <strong>High Accuracy:</strong> 82% accuracy rate (threshold 0.60)</li>
-                  <li>🔄 <strong>Real-time Updates:</strong> New themes ready instantly after adding</li>
-                </ul>
-
-                <h3>🎯 How It Works (3 Simple Steps)</h3>
-                <div class="flow-container">
-                  <div class="flow-step">
-                    <strong>Step 1: Generate Theme Descriptions</strong><br/>
-                    Use AI (Qwen LLM) to generate detailed, 150-300 word descriptions for each investment theme.
-                  </div>
-                  <div class="flow-step">
-                    <strong>Step 2: Generate Vectors</strong><br/>
-                    Convert theme descriptions into 1024-dimensional vectors using Qwen Embedding API.
-                  </div>
-                  <div class="flow-step">
-                    <strong>Step 3: Match News</strong><br/>
-                    When news arrives, convert it to a vector and find the most similar themes using PostgreSQL pgvector.
-                  </div>
-                </div>
-
-                <h3>🔧 Main Functions</h3>
-                
-                <div class="feature-card">
-                  <span class="icon-badge">1️⃣</span>
-                  <strong>Sync Theme Data</strong> (Most Common)
-                  <p>Generate descriptions and vectors for submitted themes only. 
-                  Perfect for daily maintenance after Futu crawler adds new themes.</p>
-                  <div class="tip">💡 Use this: When you see new themes without descriptions</div>
-                </div>
-
-                <div class="feature-card">
-                  <span class="icon-badge">2️⃣</span>
-                  <strong>Optimize Descriptions</strong> (Recommended Monthly)
-                  <p>Enhance all theme descriptions using LLM. Upgrade simple template descriptions to detailed AI-generated ones.</p>
-                  <div class="tip">💡 Use this: When description coverage is low (&lt;90%)</div>
-                </div>
-
-                <div class="feature-card">
-                  <span class="icon-badge">3️⃣</span>
-                  <strong>Test Match</strong> (Debug & Verify)
-                  <p>Enter sample news text to test theme matching in real-time. See which themes match and their similarity scores.</p>
-                  <div class="tip">💡 Use this: To verify matching quality or debug issues</div>
-                </div>
-
-                <div class="feature-card">
-                  <span class="icon-badge">⚠️</span>
-                  <strong>Advanced Options</strong> (Use with Caution)
-                  <p>Force update all vectors or regenerate all descriptions. Only use when embedding model upgrades or major Prompt changes.</p>
-                  <div class="warning">⚠️ High cost and long execution time (15-30 minutes). Use sparingly!</div>
-                </div>
-
-                <h3>📊 Quick Reference</h3>
-                <table>
-                  <tr>
-                    <th>Button</th>
-                    <th>When to Use</th>
-                    <th>Time</th>
-                    <th>Cost</th>
-                  </tr>
-                  <tr>
-                    <td>🔄 Sync Theme Data</td>
-                    <td>New themes added by crawler</td>
-                    <td>2-10 mins</td>
-                    <td>Low</td>
-                  </tr>
-                  <tr>
-                    <td>✨ Optimize Descriptions</td>
-                    <td>Coverage &lt;90%</td>
-                    <td>2-10 mins</td>
-                    <td>Medium</td>
-                  </tr>
-                  <tr>
-                    <td>🧪 Test Match</td>
-                    <td>Debug or verify quality</td>
-                    <td>Instant</td>
-                    <td>Free</td>
-                  </tr>
-                  <tr>
-                    <td>⚠️ Force Update Vectors</td>
-                    <td>Embedding model upgrade</td>
-                    <td>20-30 mins</td>
-                    <td>High</td>
-                  </tr>
-                  <tr>
-                    <td>⚠️ Regenerate All Descriptions</td>
-                    <td>Prompt template major change</td>
-                    <td>15-25 mins</td>
-                    <td>High</td>
-                  </tr>
-                </table>
-
-                <h3>💡 Best Practices</h3>
-                <ul>
-                  <li><strong>Regular Sync:</strong> Run "Sync Theme Data" weekly to keep themes up to date</li>
-                  <li><strong>Check Coverage:</strong> Monitor description coverage in statistics - keep it above 90%</li>
-                  <li><strong>Test First:</strong> Always use "Test Match" before deploying to production</li>
-                  <li><strong>Batch Operations:</strong> Avoid running multiple heavy operations simultaneously</li>
-                  <li><strong>Monitor Costs:</strong> Review API usage logs regularly</li>
-                </ul>
-
-                <h3>❓ Troubleshooting</h3>
-                <div class="tip">
-                  <strong>Q: Why are some themes showing "Not generated"?</strong><br/>
-                  A: Click "Sync Theme Data" to generate descriptions and vectors for new themes.
-                </div>
-                <div class="tip">
-                  <strong>Q: Matching quality seems low. What should I do?</strong><br/>
-                  A: Try "Optimize Descriptions" to upgrade theme descriptions to AI-generated detailed ones.
-                </div>
-                <div class="tip">
-                  <strong>Q: When should I use Advanced Options?</strong><br/>
-                  A: Only when embedding model upgrades or major Prompt template changes. For normal operations, use "Sync Theme Data" and "Optimize Descriptions".
-                </div>
-
-                <div style="text-align: center; margin-top: 24px; padding-top: 16px; border-top: 2px solid #e8e8e8; color: #999;">
-                  <p>💙 Powered by Qwen Embedding + PostgreSQL pgvector</p>
-                </div>
-              </div>
-            `
-          }}
-        />
-      </Modal>
-
       {/* Batch Upload Modal */}
       <Modal
         title={
@@ -2394,30 +2236,32 @@ const InvestmentThemesPage: React.FC = () => {
           {/* File Upload Area */}
           {!state.batchTaskId && (
             <>
-              <Alert
-                message="File Format Requirements"
-                description={
-                  <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
-                    <li>Support: CSV (.csv) or Excel (.xlsx, .xls) files</li>
-                    <li>Required columns: <code>theme</code>, <code>category</code>, <code>ticker</code></li>
-                    <li>Optional column: <code>company</code> (company name)</li>
-                    <li><strong>Important:</strong> <code>theme</code> column must have only ONE unique value throughout the file</li>
-                    <li>Multiple <code>category</code> values → Multiple themes will be created</li>
-                    <li>Example: theme='crypto' with 8 categories → Creates 8 themes</li>
-                    <li>Maximum file size: 10MB</li>
-                  </ul>
-                }
-                type="info"
-                showIcon
-              />
 
               <Button
                 icon={<DownloadOutlined />}
                 onClick={handleDownloadTemplate}
                 type="default"
               >
-                Download Excel Template
+                Download CSV Template
               </Button>
+
+              {/* Group Input */}
+              <div style={{ marginBottom: 16 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                  Group <Text type="secondary">(Optional)</Text>
+                </Text>
+                <Input
+                  placeholder="e.g. AI, crypto... (optional)"
+                  value={state.batchUploadGroup}
+                  onChange={(e) => setState(prev => ({ ...prev, batchUploadGroup: e.target.value }))}
+                  maxLength={100}
+                  disabled={state.uploadingFile || !!state.batchTaskId}
+                  style={{ width: '100%' }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  All themes in this batch will be assigned to this group (if provided)
+                </Text>
+              </div>
 
               {/* Market Selection */}
               <div>

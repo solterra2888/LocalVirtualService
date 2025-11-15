@@ -237,7 +237,85 @@ const MarketWeekly: React.FC = () => {
             </p>
           </div>
 
-          {/* 2.3 Foreign Exchange */}
+          {/* 2.3 My Watchlist */}
+          {((reportData.weekly_performance.us_ai_wow && reportData.weekly_performance.us_ai_wow.length > 0) ||
+            (reportData.weekly_performance.china_ai_wow && reportData.weekly_performance.china_ai_wow.length > 0)) && (
+            <div id="ai-weekly" className="subsection">
+              <h3 className="subsection-title">My Watchlist</h3>
+              
+              {/* Combined US and China AI WoW Chart */}
+              <div className="chart-container" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                {/* US AI WoW */}
+                {reportData.weekly_performance.us_ai_wow && reportData.weekly_performance.us_ai_wow.length > 0 && (
+                  <div>
+                    <h4 style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '14px', fontWeight: 600, color: '#34495E' }}>
+                      US
+                    </h4>
+                    <WoWBarChart
+                      data={reportData.weekly_performance.us_ai_wow}
+                      title="US Watchlist - Week-over-Week"
+                      height={Math.max(300, reportData.weekly_performance.us_ai_wow.length * 35)}
+                      showTitle={false}
+                    />
+                  </div>
+                )}
+                
+                {/* China AI WoW */}
+                {reportData.weekly_performance.china_ai_wow && reportData.weekly_performance.china_ai_wow.length > 0 && (
+                  <div>
+                    <h4 style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '14px', fontWeight: 600, color: '#34495E' }}>
+                      China
+                    </h4>
+                    <WoWBarChart
+                      data={reportData.weekly_performance.china_ai_wow}
+                      title="China Watchlist - Week-over-Week"
+                      height={Math.max(300, reportData.weekly_performance.china_ai_wow.length * 35)}
+                      showTitle={false}
+                    />
+                  </div>
+                )}
+              </div>
+              <p className="chart-caption">
+                Week-over-week performance of AI-related themes by market. Each theme aggregates its constituent stocks from the database.
+              </p>
+
+              {/* US AI 3-Month Relative Performance */}
+              {reportData.weekly_performance.us_ai_relative && reportData.weekly_performance.us_ai_relative.length > 0 && (
+                <>
+                  <div className="chart-container" style={{ marginTop: '2rem' }}>
+                    <RelativeLineChart
+                      data={reportData.weekly_performance.us_ai_relative}
+                      title="US Watchlist - 3 Month Trends"
+                      height={400}
+                      showTitle={true}
+                    />
+                  </div>
+                  <p className="chart-caption">
+                    3-month US Watchlist performance trends (indexed to 100).
+                  </p>
+                </>
+              )}
+
+              {/* China AI 3-Month Relative Performance */}
+              {reportData.weekly_performance.china_ai_relative && reportData.weekly_performance.china_ai_relative.length > 0 && (
+                <>
+                  <div className="chart-container" style={{ marginTop: '2rem' }}>
+                    <RelativeLineChart
+                      data={reportData.weekly_performance.china_ai_relative}
+                      title="China Watchlist - 3 Month Trends"
+                      height={400}
+                      showTitle={true}
+                    />
+                  </div>
+                  <p className="chart-caption">
+                    3-month China AI-related theme performance trends (indexed to 100).
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 2.4 Foreign Exchange */}
           <div id="forex-weekly" className="subsection">
             <h3 className="subsection-title">Foreign Exchange</h3>
             <div className="chart-container">

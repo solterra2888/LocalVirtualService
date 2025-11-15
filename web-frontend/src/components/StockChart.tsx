@@ -267,6 +267,7 @@ const StockChart: React.FC<StockChartProps> = ({
           symbol={symbol}
           companyName={companyName}
           primaryTicker={primaryTicker}
+          width={900}
           height={260}
           showHeader={false}
           onAddEventClick={handleAddEvent}

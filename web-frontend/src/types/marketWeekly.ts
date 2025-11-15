@@ -47,6 +47,10 @@ export interface WeeklyPerformance {
   indices_relative: RelativePerformancePoint[];
   sectors_wow: WoWChange[];
   sectors_relative: RelativePerformancePoint[];
+  us_ai_wow?: WoWChange[];  // US AI相关主题WoW数据（可选）
+  us_ai_relative?: RelativePerformancePoint[];  // US AI相关主题相对表现（可选）
+  china_ai_wow?: WoWChange[];  // China AI相关主题WoW数据（可选）
+  china_ai_relative?: RelativePerformancePoint[];  // China AI相关主题相对表现（可选）
   forex_wow: WoWChange[];
   forex_relative: RelativePerformancePoint[];
   commodities_wow: WoWChange[];

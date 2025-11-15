@@ -305,49 +305,6 @@ class NewsAnalysisService:
                         logger.info(f"  🔄 重试第 {attempt} 次（模板: {current_template}）")
                         await asyncio.sleep(retry_delay * attempt)  # 递增延迟
                     
-                    # 🔥 新增：渲染并打印prompt（用于测试）
-                    if current_template == "news_summary_v1":
-                        try:
-                            from backend.core.prompt_renderer import PromptRenderer
-                            renderer = PromptRenderer()
-                            rendered = renderer.render(
-                                template_code=current_template,
-                                variables_data=variables,
-                                user_id=user_id
-                            )
-                            
-                            # 截断User Prompt中的新闻内容，避免日志过长
-                            user_prompt_preview = rendered.user_prompt
-                            max_content_length = 500  # 最多显示500个字符
-                            if len(user_prompt_preview) > max_content_length:
-                                # 尝试找到内容部分并截断
-                                content_marker = "【新闻内容】"
-                                if content_marker in user_prompt_preview:
-                                    parts = user_prompt_preview.split(content_marker)
-                                    before_content = parts[0] + content_marker
-                                    after_content_parts = parts[1].split("\n\n")
-                                    if len(after_content_parts) > 0:
-                                        # 截断内容部分
-                                        content_part = after_content_parts[0]
-                                        if len(content_part) > max_content_length:
-                                            content_part = content_part[:max_content_length] + "\n...(内容已截断)..."
-                                        remaining_parts = "\n\n".join(after_content_parts[1:])
-                                        user_prompt_preview = before_content + "\n" + content_part + "\n\n" + remaining_parts
-                                else:
-                                    # 如果找不到标记，直接截断整个prompt
-                                    user_prompt_preview = user_prompt_preview[:max_content_length] + "\n...(内容已截断)..."
-                            
-                            logger.info("=" * 80)
-                            logger.info("📋 NEWS_SUMMARY_V1 PROMPT (测试输出)")
-                            logger.info("=" * 80)
-                            if rendered.system_prompt:
-                                logger.info(f"【System Prompt】:\n{rendered.system_prompt}")
-                                logger.info("-" * 80)
-                            logger.info(f"【User Prompt】:\n{user_prompt_preview}")
-                            logger.info("=" * 80)
-                        except Exception as render_error:
-                            logger.warning(f"  ⚠️  打印prompt失败: {str(render_error)}")
-                    
                     response = await llm_service.chat_completion_with_template(
                         template_code=current_template,
                         variables=variables,

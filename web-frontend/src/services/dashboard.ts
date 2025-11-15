@@ -65,6 +65,7 @@ export interface WatchlistItem {
   symbol: string;
   custom_name?: string;
   priority: number;
+  sort_order?: number;
   notes?: string;
   added_at?: string;
   primaryticker?: string;
@@ -286,6 +287,19 @@ export const dashboardAPI = {
       return await api.delete(`/dashboard/watchlist/${watchlistId}`);
     } catch (error) {
       console.error('Failed to remove from watchlist:', error);
+      throw error;
+    }
+  },
+
+  // 调整watchlist排序
+  reorderWatchlist: async (items: Array<{ watchlist_id: number; sort_order: number; group_name?: string | null }>): Promise<{
+    message: string;
+    updated: number;
+  }> => {
+    try {
+      return await api.put('/dashboard/watchlist/reorder', { items });
+    } catch (error) {
+      console.error('Failed to reorder watchlist:', error);
       throw error;
     }
   },

@@ -715,7 +715,7 @@ async def get_user_watchlist(current_user: UserResponse = Depends(get_current_us
         FROM target_tracking_config ttc
         LEFT JOIN companies c ON ttc.symbol = c.code
         WHERE ttc.user_id = %s AND ttc.enabled = true
-        ORDER BY ttc.priority DESC, ttc.added_at DESC
+        ORDER BY COALESCE(ttc.sort_order, 999999), ttc.priority DESC, ttc.added_at DESC
         """
         
         results = db_manager.fetch_all(query, [current_user.user_id])
@@ -816,10 +816,21 @@ async def add_to_watchlist(
         company_id = company_result[0] if company_result else None
         
         # 插入到watchlist
+        group_name = request.get('group_name', stock_info[2] or 'Other')  # 使用sector作为默认分组
+        
+        # 计算新的排序序号（同一用户及分组内递增）
+        sort_order_query = """
+        SELECT COALESCE(MAX(sort_order), 0) + 1
+        FROM target_tracking_config
+        WHERE user_id = %s AND COALESCE(group_name, 'default') = COALESCE(%s, 'default')
+        """
+        next_sort_order_result = db_manager.fetch_one(sort_order_query, [current_user.user_id, group_name])
+        next_sort_order = next_sort_order_result[0] if next_sort_order_result and next_sort_order_result[0] else 1
+        
         insert_query = """
         INSERT INTO target_tracking_config 
-        (user_id, company_id, symbol, name, group_name, priority, notes, enabled, primaryticker)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (user_id, company_id, symbol, name, group_name, priority, notes, enabled, primaryticker, sort_order)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """
         
@@ -828,11 +839,12 @@ async def add_to_watchlist(
             company_id,
             symbol,
             request.get('name', stock_info[1]),  # 使用公司名称
-            request.get('group_name', stock_info[2] or 'Other'),  # 使用sector作为默认分组
+            group_name,
             request.get('priority', 1),
             request.get('notes', ''),
             True,
-            stock_info[3]  # primaryticker
+            stock_info[3],  # primaryticker
+            next_sort_order
         ]
         
         result = db_manager.fetch_one(insert_query, values)
@@ -1537,6 +1549,173 @@ async def get_stock_historical_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch historical data: {str(e)}"
         )
+
+@router.put("/watchlist/reorder", summary="Reorder watchlist items")
+async def reorder_watchlist_items(
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    批量更新watchlist的自定义排序顺序
+    
+    请求参数:
+    - items: [{ "watchlist_id": int, "sort_order": int }]
+    """
+    items = request.get('items')
+    if not items or not isinstance(items, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Items must be a non-empty list"
+        )
+    
+    # 构建更新映射并校验参数
+    updates_map = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each item must be an object containing watchlist_id and sort_order"
+            )
+        
+        watchlist_id = item.get('watchlist_id')
+        sort_order = item.get('sort_order')
+        group_name = item.get('group_name')
+        
+        if watchlist_id is None or sort_order is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="watchlist_id and sort_order are required for each item"
+            )
+        
+        try:
+            watchlist_id = int(watchlist_id)
+            sort_order = int(sort_order)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="watchlist_id and sort_order must be integers"
+            )
+        
+        if sort_order < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sort_order must be greater than or equal to 1"
+            )
+        
+        if group_name is not None:
+            if not isinstance(group_name, str):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="group_name must be a string when provided"
+                )
+            group_name = group_name.strip()
+            if group_name == '':
+                group_name = None
+        
+        updates_map[watchlist_id] = {
+            "sort_order": sort_order,
+            "group_name": group_name
+        }
+    
+    if not updates_map:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid watchlist items to update"
+        )
+    
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database connection failed"
+        )
+    
+    try:
+        cursor = conn.cursor()
+        watchlist_ids = list(updates_map.keys())
+        
+        cursor.execute(
+            """
+            SELECT id, group_name 
+            FROM target_tracking_config 
+            WHERE user_id = %s AND id = ANY(%s)
+            """,
+            (current_user.user_id, watchlist_ids)
+        )
+        rows = cursor.fetchall()
+        
+        found_ids = {row[0] for row in rows}
+        missing_ids = sorted(set(watchlist_ids) - found_ids)
+        if missing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Watchlist items not found or permission denied: {missing_ids}"
+            )
+        
+        # 校验每个目标分组内的排序值不重复，并准备更新数据
+        group_sort_orders = {}
+        final_updates = {}
+        for watchlist_id, existing_group_name in rows:
+            update_info = updates_map[watchlist_id]
+            sort_order = update_info["sort_order"]
+            target_group_name = update_info.get("group_name")
+            
+            # 如果未提供新的分组，则保持原分组
+            if target_group_name is None:
+                target_group_name = existing_group_name
+            
+            normalized_group_key = target_group_name or 'default'
+            group_sort_orders.setdefault(normalized_group_key, set())
+            if sort_order in group_sort_orders[normalized_group_key]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Duplicate sort_order {sort_order} detected in group {normalized_group_key}"
+                )
+            group_sort_orders[normalized_group_key].add(sort_order)
+            
+            # 存储最终需要更新的数据（group_name保留None表示默认分组）
+            final_updates[watchlist_id] = {
+                "sort_order": sort_order,
+                "group_name": target_group_name
+            }
+        
+        for watchlist_id, _ in rows:
+            update_values = final_updates[watchlist_id]
+            target_group_name = update_values["group_name"]
+            sort_order = update_values["sort_order"]
+            
+            # 空字符串作为默认分组，需要存储为NULL
+            db_group_name = target_group_name if target_group_name not in (None, '', 'default') else None
+            
+            cursor.execute(
+                """
+                UPDATE target_tracking_config
+                SET sort_order = %s,
+                    group_name = %s
+                WHERE id = %s AND user_id = %s
+                """,
+                (sort_order, db_group_name, watchlist_id, current_user.user_id)
+            )
+        
+        conn.commit()
+        return {
+            "message": "Watchlist sort order updated successfully",
+            "updated": len(rows)
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update watchlist sort order: {str(e)}"
+        )
+    finally:
+        conn.close()
 
 @router.put("/watchlist/{watchlist_id}", summary="Update watchlist item")
 async def update_watchlist_item(

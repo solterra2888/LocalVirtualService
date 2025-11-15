@@ -146,6 +146,15 @@ const CombinedWoWChart: React.FC<CombinedWoWChartProps> = ({
     });
   };
 
+  // 格式化日期为中文格式：2025年1月15日
+  const formatDateChinese = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${year}年${month}月${day}日`;
+  };
+
   return (
     <div className="combined-wow-chart">
       <div className="chart-header">
@@ -154,6 +163,16 @@ const CombinedWoWChart: React.FC<CombinedWoWChartProps> = ({
         </h3>
         <p className="chart-subtitle">
           {formatDate(weekStart)} to {formatDate(weekEnd)}
+        </p>
+        <p style={{ 
+          fontSize: '11px', 
+          color: '#666', 
+          fontStyle: 'italic', 
+          marginTop: '4px',
+          marginBottom: 0
+        }}>
+          说明：本报告基于数据库中最新的交易日计算，对比周期为 {formatDateChinese(weekStart)} 至 {formatDateChinese(weekEnd)}。
+          如果在同一周内的不同日期查看，结束日期可能会有所不同。
         </p>
       </div>
 

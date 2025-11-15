@@ -245,6 +245,7 @@ class ThemeUnificationService:
             ntm.id,
             ntm.theme_id,
             ntm.theme_name,
+            ntm.category,
             ntm.similarity_score,
             ntm.match_rank,
             ntm.match_method,
@@ -266,7 +267,8 @@ class ThemeUnificationService:
             metadata = json.dumps({
                 'match_method': match['match_method'],
                 'matched_at': match['matched_at'].isoformat() if match['matched_at'] else None,
-                'original_match_id': match['id']
+                'original_match_id': match['id'],
+                'category': match.get('category')  # 将 category 保存到 metadata
             })
             themes_data.append((
                 news_id,
@@ -496,6 +498,34 @@ class ThemeUnificationService:
             return 0
         
         try:
+            # 🔧 修复：去重，避免 "ON CONFLICT DO UPDATE command cannot affect row a second time" 错误
+            # 对于相同的 (news_id, source_type, theme_name, market) 组合，保留置信度最高的记录
+            unique_themes = {}
+            original_count = len(themes_data)
+            
+            for data in themes_data:
+                news_id = data[0]
+                theme_name = data[1]
+                source_type = data[2]
+                market = data[7] if data[7] is not None else 'GLOBAL'
+                confidence_score = data[5]
+                
+                # 构建唯一键
+                key = (news_id, source_type, theme_name, market)
+                
+                # 如果不存在或新记录置信度更高，则更新
+                if key not in unique_themes or confidence_score > unique_themes[key][5]:
+                    unique_themes[key] = data
+            
+            # 使用去重后的数据
+            themes_data = list(unique_themes.values())
+            
+            if len(themes_data) < original_count:
+                logger.warning(
+                    f"批量插入去重: 原始 {original_count} 条 -> 去重后 {len(themes_data)} 条 "
+                    f"(移除了 {original_count - len(themes_data)} 条重复记录)"
+                )
+            
             # 分解数据为列
             news_ids = []
             theme_names = []

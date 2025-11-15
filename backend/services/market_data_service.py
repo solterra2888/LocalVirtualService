@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import psycopg2.extras
 
 from backend.database.db_manager import DatabaseManager
@@ -94,9 +95,12 @@ class MarketDataService:
             self.db_manager = DatabaseManager(db_config)
             logger.info("数据库管理器配置完成")
             
+            # 🚀 并发配置
+            self.max_workers = int(os.getenv("MARKET_DATA_MAX_WORKERS", "10"))
+            
             # 创建HTTP会话
             self.session = self._create_robust_session()
-            logger.info("HTTP会话创建完成")
+            logger.info(f"HTTP会话创建完成 (max_workers={self.max_workers})")
             
             logger.info("市场数据服务初始化完成")
             
@@ -116,7 +120,12 @@ class MarketDataService:
             allowed_methods=["GET"]
         )
         
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # 🔧 增加连接池大小以支持并发请求
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,
+            pool_maxsize=max(20, self.max_workers + 10)
+        )
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
@@ -190,6 +199,85 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"获取 {ticker} EOD数据失败: {str(e)}")
             return None
+    
+    # ==== 🚀 并发获取方法 ====
+    
+    def concurrent_fetch_realtime_data(self, assets: List[tuple]) -> Dict[str, Dict[str, Any]]:
+        """
+        并发获取多个资产的实时数据
+        
+        Args:
+            assets: 资产列表，每个元素为 (name, code, asset_type, category)
+            
+        Returns:
+            Dict[name, data_dict]: {资产名称: 实时数据字典}
+        """
+        results = {}
+        
+        def fetch_single_realtime(asset_info):
+            """获取单个资产的实时数据"""
+            name, code, asset_type, category = asset_info
+            try:
+                data = self.fetch_realtime_data(code)
+                if data:
+                    return (name, {"code": code, "asset_type": asset_type, "category": category, "data": data})
+            except Exception as e:
+                logger.error(f"并发获取{name}实时数据失败: {str(e)}")
+            return (name, None)
+        
+        # 使用线程池并发获取
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {executor.submit(fetch_single_realtime, asset): asset for asset in assets}
+            
+            for future in as_completed(futures):
+                try:
+                    name, data = future.result()
+                    if data:
+                        results[name] = data
+                except Exception as e:
+                    asset = futures[future]
+                    logger.error(f"并发获取{asset[0]}实时数据异常: {str(e)}")
+        
+        return results
+    
+    def concurrent_fetch_eod_data(self, assets: List[tuple], days: int = 1) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        并发获取多个资产的EOD数据
+        
+        Args:
+            assets: 资产列表，每个元素为 (name, code, asset_type, category)
+            days: 获取最近N天的数据
+            
+        Returns:
+            Dict[name, eod_data_list]: {资产名称: EOD数据列表}
+        """
+        results = {}
+        
+        def fetch_single_eod(asset_info):
+            """获取单个资产的EOD数据"""
+            name, code, asset_type, category = asset_info
+            try:
+                data = self.fetch_eod_data(code, days)
+                if data:
+                    return (name, {"code": code, "asset_type": asset_type, "category": category, "data": data})
+            except Exception as e:
+                logger.error(f"并发获取{name} EOD数据失败: {str(e)}")
+            return (name, None)
+        
+        # 使用线程池并发获取
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {executor.submit(fetch_single_eod, asset): asset for asset in assets}
+            
+            for future in as_completed(futures):
+                try:
+                    name, data = future.result()
+                    if data:
+                        results[name] = data
+                except Exception as e:
+                    asset = futures[future]
+                    logger.error(f"并发获取{asset[0]} EOD数据异常: {str(e)}")
+        
+        return results
     
     def parse_realtime_data(self, code: str, name: str, asset_type: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """解析实时数据"""
@@ -265,12 +353,13 @@ class MarketDataService:
             return []
     
     def store_realtime_data(self, records: List[Dict[str, Any]]) -> Dict[str, int]:
-        """存储实时数据到数据库"""
+        """🚀 批量存储实时数据到数据库 (使用execute_values优化)"""
         if not records:
             return {'success_count': 0, 'failed_count': 0}
         
         success_count = 0
         failed_count = 0
+        conn = None
             
         try:
             conn = self.db_manager.get_connection()
@@ -280,44 +369,62 @@ class MarketDataService:
             
             cursor = conn.cursor()
             
-            # UPSERT SQL
+            # 准备批量插入的数据
+            insert_data = []
+            for record in records:
+                insert_data.append((
+                    record.get('code'),
+                    record.get('asset_type'),
+                    record.get('asset_name'),
+                    record.get('open'),
+                    record.get('high'),
+                    record.get('low'),
+                    record.get('close'),
+                    record.get('volume'),
+                    record.get('previous_close'),
+                    record.get('change_amount'),
+                    record.get('change_percent'),
+                    record.get('data_timestamp'),
+                    record.get('data_datetime'),
+                    record.get('gmtoffset')
+                ))
+            
+            # 🚀 使用execute_values批量UPSERT
             upsert_sql = """
-            INSERT INTO market_data_realtime 
-            (code, asset_type, asset_name, open, high, low, close, volume, 
-             previous_close, change_amount, change_percent, data_timestamp, 
-             data_datetime, gmtoffset, created_at, updated_at)
-            VALUES (%(code)s, %(asset_type)s, %(asset_name)s, %(open)s, %(high)s, %(low)s, %(close)s, 
-                    %(volume)s, %(previous_close)s, %(change_amount)s, %(change_percent)s, 
-                    %(data_timestamp)s, %(data_datetime)s, %(gmtoffset)s, 
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (code) 
-            DO UPDATE SET
-                asset_type = EXCLUDED.asset_type,
-                asset_name = EXCLUDED.asset_name,
-                open = EXCLUDED.open,
-                high = EXCLUDED.high,
-                low = EXCLUDED.low,
-                close = EXCLUDED.close,
-                volume = EXCLUDED.volume,
-                previous_close = EXCLUDED.previous_close,
-                change_amount = EXCLUDED.change_amount,
-                change_percent = EXCLUDED.change_percent,
-                data_timestamp = EXCLUDED.data_timestamp,
-                data_datetime = EXCLUDED.data_datetime,
-                gmtoffset = EXCLUDED.gmtoffset,
-                updated_at = CURRENT_TIMESTAMP
+                INSERT INTO market_data_realtime 
+                (code, asset_type, asset_name, open, high, low, close, volume, 
+                 previous_close, change_amount, change_percent, data_timestamp, 
+                 data_datetime, gmtoffset, created_at, updated_at)
+                VALUES %s
+                ON CONFLICT (code) 
+                DO UPDATE SET
+                    asset_type = EXCLUDED.asset_type,
+                    asset_name = EXCLUDED.asset_name,
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume,
+                    previous_close = EXCLUDED.previous_close,
+                    change_amount = EXCLUDED.change_amount,
+                    change_percent = EXCLUDED.change_percent,
+                    data_timestamp = EXCLUDED.data_timestamp,
+                    data_datetime = EXCLUDED.data_datetime,
+                    gmtoffset = EXCLUDED.gmtoffset,
+                    updated_at = CURRENT_TIMESTAMP
             """
             
-            for record in records:
-                try:
-                    cursor.execute(upsert_sql, record)
-                    success_count += 1
-                except Exception as e:
-                    logger.warning(f"保存{record.get('code', 'unknown')}实时数据失败: {str(e)}")
-                    failed_count += 1
+            psycopg2.extras.execute_values(
+                cursor,
+                upsert_sql,
+                insert_data,
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                page_size=100
+            )
             
             conn.commit()
-            logger.info(f"实时数据保存完成：成功{success_count}，失败{failed_count}")
+            success_count = len(records)
+            logger.info(f"💾 实时数据批量保存完成：{success_count}条记录")
             
         except Exception as e:
             logger.error(f"批量保存实时数据失败: {str(e)}")
@@ -332,12 +439,13 @@ class MarketDataService:
         return {'success_count': success_count, 'failed_count': failed_count}
     
     def store_eod_data(self, records: List[Dict[str, Any]]) -> Dict[str, int]:
-        """存储EOD数据到数据库"""
+        """🚀 批量存储EOD数据到数据库 (使用execute_values优化)"""
         if not records:
             return {'success_count': 0, 'failed_count': 0}
         
         success_count = 0
         failed_count = 0
+        conn = None
             
         try:
             conn = self.db_manager.get_connection()
@@ -347,35 +455,50 @@ class MarketDataService:
             
             cursor = conn.cursor()
             
-            # UPSERT SQL
+            # 准备批量插入的数据
+            insert_data = []
+            for record in records:
+                insert_data.append((
+                    record.get('code'),
+                    record.get('date'),
+                    record.get('asset_type'),
+                    record.get('open'),
+                    record.get('high'),
+                    record.get('low'),
+                    record.get('close'),
+                    record.get('adjusted_close'),
+                    record.get('volume')
+                ))
+            
+            # 🚀 使用execute_values批量UPSERT
             upsert_sql = """
-            INSERT INTO market_data_eod 
-            (code, date, asset_type, open, high, low, close, adjusted_close, volume,
-             created_at, updated_at)
-            VALUES (%(code)s, %(date)s, %(asset_type)s, %(open)s, %(high)s, %(low)s, %(close)s,
-                    %(adjusted_close)s, %(volume)s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (code, date) 
-            DO UPDATE SET
-                asset_type = EXCLUDED.asset_type,
-                open = EXCLUDED.open,
-                high = EXCLUDED.high,
-                low = EXCLUDED.low,
-                close = EXCLUDED.close,
-                adjusted_close = EXCLUDED.adjusted_close,
-                volume = EXCLUDED.volume,
-                updated_at = CURRENT_TIMESTAMP
+                INSERT INTO market_data_eod 
+                (code, date, asset_type, open, high, low, close, adjusted_close, volume,
+                 created_at, updated_at)
+                VALUES %s
+                ON CONFLICT (code, date) 
+                DO UPDATE SET
+                    asset_type = EXCLUDED.asset_type,
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    adjusted_close = EXCLUDED.adjusted_close,
+                    volume = EXCLUDED.volume,
+                    updated_at = CURRENT_TIMESTAMP
             """
             
-            for record in records:
-                try:
-                    cursor.execute(upsert_sql, record)
-                    success_count += 1
-                except Exception as e:
-                    logger.warning(f"保存{record.get('code', 'unknown')} {record.get('date')}的EOD数据失败: {str(e)}")
-                    failed_count += 1
+            psycopg2.extras.execute_values(
+                cursor,
+                upsert_sql,
+                insert_data,
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                page_size=100
+            )
             
             conn.commit()
-            logger.info(f"EOD数据保存完成：成功{success_count}，失败{failed_count}")
+            success_count = len(records)
+            logger.info(f"💾 EOD数据批量保存完成：{success_count}条记录")
             
         except Exception as e:
             logger.error(f"批量保存EOD数据失败: {str(e)}")
@@ -859,7 +982,7 @@ class MarketDataService:
                                     fetch_eod: bool = True,
                                     eod_days: int = 5) -> Dict[str, Any]:
         """
-        主要业务逻辑：获取并存储市场数据
+        🚀 主要业务逻辑：并发获取并批量存储市场数据
         
         Args:
             asset_types: 要获取的资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector']
@@ -870,10 +993,11 @@ class MarketDataService:
         Returns:
             Dict包含执行结果
         """
-        logger.info("开始获取并存储市场数据", 
+        logger.info("🚀 开始并发获取并批量存储市场数据", 
                    asset_types=asset_types, 
                    fetch_realtime=fetch_realtime, 
-                   fetch_eod=fetch_eod)
+                   fetch_eod=fetch_eod,
+                   max_workers=self.max_workers)
         
         start_time = datetime.now()
         
@@ -896,61 +1020,96 @@ class MarketDataService:
             if 'sector' in asset_types:
                 all_assets.update({name: (code, 'sector', cat) for name, (code, _, cat) in SECTOR_MAP.items()})
             
-            logger.info(f"准备获取{len(all_assets)}个资产的数据")
+            total_assets = len(all_assets)
+            logger.info(f"准备并发获取{total_assets}个资产的数据 (max_workers={self.max_workers})")
+            
+            # 转换为列表格式 [(name, code, asset_type, category), ...]
+            assets_list = [(name, code, asset_type, category) 
+                          for name, (code, asset_type, category) in all_assets.items()]
             
             realtime_stats = {'success': 0, 'failed': 0}
             eod_stats = {'success': 0, 'failed': 0}
             
-            # 获取实时数据
+            # 🚀 并发获取实时数据
             if fetch_realtime:
-                logger.info("开始获取实时数据")
+                realtime_fetch_start = datetime.now()
+                logger.info(f"开始并发获取实时数据 (资产数={total_assets}, 并发数={self.max_workers})")
+                
+                # 使用并发方法获取数据
+                concurrent_results = self.concurrent_fetch_realtime_data(assets_list)
+                
+                # 解析数据
                 realtime_records = []
+                for name, result_data in concurrent_results.items():
+                    parsed = self.parse_realtime_data(
+                        result_data['code'], 
+                        name, 
+                        result_data['asset_type'], 
+                        result_data['data']
+                    )
+                    if parsed:
+                        realtime_records.append(parsed)
                 
-                for name, (code, asset_type, category) in all_assets.items():
-                    data = self.fetch_realtime_data(code)
-                    if data:
-                        parsed = self.parse_realtime_data(code, name, asset_type, data)
-                        if parsed:
-                            realtime_records.append(parsed)
-                    time.sleep(0.1)  # 避免API限流
-                
-                # 存储实时数据
+                # 🚀 批量存储实时数据
                 if realtime_records:
+                    storage_start = datetime.now()
                     result = self.store_realtime_data(realtime_records)
+                    storage_time = (datetime.now() - storage_start).total_seconds()
+                    
                     realtime_stats['success'] = result['success_count']
                     realtime_stats['failed'] = result['failed_count']
+                    
+                    fetch_time = (datetime.now() - realtime_fetch_start).total_seconds()
+                    logger.info(f"✅ 实时数据完成: 获取用时{fetch_time:.2f}s, 存储用时{storage_time:.2f}s, "
+                              f"成功{realtime_stats['success']}, 失败{realtime_stats['failed']}")
             
-            # 获取EOD数据
+            # 🚀 并发获取EOD数据
             if fetch_eod:
-                logger.info("开始获取EOD数据")
+                eod_fetch_start = datetime.now()
+                logger.info(f"开始并发获取EOD数据 (资产数={total_assets}, 天数={eod_days}, 并发数={self.max_workers})")
+                
+                # 使用并发方法获取数据
+                concurrent_results = self.concurrent_fetch_eod_data(assets_list, days=eod_days)
+                
+                # 解析数据
                 all_eod_records = []
+                for name, result_data in concurrent_results.items():
+                    parsed_records = self.parse_eod_data(
+                        result_data['code'], 
+                        result_data['asset_type'], 
+                        result_data['data']
+                    )
+                    all_eod_records.extend(parsed_records)
                 
-                for name, (code, asset_type, category) in all_assets.items():
-                    eod_data = self.fetch_eod_data(code, days=eod_days)
-                    if eod_data:
-                        parsed_records = self.parse_eod_data(code, asset_type, eod_data)
-                        all_eod_records.extend(parsed_records)
-                    time.sleep(0.1)
-                
-                # 存储EOD数据
+                # 🚀 批量存储EOD数据
                 if all_eod_records:
+                    storage_start = datetime.now()
                     result = self.store_eod_data(all_eod_records)
+                    storage_time = (datetime.now() - storage_start).total_seconds()
+                    
                     eod_stats['success'] = result['success_count']
                     eod_stats['failed'] = result['failed_count']
+                    
+                    fetch_time = (datetime.now() - eod_fetch_start).total_seconds()
+                    logger.info(f"✅ EOD数据完成: 获取用时{fetch_time:.2f}s, 存储用时{storage_time:.2f}s, "
+                              f"成功{eod_stats['success']}, 失败{eod_stats['failed']}")
             
             execution_time = (datetime.now() - start_time).total_seconds()
+            speed = total_assets / execution_time if execution_time > 0 else 0
             
-            logger.info(f"市场数据获取完成：实时数据成功{realtime_stats['success']}/失败{realtime_stats['failed']}，"
-                       f"EOD数据成功{eod_stats['success']}/失败{eod_stats['failed']}，耗时{execution_time:.2f}秒")
+            logger.info(f"🎉 市场数据获取完成：实时数据成功{realtime_stats['success']}/失败{realtime_stats['failed']}，"
+                       f"EOD数据成功{eod_stats['success']}/失败{eod_stats['failed']}，"
+                       f"总耗时{execution_time:.2f}秒，平均速度{speed:.1f}资产/秒")
             
             return {
                 'success': True,
                 'message': f"成功获取市场数据：实时{realtime_stats['success']}条，历史{eod_stats['success']}条",
                 'data': {
-                    'total_assets': len(all_assets),
+                    'total_assets': total_assets,
                     'realtime': realtime_stats,
                     'eod': eod_stats,
-                    'execution_time': execution_time
+                    'execution_time': execution_time,
+                    'speed': f"{speed:.2f} assets/sec"
                 }
             }
             

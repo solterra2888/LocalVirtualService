@@ -156,7 +156,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_eod_stock_prices',
       name: 'EODHD EOD Stock Prices',
       type: 'eodhd_eod_stock_prices',
-      description: 'Get historical EOD (End of Day) stock prices for watchlist stocks from EODHD API',
+      description: 'Get historical EOD (End of Day) stock prices for watchlist and theme associated stocks from EODHD API',
       enabled: true,
       status: 'idle',
       quickActions: [

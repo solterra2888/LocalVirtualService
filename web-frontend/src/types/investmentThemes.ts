@@ -7,6 +7,7 @@
  */
 export interface InvestmentTheme {
   theme_id: string;
+  group?: string;  // Theme group (e.g., AI, crypto) for classification
   theme_name: string;
   category?: string;  // Theme category/classification
   description_preview?: string;  // Theme description preview (LLM-generated or manually written)
@@ -57,6 +58,7 @@ export interface ThemeAssociationsResponse {
 export interface ThemeMatch {
   theme_id: string;
   theme_name: string;
+  category?: string;
   similarity: number;
   confidence: number;
   rank: number;

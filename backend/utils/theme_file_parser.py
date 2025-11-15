@@ -67,13 +67,14 @@ class ThemeFileParser:
         
         return normalized
     
-    def parse_file(self, file: UploadFile, market: str = 'US') -> Dict[str, Any]:
+    def parse_file(self, file: UploadFile, market: str = 'US', group: str = None) -> Dict[str, Any]:
         """
         解析上传的文件（CSV 或 Excel）
         
         Args:
             file: FastAPI UploadFile 对象
             market: 市场（US/HK/CN），由用户在前端选择
+            group: 主题分组（如 AI、crypto 等），由用户在前端填写
         
         Returns:
             {
@@ -81,6 +82,7 @@ class ThemeFileParser:
                 'theme_name': 'crypto',  # 主题名称（整个文件中唯一）
                 'data': {
                     'crypto_ETF': {
+                        'group': 'crypto',
                         'theme_name': 'crypto',
                         'category': 'ETF',
                         'tickers': ['ARKB', 'GBTC', 'ETHE', 'WT'],
@@ -134,7 +136,7 @@ class ThemeFileParser:
             theme_name = theme_validation['theme_name']
             
             # 数据清洗和分组（按 theme + category 组合）
-            grouped_data = self._group_by_theme_category(df, theme_name, market)
+            grouped_data = self._group_by_theme_category(df, theme_name, market, group)
             
             # 生成预览信息
             preview = self._generate_preview(grouped_data, theme_name)
@@ -204,8 +206,10 @@ class ThemeFileParser:
             if col_lower in [c.lower() for c in self.REQUIRED_COLUMNS + self.OPTIONAL_COLUMNS]:
                 column_mapping[col] = col_lower
         
+        # 使用copy方式避免SettingWithCopyWarning，但由于我们直接操作传入的df，这里用inplace=True没问题
         df.rename(columns=column_mapping, inplace=True)
         
+        # 确保返回的字典不包含DataFrame引用
         return {'success': True}
     
     def _validate_single_theme(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -245,7 +249,7 @@ class ThemeFileParser:
             'theme_name': theme_name
         }
     
-    def _group_by_theme_category(self, df: pd.DataFrame, theme_name: str, market: str) -> Dict[str, Dict]:
+    def _group_by_theme_category(self, df: pd.DataFrame, theme_name: str, market: str, group: str = None) -> Dict[str, Dict]:
         """
         按 (theme, category) 组合分组
         
@@ -253,10 +257,12 @@ class ThemeFileParser:
             df: DataFrame
             theme_name: 主题名称
             market: 市场（US/HK/CN）
+            group: 主题分组（如 AI、crypto 等）
         
         Returns:
             grouped_data: {
                 'crypto_ETF': {
+                    'group': 'crypto',
                     'theme_name': 'crypto',
                     'category': 'ETF',
                     'tickers': ['ARKB', 'GBTC', 'ETHE', 'WT'],
@@ -288,7 +294,7 @@ class ThemeFileParser:
         # 按 category 分组
         grouped = df.groupby('category')
         
-        for category_raw, group in grouped:
+        for category_raw, group_df in grouped:
             # 🔥 标准化分类名称：将下划线转换为空格，并转换为小写
             # 例如：'Electric_Utility' -> 'electric utility'
             category = self._normalize_text(category_raw)
@@ -302,14 +308,14 @@ class ThemeFileParser:
             theme_id = f"{theme_id_part1}_{theme_id_part2}"
             
             # 获取 tickers（去重并排序）
-            tickers = sorted(list(set(group['ticker'].tolist())))
+            tickers = sorted(list(set(group_df['ticker'].tolist())))
             
             # 获取 companies（如果有）
             companies = []
-            if 'company' in group.columns:
+            if 'company' in group_df.columns:
                 # 创建 ticker -> company 映射
                 ticker_company_map = {}
-                for _, row in group.iterrows():
+                for _, row in group_df.iterrows():
                     ticker = row['ticker']
                     company = row.get('company', '')
                     if ticker and company and company != 'nan':
@@ -319,6 +325,7 @@ class ThemeFileParser:
                 companies = [ticker_company_map.get(t, '') for t in tickers]
             
             grouped_data[theme_id] = {
+                'group': group,  # 这里是参数group（字符串），不是group_df
                 'theme_name': theme_name,
                 'category': category,
                 'tickers': tickers,

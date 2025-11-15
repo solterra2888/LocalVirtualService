@@ -233,7 +233,7 @@ const RelativeLineChart: React.FC<RelativeLineChartProps> = ({
           {assetNames.map((assetName, index) => (
             <Line
               key={assetName}
-              type="monotone"
+              type="linear"
               dataKey={assetName}
               stroke={COLORS[index % COLORS.length]}
               strokeWidth={2}

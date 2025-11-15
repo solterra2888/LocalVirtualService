@@ -85,6 +85,9 @@ class MarketWeeklyService:
             commodities_wow = self._calculate_wow('commodity', week_start, week_end)
             yields_wow = self._calculate_wow('bond', week_start, week_end)
             
+            # 2.5 计算AI Related数据（从数据库获取Market Weekly主题，分US和China市场）
+            us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative = self._calculate_ai_related_performance(week_start, week_end, days=90)
+            
             # 3. 计算相对表现（3个月，indexed to 100）
             indices_relative = self._calculate_relative_performance('index', days=90)
             sectors_relative = self._calculate_relative_performance('sector', days=90)
@@ -114,6 +117,10 @@ class MarketWeeklyService:
                     'indices_relative': indices_relative,
                     'sectors_wow': sectors_wow,
                     'sectors_relative': sectors_relative,
+                    'us_ai_wow': us_ai_wow,
+                    'us_ai_relative': us_ai_relative,
+                    'china_ai_wow': china_ai_wow,
+                    'china_ai_relative': china_ai_relative,
                     'forex_wow': forex_wow,
                     'forex_relative': forex_relative,
                     'commodities_wow': commodities_wow,
@@ -1583,4 +1590,223 @@ class MarketWeeklyService:
             import traceback
             logger.error(traceback.format_exc())
             return None
+    
+    def _calculate_ai_related_performance(self, week_start: datetime, week_end: datetime, days: int = 90) -> tuple:
+        """
+        计算AI Related主题的WoW和相对表现（分US和China市场）
+        
+        从数据库获取group='Market Weekly'的主题，通过theme_company_associations获取相关ticker，
+        然后从stock_prices_eod获取价格数据进行计算
+        
+        US市场: market = 'US'
+        China市场: market = 'HK' 或 'CN'
+        
+        Args:
+            week_start: 起始日期
+            week_end: 结束日期
+            days: 相对表现回溯天数
+        
+        Returns:
+            (us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative) 四元组
+        """
+        logger.info("Calculating AI Related performance from database themes (US and China markets)")
+        
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            
+            # 1. 获取Market Weekly AI主题及其关联的ticker
+            theme_query = """
+            SELECT 
+                ite.theme_id,
+                ite.theme_name,
+                ite.category,
+                tca.ticker,
+                tca.market,
+                tca.company_name
+            FROM investment_theme_embeddings ite
+            INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
+            WHERE ite."group" = 'Market Weekly'
+              AND tca.is_verified = TRUE
+            ORDER BY ite.theme_name, tca.market, tca.ticker;
+            """
+            
+            cursor.execute(theme_query)
+            theme_tickers = cursor.fetchall()
+            
+            if not theme_tickers:
+                logger.warning("No Market Weekly AI themes found in database")
+                return [], [], [], []
+            
+            # 2. 按主题和市场分组ticker
+            # US市场: market = 'US'
+            # China市场: market = 'HK' 或 'CN'
+            us_themes_map = {}
+            china_themes_map = {}
+            
+            for row in theme_tickers:
+                theme_id, theme_name, category, ticker, market, company_name = row
+                
+                # 判断市场归属
+                if market == 'US':
+                    target_map = us_themes_map
+                elif market in ('HK', 'CN'):
+                    target_map = china_themes_map
+                else:
+                    continue  # 跳过其他市场
+                
+                if theme_name not in target_map:
+                    target_map[theme_name] = {
+                        'theme_id': theme_id,
+                        'category': category,
+                        'tickers': []
+                    }
+                target_map[theme_name]['tickers'].append(ticker)
+            
+            logger.info(f"Found {len(us_themes_map)} US AI themes and {len(china_themes_map)} China AI themes")
+            
+            # 3. 计算US市场的WoW和相对表现
+            us_ai_wow = self._calculate_market_wow(us_themes_map, week_start, week_end, cursor)
+            us_ai_relative = self._calculate_market_relative(us_themes_map, days, cursor)
+            
+            # 4. 计算China市场的WoW和相对表现
+            china_ai_wow = self._calculate_market_wow(china_themes_map, week_start, week_end, cursor)
+            china_ai_relative = self._calculate_market_relative(china_themes_map, days, cursor)
+            
+            cursor.close()
+            conn.close()
+            
+            logger.info(f"US AI: {len(us_ai_wow)} themes WoW, {len(us_ai_relative)} days relative")
+            logger.info(f"China AI: {len(china_ai_wow)} themes WoW, {len(china_ai_relative)} days relative")
+            
+            return us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative
+            
+        except Exception as e:
+            logger.error(f"Error calculating AI related performance: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return [], [], [], []
+    
+    def _calculate_market_wow(self, themes_map: dict, week_start: datetime, week_end: datetime, cursor) -> list:
+        """
+        计算某个市场所有主题的WoW
+        
+        关键：与report_debug.py逻辑一致 - 先计算每日平均价格，再计算WoW
+        """
+        market_wow = []
+        
+        for theme_name, theme_data in themes_map.items():
+            tickers = theme_data['tickers']
+            
+            # 关键逻辑：先计算每日的平均价格（所有股票的平均），再计算WoW
+            # 这与report_debug.py的compute_ai_sector_panels() + compute_wow()逻辑一致
+            wow_query = """
+            WITH daily_avg_prices AS (
+                -- 步骤1: 计算每日所有股票的平均收盘价
+                SELECT 
+                    date::date as trade_date,
+                    AVG(close) as avg_close
+                FROM stock_prices_eod
+                WHERE code = ANY(%s)
+                  AND date BETWEEN %s - INTERVAL '30 days' AND %s
+                  AND close IS NOT NULL
+                GROUP BY date::date
+                HAVING COUNT(*) > 0
+            ),
+            week_start_price AS (
+                -- 步骤2: 获取week_start当天或之前最近的平均价格
+                SELECT avg_close as start_price
+                FROM daily_avg_prices
+                WHERE trade_date <= %s
+                ORDER BY trade_date DESC
+                LIMIT 1
+            ),
+            week_end_price AS (
+                -- 步骤3: 获取week_end当天或之前最近的平均价格
+                SELECT avg_close as end_price
+                FROM daily_avg_prices
+                WHERE trade_date <= %s
+                ORDER BY trade_date DESC
+                LIMIT 1
+            )
+            -- 步骤4: 计算涨跌幅（基于平均价格）
+            SELECT 
+                ROUND(((wep.end_price - wsp.start_price) / NULLIF(wsp.start_price, 0) * 100)::numeric, 2) as change_pct
+            FROM week_start_price wsp
+            CROSS JOIN week_end_price wep
+            WHERE wsp.start_price IS NOT NULL 
+              AND wsp.start_price != 0
+              AND wep.end_price IS NOT NULL;
+            """
+            
+            cursor.execute(wow_query, (
+                tickers, week_start.date(), week_end.date(),
+                week_start.date(),
+                week_end.date()
+            ))
+            
+            result = cursor.fetchone()
+            if result and result[0] is not None:
+                market_wow.append({
+                    'name': theme_name,
+                    'change_pct': round(float(result[0]), 2)
+                })
+        
+        # 按涨跌幅排序
+        market_wow.sort(key=lambda x: x['change_pct'], reverse=True)
+        return market_wow
+    
+    def _calculate_market_relative(self, themes_map: dict, days: int, cursor) -> list:
+        """计算某个市场所有主题的相对表现"""
+        market_relative = []
+        
+        for theme_name, theme_data in themes_map.items():
+            tickers = theme_data['tickers']
+            
+            relative_query = """
+            WITH daily_avg_prices AS (
+                SELECT 
+                    date::date as trade_date,
+                    AVG(close) as avg_close
+                FROM stock_prices_eod
+                WHERE code = ANY(%s)
+                  AND date >= CURRENT_DATE - %s
+                  AND close IS NOT NULL
+                GROUP BY date::date
+                HAVING COUNT(*) > 0
+            ),
+            first_price AS (
+                SELECT avg_close as first_close
+                FROM daily_avg_prices
+                ORDER BY trade_date
+                LIMIT 1
+            )
+            SELECT 
+                dap.trade_date,
+                ROUND((dap.avg_close / NULLIF(fp.first_close, 0) * 100)::numeric, 2) as indexed_value
+            FROM daily_avg_prices dap
+            CROSS JOIN first_price fp
+            WHERE fp.first_close IS NOT NULL AND fp.first_close != 0
+            ORDER BY dap.trade_date;
+            """
+            
+            cursor.execute(relative_query, (tickers, days))
+            daily_data = cursor.fetchall()
+            
+            # 添加到结果中
+            for row in daily_data:
+                trade_date_str = row[0].strftime('%Y-%m-%d')
+                indexed_value = float(row[1]) if row[1] is not None else 100.0
+                
+                # 查找或创建该日期的记录
+                date_record = next((r for r in market_relative if r['date'] == trade_date_str), None)
+                if not date_record:
+                    date_record = {'date': trade_date_str}
+                    market_relative.append(date_record)
+                
+                date_record[theme_name] = indexed_value
+        
+        # 按日期排序
+        market_relative.sort(key=lambda x: x['date'])
+        return market_relative
 

@@ -295,20 +295,19 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     try {
       setLoading(true);
       
-      // Get execution logs for all tasks
-      const response = await schedulerAPI.getAllExecutionLogs(50, 0);
+      // Prepare task types for filtering (exclude futu_themes)
+      let taskTypesToFetch = selectedSummaryTasks.length > 0 
+        ? selectedSummaryTasks.filter((type) => type !== 'futu_themes')
+        : undefined;
+      
+      // Get execution logs with task type filtering at backend
+      // Increase limit to 500 to get more records when filtering by task type
+      const response = await schedulerAPI.getAllExecutionLogs(500, 0, taskTypesToFetch);
 
       if (response.success && response.data) {
         let filteredLogs = response.data.logs.filter(
           (log: ExecutionLog) => log.task_type !== 'futu_themes'
         );
-        
-        // Filter by selected tasks
-        if (selectedSummaryTasks.length > 0) {
-          filteredLogs = filteredLogs.filter((log: ExecutionLog) => 
-            selectedSummaryTasks.includes(log.task_type)
-          );
-        }
         
         // Filter by status
         if (statusFilter && statusFilter !== 'all') {
@@ -625,7 +624,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             value={selectedSummaryTasks}
             onChange={(value) => setSelectedSummaryTasks(value as string[])}
             options={summaryTaskOptions}
-            style={{ minWidth: 220 }}
+            style={{ minWidth: 350 }}
             size="small"
             maxTagCount="responsive"
           />

@@ -172,7 +172,7 @@ class NewsService:
                 # 获取投资主题匹配结果
                 theme_query = """
                     SELECT 
-                        theme_id, theme_name, similarity_score, match_rank
+                        theme_id, theme_name, category, similarity_score, match_rank
                     FROM news_theme_matches
                     WHERE news_id = %s
                     ORDER BY match_rank ASC
@@ -184,9 +184,10 @@ class NewsService:
                     theme_matches.append({
                         'theme_id': theme_row[0],
                         'theme_name': theme_row[1],
-                        'similarity': float(theme_row[2]) if theme_row[2] is not None else 0.0,
-                        'confidence': float(theme_row[2]) if theme_row[2] is not None else 0.0,  # 使用相似度作为置信度
-                        'rank': theme_row[3]
+                        'category': theme_row[2],
+                        'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
+                        'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
+                        'rank': theme_row[4]
                     })
                 news_item['theme_matches'] = theme_matches
                 
@@ -903,7 +904,7 @@ async def get_news_detail(
             # 获取投资主题匹配结果
             theme_query = """
                 SELECT 
-                    theme_id, theme_name, similarity_score, match_rank
+                    theme_id, theme_name, category, similarity_score, match_rank
                 FROM news_theme_matches
                 WHERE news_id = %s
                 ORDER BY match_rank ASC
@@ -915,9 +916,10 @@ async def get_news_detail(
                 theme_matches.append({
                     'theme_id': theme_row[0],
                     'theme_name': theme_row[1],
-                    'similarity': float(theme_row[2]) if theme_row[2] is not None else 0.0,
-                    'confidence': float(theme_row[2]) if theme_row[2] is not None else 0.0,  # 使用相似度作为置信度
-                    'rank': theme_row[3]
+                    'category': theme_row[2],
+                    'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
+                    'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
+                    'rank': theme_row[4]
                 })
             news_item['theme_matches'] = theme_matches
             

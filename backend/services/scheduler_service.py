@@ -1970,6 +1970,11 @@ class SchedulerService:
         """
         执行EODHD历史股价数据获取任务（通过Celery异步执行）
         
+        功能：
+        - 获取watchlist中所有股票的历史价格数据（从target_tracking_config表）
+        - 获取theme_company_associations表中所有股票的历史价格数据
+        - 自动合并并去重，存储到stock_prices_eod表
+        
         注意：此方法会等待Celery任务完成（可能需要3-10分钟），以便记录准确的执行结果
         
         Args:
@@ -2673,8 +2678,15 @@ class SchedulerService:
             logger.error(f"记录任务执行完成失败: {str(e)}")
 
     async def get_task_execution_logs(self, task_id: str = None, limit: int = 50, 
-                                    offset: int = 0) -> List[Dict[str, Any]]:
-        """获取任务执行日志"""
+                                    offset: int = 0, task_types: List[str] = None) -> List[Dict[str, Any]]:
+        """获取任务执行日志
+        
+        Args:
+            task_id: 任务ID（可选）
+            limit: 返回记录数限制
+            offset: 偏移量
+            task_types: 任务类型列表（可选），用于过滤特定类型的任务
+        """
         try:
             conn = self.db_manager.get_connection()
             if not conn:
@@ -2693,6 +2705,19 @@ class SchedulerService:
                         ORDER BY started_at DESC 
                         LIMIT %s OFFSET %s
                     """, (task_id, limit, offset))
+                elif task_types and len(task_types) > 0:
+                    # 按 task_type 列表过滤
+                    placeholders = ','.join(['%s'] * len(task_types))
+                    query = f"""
+                        SELECT id, task_id, task_name, task_type, started_at, finished_at,
+                               duration_ms, status, result_message, result_data, 
+                               error_message, error_traceback, execution_params
+                        FROM task_execution_logs 
+                        WHERE task_type IN ({placeholders})
+                        ORDER BY started_at DESC 
+                        LIMIT %s OFFSET %s
+                    """
+                    cursor.execute(query, (*task_types, limit, offset))
                 else:
                     cursor.execute("""
                         SELECT id, task_id, task_name, task_type, started_at, finished_at,

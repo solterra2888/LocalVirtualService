@@ -67,6 +67,30 @@ const WoWBarChart: React.FC<WoWBarChartProps> = ({
     return `${value}%`;
   };
 
+  // 自定义柱状图标签（与 CombinedWoWChart 样式一致）
+  const CustomLabel = (props: any) => {
+    const { x, y, width, height, value } = props;
+    const isPositive = value >= 0;
+    const labelOffset = 10;
+    const barStartX = isPositive ? x : x + width;
+    const barEndX = isPositive ? x + width : x;
+    const labelX = isPositive ? barEndX + labelOffset : barStartX - labelOffset;
+
+    return (
+      <text
+        x={labelX}
+        y={y + height / 2}
+        fill="#2C3E50"
+        textAnchor={isPositive ? 'start' : 'end'}
+        dominantBaseline="middle"
+        fontSize="9"
+        fontWeight="bold"
+      >
+        {value >= 0 ? '+' : ''}{value.toFixed(1)}%
+      </text>
+    );
+  };
+
   return (
     <div style={{ width: '100%' }}>
       {showTitle && (
@@ -78,7 +102,7 @@ const WoWBarChart: React.FC<WoWBarChartProps> = ({
         <BarChart
           data={data}
           layout="vertical"
-          margin={{ top: 5, right: 40, left: 120, bottom: 5 }}
+
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
           <XAxis
@@ -99,6 +123,7 @@ const WoWBarChart: React.FC<WoWBarChartProps> = ({
           <Bar
             dataKey="change_pct"
             radius={[0, 4, 4, 0]}
+            label={<CustomLabel />}
           >
             {data.map((entry, index) => (
               <Cell

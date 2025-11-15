@@ -817,8 +817,9 @@ async def create_eodhd_eod_stock_prices_task(
     
     默认配置：
     - 纽约时间工作日每天执行 (0 9 * * 1-5)
-    - 获取所有watchlist中的股票历史价格数据
-    - 自动存储到stock_prices_eod表
+    - 获取watchlist中的股票历史价格数据（从target_tracking_config表）
+    - 获取主题关联公司的历史价格数据（从theme_company_associations表）
+    - 自动合并并去重，存储到stock_prices_eod表
     """
     try:
         logger.info("创建EODHD历史股价定时任务请求", 
@@ -1690,19 +1691,31 @@ async def get_task_logs(
 
 @router.get("/execution-logs", summary="获取所有任务执行日志")
 async def get_all_execution_logs(
-    limit: int = Query(default=50, ge=1, le=500, description="返回日志条数"),
-    offset: int = Query(default=0, ge=0, description="偏移量")
+    limit: int = Query(default=50, ge=1, le=1000, description="返回日志条数"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+    task_types: Optional[str] = Query(default=None, description="任务类型列表，逗号分隔")
 ):
     """
     获取所有任务的执行日志
+    
+    Args:
+        limit: 返回记录数限制
+        offset: 偏移量
+        task_types: 任务类型列表，逗号分隔，例如 "economic_events,market_data"
     """
     try:
+        # 解析 task_types
+        task_types_list = None
+        if task_types:
+            task_types_list = [t.strip() for t in task_types.split(',') if t.strip()]
+        
         logger.info("获取所有任务执行日志请求", 
                    limit=limit,
-                   offset=offset)
+                   offset=offset,
+                   task_types=task_types_list)
         
         scheduler_service = await get_scheduler_service()
-        logs = await scheduler_service.get_task_execution_logs(None, limit, offset)
+        logs = await scheduler_service.get_task_execution_logs(None, limit, offset, task_types_list)
         
         return {
             "success": True,
