@@ -27,6 +27,7 @@ class ChartSymbol(BaseModel):
 class BatchChartRequest(BaseModel):
     symbols: List[ChartSymbol]
     days: int = 90
+    data_source: str = 'auto'  # 'market', 'stock', or 'auto'
 
 
 @router.get("/market-weekly/report")
@@ -196,7 +197,8 @@ async def get_ohlc_data_batch(
         result = await service.get_ohlc_data_batch(
             symbols=symbols,
             days=batch_request.days,
-            request=request  # 🔥 传入request用于检测客户端断开
+            request=request,  # 🔥 传入request用于检测客户端断开
+            data_source=batch_request.data_source  # 🔥 指定数据源
         )
         
         status = result.get("status")

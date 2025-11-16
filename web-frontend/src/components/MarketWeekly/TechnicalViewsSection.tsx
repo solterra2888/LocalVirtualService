@@ -132,11 +132,12 @@ const SimpleTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps> = ({
 
         console.log(`[TechnicalViews] Loading ${symbols.length} charts for ${title}...`);
 
-        // 🔥 批量获取所有OHLC数据
+        // 🔥 批量获取所有OHLC数据（从 market_data_eod 获取）
         const result = await marketWeeklyAPI.getOHLCDataInBatch(
           symbols,
           90,
-          abortControllerRef.current.signal
+          abortControllerRef.current.signal,
+          'market'  // 🔥 indices/sectors/forex/commodities/bonds 使用 market_data_eod
         );
 
         // 将结果转换为Map，方便查找
@@ -177,9 +178,44 @@ const SimpleTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps> = ({
     );
   }
 
+  // 对 US Treasury Yields 的展示顺序进行固定：3M, 1Y, 5Y, 10Y
+  let orderedAssets = assets;
+  if (title === 'US Treasury Yields' || sectionId === 'yields-technical') {
+    const getYieldOrderKey = (name: string): number => {
+      const lower = name.toLowerCase();
+
+      // 3 month
+      if (lower.includes('3m') || lower.includes('3 month')) {
+        return 1;
+      }
+      // 1 year
+      if (lower.includes('1y') || lower.includes('1 year')) {
+        return 2;
+      }
+      // 5 year
+      if (lower.includes('5y') || lower.includes('5 year')) {
+        return 3;
+      }
+      // 10 year
+      if (lower.includes('10y') || lower.includes('10 year')) {
+        return 4;
+      }
+
+      // 其他期限保持在后面，且利用稳定排序保持原有相对顺序
+      return Number.POSITIVE_INFINITY;
+    };
+
+    orderedAssets = [...assets].sort((a, b) => {
+      const ka = getYieldOrderKey(a.name);
+      const kb = getYieldOrderKey(b.name);
+      if (ka === kb) return 0;
+      return ka - kb;
+    });
+  }
+
   return (
     <div className="technical-grid">
-      {assets.map((asset) => {
+      {orderedAssets.map((asset) => {
         const primaryTicker = asset.primary_ticker || asset.symbol;
         const chartData = chartsData.get(primaryTicker) || null;
         
@@ -233,11 +269,12 @@ const EquityIndicesTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps
 
         console.log(`[TechnicalViews] Loading ${symbols.length} charts for equity indices...`);
 
-        // 🔥 批量获取所有OHLC数据
+        // 🔥 批量获取所有OHLC数据（从 market_data_eod 获取）
         const result = await marketWeeklyAPI.getOHLCDataInBatch(
           symbols,
           90,
-          abortControllerRef.current.signal
+          abortControllerRef.current.signal,
+          'market'  // 🔥 indices 使用 market_data_eod
         );
 
         // 将结果转换为Map，方便查找
@@ -284,12 +321,31 @@ const EquityIndicesTechnicalSectionInternal: React.FC<TechnicalViewsSectionProps
     <div className="technical-region-groups">
       {Object.entries(regions).map(([region, regionAssets]) => {
         if (regionAssets.length === 0) return null;
-        
+
+        // 对 US 市场的指数顺序进行固定排序：S&P 500, Nasdaq 100, Dow Jones，其余保持原有顺序
+        let orderedAssets = regionAssets;
+        if (region === 'US') {
+          const preferredOrder = ['S&P 500', 'Nasdaq 100', 'Dow Jones'];
+          orderedAssets = [...regionAssets].sort((a, b) => {
+            const ia = preferredOrder.indexOf(a.name);
+            const ib = preferredOrder.indexOf(b.name);
+
+            const aIn = ia !== -1;
+            const bIn = ib !== -1;
+
+            if (aIn && bIn) return ia - ib;
+            if (aIn) return -1;
+            if (bIn) return 1;
+            // 对于不在优先列表中的，回退到名称字母顺序，保证顺序稳定可预期
+            return a.name.localeCompare(b.name);
+          });
+        }
+
         return (
           <div key={region} className="technical-region-block">
             <h4 className="technical-region-title">{region} Markets</h4>
             <div className="technical-grid">
-              {regionAssets.map((asset) => {
+              {orderedAssets.map((asset) => {
                 const primaryTicker = asset.primary_ticker || asset.symbol;
                 const chartData = chartsData.get(primaryTicker) || null;
 

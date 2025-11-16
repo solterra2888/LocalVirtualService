@@ -94,6 +94,7 @@ export interface EarningsEvent {
   time: string;  // "Before Open" | "After Close" | "During Hours"
   ticker: string;
   company: string;
+  logo_url?: string;  // 公司logo URL
 }
 
 // IPO日历事件
@@ -105,6 +106,22 @@ export interface IPOEvent {
   deal_type?: string;
   price_range?: string;
   shares?: string;
+}
+
+// My Themes股票信息
+export interface MyThemesStockInfo {
+  ticker: string;
+  company_name: string;
+  theme_name: string;
+  theme_id: string;
+  category: string;
+  market: string;
+}
+
+// My Themes股票数据
+export interface MyThemesStocks {
+  us_stocks: MyThemesStockInfo[];
+  china_stocks: MyThemesStockInfo[];
 }
 
 // 下周展望
@@ -120,6 +137,7 @@ export interface MarketWeeklyReport {
   executive_summary: ExecutiveSummary;
   weekly_performance: WeeklyPerformance;
   technical_views: TechnicalViews;
+  my_themes_stocks?: MyThemesStocks;  // My Themes个股数据（可选）
   next_week_outlook: NextWeekOutlook;
 }
 

@@ -147,11 +147,13 @@ class MarketWeeklyAPI {
    * @param symbols - 股票代码列表 [{ symbol: 'SPY.US', label: 'S&P 500' }, ...]
    * @param days - 天数
    * @param signal - AbortSignal 用于取消请求
+   * @param dataSource - 数据源: 'market' (indices/sectors/forex/commodities/bonds) or 'stock' (个股) or 'auto'
    */
   async getOHLCDataInBatch(
     symbols: Array<{ symbol: string; label?: string }>,
     days: number = 90,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    dataSource: 'market' | 'stock' | 'auto' = 'auto'
   ): Promise<{
     status: 'completed' | 'cancelled';
     processed: number;
@@ -179,7 +181,8 @@ class MarketWeeklyAPI {
             symbol: s.symbol,
             label: s.label || s.symbol
           })),
-          days
+          days,
+          data_source: dataSource // 🔥 指定数据源
         },
         {
           signal // 🔥 传入AbortSignal用于取消请求

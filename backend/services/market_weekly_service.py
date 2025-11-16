@@ -101,6 +101,9 @@ class MarketWeeklyService:
             # 5. 获取技术视图数据（资产列表）
             technical_views = self._get_technical_views_data()
             
+            # 5.5 获取My Themes股票数据（个股走势图）
+            my_themes_stocks = self._get_my_themes_stocks()
+            
             # 6. 获取下周展望数据
             next_week_outlook = self._get_next_week_outlook(week_end)
             
@@ -129,6 +132,7 @@ class MarketWeeklyService:
                     'yields_data': yields_data
                 },
                 'technical_views': technical_views,
+                'my_themes_stocks': my_themes_stocks,
                 'next_week_outlook': next_week_outlook
             }
             
@@ -148,79 +152,106 @@ class MarketWeeklyService:
         """
         计算周度时间范围
         
-        逻辑：
-        - week_end: 数据库中最新的交易日（本周最新数据）
-        - week_start: 上一个周五（作为上周的代表）
+        完全参考report_debug.py的compute_wow逻辑：
+        1. resample("W-FRI") - 按周五重采样
+        2. wk.index[-2], wk.index[-1] - 取最后两个周五
+        3. w0 (week_start) = 倒数第二个周五
+        4. w1 (week_end) = 最后一个周五
         
         这样可以确保：
-        - 如果本周有数据（即使不是周五），也会使用本周数据
-        - 对比的是"上周五"到"本周最新交易日"
+        - 在周末时，用户看到的是上周完整的报告（周五到周五）
+        - 避免在周末或周初显示"不完整"的周数据
         
         Args:
             period: 'latest' 或特定日期
         
         Returns:
-            (week_start, week_end) 元组，都是datetime对象
+            (week_start, week_end) 元组，都是datetime对象，都是周五
         """
         if period == 'latest':
             try:
                 conn = self.db_manager.get_connection()
                 cursor = conn.cursor()
                 
-                # 1. 获取数据库中的最新交易日（作为week_end）
+                # 1. 获取过去30天的所有周五交易日（确保能找到至少2个）
+                # 模拟 resample("W-FRI").last() 的逻辑
                 cursor.execute("""
-                    SELECT MAX(date)::date as latest_date
-                    FROM market_data_eod
-                    WHERE date >= CURRENT_DATE - INTERVAL '14 days'
+                    WITH all_fridays AS (
+                        SELECT DISTINCT date::date as friday_date
+                        FROM market_data_eod
+                        WHERE EXTRACT(DOW FROM date) = 5  -- 周五
+                          AND date >= CURRENT_DATE - INTERVAL '30 days'
+                          AND date <= CURRENT_DATE
+                        ORDER BY date DESC
+                    )
+                    SELECT friday_date FROM all_fridays
+                    ORDER BY friday_date DESC
+                    LIMIT 2
                 """)
-                result = cursor.fetchone()
-                week_end_date = result[0] if result and result[0] else None
                 
-                if not week_end_date:
-                    raise ValueError("No recent data found in market_data_eod")
-                
-                # 2. 获取week_end之前最近的周五（作为week_start）
-                # 如果week_end本身就是周五，则取上一个周五
-                cursor.execute("""
-                    SELECT MAX(date)::date as friday_date
-                    FROM market_data_eod
-                    WHERE EXTRACT(DOW FROM date) = 5  -- 周五
-                      AND date < %s
-                      AND date >= %s - INTERVAL '14 days'
-                """, (week_end_date, week_end_date))
-                
-                result = cursor.fetchone()
-                week_start_date = result[0] if result and result[0] else None
-                
+                fridays = cursor.fetchall()
                 cursor.close()
                 conn.close()
                 
-                if not week_start_date:
-                    # 如果找不到之前的周五，使用week_end - 7天
-                    logger.warning("Could not find previous Friday, using week_end - 7 days")
+                if len(fridays) >= 2:
+                    # 完全按照report_debug.py的逻辑：
+                    # w0, w1 = wk.index[-2], wk.index[-1]
+                    week_end_date = fridays[0][0]      # wk.index[-1] = 最后一个周五
+                    week_start_date = fridays[1][0]    # wk.index[-2] = 倒数第二个周五
+                    
+                    logger.info(f"Found 2 Fridays from DB: week_start={week_start_date}, week_end={week_end_date}")
+                elif len(fridays) == 1:
+                    # 只找到一个周五，使用该周五和前一周
+                    week_end_date = fridays[0][0]
                     week_start_date = week_end_date - timedelta(days=7)
-                
-                logger.info(f"Calculated week range from database: {week_start_date} to {week_end_date}")
+                    logger.warning(f"Only found 1 Friday, using week_start={week_start_date}, week_end={week_end_date}")
+                else:
+                    # 没有找到周五，使用fallback
+                    raise ValueError("No Fridays found in database, using fallback")
                 
             except Exception as e:
-                logger.error(f"Error querying week range from database: {str(e)}")
-                # 使用fallback逻辑
+                logger.error(f"Error querying week range from database: {str(e)}, using fallback")
+                # 使用fallback逻辑（不依赖数据库）
                 today = datetime.utcnow().date()
-                week_end_date = today
-                # 找到上一个周五
+                
+                # 找到最近的周五
                 days_since_friday = (today.weekday() - 4) % 7
                 if days_since_friday == 0:
-                    days_since_friday = 7
-                week_start_date = today - timedelta(days=days_since_friday)
+                    # 今天是周五
+                    last_friday = today
+                else:
+                    # 往前找最近的周五
+                    if days_since_friday < 0:
+                        days_since_friday += 7
+                    last_friday = today - timedelta(days=days_since_friday)
+                
+                # 上一个周五
+                previous_friday = last_friday - timedelta(days=7)
+                
+                week_end_date = last_friday
+                week_start_date = previous_friday
+                
+                logger.info(f"Using fallback logic: week_start={week_start_date}, week_end={week_end_date}")
         else:
             # TODO: 支持特定日期范围
             today = datetime.utcnow().date()
-            week_end_date = today
-            week_start_date = week_end_date - timedelta(days=7)
+            days_since_friday = (today.weekday() - 4) % 7
+            if days_since_friday == 0:
+                last_friday = today
+            else:
+                if days_since_friday < 0:
+                    days_since_friday += 7
+                last_friday = today - timedelta(days=days_since_friday)
+            
+            week_end_date = last_friday
+            week_start_date = last_friday - timedelta(days=7)
         
         # 转换为datetime对象
         week_start = datetime.combine(week_start_date, datetime.min.time())
         week_end = datetime.combine(week_end_date, datetime.max.time())
+        
+        logger.info(f"Final result: week_start={week_start.date()} ({week_start.strftime('%A')}), "
+                   f"week_end={week_end.date()} ({week_end.strftime('%A')})")
         
         return week_start, week_end
     
@@ -855,18 +886,41 @@ class MarketWeeklyService:
     
     def _get_earnings_calendar(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """获取财报日历数据"""
-        # 使用company_earnings_history表代替earnings_calendar表
+        # 使用company_earnings_history表，并且只展示：
+        # - 用户watchlist中的股票（来自 target_tracking_config.primaryticker）
+        # - 主题设置中的股票（来自 theme_company_associations.ticker，且已验证）
         query = """
+        WITH watchlist_tickers AS (
+            SELECT DISTINCT primaryticker AS ticker
+            FROM target_tracking_config
+            WHERE enabled = TRUE
+              AND primaryticker IS NOT NULL
+              AND primaryticker != ''
+        ),
+        theme_tickers AS (
+            SELECT DISTINCT ticker
+            FROM theme_company_associations
+            WHERE is_verified = TRUE
+              AND ticker IS NOT NULL
+              AND ticker != ''
+        ),
+        combined_tickers AS (
+            SELECT ticker FROM watchlist_tickers
+            UNION
+            SELECT ticker FROM theme_tickers
+        )
         SELECT 
-            ceh.reportdate as date,
+            ceh.reportdate AS date,
             c.code,
             c.name,
-            ceh.beforeaftermarket
+            ceh.beforeaftermarket,
+            c.logourl
         FROM company_earnings_history ceh
         INNER JOIN companies c ON ceh.company_id = c.id
+        INNER JOIN combined_tickers ct ON c.primaryticker = ct.ticker
         WHERE ceh.reportdate >= %s AND ceh.reportdate <= %s
         ORDER BY ceh.reportdate, c.code
-        LIMIT 100;
+        LIMIT 200;
         """
         
         try:
@@ -894,7 +948,8 @@ class MarketWeeklyService:
                     'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
                     'time': time_str,
                     'ticker': ticker,
-                    'company': row[2] or ''
+                    'company': row[2] or '',
+                    'logo_url': row[4] or ''
                 })
             
             cursor.close()
@@ -1131,7 +1186,7 @@ class MarketWeeklyService:
             del _memory_cache[cache_key]
             logger.info(f"Cleared memory cache: {cache_key}")
     
-    async def get_ohlc_data_batch(self, symbols: List[str], days: int = 90, request=None) -> Dict[str, Any]:
+    async def get_ohlc_data_batch(self, symbols: List[str], days: int = 90, request=None, data_source: str = 'auto') -> Dict[str, Any]:
         """
         批量获取OHLC原始数据（用于前端渲染图表，支持请求中断检测）
         
@@ -1139,6 +1194,10 @@ class MarketWeeklyService:
             symbols: 股票代码列表，格式为 [{"symbol": "SPY.US", "label": "S&P 500"}, ...]
             days: 天数
             request: FastAPI Request对象，用于检测客户端断开
+            data_source: 数据源选择
+                - 'market': 优先使用 market_data_eod (用于 indices, sectors, forex, commodities, bonds)
+                - 'stock': 优先使用 stock_prices_eod (用于个股数据)
+                - 'auto': 自动判断（默认，向后兼容）
         
         Returns:
             {
@@ -1195,22 +1254,11 @@ class MarketWeeklyService:
                 conn = self.db_manager.get_connection()
                 cursor = conn.cursor()
                 
-                # 首先尝试从 stock_prices_eod 表获取数据
-                query_stock = """
-                SELECT date, open, high, low, close, volume
-                FROM stock_prices_eod
-                WHERE code = %s 
-                AND date >= %s 
-                AND date <= %s
-                AND period = 'd'
-                ORDER BY date ASC
-                """
+                rows = None
                 
-                cursor.execute(query_stock, (symbol, start_date, end_date))
-                rows = cursor.fetchall()
-                
-                # 如果没有数据，尝试从 market_data_eod 表获取
-                if not rows:
+                # 根据 data_source 参数决定查询哪个表
+                if data_source == 'market':
+                    # 优先使用 market_data_eod (用于 indices, sectors, forex, commodities, bonds)
                     query_market = """
                     SELECT date, open, high, low, close, volume
                     FROM market_data_eod
@@ -1219,9 +1267,49 @@ class MarketWeeklyService:
                     AND date <= %s
                     ORDER BY date ASC
                     """
-                    
                     cursor.execute(query_market, (symbol, start_date, end_date))
                     rows = cursor.fetchall()
+                    
+                elif data_source == 'stock':
+                    # 优先使用 stock_prices_eod (用于个股数据)
+                    query_stock = """
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_eod
+                    WHERE code = %s 
+                    AND date >= %s 
+                    AND date <= %s
+                    AND period = 'd'
+                    ORDER BY date ASC
+                    """
+                    cursor.execute(query_stock, (symbol, start_date, end_date))
+                    rows = cursor.fetchall()
+                    
+                else:  # data_source == 'auto' (默认，向后兼容)
+                    # 首先尝试从 stock_prices_eod 表获取数据
+                    query_stock = """
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_eod
+                    WHERE code = %s 
+                    AND date >= %s 
+                    AND date <= %s
+                    AND period = 'd'
+                    ORDER BY date ASC
+                    """
+                    cursor.execute(query_stock, (symbol, start_date, end_date))
+                    rows = cursor.fetchall()
+                    
+                    # 如果没有数据，尝试从 market_data_eod 表获取
+                    if not rows:
+                        query_market = """
+                        SELECT date, open, high, low, close, volume
+                        FROM market_data_eod
+                        WHERE code = %s 
+                        AND date >= %s 
+                        AND date <= %s
+                        ORDER BY date ASC
+                        """
+                        cursor.execute(query_market, (symbol, start_date, end_date))
+                        rows = cursor.fetchall()
                 
                 cursor.close()
                 conn.close()
@@ -1691,122 +1779,276 @@ class MarketWeeklyService:
         """
         计算某个市场所有主题的WoW
         
-        关键：与report_debug.py逻辑一致 - 先计算每日平均价格，再计算WoW
+        优化逻辑：与report_debug.py逻辑一致
+        1. 获取所有股票的原始价格数据
+        2. 使用ffill/bfill填充缺失值（确保数据连续性）
+        3. 计算每日平均价格（所有股票的横向平均）
+        4. 对比week_start和week_end两个周五的平均价格，计算WoW
         """
+        import pandas as pd
+        
         market_wow = []
         
         for theme_name, theme_data in themes_map.items():
             tickers = theme_data['tickers']
             
-            # 关键逻辑：先计算每日的平均价格（所有股票的平均），再计算WoW
-            # 这与report_debug.py的compute_ai_sector_panels() + compute_wow()逻辑一致
-            wow_query = """
-            WITH daily_avg_prices AS (
-                -- 步骤1: 计算每日所有股票的平均收盘价
-                SELECT 
-                    date::date as trade_date,
-                    AVG(close) as avg_close
-                FROM stock_prices_eod
-                WHERE code = ANY(%s)
-                  AND date BETWEEN %s - INTERVAL '30 days' AND %s
-                  AND close IS NOT NULL
-                GROUP BY date::date
-                HAVING COUNT(*) > 0
-            ),
-            week_start_price AS (
-                -- 步骤2: 获取week_start当天或之前最近的平均价格
-                SELECT avg_close as start_price
-                FROM daily_avg_prices
-                WHERE trade_date <= %s
-                ORDER BY trade_date DESC
-                LIMIT 1
-            ),
-            week_end_price AS (
-                -- 步骤3: 获取week_end当天或之前最近的平均价格
-                SELECT avg_close as end_price
-                FROM daily_avg_prices
-                WHERE trade_date <= %s
-                ORDER BY trade_date DESC
-                LIMIT 1
-            )
-            -- 步骤4: 计算涨跌幅（基于平均价格）
-            SELECT 
-                ROUND(((wep.end_price - wsp.start_price) / NULLIF(wsp.start_price, 0) * 100)::numeric, 2) as change_pct
-            FROM week_start_price wsp
-            CROSS JOIN week_end_price wep
-            WHERE wsp.start_price IS NOT NULL 
-              AND wsp.start_price != 0
-              AND wep.end_price IS NOT NULL;
+            if not tickers:
+                continue
+            
+            # 1. 获取所有股票的原始数据（包含week_start前后30天，确保有足够数据用于填充）
+            query = """
+            SELECT code, date::date as trade_date, close
+            FROM stock_prices_eod
+            WHERE code = ANY(%s)
+              AND date BETWEEN %s - INTERVAL '30 days' AND %s
+              AND close IS NOT NULL
+            ORDER BY code, date
             """
             
-            cursor.execute(wow_query, (
-                tickers, week_start.date(), week_end.date(),
-                week_start.date(),
-                week_end.date()
-            ))
+            cursor.execute(query, (tickers, week_start.date(), week_end.date()))
+            rows = cursor.fetchall()
             
-            result = cursor.fetchone()
-            if result and result[0] is not None:
-                market_wow.append({
-                    'name': theme_name,
-                    'change_pct': round(float(result[0]), 2)
-                })
+            if not rows:
+                logger.warning(f"No WoW data found for theme '{theme_name}' with {len(tickers)} tickers")
+                continue
+            
+            # 2. 转换为DataFrame
+            df = pd.DataFrame(rows, columns=['code', 'date', 'close'])
+            
+            # 2.5. 🔥 关键：去重处理（如果同一股票同一天有多条记录，取最新的）
+            df = df.sort_values('date').drop_duplicates(subset=['code', 'date'], keep='last')
+            
+            # 3. Pivot成wide format (每只股票一列)
+            pivot_df = df.pivot(index='date', columns='code', values='close')
+            
+            # 4. 使用ffill/bfill填充缺失值（模拟report_debug.py的逻辑）
+            pivot_df = pivot_df.ffill().bfill()
+            
+            # 5. 计算每日平均价格（所有股票的横向平均）
+            # 与report_debug.py中的 us_panel.mean(axis=1) 逻辑一致
+            daily_avg = pivot_df.mean(axis=1)
+            
+            # 6. 获取week_start和week_end的平均价格
+            try:
+                # 找到最接近week_start的日期（<=week_start的最大日期）
+                start_dates = daily_avg.index[daily_avg.index <= week_start.date()]
+                if len(start_dates) == 0:
+                    logger.warning(f"No data before week_start for theme '{theme_name}'")
+                    continue
+                start_price = daily_avg[start_dates[-1]]
+                
+                # 找到最接近week_end的日期（<=week_end的最大日期）
+                end_dates = daily_avg.index[daily_avg.index <= week_end.date()]
+                if len(end_dates) == 0:
+                    logger.warning(f"No data before week_end for theme '{theme_name}'")
+                    continue
+                end_price = daily_avg[end_dates[-1]]
+                
+                # 7. 计算WoW变化率
+                if start_price > 0:
+                    change_pct = ((end_price - start_price) / start_price * 100)
+                    market_wow.append({
+                        'name': theme_name,
+                        'change_pct': round(float(change_pct), 2)
+                    })
+                    
+                    logger.debug(f"Theme '{theme_name}' WoW: {start_price:.2f} -> {end_price:.2f} = {change_pct:+.2f}%")
+                else:
+                    logger.warning(f"Theme '{theme_name}' has invalid start price: {start_price}")
+            
+            except Exception as e:
+                logger.error(f"Error calculating WoW for theme '{theme_name}': {str(e)}")
+                continue
         
         # 按涨跌幅排序
         market_wow.sort(key=lambda x: x['change_pct'], reverse=True)
+        
+        logger.info(f"Calculated WoW for {len(market_wow)} themes")
         return market_wow
     
     def _calculate_market_relative(self, themes_map: dict, days: int, cursor) -> list:
-        """计算某个市场所有主题的相对表现"""
+        """
+        计算某个市场所有主题的相对表现
+        
+        优化逻辑：与report_debug.py保持一致
+        1. 获取所有股票的原始价格数据
+        2. 使用ffill/bfill填充缺失值（模拟停牌期间价格不变）
+        3. 计算每日平均价格（确保每天都基于相同数量的股票）
+        4. 以第一个交易日为基准（100），计算相对表现
+        """
+        import pandas as pd
+        
         market_relative = []
         
         for theme_name, theme_data in themes_map.items():
             tickers = theme_data['tickers']
             
-            relative_query = """
-            WITH daily_avg_prices AS (
-                SELECT 
-                    date::date as trade_date,
-                    AVG(close) as avg_close
-                FROM stock_prices_eod
-                WHERE code = ANY(%s)
-                  AND date >= CURRENT_DATE - %s
-                  AND close IS NOT NULL
-                GROUP BY date::date
-                HAVING COUNT(*) > 0
-            ),
-            first_price AS (
-                SELECT avg_close as first_close
-                FROM daily_avg_prices
-                ORDER BY trade_date
-                LIMIT 1
-            )
-            SELECT 
-                dap.trade_date,
-                ROUND((dap.avg_close / NULLIF(fp.first_close, 0) * 100)::numeric, 2) as indexed_value
-            FROM daily_avg_prices dap
-            CROSS JOIN first_price fp
-            WHERE fp.first_close IS NOT NULL AND fp.first_close != 0
-            ORDER BY dap.trade_date;
+            if not tickers:
+                continue
+            
+            # 1. 获取所有股票的原始数据（每只股票的每日收盘价）
+            query = """
+            SELECT code, date::date as trade_date, close
+            FROM stock_prices_eod
+            WHERE code = ANY(%s)
+              AND date >= CURRENT_DATE - %s
+              AND close IS NOT NULL
+            ORDER BY code, date
             """
             
-            cursor.execute(relative_query, (tickers, days))
-            daily_data = cursor.fetchall()
+            cursor.execute(query, (tickers, days))
+            rows = cursor.fetchall()
             
-            # 添加到结果中
-            for row in daily_data:
-                trade_date_str = row[0].strftime('%Y-%m-%d')
-                indexed_value = float(row[1]) if row[1] is not None else 100.0
-                
-                # 查找或创建该日期的记录
-                date_record = next((r for r in market_relative if r['date'] == trade_date_str), None)
-                if not date_record:
-                    date_record = {'date': trade_date_str}
-                    market_relative.append(date_record)
-                
-                date_record[theme_name] = indexed_value
+            if not rows:
+                logger.warning(f"No data found for theme '{theme_name}' with {len(tickers)} tickers")
+                continue
+            
+            # 2. 转换为DataFrame
+            df = pd.DataFrame(rows, columns=['code', 'date', 'close'])
+            
+            # 2.5. 🔥 关键：去重处理（如果同一股票同一天有多条记录，取最新的）
+            # 这可能发生在数据导入时有重复，或者有数据修正
+            df = df.sort_values('date').drop_duplicates(subset=['code', 'date'], keep='last')
+            
+            # 3. Pivot成wide format (每只股票一列，每个日期一行)
+            # 这样可以清晰地看到哪些日期哪些股票缺失数据
+            pivot_df = df.pivot(index='date', columns='code', values='close')
+            
+            # 4. 使用ffill填充缺失值（模拟report_debug.py的逻辑）
+            # ffill: 用前一个有效值填充（假设停牌期间价格不变）
+            # bfill: 如果开头有缺失，用后一个有效值填充
+            pivot_df = pivot_df.ffill().bfill()
+            
+            # 5. 计算每日平均价格（所有股票的横向平均）
+            # 与report_debug.py中的 us_panel.mean(axis=1) 逻辑一致
+            daily_avg = pivot_df.mean(axis=1)
+            
+            # 6. 计算相对表现（indexed to 100）
+            if len(daily_avg) > 0:
+                first_value = daily_avg.iloc[0]  # 第一个交易日的平均价格
+                if first_value > 0:
+                    # 以第一天为基准100，计算后续每天的相对表现
+                    indexed_values = (daily_avg / first_value * 100).round(2)
+                    
+                    # 7. 添加到结果中
+                    for date, value in indexed_values.items():
+                        date_str = date.strftime('%Y-%m-%d')
+                        
+                        # 查找或创建该日期的记录
+                        date_record = next((r for r in market_relative if r['date'] == date_str), None)
+                        if not date_record:
+                            date_record = {'date': date_str}
+                            market_relative.append(date_record)
+                        
+                        date_record[theme_name] = float(value)
+                    
+                    logger.debug(f"Theme '{theme_name}': {len(indexed_values)} days, "
+                               f"from {indexed_values.iloc[0]:.2f} to {indexed_values.iloc[-1]:.2f}")
+                else:
+                    logger.warning(f"Theme '{theme_name}' has invalid first value: {first_value}")
+            else:
+                logger.warning(f"Theme '{theme_name}' has no valid data after processing")
         
         # 按日期排序
         market_relative.sort(key=lambda x: x['date'])
+        
+        logger.info(f"Calculated relative performance for {len(market_relative)} days")
         return market_relative
+    
+    def _get_my_themes_stocks(self) -> Dict[str, Any]:
+        """
+        获取My Themes的个股数据（用于Technical Views章节的个股走势图）
+        
+        从investment_theme_embeddings表获取group='Market Weekly'的主题，
+        通过theme_company_associations获取关联的ticker列表，
+        按US Stock和China Stock分类
+        
+        Returns:
+            {
+                "us_stocks": [
+                    {
+                        "ticker": "NVDA.US",
+                        "company_name": "NVIDIA Corporation",
+                        "theme_name": "AI Chips",
+                        "market": "US"
+                    },
+                    ...
+                ],
+                "china_stocks": [
+                    {
+                        "ticker": "0700.HK",
+                        "company_name": "Tencent Holdings Ltd",
+                        "theme_name": "Cloud & Platform",
+                        "market": "HK"
+                    },
+                    ...
+                ]
+            }
+        """
+        logger.info("Fetching My Themes stocks for individual ticker charts")
+        
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            
+            # 获取Market Weekly主题及其关联的ticker
+            query = """
+            SELECT 
+                ite.theme_id,
+                ite.theme_name,
+                ite.category,
+                tca.ticker,
+                tca.market,
+                tca.company_name
+            FROM investment_theme_embeddings ite
+            INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
+            WHERE ite."group" = 'Market Weekly'
+              AND tca.is_verified = TRUE
+            ORDER BY ite.theme_name, tca.market, tca.ticker;
+            """
+            
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            if not rows:
+                logger.warning("No Market Weekly themes found in database")
+                return {"us_stocks": [], "china_stocks": []}
+            
+            # 按市场分类
+            us_stocks = []
+            china_stocks = []
+            
+            for row in rows:
+                theme_id, theme_name, category, ticker, market, company_name = row
+                
+                stock_info = {
+                    "ticker": ticker,
+                    "company_name": company_name or ticker,
+                    "theme_name": theme_name,
+                    "theme_id": theme_id,
+                    "category": category,
+                    "market": market
+                }
+                
+                # 判断市场归属
+                if market == 'US':
+                    us_stocks.append(stock_info)
+                elif market in ('HK', 'CN'):
+                    china_stocks.append(stock_info)
+            
+            logger.info(f"Found {len(us_stocks)} US stocks and {len(china_stocks)} China stocks in My Themes")
+            
+            return {
+                "us_stocks": us_stocks,
+                "china_stocks": china_stocks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching My Themes stocks: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"us_stocks": [], "china_stocks": []}
 

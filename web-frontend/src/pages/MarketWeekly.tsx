@@ -6,7 +6,9 @@ import CombinedWoWChart from '../components/MarketWeekly/CombinedWoWChart';
 import WoWBarChart from '../components/MarketWeekly/WoWBarChart';
 import RelativeLineChart from '../components/MarketWeekly/RelativeLineChart';
 import TechnicalViewsSection from '../components/MarketWeekly/TechnicalViewsSection';
-import { EconomicCalendarTable, EarningsCalendarTable, IPOCalendarTable } from '../components/MarketWeekly/CalendarTables';
+import MyThemesSection from '../components/MarketWeekly/MyThemesSection';
+import { EconomicCalendarTable, IPOCalendarTable } from '../components/MarketWeekly/CalendarTables';
+import { EarningsCalendarWeek } from '../components/MarketWeekly/EarningsCalendarWeek';
 import { marketWeeklyAPI } from '../services/marketWeekly';
 import type { MarketWeeklyReport } from '../types/marketWeekly';
 import './MarketWeekly.css';
@@ -237,12 +239,15 @@ const MarketWeekly: React.FC = () => {
             </p>
           </div>
 
-          {/* 2.3 My Watchlist */}
+          {/* 2.3 My Themes */}
           {((reportData.weekly_performance.us_ai_wow && reportData.weekly_performance.us_ai_wow.length > 0) ||
             (reportData.weekly_performance.china_ai_wow && reportData.weekly_performance.china_ai_wow.length > 0)) && (
             <div id="ai-weekly" className="subsection">
-              <h3 className="subsection-title">My Watchlist</h3>
-              
+              <h3 className="subsection-title">My Themes</h3>
+              <p className="section-caption" style={{ fontSize: '11px' }}>
+                管理员可以在 Theme Settings 中自定义需要重点关注的 sectors 和 tickers。
+              </p>
+
               {/* Combined US and China AI WoW Chart */}
               <div className="chart-container" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 {/* US AI WoW */}
@@ -253,7 +258,7 @@ const MarketWeekly: React.FC = () => {
                     </h4>
                     <WoWBarChart
                       data={reportData.weekly_performance.us_ai_wow}
-                      title="US Watchlist - Week-over-Week"
+                      title="US Theme - Week-over-Week"
                       height={Math.max(300, reportData.weekly_performance.us_ai_wow.length * 35)}
                       showTitle={false}
                     />
@@ -268,7 +273,7 @@ const MarketWeekly: React.FC = () => {
                     </h4>
                     <WoWBarChart
                       data={reportData.weekly_performance.china_ai_wow}
-                      title="China Watchlist - Week-over-Week"
+                      title="China Theme - Week-over-Week"
                       height={Math.max(300, reportData.weekly_performance.china_ai_wow.length * 35)}
                       showTitle={false}
                     />
@@ -276,7 +281,7 @@ const MarketWeekly: React.FC = () => {
                 )}
               </div>
               <p className="chart-caption">
-                Week-over-week performance of AI-related themes by market. Each theme aggregates its constituent stocks from the database.
+                Week-over-week performance of your selected themes by market. Each theme aggregates its constituent stocks from the database.
               </p>
 
               {/* US AI 3-Month Relative Performance */}
@@ -285,13 +290,13 @@ const MarketWeekly: React.FC = () => {
                   <div className="chart-container" style={{ marginTop: '2rem' }}>
                     <RelativeLineChart
                       data={reportData.weekly_performance.us_ai_relative}
-                      title="US Watchlist - 3 Month Trends"
+                      title="US Theme - 3 Month Trends"
                       height={400}
                       showTitle={true}
                     />
                   </div>
                   <p className="chart-caption">
-                    3-month US Watchlist performance trends (indexed to 100).
+                    3-month US Theme performance trends (indexed to 100).
                   </p>
                 </>
               )}
@@ -302,7 +307,7 @@ const MarketWeekly: React.FC = () => {
                   <div className="chart-container" style={{ marginTop: '2rem' }}>
                     <RelativeLineChart
                       data={reportData.weekly_performance.china_ai_relative}
-                      title="China Watchlist - 3 Month Trends"
+                      title="China Theme - 3 Month Trends"
                       height={400}
                       showTitle={true}
                     />
@@ -382,6 +387,14 @@ const MarketWeekly: React.FC = () => {
             groupByRegion={false}
           />
 
+          {/* My Themes Stocks Section */}
+          {reportData.my_themes_stocks && (
+            <MyThemesSection
+              myThemesStocks={reportData.my_themes_stocks}
+              sectionId="my-themes-technical"
+            />
+          )}
+
           <TechnicalViewsSection
             assets={reportData.technical_views.forex}
             title="Foreign Exchange"
@@ -419,9 +432,9 @@ const MarketWeekly: React.FC = () => {
           <div id="earnings-calendar" className="subsection">
             <h3 className="subsection-title">Earnings Calendar</h3>
             <p className="section-intro">
-              S&P 500 company earnings releases scheduled for next week
+              Only shows earnings for tickers configured in your Watchlist and Theme Settings
             </p>
-            <EarningsCalendarTable data={reportData.next_week_outlook.earnings_calendar} />
+            <EarningsCalendarWeek data={reportData.next_week_outlook.earnings_calendar} />
           </div>
 
           <div id="ipo-calendar" className="subsection">
