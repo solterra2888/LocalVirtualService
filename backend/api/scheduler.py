@@ -129,12 +129,16 @@ class CreateEODHDStockPricesTaskRequest(BaseModel):
 
 
 class CreateEODHDEODStockPricesTaskRequest(BaseModel):
-    """创建EODHD历史股价定时任务请求模型"""
+    """创建EODHD历史股价定时任务请求模型（支持多周期）"""
     name: str = Field(default="EODHD EOD Stock Prices Auto Fetch", description="任务名称")
     cron_expression: str = Field(default="0 9 * * 1-5", description="Cron表达式（默认工作日每天9点）")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     days_back: int = Field(default=60, description="回溯天数", ge=1, le=365)
+    periods: Optional[List[str]] = Field(
+        default=['d', 'w', 'm'], 
+        description="数据周期列表：'d'=日线, 'w'=周线, 'm'=月线"
+    )
 
 
 # CreateFutuThemesTaskRequest 已删除 - 不再支持 futu 主题爬虫
@@ -813,25 +817,28 @@ async def create_eodhd_eod_stock_prices_task(
     current_user=Depends(get_current_user)
 ):
     """
-    创建EODHD历史股价数据获取定时任务
+    创建EODHD历史股价数据获取定时任务（支持多周期）
     
     默认配置：
     - 纽约时间工作日每天执行 (0 9 * * 1-5)
     - 获取watchlist中的股票历史价格数据（从target_tracking_config表）
     - 获取主题关联公司的历史价格数据（从theme_company_associations表）
+    - 支持同时获取多个周期的数据（日线、周线、月线）
     - 自动合并并去重，存储到stock_prices_eod表
     """
     try:
-        logger.info("创建EODHD历史股价定时任务请求", 
+        logger.info("创建EODHD历史股价定时任务请求（多周期）", 
                    user=current_user.username,
                    task_name=request.name,
-                   cron_expression=request.cron_expression)
+                   cron_expression=request.cron_expression,
+                   periods=request.periods)
         
         scheduler_service = await get_scheduler_service()
         
-        # 历史股价任务参数
+        # 历史股价任务参数（包含periods）
         task_params = {
-            'days_back': request.days_back
+            'days_back': request.days_back,
+            'periods': request.periods if request.periods else ['d', 'w', 'm']
         }
         
         result = await scheduler_service.create_cron_task(
@@ -876,15 +883,16 @@ async def create_default_eodhd_eod_stock_prices_task(
     current_user=Depends(get_current_user)
 ):
     """
-    创建默认的EODHD历史股价定时任务
+    创建默认的EODHD历史股价定时任务（支持多周期）
     
     默认配置：
     - 纽约时间工作日每天执行 (0 9 * * 1-5)
     - 获取所有watchlist股票的历史价格数据
-    - 回溯30天数据
+    - 回溯60天数据
+    - 同时获取日线、周线、月线三个周期的数据
     """
     try:
-        logger.info("创建默认EODHD历史股价定时任务请求", user=current_user.username)
+        logger.info("创建默认EODHD历史股价定时任务请求（多周期）", user=current_user.username)
         
         scheduler_service = await get_scheduler_service()
         
@@ -894,7 +902,10 @@ async def create_default_eodhd_eod_stock_prices_task(
             cron_expression="0 9 * * 1-5",  # 工作日每天9点
             timezone="America/New_York",
             enabled=True,
-            task_params={'days_back': 60},
+            task_params={
+                'days_back': 60,
+                'periods': ['d', 'w', 'm']  # 默认获取所有周期
+            },
             created_by=current_user.username
         )
         

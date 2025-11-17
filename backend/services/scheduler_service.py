@@ -1968,11 +1968,12 @@ class SchedulerService:
     
     async def _execute_eodhd_eod_stock_prices_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行EODHD历史股价数据获取任务（通过Celery异步执行）
+        执行EODHD历史股价数据获取任务（通过Celery异步执行，支持多周期）
         
         功能：
         - 获取watchlist中所有股票的历史价格数据（从target_tracking_config表）
         - 获取theme_company_associations表中所有股票的历史价格数据
+        - 支持同时获取多个周期的数据（日线、周线、月线）
         - 自动合并并去重，存储到stock_prices_eod表
         
         注意：此方法会等待Celery任务完成（可能需要3-10分钟），以便记录准确的执行结果
@@ -1980,8 +1981,9 @@ class SchedulerService:
         Args:
             params: 任务参数
                 - days_back: 回溯天数（默认: 60天）
+                - periods: 数据周期列表 ['d', 'w', 'm']（默认: ['d', 'w', 'm']）
                 - wait_for_completion: 是否等待任务完成（默认: True）
-                - timeout: 任务超时时间（秒，默认: 900 = 15分钟）
+                - timeout: 任务超时时间（秒，默认: 1200 = 20分钟）
         
         Returns:
             Dict包含任务执行结果
@@ -1990,32 +1992,40 @@ class SchedulerService:
         from celery.result import AsyncResult
         
         try:
-            logger.info("提交EODHD历史股价数据获取任务到Celery", params=params)
+            logger.info("提交EODHD历史股价数据获取任务到Celery（多周期）", params=params)
             
             # 获取参数
             days_back = params.get('days_back', 60)
+            periods = params.get('periods', ['d', 'w', 'm'])  # 默认获取所有周期
             wait_for_completion = params.get('wait_for_completion', True)
-            timeout = params.get('timeout', 900)  # 默认15分钟超时
+            timeout = params.get('timeout', 1200)  # 默认20分钟超时（多周期需要更长时间）
+            
+            # 确保periods是列表格式
+            if isinstance(periods, str):
+                periods = [periods]
+            
+            logger.info(f"准备获取 {len(periods)} 个周期的数据: {periods}")
             
             # 导入Celery任务
             from backend.tasks.data_tasks import fetch_eodhd_eod_stock_prices_task
             
-            # 提交Celery任务
+            # 提交Celery任务（传入periods参数）
             task = fetch_eodhd_eod_stock_prices_task.apply_async(
-                kwargs={'days_back': days_back}
+                kwargs={'days_back': days_back, 'periods': periods}
             )
             
-            logger.info(f"EODHD历史股价数据获取任务已提交到Celery: task_id={task.id}")
+            logger.info(f"EODHD历史股价数据获取任务已提交到Celery: task_id={task.id}, periods={periods}")
             
             # 如果不等待完成，立即返回
             if not wait_for_completion:
                 return {
                     'success': True,
-                    'message': f"EODHD历史股价数据获取任务已提交到Celery队列（任务ID: {task.id}）",
+                    'message': f"EODHD历史股价数据获取任务已提交到Celery队列（任务ID: {task.id}, 周期: {periods}）",
                     'data': {
                         'task_id': task.id,
                         'status': 'PENDING',
-                        'days_back': days_back
+                        'days_back': days_back,
+                        'periods': periods
                     }
                 }
             

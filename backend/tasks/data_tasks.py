@@ -150,18 +150,20 @@ def fetch_eodhd_fundamentals_task(self, exchanges, data_types):
 
 
 @app.task(bind=True, name='fetch_eodhd_eod_stock_prices', queue='data_fetching')
-def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
+def fetch_eodhd_eod_stock_prices_task(self, days_back=60, periods=None):
     """
-    异步获取 EODHD 历史股价数据 Celery 任务
+    异步获取 EODHD 历史股价数据 Celery 任务（支持多周期）
     
     适用场景：
     - 获取 watchlist 中所有股票的历史价格数据（从target_tracking_config表）
     - 获取主题关联公司的历史价格数据（从theme_company_associations表）
-    - 执行时间 3-10分钟（取决于股票数量）
+    - 支持同时获取多个周期的数据（日线、周线、月线）
+    - 执行时间 3-10分钟（取决于股票数量和周期数量）
     - 避免阻塞 APScheduler
     
     Args:
         days_back: 回溯天数（默认: 60天）
+        periods: 数据周期列表 ['d', 'w', 'm']（默认: ['d', 'w', 'm']）
     
     Returns:
         Dict: 包含执行结果
@@ -171,12 +173,16 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
                 'total_tickers': int,
                 'watchlist_tickers': int,
                 'theme_tickers': int,
-                'success_count': int,
-                'failed_count': int,
+                'periods': List[str],
+                'period_results': Dict,
                 'total_records': int,
                 'execution_time': float
             }
     """
+    
+    # 默认获取所有周期
+    if periods is None:
+        periods = ['d', 'w', 'm']
     
     def update_progress(status=None, progress=None, current_ticker=None, log_message=None, **kwargs):
         """更新任务进度到 Redis"""
@@ -188,7 +194,8 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
                 'message': log_message or '',
                 'tickers_processed': kwargs.get('tickers_processed', 0),
                 'tickers_failed': kwargs.get('tickers_failed', 0),
-                'records_stored': kwargs.get('records_stored', 0)
+                'records_stored': kwargs.get('records_stored', 0),
+                'periods': kwargs.get('periods', periods)
             }
             
             current_task.update_state(
@@ -203,24 +210,26 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
             error(f"更新任务状态失败: {str(e)}", source="celery_data_task")
     
     try:
-        info(f"开始执行 EODHD 历史股价数据获取任务", 
+        info(f"开始执行 EODHD 历史股价数据获取任务（多周期）", 
              task_id=self.request.id,
              days_back=days_back,
+             periods=periods,
              source="celery_data_task")
         
         update_progress(
             status='starting',
             progress=0,
-            log_message=f"初始化历史股价服务，准备获取最近 {days_back} 天的数据"
+            log_message=f"初始化历史股价服务，准备获取最近 {days_back} 天的数据（周期: {periods}）",
+            periods=periods
         )
         
         # 导入服务
         from backend.services.eodhd_eod_stock_prices_service import create_eodhd_eod_stock_prices_service
         service = create_eodhd_eod_stock_prices_service()
         
-        # 执行数据获取（同步方法）
-        info(f"开始获取历史股价数据", source="celery_data_task")
-        result = service.fetch_and_store_watchlist_eod_prices(days_back)
+        # 执行数据获取（同步方法，传入periods参数）
+        info(f"开始获取历史股价数据（周期: {periods}）", source="celery_data_task")
+        result = service.fetch_and_store_watchlist_eod_prices(days_back, periods)
         
         # 处理结果
         if result.get('error'):
@@ -232,7 +241,8 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
             update_progress(
                 status='failed',
                 progress=0,
-                log_message=error_msg
+                log_message=error_msg,
+                periods=periods
             )
             
             return {
@@ -242,20 +252,20 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
             }
         else:
             total_tickers = result.get('total_tickers', 0)
-            success_count = result.get('success_count', 0)
-            failed_count = result.get('failed_count', 0)
+            periods_fetched = result.get('periods', periods)
+            period_results = result.get('period_results', {})
             total_records = result.get('total_records', 0)
             execution_time = result.get('execution_time', 0)
             
-            success_msg = f"EODHD历史股价数据获取成功: 处理了{total_tickers}个ticker，成功{success_count}个，失败{failed_count}个，存储了{total_records}条记录，耗时{execution_time:.2f}秒"
+            success_msg = f"EODHD历史股价数据获取成功（{len(periods_fetched)}个周期）: 处理了{total_tickers}个ticker，存储了{total_records}条记录，耗时{execution_time:.2f}秒"
             
             update_progress(
                 status='completed',
                 progress=100,
                 log_message=success_msg,
-                tickers_processed=success_count,
-                tickers_failed=failed_count,
-                records_stored=total_records
+                tickers_processed=total_tickers,
+                records_stored=total_records,
+                periods=periods_fetched
             )
             
             info(success_msg, 
@@ -266,8 +276,8 @@ def fetch_eodhd_eod_stock_prices_task(self, days_back=60):
                 'success': True,
                 'message': success_msg,
                 'total_tickers': total_tickers,
-                'success_count': success_count,
-                'failed_count': failed_count,
+                'periods': periods_fetched,
+                'period_results': period_results,
                 'total_records': total_records,
                 'execution_time': execution_time,
                 'data': result

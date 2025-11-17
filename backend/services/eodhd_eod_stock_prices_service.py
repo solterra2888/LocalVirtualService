@@ -180,24 +180,36 @@ class EODHDEODStockPricesService:
             logger.error(f"获取ticker {ticker} 最新日期失败: {str(e)}")
             return None
     
-    def fetch_eod_data_for_ticker(self, ticker: str, from_date: str, to_date: str) -> Optional[List[Dict]]:
-        """获取单个ticker的历史价格数据（智能优化版）"""
+    def fetch_eod_data_for_ticker(self, ticker: str, from_date: str, to_date: str, period: str = 'd') -> Optional[List[Dict]]:
+        """
+        获取单个ticker的历史价格数据（智能优化版，支持多周期）
+        
+        Args:
+            ticker: 股票代码
+            from_date: 开始日期
+            to_date: 结束日期
+            period: 数据周期 ('d'=日线, 'w'=周线, 'm'=月线)
+        
+        Returns:
+            历史价格数据列表，失败返回None
+        """
         try:
-            # 🔍 智能优化：检查数据库中的最新日期，避免请求已停牌/退市的股票
-            latest_date = self.get_latest_date_for_ticker(ticker)
-            if latest_date:
-                from datetime import datetime
-                try:
-                    latest = datetime.strptime(latest_date, '%Y-%m-%d')
-                    request_from = datetime.strptime(from_date, '%Y-%m-%d')
-                    days_since_last_trade = (request_from - latest).days
-                    
-                    # 如果最新数据超过180天（6个月）前，很可能已停牌/退市
-                    if days_since_last_trade > 180:
-                        logger.debug(f"跳过ticker {ticker}：最新交易日{latest_date}距请求日期已{days_since_last_trade}天，可能已停牌/退市")
-                        return []  # 返回空列表，视为正常（无新数据）
-                except ValueError:
-                    pass  # 日期解析失败，继续正常流程
+            # 🔍 智能优化：仅对日线数据检查最新日期，避免请求已停牌/退市的股票
+            if period == 'd':
+                latest_date = self.get_latest_date_for_ticker(ticker)
+                if latest_date:
+                    from datetime import datetime
+                    try:
+                        latest = datetime.strptime(latest_date, '%Y-%m-%d')
+                        request_from = datetime.strptime(from_date, '%Y-%m-%d')
+                        days_since_last_trade = (request_from - latest).days
+                        
+                        # 如果最新数据超过180天（6个月）前，很可能已停牌/退市
+                        if days_since_last_trade > 180:
+                            logger.debug(f"跳过ticker {ticker}：最新交易日{latest_date}距请求日期已{days_since_last_trade}天，可能已停牌/退市")
+                            return []  # 返回空列表，视为正常（无新数据）
+                    except ValueError:
+                        pass  # 日期解析失败，继续正常流程
             
             # 格式化ticker为EODHD格式
             formatted_ticker = format_ticker_for_eodhd(ticker)
@@ -207,12 +219,12 @@ class EODHDEODStockPricesService:
             params = {
                 'from': from_date,
                 'to': to_date,
-                'period': 'd',  # 日线数据
+                'period': period,  # 支持多种周期：d/w/m
                 'api_token': self.api_token,
                 'fmt': 'json'
             }
             
-            logger.debug(f"请求EODHD API", url=url, params=params)
+            logger.debug(f"请求EODHD API (period={period})", url=url, params=params)
             
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
@@ -221,30 +233,40 @@ class EODHDEODStockPricesService:
             
             if isinstance(data, list):
                 if len(data) > 0:
-                    logger.debug(f"成功获取ticker {ticker} 的{len(data)}条历史数据")
+                    logger.debug(f"成功获取ticker {ticker} period={period} 的{len(data)}条历史数据")
                     return data
                 else:
                     # 返回空列表是正常情况（该期间无交易），使用debug级别
-                    logger.debug(f"ticker {ticker} 在日期范围{from_date}至{to_date}内无交易数据")
+                    logger.debug(f"ticker {ticker} period={period} 在日期范围{from_date}至{to_date}内无交易数据")
                     return []
             else:
-                logger.warning(f"ticker {ticker} API返回非列表数据: {type(data)}")
+                logger.warning(f"ticker {ticker} period={period} API返回非列表数据: {type(data)}")
                 return []
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"请求EODHD API失败 - ticker {ticker}: {str(e)}")
+            logger.error(f"请求EODHD API失败 - ticker {ticker} period={period}: {str(e)}")
             return None
         except Exception as e:
-            logger.error(f"获取ticker {ticker} 历史数据失败: {str(e)}")
+            logger.error(f"获取ticker {ticker} period={period} 历史数据失败: {str(e)}")
             return None
     
-    def store_eod_data(self, ticker: str, eod_data: List[Dict]) -> int:
-        """存储历史价格数据到数据库"""
+    def store_eod_data(self, ticker: str, eod_data: List[Dict], period: str = 'd') -> int:
+        """
+        存储历史价格数据到数据库
+        
+        Args:
+            ticker: 股票代码
+            eod_data: 历史价格数据列表
+            period: 数据周期 ('d'=日线, 'w'=周线, 'm'=月线)
+        
+        Returns:
+            成功存储的记录数
+        """
         if not eod_data:
             return 0
         
         try:
-            logger.debug(f"开始存储ticker {ticker} 的{len(eod_data)}条历史数据")
+            logger.debug(f"开始存储ticker {ticker} period={period} 的{len(eod_data)}条历史数据")
             
             # 准备批量插入数据
             insert_data = []
@@ -260,7 +282,7 @@ class EODHDEODStockPricesService:
                     item.get('adjusted_close'),
                     item.get('split_coefficient', 1.0),
                     item.get('dividend_amount', 0.0),
-                    'd'  # period
+                    period  # 使用传入的period参数
                 ))
             
             # 使用ON CONFLICT处理重复数据
@@ -286,26 +308,38 @@ class EODHDEODStockPricesService:
                     cursor.executemany(query, insert_data)
                     conn.commit()
             
-            logger.debug(f"成功存储ticker {ticker} 的{len(eod_data)}条历史数据")
+            logger.debug(f"成功存储ticker {ticker} period={period} 的{len(eod_data)}条历史数据")
             return len(eod_data)
             
         except Exception as e:
-            logger.error(f"存储ticker {ticker} 历史数据失败: {str(e)}")
+            logger.error(f"存储ticker {ticker} period={period} 历史数据失败: {str(e)}")
             return 0
     
-    def concurrent_fetch_eod_data(self, tickers: List[str], start_date: str, end_date: str, max_workers: int = None) -> Dict[str, List[Dict]]:
-        """🚀 并发获取多个ticker的历史价格数据（性能优化版本）"""
+    def concurrent_fetch_eod_data(self, tickers: List[str], start_date: str, end_date: str, period: str = 'd', max_workers: int = None) -> Dict[str, List[Dict]]:
+        """
+        🚀 并发获取多个ticker的历史价格数据（性能优化版本，支持多周期）
+        
+        Args:
+            tickers: 股票代码列表
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期 ('d'=日线, 'w'=周线, 'm'=月线)
+            max_workers: 最大并发线程数
+        
+        Returns:
+            字典: {ticker: eod_data_list}
+        """
         
         def fetch_single_ticker(ticker):
             """获取单个ticker的数据"""
             try:
-                eod_data = self.fetch_eod_data_for_ticker(ticker, start_date, end_date)
+                eod_data = self.fetch_eod_data_for_ticker(ticker, start_date, end_date, period)
                 if eod_data is not None:
                     return (ticker, eod_data, True)
                 else:
                     return (ticker, None, False)
             except Exception as e:
-                logger.error(f"并发获取ticker {ticker} 失败: {str(e)}")
+                logger.error(f"并发获取ticker {ticker} period={period} 失败: {str(e)}")
                 return (ticker, None, False)
         
         # 使用线程池并发执行
@@ -316,7 +350,7 @@ class EODHDEODStockPricesService:
         successful_count = 0
         failed_count = 0
         
-        logger.info(f"🚀 开始并发获取 {len(tickers)} 个ticker的历史数据，并发数: {max_workers}")
+        logger.info(f"🚀 开始并发获取 {len(tickers)} 个ticker period={period} 的历史数据，并发数: {max_workers}")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交所有任务
@@ -336,12 +370,21 @@ class EODHDEODStockPricesService:
                     results[ticker] = None
                     failed_count += 1
         
-        logger.info(f"✅ 并发获取完成: 成功 {successful_count}/{len(tickers)}, 失败 {failed_count}")
+        logger.info(f"✅ 并发获取完成 period={period}: 成功 {successful_count}/{len(tickers)}, 失败 {failed_count}")
         
         return results
     
-    def batch_store_eod_data(self, ticker_data_map: Dict[str, List[Dict]]) -> Dict[str, int]:
-        """🚀 真正的批量存储：使用execute_values一次性插入所有ticker的历史价格数据"""
+    def batch_store_eod_data(self, ticker_data_map: Dict[str, List[Dict]], period: str = 'd') -> Dict[str, int]:
+        """
+        🚀 真正的批量存储：使用execute_values一次性插入所有ticker的历史价格数据
+        
+        Args:
+            ticker_data_map: {ticker: eod_data_list} 字典
+            period: 数据周期 ('d'=日线, 'w'=周线, 'm'=月线)
+        
+        Returns:
+            {ticker: records_count} 字典
+        """
         if not ticker_data_map:
             return {}
         
@@ -368,7 +411,7 @@ class EODHDEODStockPricesService:
                         item.get('adjusted_close'),
                         item.get('split_coefficient', 1.0),
                         item.get('dividend_amount', 0.0),
-                        'd'  # period
+                        period  # 使用传入的period参数
                     ))
                     ticker_count += 1
                 
@@ -407,27 +450,41 @@ class EODHDEODStockPricesService:
                     )
                     conn.commit()
             
-            logger.info(f"💾 批量存储完成: {len(all_insert_data)}条记录 来自{len([k for k,v in ticker_data_map.items() if v])}个ticker")
+            logger.info(f"💾 批量存储完成 period={period}: {len(all_insert_data)}条记录 来自{len([k for k,v in ticker_data_map.items() if v])}个ticker")
             
             return results
             
         except Exception as e:
-            logger.error(f"批量存储失败: {str(e)}")
+            logger.error(f"批量存储失败 period={period}: {str(e)}")
             # 失败时回退到逐个存储
             logger.warning("回退到逐个存储模式...")
             results = {}
             for ticker, eod_data in ticker_data_map.items():
                 if eod_data:
-                    records_stored = self.store_eod_data(ticker, eod_data)
+                    records_stored = self.store_eod_data(ticker, eod_data, period)
                     results[ticker] = records_stored
                 else:
                     results[ticker] = 0
             return results
     
-    def fetch_and_store_watchlist_eod_prices(self, days_back: int = 60) -> Dict[str, Any]:
-        """🚀 批量并发获取并存储watchlist和theme_company_associations中所有股票的历史价格数据"""
+    def fetch_and_store_watchlist_eod_prices(self, days_back: int = 60, periods: List[str] = None) -> Dict[str, Any]:
+        """
+        🚀 批量并发获取并存储watchlist和theme_company_associations中所有股票的历史价格数据（支持多周期）
+        
+        Args:
+            days_back: 回溯天数
+            periods: 数据周期列表 ['d', 'w', 'm']，默认获取所有周期
+        
+        Returns:
+            执行结果字典
+        """
         start_time = time.time()
-        logger.info(f"🚀 开始批量并发获取历史价格数据，回溯{days_back}天")
+        
+        # 默认获取所有周期：日线、周线、月线
+        if periods is None:
+            periods = ['d', 'w', 'm']
+        
+        logger.info(f"🚀 开始批量并发获取历史价格数据，回溯{days_back}天，周期: {periods}")
         
         try:
             # 获取watchlist中的ticker
@@ -458,87 +515,113 @@ class EODHDEODStockPricesService:
                     'success_count': 0,
                     'failed_count': 0,
                     'total_records': 0,
+                    'periods': periods,
                     'execution_time': time.time() - start_time
                 }
-            
-            logger.info(f"🚀 开始批量并发处理{len(tickers)}个ticker的历史价格数据")
-            logger.info(f"批量配置: batch_size={self.batch_size}, max_workers={self.max_workers}")
             
             # 计算日期范围
             end_date = datetime.now().strftime('%Y-%m-%d')
             start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
             
-            total_success_count = 0
-            total_failed_count = 0
-            total_records = 0
+            # 🔄 遍历所有周期
+            period_results = {}
+            total_records_all_periods = 0
             
-            # 🚀 分批并发处理ticker
-            for batch_start in range(0, len(tickers), self.batch_size):
-                batch_end = min(batch_start + self.batch_size, len(tickers))
-                batch_tickers = tickers[batch_start:batch_end]
-                batch_num = batch_start // self.batch_size + 1
-                total_batches = (len(tickers) + self.batch_size - 1) // self.batch_size
+            for period in periods:
+                logger.info(f"📊 开始处理周期 period={period}")
+                period_start_time = time.time()
                 
-                logger.info(f"🚀 处理批次 {batch_num}/{total_batches}: {len(batch_tickers)} 个ticker ({batch_start+1}-{batch_end}/{len(tickers)})")
+                logger.info(f"🚀 批量配置: batch_size={self.batch_size}, max_workers={self.max_workers}")
                 
-                batch_start_time = time.time()
+                total_success_count = 0
+                total_failed_count = 0
+                total_records = 0
                 
-                # 1. 🚀 并发获取API数据
-                ticker_data_map = self.concurrent_fetch_eod_data(batch_tickers, start_date, end_date)
+                # 🚀 分批并发处理ticker
+                for batch_start in range(0, len(tickers), self.batch_size):
+                    batch_end = min(batch_start + self.batch_size, len(tickers))
+                    batch_tickers = tickers[batch_start:batch_end]
+                    batch_num = batch_start // self.batch_size + 1
+                    total_batches = (len(tickers) + self.batch_size - 1) // self.batch_size
+                    
+                    logger.info(f"🚀 处理批次 {batch_num}/{total_batches} period={period}: {len(batch_tickers)} 个ticker ({batch_start+1}-{batch_end}/{len(tickers)})")
+                    
+                    batch_start_time = time.time()
+                    
+                    # 1. 🚀 并发获取API数据（传入period参数）
+                    ticker_data_map = self.concurrent_fetch_eod_data(batch_tickers, start_date, end_date, period)
+                    
+                    batch_fetch_time = time.time() - batch_start_time
+                    
+                    # 2. 批量存储数据（传入period参数）
+                    batch_save_start_time = time.time()
+                    store_results = self.batch_store_eod_data(ticker_data_map, period)
+                    batch_save_time = time.time() - batch_save_start_time
+                    
+                    # 统计本批次结果
+                    batch_success = sum(1 for v in store_results.values() if v > 0)
+                    batch_failed = len(batch_tickers) - batch_success
+                    batch_records = sum(store_results.values())
+                    
+                    total_success_count += batch_success
+                    total_failed_count += batch_failed
+                    total_records += batch_records
+                    
+                    batch_total_time = time.time() - batch_start_time
+                    
+                    logger.info(f"✅ 批次 {batch_num}/{total_batches} period={period} 完成: "
+                              f"成功 {batch_success}/{len(batch_tickers)}, "
+                              f"失败 {batch_failed}, "
+                              f"存储 {batch_records} 条记录, "
+                              f"获取用时 {batch_fetch_time:.1f}s, "
+                              f"存储用时 {batch_save_time:.1f}s, "
+                              f"总用时 {batch_total_time:.1f}s "
+                              f"(速度: {batch_success/batch_total_time:.1f} ticker/秒)")
+                    
+                    # 批次间短暂延迟
+                    if batch_end < len(tickers):
+                        time.sleep(0.5)
                 
-                batch_fetch_time = time.time() - batch_start_time
+                period_execution_time = time.time() - period_start_time
                 
-                # 2. 批量存储数据
-                batch_save_start_time = time.time()
-                store_results = self.batch_store_eod_data(ticker_data_map)
-                batch_save_time = time.time() - batch_save_start_time
+                # 记录当前周期的结果
+                period_results[period] = {
+                    'success_count': total_success_count,
+                    'failed_count': total_failed_count,
+                    'total_records': total_records,
+                    'execution_time': period_execution_time
+                }
                 
-                # 统计本批次结果
-                batch_success = sum(1 for v in store_results.values() if v > 0)
-                batch_failed = len(batch_tickers) - batch_success
-                batch_records = sum(store_results.values())
+                total_records_all_periods += total_records
                 
-                total_success_count += batch_success
-                total_failed_count += batch_failed
-                total_records += batch_records
-                
-                batch_total_time = time.time() - batch_start_time
-                
-                logger.info(f"✅ 批次 {batch_num}/{total_batches} 完成: "
-                          f"成功 {batch_success}/{len(batch_tickers)}, "
-                          f"失败 {batch_failed}, "
-                          f"存储 {batch_records} 条记录, "
-                          f"获取用时 {batch_fetch_time:.1f}s, "
-                          f"存储用时 {batch_save_time:.1f}s, "
-                          f"总用时 {batch_total_time:.1f}s "
-                          f"(速度: {batch_success/batch_total_time:.1f} ticker/秒)")
-                
-                # 批次间短暂延迟
-                if batch_end < len(tickers):
-                    time.sleep(0.5)
+                logger.info(f"✅ 周期 period={period} 完成: "
+                          f"成功 {total_success_count}/{len(tickers)}, "
+                          f"失败 {total_failed_count}, "
+                          f"存储 {total_records} 条记录, "
+                          f"用时 {period_execution_time:.1f}s")
             
             execution_time = time.time() - start_time
             
             result = {
                 'success': True,
-                'message': f'🚀 批量并发历史价格数据获取完成',
+                'message': f'🚀 批量并发历史价格数据获取完成（{len(periods)}个周期）',
                 'total_tickers': len(tickers),
                 'watchlist_tickers': len(watchlist_tickers),
                 'theme_tickers': len(theme_tickers),
-                'success_count': total_success_count,
-                'failed_count': total_failed_count,
-                'total_records': total_records,
+                'periods': periods,
+                'period_results': period_results,
+                'total_records': total_records_all_periods,
                 'execution_time': execution_time,
                 'date_range': f'{start_date} to {end_date}',
-                'avg_speed': f'{total_success_count/execution_time:.2f} ticker/秒' if execution_time > 0 else 'N/A'
+                'avg_speed': f'{len(tickers)*len(periods)/execution_time:.2f} ticker*period/秒' if execution_time > 0 else 'N/A'
             }
             
             logger.info("🚀 批量并发历史价格数据获取任务完成", 
                        total_tickers=result['total_tickers'],
                        watchlist_tickers=result['watchlist_tickers'],
                        theme_tickers=result['theme_tickers'],
-                       success_count=result['success_count'],
-                       failed_count=result['failed_count'],
+                       periods=result['periods'],
+                       period_results=result['period_results'],
                        total_records=result['total_records'],
                        execution_time=result['execution_time'],
                        avg_speed=result['avg_speed'],
