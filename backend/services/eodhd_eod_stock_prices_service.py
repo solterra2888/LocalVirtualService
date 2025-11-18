@@ -61,9 +61,10 @@ class EODHDEODStockPricesService:
             
             # 配置参数 - 批量并发处理
             self.batch_size = int(os.getenv('EODHD_EOD_BATCH_SIZE', '100'))  # 每批处理的ticker数量
-            self.max_workers = int(os.getenv('EODHD_EOD_MAX_WORKERS', '20'))  # 并发线程数
-            self.request_delay = float(os.getenv('EODHD_REQUEST_DELAY', '0.05'))  # 请求间隔（并发时可以更短）
+            self.max_workers = int(os.getenv('EODHD_EOD_MAX_WORKERS', '8'))  # 并发线程数（降低以避免超时）
+            self.request_delay = float(os.getenv('EODHD_REQUEST_DELAY', '0.1'))  # 请求间隔（增加以减少限流）
             self.max_retries = int(os.getenv('EODHD_MAX_RETRIES_ON_RATE_LIMIT', '3'))
+            self.request_timeout = int(os.getenv('EODHD_REQUEST_TIMEOUT', '60'))  # 请求超时时间（秒）
             
             # 创建优化的HTTP会话
             self.session = self._create_robust_session()
@@ -73,6 +74,7 @@ class EODHDEODStockPricesService:
                        batch_size=self.batch_size,
                        max_workers=self.max_workers,
                        request_delay=self.request_delay,
+                       request_timeout=self.request_timeout,
                        max_retries=self.max_retries)
             
         except Exception as e:
@@ -226,7 +228,7 @@ class EODHDEODStockPricesService:
             
             logger.debug(f"请求EODHD API (period={period})", url=url, params=params)
             
-            response = self.session.get(url, params=params, timeout=30)
+            response = self.session.get(url, params=params, timeout=self.request_timeout)
             response.raise_for_status()
             
             data = response.json()
