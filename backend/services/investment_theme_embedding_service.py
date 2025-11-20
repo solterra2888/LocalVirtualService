@@ -1543,24 +1543,61 @@ class InvestmentThemeEmbeddingService:
             
             # 1. 生成theme_id（如果未提供）
             if not theme_id:
-                # 生成格式：CUSTOM_<TIMESTAMP>
-                import time
-                theme_id = f"CUSTOM_{int(time.time())}"
+                # 生成格式：username_theme_name_category
+                # 与批量上传使用相同的逻辑，确保一致性
+                # 例如：'john_ai_healthcare_diagnostics'
+                username_part = creator_username.replace(' ', '_').lower() if creator_username else 'unknown'
+                theme_name_part = theme_name.replace(' ', '_').lower()
+                category_part = category.replace(' ', '_').lower()
+                theme_id = f"{username_part}_{theme_name_part}_{category_part}"
             
             # 2. 检查theme_id是否已存在
             cursor.execute("""
-                SELECT 1 FROM investment_theme_embeddings
+                SELECT id, theme_name, category, description, "group", created_by
+                FROM investment_theme_embeddings
                 WHERE theme_id = %s
             """, (theme_id,))
             
-            if cursor.fetchone():
+            existing_theme = cursor.fetchone()
+            if existing_theme:
+                # 获取现有主题的 tickers
+                db_theme_id = existing_theme[0]
+                existing_theme_name = existing_theme[1]
+                existing_category = existing_theme[2]
+                existing_description = existing_theme[3]
+                existing_group = existing_theme[4]
+                existing_created_by = existing_theme[5]
+                
+                cursor.execute("""
+                    SELECT ticker FROM theme_company_associations
+                    WHERE theme_id = %s
+                    ORDER BY ticker
+                """, (theme_id,))
+                
+                existing_tickers = [row[0] for row in cursor.fetchall()]
+                
                 cursor.close()
                 conn.close()
+                
+                # 返回冲突信息，让前端处理
                 return {
                     "success": False,
-                    "message": f"主题ID {theme_id} 已存在，请使用其他ID",
+                    "conflict": True,
+                    "message": f"主题 '{theme_name}' (Category: {category}) 已存在",
+                    "theme_id": theme_id,
                     "theme_saved": False,
-                    "embedding_created": False
+                    "embedding_created": False,
+                    "existing_theme": {
+                        "db_theme_id": db_theme_id,
+                        "theme_id": theme_id,
+                        "theme_name": existing_theme_name,
+                        "category": existing_category,
+                        "description": existing_description,
+                        "group": existing_group,
+                        "created_by": existing_created_by,
+                        "tickers": existing_tickers
+                    },
+                    "new_tickers": tickers or []
                 }
             
             # 3. 生成向量

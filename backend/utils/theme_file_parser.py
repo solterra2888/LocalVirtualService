@@ -67,7 +67,7 @@ class ThemeFileParser:
         
         return normalized
     
-    def parse_file(self, file: UploadFile, market: str = 'US', group: str = None) -> Dict[str, Any]:
+    def parse_file(self, file: UploadFile, market: str = 'US', group: str = None, creator_username: str = None) -> Dict[str, Any]:
         """
         解析上传的文件（CSV 或 Excel）
         
@@ -75,6 +75,7 @@ class ThemeFileParser:
             file: FastAPI UploadFile 对象
             market: 市场（US/HK/CN），由用户在前端选择
             group: 主题分组（如 AI、crypto 等），由用户在前端填写
+            creator_username: 创建者用户名（用于生成唯一的theme_id）
         
         Returns:
             {
@@ -136,7 +137,7 @@ class ThemeFileParser:
             theme_name = theme_validation['theme_name']
             
             # 数据清洗和分组（按 theme + category 组合）
-            grouped_data = self._group_by_theme_category(df, theme_name, market, group)
+            grouped_data = self._group_by_theme_category(df, theme_name, market, group, creator_username)
             
             # 生成预览信息
             preview = self._generate_preview(grouped_data, theme_name)
@@ -249,7 +250,7 @@ class ThemeFileParser:
             'theme_name': theme_name
         }
     
-    def _group_by_theme_category(self, df: pd.DataFrame, theme_name: str, market: str, group: str = None) -> Dict[str, Dict]:
+    def _group_by_theme_category(self, df: pd.DataFrame, theme_name: str, market: str, group: str = None, creator_username: str = None) -> Dict[str, Dict]:
         """
         按 (theme, category) 组合分组
         
@@ -258,6 +259,7 @@ class ThemeFileParser:
             theme_name: 主题名称
             market: 市场（US/HK/CN）
             group: 主题分组（如 AI、crypto 等）
+            creator_username: 创建者用户名
         
         Returns:
             grouped_data: {
@@ -301,11 +303,13 @@ class ThemeFileParser:
             
             logger.debug(f"分类标准化: '{category_raw}' -> '{category}'")
             
-            # 生成主题 ID（使用标准化后的名称，但用下划线连接以保持ID格式）
-            # 例如：'gs power up' + 'electric utility' -> 'gs_power_up_electric_utility'
+            # 生成主题 ID（使用标准化后的名称，包含用户名以确保唯一性）
+            # 格式：username_theme_name_category
+            # 例如：'john_gs_power_up_electric_utility'
+            username_part = creator_username.replace(' ', '_').lower() if creator_username else 'unknown'
             theme_id_part1 = theme_name.replace(' ', '_')
             theme_id_part2 = category.replace(' ', '_')
-            theme_id = f"{theme_id_part1}_{theme_id_part2}"
+            theme_id = f"{username_part}_{theme_id_part1}_{theme_id_part2}"
             
             # 获取 tickers（去重并排序）
             tickers = sorted(list(set(group_df['ticker'].tolist())))

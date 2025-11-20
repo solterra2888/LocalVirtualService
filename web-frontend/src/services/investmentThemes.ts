@@ -52,7 +52,8 @@ export async function listThemes(
   limit: number = 100,
   offset: number = 0,
   search?: string,
-  groups?: string[]
+  groups?: string[],
+  createdBy?: string[]
 ): Promise<ThemeListResponse> {
   const params: Record<string, any> = { limit, offset };
   if (search !== undefined && search !== null && search !== '') {
@@ -62,8 +63,11 @@ export async function listThemes(
   // FastAPI 的 Query(List[str]) 需要多个同名参数，如 ?group=crypto&group=market%20weekly
   // axios 默认会将数组转换为 group[]=crypto&group[]=market%20weekly 或其他格式
   // 我们需要手动构建 URL 参数来确保格式正确
-  if (groups !== undefined && groups !== null && groups.length > 0) {
-    // 手动构建查询字符串，确保每个 group 都是独立的参数
+  const hasGroups = groups !== undefined && groups !== null && groups.length > 0;
+  const hasUsers = createdBy !== undefined && createdBy !== null && createdBy.length > 0;
+  
+  if (hasGroups || hasUsers) {
+    // 手动构建查询字符串，确保每个 group 和 created_by 都是独立的参数
     const queryParams = new URLSearchParams();
     queryParams.append('limit', limit.toString());
     queryParams.append('offset', offset.toString());
@@ -71,9 +75,17 @@ export async function listThemes(
       queryParams.append('search', search);
     }
     // 为每个 group 添加一个独立的参数（多个同名参数）
-    groups.forEach(group => {
-      queryParams.append('group', group);
-    });
+    if (hasGroups) {
+      groups.forEach(group => {
+        queryParams.append('group', group);
+      });
+    }
+    // 为每个 created_by 添加一个独立的参数（多个同名参数）
+    if (hasUsers) {
+      createdBy.forEach(user => {
+        queryParams.append('created_by', user);
+      });
+    }
     
     const url = `/investment-themes/themes?${queryParams.toString()}`;
     // URL 已经包含查询参数，不再传递 params 对象
@@ -96,6 +108,21 @@ export async function getAllGroups(): Promise<{
     groups: string[];
     count: number;
   }>('/investment-themes/groups');
+}
+
+/**
+ * Get all unique users (for filter dropdown, admin only)
+ */
+export async function getAllUsers(): Promise<{
+  success: boolean;
+  users: string[];
+  count: number;
+}> {
+  return await api.get<{
+    success: boolean;
+    users: string[];
+    count: number;
+  }>('/investment-themes/users');
 }
 
 /**
@@ -187,6 +214,8 @@ export async function pollTaskUntilComplete(
   while (true) {
     const status = await getTaskStatus(taskId);
     
+    console.log(`🔄 Task ${taskId} status: ${status.status}`, status);
+    
     // Notify progress
     if (onProgress) {
       onProgress(status);
@@ -194,11 +223,13 @@ export async function pollTaskUntilComplete(
     
     // Check if completed
     if (status.status === 'SUCCESS' || status.status === 'FAILURE') {
+      console.log(`✅ Task ${taskId} completed with status: ${status.status}`);
       return status;
     }
     
     // Check timeout
     if (Date.now() - startTime > timeout) {
+      console.error(`❌ Task ${taskId} timeout after ${timeout}ms`);
       throw new Error('Task timeout');
     }
     
@@ -342,6 +373,18 @@ export async function createTheme(
   theme_saved: boolean;
   embedding_created: boolean;
   associations_created?: number;
+  conflict?: boolean;
+  existing_theme?: {
+    db_theme_id: number;
+    theme_id: string;
+    theme_name: string;
+    category: string;
+    description: string;
+    group?: string;
+    created_by: string;
+    tickers: string[];
+  };
+  new_tickers?: string[];
   error?: string;
 }> {
   return await api.post('/investment-themes/create', {
@@ -352,6 +395,86 @@ export async function createTheme(
     theme_id: themeId,
     market: market,
     tickers: tickers,
+  });
+}
+
+/**
+ * Update theme with conflict resolution
+ * Called when user resolves a theme conflict by selecting tickers
+ */
+export async function updateThemeWithConflictResolution(
+  themeId: string,
+  themeName: string,
+  category: string,
+  description: string,
+  selectedTickers: string[],
+  group?: string
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  theme_saved: boolean;
+  embedding_created: boolean;
+  associations_updated?: number;
+  error?: string;
+}> {
+  return await api.post(`/investment-themes/${themeId}/update-with-conflict-resolution`, {
+    theme_name: themeName,
+    category: category,
+    description: description,
+    selected_tickers: selectedTickers,
+    group: group,
+  });
+}
+
+/**
+ * Batch resolve theme conflicts
+ * Submit all conflict resolutions at once and process in Celery
+ */
+export async function batchResolveConflicts(
+  conflictResolutions: Record<string, {
+    theme_name: string;
+    category: string;
+    description: string;
+    selected_tickers: string[];
+    group?: string;
+  }>
+): Promise<{
+  success: boolean;
+  message: string;
+  task_id: string;
+}> {
+  return await api.post('/investment-themes/batch-resolve-conflicts', {
+    conflict_resolutions: conflictResolutions
+  });
+}
+
+/**
+ * Update theme tickers and regenerate description/vector
+ */
+export async function updateThemeTickers(
+  themeId: string,
+  tickers: string[],
+  themeName: string,
+  category: string,
+  group?: string,
+  market?: string
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  description_updated: boolean;
+  embedding_updated: boolean;
+  old_associations_deleted: number;
+  new_associations_created: number;
+}> {
+  return await api.post('/investment-themes/update-theme-tickers', {
+    theme_id: themeId,
+    tickers: tickers,
+    theme_name: themeName,
+    category: category,
+    group: group,
+    market: market,
   });
 }
 

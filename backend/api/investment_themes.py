@@ -15,7 +15,7 @@ from backend.services.investment_theme_embedding_service import InvestmentThemeE
 from backend.services.theme_company_association_service import ThemeCompanyAssociationService
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
-from backend.auth.jwt_utils import get_current_admin_user, TokenData
+from backend.auth.jwt_utils import get_current_admin_user, get_current_user, TokenData
 
 router = APIRouter(prefix="/investment-themes", tags=["Investment Themes"])
 logger = get_logger("investment_themes_api")
@@ -104,6 +104,33 @@ class CreateThemeRequest(BaseModel):
     theme_id: Optional[str] = Field(None, max_length=50, description="主题ID（可选，不提供则自动生成）")
     market: Optional[str] = Field(None, description="默认市场代码（US/HK/CN），仅用于没有后缀的ticker")
     tickers: Optional[List[str]] = Field(None, description="关联的股票代码列表，支持完整格式（如 'NVDA.US', '688256.SHG'）或简写（如 'NVDA'），可混合不同交易所")
+
+
+class UpdateThemeTickersRequest(BaseModel):
+    """更新主题tickers并重新生成描述和向量的请求"""
+    theme_id: str = Field(..., description="主题ID")
+    tickers: List[str] = Field(..., description="最终选择的股票代码列表")
+    theme_name: str = Field(..., description="主题名称")
+    category: str = Field(..., description="主题分类")
+    group: Optional[str] = Field(None, description="主题分组")
+    market: Optional[str] = Field(None, description="默认市场代码")
+
+
+class UpdateThemeWithConflictResolutionRequest(BaseModel):
+    """冲突解决后更新主题的请求"""
+    theme_name: str = Field(..., description="主题名称")
+    category: str = Field(..., description="主题分类")
+    description: str = Field(..., description="当前主题描述")
+    selected_tickers: List[str] = Field(..., description="用户选择的最终 ticker 列表（已标准化，带市场后缀）")
+    group: Optional[str] = Field(None, description="主题分组")
+
+
+class BatchResolveConflictsRequest(BaseModel):
+    """批量解决冲突的请求"""
+    conflict_resolutions: Dict[str, UpdateThemeWithConflictResolutionRequest] = Field(
+        ..., 
+        description="冲突解决方案字典，key 为 theme_id，value 为解决方案"
+    )
 
 
 class VerifyTickerRequest(BaseModel):
@@ -360,22 +387,29 @@ async def list_all_themes(
     market: Optional[str] = None,
     search: Optional[str] = Query(None, description="Search keyword for theme name or category"),
     group: Optional[List[str]] = Query(None, description="Filter by group name(s) - multiple selection supported"),
+    created_by: Optional[List[str]] = Query(None, description="Filter by creator username(s) - multiple selection supported (admin only)"),
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
     列出所有投资主题
+    
+    权限：
+    - admin用户：可以查看所有主题
+    - 非admin用户：只能查看自己创建的主题
     
     参数：
     - market: 市场过滤（HK/US/CN）
     - search: 搜索关键词（主题名称或类别）
     - group: 按组名筛选（支持多个，逗号分隔或多次传递）
+    - created_by: 按创建者用户名筛选（支持多个，仅admin用户可用）
     - limit: 每页数量
     - offset: 偏移量
     
     示例：
     ```
-    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto
+    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto&created_by=user1&created_by=user2
     ```
     """
     try:
@@ -394,6 +428,11 @@ async def list_all_themes(
         filters = []
         filter_params: List[Any] = []
 
+        # 非admin用户只能看自己创建的主题
+        if not current_user.is_admin:
+            filters.append("ite.created_by = %s")
+            filter_params.append(current_user.username)
+
         search_value = search.strip() if search else None
         if search_value:
             filters.append("(ite.theme_name ILIKE %s OR ite.category ILIKE %s)")
@@ -408,6 +447,15 @@ async def list_all_themes(
                 placeholders = ','.join(['%s'] * len(valid_groups))
                 filters.append(f"ite.\"group\" IN ({placeholders})")
                 filter_params.extend(valid_groups)
+        
+        # 添加 created_by 筛选（支持多个用户，仅admin用户可用）
+        if created_by and len(created_by) > 0 and current_user.is_admin:
+            # 过滤掉空字符串
+            valid_users = [u.strip() for u in created_by if u and u.strip()]
+            if valid_users:
+                placeholders = ','.join(['%s'] * len(valid_users))
+                filters.append(f"ite.created_by IN ({placeholders})")
+                filter_params.extend(valid_users)
 
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
@@ -561,6 +609,56 @@ async def get_all_groups():
     except Exception as e:
         logger.error(f"Getting groups list failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Getting groups failed: {str(e)}")
+
+
+@router.get("/users")
+async def get_all_users(
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """
+    获取所有唯一的 created_by 用户值（用于筛选器，仅admin用户可用）
+    
+    返回所有 investment_theme_embeddings 表中唯一的 created_by 值列表
+    
+    示例：
+    ```
+    GET /api/investment-themes/users
+    ```
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 查询所有唯一的非空 created_by 值
+        cursor.execute("""
+            SELECT DISTINCT created_by
+            FROM investment_theme_embeddings
+            WHERE created_by IS NOT NULL AND created_by != ''
+            ORDER BY created_by
+        """)
+        
+        users = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "users": users,
+            "count": len(users)
+        }
+        
+    except Exception as e:
+        logger.error(f"Getting users failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Getting users failed: {str(e)}")
 
 
 @router.get("/{theme_id}/associations", response_model=ThemeAssociationsResponse)
@@ -854,14 +952,19 @@ async def get_task_status(task_id: str):
             if task_result.info:
                 response["progress"] = task_result.info.get('progress', 0)
                 response["message"] = task_result.info.get('message', 'Processing...')
-                # Include additional metadata
-                for key in ['total', 'processed', 'failed', 'current_batch', 'total_batches']:
-                    if key in task_result.info:
-                        response[key] = task_result.info[key]
+                # 🔥 统一格式：将所有 meta 信息放在 meta 字段中
+                response["meta"] = task_result.info
         elif task_result.state == 'SUCCESS':
             response["progress"] = 100
             response["message"] = "Task completed successfully"
             response["result"] = task_result.result
+            # 🔥 统一格式：在 SUCCESS 状态也包含 meta 字段（从 result 中提取统计信息）
+            if isinstance(task_result.result, dict):
+                response["meta"] = {
+                    "progress": 100,
+                    "status": "completed",
+                    **task_result.result.get('statistics', {})
+                }
         elif task_result.state == 'FAILURE':
             response["progress"] = 0
             response["message"] = f"Task failed: {str(task_result.info)}"
@@ -1126,12 +1229,14 @@ async def batch_update_theme_enabled_status(
 async def update_theme_description(
     theme_id: str,
     request: UpdateDescriptionRequest,
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    更新主题描述并重新向量化（仅管理员）
+    更新主题描述并重新向量化
     
-    权限：仅管理员
+    权限：
+    - admin用户：可以编辑所有主题
+    - 非admin用户：只能编辑自己创建的主题
     
     说明：
     - 更新主题的描述内容
@@ -1170,13 +1275,42 @@ async def update_theme_description(
     ```
     """
     try:
+        from backend.database.db_manager import DatabaseManager
+        
         db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查是否是主题的创建者
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings 
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="权限不足：只能编辑自己创建的主题"
+                )
+        
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"Admin {current_user.username} updating theme description",
+            f"User {current_user.username} updating theme description",
             theme_id=theme_id,
-            description_length=len(request.description)
+            description_length=len(request.description),
+            is_admin=current_user.is_admin
         )
         
         result = await service.update_theme_description(
@@ -1207,12 +1341,14 @@ async def update_theme_description(
 @router.delete("/{theme_id}")
 async def delete_theme(
     theme_id: str,
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    删除投资主题（仅管理员，物理删除）
+    删除投资主题（物理删除）
     
-    权限：仅管理员
+    权限：
+    - admin用户：可以删除所有主题
+    - 非admin用户：只能删除自己创建的主题
     
     说明：
     - 硬删除主题（物理删除，不可恢复）
@@ -1237,12 +1373,41 @@ async def delete_theme(
     ```
     """
     try:
+        from backend.database.db_manager import DatabaseManager
+        
         db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查是否是主题的创建者
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings 
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="权限不足：只能删除自己创建的主题"
+                )
+        
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"Admin {current_user.username} deleting theme",
-            theme_id=theme_id
+            f"User {current_user.username} deleting theme",
+            theme_id=theme_id,
+            is_admin=current_user.is_admin
         )
         
         result = service.delete_theme(
@@ -1265,12 +1430,14 @@ async def delete_theme(
 @router.post("/batch-delete")
 async def batch_delete_themes(
     request: BatchDeleteThemeRequest,
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    批量删除投资主题（仅管理员，物理删除）
+    批量删除投资主题（物理删除）
     
-    权限：仅管理员
+    权限：
+    - admin用户：可以删除所有主题
+    - 非admin用户：只能删除自己创建的主题
     
     说明：
     - 硬删除多个主题（物理删除，不可恢复）
@@ -1300,12 +1467,47 @@ async def batch_delete_themes(
     ```
     """
     try:
+        from backend.database.db_manager import DatabaseManager
+        
         db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查每个主题是否是自己创建的
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            placeholders = ','.join(['%s'] * len(request.theme_ids))
+            cursor.execute(f"""
+                SELECT theme_id, created_by 
+                FROM investment_theme_embeddings 
+                WHERE theme_id IN ({placeholders})
+            """, request.theme_ids)
+            
+            theme_creators = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.close()
+            conn.close()
+            
+            # 检查是否有不属于当前用户的主题
+            unauthorized_themes = [
+                tid for tid in request.theme_ids 
+                if theme_creators.get(tid) != current_user.username
+            ]
+            
+            if unauthorized_themes:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"权限不足：无法删除以下主题（不是您创建的）: {', '.join(unauthorized_themes)}"
+                )
+        
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"Admin {current_user.username} batch deleting {len(request.theme_ids)} themes",
-            theme_ids=request.theme_ids
+            f"User {current_user.username} batch deleting {len(request.theme_ids)} themes",
+            theme_ids=request.theme_ids,
+            is_admin=current_user.is_admin
         )
         
         result = service.batch_delete_themes(
@@ -1328,12 +1530,12 @@ async def batch_delete_themes(
 @router.post("/generate-description")
 async def generate_theme_description(
     request: GenerateDescriptionRequest,
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    为新主题生成LLM描述（预览，不保存，仅管理员）
+    为新主题生成LLM描述（预览，不保存）
     
-    权限：仅管理员
+    权限：所有登录用户
     
     说明：
     - 使用LLM生成主题描述
@@ -1362,11 +1564,12 @@ async def generate_theme_description(
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"Admin {current_user.username} generating description for new theme",
+            f"User {current_user.username} generating description for new theme",
             theme_name=request.theme_name,
             category=request.category,
             market=request.market,
-            tickers=request.tickers
+            tickers=request.tickers,
+            is_admin=current_user.is_admin
         )
         
         # 如果提供了 tickers，验证并获取公司信息
@@ -1418,12 +1621,12 @@ async def generate_theme_description(
 @router.post("/create")
 async def create_theme(
     request: CreateThemeRequest,
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    创建新的投资主题（仅管理员）
+    创建新的投资主题
     
-    权限：仅管理员
+    权限：所有登录用户
     
     说明：
     - 创建新主题并保存到数据库
@@ -1474,13 +1677,14 @@ async def create_theme(
         service = InvestmentThemeEmbeddingService(db_config)
         
         logger.info(
-            f"Admin {current_user.username} creating new theme",
+            f"User {current_user.username} creating new theme",
             group=request.group,
             theme_name=request.theme_name,
             category=request.category,
             theme_id=request.theme_id,
             market=request.market,
-            tickers=request.tickers
+            tickers=request.tickers,
+            is_admin=current_user.is_admin
         )
         
         result = await service.create_theme(
@@ -1494,8 +1698,113 @@ async def create_theme(
             tickers=request.tickers
         )
         
+        # 🔥 自动验证新创建的 tickers（如果有）
+        verified_count = 0
+        if result.get("theme_saved") and result.get("associations_created", 0) > 0 and request.tickers:
+            theme_id = result.get("theme_id")
+            logger.info(f"🔍 Auto-verifying {len(request.tickers)} tickers for new theme {theme_id}...")
+            
+            try:
+                from backend.database.db_manager import DatabaseManager
+                from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                from backend.config.exchange_config import format_ticker_for_eodhd
+                
+                db_config = get_database_config()
+                db_manager = DatabaseManager(db_config)
+                
+                for ticker in request.tickers:
+                    try:
+                        # 检查ticker是否在companies表中
+                        verify_conn = db_manager.get_connection()
+                        verify_cursor = verify_conn.cursor()
+                        
+                        verify_cursor.execute("""
+                            SELECT id, code, name, exchange, primaryticker
+                            FROM companies
+                            WHERE UPPER(primaryticker) = UPPER(%s)
+                            LIMIT 1
+                        """, (ticker,))
+                        
+                        company_result = verify_cursor.fetchone()
+                        
+                        if company_result:
+                            # 在数据库中找到，更新is_verified
+                            verify_cursor.execute("""
+                                UPDATE theme_company_associations
+                                SET is_verified = TRUE,
+                                    company_name = %s,
+                                    updated_at = NOW()
+                                WHERE theme_id = %s AND ticker = %s
+                            """, (company_result[2], theme_id, ticker))
+                            verify_conn.commit()
+                            verified_count += 1
+                            logger.debug(f"✅ Ticker {ticker} verified (found in DB)")
+                        else:
+                            # 不在数据库中，尝试从EODHD获取
+                            logger.debug(f"🔍 Ticker {ticker} not in DB, fetching from EODHD...")
+                            
+                            formatted_ticker = format_ticker_for_eodhd(ticker)
+                            if '.' in formatted_ticker:
+                                symbol, exchange = formatted_ticker.rsplit('.', 1)
+                            else:
+                                symbol = formatted_ticker
+                                exchange = 'US'
+                            
+                            fundamentals_service = EODHDFundamentalsService()
+                            full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                            
+                            if full_data:
+                                # 保存到数据库
+                                company_data = {
+                                    'symbol': symbol,
+                                    'exchange': exchange,
+                                    'general_data': full_data.get('General', full_data),
+                                    'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                                    'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                                    'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                                    'full_data': full_data
+                                }
+                                
+                                fundamentals_service.batch_save_companies_data([company_data])
+                                
+                                # 更新is_verified
+                                general_data = full_data.get('General', full_data)
+                                company_name = general_data.get('Name', symbol)
+                                
+                                verify_cursor.execute("""
+                                    UPDATE theme_company_associations
+                                    SET is_verified = TRUE,
+                                        company_name = %s,
+                                        updated_at = NOW()
+                                    WHERE theme_id = %s AND ticker = %s
+                                """, (company_name, theme_id, ticker))
+                                verify_conn.commit()
+                                verified_count += 1
+                                logger.info(f"✅ Ticker {ticker} verified and fetched from EODHD")
+                            else:
+                                logger.warning(f"⚠️ Ticker {ticker} not found in EODHD")
+                        
+                        verify_cursor.close()
+                        verify_conn.close()
+                        
+                    except Exception as verify_error:
+                        logger.warning(f"Failed to verify ticker {ticker}: {str(verify_error)}")
+                        continue
+                
+                logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(request.tickers)} tickers verified")
+                
+                # 添加验证结果到返回值
+                result["verified_count"] = verified_count
+                
+            except Exception as e:
+                logger.warning(f"Auto-verification failed: {str(e)}")
+        
         # 根据结果返回不同的状态码
         if result["success"]:
+            return result
+        elif result.get("conflict"):
+            # 检测到冲突，返回冲突信息让前端处理（返回200状态码）
+            logger.info(f"Theme conflict detected: {result.get('theme_id')}")
             return result
         elif result.get("theme_saved"):
             # 主题保存成功但向量化失败，返回206 Partial Content
@@ -1511,17 +1820,517 @@ async def create_theme(
         raise HTTPException(status_code=500, detail=f"创建主题失败: {str(e)}")
 
 
+@router.post("/update-theme-tickers")
+async def update_theme_tickers(
+    request: UpdateThemeTickersRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    更新主题的 tickers 并重新生成描述和向量
+    
+    使用场景：
+    - 当创建主题时发现 theme_id 冲突
+    - 用户选择要保留的 tickers 后调用此接口
+    - 会删除旧的 tickers 关联，创建新的关联
+    - 重新生成 LLM 描述和向量
+    
+    权限：所有登录用户（但非 admin 只能更新自己创建的主题）
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        from backend.services.theme_company_association_service import ThemeCompanyAssociationService
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 检查权限：非 admin 只能更新自己创建的主题
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings 
+                WHERE theme_id = %s
+            """, (request.theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="权限不足：只能更新自己创建的主题"
+                )
+        
+        service = InvestmentThemeEmbeddingService(db_config)
+        association_service = ThemeCompanyAssociationService(db_config)
+        
+        logger.info(
+            f"User {current_user.username} updating theme tickers",
+            theme_id=request.theme_id,
+            tickers_count=len(request.tickers),
+            is_admin=current_user.is_admin
+        )
+        
+        # 1. 验证 tickers 并获取公司信息
+        stock_symbols = None
+        company_names = None
+        valid_tickers = []
+        
+        if request.tickers and request.market:
+            try:
+                validation_result = association_service.validate_and_complete_tickers(
+                    request.tickers,
+                    request.market
+                )
+                
+                if validation_result.get("valid"):
+                    valid_tickers = [v["full_ticker"] for v in validation_result["valid"]]
+                    stock_symbols = ", ".join(valid_tickers)
+                    company_names = ", ".join([v["company_name"] for v in validation_result["valid"]])
+                    logger.info(f"Validated {len(valid_tickers)} tickers for theme {request.theme_id}")
+            except Exception as e:
+                logger.warning(f"Failed to validate tickers: {str(e)}")
+        
+        # 2. 使用 LLM 重新生成描述
+        desc_result = await service.generate_theme_description(
+            theme_name=request.theme_name,
+            category=request.category,
+            stock_symbols=stock_symbols,
+            company_names=company_names
+        )
+        
+        if not desc_result.get('success'):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate description: {desc_result.get('message')}"
+            )
+        
+        new_description = desc_result.get('description', '')
+        
+        # 3. 更新主题描述和向量
+        update_result = await service.update_theme_description(
+            theme_id=request.theme_id,
+            new_description=new_description,
+            editor_username=current_user.username,
+            new_group=request.group,
+            version=None  # 不使用乐观锁
+        )
+        
+        if not update_result.get('description_saved'):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to update theme: {update_result.get('message')}"
+            )
+        
+        # 4. 删除旧的 ticker 关联
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM theme_company_associations
+            WHERE theme_id = %s
+        """, (request.theme_id,))
+        
+        old_count = cursor.rowcount
+        logger.info(f"Deleted {old_count} old ticker associations for theme {request.theme_id}")
+        
+        # 5. 创建新的 ticker 关联
+        new_count = 0
+        if valid_tickers:
+            for ticker in valid_tickers:
+                # 解析 ticker 获取 market
+                if '.' in ticker:
+                    symbol, exchange_suffix = ticker.rsplit('.', 1)
+                    # 简单映射
+                    market_map = {'US': 'US', 'HK': 'HK', 'SHG': 'CN', 'SHE': 'CN'}
+                    ticker_market = market_map.get(exchange_suffix, request.market or 'US')
+                else:
+                    ticker_market = request.market or 'US'
+                
+                cursor.execute("""
+                    INSERT INTO theme_company_associations 
+                    (theme_id, ticker, market, association_weight, created_at)
+                    VALUES (%s, %s, %s, 1.0, NOW())
+                    ON CONFLICT (theme_id, ticker) DO NOTHING
+                """, (request.theme_id, ticker, ticker_market))
+                
+                new_count += cursor.rowcount
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Created {new_count} new ticker associations for theme {request.theme_id}")
+        
+        return {
+            "success": True,
+            "message": f"主题更新成功：删除 {old_count} 个旧关联，创建 {new_count} 个新关联",
+            "theme_id": request.theme_id,
+            "description_updated": update_result.get('description_saved'),
+            "embedding_updated": update_result.get('embedding_updated'),
+            "old_associations_deleted": old_count,
+            "new_associations_created": new_count
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update theme tickers failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@router.post("/{theme_id}/update-with-conflict-resolution")
+async def update_theme_with_conflict_resolution(
+    theme_id: str,
+    request: UpdateThemeWithConflictResolutionRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    冲突解决后更新主题
+    
+    使用场景：
+    - 批量上传或单个创建时发现主题冲突
+    - 用户在冲突解决界面选择要保留的 tickers
+    - 更新主题的 tickers 关联并重新生成向量
+    
+    权限：所有登录用户（但非 admin 只能更新自己创建的主题）
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        from backend.services.theme_company_association_service import ThemeCompanyAssociationService
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        logger.info(
+            f"User {current_user.username} updating theme with conflict resolution",
+            theme_id=theme_id,
+            theme_name=request.theme_name,
+            category=request.category,
+            selected_tickers_count=len(request.selected_tickers),
+            is_admin=current_user.is_admin
+        )
+        
+        # 检查权限：非 admin 只能更新自己创建的主题
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings 
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="权限不足：只能更新自己创建的主题"
+                )
+        
+        service = InvestmentThemeEmbeddingService(db_config)
+        association_service = ThemeCompanyAssociationService(db_config)
+        
+        # selected_tickers 已经是标准化的（带市场后缀），直接使用
+        valid_tickers = request.selected_tickers
+        
+        # 获取公司名称用于生成描述
+        stock_symbols = ", ".join(valid_tickers)
+        company_names = None
+        
+        try:
+            # 尝试获取公司名称
+            conn = db_manager.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                placeholders = ','.join(['%s'] * len(valid_tickers))
+                cursor.execute(f"""
+                    SELECT ticker, company_name 
+                    FROM company_profiles 
+                    WHERE ticker IN ({placeholders})
+                """, valid_tickers)
+                
+                companies = {row[0]: row[1] for row in cursor.fetchall()}
+                company_names = ", ".join([companies.get(t, t) for t in valid_tickers])
+                
+                cursor.close()
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to fetch company names: {str(e)}")
+        
+        # 使用 LLM 重新生成描述
+        desc_result = await service.generate_theme_description(
+            theme_name=request.theme_name,
+            category=request.category,
+            stock_symbols=stock_symbols,
+            company_names=company_names
+        )
+        
+        if not desc_result.get('success'):
+            logger.warning(f"Failed to generate description, using existing: {desc_result.get('message')}")
+            new_description = request.description  # 使用现有描述
+        else:
+            new_description = desc_result.get('description', request.description)
+        
+        # 更新主题描述和向量
+        update_result = await service.update_theme_description(
+            theme_id=theme_id,
+            new_description=new_description,
+            editor_username=current_user.username,
+            new_group=request.group,
+            version=None  # 不使用乐观锁
+        )
+        
+        if not update_result.get('description_saved'):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to update theme: {update_result.get('message')}"
+            )
+        
+        # 删除旧的 ticker 关联（先获取旧的用于对比）
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 获取旧的tickers用于对比（找出新增的）
+        cursor.execute("""
+            SELECT ticker FROM theme_company_associations
+            WHERE theme_id = %s
+        """, (theme_id,))
+        old_tickers = set([row[0] for row in cursor.fetchall()])
+        
+        # 删除旧关联
+        cursor.execute("""
+            DELETE FROM theme_company_associations
+            WHERE theme_id = %s
+        """, (theme_id,))
+        
+        old_count = cursor.rowcount
+        logger.info(f"Deleted {old_count} old ticker associations for theme {theme_id}")
+        
+        # 创建新的 ticker 关联
+        new_count = 0
+        newly_added_tickers = []  # 记录新增的ticker
+        if valid_tickers:
+            for ticker in valid_tickers:
+                # 解析 ticker 获取 market
+                if '.' in ticker:
+                    symbol, exchange_suffix = ticker.rsplit('.', 1)
+                    # 简单映射
+                    market_map = {'US': 'US', 'HK': 'HK', 'SHG': 'CN', 'SHE': 'CN'}
+                    ticker_market = market_map.get(exchange_suffix, 'US')
+                else:
+                    ticker_market = 'US'
+                
+                cursor.execute("""
+                    INSERT INTO theme_company_associations 
+                    (theme_id, ticker, market, created_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (theme_id, ticker) DO NOTHING
+                """, (theme_id, ticker, ticker_market))
+                new_count += cursor.rowcount
+                
+                # 记录新增的ticker
+                if ticker not in old_tickers:
+                    newly_added_tickers.append(ticker)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Created {new_count} new ticker associations for theme {theme_id}")
+        
+        # 🔥 自动验证新增的 tickers（只验证真正新增的，不验证已存在的）
+        verified_count = 0
+        if len(newly_added_tickers) > 0:
+            logger.info(f"🔍 Auto-verifying {len(newly_added_tickers)} newly added tickers for {theme_id}...")
+            try:
+                from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                from backend.config.exchange_config import format_ticker_for_eodhd
+                
+                for ticker in newly_added_tickers:
+                    try:
+                        # 检查ticker是否在companies表中
+                        verify_conn = db_manager.get_connection()
+                        verify_cursor = verify_conn.cursor()
+                        
+                        verify_cursor.execute("""
+                            SELECT id, code, name, exchange, primaryticker
+                            FROM companies
+                            WHERE UPPER(primaryticker) = UPPER(%s)
+                            LIMIT 1
+                        """, (ticker,))
+                        
+                        company_result = verify_cursor.fetchone()
+                        
+                        if company_result:
+                            # 在数据库中找到，更新is_verified
+                            verify_cursor.execute("""
+                                UPDATE theme_company_associations
+                                SET is_verified = TRUE,
+                                    company_name = %s,
+                                    updated_at = NOW()
+                                WHERE theme_id = %s AND ticker = %s
+                            """, (company_result[2], theme_id, ticker))
+                            verify_conn.commit()
+                            verified_count += 1
+                            logger.debug(f"✅ Ticker {ticker} verified (found in DB)")
+                        else:
+                            # 不在数据库中，尝试从EODHD获取
+                            logger.debug(f"🔍 Ticker {ticker} not in DB, fetching from EODHD...")
+                            
+                            formatted_ticker = format_ticker_for_eodhd(ticker)
+                            if '.' in formatted_ticker:
+                                symbol, exchange = formatted_ticker.rsplit('.', 1)
+                            else:
+                                symbol = formatted_ticker
+                                exchange = 'US'
+                            
+                            fundamentals_service = EODHDFundamentalsService()
+                            full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                            
+                            if full_data:
+                                # 保存到数据库
+                                company_data = {
+                                    'symbol': symbol,
+                                    'exchange': exchange,
+                                    'general_data': full_data.get('General', full_data),
+                                    'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                                    'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                                    'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                                    'full_data': full_data
+                                }
+                                
+                                fundamentals_service.batch_save_companies_data([company_data])
+                                
+                                # 更新is_verified
+                                general_data = full_data.get('General', full_data)
+                                company_name = general_data.get('Name', symbol)
+                                
+                                verify_cursor.execute("""
+                                    UPDATE theme_company_associations
+                                    SET is_verified = TRUE,
+                                        company_name = %s,
+                                        updated_at = NOW()
+                                    WHERE theme_id = %s AND ticker = %s
+                                """, (company_name, theme_id, ticker))
+                                verify_conn.commit()
+                                verified_count += 1
+                                logger.info(f"✅ Ticker {ticker} verified and fetched from EODHD")
+                            else:
+                                logger.warning(f"⚠️ Ticker {ticker} not found in EODHD")
+                        
+                        verify_cursor.close()
+                        verify_conn.close()
+                        
+                    except Exception as verify_error:
+                        logger.warning(f"Failed to verify ticker {ticker}: {str(verify_error)}")
+                        continue
+                
+                logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(newly_added_tickers)} newly added tickers verified")
+                
+            except Exception as e:
+                logger.warning(f"Auto-verification failed: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": f"主题 '{request.theme_name}' 已更新",
+            "theme_id": theme_id,
+            "theme_saved": True,
+            "embedding_created": update_result.get('vector_saved', False),
+            "associations_updated": new_count,
+            "verified_count": verified_count  # 返回验证的数量
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update theme with conflict resolution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新主题失败: {str(e)}")
+
+
+@router.post("/batch-resolve-conflicts")
+async def batch_resolve_conflicts(
+    request: BatchResolveConflictsRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量解决冲突
+    
+    使用场景：
+    - 批量上传时检测到多个主题冲突
+    - 用户在统一界面中选择所有冲突的解决方案
+    - 提交到 Celery 进行批量异步处理
+    
+    权限：所有登录用户（但非 admin 只能更新自己创建的主题）
+    """
+    try:
+        logger.info(
+            f"User {current_user.username} batch resolving conflicts",
+            conflicts_count=len(request.conflict_resolutions),
+            is_admin=current_user.is_admin
+        )
+        
+        # 转换为普通字典用于 Celery 任务
+        conflict_resolutions_dict = {}
+        for theme_id, resolution in request.conflict_resolutions.items():
+            conflict_resolutions_dict[theme_id] = {
+                "theme_name": resolution.theme_name,
+                "category": resolution.category,
+                "description": resolution.description,
+                "selected_tickers": resolution.selected_tickers,
+                "group": resolution.group
+            }
+        
+        # 提交 Celery 任务
+        from backend.tasks.theme_tasks import batch_resolve_conflicts_task
+        
+        task = batch_resolve_conflicts_task.apply_async(
+            args=[conflict_resolutions_dict, current_user.username],
+            queue='ai_processing'
+        )
+        
+        logger.info(f"Batch resolve conflicts task submitted: {task.id}")
+        
+        return {
+            "success": True,
+            "message": "批量冲突解决任务已提交",
+            "task_id": task.id
+        }
+        
+    except Exception as e:
+        logger.error(f"Batch resolve conflicts failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量冲突解决失败: {str(e)}")
+
+
 @router.post("/batch-upload")
 async def batch_upload_themes(
     file: UploadFile = File(...),
     group: Optional[str] = Form(None),
     market: str = Form("US"),
-    current_user: TokenData = Depends(get_current_admin_user)
+    current_user: TokenData = Depends(get_current_user)
 ):
     """
-    批量上传主题文件（仅管理员）
+    批量上传主题文件
     
-    权限：仅管理员
+    权限：所有登录用户
     
     核心逻辑（重要）：
     - theme 列必须只有一个唯一值（整个文件）
@@ -1579,7 +2388,7 @@ async def batch_upload_themes(
     """
     try:
         logger.info(
-            f"Admin {current_user.username} uploading batch theme file: {file.filename}, group: {group}, market: {market}"
+            f"User {current_user.username} uploading batch theme file: {file.filename}, group: {group}, market: {market}, is_admin: {current_user.is_admin}"
         )
         
         # 1. 验证 market 参数
@@ -1608,7 +2417,7 @@ async def batch_upload_themes(
         # 重置文件指针
         await file.seek(0)
         
-        parse_result = parser.parse_file(file, market=market, group=group)
+        parse_result = parser.parse_file(file, market=market, group=group, creator_username=current_user.username)
         
         # 5. 如果解析失败，返回错误
         if not parse_result.get('success'):

@@ -521,9 +521,10 @@ def batch_create_themes_task(
             - details: List[dict] - Detailed results
     """
     task_id = self.request.id
+    total = len(themes_data)  # Store total before try block for exception handler
     
     try:
-        logger.info(f"Starting batch create themes task {task_id}, total themes: {len(themes_data)}, user: {creator_username}")
+        logger.info(f"Starting batch create themes task {task_id}, total themes: {total}, user: {creator_username}")
         
         # Import service
         from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
@@ -532,11 +533,10 @@ def batch_create_themes_task(
         db_config = get_database_config()
         service = InvestmentThemeEmbeddingService(db_config)
         db_manager = DatabaseManager(db_config)
-        
-        total = len(themes_data)
         created = 0
         failed = 0
         skipped = 0
+        conflicts = []  # 记录冲突的主题
         details = []
         
         # Update initial status
@@ -595,6 +595,7 @@ def batch_create_themes_task(
                     created=created,
                     failed=failed,
                     skipped=skipped,
+                    conflicts=len(conflicts),
                     current_batch=batch_number,
                     total_batches=total_batches
                 )
@@ -607,19 +608,99 @@ def batch_create_themes_task(
                 
                 for theme_id, data in batch:
                     # 🔥 修复：从 data 中提取 theme_name 和 category
-                    # theme_id 已经由 parser 生成（格式：theme_name_category）
+                    # theme_id 已经由 parser 生成（格式：username_theme_name_category）
                     theme_name = data['theme_name']
                     category = data['category']
                     
                     # 检查是否已存在
                     if theme_id in existing_theme_ids:
-                        logger.warning(f"Theme '{theme_name}' (ID: {theme_id}) already exists, skipping")
+                        # 不再直接跳过，而是收集冲突信息
+                        logger.warning(f"Theme '{theme_name}' (ID: {theme_id}) conflict detected, collecting conflict info")
+                        
+                        # 获取现有主题的 tickers
+                        try:
+                            conflict_conn = db_manager.get_connection()
+                            conflict_cursor = conflict_conn.cursor()
+                            
+                            # 获取现有主题的详细信息
+                            conflict_cursor.execute("""
+                                SELECT id, theme_name, category, description, "group", created_by
+                                FROM investment_theme_embeddings
+                                WHERE theme_id = %s
+                            """, (theme_id,))
+                            
+                            existing_row = conflict_cursor.fetchone()
+                            if existing_row:
+                                db_theme_id, existing_theme_name, existing_category, existing_description, existing_group, existing_created_by = existing_row
+                                
+                                # 获取现有的 tickers（已经是标准化的，带市场后缀）
+                                conflict_cursor.execute("""
+                                    SELECT ticker FROM theme_company_associations
+                                    WHERE theme_id = %s
+                                    ORDER BY ticker
+                                """, (theme_id,))
+                                
+                                existing_tickers = [row[0] for row in conflict_cursor.fetchall()]
+                                
+                                # 标准化新的 tickers（添加市场后缀）以便正确比较
+                                normalized_new_tickers = data.get('tickers', [])
+                                if data.get('tickers') and data.get('market'):
+                                    try:
+                                        from backend.services.theme_company_association_service import ThemeCompanyAssociationService
+                                        
+                                        association_service = ThemeCompanyAssociationService(db_config)
+                                        validation_result = association_service.validate_and_complete_tickers(
+                                            data['tickers'],
+                                            data['market']
+                                        )
+                                        
+                                        if validation_result.get("valid"):
+                                            # 使用标准化后的完整 ticker（带市场后缀）
+                                            normalized_new_tickers = [v["full_ticker"] for v in validation_result["valid"]]
+                                            logger.debug(f"Normalized new tickers for conflict: {normalized_new_tickers}")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to normalize new tickers for conflict: {str(e)}")
+                                        # 如果标准化失败，使用原始 tickers
+                                
+                                # 记录冲突信息
+                                conflicts.append({
+                                    "theme_id": theme_id,
+                                    "theme_name": theme_name,
+                                    "category": category,
+                                    "existing_theme": {
+                                        "db_theme_id": db_theme_id,
+                                        "theme_id": theme_id,
+                                        "theme_name": existing_theme_name,
+                                        "category": existing_category,
+                                        "description": existing_description,
+                                        "group": existing_group,
+                                        "created_by": existing_created_by,
+                                        "tickers": existing_tickers
+                                    },
+                                    "new_data": {
+                                        "theme_name": theme_name,
+                                        "category": category,
+                                        "description": data.get('description', ''),
+                                        "group": data.get('group'),
+                                        "tickers": normalized_new_tickers,  # 使用标准化后的 tickers
+                                        "market": data.get('market')
+                                    }
+                                })
+                                
+                                logger.info(f"Conflict recorded: {theme_name} (existing: {len(existing_tickers)} tickers, new: {len(normalized_new_tickers)} tickers)")
+                            
+                            conflict_cursor.close()
+                            conflict_conn.close()
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to collect conflict info for '{theme_name}': {str(e)}")
+                        
                         skipped += 1
                         details.append({
                             "theme_name": theme_name,
                             "theme_id": theme_id,
-                            "status": "skipped",
-                            "reason": "Theme already exists"
+                            "status": "conflict",
+                            "reason": "Theme already exists, requires conflict resolution"
                         })
                         continue
                     
@@ -787,7 +868,7 @@ def batch_create_themes_task(
             skipped=skipped
         )
         
-        logger.info(f"Task {task_id} completed: total={total}, created={created}, failed={failed}, skipped={skipped}")
+        logger.info(f"Task {task_id} completed: total={total}, created={created}, failed={failed}, skipped={skipped}, conflicts={len(conflicts)}")
         
         return {
             "success": True,
@@ -796,7 +877,482 @@ def batch_create_themes_task(
                 "total": total,
                 "created": created,
                 "failed": failed,
-                "skipped": skipped
+                "skipped": skipped,
+                "conflicts": len(conflicts)
+            },
+            "conflicts": conflicts,  # 返回冲突列表
+            "details": details
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Task {task_id} exception: {error_msg}")
+        
+        update_task_progress(
+            task_id,
+            status="failed",
+            progress=0,
+            message=f"Task exception: {error_msg}"
+        )
+        
+        return {
+            "success": False,
+            "error": error_msg,
+            "statistics": {
+                "total": total,
+                "created": 0,
+                "failed": 0,
+                "skipped": 0
+            }
+        }
+
+
+@app.task(bind=True, name='batch_resolve_conflicts', queue='ai_processing')
+def batch_resolve_conflicts_task(
+    self,
+    conflict_resolutions: dict,
+    operator_username: str
+):
+    """
+    Celery task: 批量解决主题冲突
+    
+    Args:
+        conflict_resolutions: 冲突解决方案字典
+            格式: {
+                theme_id: {
+                    "theme_name": str,
+                    "category": str,
+                    "description": str,
+                    "selected_tickers": [str],  # 用户选择的 tickers（已标准化）
+                    "group": str (optional)
+                }
+            }
+        operator_username: 操作者用户名
+    
+    Returns:
+        dict: {
+            "success": bool,
+            "message": str,
+            "statistics": {
+                "total": int,
+                "success": int,
+                "failed": int
+            },
+            "details": [...]
+        }
+    """
+    task_id = self.request.id
+    logger.info(f"Starting batch resolve conflicts task {task_id}, total conflicts: {len(conflict_resolutions)}, user: {operator_username}")
+    
+    try:
+        from backend.database.db_manager import DatabaseManager
+        from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        total = len(conflict_resolutions)
+        success_count = 0
+        failed_count = 0
+        skipped_count = 0  # 新增：跳过计数（ticker完全相同，无需处理）
+        details = []
+        
+        # Update initial status
+        update_task_progress(
+            task_id,
+            status="initializing",
+            progress=0,
+            message=f"Initializing batch conflict resolution for {total} themes...",
+            total=total,
+            success=0,
+            failed=0,
+            skipped=0
+        )
+        
+        # 批量并行处理冲突
+        batch_size = 5  # 每批处理5个，避免过多并发
+        conflicts_list = list(conflict_resolutions.items())
+        total_batches = (len(conflicts_list) + batch_size - 1) // batch_size
+        
+        logger.info(f"Processing {total} conflicts in {total_batches} batches (batch size: {batch_size})")
+        
+        service = InvestmentThemeEmbeddingService(db_config)
+        
+        for batch_num in range(total_batches):
+            batch_start = batch_num * batch_size
+            batch_end = min(batch_start + batch_size, total)
+            batch = conflicts_list[batch_start:batch_end]
+            
+            logger.info(f"Processing batch {batch_num + 1}/{total_batches}: conflicts {batch_start + 1}-{batch_end}")
+            
+            # 并行处理当前批次
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # 定义异步处理单个冲突的函数
+                async def process_single_conflict(theme_id: str, resolution: dict, conflict_index: int):
+                    try:
+                        theme_name = resolution['theme_name']
+                        category = resolution['category']
+                        description = resolution['description']
+                        selected_tickers = resolution['selected_tickers']
+                        group = resolution.get('group')
+                        
+                        logger.info(f"[Batch {batch_num + 1}] Processing conflict {conflict_index + 1}/{total}: {theme_id}, {len(selected_tickers)} tickers")
+                        
+                        # 🔥 优化：检查 tickers 是否有变化
+                        # 获取现有主题的 tickers
+                        conn = db_manager.get_connection()
+                        if conn:
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                SELECT ticker FROM theme_company_associations
+                                WHERE theme_id = %s
+                                ORDER BY ticker
+                            """, (theme_id,))
+                            
+                            existing_tickers = [row[0] for row in cursor.fetchall()]
+                            cursor.close()
+                            conn.close()
+                            
+                            # 比较集合：如果完全相同，说明所有ticker都是"重复"，无需重新生成
+                            existing_set = set(existing_tickers)
+                            selected_set = set(selected_tickers)
+                            
+                            if existing_set == selected_set:
+                                logger.info(f"⏭️ Skipping {theme_id}: All tickers are duplicates, no changes needed (saved LLM + vectorization)")
+                                # 直接返回成功，不需要任何LLM或向量化操作
+                                return {
+                                    "success": True,
+                                    "theme_id": theme_id,
+                                    "theme_name": theme_name,
+                                    "selected_tickers": selected_tickers,
+                                    "skipped": True,
+                                    "reason": "no_ticker_changes"
+                                }
+                        
+                        # 🔥 如果有变化，才进行LLM生成和向量化
+                        logger.info(f"🔄 {theme_id}: Tickers changed, regenerating description and vector...")
+                        
+                        # 获取公司名称
+                        stock_symbols = ", ".join(selected_tickers)
+                        company_names = None
+                        
+                        if len(selected_tickers) > 0:
+                            try:
+                                conn = db_manager.get_connection()
+                                if conn:
+                                    cursor = conn.cursor()
+                                    placeholders = ','.join(['%s'] * len(selected_tickers))
+                                    cursor.execute(f"""
+                                        SELECT ticker, company_name 
+                                        FROM company_profiles 
+                                        WHERE ticker IN ({placeholders})
+                                    """, selected_tickers)
+                                    
+                                    companies = {row[0]: row[1] for row in cursor.fetchall()}
+                                    company_names = ", ".join([companies.get(t, t) for t in selected_tickers])
+                                    
+                                    cursor.close()
+                                    conn.close()
+                            except Exception as e:
+                                logger.debug(f"Failed to fetch company names for {theme_id}: {str(e)}")
+                        
+                        # 并行生成描述和更新向量
+                        desc_result = await service.generate_theme_description(
+                            theme_name=theme_name,
+                            category=category,
+                            stock_symbols=stock_symbols,
+                            company_names=company_names
+                        )
+                        
+                        if desc_result.get('success'):
+                            new_description = desc_result.get('description', description)
+                        else:
+                            logger.warning(f"Failed to generate description for {theme_id}, using existing")
+                            new_description = description
+                        
+                        # 更新主题描述和向量
+                        update_result = await service.update_theme_description(
+                            theme_id=theme_id,
+                            new_description=new_description,
+                            editor_username=operator_username,
+                            new_group=group,
+                            version=None
+                        )
+                        
+                        if not update_result.get('description_saved'):
+                            raise Exception(f"Failed to update theme: {update_result.get('message')}")
+                        
+                        # 返回结果，稍后批量更新数据库关联
+                        return {
+                            "success": True,
+                            "theme_id": theme_id,
+                            "theme_name": theme_name,
+                            "selected_tickers": selected_tickers
+                        }
+                        
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "theme_id": theme_id,
+                            "theme_name": resolution.get('theme_name', 'Unknown'),
+                            "error": str(e)
+                        }
+                
+                # 并行执行当前批次的所有冲突
+                tasks = [
+                    process_single_conflict(theme_id, resolution, batch_start + idx)
+                    for idx, (theme_id, resolution) in enumerate(batch)
+                ]
+                
+                batch_results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                
+                # 批量更新数据库关联（同步操作）
+                for idx, result in enumerate(batch_results):
+                    conflict_index = batch_start + idx
+                    
+                    if isinstance(result, Exception):
+                        failed_count += 1
+                        logger.error(f"Batch processing exception: {str(result)}")
+                        details.append({
+                            "theme_id": "Unknown",
+                            "theme_name": "Unknown",
+                            "status": "failed",
+                            "message": str(result)
+                        })
+                        continue
+                    
+                    if result.get('success'):
+                        theme_id = result['theme_id']
+                        theme_name = result['theme_name']
+                        selected_tickers = result['selected_tickers']
+                        
+                        # 🔥 检查是否跳过（ticker完全相同）
+                        if result.get('skipped'):
+                            skipped_count += 1
+                            details.append({
+                                "theme_id": theme_id,
+                                "theme_name": theme_name,
+                                "status": "skipped",
+                                "message": "All tickers are duplicates, no changes needed (saved LLM + vectorization)"
+                            })
+                            logger.info(f"⏭️ Skipped {theme_id}: no ticker changes")
+                            continue
+                        
+                        try:
+                            # 删除旧关联并创建新关联
+                            conn = db_manager.get_connection()
+                            if not conn:
+                                raise Exception("Cannot establish database connection")
+                            
+                            cursor = conn.cursor()
+                            
+                            # 获取旧的tickers用于对比（找出新增的）
+                            cursor.execute("""
+                                SELECT ticker FROM theme_company_associations
+                                WHERE theme_id = %s
+                            """, (theme_id,))
+                            old_tickers = set([row[0] for row in cursor.fetchall()])
+                            
+                            # 删除旧关联
+                            cursor.execute("""
+                                DELETE FROM theme_company_associations
+                                WHERE theme_id = %s
+                            """, (theme_id,))
+                            old_count = cursor.rowcount
+                            
+                            # 创建新关联
+                            new_count = 0
+                            newly_added_tickers = []  # 记录新增的ticker
+                            for ticker in selected_tickers:
+                                if '.' in ticker:
+                                    symbol, exchange_suffix = ticker.rsplit('.', 1)
+                                    market_map = {'US': 'US', 'HK': 'HK', 'SHG': 'CN', 'SHE': 'CN'}
+                                    ticker_market = market_map.get(exchange_suffix, 'US')
+                                else:
+                                    ticker_market = 'US'
+                                
+                                cursor.execute("""
+                                    INSERT INTO theme_company_associations 
+                                    (theme_id, ticker, market, created_at)
+                                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                                    ON CONFLICT (theme_id, ticker) DO NOTHING
+                                """, (theme_id, ticker, ticker_market))
+                                new_count += cursor.rowcount
+                                
+                                # 记录新增的ticker
+                                if ticker not in old_tickers:
+                                    newly_added_tickers.append(ticker)
+                            
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+                            
+                            # 🔥 自动验证新增的 tickers（只验证真正新增的，不验证已存在的）
+                            verified_count = 0
+                            if len(newly_added_tickers) > 0:
+                                logger.info(f"🔍 Auto-verifying {len(newly_added_tickers)} newly added tickers for {theme_id}...")
+                                try:
+                                    from backend.database.db_manager import DatabaseManager
+                                    from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                                    from backend.config.exchange_config import format_ticker_for_eodhd
+                                    
+                                    for ticker in newly_added_tickers:
+                                        try:
+                                            # 检查ticker是否在companies表中
+                                            verify_conn = db_manager.get_connection()
+                                            verify_cursor = verify_conn.cursor()
+                                            
+                                            verify_cursor.execute("""
+                                                SELECT id, code, name, exchange, primaryticker
+                                                FROM companies
+                                                WHERE UPPER(primaryticker) = UPPER(%s)
+                                                LIMIT 1
+                                            """, (ticker,))
+                                            
+                                            company_result = verify_cursor.fetchone()
+                                            
+                                            if company_result:
+                                                # 在数据库中找到，更新is_verified
+                                                verify_cursor.execute("""
+                                                    UPDATE theme_company_associations
+                                                    SET is_verified = TRUE,
+                                                        company_name = %s,
+                                                        updated_at = NOW()
+                                                    WHERE theme_id = %s AND ticker = %s
+                                                """, (company_result[2], theme_id, ticker))
+                                                verify_conn.commit()
+                                                verified_count += 1
+                                                logger.debug(f"✅ Ticker {ticker} verified (found in DB)")
+                                            else:
+                                                # 不在数据库中，尝试从EODHD获取
+                                                logger.debug(f"🔍 Ticker {ticker} not in DB, fetching from EODHD...")
+                                                
+                                                formatted_ticker = format_ticker_for_eodhd(ticker)
+                                                if '.' in formatted_ticker:
+                                                    symbol, exchange = formatted_ticker.rsplit('.', 1)
+                                                else:
+                                                    symbol = formatted_ticker
+                                                    exchange = 'US'
+                                                
+                                                fundamentals_service = EODHDFundamentalsService()
+                                                full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                                                
+                                                if full_data:
+                                                    # 保存到数据库
+                                                    company_data = {
+                                                        'symbol': symbol,
+                                                        'exchange': exchange,
+                                                        'general_data': full_data.get('General', full_data),
+                                                        'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                                                        'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                                                        'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                                                        'full_data': full_data
+                                                    }
+                                                    
+                                                    fundamentals_service.batch_save_companies_data([company_data])
+                                                    
+                                                    # 更新is_verified
+                                                    general_data = full_data.get('General', full_data)
+                                                    company_name = general_data.get('Name', symbol)
+                                                    
+                                                    verify_cursor.execute("""
+                                                        UPDATE theme_company_associations
+                                                        SET is_verified = TRUE,
+                                                            company_name = %s,
+                                                            updated_at = NOW()
+                                                        WHERE theme_id = %s AND ticker = %s
+                                                    """, (company_name, theme_id, ticker))
+                                                    verify_conn.commit()
+                                                    verified_count += 1
+                                                    logger.info(f"✅ Ticker {ticker} verified and fetched from EODHD")
+                                                else:
+                                                    logger.warning(f"⚠️ Ticker {ticker} not found in EODHD")
+                                            
+                                            verify_cursor.close()
+                                            verify_conn.close()
+                                            
+                                        except Exception as verify_error:
+                                            logger.warning(f"Failed to verify ticker {ticker}: {str(verify_error)}")
+                                            continue
+                                    
+                                    logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(newly_added_tickers)} newly added tickers verified")
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Auto-verification failed: {str(e)}")
+                            
+                            success_count += 1
+                            details.append({
+                                "theme_id": theme_id,
+                                "theme_name": theme_name,
+                                "status": "success",
+                                "message": f"Updated: deleted {old_count} old associations, created {new_count} new associations, verified {verified_count} tickers"
+                            })
+                            
+                            logger.info(f"✅ Successfully resolved conflict for {theme_id}: {old_count} deleted, {new_count} created, {verified_count} verified")
+                            
+                        except Exception as e:
+                            failed_count += 1
+                            error_msg = str(e)
+                            details.append({
+                                "theme_id": theme_id,
+                                "theme_name": theme_name,
+                                "status": "failed",
+                                "message": f"DB update failed: {error_msg}"
+                            })
+                            logger.error(f"Failed to update DB for {theme_id}: {error_msg}")
+                    else:
+                        failed_count += 1
+                        details.append({
+                            "theme_id": result.get('theme_id', 'Unknown'),
+                            "theme_name": result.get('theme_name', 'Unknown'),
+                            "status": "failed",
+                            "message": result.get('error', 'Unknown error')
+                        })
+                        logger.error(f"Failed to resolve conflict for {result.get('theme_id')}: {result.get('error')}")
+                    
+                    # 每处理一个冲突就更新进度
+                    progress = int(((conflict_index + 1) / total) * 100)
+                    update_task_progress(
+                        task_id,
+                        status="processing",
+                        progress=progress,
+                        message=f"Processed {conflict_index + 1}/{total} conflicts",
+                        total=total,
+                        success=success_count,
+                        failed=failed_count,
+                        skipped=skipped_count
+                    )
+                
+            finally:
+                loop.close()
+            
+            logger.info(f"Batch {batch_num + 1}/{total_batches} completed: {success_count} success, {failed_count} failed, {skipped_count} skipped (no changes) so far")
+        
+        # Update completion status
+        update_task_progress(
+            task_id,
+            status="completed",
+            progress=100,
+            message=f"Batch conflict resolution completed: {success_count} success, {failed_count} failed, {skipped_count} skipped (no changes)",
+            total=total,
+            success=success_count,
+            failed=failed_count,
+            skipped=skipped_count
+        )
+        
+        logger.info(f"Task {task_id} completed: total={total}, success={success_count}, failed={failed_count}, skipped={skipped_count}")
+        
+        return {
+            "success": True,
+            "message": f"Batch conflict resolution completed",
+            "statistics": {
+                "total": total,
+                "success": success_count,
+                "failed": failed_count,
+                "skipped": skipped_count
             },
             "details": details
         }
@@ -816,7 +1372,7 @@ def batch_create_themes_task(
             "success": False,
             "error": error_msg,
             "statistics": {
-                "total": len(themes_data) if themes_data else 0,
+                "total": total,
                 "created": 0,
                 "failed": 0,
                 "skipped": 0

@@ -64,7 +64,10 @@ import {
   batchUploadThemes,
   getThemeAssociations,
   verifyTicker,
-  getAllGroups
+  getAllGroups,
+  getAllUsers,
+  updateThemeTickers,
+  updateThemeWithConflictResolution
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
@@ -74,6 +77,8 @@ import {
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useAuthStore } from '../store/authStore';
+import ThemeConflictModal from '../components/ThemeConflictModal';
+import BatchThemeConflictModal from '../components/BatchThemeConflictModal';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea, Search } = Input;
@@ -100,12 +105,19 @@ interface PageState {
   newThemeGroup: string;
   newThemeName: string;
   newThemeCategory: string;
-  newThemeId: string;
   newThemeMarket: string;
   newThemeTickers: string;
   newThemeDescription: string;
   generatingDescription: boolean;
   creatingTheme: boolean;
+  // 冲突解决相关
+  conflictModalVisible: boolean;
+  conflictExistingTheme: any;
+  conflictNewTickers: string[];
+  // 批量上传冲突
+  batchConflictModalVisible: boolean;
+  batchConflicts: any[];
+  conflictResolving: boolean;
   // 批量上传相关
   batchUploadModalVisible: boolean;
   uploadingFile: boolean;
@@ -133,6 +145,9 @@ interface PageState {
     selectedGroups: string[];  // 选中的 Group 筛选值（支持多选）
     availableGroups: string[];  // 所有可用的 groups（从 API 获取）
     loadingGroups: boolean;  // 是否正在加载 groups
+    selectedUsers: string[];  // 选中的 User 筛选值（支持多选，admin专用）
+    availableUsers: string[];  // 所有可用的 users（从 API 获取）
+    loadingUsers: boolean;  // 是否正在加载 users
 }
 
 const InvestmentThemesPage: React.FC = () => {
@@ -144,7 +159,7 @@ const InvestmentThemesPage: React.FC = () => {
     themes: [],
     total: 0,
     currentPage: 1,
-    pageSize: 20,
+    pageSize: 50,
     initializing: false,
     testModalVisible: false,
     testNewsText: '',
@@ -161,12 +176,19 @@ const InvestmentThemesPage: React.FC = () => {
     newThemeGroup: '',
     newThemeName: '',
     newThemeCategory: '',
-    newThemeId: '',
     newThemeMarket: 'US',
     newThemeTickers: '',
     newThemeDescription: '',
     generatingDescription: false,
     creatingTheme: false,
+    // 冲突解决相关
+    conflictModalVisible: false,
+    conflictExistingTheme: null,
+    conflictNewTickers: [],
+    conflictResolving: false,
+    // 批量上传冲突
+    batchConflictModalVisible: false,
+    batchConflicts: [],
     // 批量上传相关
     batchUploadModalVisible: false,
     uploadingFile: false,
@@ -186,23 +208,28 @@ const InvestmentThemesPage: React.FC = () => {
     searchKeyword: '',
     selectedGroups: [],
     availableGroups: [],
-    loadingGroups: false
+    loadingGroups: false,
+    selectedUsers: [],
+    availableUsers: [],
+    loadingUsers: false
   });
 
 
   // Load theme list
-  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string, groups?: string[]) => {
+  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string, groups?: string[], users?: string[]) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       const currentPage = page || state.currentPage;
       const currentPageSize = pageSize || state.pageSize;
       const effectiveSearch = searchKeyword !== undefined ? searchKeyword : state.searchKeyword;
       const effectiveGroups = groups !== undefined ? groups : state.selectedGroups;
+      const effectiveUsers = users !== undefined ? users : state.selectedUsers;
       const response = await listThemes(
         currentPageSize,
         (currentPage - 1) * currentPageSize,
         effectiveSearch,
-        effectiveGroups.length > 0 ? effectiveGroups : undefined
+        effectiveGroups.length > 0 ? effectiveGroups : undefined,
+        isAdmin && effectiveUsers.length > 0 ? effectiveUsers : undefined
       );
       
       setState(prev => ({
@@ -226,7 +253,7 @@ const InvestmentThemesPage: React.FC = () => {
       searchKeyword: trimmed,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, trimmed, state.selectedGroups);
+    loadThemes(1, state.pageSize, trimmed, state.selectedGroups, state.selectedUsers);
   };
   
   const handleGroupFilterChange = (groups: string[]) => {
@@ -235,7 +262,16 @@ const InvestmentThemesPage: React.FC = () => {
       selectedGroups: groups,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, state.searchKeyword, groups);
+    loadThemes(1, state.pageSize, state.searchKeyword, groups, state.selectedUsers);
+  };
+  
+  const handleUserFilterChange = (users: string[]) => {
+    setState(prev => ({
+      ...prev,
+      selectedUsers: users,
+      currentPage: 1
+    }));
+    loadThemes(1, state.pageSize, state.searchKeyword, state.selectedGroups, users);
   };
 
   const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,7 +282,7 @@ const InvestmentThemesPage: React.FC = () => {
     }));
 
     if (value === '') {
-      loadThemes(1, state.pageSize, '', state.selectedGroups);
+      loadThemes(1, state.pageSize, '', state.selectedGroups, state.selectedUsers);
     }
   };
   
@@ -274,9 +310,39 @@ const InvestmentThemesPage: React.FC = () => {
     }
   };
   
-  // 组件加载时获取所有 groups
+  // 加载所有可用的 users（从 API 获取，不受分页限制，仅admin用户）
+  const loadAvailableUsers = async () => {
+    if (!isAdmin) {
+      return; // 非admin用户不需要加载
+    }
+    if (state.loadingUsers || state.availableUsers.length > 0) {
+      return; // 已加载或正在加载，跳过
+    }
+    
+    setState(prev => ({ ...prev, loadingUsers: true }));
+    try {
+      const response = await getAllUsers();
+      if (response.success) {
+        setState(prev => ({
+          ...prev,
+          availableUsers: response.users || [],
+          loadingUsers: false
+        }));
+      } else {
+        setState(prev => ({ ...prev, loadingUsers: false }));
+      }
+    } catch (error) {
+      console.error('Failed to load users:', error);
+      setState(prev => ({ ...prev, loadingUsers: false }));
+    }
+  };
+  
+  // 组件加载时获取所有 groups 和 users
   useEffect(() => {
     loadAvailableGroups();
+    if (isAdmin) {
+      loadAvailableUsers();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 只在组件首次加载时执行
 
@@ -927,10 +993,11 @@ const InvestmentThemesPage: React.FC = () => {
     }
   };
 
-  // Handle edit description (Admin only)
+  // Handle edit description
   const handleEditDescription = (theme: InvestmentTheme) => {
-    if (!isAdmin) {
-      message.error('Only administrators can perform this operation');
+    // Check if user has permission to edit
+    if (!isAdmin && theme.created_by !== user?.username) {
+      message.error('You can only edit themes you created');
       return;
     }
 
@@ -991,10 +1058,11 @@ const InvestmentThemesPage: React.FC = () => {
     }
   };
 
-  // Handle delete theme (Admin only)
+  // Handle delete theme
   const handleDeleteTheme = (theme: InvestmentTheme) => {
-    if (!isAdmin) {
-      message.error('Only administrators can perform this operation');
+    // Check if user has permission to delete
+    if (!isAdmin && theme.created_by !== user?.username) {
+      message.error('You can only delete themes you created');
       return;
     }
 
@@ -1047,13 +1115,8 @@ const InvestmentThemesPage: React.FC = () => {
     });
   };
 
-  // Handle batch delete themes (Admin only)
+  // Handle batch delete themes
   const handleBatchDelete = () => {
-    if (!isAdmin) {
-      message.error('Only administrators can perform this operation');
-      return;
-    }
-
     if (state.selectedRowKeys.length === 0) {
       message.warning('Please select themes to delete');
       return;
@@ -1063,6 +1126,18 @@ const InvestmentThemesPage: React.FC = () => {
     const selectedThemes = state.themes.filter(theme => 
       state.selectedRowKeys.includes(theme.theme_id)
     );
+    
+    // Check permissions for non-admin users
+    if (!isAdmin) {
+      const unauthorizedThemes = selectedThemes.filter(
+        theme => theme.created_by !== user?.username
+      );
+      
+      if (unauthorizedThemes.length > 0) {
+        message.error(`You can only delete your own themes. ${unauthorizedThemes.length} theme(s) selected are not created by you.`);
+        return;
+      }
+    }
 
     Modal.confirm({
       title: `Confirm Batch Delete ${selectedThemes.length} Themes?`,
@@ -1218,15 +1293,41 @@ const InvestmentThemesPage: React.FC = () => {
         ? state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean)
         : undefined;
       
+      console.log('📤 Creating theme with data:', {
+        themeName: state.newThemeName,
+        category: state.newThemeCategory,
+        tickers: tickersArray,
+        group: state.newThemeGroup
+      });
+      
       const result = await createTheme(
         state.newThemeName,
         state.newThemeCategory,
         state.newThemeDescription,
         state.newThemeGroup.trim() || undefined, // group is now optional
-        state.newThemeId || undefined,
+        undefined, // theme_id is auto-generated, no need to pass
         undefined, // market parameter removed - users can input tickers with suffixes
         tickersArray
       );
+      
+      console.log('📥 Create theme result:', result);
+      
+      // 检查是否有冲突
+      if (result.conflict && result.existing_theme) {
+        console.log('⚠️ Conflict detected! Showing conflict resolution modal');
+        console.log('Existing theme:', result.existing_theme);
+        console.log('New tickers:', result.new_tickers);
+        
+        // 显示冲突解决Modal
+        setState(prev => ({
+          ...prev,
+          creatingTheme: false,
+          conflictModalVisible: true,
+          conflictExistingTheme: result.existing_theme,
+          conflictNewTickers: result.new_tickers || []
+        }));
+        return;
+      }
       
       if (result.theme_saved) {
         if (result.embedding_created) {
@@ -1235,7 +1336,7 @@ const InvestmentThemesPage: React.FC = () => {
           message.warning(`Theme saved, but vector generation failed: ${result.error || 'Unknown error'}`);
         }
         
-        // Reset and close modal
+        // Reset and close modal (removed newThemeId as it's auto-generated)
         setState(prev => ({
           ...prev,
           createModalVisible: false,
@@ -1243,7 +1344,6 @@ const InvestmentThemesPage: React.FC = () => {
           newThemeGroup: '',
           newThemeName: '',
           newThemeCategory: '',
-          newThemeId: '',
           newThemeMarket: 'US',
           newThemeTickers: '',
           newThemeDescription: '',
@@ -1256,10 +1356,126 @@ const InvestmentThemesPage: React.FC = () => {
         message.error(result.message || 'Failed to create theme');
         setState(prev => ({ ...prev, creatingTheme: false }));
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ Create theme error:', error);
+      console.error('Error response:', error.response);
+      
+      // 检查是否是冲突错误（可能API返回的是错误而不是正常响应）
+      if (error.response?.data?.conflict && error.response?.data?.existing_theme) {
+        console.log('⚠️ Conflict detected in error response! Showing conflict resolution modal');
+        
+        setState(prev => ({
+          ...prev,
+          creatingTheme: false,
+          conflictModalVisible: true,
+          conflictExistingTheme: error.response.data.existing_theme,
+          conflictNewTickers: error.response.data.new_tickers || []
+        }));
+        return;
+      }
+      
       message.error(`Create theme failed: ${getErrorMessage(error)}`);
       setState(prev => ({ ...prev, creatingTheme: false }));
     }
+  };
+  
+  // Handle conflict resolution - user confirms selected tickers
+  const handleConflictResolve = async (selectedTickers: string[]) => {
+    setState(prev => ({ ...prev, conflictResolving: true }));
+    
+    try {
+      const result = await updateThemeTickers(
+        state.conflictExistingTheme.theme_id,
+        selectedTickers,
+        state.newThemeName,
+        state.newThemeCategory,
+        state.newThemeGroup.trim() || undefined,
+        state.newThemeMarket
+      );
+      
+      if (result.success) {
+        message.success(result.message);
+        
+        // Close both modals and reset state
+        setState(prev => ({
+          ...prev,
+          conflictModalVisible: false,
+          conflictResolving: false,
+          conflictExistingTheme: null,
+          conflictNewTickers: [],
+          createModalVisible: false,
+          createStep: 1,
+          newThemeGroup: '',
+          newThemeName: '',
+          newThemeCategory: '',
+          newThemeMarket: 'US',
+          newThemeTickers: '',
+          newThemeDescription: ''
+        }));
+        
+        // Reload themes list
+        loadThemes(state.currentPage);
+      } else {
+        message.error('Failed to update theme');
+        setState(prev => ({ ...prev, conflictResolving: false }));
+      }
+    } catch (error) {
+      message.error(`Update failed: ${getErrorMessage(error)}`);
+      setState(prev => ({ ...prev, conflictResolving: false }));
+    }
+  };
+  
+  // Handle conflict resolution - user cancels
+  const handleConflictCancel = () => {
+    setState(prev => ({
+      ...prev,
+      conflictModalVisible: false,
+      conflictExistingTheme: null,
+      conflictNewTickers: []
+    }));
+  };
+
+  // Handle batch conflict resolution
+  const handleBatchConflictResolve = async (themeId: string, selectedTickers: string[]) => {
+    try {
+      console.log(`🔧 Resolving batch conflict for theme ${themeId}`, selectedTickers);
+      
+      // 找到对应的冲突主题
+      const conflict = state.batchConflicts.find((c: any) => c.theme_id === themeId);
+      if (!conflict) {
+        throw new Error('Conflict not found');
+      }
+      
+      // 调用冲突解决 API
+      const result = await updateThemeWithConflictResolution(
+        themeId,
+        conflict.theme_name,
+        conflict.category,
+        conflict.existing_theme.description,
+        selectedTickers,
+        conflict.new_data.group
+      );
+      
+      if (result.success) {
+        message.success(`主题 "${conflict.theme_name}" 已更新`);
+        // 刷新主题列表
+        loadThemes(state.currentPage);
+      } else {
+        throw new Error(result.message || '更新失败');
+      }
+    } catch (error) {
+      console.error('Failed to resolve batch conflict:', error);
+      message.error(getErrorMessage(error));
+      throw error;  // Re-throw so modal knows it failed
+    }
+  };
+
+  const handleBatchConflictClose = () => {
+    setState(prev => ({
+      ...prev,
+      batchConflictModalVisible: false,
+      batchConflicts: []
+    }));
   };
 
   // Handle cancel create
@@ -1277,7 +1493,6 @@ const InvestmentThemesPage: React.FC = () => {
           newThemeGroup: '',
           newThemeName: '',
           newThemeCategory: '',
-          newThemeId: '',
           newThemeMarket: 'US',
           newThemeTickers: '',
           newThemeDescription: '',
@@ -1370,8 +1585,10 @@ const InvestmentThemesPage: React.FC = () => {
       const result = finalStatus.result as any;
       
       if (result && result.success) {
+        const conflictCount = result.statistics?.conflicts || 0;
+        
         message.success(
-          `Batch upload completed: ${result.statistics?.created || 0} created, ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped`
+          `Batch upload completed: ${result.statistics?.created || 0} created, ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped, ${conflictCount} conflicts`
         );
         
         setState(prev => ({
@@ -1379,6 +1596,17 @@ const InvestmentThemesPage: React.FC = () => {
           batchTaskDetails: result.details || [],
           batchTaskProgress: 100,
         }));
+        
+        // 检查是否有冲突需要解决
+        if (conflictCount > 0 && result.conflicts && result.conflicts.length > 0) {
+          console.log('📋 Batch upload conflicts detected:', result.conflicts);
+          
+          setState(prev => ({
+            ...prev,
+            batchConflictModalVisible: true,
+            batchConflicts: result.conflicts
+          }));
+        }
         
         // 刷新主题列表
         loadThemes(state.currentPage);
@@ -1560,6 +1788,14 @@ const InvestmentThemesPage: React.FC = () => {
       )
     },
     {
+      title: 'Created By',
+      dataIndex: 'created_by',
+      key: 'created_by',
+      render: (createdBy?: string) => (
+        createdBy ? <Text>{createdBy}</Text> : <Text type="secondary">-</Text>
+      )
+    },
+    {
       title: 'Enabled',
       dataIndex: 'is_enabled_for_matching',
       key: 'is_enabled_for_matching',
@@ -1575,31 +1811,38 @@ const InvestmentThemesPage: React.FC = () => {
         </Tooltip>
       )
     },
-    ...(isAdmin ? [{
+    {
       title: 'Actions',
       key: 'actions',
-      render: (_: any, record: InvestmentTheme) => (
-        <Space size="small">
-          <Tooltip title="Edit Description">
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleEditDescription(record)}
-            />
-          </Tooltip>
-          <Tooltip title="Delete Theme">
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDeleteTheme(record)}
-            />
-          </Tooltip>
-        </Space>
-      )
-    }] : [])
+      render: (_: any, record: InvestmentTheme) => {
+        // Check if user can edit/delete this theme
+        const canEdit = isAdmin || record.created_by === user?.username;
+        
+        return (
+          <Space size="small">
+            <Tooltip title={canEdit ? "Edit Description" : "You can only edit your own themes"}>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleEditDescription(record)}
+                disabled={!canEdit}
+              />
+            </Tooltip>
+            <Tooltip title={canEdit ? "Delete Theme" : "You can only delete your own themes"}>
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDeleteTheme(record)}
+                disabled={!canEdit}
+              />
+            </Tooltip>
+          </Space>
+        );
+      }
+    }
   ];
 
 
@@ -1615,7 +1858,7 @@ const InvestmentThemesPage: React.FC = () => {
               <FundOutlined /> Investment Themes Settings
             </Title>
             <Paragraph type="secondary">
-              Intelligent theme matching system based on Embedding technique, automatically associating news through semantic analysis. Only admin can create and edit themes.
+              Intelligent theme matching system based on Embedding technique, automatically associating news through semantic analysis. All users can create themes. You can edit and delete your own themes{isAdmin ? ', and admin can manage all themes' : ''}.
             </Paragraph>
           </div>
         </div>
@@ -1628,41 +1871,39 @@ const InvestmentThemesPage: React.FC = () => {
          {/* Operations */}
          <div style={{ marginBottom: '16px' }}>
            <Space size="middle" wrap>
-            {isAdmin && (
-              <>
-                <Tooltip title="Create a new custom investment theme with LLM-generated description">
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
-                  >
-                    Create New Theme
-                  </Button>
-                </Tooltip>
-                
-                <Tooltip title="Batch upload themes from CSV/Excel file">
-                  <Button
-                    type="default"
-                    icon={<UploadOutlined />}
-                    onClick={() => setState(prev => ({ ...prev, batchUploadModalVisible: true }))}
-                  >
-                    Batch Upload
-                  </Button>
-                </Tooltip>
-                
-                <Tooltip title="Delete selected themes (soft delete)">
-                  <Button
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={handleBatchDelete}
-                    disabled={state.selectedRowKeys.length === 0}
-                  >
-                    Batch Delete {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
-                  </Button>
-                </Tooltip>
-              </>
-            )}
+            {/* Create and Upload - Available to all users */}
+            <Tooltip title="Create a new custom investment theme with LLM-generated description">
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
+              >
+                Create New Theme
+              </Button>
+            </Tooltip>
             
+            <Tooltip title="Batch upload themes from CSV/Excel file">
+              <Button
+                type="default"
+                icon={<UploadOutlined />}
+                onClick={() => setState(prev => ({ ...prev, batchUploadModalVisible: true }))}
+              >
+                Batch Upload
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to delete" : `Delete selected themes${!isAdmin ? " (only your own)" : ""}`}>
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={handleBatchDelete}
+                disabled={state.selectedRowKeys.length === 0}
+              >
+                Batch Delete {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+              </Button>
+            </Tooltip>
+            
+            {/* Admin-only operations */}
             {isAdmin && (
               <>
                 <Tooltip title="Generate descriptions and vectors for new themes, suitable after adding new themes">
@@ -1788,6 +2029,29 @@ const InvestmentThemesPage: React.FC = () => {
                 ))}
               </Select>
             </Space>
+            {isAdmin && (
+              <Space size="small">
+                <Text type="secondary">User:</Text>
+                <Select
+                  mode="multiple"
+                  placeholder={state.loadingUsers ? "Loading users..." : "Select users"}
+                  value={state.selectedUsers}
+                  onChange={handleUserFilterChange}
+                  style={{ minWidth: 200 }}
+                  size="small"
+                  allowClear
+                  maxTagCount="responsive"
+                  loading={state.loadingUsers}
+                  notFoundContent={state.loadingUsers ? "Loading..." : "No users found"}
+                >
+                  {state.availableUsers.map(user => (
+                    <Select.Option key={user} value={user}>
+                      {user}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Space>
+            )}
           </Space>
         }
       >
@@ -1796,17 +2060,21 @@ const InvestmentThemesPage: React.FC = () => {
           dataSource={state.themes}
           rowKey="theme_id"
           loading={state.loading}
-          rowSelection={isAdmin ? {
+          rowSelection={{
             selectedRowKeys: state.selectedRowKeys,
             onChange: (selectedRowKeys: React.Key[]) => {
               setState(prev => ({ ...prev, selectedRowKeys }));
             },
+            getCheckboxProps: (record: InvestmentTheme) => ({
+              disabled: !isAdmin && record.created_by !== user?.username,
+              title: !isAdmin && record.created_by !== user?.username ? 'You can only select your own themes' : undefined
+            }),
             selections: [
               Table.SELECTION_ALL,
               Table.SELECTION_INVERT,
               Table.SELECTION_NONE,
             ],
-          } : undefined}
+          }}
           pagination={{
             current: state.currentPage,
             pageSize: state.pageSize,
@@ -1819,10 +2087,10 @@ const InvestmentThemesPage: React.FC = () => {
               setState(prev => ({ 
                 ...prev, 
                 currentPage: page, 
-                pageSize: pageSize || 20,
+                pageSize: pageSize || 50,
                 selectedRowKeys: []  // 清空选中项
               }));
-              loadThemes(page, pageSize || 20, state.searchKeyword, state.selectedGroups);  // 传递新的 pageSize 和筛选条件
+              loadThemes(page, pageSize || 50, state.searchKeyword, state.selectedGroups, state.selectedUsers);  // 传递新的 pageSize 和筛选条件
             }
           }}
           size="small"
@@ -2082,17 +2350,7 @@ const InvestmentThemesPage: React.FC = () => {
               
               <Divider style={{ margin: '16px 0' }} />
               
-              <Form.Item 
-                label="Theme ID (Optional)" 
-                help="Leave empty to auto-generate (format: CUSTOM_TIMESTAMP)"
-              >
-                <Input
-                  placeholder="e.g. AI_CHIP_US (optional)"
-                  value={state.newThemeId}
-                  onChange={(e) => setState(prev => ({ ...prev, newThemeId: e.target.value }))}
-                  maxLength={50}
-                />
-              </Form.Item>
+
             </Form>
             
             <div style={{ textAlign: 'right', marginTop: 24 }}>
@@ -2148,11 +2406,12 @@ const InvestmentThemesPage: React.FC = () => {
                   <Text strong>Associated Stocks:</Text> <Text>{state.newThemeTickers.split(',').map(t => t.trim()).filter(Boolean).join(', ')}</Text>
                 </div>
               )}
-              {state.newThemeId && (
-                <div>
-                  <Text strong>Theme ID:</Text> <Text code>{state.newThemeId}</Text>
-                </div>
-              )}
+              <div>
+                <Text strong>Theme ID (Auto-generated):</Text> 
+                <Text code style={{ marginLeft: 8 }}>
+                  {`${user?.username || 'yourname'}_${state.newThemeName.toLowerCase().replace(/\s+/g, '_')}_${state.newThemeCategory.toLowerCase().replace(/\s+/g, '_')}`}
+                </Text>
+              </div>
             </Space>
             
             <Divider />
@@ -2202,6 +2461,26 @@ const InvestmentThemesPage: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      {/* Theme Conflict Resolution Modal */}
+      {state.conflictExistingTheme && (
+        <ThemeConflictModal
+          visible={state.conflictModalVisible}
+          onCancel={handleConflictCancel}
+          onConfirm={handleConflictResolve}
+          existingTheme={state.conflictExistingTheme}
+          newTickers={state.conflictNewTickers}
+          loading={state.conflictResolving}
+        />
+      )}
+      
+      {/* 批量上传冲突解决 Modal */}
+      <BatchThemeConflictModal
+        visible={state.batchConflictModalVisible}
+        conflicts={state.batchConflicts}
+        onClose={handleBatchConflictClose}
+        onResolve={handleBatchConflictResolve}
+      />
 
       {/* Batch Upload Modal */}
       <Modal
