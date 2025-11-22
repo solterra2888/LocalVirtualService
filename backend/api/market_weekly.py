@@ -53,8 +53,8 @@ async def get_market_weekly_report(
         # 创建服务实例
         service = MarketWeeklyService()
         
-        # 生成报告（使用缓存）
-        report_data = service.generate_report(period=period, use_cache=use_cache)
+        # 🔥 生成报告（使用缓存，传递用户ID用于个性化标签筛选）
+        report_data = service.generate_report(period=period, use_cache=use_cache, user_id=current_user.username)
         
         if not report_data:
             raise HTTPException(status_code=404, detail="Report data not available")

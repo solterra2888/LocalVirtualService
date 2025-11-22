@@ -825,11 +825,110 @@ def batch_create_themes_task(
                             created += 1
                             associations_count = result.get('associations_created', 0)
                             logger.info(f"✅ Theme created successfully: '{theme_name}' (ID: {theme_id}, Associations: {associations_count})")
+                            
+                            # 🔍 Auto-verify tickers for the newly created theme
+                            verified_count = 0
+                            theme_tickers = theme_names_batch[idx][1].get('tickers', [])
+                            
+                            if theme_tickers and associations_count > 0:
+                                logger.info(f"🔍 Auto-verifying {len(theme_tickers)} tickers for theme '{theme_name}'...")
+                                
+                                try:
+                                    from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                                    from backend.config.exchange_config import format_ticker_for_eodhd
+                                    
+                                    # Get ticker associations from database
+                                    verify_conn = db_manager.get_connection()
+                                    if verify_conn:
+                                        verify_cursor = verify_conn.cursor()
+                                        
+                                        # Get standardized tickers from associations table
+                                        verify_cursor.execute("""
+                                            SELECT ticker FROM theme_company_associations
+                                            WHERE theme_id = %s AND is_verified = false
+                                        """, (theme_id,))
+                                        
+                                        unverified_tickers = [row[0] for row in verify_cursor.fetchall()]
+                                        verify_cursor.close()
+                                        verify_conn.close()
+                                        
+                                        if unverified_tickers:
+                                            for ticker in unverified_tickers:
+                                                try:
+                                                    # Parse ticker (e.g., "NVDA.US" -> symbol="NVDA", exchange="US")
+                                                    symbol, exchange = format_ticker_for_eodhd(ticker)
+                                                    
+                                                    # Check if ticker exists in companies table
+                                                    check_conn = db_manager.get_connection()
+                                                    check_cursor = check_conn.cursor()
+                                                    check_cursor.execute("""
+                                                        SELECT id, code, name, exchange, primaryticker
+                                                        FROM companies
+                                                        WHERE primaryticker = %s
+                                                    """, (ticker,))
+                                                    
+                                                    company_exists = check_cursor.fetchone()
+                                                    check_cursor.close()
+                                                    check_conn.close()
+                                                    
+                                                    if company_exists:
+                                                        # Already in database, mark as verified
+                                                        update_conn = db_manager.get_connection()
+                                                        update_cursor = update_conn.cursor()
+                                                        update_cursor.execute("""
+                                                            UPDATE theme_company_associations
+                                                            SET is_verified = true
+                                                            WHERE theme_id = %s AND ticker = %s
+                                                        """, (theme_id, ticker))
+                                                        update_conn.commit()
+                                                        update_cursor.close()
+                                                        update_conn.close()
+                                                        verified_count += 1
+                                                        logger.debug(f"  ✅ {ticker} verified (already in database)")
+                                                    else:
+                                                        # Try to fetch from EODHD
+                                                        fundamentals_service = EODHDFundamentalsService(db_config)
+                                                        fetch_result = loop.run_until_complete(
+                                                            fundamentals_service.fetch_and_save_company_fundamentals(
+                                                                symbol=symbol,
+                                                                exchange=exchange
+                                                            )
+                                                        )
+                                                        
+                                                        if fetch_result.get('success'):
+                                                            # Mark as verified
+                                                            update_conn = db_manager.get_connection()
+                                                            update_cursor = update_conn.cursor()
+                                                            update_cursor.execute("""
+                                                                UPDATE theme_company_associations
+                                                                SET is_verified = true
+                                                                WHERE theme_id = %s AND ticker = %s
+                                                            """, (theme_id, ticker))
+                                                            update_conn.commit()
+                                                            update_cursor.close()
+                                                            update_conn.close()
+                                                            verified_count += 1
+                                                            logger.debug(f"  ✅ {ticker} verified (fetched from EODHD)")
+                                                        else:
+                                                            logger.warning(f"  ⚠️ {ticker} could not be verified (not found in EODHD)")
+                                                    
+                                                except Exception as verify_error:
+                                                    logger.warning(f"  ❌ Failed to verify {ticker}: {str(verify_error)}")
+                                                    continue
+                                            
+                                            logger.info(f"🔍 Auto-verification completed for '{theme_name}': {verified_count}/{len(unverified_tickers)} tickers verified")
+                                        else:
+                                            logger.debug(f"No unverified tickers for theme '{theme_name}'")
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Auto-verification failed for theme '{theme_name}': {str(e)}")
+                            
                             details.append({
                                 "theme_name": theme_name,
                                 "theme_id": theme_id,
                                 "status": "success",
                                 "associations_created": associations_count,
+                                "verified_count": verified_count,
                                 "embedding_created": result.get('embedding_created', False)
                             })
                 
@@ -1190,16 +1289,33 @@ def batch_resolve_conflicts_task(
                             cursor.close()
                             conn.close()
                             
-                            # 🔥 自动验证新增的 tickers（只验证真正新增的，不验证已存在的）
+                            # 🔥 自动验证所有勾选的 tickers（不只是新增的，所有勾选的未验证ticker都要验证）
                             verified_count = 0
-                            if len(newly_added_tickers) > 0:
-                                logger.info(f"🔍 Auto-verifying {len(newly_added_tickers)} newly added tickers for {theme_id}...")
+                            if len(selected_tickers) > 0:
+                                logger.info(f"🔍 Auto-verifying {len(selected_tickers)} selected tickers for {theme_id}...")
                                 try:
                                     from backend.database.db_manager import DatabaseManager
                                     from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
                                     from backend.config.exchange_config import format_ticker_for_eodhd
                                     
-                                    for ticker in newly_added_tickers:
+                                    # 先获取未验证的ticker列表
+                                    verify_check_conn = db_manager.get_connection()
+                                    verify_check_cursor = verify_check_conn.cursor()
+                                    verify_check_cursor.execute("""
+                                        SELECT ticker FROM theme_company_associations
+                                        WHERE theme_id = %s AND (is_verified IS NULL OR is_verified = false)
+                                    """, (theme_id,))
+                                    unverified_tickers = set([row[0] for row in verify_check_cursor.fetchall()])
+                                    verify_check_cursor.close()
+                                    verify_check_conn.close()
+                                    
+                                    logger.info(f"  Found {len(unverified_tickers)} unverified tickers to validate")
+                                    
+                                    for ticker in selected_tickers:
+                                        # 只验证未验证的ticker
+                                        if ticker not in unverified_tickers:
+                                            logger.debug(f"  ⏭️ {ticker} already verified, skipping")
+                                            continue
                                         try:
                                             # 检查ticker是否在companies表中
                                             verify_conn = db_manager.get_connection()
@@ -1278,7 +1394,7 @@ def batch_resolve_conflicts_task(
                                             logger.warning(f"Failed to verify ticker {ticker}: {str(verify_error)}")
                                             continue
                                     
-                                    logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(newly_added_tickers)} newly added tickers verified")
+                                    logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(unverified_tickers)} tickers verified")
                                     
                                 except Exception as e:
                                     logger.warning(f"Auto-verification failed: {str(e)}")

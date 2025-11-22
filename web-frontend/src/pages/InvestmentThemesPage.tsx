@@ -45,7 +45,10 @@ import {
   RobotOutlined,
   UploadOutlined,
   InboxOutlined,
-  DownloadOutlined
+  DownloadOutlined,
+  ShareAltOutlined,
+  UserOutlined,
+  CloseCircleOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -64,10 +67,12 @@ import {
   batchUploadThemes,
   getThemeAssociations,
   verifyTicker,
-  getAllGroups,
   getAllUsers,
   updateThemeTickers,
-  updateThemeWithConflictResolution
+  updateThemeWithConflictResolution,
+  updateThemeShareStatus,
+  getAvailableTags,
+  batchTagThemes
 } from '../services/investmentThemes';
 import {
   InvestmentTheme,
@@ -97,12 +102,16 @@ interface PageState {
   editModalVisible: boolean;
   editingTheme: InvestmentTheme | null;
   editDescription: string;
-  editGroup: string;
+  editTags: string[];  // Current tags for the theme being edited
+  editTagsToAdd: string;  // Comma-separated new tags to add
+  editTickers: ThemeAssociation[];  // 当前的ticker列表（包含验证状态）
+  editTickersToAdd: string;  // 要添加的新ticker（逗号分隔）
+  editLoadingTickers: boolean;  // 是否正在加载ticker数据
   editLoading: boolean;
   selectedRowKeys: React.Key[];
   createModalVisible: boolean;
   createStep: number;
-  newThemeGroup: string;
+  newThemeTags: string[];  // Changed from newThemeGroup to newThemeTags (multi-select)
   newThemeName: string;
   newThemeCategory: string;
   newThemeMarket: string;
@@ -122,7 +131,7 @@ interface PageState {
   batchUploadModalVisible: boolean;
   uploadingFile: boolean;
   uploadedFile: File | null;
-  batchUploadGroup: string;  // Group 分组（必填）
+  batchUploadTags: string[];  // Tags 标签（可选，多选）
   batchUploadMarket: string;  // market 选择
   uploadPreview: {
     theme_name: string;  // 主题名称（整个文件中唯一）
@@ -142,12 +151,17 @@ interface PageState {
     associationData: ThemeAssociation[];
     verifyingTickers: Set<string>;  // 正在验证的tickers
     searchKeyword: string;
-    selectedGroups: string[];  // 选中的 Group 筛选值（支持多选）
-    availableGroups: string[];  // 所有可用的 groups（从 API 获取）
-    loadingGroups: boolean;  // 是否正在加载 groups
+    selectedFilterTags: string[];  // 选中的 Tags 筛选值（用于过滤主题列表）
     selectedUsers: string[];  // 选中的 User 筛选值（支持多选，admin专用）
     availableUsers: string[];  // 所有可用的 users（从 API 获取）
     loadingUsers: boolean;  // 是否正在加载 users
+    // 批量打标签相关
+    batchTagModalVisible: boolean;
+    batchTagAction: 'add' | 'remove';
+    selectedTags: string[];  // 批量打标签操作时选择的标签
+    availableTags: Array<{ tag_name: string; count: number }>;
+    loadingTags: boolean;
+    batchTagging: boolean;
 }
 
 const InvestmentThemesPage: React.FC = () => {
@@ -168,12 +182,16 @@ const InvestmentThemesPage: React.FC = () => {
     editModalVisible: false,
     editingTheme: null,
     editDescription: '',
-    editGroup: '',
+    editTags: [],
+    editTagsToAdd: '',
+    editTickers: [],
+    editTickersToAdd: '',
+    editLoadingTickers: false,
     editLoading: false,
     selectedRowKeys: [],
     createModalVisible: false,
     createStep: 1,
-    newThemeGroup: '',
+    newThemeTags: [],  // Changed to array for multi-select
     newThemeName: '',
     newThemeCategory: '',
     newThemeMarket: 'US',
@@ -193,7 +211,7 @@ const InvestmentThemesPage: React.FC = () => {
     batchUploadModalVisible: false,
     uploadingFile: false,
     uploadedFile: null,
-    batchUploadGroup: '',  // 默认为空，必须用户填写
+    batchUploadTags: [],  // 默认为空数组，支持多标签
     batchUploadMarket: 'US',  // 默认 US 市场
     uploadPreview: null,
     batchTaskId: null,
@@ -206,30 +224,36 @@ const InvestmentThemesPage: React.FC = () => {
     associationData: [],
     verifyingTickers: new Set(),
     searchKeyword: '',
-    selectedGroups: [],
-    availableGroups: [],
-    loadingGroups: false,
+    selectedFilterTags: [],
     selectedUsers: [],
     availableUsers: [],
-    loadingUsers: false
+    loadingUsers: false,
+    // 批量打标签相关
+    batchTagModalVisible: false,
+    batchTagAction: 'add',
+    selectedTags: [],
+    availableTags: [],
+    loadingTags: false,
+    batchTagging: false
   });
 
 
   // Load theme list
-  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string, groups?: string[], users?: string[]) => {
+  const loadThemes = async (page?: number, pageSize?: number, searchKeyword?: string, tags?: string[], users?: string[]) => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       const currentPage = page || state.currentPage;
       const currentPageSize = pageSize || state.pageSize;
       const effectiveSearch = searchKeyword !== undefined ? searchKeyword : state.searchKeyword;
-      const effectiveGroups = groups !== undefined ? groups : state.selectedGroups;
+      const effectiveTags = tags !== undefined ? tags : state.selectedFilterTags;
       const effectiveUsers = users !== undefined ? users : state.selectedUsers;
       const response = await listThemes(
         currentPageSize,
         (currentPage - 1) * currentPageSize,
         effectiveSearch,
-        effectiveGroups.length > 0 ? effectiveGroups : undefined,
-        isAdmin && effectiveUsers.length > 0 ? effectiveUsers : undefined
+        effectiveTags.length > 0 ? effectiveTags : undefined,
+        isAdmin && effectiveUsers.length > 0 ? effectiveUsers : undefined,
+        true  // showShared: 默认显示所有（非admin用户：自己创建的+已分享的；admin用户：所有主题）
       );
       
       setState(prev => ({
@@ -253,16 +277,16 @@ const InvestmentThemesPage: React.FC = () => {
       searchKeyword: trimmed,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, trimmed, state.selectedGroups, state.selectedUsers);
+    loadThemes(1, state.pageSize, trimmed, state.selectedFilterTags, state.selectedUsers);
   };
   
-  const handleGroupFilterChange = (groups: string[]) => {
+  const handleTagFilterChange = (tags: string[]) => {
     setState(prev => ({
       ...prev,
-      selectedGroups: groups,
+      selectedFilterTags: tags,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, state.searchKeyword, groups, state.selectedUsers);
+    loadThemes(1, state.pageSize, state.searchKeyword, tags, state.selectedUsers);
   };
   
   const handleUserFilterChange = (users: string[]) => {
@@ -271,7 +295,7 @@ const InvestmentThemesPage: React.FC = () => {
       selectedUsers: users,
       currentPage: 1
     }));
-    loadThemes(1, state.pageSize, state.searchKeyword, state.selectedGroups, users);
+    loadThemes(1, state.pageSize, state.searchKeyword, state.selectedFilterTags, users);
   };
 
   const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -282,31 +306,7 @@ const InvestmentThemesPage: React.FC = () => {
     }));
 
     if (value === '') {
-      loadThemes(1, state.pageSize, '', state.selectedGroups, state.selectedUsers);
-    }
-  };
-  
-  // 加载所有可用的 groups（从 API 获取，不受分页限制）
-  const loadAvailableGroups = async () => {
-    if (state.loadingGroups || state.availableGroups.length > 0) {
-      return; // 已加载或正在加载，跳过
-    }
-    
-    setState(prev => ({ ...prev, loadingGroups: true }));
-    try {
-      const response = await getAllGroups();
-      if (response.success) {
-        setState(prev => ({
-          ...prev,
-          availableGroups: response.groups || [],
-          loadingGroups: false
-        }));
-      } else {
-        setState(prev => ({ ...prev, loadingGroups: false }));
-      }
-    } catch (error) {
-      console.error('Failed to load groups:', error);
-      setState(prev => ({ ...prev, loadingGroups: false }));
+      loadThemes(1, state.pageSize, '', state.selectedFilterTags, state.selectedUsers);
     }
   };
   
@@ -337,9 +337,76 @@ const InvestmentThemesPage: React.FC = () => {
     }
   };
   
-  // 组件加载时获取所有 groups 和 users
+  // 加载所有可用的标签（从 API 获取）
+  const loadAvailableTags = async () => {
+    setState(prev => ({ ...prev, loadingTags: true }));
+    try {
+      const response = await getAvailableTags();
+      if (response.success) {
+        setState(prev => ({
+          ...prev,
+          availableTags: response.tags || [],
+          loadingTags: false
+        }));
+      } else {
+        setState(prev => ({ ...prev, loadingTags: false }));
+      }
+    } catch (error) {
+      console.error('Failed to load tags:', error);
+      setState(prev => ({ ...prev, loadingTags: false }));
+    }
+  };
+  
+  // 🔥 Helper function: Batch tag themes
+  const batchTagThemes = async (themeIds: string[], tagNames: string[], action: 'add' | 'remove') => {
+    try {
+      // Call batch tag API directly with tag names
+      const { batchTagThemes: apiBatchTag } = await import('../services/investmentThemes');
+      const result = await apiBatchTag(themeIds, tagNames, action);
+      
+      // Reload tags after operation
+      await loadAvailableTags();
+      
+      return result;
+    } catch (error) {
+      console.error('Failed to batch tag themes:', error);
+      throw error;
+    }
+  };
+  
+  // 🔥 Helper function: Update tags for a single theme (replace all existing tags)
+  const updateThemeTags = async (themeId: string, tagNames: string[]) => {
+    try {
+      // First, get current tags for the theme
+      const { getThemeTags } = await import('../services/investmentThemes');
+      const currentTagsResponse = await getThemeTags(themeId);
+      const currentTags = currentTagsResponse.tags.map(t => t.tag_name);
+      
+      // Find tags to remove and add
+      const tagsToRemove = currentTags.filter(t => !tagNames.includes(t));
+      const tagsToAdd = tagNames.filter(t => !currentTags.includes(t));
+      
+      // Remove old tags
+      if (tagsToRemove.length > 0) {
+        await batchTagThemes([themeId], tagsToRemove, 'remove');
+      }
+      
+      // Add new tags
+      if (tagsToAdd.length > 0) {
+        await batchTagThemes([themeId], tagsToAdd, 'add');
+      }
+      
+      // Reload tags
+      await loadAvailableTags();
+    } catch (error) {
+      console.error('Failed to update theme tags:', error);
+      throw error;
+    }
+  };
+  
+  // 组件加载时获取所有 users 和 tags
   useEffect(() => {
-    loadAvailableGroups();
+    loadAvailableTags();
     if (isAdmin) {
       loadAvailableUsers();
     }
@@ -994,7 +1061,7 @@ const InvestmentThemesPage: React.FC = () => {
   };
 
   // Handle edit description
-  const handleEditDescription = (theme: InvestmentTheme) => {
+  const handleEditDescription = async (theme: InvestmentTheme) => {
     // Check if user has permission to edit
     if (!isAdmin && theme.created_by !== user?.username) {
       message.error('You can only edit themes you created');
@@ -1006,7 +1073,79 @@ const InvestmentThemesPage: React.FC = () => {
       editModalVisible: true,
       editingTheme: theme,
       editDescription: theme.description_preview || '',
-      editGroup: theme.group || ''
+      editTags: theme.tags || [],  // Load existing tags
+      editTagsToAdd: '',
+      editTickers: [],
+      editTickersToAdd: '',
+      editLoadingTickers: true
+    }));
+
+    // Load ticker associations
+    try {
+      const response = await getThemeAssociations(theme.theme_id);
+      setState(prev => ({
+        ...prev,
+        editTickers: response.associations,
+        editLoadingTickers: false
+      }));
+    } catch (error) {
+      message.error(`Failed to load ticker associations: ${getErrorMessage(error)}`);
+      setState(prev => ({
+        ...prev,
+        editLoadingTickers: false
+      }));
+    }
+  };
+
+  // Handle add new tickers
+  const handleAddTickers = () => {
+    if (!state.editTickersToAdd.trim()) {
+      return;
+    }
+
+    const newTickers = state.editTickersToAdd
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    if (newTickers.length === 0) {
+      return;
+    }
+
+    // Check for duplicates
+    const existingTickers = new Set(state.editTickers.map(t => t.ticker.toUpperCase()));
+    const duplicates = newTickers.filter(t => existingTickers.has(t.toUpperCase()));
+    
+    if (duplicates.length > 0) {
+      message.warning(`These tickers already exist: ${duplicates.join(', ')}`);
+    }
+
+    // Add non-duplicate tickers
+    const tickersToAdd = newTickers.filter(t => !existingTickers.has(t.toUpperCase()));
+    
+    if (tickersToAdd.length > 0) {
+      const newTickerObjects: ThemeAssociation[] = tickersToAdd.map(ticker => ({
+        ticker: ticker,
+        market: null,
+        is_verified: false,
+        association_weight: null
+      }));
+
+      setState(prev => ({
+        ...prev,
+        editTickers: [...prev.editTickers, ...newTickerObjects],
+        editTickersToAdd: ''
+      }));
+
+      message.success(`Added ${tickersToAdd.length} ticker(s)`);
+    }
+  };
+
+  // Handle remove ticker
+  const handleRemoveTicker = (tickerToRemove: string) => {
+    setState(prev => ({
+      ...prev,
+      editTickers: prev.editTickers.filter(t => t.ticker !== tickerToRemove)
     }));
   };
 
@@ -1022,40 +1161,126 @@ const InvestmentThemesPage: React.FC = () => {
     setState(prev => ({ ...prev, editLoading: true }));
 
     try {
-      // 始终发送 group 值（即使是空字符串，表示清空）
-      // 这样后端可以正确处理清空操作
-      const result = await updateThemeDescription(
-        state.editingTheme.theme_id,
-        state.editDescription,
-        state.editingTheme.version,
-        state.editGroup.trim()  // 发送空字符串表示清空，非空字符串表示更新
-      );
+      // Check if tickers have changed
+      const originalTickers = (state.editingTheme.tickers || []).sort();
+      const currentTickers = state.editTickers.map(t => t.ticker).sort();
+      const tickersChanged = JSON.stringify(originalTickers) !== JSON.stringify(currentTickers);
 
-      if (result.description_saved) {
-        if (result.embedding_updated) {
-          message.success('Description, group, and vector updated successfully');
-        } else {
-          message.warning(`Description and group saved, but vector update failed: ${result.error || 'Unknown error'}`);
+      // If tickers changed, use updateThemeTickers API (which will update description, group, and tickers)
+      if (tickersChanged) {
+        // Infer market from tickers (check if any ticker has a market suffix)
+        const tickers = state.editTickers.map(t => t.ticker);
+        let inferredMarket = 'US'; // Default to US
+        
+        // Check for non-US markets
+        for (const ticker of tickers) {
+          if (ticker.includes('.HK')) {
+            inferredMarket = 'HK';
+            break;
+          } else if (ticker.includes('.SHG') || ticker.includes('.SHE')) {
+            inferredMarket = 'CN';
+            break;
+          }
         }
         
-        setState(prev => ({
-          ...prev,
-          editModalVisible: false,
-          editingTheme: null,
-          editDescription: '',
-          editGroup: '',
-          editLoading: false
-        }));
-        
-        loadThemes(state.currentPage);
+        const result = await updateThemeTickers(
+          state.editingTheme.theme_id,
+          tickers,
+          state.editingTheme.theme_name,
+          state.editingTheme.category || '',
+          undefined,  // group parameter removed
+          inferredMarket  // Use inferred market
+        );
+
+        if (result.success) {
+          message.success('Theme updated successfully (tickers, description, and vector regenerated)');
+          
+          setState(prev => ({
+            ...prev,
+            editModalVisible: false,
+            editingTheme: null,
+            editDescription: '',
+            editTags: [],
+            editTagsToAdd: '',
+            editTickers: [],
+            editTickersToAdd: '',
+            editLoading: false
+          }));
+          
+          // Refresh with delay to ensure backend processing completes
+          setTimeout(() => {
+            loadThemes(state.currentPage);
+          }, 1500);
+        } else {
+          message.error(result.message || 'Update failed');
+          setState(prev => ({ ...prev, editLoading: false }));
+        }
       } else {
-        message.error(result.message || 'Update failed');
-        setState(prev => ({ ...prev, editLoading: false }));
+        // Tickers not changed, only update description and group
+        const result = await updateThemeDescription(
+          state.editingTheme.theme_id,
+          state.editDescription,
+          state.editingTheme.version,
+          undefined  // group parameter removed
+        );
+
+        // 🔥 Update tags separately after updating description
+        await updateThemeTags(state.editingTheme.theme_id, state.editTags);
+
+        if (result.description_saved) {
+          if (result.embedding_updated) {
+            message.success('Description, group, and vector updated successfully');
+          } else {
+            message.warning(`Description and group saved, but vector update failed: ${result.error || 'Unknown error'}`);
+          }
+          
+          setState(prev => ({
+            ...prev,
+            editModalVisible: false,
+            editingTheme: null,
+            editDescription: '',
+            editTags: [],
+            editTagsToAdd: '',
+            editTickers: [],
+            editTickersToAdd: '',
+            editLoading: false
+          }));
+          
+          loadThemes(state.currentPage);
+        } else {
+          message.error(result.message || 'Update failed');
+          setState(prev => ({ ...prev, editLoading: false }));
+        }
       }
     } catch (error) {
       message.error(`Update failed: ${getErrorMessage(error)}`);
       setState(prev => ({ ...prev, editLoading: false }));
     }
+  };
+
+  // Handle toggle share status
+  const handleToggleShare = async (theme: InvestmentTheme) => {
+    const newStatus = !theme.is_shared;
+    const actionText = newStatus ? '分享' : '取消分享';
+    
+    Modal.confirm({
+      title: `确认${actionText}主题？`,
+      icon: <InfoCircleOutlined />,
+      content: newStatus 
+        ? '分享后，所有用户都可以查看和使用此主题（但不能编辑）。'
+        : '取消分享后，只有您可以查看和使用此主题。',
+      okText: `确认${actionText}`,
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await updateThemeShareStatus(theme.theme_id, newStatus);
+          message.success(`主题${actionText}成功`);
+          loadThemes(state.currentPage);
+        } catch (error) {
+          message.error(`${actionText}失败: ${getErrorMessage(error)}`);
+        }
+      }
+    });
   };
 
   // Handle delete theme
@@ -1255,7 +1480,7 @@ const InvestmentThemesPage: React.FC = () => {
       const result = await generateThemeDescription(
         state.newThemeName, 
         state.newThemeCategory,
-        state.newThemeGroup.trim() || undefined, // group is now optional
+        undefined, // group parameter removed - will use tags instead
         undefined, // market parameter removed - users can input tickers with suffixes
         tickersArray
       );
@@ -1297,14 +1522,14 @@ const InvestmentThemesPage: React.FC = () => {
         themeName: state.newThemeName,
         category: state.newThemeCategory,
         tickers: tickersArray,
-        group: state.newThemeGroup
+        tags: state.newThemeTags
       });
       
       const result = await createTheme(
         state.newThemeName,
         state.newThemeCategory,
         state.newThemeDescription,
-        state.newThemeGroup.trim() || undefined, // group is now optional
+        undefined, // group parameter removed - will use tags instead
         undefined, // theme_id is auto-generated, no need to pass
         undefined, // market parameter removed - users can input tickers with suffixes
         tickersArray
@@ -1330,18 +1555,29 @@ const InvestmentThemesPage: React.FC = () => {
       }
       
       if (result.theme_saved) {
+        // 🔥 Theme created, now add tags if any
+        if (state.newThemeTags.length > 0) {
+          try {
+            await batchTagThemes([result.theme_id], state.newThemeTags, 'add');
+            console.log(`✅ Tags added to theme ${result.theme_id}:`, state.newThemeTags);
+          } catch (tagError) {
+            console.error('Failed to add tags:', tagError);
+            message.warning('主题创建成功，但添加标签失败');
+          }
+        }
+        
         if (result.embedding_created) {
-          message.success(`Theme '${state.newThemeName}' created successfully!`);
+          message.success(`Theme '${state.newThemeName}' created successfully!${state.newThemeTags.length > 0 ? ` (${state.newThemeTags.length} tags added)` : ''}`);
         } else {
           message.warning(`Theme saved, but vector generation failed: ${result.error || 'Unknown error'}`);
         }
         
-        // Reset and close modal (removed newThemeId as it's auto-generated)
+        // Reset and close modal
         setState(prev => ({
           ...prev,
           createModalVisible: false,
           createStep: 1,
-          newThemeGroup: '',
+          newThemeTags: [],  // Changed to empty array
           newThemeName: '',
           newThemeCategory: '',
           newThemeMarket: 'US',
@@ -1350,8 +1586,10 @@ const InvestmentThemesPage: React.FC = () => {
           creatingTheme: false
         }));
         
-        // Reload themes list
-        loadThemes(state.currentPage);
+        // Reload themes list with a delay to ensure backend processing completes
+        setTimeout(() => {
+          loadThemes(state.currentPage);
+        }, 2000);
       } else {
         message.error(result.message || 'Failed to create theme');
         setState(prev => ({ ...prev, creatingTheme: false }));
@@ -1389,7 +1627,7 @@ const InvestmentThemesPage: React.FC = () => {
         selectedTickers,
         state.newThemeName,
         state.newThemeCategory,
-        state.newThemeGroup.trim() || undefined,
+        undefined,  // group parameter removed
         state.newThemeMarket
       );
       
@@ -1405,7 +1643,7 @@ const InvestmentThemesPage: React.FC = () => {
           conflictNewTickers: [],
           createModalVisible: false,
           createStep: 1,
-          newThemeGroup: '',
+          newThemeTags: [],  // Changed to empty array
           newThemeName: '',
           newThemeCategory: '',
           newThemeMarket: 'US',
@@ -1413,8 +1651,10 @@ const InvestmentThemesPage: React.FC = () => {
           newThemeDescription: ''
         }));
         
-        // Reload themes list
-        loadThemes(state.currentPage);
+        // Reload themes list with delay to ensure backend updates complete
+        setTimeout(() => {
+          loadThemes(state.currentPage);
+        }, 1500);
       } else {
         message.error('Failed to update theme');
         setState(prev => ({ ...prev, conflictResolving: false }));
@@ -1458,8 +1698,10 @@ const InvestmentThemesPage: React.FC = () => {
       
       if (result.success) {
         message.success(`主题 "${conflict.theme_name}" 已更新`);
-        // 刷新主题列表
-        loadThemes(state.currentPage);
+        // 刷新主题列表，添加延迟以确保后端更新完成
+        setTimeout(() => {
+          loadThemes(state.currentPage);
+        }, 1500);
       } else {
         throw new Error(result.message || '更新失败');
       }
@@ -1476,6 +1718,11 @@ const InvestmentThemesPage: React.FC = () => {
       batchConflictModalVisible: false,
       batchConflicts: []
     }));
+    
+    // 关闭冲突modal时刷新列表，确保看到最新的数据
+    setTimeout(() => {
+      loadThemes(state.currentPage);
+    }, 1000);
   };
 
   // Handle cancel create
@@ -1490,7 +1737,7 @@ const InvestmentThemesPage: React.FC = () => {
           ...prev,
           createModalVisible: false,
           createStep: 1,
-          newThemeGroup: '',
+          newThemeTags: [],  // Changed to empty array
           newThemeName: '',
           newThemeCategory: '',
           newThemeMarket: 'US',
@@ -1540,19 +1787,20 @@ const InvestmentThemesPage: React.FC = () => {
     try {
       const result = await batchUploadThemes(
         state.uploadedFile, 
-        state.batchUploadGroup.trim() || undefined, // group is now optional
+        undefined, // group parameter removed - will use tags instead
         state.batchUploadMarket
       );
       
       if (result.success) {
-        message.success(result.message);
-        
+        // 🔥 Batch upload initiated, store task ID and tags for later application
         setState(prev => ({
           ...prev,
           uploadingFile: false,
           batchTaskId: result.task_id,
           uploadPreview: result.preview,
         }));
+        
+        message.success(result.message);
         
         // 开始轮询任务进度
         startPollingBatchTask(result.task_id);
@@ -1586,10 +1834,27 @@ const InvestmentThemesPage: React.FC = () => {
       
       if (result && result.success) {
         const conflictCount = result.statistics?.conflicts || 0;
+        const createdCount = result.statistics?.created || 0;
         
-        message.success(
-          `Batch upload completed: ${result.statistics?.created || 0} created, ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped, ${conflictCount} conflicts`
-        );
+        // 🔥 Apply tags to newly created themes if tags were selected
+        if (state.batchUploadTags.length > 0 && result.theme_ids && result.theme_ids.length > 0) {
+          try {
+            await batchTagThemes(result.theme_ids, state.batchUploadTags, 'add');
+            console.log(`✅ Tags added to ${result.theme_ids.length} batch uploaded themes:`, state.batchUploadTags);
+            message.success(
+              `Batch upload completed: ${createdCount} created (${state.batchUploadTags.length} tags added), ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped, ${conflictCount} conflicts`
+            );
+          } catch (tagError) {
+            console.error('Failed to add tags to batch uploaded themes:', tagError);
+            message.warning(
+              `Batch upload completed: ${createdCount} created, but failed to add tags. ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped, ${conflictCount} conflicts`
+            );
+          }
+        } else {
+          message.success(
+            `Batch upload completed: ${createdCount} created, ${result.statistics?.failed || 0} failed, ${result.statistics?.skipped || 0} skipped, ${conflictCount} conflicts`
+          );
+        }
         
         setState(prev => ({
           ...prev,
@@ -1608,8 +1873,10 @@ const InvestmentThemesPage: React.FC = () => {
           }));
         }
         
-        // 刷新主题列表
-        loadThemes(state.currentPage);
+        // 刷新主题列表，添加延迟以确保后端处理完成（LLM描述生成和向量化）
+        setTimeout(() => {
+          loadThemes(state.currentPage);
+        }, 2000);
       } else {
         const errorMsg = (result as any)?.error || 'Unknown error';
         message.error(`Batch upload failed: ${errorMsg}`);
@@ -1621,11 +1888,14 @@ const InvestmentThemesPage: React.FC = () => {
 
   // Batch Upload: Close modal
   const handleCloseBatchUploadModal = () => {
+    // 如果任务已完成，关闭modal时刷新列表
+    const shouldRefresh = state.batchTaskId && state.batchTaskProgress === 100;
+    
     setState(prev => ({
       ...prev,
       batchUploadModalVisible: false,
       uploadedFile: null,
-      batchUploadGroup: '',  // 重置为空
+      batchUploadTags: [],  // 重置为空数组
       batchUploadMarket: 'US',  // 重置为默认值
       uploadPreview: null,
       batchTaskId: null,
@@ -1634,8 +1904,77 @@ const InvestmentThemesPage: React.FC = () => {
       batchTaskDetails: [],
       uploadingFile: false,
     }));
+    
+    // 任务完成后关闭modal时刷新列表，确保显示最新数据
+    if (shouldRefresh) {
+      setTimeout(() => {
+        loadThemes(state.currentPage);
+      }, 1000);
+    }
   };
 
+  // 批量打标签相关函数
+  const handleOpenBatchTagModal = (action: 'add' | 'remove') => {
+    if (state.selectedRowKeys.length === 0) {
+      message.warning('请先选择要操作的主题');
+      return;
+    }
+    
+    setState(prev => ({
+      ...prev,
+      batchTagModalVisible: true,
+      batchTagAction: action,
+      selectedTags: []
+    }));
+    
+    // 刷新可用标签列表
+    loadAvailableTags();
+  };
+  
+  const handleCloseBatchTagModal = () => {
+    setState(prev => ({
+      ...prev,
+      batchTagModalVisible: false,
+      selectedTags: [],
+      batchTagging: false
+    }));
+  };
+  
+  const handleBatchTag = async () => {
+    if (state.selectedTags.length === 0) {
+      message.warning('请选择至少一个标签');
+      return;
+    }
+    
+    setState(prev => ({ ...prev, batchTagging: true }));
+    
+    try {
+      const themeIds = state.selectedRowKeys.map(String);
+      const result = await batchTagThemes(
+        themeIds,
+        state.selectedTags,
+        state.batchTagAction
+      );
+      
+      if (result.success) {
+        message.success(result.message);
+        handleCloseBatchTagModal();
+        
+        // 刷新主题列表
+        loadThemes(state.currentPage);
+        
+        // 清空选中项
+        setState(prev => ({ ...prev, selectedRowKeys: [] }));
+      } else {
+        message.error('操作失败');
+      }
+    } catch (error) {
+      message.error(`操作失败: ${getErrorMessage(error)}`);
+    } finally {
+      setState(prev => ({ ...prev, batchTagging: false }));
+    }
+  };
+  
   const handleDownloadTemplate = () => {
     const headers = ['theme', 'category', 'ticker', 'company'];
     const sampleRows = [
@@ -1690,7 +2029,9 @@ const InvestmentThemesPage: React.FC = () => {
       dataIndex: 'theme_name',
       key: 'theme_name',
       ellipsis: true,
-      render: (name: string) => <Text strong>{name}</Text>
+      render: (name: string, record: InvestmentTheme) => (
+        <Text strong>{name}</Text>
+      )
     },
     {
       title: 'Category',
@@ -1700,12 +2041,22 @@ const InvestmentThemesPage: React.FC = () => {
         category ? <Text>{category}</Text> : <Text type="secondary">Not set</Text>
     },
     {
-      title: 'Group',
-      dataIndex: 'group',
-      key: 'group',
-      width: 120,
-      render: (group?: string) =>
-        group ? <Tag color="blue">{group}</Tag> : <Text type="secondary">-</Text>
+      title: 'Tags',
+      dataIndex: 'tags',
+      key: 'tags',
+      width: 200,
+      render: (tags?: string[]) => {
+        if (!tags || tags.length === 0) {
+          return <Text type="secondary">-</Text>;
+        }
+        return (
+          <Space size={[0, 4]} wrap>
+            {tags.map(tag => (
+              <Tag key={tag} color="blue">{tag}</Tag>
+            ))}
+          </Space>
+        );
+      }
     },
     {
       title: 'Tickers',
@@ -1815,12 +2166,14 @@ const InvestmentThemesPage: React.FC = () => {
       title: 'Actions',
       key: 'actions',
       render: (_: any, record: InvestmentTheme) => {
-        // Check if user can edit/delete this theme
-        const canEdit = isAdmin || record.created_by === user?.username;
+        // Check if user can edit/delete/share this theme
+        const canEdit = record.can_edit ?? (isAdmin || record.created_by === user?.username);
+        const canDelete = record.can_delete ?? canEdit;
+        const canShare = record.can_share ?? canEdit;
         
         return (
           <Space size="small">
-            <Tooltip title={canEdit ? "Edit Description" : "You can only edit your own themes"}>
+            <Tooltip title={canEdit ? "Edit Theme" : "只能编辑自己创建的主题"}>
               <Button
                 type="link"
                 size="small"
@@ -1829,14 +2182,27 @@ const InvestmentThemesPage: React.FC = () => {
                 disabled={!canEdit}
               />
             </Tooltip>
-            <Tooltip title={canEdit ? "Delete Theme" : "You can only delete your own themes"}>
+            
+            {canShare && (
+              <Tooltip title={record.is_shared ? "取消分享" : "分享给所有用户"}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={record.is_shared ? <CloseCircleOutlined /> : <ShareAltOutlined />}
+                  onClick={() => handleToggleShare(record)}
+                  style={{ color: record.is_shared ? '#52c41a' : undefined }}
+                />
+              </Tooltip>
+            )}
+            
+            <Tooltip title={canDelete ? "Delete Theme" : "只能删除自己创建的主题"}>
               <Button
                 type="link"
                 size="small"
                 danger
                 icon={<DeleteOutlined />}
                 onClick={() => handleDeleteTheme(record)}
-                disabled={!canEdit}
+                disabled={!canDelete}
               />
             </Tooltip>
           </Space>
@@ -1889,6 +2255,28 @@ const InvestmentThemesPage: React.FC = () => {
                 onClick={() => setState(prev => ({ ...prev, batchUploadModalVisible: true }))}
               >
                 Batch Upload
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to tag" : "Add tags to selected themes"}>
+              <Button
+                type="default"
+                icon={<PlusOutlined />}
+                onClick={() => handleOpenBatchTagModal('add')}
+                disabled={state.selectedRowKeys.length === 0}
+              >
+                Add Tags {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to untag" : "Remove tags from selected themes"}>
+              <Button
+                type="default"
+                icon={<CloseCircleOutlined />}
+                onClick={() => handleOpenBatchTagModal('remove')}
+                disabled={state.selectedRowKeys.length === 0}
+              >
+                Remove Tags {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
               </Button>
             </Tooltip>
             
@@ -2009,22 +2397,26 @@ const InvestmentThemesPage: React.FC = () => {
               style={{ width: 260 }}
             />
             <Space size="small">
-              <Text type="secondary">Group:</Text>
+              <Text type="secondary">Tags:</Text>
               <Select
                 mode="multiple"
-                placeholder={state.loadingGroups ? "Loading groups..." : "Select groups"}
-                value={state.selectedGroups}
-                onChange={handleGroupFilterChange}
+                placeholder={state.loadingTags ? "Loading tags..." : "Select tags"}
+                value={state.selectedFilterTags}
+                onChange={handleTagFilterChange}
                 style={{ minWidth: 200 }}
                 size="small"
                 allowClear
                 maxTagCount="responsive"
-                loading={state.loadingGroups}
-                notFoundContent={state.loadingGroups ? "Loading..." : "No groups found"}
+                loading={state.loadingTags}
+                notFoundContent={state.loadingTags ? "Loading..." : "No tags found"}
+                showSearch
+                filterOption={(input, option) =>
+                  (option?.children as unknown as string)?.toLowerCase().includes(input.toLowerCase())
+                }
               >
-                {state.availableGroups.map(group => (
-                  <Select.Option key={group} value={group}>
-                    {group}
+                {state.availableTags.map(tag => (
+                  <Select.Option key={tag.tag_name} value={tag.tag_name}>
+                    {tag.tag_name} {tag.count > 0 ? `(${tag.count})` : ''}
                   </Select.Option>
                 ))}
               </Select>
@@ -2065,10 +2457,8 @@ const InvestmentThemesPage: React.FC = () => {
             onChange: (selectedRowKeys: React.Key[]) => {
               setState(prev => ({ ...prev, selectedRowKeys }));
             },
-            getCheckboxProps: (record: InvestmentTheme) => ({
-              disabled: !isAdmin && record.created_by !== user?.username,
-              title: !isAdmin && record.created_by !== user?.username ? 'You can only select your own themes' : undefined
-            }),
+            // 允许用户勾选任何主题（包括分享的主题），以便进行标签操作
+            // 具体的操作权限在执行时检查（例如删除只能删除自己的主题）
             selections: [
               Table.SELECTION_ALL,
               Table.SELECTION_INVERT,
@@ -2090,7 +2480,7 @@ const InvestmentThemesPage: React.FC = () => {
                 pageSize: pageSize || 50,
                 selectedRowKeys: []  // 清空选中项
               }));
-              loadThemes(page, pageSize || 50, state.searchKeyword, state.selectedGroups, state.selectedUsers);  // 传递新的 pageSize 和筛选条件
+              loadThemes(page, pageSize || 50, state.searchKeyword, state.selectedFilterTags, state.selectedUsers);  // 传递新的 pageSize 和筛选条件
             }
           }}
           size="small"
@@ -2219,7 +2609,10 @@ const InvestmentThemesPage: React.FC = () => {
           editModalVisible: false, 
           editingTheme: null,
           editDescription: '',
-          editGroup: ''
+          editTags: [],
+          editTagsToAdd: '',
+          editTickers: [],
+          editTickersToAdd: ''
         }))}
         onOk={handleSubmitEdit}
         okText="Save & Re-vectorize"
@@ -2235,6 +2628,7 @@ const InvestmentThemesPage: React.FC = () => {
                 <ul style={{ marginBottom: 0, paddingLeft: '20px' }}>
                   <li>Description and group will be saved immediately</li>
                   <li>Vector will be regenerated automatically (may take a few seconds)</li>
+                  <li><strong>If tickers are changed:</strong> Description will be regenerated using LLM and new tickers will be auto-verified</li>
                   <li>If vectorization fails, description and group are still saved</li>
                 </ul>
               }
@@ -2260,17 +2654,65 @@ const InvestmentThemesPage: React.FC = () => {
             </Space>
             <Divider />
             <Form layout="vertical">
-              <Form.Item label="Group" help="Group name for classifying themes (e.g., AI, crypto, healthcare) - Optional">
-                <Input
-                  placeholder="e.g. AI, Energy (optional)"
-                  value={state.editGroup}
-                  onChange={(e) => setState(prev => ({ ...prev, editGroup: e.target.value }))}
-                  maxLength={100}
-                  showCount
-                />
+              {/* Tags Management Section */}
+              <Form.Item label="My Tags" help="🏷️ Your personal tags for this theme. These tags are only visible to you and help organize themes for reports like Market Weekly.">
+                <Space direction="vertical" style={{ width: '100%' }} size="small">
+                  {/* Display current tags */}
+                  {state.editTags.length > 0 ? (
+                    <Space size={[0, 4]} wrap>
+                      {state.editTags.map(tag => (
+                        <Tag
+                          key={tag}
+                          closable
+                          onClose={() => {
+                            setState(prev => ({
+                              ...prev,
+                              editTags: prev.editTags.filter(t => t !== tag)
+                            }));
+                          }}
+                          color="blue"
+                        >
+                          {tag}
+                        </Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Text type="secondary">No tags assigned</Text>
+                  )}
+                  
+                  {/* Add new tags */}
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Select
+                      mode="tags"
+                      style={{ width: '100%' }}
+                      placeholder="Select or type tags to add (e.g., Market Weekly)"
+                      value={[]}
+                      onChange={(values) => {
+                        if (values.length > 0) {
+                          // Add new unique tags
+                          const newTags = values.filter(v => !state.editTags.includes(v));
+                          if (newTags.length > 0) {
+                            setState(prev => ({
+                              ...prev,
+                              editTags: [...prev.editTags, ...newTags]
+                            }));
+                          }
+                        }
+                      }}
+                      loading={state.loadingTags}
+                      maxTagCount="responsive"
+                    >
+                      {state.availableTags.map(tag => (
+                        <Select.Option key={tag.tag_name} value={tag.tag_name}>
+                          {tag.tag_name} ({tag.count})
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Space.Compact>
+                </Space>
               </Form.Item>
               
-              <Form.Item label="Description" required style={{ marginBottom: 0 }}>
+              <Form.Item label="Description" required>
                 <TextArea
                   value={state.editDescription}
                   onChange={(e) => setState(prev => ({ ...prev, editDescription: e.target.value }))}
@@ -2279,6 +2721,68 @@ const InvestmentThemesPage: React.FC = () => {
                   maxLength={2000}
                   showCount
                 />
+              </Form.Item>
+              
+              <Divider />
+              
+              <Form.Item 
+                label="Associated Tickers" 
+                help="Add or remove tickers. Changes will trigger description and vector regeneration with auto-verification."
+              >
+                {state.editLoadingTickers ? (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <SyncOutlined spin style={{ fontSize: '24px' }} />
+                    <div style={{ marginTop: '8px' }}>Loading tickers...</div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Current Tickers */}
+                    <div style={{ marginBottom: '12px' }}>
+                      <Text strong style={{ fontSize: '12px', color: '#666' }}>Current Tickers:</Text>
+                      <div style={{ marginTop: '8px' }}>
+                        {state.editTickers.length === 0 ? (
+                          <Text type="secondary">No tickers associated</Text>
+                        ) : (
+                          <Space size={[0, 8]} wrap>
+                            {state.editTickers.map((assoc) => (
+                              <Tag
+                                key={assoc.ticker}
+                                closable
+                                onClose={() => handleRemoveTicker(assoc.ticker)}
+                                color={assoc.is_verified ? 'green' : 'default'}
+                                icon={assoc.is_verified ? <CheckCircleOutlined /> : null}
+                              >
+                                {assoc.ticker}
+                              </Tag>
+                            ))}
+                          </Space>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Add New Tickers */}
+                    <div>
+                      <Text strong style={{ fontSize: '12px', color: '#666' }}>Add New Tickers:</Text>
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                        <Input
+                          placeholder="e.g. NVDA.US, AMD.US, 0700.HK (comma-separated)"
+                          value={state.editTickersToAdd}
+                          onChange={(e) => setState(prev => ({ ...prev, editTickersToAdd: e.target.value }))}
+                          onPressEnter={handleAddTickers}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          onClick={handleAddTickers}
+                          disabled={!state.editTickersToAdd.trim()}
+                        >
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </Form.Item>
             </Form>
           </div>
@@ -2304,14 +2808,22 @@ const InvestmentThemesPage: React.FC = () => {
           <div>
 
             <Form layout="vertical">
-              <Form.Item label="Group" help="Group name for classifying themes (e.g., AI, crypto, healthcare) - Optional">
-                <Input
-                  placeholder="e.g. AI, Energy (optional)"
-                  value={state.newThemeGroup}
-                  onChange={(e) => setState(prev => ({ ...prev, newThemeGroup: e.target.value }))}
-                  maxLength={100}
-                  showCount
-                />
+              <Form.Item label="My Tags" help="🏷️ Personal tags for organizing your themes (e.g., Market Weekly, Broker Report). These tags are private to you - other users cannot see them. You can tag any theme, including shared ones.">
+                <Select
+                  mode="tags"
+                  style={{ width: '100%' }}
+                  placeholder="Select or enter tags (e.g., Market Weekly, Broker Report)"
+                  value={state.newThemeTags}
+                  onChange={(values) => setState(prev => ({ ...prev, newThemeTags: values }))}
+                  loading={state.loadingTags}
+                  maxTagCount="responsive"
+                >
+                  {state.availableTags.map(tag => (
+                    <Select.Option key={tag.tag_name} value={tag.tag_name}>
+                      {tag.tag_name} ({tag.count})
+                    </Select.Option>
+                  ))}
+                </Select>
               </Form.Item>
               
               <Form.Item label="Theme Name" required>
@@ -2390,9 +2902,14 @@ const InvestmentThemesPage: React.FC = () => {
             />
             
             <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }} size="small">
-              {state.newThemeGroup && (
+              {state.newThemeTags.length > 0 && (
                 <div>
-                  <Text strong>Group:</Text> <Text>{state.newThemeGroup}</Text>
+                  <Text strong>Tags:</Text>{' '}
+                  <Space size={[0, 4]} wrap>
+                    {state.newThemeTags.map(tag => (
+                      <Tag key={tag} color="blue">{tag}</Tag>
+                    ))}
+                  </Space>
                 </div>
               )}
               <div>
@@ -2482,6 +2999,98 @@ const InvestmentThemesPage: React.FC = () => {
         onResolve={handleBatchConflictResolve}
       />
 
+      {/* Batch Tag Modal */}
+      <Modal
+        title={
+          <Space>
+            {state.batchTagAction === 'add' ? <PlusOutlined /> : <CloseCircleOutlined />}
+            <span>{state.batchTagAction === 'add' ? '批量添加标签' : '批量移除标签'}</span>
+          </Space>
+        }
+        open={state.batchTagModalVisible}
+        onCancel={handleCloseBatchTagModal}
+        onOk={handleBatchTag}
+        confirmLoading={state.batchTagging}
+        okText={state.batchTagAction === 'add' ? '添加标签' : '移除标签'}
+        cancelText="取消"
+        width={600}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <Alert
+            message="提示"
+            description={
+              <div>
+                <div>已选择 {state.selectedRowKeys.length} 个主题</div>
+                <div style={{ marginTop: 8 }}>
+                  {state.batchTagAction === 'add' 
+                    ? '请选择要添加的标签。如果标签不存在，将自动创建。' 
+                    : '请选择要移除的标签。'}
+                </div>
+              </div>
+            }
+            type="info"
+            showIcon
+          />
+          
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>
+              {state.batchTagAction === 'add' ? '选择或输入标签' : '选择要移除的标签'}:
+            </Text>
+            <Select
+              mode="tags"
+              style={{ width: '100%' }}
+              placeholder={state.batchTagAction === 'add' ? '选择现有标签或输入新标签（支持多选）' : '选择要移除的标签'}
+              value={state.selectedTags}
+              onChange={(values) => setState(prev => ({ ...prev, selectedTags: values }))}
+              loading={state.loadingTags}
+              disabled={state.batchTagging}
+              maxTagCount="responsive"
+            >
+              {state.availableTags.map(tag => (
+                <Select.Option key={tag.tag_name} value={tag.tag_name}>
+                  {tag.tag_name} ({tag.count})
+                </Select.Option>
+              ))}
+            </Select>
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+              {state.batchTagAction === 'add' 
+                ? '支持输入新标签名称，如 "Market Weekly"、"Broker Report" 等' 
+                : '只能移除现有标签'}
+            </Text>
+          </div>
+          
+          {state.availableTags.length > 0 && (
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                当前可用标签:
+              </Text>
+              <Space wrap>
+                {state.availableTags.slice(0, 10).map(tag => (
+                  <Tag 
+                    key={tag.tag_name} 
+                    color="blue"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (!state.selectedTags.includes(tag.tag_name)) {
+                        setState(prev => ({
+                          ...prev,
+                          selectedTags: [...prev.selectedTags, tag.tag_name]
+                        }));
+                      }
+                    }}
+                  >
+                    {tag.tag_name} ({tag.count})
+                  </Tag>
+                ))}
+                {state.availableTags.length > 10 && (
+                  <Text type="secondary">...共 {state.availableTags.length} 个标签</Text>
+                )}
+              </Space>
+            </div>
+          )}
+        </Space>
+      </Modal>
+
       {/* Batch Upload Modal */}
       <Modal
         title={
@@ -2524,21 +3133,29 @@ const InvestmentThemesPage: React.FC = () => {
                 Download CSV Template
               </Button>
 
-              {/* Group Input */}
+              {/* Tags Input */}
               <div style={{ marginBottom: 16 }}>
                 <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                  Group <Text type="secondary">(Optional)</Text>
+                  My Tags <Text type="secondary">(Optional)</Text>
                 </Text>
-                <Input
-                  placeholder="e.g. AI, crypto... (optional)"
-                  value={state.batchUploadGroup}
-                  onChange={(e) => setState(prev => ({ ...prev, batchUploadGroup: e.target.value }))}
-                  maxLength={100}
-                  disabled={state.uploadingFile || !!state.batchTaskId}
+                <Select
+                  mode="tags"
                   style={{ width: '100%' }}
-                />
+                  placeholder="Your personal tags (e.g., Market Weekly, Broker Report)"
+                  value={state.batchUploadTags}
+                  onChange={(values) => setState(prev => ({ ...prev, batchUploadTags: values }))}
+                  disabled={state.uploadingFile || !!state.batchTaskId}
+                  loading={state.loadingTags}
+                  maxTagCount="responsive"
+                >
+                  {state.availableTags.map(tag => (
+                    <Select.Option key={tag.tag_name} value={tag.tag_name}>
+                      {tag.tag_name} ({tag.count})
+                    </Select.Option>
+                  ))}
+                </Select>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  All themes in this batch will be assigned to this group (if provided)
+                  🏷️ All themes in this batch will be tagged with your personal tags. These are only visible to you.
                 </Text>
               </div>
 
@@ -2632,7 +3249,7 @@ const InvestmentThemesPage: React.FC = () => {
           {/* Progress Display */}
           {state.batchTaskId && (
             <>
-              <Divider>Processing Progress</Divider>
+              <Divider>Processing: llm description generation, vectorization, ticker verification</Divider>
               <Progress
                 percent={state.batchTaskProgress}
                 status={state.batchTaskProgress === 100 ? 'success' : 'active'}

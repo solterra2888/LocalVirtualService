@@ -35,7 +35,7 @@ class MarketWeeklyService:
         self.db_manager = DatabaseManager(db_config)
         logger.info("MarketWeeklyService initialized")
     
-    def generate_report(self, period: str = 'latest', use_cache: bool = True, cache_ttl: int = 3600) -> Dict[str, Any]:
+    def generate_report(self, period: str = 'latest', use_cache: bool = True, cache_ttl: int = 3600, user_id: str = None) -> Dict[str, Any]:
         """
         生成Market Weekly报告
         
@@ -43,11 +43,13 @@ class MarketWeeklyService:
             period: 报告周期，'latest' 表示最新一周
             use_cache: 是否使用缓存，默认True
             cache_ttl: 缓存过期时间（秒），默认3600秒（1小时）
+            user_id: 用户ID，用于筛选用户个性化的主题标签
         
         Returns:
             完整的报告数据字典
         """
-        cache_key = f"market_weekly_report:{period}"
+        # 🔥 缓存key包含用户ID，确保每个用户的报告独立缓存
+        cache_key = f"market_weekly_report:{period}:{user_id}" if user_id else f"market_weekly_report:{period}"
         
         # 尝试从缓存获取
         if use_cache:
@@ -86,7 +88,7 @@ class MarketWeeklyService:
             yields_wow = self._calculate_wow('bond', week_start, week_end)
             
             # 2.5 计算AI Related数据（从数据库获取Market Weekly主题，分US和China市场）
-            us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative = self._calculate_ai_related_performance(week_start, week_end, days=90)
+            us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative = self._calculate_ai_related_performance(week_start, week_end, days=90, user_id=user_id)
             
             # 3. 计算相对表现（3个月，indexed to 100）
             indices_relative = self._calculate_relative_performance('index', days=90)
@@ -102,7 +104,7 @@ class MarketWeeklyService:
             technical_views = self._get_technical_views_data()
             
             # 5.5 获取My Themes股票数据（个股走势图）
-            my_themes_stocks = self._get_my_themes_stocks()
+            my_themes_stocks = self._get_my_themes_stocks(user_id=user_id)
             
             # 6. 获取下周展望数据
             next_week_outlook = self._get_next_week_outlook(week_end)
@@ -1679,11 +1681,11 @@ class MarketWeeklyService:
             logger.error(traceback.format_exc())
             return None
     
-    def _calculate_ai_related_performance(self, week_start: datetime, week_end: datetime, days: int = 90) -> tuple:
+    def _calculate_ai_related_performance(self, week_start: datetime, week_end: datetime, days: int = 90, user_id: str = None) -> tuple:
         """
         计算AI Related主题的WoW和相对表现（分US和China市场）
         
-        从数据库获取group='Market Weekly'的主题，通过theme_company_associations获取相关ticker，
+        🔥 从数据库获取用户个性化的 'Market Weekly' 标签主题，通过theme_company_associations获取相关ticker，
         然后从stock_prices_eod获取价格数据进行计算
         
         US市场: market = 'US'
@@ -1693,37 +1695,45 @@ class MarketWeeklyService:
             week_start: 起始日期
             week_end: 结束日期
             days: 相对表现回溯天数
+            user_id: 用户ID，用于筛选用户个性化的标签
         
         Returns:
             (us_ai_wow, us_ai_relative, china_ai_wow, china_ai_relative) 四元组
         """
-        logger.info("Calculating AI Related performance from database themes (US and China markets)")
+        logger.info(f"Calculating AI Related performance from database themes (US and China markets) for user: {user_id}")
         
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
             
-            # 1. 获取Market Weekly AI主题及其关联的ticker
-            theme_query = """
-            SELECT 
-                ite.theme_id,
-                ite.theme_name,
-                ite.category,
-                tca.ticker,
-                tca.market,
-                tca.company_name
-            FROM investment_theme_embeddings ite
-            INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
-            WHERE ite."group" = 'Market Weekly'
-              AND tca.is_verified = TRUE
-            ORDER BY ite.theme_name, tca.market, tca.ticker;
-            """
+            # 🔥 1. 获取用户个性化的Market Weekly主题及其关联的ticker
+            if user_id:
+                theme_query = """
+                    SELECT DISTINCT
+                    ite.theme_id,
+                    ite.theme_name,
+                    ite.category,
+                    tca.ticker,
+                    tca.market,
+                    tca.company_name
+                FROM investment_theme_embeddings ite
+                INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
+                    INNER JOIN theme_tags tt ON ite.theme_id = tt.theme_id
+                    WHERE tt.tag_name = 'Market Weekly'
+                      AND tt.user_id = %s
+                  AND tca.is_verified = TRUE
+                ORDER BY ite.theme_name, tca.market, tca.ticker;
+                """
+                cursor.execute(theme_query, (user_id,))
+            else:
+                # 如果没有user_id，返回空结果（个性化标签必须指定用户）
+                logger.warning("No user_id provided for personalized Market Weekly themes")
+                return [], [], [], []
             
-            cursor.execute(theme_query)
             theme_tickers = cursor.fetchall()
             
             if not theme_tickers:
-                logger.warning("No Market Weekly AI themes found in database")
+                logger.warning(f"No Market Weekly AI themes found for user: {user_id}")
                 return [], [], [], []
             
             # 2. 按主题和市场分组ticker
@@ -1955,7 +1965,7 @@ class MarketWeeklyService:
         logger.info(f"Calculated relative performance for {len(market_relative)} days")
         return market_relative
     
-    def _get_my_themes_stocks(self) -> Dict[str, Any]:
+    def _get_my_themes_stocks(self, user_id: str = None) -> Dict[str, Any]:
         """
         获取My Themes的个股数据（用于Technical Views章节的个股走势图）
         
@@ -1985,36 +1995,45 @@ class MarketWeeklyService:
                 ]
             }
         """
-        logger.info("Fetching My Themes stocks for individual ticker charts")
+        logger.info(f"Fetching My Themes stocks for individual ticker charts for user: {user_id}")
         
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
             
-            # 获取Market Weekly主题及其关联的ticker
-            query = """
-            SELECT 
-                ite.theme_id,
-                ite.theme_name,
-                ite.category,
-                tca.ticker,
-                tca.market,
-                tca.company_name
-            FROM investment_theme_embeddings ite
-            INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
-            WHERE ite."group" = 'Market Weekly'
-              AND tca.is_verified = TRUE
-            ORDER BY ite.theme_name, tca.market, tca.ticker;
-            """
+            # 🔥 获取用户个性化的Market Weekly主题及其关联的ticker
+            if user_id:
+                query = """
+                    SELECT DISTINCT
+                    ite.theme_id,
+                    ite.theme_name,
+                    ite.category,
+                    tca.ticker,
+                    tca.market,
+                    tca.company_name
+                FROM investment_theme_embeddings ite
+                INNER JOIN theme_company_associations tca ON ite.theme_id = tca.theme_id
+                    INNER JOIN theme_tags tt ON ite.theme_id = tt.theme_id
+                    WHERE tt.tag_name = 'Market Weekly'
+                      AND tt.user_id = %s
+                  AND tca.is_verified = TRUE
+                ORDER BY ite.theme_name, tca.market, tca.ticker;
+                """
+                cursor.execute(query, (user_id,))
+            else:
+                # 如果没有user_id，返回空结果（个性化标签必须指定用户）
+                logger.warning("No user_id provided for personalized Market Weekly themes")
+                cursor.close()
+                conn.close()
+                return {"us_stocks": [], "china_stocks": []}
             
-            cursor.execute(query)
             rows = cursor.fetchall()
             
             cursor.close()
             conn.close()
             
             if not rows:
-                logger.warning("No Market Weekly themes found in database")
+                logger.warning(f"No Market Weekly themes found for user: {user_id}")
                 return {"us_stocks": [], "china_stocks": []}
             
             # 按市场分类

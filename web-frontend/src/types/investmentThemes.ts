@@ -7,7 +7,8 @@
  */
 export interface InvestmentTheme {
   theme_id: string;
-  group?: string;  // Theme group (e.g., AI, crypto) for classification
+  group?: string;  // Theme group (e.g., AI, crypto) for classification - DEPRECATED, use tags instead
+  tags?: string[];  // Theme tags (e.g., ['Market Weekly', 'Broker Report'])
   theme_name: string;
   category?: string;  // Theme category/classification
   description_preview?: string;  // Theme description preview (LLM-generated or manually written)
@@ -30,6 +31,16 @@ export interface InvestmentTheme {
   verified_tickers?: number;
   total_tickers?: number;
   created_by?: string;
+  
+  // Sharing status
+  is_shared?: boolean;  // Whether this theme is shared with all users
+  shared_at?: string;   // When the theme was shared
+  shared_by?: string;   // Who shared the theme
+  
+  // Permission flags (computed by backend)
+  can_edit?: boolean;   // Whether current user can edit this theme
+  can_delete?: boolean; // Whether current user can delete this theme
+  can_share?: boolean;  // Whether current user can share/unshare this theme
 }
 
 /**

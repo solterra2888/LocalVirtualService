@@ -52,32 +52,35 @@ export async function listThemes(
   limit: number = 100,
   offset: number = 0,
   search?: string,
-  groups?: string[],
-  createdBy?: string[]
+  tags?: string[],
+  createdBy?: string[],
+  showShared: boolean = true
 ): Promise<ThemeListResponse> {
-  const params: Record<string, any> = { limit, offset };
+  const params: Record<string, any> = { limit, offset, show_shared: showShared };
   if (search !== undefined && search !== null && search !== '') {
     params.search = search;
   }
   
-  // FastAPI 的 Query(List[str]) 需要多个同名参数，如 ?group=crypto&group=market%20weekly
+  // FastAPI 的 Query(List[str]) 需要多个同名参数，如 ?group=AI&group=Market%20Weekly
+  // 注意：后端参数名仍为 'group'，但实际用于筛选 theme_tags 表中的 tag_name
   // axios 默认会将数组转换为 group[]=crypto&group[]=market%20weekly 或其他格式
   // 我们需要手动构建 URL 参数来确保格式正确
-  const hasGroups = groups !== undefined && groups !== null && groups.length > 0;
+  const hasTags = tags !== undefined && tags !== null && tags.length > 0;
   const hasUsers = createdBy !== undefined && createdBy !== null && createdBy.length > 0;
   
-  if (hasGroups || hasUsers) {
+  if (hasTags || hasUsers) {
     // 手动构建查询字符串，确保每个 group 和 created_by 都是独立的参数
     const queryParams = new URLSearchParams();
     queryParams.append('limit', limit.toString());
     queryParams.append('offset', offset.toString());
+    queryParams.append('show_shared', showShared.toString());
     if (search) {
       queryParams.append('search', search);
     }
-    // 为每个 group 添加一个独立的参数（多个同名参数）
-    if (hasGroups) {
-      groups.forEach(group => {
-        queryParams.append('group', group);
+    // 为每个 tag 添加一个独立的 'group' 参数（后端参数名仍为 'group'）
+    if (hasTags) {
+      tags.forEach(tag => {
+        queryParams.append('group', tag);
       });
     }
     // 为每个 created_by 添加一个独立的参数（多个同名参数）
@@ -134,6 +137,26 @@ export async function getThemeAssociations(
   return await api.get<ThemeAssociationsResponse>(
     `/investment-themes/${themeId}/associations`
   );
+}
+
+/**
+ * Update theme share status
+ */
+export async function updateThemeShareStatus(
+  themeId: string,
+  isShared: boolean
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  is_shared: boolean;
+}> {
+  return await api.patch<{
+    success: boolean;
+    message: string;
+    theme_id: string;
+    is_shared: boolean;
+  }>(`/investment-themes/${themeId}/share`, { is_shared: isShared });
 }
 
 /**
@@ -524,5 +547,77 @@ export async function batchUploadThemes(
   }
   
   return await response.json();
+}
+
+/**
+ * Get available tags and their counts
+ */
+export async function getAvailableTags(): Promise<{
+  success: boolean;
+  tags: Array<{ tag_name: string; count: number }>;
+}> {
+  return await api.get('/investment-themes/available-tags');
+}
+
+/**
+ * Get tags for a specific theme
+ */
+export async function getThemeTags(themeId: string): Promise<{
+  success: boolean;
+  theme_id: string;
+  tags: Array<{ tag_name: string; created_at?: string; created_by?: string }>;
+}> {
+  return await api.get(`/investment-themes/${themeId}/tags`);
+}
+
+/**
+ * Batch add or remove tags for themes
+ */
+export async function batchTagThemes(
+  themeIds: string[],
+  tags: string[],
+  action: 'add' | 'remove'
+): Promise<{
+  success: boolean;
+  message: string;
+  affected_count: number;
+}> {
+  return await api.post('/investment-themes/batch-tag', {
+    theme_ids: themeIds,
+    tags,
+    action,
+  });
+}
+
+/**
+ * Add a single tag to a theme
+ */
+export async function addTagToTheme(
+  themeId: string,
+  tagName: string
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  tag_name: string;
+}> {
+  return await api.post(`/investment-themes/${themeId}/tags`, {
+    tag_name: tagName,
+  });
+}
+
+/**
+ * Remove a single tag from a theme
+ */
+export async function removeTagFromTheme(
+  themeId: string,
+  tagName: string
+): Promise<{
+  success: boolean;
+  message: string;
+  theme_id: string;
+  tag_name: string;
+}> {
+  return await api.delete(`/investment-themes/${themeId}/tags/${tagName}`);
 }
 

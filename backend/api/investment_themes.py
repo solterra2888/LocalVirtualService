@@ -139,6 +139,23 @@ class VerifyTickerRequest(BaseModel):
     ticker: str = Field(..., description="要验证的ticker（完整格式，如 TLN.US）")
 
 
+class UpdateShareStatusRequest(BaseModel):
+    """更新分享状态请求"""
+    is_shared: bool = Field(..., description="是否公开分享")
+
+
+class BatchTagRequest(BaseModel):
+    """批量打标签请求"""
+    theme_ids: List[str] = Field(..., description="主题ID列表")
+    tags: List[str] = Field(..., description="标签名称列表")
+    action: str = Field(..., description="操作类型：add 或 remove")
+
+
+class AddTagToThemeRequest(BaseModel):
+    """为主题添加标签请求"""
+    tag_name: str = Field(..., min_length=1, max_length=100, description="标签名称")
+
+
 class VerifyTickerResponse(BaseModel):
     """验证ticker响应"""
     success: bool
@@ -388,6 +405,7 @@ async def list_all_themes(
     search: Optional[str] = Query(None, description="Search keyword for theme name or category"),
     group: Optional[List[str]] = Query(None, description="Filter by group name(s) - multiple selection supported"),
     created_by: Optional[List[str]] = Query(None, description="Filter by creator username(s) - multiple selection supported (admin only)"),
+    show_shared: bool = Query(True, description="是否显示已分享的themes（非admin用户）"),
     limit: int = 100,
     offset: int = 0,
     current_user: TokenData = Depends(get_current_user)
@@ -397,19 +415,20 @@ async def list_all_themes(
     
     权限：
     - admin用户：可以查看所有主题
-    - 非admin用户：只能查看自己创建的主题
+    - 非admin用户：可以查看自己创建的主题 + 已分享的主题(is_shared=true)
     
     参数：
     - market: 市场过滤（HK/US/CN）
     - search: 搜索关键词（主题名称或类别）
     - group: 按组名筛选（支持多个，逗号分隔或多次传递）
     - created_by: 按创建者用户名筛选（支持多个，仅admin用户可用）
+    - show_shared: 是否显示已分享的themes（非admin用户，默认true）
     - limit: 每页数量
     - offset: 偏移量
     
     示例：
     ```
-    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto&created_by=user1&created_by=user2
+    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto&created_by=user1&created_by=user2&show_shared=true
     ```
     """
     try:
@@ -428,10 +447,21 @@ async def list_all_themes(
         filters = []
         filter_params: List[Any] = []
 
-        # 非admin用户只能看自己创建的主题
+        # 权限和筛选逻辑
         if not current_user.is_admin:
-            filters.append("ite.created_by = %s")
-            filter_params.append(current_user.username)
+            # 非admin用户：自己创建的 OR 已分享的
+            if show_shared:
+                filters.append("(ite.created_by = %s OR ite.is_shared = TRUE)")
+                filter_params.append(current_user.username)
+            else:
+                # 只看自己创建的
+                filters.append("ite.created_by = %s")
+                filter_params.append(current_user.username)
+        else:
+            # admin用户：如果选择"仅我创建的"，则只显示自己创建的
+            if not show_shared:
+                filters.append("ite.created_by = %s")
+                filter_params.append(current_user.username)
 
         search_value = search.strip() if search else None
         if search_value:
@@ -439,14 +469,24 @@ async def list_all_themes(
             pattern = f"%{search_value}%"
             filter_params.extend([pattern, pattern])
         
-        # 添加 group 筛选（支持多个 group）
+        # 🔥 添加 group (tags) 筛选（支持多个 tag）
+        # 现在基于用户个性化标签筛选
         if group and len(group) > 0:
             # 过滤掉空字符串
-            valid_groups = [g.strip() for g in group if g and g.strip()]
-            if valid_groups:
-                placeholders = ','.join(['%s'] * len(valid_groups))
-                filters.append(f"ite.\"group\" IN ({placeholders})")
-                filter_params.extend(valid_groups)
+            valid_tags = [g.strip() for g in group if g and g.strip()]
+            if valid_tags:
+                # 筛选拥有这些标签的主题（当前用户的标签）
+                placeholders = ','.join(['%s'] * len(valid_tags))
+                filters.append(f"""
+                    EXISTS (
+                        SELECT 1 FROM theme_tags tt
+                        WHERE tt.theme_id = ite.theme_id
+                          AND tt.user_id = %s
+                          AND tt.tag_name IN ({placeholders})
+                    )
+                """)
+                filter_params.append(current_user.username)
+                filter_params.extend(valid_tags)
         
         # 添加 created_by 筛选（支持多个用户，仅admin用户可用）
         if created_by and len(created_by) > 0 and current_user.is_admin:
@@ -484,7 +524,10 @@ async def list_all_themes(
                 ite.description,
                 ite.description_source,
                 ite.is_enabled_for_matching,
-                ite."group"
+                ite."group",
+                ite.is_shared,
+                ite.shared_at,
+                ite.shared_by
             FROM investment_theme_embeddings ite
             {where_clause}
             ORDER BY ite.theme_name
@@ -509,8 +552,15 @@ async def list_all_themes(
                 'description_source': row[11],
                 'is_enabled_for_matching': row[12] if row[12] is not None else True,
                 'group': row[13],
+                'is_shared': row[14] if row[14] is not None else False,
+                'shared_at': row[15].isoformat() if row[15] else None,
+                'shared_by': row[16],
                 'has_embedding': True,
-                'tickers': []
+                'tickers': [],
+                # 权限标记
+                'can_edit': current_user.is_admin or row[9] == current_user.username,
+                'can_delete': current_user.is_admin or row[9] == current_user.username,
+                'can_share': current_user.is_admin or row[9] == current_user.username,
             })
         
         if themes:
@@ -536,6 +586,18 @@ async def list_all_themes(
                 for row in ticker_rows
             }
             
+            # 🔥 查询主题的标签（只返回当前用户的标签）
+            cursor.execute("""
+                SELECT theme_id, ARRAY_AGG(tag_name ORDER BY created_at) AS tags
+                FROM theme_tags
+                WHERE theme_id = ANY(%s)
+                  AND user_id = %s
+                GROUP BY theme_id
+            """, (theme_ids, current_user.username))
+            
+            tags_rows = cursor.fetchall()
+            tags_map = {row[0]: [tag for tag in row[1] if tag] for row in tags_rows}
+            
             for theme in themes:
                 counts = ticker_map.get(theme['theme_id'])
                 if counts:
@@ -546,6 +608,9 @@ async def list_all_themes(
                     theme['tickers'] = []
                     theme['verified_tickers'] = 0
                     theme['total_tickers'] = 0
+                
+                # 🔥 添加标签列表
+                theme['tags'] = tags_map.get(theme['theme_id'], [])
         
         cursor.close()
         conn.close()
@@ -1427,6 +1492,118 @@ async def delete_theme(
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
+@router.patch("/{theme_id}/share")
+async def update_theme_share_status(
+    theme_id: str,
+    request: UpdateShareStatusRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    更新主题的分享状态
+    
+    权限：
+    - Admin：可以分享/取消分享所有主题
+    - 普通用户：只能分享/取消分享自己创建的主题
+    
+    说明：
+    - is_shared=true: 主题对所有用户可见和可用（但只有创建者和admin可编辑）
+    - is_shared=false: 主题仅对创建者和admin可见
+    
+    示例：
+    ```
+    PATCH /api/investment-themes/BK1001/share
+    {
+        "is_shared": true
+    }
+    ```
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查是否是主题的创建者
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings 
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="权限不足：只能分享自己创建的主题"
+                )
+        
+        # 更新分享状态
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        if request.is_shared:
+            # 设置为分享
+            cursor.execute("""
+                UPDATE investment_theme_embeddings
+                SET is_shared = TRUE,
+                    shared_at = NOW(),
+                    shared_by = %s,
+                    updated_at = NOW()
+                WHERE theme_id = %s
+            """, (current_user.username, theme_id))
+        else:
+            # 取消分享
+            cursor.execute("""
+                UPDATE investment_theme_embeddings
+                SET is_shared = FALSE,
+                    shared_at = NULL,
+                    shared_by = NULL,
+                    updated_at = NOW()
+                WHERE theme_id = %s
+            """, (theme_id,))
+        
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="主题不存在")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(
+            f"User {current_user.username} updated share status for theme {theme_id}",
+            is_shared=request.is_shared,
+            is_admin=current_user.is_admin
+        )
+        
+        return {
+            "success": True,
+            "message": f"主题{'已分享' if request.is_shared else '已取消分享'}",
+            "theme_id": theme_id,
+            "is_shared": request.is_shared
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update theme share status failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
 @router.post("/batch-delete")
 async def batch_delete_themes(
     request: BatchDeleteThemeRequest,
@@ -1970,6 +2147,99 @@ async def update_theme_tickers(
         
         logger.info(f"Created {new_count} new ticker associations for theme {request.theme_id}")
         
+        # 🔍 自动验证新添加的 tickers
+        verified_count = 0
+        if valid_tickers:
+            logger.info(f"🔍 Auto-verifying {len(valid_tickers)} tickers for theme {request.theme_id}...")
+            
+            try:
+                from backend.services.eodhd_fundamentals_service import EODHDFundamentalsService
+                from backend.config.exchange_config import format_ticker_for_eodhd
+                
+                for ticker in valid_tickers:
+                    try:
+                        # 检查ticker是否在companies表中
+                        verify_conn = db_manager.get_connection()
+                        verify_cursor = verify_conn.cursor()
+                        
+                        verify_cursor.execute("""
+                            SELECT id, code, name, exchange, primaryticker
+                            FROM companies
+                            WHERE UPPER(primaryticker) = UPPER(%s)
+                            LIMIT 1
+                        """, (ticker,))
+                        
+                        company_result = verify_cursor.fetchone()
+                        
+                        if company_result:
+                            # 在数据库中找到，更新is_verified
+                            verify_cursor.execute("""
+                                UPDATE theme_company_associations
+                                SET is_verified = TRUE,
+                                    company_name = %s,
+                                    updated_at = NOW()
+                                WHERE theme_id = %s AND ticker = %s
+                            """, (company_result[2], request.theme_id, ticker))
+                            verify_conn.commit()
+                            verified_count += 1
+                            logger.debug(f"  ✅ {ticker} verified (found in DB)")
+                        else:
+                            # 不在数据库中，尝试从EODHD获取
+                            logger.debug(f"  🔍 {ticker} not in DB, fetching from EODHD...")
+                            
+                            formatted_ticker = format_ticker_for_eodhd(ticker)
+                            if '.' in formatted_ticker:
+                                symbol, exchange = formatted_ticker.rsplit('.', 1)
+                            else:
+                                symbol = formatted_ticker
+                                exchange = 'US'
+                            
+                            fundamentals_service = EODHDFundamentalsService()
+                            full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+                            
+                            if full_data:
+                                # 保存到数据库
+                                company_data = {
+                                    'symbol': symbol,
+                                    'exchange': exchange,
+                                    'general_data': full_data.get('General', full_data),
+                                    'address_data': full_data.get('General', full_data).get('AddressData') if full_data.get('General') else None,
+                                    'officers_data': fundamentals_service._extract_officers_list(full_data.get('General', full_data).get('Officers', {})) if full_data.get('General') else [],
+                                    'listings_data': full_data.get('General', full_data).get('Listings') if full_data.get('General') else None,
+                                    'full_data': full_data
+                                }
+                                
+                                fundamentals_service.batch_save_companies_data([company_data])
+                                
+                                # 更新is_verified
+                                general_data = full_data.get('General', full_data)
+                                company_name = general_data.get('Name', symbol)
+                                
+                                verify_cursor.execute("""
+                                    UPDATE theme_company_associations
+                                    SET is_verified = TRUE,
+                                        company_name = %s,
+                                        updated_at = NOW()
+                                    WHERE theme_id = %s AND ticker = %s
+                                """, (company_name, request.theme_id, ticker))
+                                verify_conn.commit()
+                                verified_count += 1
+                                logger.info(f"  ✅ {ticker} verified (fetched from EODHD)")
+                            else:
+                                logger.warning(f"  ⚠️ {ticker} not found in EODHD")
+                        
+                        verify_cursor.close()
+                        verify_conn.close()
+                        
+                    except Exception as verify_error:
+                        logger.warning(f"  ❌ Failed to verify {ticker}: {str(verify_error)}")
+                        continue
+                
+                logger.info(f"🔍 Auto-verification completed: {verified_count}/{len(valid_tickers)} tickers verified")
+                
+            except Exception as e:
+                logger.warning(f"Auto-verification failed: {str(e)}")
+        
         return {
             "success": True,
             "message": f"主题更新成功：删除 {old_count} 个旧关联，创建 {new_count} 个新关联",
@@ -1977,7 +2247,8 @@ async def update_theme_tickers(
             "description_updated": update_result.get('description_saved'),
             "embedding_updated": update_result.get('embedding_updated'),
             "old_associations_deleted": old_count,
-            "new_associations_created": new_count
+            "new_associations_created": new_count,
+            "verified_count": verified_count
         }
         
     except HTTPException:
@@ -2465,4 +2736,417 @@ async def batch_upload_themes(
     except Exception as e:
         logger.error(f"Batch upload failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
+
+
+# ==================== Theme Tags Management Endpoints ====================
+
+@router.get("/{theme_id}/tags")
+async def get_theme_tags(
+    theme_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    获取主题的所有标签
+    
+    Returns:
+        {
+            "success": true,
+            "theme_id": "theme_001",
+            "tags": ["Market Weekly", "Broker Report"]
+        }
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 查询主题的所有标签
+        cursor.execute("""
+            SELECT tag_name, created_at, created_by
+            FROM theme_tags
+            WHERE theme_id = %s
+            ORDER BY created_at DESC
+        """, (theme_id,))
+        
+        rows = cursor.fetchall()
+        tags = [{"tag_name": row[0], "created_at": row[1].isoformat() if row[1] else None, "created_by": row[2]} for row in rows]
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "theme_id": theme_id,
+            "tags": tags
+        }
+        
+    except Exception as e:
+        logger.error(f"Get theme tags failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取标签失败: {str(e)}")
+
+
+@router.get("/available-tags")
+async def get_available_tags(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    获取当前用户的所有可用标签及其使用次数（用户个性化）
+    
+    🔥 只返回当前用户自己创建的标签
+    
+    Returns:
+        {
+            "success": true,
+            "tags": [
+                {"tag_name": "Market Weekly", "count": 15},
+                {"tag_name": "Broker Report", "count": 3}
+            ]
+        }
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 🔥 查询当前用户的标签及其使用次数
+        cursor.execute("""
+            SELECT tag_name, COUNT(DISTINCT theme_id) as count
+            FROM theme_tags
+            WHERE user_id = %s
+            GROUP BY tag_name
+            ORDER BY count DESC, tag_name
+        """, (current_user.username,))
+        
+        rows = cursor.fetchall()
+        tags = [{"tag_name": row[0], "count": row[1]} for row in rows]
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "tags": tags
+        }
+        
+    except Exception as e:
+        logger.error(f"Get available tags failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取可用标签失败: {str(e)}")
+
+
+@router.post("/batch-tag")
+async def batch_tag_themes(
+    request: BatchTagRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量为主题添加或移除标签（用户个性化标签）
+    
+    🔥 重要变更：标签现在是用户个性化的
+    - 每个用户可以独立为任何主题（包括别人分享的）打标签
+    - 用户只能添加/删除自己的标签，不影响其他用户的标签
+    - 同一个主题可以被不同用户独立打上相同的标签
+    
+    权限：
+    - 所有用户都可以为可见的主题打标签（自己创建的 + 已分享的）
+    - 用户只能删除自己添加的标签
+    
+    Args:
+        request: {
+            "theme_ids": ["theme_001", "theme_002"],
+            "tags": ["Market Weekly", "Broker Report"],
+            "action": "add" | "remove"
+        }
+    
+    Returns:
+        {
+            "success": true,
+            "message": "成功为 2 个主题添加标签",
+            "affected_count": 2
+        }
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        if not request.theme_ids:
+            raise HTTPException(status_code=400, detail="主题ID列表不能为空")
+        
+        if not request.tags:
+            raise HTTPException(status_code=400, detail="标签列表不能为空")
+        
+        if request.action not in ["add", "remove"]:
+            raise HTTPException(status_code=400, detail="操作类型必须是 'add' 或 'remove'")
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        
+        # 🔥 验证用户是否有权限查看这些主题
+        # 用户可以为自己创建的主题 OR 已分享的主题打标签
+        placeholders = ','.join(['%s'] * len(request.theme_ids))
+        if not current_user.is_admin:
+            cursor.execute(f"""
+                SELECT theme_id FROM investment_theme_embeddings
+                WHERE theme_id IN ({placeholders})
+                  AND (created_by = %s OR is_shared = TRUE)
+            """, (*request.theme_ids, current_user.username))
+        else:
+            # Admin can tag all themes
+            cursor.execute(f"""
+                SELECT theme_id FROM investment_theme_embeddings
+                WHERE theme_id IN ({placeholders})
+            """, (*request.theme_ids,))
+        
+        accessible_themes = {row[0] for row in cursor.fetchall()}
+        inaccessible_themes = set(request.theme_ids) - accessible_themes
+        
+        if inaccessible_themes:
+            cursor.close()
+            conn.close()
+            raise HTTPException(
+                status_code=403,
+                detail=f"权限不足：无法访问以下主题: {', '.join(inaccessible_themes)}"
+            )
+        
+        affected_count = 0
+        
+        if request.action == "add":
+            # 🔥 批量添加标签（记录 user_id）
+            for theme_id in request.theme_ids:
+                for tag_name in request.tags:
+                    cursor.execute("""
+                        INSERT INTO theme_tags (theme_id, tag_name, user_id, created_by, created_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                        ON CONFLICT (theme_id, tag_name, user_id) DO NOTHING
+                    """, (theme_id, tag_name, current_user.username, current_user.username))
+                    affected_count += cursor.rowcount
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            logger.info(
+                f"User {current_user.username} added personal tags to themes",
+                theme_ids=request.theme_ids,
+                tags=request.tags,
+                affected_count=affected_count
+            )
+            
+            return {
+                "success": True,
+                "message": f"成功为 {len(request.theme_ids)} 个主题添加标签",
+                "affected_count": affected_count
+            }
+        
+        else:  # action == "remove"
+            # 🔥 批量移除标签（只删除当前用户的标签）
+            placeholders_themes = ','.join(['%s'] * len(request.theme_ids))
+            placeholders_tags = ','.join(['%s'] * len(request.tags))
+            
+            cursor.execute(f"""
+                DELETE FROM theme_tags
+                WHERE theme_id IN ({placeholders_themes})
+                  AND tag_name IN ({placeholders_tags})
+                  AND user_id = %s
+            """, (*request.theme_ids, *request.tags, current_user.username))
+            
+            affected_count = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            logger.info(
+                f"User {current_user.username} removed personal tags from themes",
+                theme_ids=request.theme_ids,
+                tags=request.tags,
+                affected_count=affected_count
+            )
+            
+            return {
+                "success": True,
+                "message": f"成功从 {len(request.theme_ids)} 个主题移除标签",
+                "affected_count": affected_count
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch tag operation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量标签操作失败: {str(e)}")
+
+
+@router.post("/{theme_id}/tags")
+async def add_tag_to_theme(
+    theme_id: str,
+    request: AddTagToThemeRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    为单个主题添加标签
+    
+    权限：
+    - Admin：可以为所有主题添加标签
+    - 普通用户：只能为自己创建的主题添加标签
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查权限
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403,
+                    detail="权限不足：只能为自己创建的主题添加标签"
+                )
+        
+        # 添加标签
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO theme_tags (theme_id, tag_name, created_by, created_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (theme_id, tag_name) DO NOTHING
+        """, (theme_id, request.tag_name, current_user.username))
+        
+        affected = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if affected == 0:
+            return {
+                "success": True,
+                "message": "标签已存在",
+                "theme_id": theme_id,
+                "tag_name": request.tag_name
+            }
+        
+        return {
+            "success": True,
+            "message": "标签添加成功",
+            "theme_id": theme_id,
+            "tag_name": request.tag_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Add tag to theme failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"添加标签失败: {str(e)}")
+
+
+@router.delete("/{theme_id}/tags/{tag_name}")
+async def remove_tag_from_theme(
+    theme_id: str,
+    tag_name: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    从单个主题移除标签
+    
+    权限：
+    - Admin：可以移除所有主题的标签
+    - 普通用户：只能移除自己创建的主题的标签
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 非admin用户需要检查权限
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT created_by FROM investment_theme_embeddings
+                WHERE theme_id = %s
+            """, (theme_id,))
+            result_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result_row:
+                raise HTTPException(status_code=404, detail="主题不存在")
+            
+            if result_row[0] != current_user.username:
+                raise HTTPException(
+                    status_code=403,
+                    detail="权限不足：只能移除自己创建的主题的标签"
+                )
+        
+        # 移除标签
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM theme_tags
+            WHERE theme_id = %s AND tag_name = %s
+        """, (theme_id, tag_name))
+        
+        affected = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if affected == 0:
+            raise HTTPException(status_code=404, detail="标签不存在")
+        
+        return {
+            "success": True,
+            "message": "标签移除成功",
+            "theme_id": theme_id,
+            "tag_name": tag_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Remove tag from theme failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"移除标签失败: {str(e)}")
 
