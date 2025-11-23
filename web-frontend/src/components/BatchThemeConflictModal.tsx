@@ -119,7 +119,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       data.push({
         ticker,
         status: 'new',
-        statusText: '新增',
+        statusText: 'New',
         statusColor: 'green'
       });
     });
@@ -129,7 +129,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       data.push({
         ticker,
         status: 'duplicate',
-        statusText: '重复',
+        statusText: 'Duplicate',
         statusColor: 'blue'
       });
     });
@@ -139,7 +139,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       data.push({
         ticker,
         status: 'existing',
-        statusText: '原有',
+        statusText: 'Existing',
         statusColor: 'default'
       });
     });
@@ -198,9 +198,9 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
         </Tag>
       ),
       filters: [
-        { text: '新增', value: 'new' },
-        { text: '重复', value: 'duplicate' },
-        { text: '原有', value: 'existing' }
+        { text: 'New', value: 'new' },
+        { text: 'Duplicate', value: 'duplicate' },
+        { text: 'Existing', value: 'existing' }
       ],
       onFilter: (value, record) => record.status === value
     }
@@ -293,7 +293,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       });
       
       if (Object.keys(conflictResolutions).length === 0) {
-        message.warning('请至少为一个主题选择 Tickers');
+        message.warning('Please select Tickers for at least one theme');
         setResolving(false);
         return;
       }
@@ -306,12 +306,12 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       const result = await batchResolveConflicts(conflictResolutions);
       
       if (!result.success) {
-        throw new Error(result.message || '提交失败');
+        throw new Error(result.message || 'Submission failed');
       }
       
       const taskId = result.task_id;
       console.log(`✅ Batch conflict resolution task submitted: ${taskId}`);
-      message.success(`批量冲突解决任务已提交，正在处理 ${Object.keys(conflictResolutions).length} 个主题...`);
+      message.success(`Batch conflict resolution task submitted, processing ${Object.keys(conflictResolutions).length} themes...`);
       
       // 轮询任务状态
       await pollTaskUntilComplete(
@@ -344,23 +344,23 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
         
         if (skippedCount > 0) {
           message.success(
-            `批量冲突解决完成: ${stats.success} 成功, ${stats.failed} 失败, ${skippedCount} 跳过（无变化，节省了 ${skippedCount} 次 LLM 调用和向量化）`
+            `Batch conflict resolution completed: ${stats.success} successful, ${stats.failed} failed, ${skippedCount} skipped (no changes, saved ${skippedCount} LLM calls and vectorizations)`
           );
         } else {
           message.success(
-            `批量冲突解决完成: ${stats.success} 成功, ${stats.failed} 失败`
+            `Batch conflict resolution completed: ${stats.success} successful, ${stats.failed} failed`
           );
         }
         
         // 关闭对话框
         onClose();
       } else {
-        throw new Error(finalResult?.error || '任务执行失败');
+        throw new Error(finalResult?.error || 'Task execution failed');
       }
       
     } catch (error: any) {
       console.error('❌ Batch conflict resolution failed:', error);
-      message.error(`批量冲突解决失败: ${error.message || String(error)}`);
+      message.error(`Batch conflict resolution failed: ${error.message || String(error)}`);
     } finally {
       setResolving(false);
     }
@@ -400,7 +400,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       title={
         <Space>
           <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-          <span>批量上传冲突解决 - 统一处理</span>
+          <span>Batch Upload Conflict Resolution - Unified Processing</span>
         </Space>
       }
       open={visible}
@@ -412,39 +412,39 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       <Space direction="vertical" style={{ width: '100%' }} size="large">
         {/* 全局统计 */}
         <Alert
-          message="全局操作汇总"
+          message="Global Operation Summary"
           description={
             <Space direction="vertical" style={{ width: '100%' }} size="small">
               <Row gutter={16}>
                 <Col span={6}>
                   <Statistic 
-                    title="将新增" 
+                    title="Will Add" 
                     value={globalStats.totalAdded} 
-                    suffix="个"
+                    suffix=""
                     valueStyle={{ fontSize: 16, color: '#52c41a' }}
                   />
                 </Col>
                 <Col span={6}>
                   <Statistic 
-                    title="将保留" 
+                    title="Will Keep" 
                     value={globalStats.totalKept} 
-                    suffix="个"
+                    suffix=""
                     valueStyle={{ fontSize: 16, color: '#1890ff' }}
                   />
                 </Col>
                 <Col span={6}>
                   <Statistic 
-                    title="将移除" 
+                    title="Will Remove" 
                     value={globalStats.totalRemoved} 
-                    suffix="个"
+                    suffix=""
                     valueStyle={{ fontSize: 16, color: globalStats.totalRemoved > 0 ? '#cf1322' : undefined }}
                   />
                 </Col>
                 <Col span={6}>
                   <Statistic 
-                    title="总选中" 
+                    title="Total Selected" 
                     value={globalStats.totalSelected} 
-                    suffix="个"
+                    suffix=""
                     valueStyle={{ fontSize: 16, fontWeight: 'bold' }}
                   />
                 </Col>
@@ -457,7 +457,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
         {/* 进度条（解决中显示） */}
         {resolving && (
           <Alert
-            message={`正在处理冲突 (${resolvedCount}/${conflicts.length})...`}
+            message={`Processing Conflicts (${resolvedCount}/${conflicts.length})...`}
             description={
               <Progress 
                 percent={resolvingProgress} 
@@ -489,11 +489,11 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
                       <Text type="secondary">-</Text>
                       <Text>{conflict.category}</Text>
                       <Tag color="blue">
-                        已选 {stats.total} 个 Tickers
+                        Selected {stats.total} Tickers
                       </Tag>
                       {noChanges && (
                         <Tag color="success" icon={<CheckCircleOutlined />}>
-                          无变化（将跳过 LLM）
+                          No Changes (Will Skip LLM)
                         </Tag>
                       )}
                     </Space>
@@ -503,13 +503,13 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
                     {/* 主题信息 */}
                     <div>
                       <Space>
-                        <Text><Text strong>主题名称:</Text> {conflict.theme_name}</Text>
+                        <Text><Text strong>Theme Name:</Text> {conflict.theme_name}</Text>
                         <Text type="secondary">|</Text>
-                        <Text><Text strong>分类:</Text> {conflict.category}</Text>
+                        <Text><Text strong>Category:</Text> {conflict.category}</Text>
                         {conflict.existing_theme.group && (
                           <>
                             <Text type="secondary">|</Text>
-                            <Text><Text strong>分组:</Text> {conflict.existing_theme.group}</Text>
+                            <Text><Text strong>Group:</Text> {conflict.existing_theme.group}</Text>
                           </>
                         )}
                       </Space>
@@ -518,19 +518,19 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
                     {/* 快捷操作按钮 */}
                     <Space>
                       <Button size="small" onClick={() => handleSelectAll(conflict.theme_id, conflict)}>
-                        全选
+                        Select All
                       </Button>
                       <Button size="small" onClick={() => handleDeselectAll(conflict.theme_id)}>
-                        全不选
+                        Deselect All
                       </Button>
                       <Button size="small" onClick={() => handleSelectByStatus(conflict.theme_id, conflict, 'new')}>
-                        选择新增
+                        Select New
                       </Button>
                       <Button size="small" onClick={() => handleSelectByStatus(conflict.theme_id, conflict, 'existing')}>
-                        选择原有
+                        Select Existing
                       </Button>
                       <Button size="small" onClick={() => handleSelectByStatus(conflict.theme_id, conflict, 'duplicate')}>
-                        选择重复
+                        Select Duplicate
                       </Button>
                     </Space>
 
@@ -548,10 +548,10 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
                     <Alert
                       message={
                         <Space split={<Text type="secondary">|</Text>}>
-                          <Text>将新增: <Text strong style={{ color: '#52c41a' }}>{stats.willAdd}</Text> 个</Text>
-                          <Text>将保留: <Text strong style={{ color: '#1890ff' }}>{stats.willKeep}</Text> 个</Text>
-                          <Text>将移除: <Text strong style={{ color: stats.willRemove > 0 ? '#cf1322' : undefined }}>{stats.willRemove}</Text> 个</Text>
-                          <Text>总计: <Text strong>{stats.total}</Text> 个</Text>
+                          <Text>Will Add: <Text strong style={{ color: '#52c41a' }}>{stats.willAdd}</Text></Text>
+                          <Text>Will Keep: <Text strong style={{ color: '#1890ff' }}>{stats.willKeep}</Text></Text>
+                          <Text>Will Remove: <Text strong style={{ color: stats.willRemove > 0 ? '#cf1322' : undefined }}>{stats.willRemove}</Text></Text>
+                          <Text>Total: <Text strong>{stats.total}</Text></Text>
                         </Space>
                       }
                       type="info"
@@ -567,7 +567,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
         {/* 底部操作按钮 */}
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button onClick={handleSkipAll} disabled={resolving}>
-            跳过全部
+            Skip All
           </Button>
           <Button 
             type="primary" 
@@ -575,7 +575,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
             loading={resolving}
             disabled={globalStats.totalSelected === 0}
           >
-            确认并更新全部 ({conflicts.length} 个主题)
+            Confirm and Update All ({conflicts.length} themes)
           </Button>
         </Space>
       </Space>

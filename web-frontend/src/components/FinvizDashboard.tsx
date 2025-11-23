@@ -37,6 +37,8 @@ import {
   Dropdown,
   Divider,
   Segmented,
+  Checkbox,
+  Tooltip,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -79,13 +81,15 @@ import {
   HolderOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
-import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData } from '../services/dashboard';
+import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
 import { filesAPI } from '../services/files';
 import { newsAPI } from '../services/news';
 import type { NewsTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
+import AddToCustomGroupModal from './AddToCustomGroupModal';
+import ManageCustomGroupsModal from './ManageCustomGroupsModal';
 import StockChart from './StockChart';
 import {
   EXCHANGE_FILTER_TABS,
@@ -134,6 +138,9 @@ interface SortableWatchlistRowProps {
   formatChange: (change?: number) => string;
   getChangeColor: (change?: number) => string;
   disabled?: boolean;
+  isEditMode?: boolean;
+  isChecked?: boolean;
+  onCheckboxToggle?: (watchlistId: number) => void;
 }
 
 const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
@@ -148,6 +155,9 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
   formatChange,
   getChangeColor,
   disabled = false,
+  isEditMode = false,
+  isChecked = false,
+  onCheckboxToggle,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.watchlist_id,
@@ -174,7 +184,13 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
       <div
         onClick={() => {
           if (!disabled) {
-            onSelect(item as WatchlistStockInfo);
+            if (isEditMode && onCheckboxToggle) {
+              // 在编辑模式下，点击整个卡片切换复选框
+              onCheckboxToggle(item.watchlist_id);
+            } else {
+              // 正常模式下，选择股票
+              onSelect(item as WatchlistStockInfo);
+            }
           }
         }}
         style={{
@@ -184,9 +200,19 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
           padding: '8px 12px',
           height: '60px',
           borderRadius: '10px',
-          border: isSelected ? '1px solid #91d5ff' : '1px solid #f0f0f0',
-          background: isSelected ? '#e6f7ff' : '#ffffff',
-          boxShadow: isSelected
+          border: isEditMode && isChecked 
+            ? '1px solid #52c41a' 
+            : isSelected 
+            ? '1px solid #91d5ff' 
+            : '1px solid #f0f0f0',
+          background: isEditMode && isChecked 
+            ? '#f6ffed' 
+            : isSelected 
+            ? '#e6f7ff' 
+            : '#ffffff',
+          boxShadow: isEditMode && isChecked
+            ? '0 2px 8px rgba(82, 196, 26, 0.15)'
+            : isSelected
             ? '0 2px 8px rgba(24, 144, 255, 0.15)'
             : isDragging
             ? '0 4px 12px rgba(0, 0, 0, 0.12)'
@@ -196,21 +222,32 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
           opacity: disabled && !isDragging ? 0.7 : 1,
         }}
       >
-        <div
-          {...(!disabled ? listeners : undefined)}
-          onClick={event => event.stopPropagation()}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: '100%',
-            padding: '0 4px',
-            color: '#bfbfbf',
-            cursor: disabled ? 'not-allowed' : 'grab',
-            userSelect: 'none',
-          }}
-        >
-          <HolderOutlined />
-        </div>
+        {isEditMode && onCheckboxToggle && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              checked={isChecked}
+              onChange={() => onCheckboxToggle(item.watchlist_id)}
+            />
+          </div>
+        )}
+        
+        {!isEditMode && (
+          <div
+            {...(!disabled ? listeners : undefined)}
+            onClick={event => event.stopPropagation()}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              height: '100%',
+              padding: '0 4px',
+              color: '#bfbfbf',
+              cursor: disabled ? 'not-allowed' : 'grab',
+              userSelect: 'none',
+            }}
+          >
+            <HolderOutlined />
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
           <Text
@@ -567,10 +604,22 @@ const FinvizDashboard: React.FC = () => {
   // 错误状态跟踪，防止重复显示相同的错误消息
   const [lastError, setLastError] = useState<string | null>(null);
 
+  // 编辑模式状态（用于批量操作）
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [selectedWatchlistIds, setSelectedWatchlistIds] = useState<Set<number>>(new Set());
+  const [addToGroupModalVisible, setAddToGroupModalVisible] = useState<boolean>(false);
+  const [manageGroupsModalVisible, setManageGroupsModalVisible] = useState<boolean>(false);
+
+  // 自定义组状态
+  const [customGroups, setCustomGroups] = useState<CustomGroup[]>([]);
+  const [selectedCustomGroupId, setSelectedCustomGroupId] = useState<number | null>(null);
+  const [customGroupMemberIds, setCustomGroupMemberIds] = useState<Set<number>>(new Set());
+
   // 初始化数据
   useEffect(() => {
     loadUserWatchlist();
     loadThemes();
+    loadCustomGroups();
     logger.logInfo('FinvizDashboard页面已加载', 'finviz-dashboard');
     
     // 定期清理过期缓存
@@ -579,6 +628,36 @@ const FinvizDashboard: React.FC = () => {
     return () => clearInterval(cleanupInterval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 加载自定义组
+  const loadCustomGroups = async () => {
+    try {
+      const groups = await dashboardAPI.getCustomGroups();
+      setCustomGroups(groups);
+    } catch (error) {
+      console.error('Failed to load custom groups:', error);
+    }
+  };
+
+  // 当选中自定义组时，加载组成员
+  useEffect(() => {
+    if (selectedCustomGroupId) {
+      loadCustomGroupMembers(selectedCustomGroupId);
+    } else {
+      setCustomGroupMemberIds(new Set());
+    }
+  }, [selectedCustomGroupId]);
+
+  const loadCustomGroupMembers = async (groupId: number) => {
+    try {
+      const result = await dashboardAPI.getCustomGroupMembers(groupId);
+      const memberIds = new Set(result.members.map(m => m.watchlist_id));
+      setCustomGroupMemberIds(memberIds);
+    } catch (error) {
+      console.error('Failed to load custom group members:', error);
+      message.error('Failed to load custom group members');
+    }
+  };
 
   // 页面可见性检测
   useEffect(() => {
@@ -873,6 +952,11 @@ const FinvizDashboard: React.FC = () => {
         })
       )
       .filter(item => {
+        // 自定义组过滤
+        if (selectedCustomGroupId && !customGroupMemberIds.has(item.watchlist_id)) {
+          return false;
+        }
+
         if (priorityFilter !== 'all' && item.priority !== priorityFilter) {
           return false;
         }
@@ -901,7 +985,7 @@ const FinvizDashboard: React.FC = () => {
           (groupName && groupName.includes(lowerSearch))
         );
       });
-  }, [watchlistGroups, priorityFilter, exchangeFilter, searchValue, resolvePriceData]);
+  }, [watchlistGroups, priorityFilter, exchangeFilter, searchValue, resolvePriceData, selectedCustomGroupId, customGroupMemberIds]);
 
   const handleSelectStock = useCallback((stock: WatchlistStockInfo | null) => {
     if (!stock) {
@@ -1150,7 +1234,7 @@ const FinvizDashboard: React.FC = () => {
   };
 
   // 删除watchlist项
-  const handleRemoveFromWatchlist = async (watchlistId: number, symbol: string) => {
+  const handleRemoveFromWatchlist = useCallback(async (watchlistId: number, symbol: string) => {
     try {
       const result = await dashboardAPI.removeFromWatchlist(watchlistId);
       message.success(result.message);
@@ -1174,7 +1258,7 @@ const FinvizDashboard: React.FC = () => {
       message.error('Failed to remove');
       logger.logError(`Failed to remove watchlist item: ${symbol}`, 'finviz-dashboard', error);
     }
-  };
+  }, [selectedStock, logger]);
 
   const handleWatchlistAction = useCallback((action: string, item: WatchlistItem) => {
     if (action === 'edit') {
@@ -1220,7 +1304,6 @@ const FinvizDashboard: React.FC = () => {
       return;
     }
 
-    const activeItemGroupKey = flattened[oldIndex].group_name;
     const overItemGroupKey = flattened[newIndex].group_name;
     const overItemOriginalGroup =
       flattened[newIndex].original_group_name ?? flattened[newIndex].group_name;
@@ -1392,6 +1475,9 @@ const FinvizDashboard: React.FC = () => {
                 formatChange={formatChange}
                 getChangeColor={getChangeColor}
                 disabled={isReordering || loading}
+                isEditMode={isEditMode}
+                isChecked={selectedWatchlistIds.has(item.watchlist_id)}
+                onCheckboxToggle={handleToggleSelectTicker}
               />
             ))}
           </div>
@@ -1423,6 +1509,58 @@ const FinvizDashboard: React.FC = () => {
         }
       }
     }
+  };
+
+  // 切换编辑模式
+  const handleToggleEditMode = () => {
+    setIsEditMode(!isEditMode);
+    if (isEditMode) {
+      // 退出编辑模式时清空选择
+      setSelectedWatchlistIds(new Set());
+    }
+  };
+
+  // 切换单个ticker的选中状态
+  const handleToggleSelectTicker = (watchlistId: number) => {
+    setSelectedWatchlistIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(watchlistId)) {
+        newSet.delete(watchlistId);
+      } else {
+        newSet.add(watchlistId);
+      }
+      return newSet;
+    });
+  };
+
+  // 全选/取消全选
+  const handleToggleSelectAll = () => {
+    if (selectedWatchlistIds.size === filteredStocks.length) {
+      // 如果已全选，则取消全选
+      setSelectedWatchlistIds(new Set());
+    } else {
+      // 否则全选
+      const allIds = filteredStocks.map(item => item.watchlist_id);
+      setSelectedWatchlistIds(new Set(allIds));
+    }
+  };
+
+  // 打开添加到自定义组的弹窗
+  const handleOpenAddToGroup = () => {
+    if (selectedWatchlistIds.size === 0) {
+      message.warning('Please select at least one ticker');
+      return;
+    }
+    setAddToGroupModalVisible(true);
+  };
+
+  // 添加到自定义组成功的回调
+  const handleAddToGroupSuccess = async () => {
+    // 重新加载自定义组列表
+    await loadCustomGroups();
+    // 退出编辑模式并清空选择
+    setIsEditMode(false);
+    setSelectedWatchlistIds(new Set());
   };
 
   const getSentimentColor = (polarity?: number) => {
@@ -2399,36 +2537,63 @@ const FinvizDashboard: React.FC = () => {
                   <HeartOutlined />
                 ) : (
                   <>
-                    <HeartOutlined /> My Watchlist
+                    <HeartOutlined /> Watchlist
                   </>
                 )}
               </Title>
               {!watchlistCollapsed && (
-                <Button 
-                  type="primary" 
-                  icon={<PlusOutlined />} 
-                  size="small"
-                  onClick={() => setAddModalVisible(true)}
-                  title="Add stock to watchlist"
-                >
-                  Add
-                </Button>
-              )}
-              {!watchlistCollapsed && (
-                <Button
-                  type="text"
-                  icon={<MenuFoldOutlined />}
-                  onClick={() => setWatchlistCollapsed(true)}
-                  style={{
-                    fontSize: '16px',
-                    width: 32,
-                    height: 32,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                  title="收缩Watchlist"
-                />
+                <Space size="small">
+                  {!isEditMode ? (
+                    <>
+                      <Tooltip title="Add - Add a new stock to your watchlist">
+                        <Button 
+                          type="primary" 
+                          icon={<PlusOutlined />} 
+                          size="small"
+                          onClick={() => setAddModalVisible(true)}
+                        />
+                      </Tooltip>
+                      <Tooltip title="Edit - Enter edit mode to select and manage multiple tickers">
+                        <Button 
+                          icon={<EditOutlined />} 
+                          size="small"
+                          onClick={handleToggleEditMode}
+                        />
+                      </Tooltip>
+                    </>
+                  ) : (
+                    <>
+                      <Button 
+                        type="primary"
+                        size="small"
+                        onClick={handleOpenAddToGroup}
+                        disabled={selectedWatchlistIds.size === 0}
+                      >
+                        Add to ({selectedWatchlistIds.size})
+                      </Button>
+                      <Button 
+                        size="small"
+                        onClick={handleToggleEditMode}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    type="text"
+                    icon={<MenuFoldOutlined />}
+                    onClick={() => setWatchlistCollapsed(true)}
+                    style={{
+                      fontSize: '16px',
+                      width: 32,
+                      height: 32,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="收缩Watchlist"
+                  />
+                </Space>
               )}
             </div>
             
@@ -2442,6 +2607,18 @@ const FinvizDashboard: React.FC = () => {
                   style={{ marginBottom: '12px' }}
                   allowClear
                 />
+                
+                {isEditMode && filteredStocks.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <Checkbox
+                      checked={selectedWatchlistIds.size === filteredStocks.length && filteredStocks.length > 0}
+                      indeterminate={selectedWatchlistIds.size > 0 && selectedWatchlistIds.size < filteredStocks.length}
+                      onChange={handleToggleSelectAll}
+                    >
+                      Select All ({selectedWatchlistIds.size}/{filteredStocks.length})
+                    </Checkbox>
+                  </div>
+                )}
                 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
                   <Segmented
@@ -2468,6 +2645,46 @@ const FinvizDashboard: React.FC = () => {
                       </Option>
                     ))}
                   </Select>
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <Select
+                      placeholder="Custom Groups"
+                      value={selectedCustomGroupId}
+                      onChange={setSelectedCustomGroupId}
+                      size="small"
+                      allowClear
+                      style={{ flex: 1 }}
+                    >
+                      {customGroups.map(group => (
+                        <Option key={group.id} value={group.id}>
+                          <Space>
+                            <div
+                              style={{
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                backgroundColor: group.color || '#1890ff',
+                              }}
+                            />
+                            <span>{group.group_name}</span>
+                            <Tag color="default" style={{ marginLeft: 'auto' }}>
+                              {group.member_count || 0}
+                            </Tag>
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                    <Button
+                      type="text"
+                      icon={<EditOutlined />}
+                      size="small"
+                      onClick={() => setManageGroupsModalVisible(true)}
+                      title="Manage custom groups"
+                      style={{ flexShrink: 0 }}
+                    />
+                  </div>
                 </div>
               </>
             )}
@@ -2608,6 +2825,20 @@ const FinvizDashboard: React.FC = () => {
         onSuccess={handleEditSuccess}
       />
 
+      {/* 添加到自定义组的模态框 */}
+      <AddToCustomGroupModal
+        visible={addToGroupModalVisible}
+        selectedWatchlistIds={Array.from(selectedWatchlistIds)}
+        onClose={() => setAddToGroupModalVisible(false)}
+        onSuccess={handleAddToGroupSuccess}
+      />
+
+      {/* 管理自定义组的模态框 */}
+      <ManageCustomGroupsModal
+        visible={manageGroupsModalVisible}
+        onClose={() => setManageGroupsModalVisible(false)}
+        onUpdate={loadCustomGroups}
+      />
 
       {/* AI分析详情模态框 */}
       <Modal

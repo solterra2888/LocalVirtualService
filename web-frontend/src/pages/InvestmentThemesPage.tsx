@@ -3,7 +3,7 @@
  * Display and manage investment theme vector retrieval functionality
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Card,
   Table,
@@ -48,7 +48,8 @@ import {
   DownloadOutlined,
   ShareAltOutlined,
   UserOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  QuestionCircleOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -155,6 +156,7 @@ interface PageState {
     selectedUsers: string[];  // 选中的 User 筛选值（支持多选，admin专用）
     availableUsers: string[];  // 所有可用的 users（从 API 获取）
     loadingUsers: boolean;  // 是否正在加载 users
+    ownershipFilter: 'all' | 'own' | 'shared';  // 所有权筛选器：全部/自己创建/他人分享
     // 批量打标签相关
     batchTagModalVisible: boolean;
     batchTagAction: 'add' | 'remove';
@@ -228,6 +230,7 @@ const InvestmentThemesPage: React.FC = () => {
     selectedUsers: [],
     availableUsers: [],
     loadingUsers: false,
+    ownershipFilter: 'all',
     // 批量打标签相关
     batchTagModalVisible: false,
     batchTagAction: 'add',
@@ -296,6 +299,14 @@ const InvestmentThemesPage: React.FC = () => {
       currentPage: 1
     }));
     loadThemes(1, state.pageSize, state.searchKeyword, state.selectedFilterTags, users);
+  };
+
+  const handleOwnershipFilterChange = (filter: 'all' | 'own' | 'shared') => {
+    setState(prev => ({
+      ...prev,
+      ownershipFilter: filter,
+      currentPage: 1
+    }));
   };
 
   const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1264,13 +1275,13 @@ const InvestmentThemesPage: React.FC = () => {
     const actionText = newStatus ? '分享' : '取消分享';
     
     Modal.confirm({
-      title: `确认${actionText}主题？`,
+      title: newStatus ? 'Confirm Share Theme?' : 'Confirm Unshare Theme?',
       icon: <InfoCircleOutlined />,
       content: newStatus 
-        ? '分享后，所有用户都可以查看和使用此主题（但不能编辑）。'
-        : '取消分享后，只有您可以查看和使用此主题。',
-      okText: `确认${actionText}`,
-      cancelText: '取消',
+        ? 'After sharing, all users can view and use this theme (but cannot edit).'
+        : 'After unsharing, only you can view and use this theme.',
+      okText: newStatus ? 'Confirm Share' : 'Confirm Unshare',
+      cancelText: 'Cancel',
       onOk: async () => {
         try {
           await updateThemeShareStatus(theme.theme_id, newStatus);
@@ -2028,6 +2039,7 @@ const InvestmentThemesPage: React.FC = () => {
       title: 'Theme Name',
       dataIndex: 'theme_name',
       key: 'theme_name',
+      width: 280,
       ellipsis: true,
       render: (name: string, record: InvestmentTheme) => (
         <Text strong>{name}</Text>
@@ -2037,11 +2049,19 @@ const InvestmentThemesPage: React.FC = () => {
       title: 'Category',
       dataIndex: 'category',
       key: 'category',
+      width: 180,
       render: (category?: string) =>
         category ? <Text>{category}</Text> : <Text type="secondary">Not set</Text>
     },
     {
-      title: 'Tags',
+      title: (
+        <Space>
+          <span>Tags</span>
+          <Tooltip title="Tags are personal labels used to organize and categorize themes, primarily for Market Weekly and other reports. Tags are only visible to you.">
+            <QuestionCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} />
+          </Tooltip>
+        </Space>
+      ),
       dataIndex: 'tags',
       key: 'tags',
       width: 200,
@@ -2066,31 +2086,19 @@ const InvestmentThemesPage: React.FC = () => {
         if (!tickers || tickers.length === 0) {
           return <Text type="secondary">None</Text>;
         }
-        const displayTickers = tickers.slice(0, 5);
-        const extraCount = tickers.length - displayTickers.length;
         return (
-          <Space size={[0, 4]} wrap>
-            {displayTickers.map(ticker => (
-              <Tooltip title="View associated tickers" key={ticker}>
-                <Tag
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => showAssociationsModal(record)}
-                >
-                  {ticker}
-                </Tag>
-              </Tooltip>
-            ))}
-            {extraCount > 0 && (
-              <Tooltip title="View remaining tickers">
-                <Tag
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => showAssociationsModal(record)}
-                >
-                  +{extraCount}
-                </Tag>
-              </Tooltip>
-            )}
-          </Space>
+          <Tooltip title="View associated tickers">
+            <Text
+              style={{
+                color: '#1890ff',
+                textDecoration: 'underline',
+                cursor: 'pointer'
+              }}
+              onClick={() => showAssociationsModal(record)}
+            >
+              {tickers.length}
+            </Text>
+          </Tooltip>
         );
       }
     },
@@ -2110,21 +2118,6 @@ const InvestmentThemesPage: React.FC = () => {
           </Tooltip>
         );
       }
-    },
-    {
-      title: 'Description Preview',
-      dataIndex: 'description_preview',
-      key: 'description_preview',
-      ellipsis: true,
-      render: (text: string, record: InvestmentTheme) => (
-        <Text 
-          ellipsis 
-          style={{ cursor: text ? 'pointer' : 'default', color: text ? undefined : '#999' }}
-          onClick={() => text && showDescriptionModal(record)}
-        >
-          {text || 'Not generated'}
-        </Text>
-      )
     },
     {
       title: 'Vectorized',
@@ -2397,6 +2390,19 @@ const InvestmentThemesPage: React.FC = () => {
               style={{ width: 260 }}
             />
             <Space size="small">
+              <Text type="secondary">Ownership:</Text>
+              <Select
+                value={state.ownershipFilter}
+                onChange={handleOwnershipFilterChange}
+                style={{ width: 120 }}
+                size="small"
+              >
+                <Select.Option value="all">All</Select.Option>
+                <Select.Option value="own">My Own</Select.Option>
+                <Select.Option value="shared">Shared</Select.Option>
+              </Select>
+            </Space>
+            <Space size="small">
               <Text type="secondary">Tags:</Text>
               <Select
                 mode="multiple"
@@ -2449,7 +2455,22 @@ const InvestmentThemesPage: React.FC = () => {
       >
         <Table
           columns={columns}
-          dataSource={state.themes}
+          dataSource={useMemo(() => {
+            // Filter themes based on ownership filter
+            if (state.ownershipFilter === 'all') {
+              return state.themes;
+            }
+            return state.themes.filter(theme => {
+              if (state.ownershipFilter === 'own') {
+                // My own: created by current user
+                return (theme as any).created_by === user?.username;
+              } else if (state.ownershipFilter === 'shared') {
+                // Shared: is_shared is true and not created by current user
+                return (theme as any).is_shared === true && (theme as any).created_by !== user?.username;
+              }
+              return true;
+            });
+          }, [state.themes, state.ownershipFilter, user?.username])}
           rowKey="theme_id"
           loading={state.loading}
           rowSelection={{
@@ -2468,7 +2489,22 @@ const InvestmentThemesPage: React.FC = () => {
           pagination={{
             current: state.currentPage,
             pageSize: state.pageSize,
-            total: state.total,
+            total: useMemo(() => {
+              if (state.ownershipFilter === 'all') {
+                return state.total;
+              }
+              const filteredThemes = state.themes.filter(theme => {
+                if (state.ownershipFilter === 'own') {
+                  return (theme as any).created_by === user?.username;
+                } else if (state.ownershipFilter === 'shared') {
+                  return (theme as any).is_shared === true && (theme as any).created_by !== user?.username;
+                }
+                return true;
+              });
+              // Note: This is the filtered count for current page only
+              // For accurate total count, we would need backend filtering
+              return filteredThemes.length;
+            }, [state.themes, state.ownershipFilter, state.total, user?.username]),
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total) => `Total ${total} themes`,

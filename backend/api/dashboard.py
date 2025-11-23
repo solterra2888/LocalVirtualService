@@ -1972,4 +1972,612 @@ async def health_check():
     return {"status": "healthy", "service": "dashboard", "timestamp": datetime.now().isoformat()}
 
 
+# ============================================
+# Watchlist Custom Groups API
+# ============================================
+
+@router.get("/watchlist/custom-groups", summary="Get user's custom groups")
+async def get_custom_groups(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取用户的自定义watchlist组列表
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        query = """
+        SELECT 
+            id,
+            group_name,
+            description,
+            color,
+            sort_order,
+            created_at,
+            updated_at,
+            (SELECT COUNT(*) FROM watchlist_custom_group_members 
+             WHERE custom_group_id = watchlist_custom_groups.id) as member_count
+        FROM watchlist_custom_groups
+        WHERE user_id = %s
+        ORDER BY sort_order ASC, created_at DESC
+        """
+        
+        results = db_manager.fetch_all(query, [current_user.user_id])
+        
+        groups = []
+        for row in results:
+            group = {
+                "id": row[0],
+                "group_name": row[1],
+                "description": row[2],
+                "color": row[3],
+                "sort_order": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "updated_at": row[6].isoformat() if row[6] else None,
+                "member_count": row[7]
+            }
+            groups.append(group)
+        
+        return groups
+        
+    except Exception as e:
+        logger.error(f"Failed to get custom groups", 
+                    user=current_user.username, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get custom groups: {str(e)}"
+        )
+
+
+@router.post("/watchlist/custom-groups", summary="Create a new custom group")
+async def create_custom_group(
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    创建新的自定义组
+    
+    请求参数:
+    - group_name: 组名 (必需)
+    - description: 描述 (可选)
+    - color: 颜色 (可选，默认#1890ff)
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        group_name = request.get('group_name', '').strip()
+        if not group_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Group name cannot be empty"
+            )
+        
+        # 检查组名是否已存在
+        check_query = """
+        SELECT id FROM watchlist_custom_groups 
+        WHERE user_id = %s AND group_name = %s
+        """
+        existing = db_manager.fetch_one(check_query, [current_user.user_id, group_name])
+        
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Custom group '{group_name}' already exists"
+            )
+        
+        # 获取下一个排序序号
+        sort_order_query = """
+        SELECT COALESCE(MAX(sort_order), -1) + 1
+        FROM watchlist_custom_groups
+        WHERE user_id = %s
+        """
+        sort_order_result = db_manager.fetch_one(sort_order_query, [current_user.user_id])
+        next_sort_order = sort_order_result[0] if sort_order_result else 0
+        
+        # 插入新组
+        insert_query = """
+        INSERT INTO watchlist_custom_groups 
+        (user_id, group_name, description, color, sort_order)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id, group_name, description, color, sort_order, created_at, updated_at
+        """
+        
+        values = [
+            current_user.user_id,
+            group_name,
+            request.get('description', ''),
+            request.get('color', '#1890ff'),
+            next_sort_order
+        ]
+        
+        result = db_manager.fetch_one(insert_query, values)
+        
+        if result:
+            logger.info(f"Created custom group", 
+                       user=current_user.username, group_name=group_name)
+            
+            return {
+                "message": f"Custom group '{group_name}' created successfully",
+                "group": {
+                    "id": result[0],
+                    "group_name": result[1],
+                    "description": result[2],
+                    "color": result[3],
+                    "sort_order": result[4],
+                    "created_at": result[5].isoformat() if result[5] else None,
+                    "updated_at": result[6].isoformat() if result[6] else None,
+                    "member_count": 0
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create custom group"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create custom group", 
+                    user=current_user.username, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create custom group: {str(e)}"
+        )
+
+
+@router.put("/watchlist/custom-groups/{group_id}", summary="Update custom group")
+async def update_custom_group(
+    group_id: int,
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    更新自定义组信息
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 验证组是否存在且属于当前用户
+        check_query = """
+        SELECT id FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        existing = db_manager.fetch_one(check_query, [group_id, current_user.user_id])
+        
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom group not found"
+            )
+        
+        # 构建更新语句
+        update_fields = []
+        values = []
+        
+        if 'group_name' in request:
+            group_name = request['group_name'].strip()
+            if not group_name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Group name cannot be empty"
+                )
+            update_fields.append("group_name = %s")
+            values.append(group_name)
+        
+        if 'description' in request:
+            update_fields.append("description = %s")
+            values.append(request['description'])
+        
+        if 'color' in request:
+            update_fields.append("color = %s")
+            values.append(request['color'])
+        
+        if not update_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No fields to update"
+            )
+        
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.extend([group_id, current_user.user_id])
+        
+        update_query = f"""
+        UPDATE watchlist_custom_groups 
+        SET {', '.join(update_fields)}
+        WHERE id = %s AND user_id = %s
+        RETURNING id, group_name, description, color, sort_order, created_at, updated_at
+        """
+        
+        result = db_manager.fetch_one(update_query, values)
+        
+        if result:
+            logger.info(f"Updated custom group", 
+                       user=current_user.username, group_id=group_id)
+            
+            return {
+                "message": "Custom group updated successfully",
+                "group": {
+                    "id": result[0],
+                    "group_name": result[1],
+                    "description": result[2],
+                    "color": result[3],
+                    "sort_order": result[4],
+                    "created_at": result[5].isoformat() if result[5] else None,
+                    "updated_at": result[6].isoformat() if result[6] else None
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update custom group"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update custom group", 
+                    user=current_user.username, group_id=group_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update custom group: {str(e)}"
+        )
+
+
+@router.delete("/watchlist/custom-groups/{group_id}", summary="Delete custom group")
+async def delete_custom_group(
+    group_id: int,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    删除自定义组（会自动删除组成员关联）
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 验证组是否存在且属于当前用户
+        check_query = """
+        SELECT group_name FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        existing = db_manager.fetch_one(check_query, [group_id, current_user.user_id])
+        
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom group not found"
+            )
+        
+        group_name = existing[0]
+        
+        # 删除组（会级联删除成员）
+        delete_query = """
+        DELETE FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to connect to database"
+            )
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(delete_query, [group_id, current_user.user_id])
+            conn.commit()
+            
+            logger.info(f"Deleted custom group", 
+                       user=current_user.username, 
+                       group_id=group_id, 
+                       group_name=group_name)
+            
+            return {
+                "message": f"Custom group '{group_name}' deleted successfully",
+                "group_id": group_id
+            }
+        finally:
+            conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete custom group", 
+                    user=current_user.username, group_id=group_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete custom group: {str(e)}"
+        )
+
+
+@router.post("/watchlist/custom-groups/{group_id}/members", summary="Add tickers to custom group")
+async def add_tickers_to_custom_group(
+    group_id: int,
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    将多个ticker添加到自定义组
+    
+    请求参数:
+    - watchlist_ids: watchlist ID列表 (必需)
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        watchlist_ids = request.get('watchlist_ids', [])
+        if not watchlist_ids or not isinstance(watchlist_ids, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="watchlist_ids must be a non-empty list"
+            )
+        
+        # 验证组是否存在且属于当前用户
+        check_query = """
+        SELECT group_name FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        group_result = db_manager.fetch_one(check_query, [group_id, current_user.user_id])
+        
+        if not group_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom group not found"
+            )
+        
+        group_name = group_result[0]
+        
+        # 验证所有watchlist_id都属于当前用户
+        verify_query = f"""
+        SELECT id FROM target_tracking_config 
+        WHERE id IN ({','.join(['%s'] * len(watchlist_ids))}) AND user_id = %s
+        """
+        valid_ids = db_manager.fetch_all(verify_query, watchlist_ids + [current_user.user_id])
+        valid_id_set = {row[0] for row in valid_ids}
+        
+        if len(valid_id_set) != len(watchlist_ids):
+            invalid_ids = set(watchlist_ids) - valid_id_set
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid watchlist IDs: {invalid_ids}"
+            )
+        
+        # 批量插入成员（忽略已存在的）
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to connect to database"
+            )
+        
+        try:
+            cursor = conn.cursor()
+            added_count = 0
+            skipped_count = 0
+            
+            for watchlist_id in watchlist_ids:
+                try:
+                    insert_query = """
+                    INSERT INTO watchlist_custom_group_members 
+                    (user_id, custom_group_id, watchlist_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (custom_group_id, watchlist_id) DO NOTHING
+                    """
+                    cursor.execute(insert_query, [current_user.user_id, group_id, watchlist_id])
+                    
+                    if cursor.rowcount > 0:
+                        added_count += 1
+                    else:
+                        skipped_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to add ticker to custom group", 
+                                 user=current_user.username,
+                                 group_id=group_id,
+                                 watchlist_id=watchlist_id,
+                                 error=str(e))
+                    skipped_count += 1
+            
+            conn.commit()
+            
+            logger.info(f"Added tickers to custom group", 
+                       user=current_user.username,
+                       group_name=group_name,
+                       added_count=added_count,
+                       skipped_count=skipped_count)
+            
+            return {
+                "message": f"Added {added_count} ticker(s) to '{group_name}'",
+                "group_id": group_id,
+                "group_name": group_name,
+                "added_count": added_count,
+                "skipped_count": skipped_count,
+                "total_requested": len(watchlist_ids)
+            }
+        finally:
+            conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to add tickers to custom group", 
+                    user=current_user.username, group_id=group_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add tickers to custom group: {str(e)}"
+        )
+
+
+@router.delete("/watchlist/custom-groups/{group_id}/members", summary="Remove tickers from custom group")
+async def remove_tickers_from_custom_group(
+    group_id: int,
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    从自定义组中移除多个ticker
+    
+    请求参数:
+    - watchlist_ids: watchlist ID列表 (必需)
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        watchlist_ids = request.get('watchlist_ids', [])
+        if not watchlist_ids or not isinstance(watchlist_ids, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="watchlist_ids must be a non-empty list"
+            )
+        
+        # 验证组是否存在且属于当前用户
+        check_query = """
+        SELECT group_name FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        group_result = db_manager.fetch_one(check_query, [group_id, current_user.user_id])
+        
+        if not group_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom group not found"
+            )
+        
+        group_name = group_result[0]
+        
+        # 删除成员
+        delete_query = f"""
+        DELETE FROM watchlist_custom_group_members 
+        WHERE custom_group_id = %s 
+        AND user_id = %s 
+        AND watchlist_id IN ({','.join(['%s'] * len(watchlist_ids))})
+        """
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to connect to database"
+            )
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(delete_query, [group_id, current_user.user_id] + watchlist_ids)
+            removed_count = cursor.rowcount
+            conn.commit()
+            
+            logger.info(f"Removed tickers from custom group", 
+                       user=current_user.username,
+                       group_name=group_name,
+                       removed_count=removed_count)
+            
+            return {
+                "message": f"Removed {removed_count} ticker(s) from '{group_name}'",
+                "group_id": group_id,
+                "group_name": group_name,
+                "removed_count": removed_count,
+                "total_requested": len(watchlist_ids)
+            }
+        finally:
+            conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove tickers from custom group", 
+                    user=current_user.username, group_id=group_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove tickers from custom group: {str(e)}"
+        )
+
+
+@router.get("/watchlist/custom-groups/{group_id}/members", summary="Get custom group members")
+async def get_custom_group_members(
+    group_id: int,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    获取自定义组的成员列表（包含完整的ticker信息）
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        # 验证组是否存在且属于当前用户
+        check_query = """
+        SELECT group_name FROM watchlist_custom_groups 
+        WHERE id = %s AND user_id = %s
+        """
+        group_result = db_manager.fetch_one(check_query, [group_id, current_user.user_id])
+        
+        if not group_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom group not found"
+            )
+        
+        # 获取成员列表
+        query = """
+        SELECT 
+            m.id as member_id,
+            m.watchlist_id,
+            m.added_at,
+            t.symbol,
+            t.name,
+            t.group_name,
+            t.priority,
+            t.notes,
+            c.name as company_name,
+            c.sector,
+            c.industry
+        FROM watchlist_custom_group_members m
+        JOIN target_tracking_config t ON m.watchlist_id = t.id
+        LEFT JOIN companies c ON t.company_id = c.id
+        WHERE m.custom_group_id = %s AND m.user_id = %s
+        ORDER BY m.added_at DESC
+        """
+        
+        results = db_manager.fetch_all(query, [group_id, current_user.user_id])
+        
+        members = []
+        for row in results:
+            member = {
+                "member_id": row[0],
+                "watchlist_id": row[1],
+                "added_at": row[2].isoformat() if row[2] else None,
+                "symbol": row[3],
+                "name": row[4],
+                "group_name": row[5],
+                "priority": row[6],
+                "notes": row[7],
+                "company_name": row[8],
+                "sector": row[9],
+                "industry": row[10]
+            }
+            members.append(member)
+        
+        return {
+            "group_id": group_id,
+            "group_name": group_result[0],
+            "member_count": len(members),
+            "members": members
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get custom group members", 
+                    user=current_user.username, group_id=group_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get custom group members: {str(e)}"
+        )
+
 

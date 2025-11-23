@@ -1,4 +1,5 @@
 import { api } from './api';
+import apiClient from './api';
 import type { NewsAnalysisResult } from '../types/news';
 
 // 类型定义
@@ -116,6 +117,31 @@ export interface StockPriceData {
   change_percent?: number;
   last_updated?: string;
   updated_at?: string;
+}
+
+export interface CustomGroup {
+  id: number;
+  group_name: string;
+  description?: string;
+  color?: string;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+  member_count?: number;
+}
+
+export interface CustomGroupMember {
+  member_id: number;
+  watchlist_id: number;
+  added_at?: string;
+  symbol: string;
+  name?: string;
+  group_name?: string;
+  priority: number;
+  notes?: string;
+  company_name?: string;
+  sector?: string;
+  industry?: string;
 }
 
 // API服务
@@ -384,6 +410,119 @@ export const dashboardAPI = {
       return await api.get(`/dashboard/stock-historical-data/${symbol}`, { days });
     } catch (error) {
       console.error('Failed to get stock historical data:', error);
+      throw error;
+    }
+  },
+
+  // === Custom Groups API ===
+
+  // 获取用户的自定义组列表
+  getCustomGroups: async (): Promise<CustomGroup[]> => {
+    try {
+      return await api.get<CustomGroup[]>('/dashboard/watchlist/custom-groups');
+    } catch (error) {
+      console.error('Failed to get custom groups:', error);
+      throw error;
+    }
+  },
+
+  // 创建新的自定义组
+  createCustomGroup: async (params: {
+    group_name: string;
+    description?: string;
+    color?: string;
+  }): Promise<{
+    message: string;
+    group: CustomGroup;
+  }> => {
+    try {
+      return await api.post('/dashboard/watchlist/custom-groups', params);
+    } catch (error) {
+      console.error('Failed to create custom group:', error);
+      throw error;
+    }
+  },
+
+  // 更新自定义组
+  updateCustomGroup: async (groupId: number, params: {
+    group_name?: string;
+    description?: string;
+    color?: string;
+  }): Promise<{
+    message: string;
+    group: CustomGroup;
+  }> => {
+    try {
+      return await api.put(`/dashboard/watchlist/custom-groups/${groupId}`, params);
+    } catch (error) {
+      console.error('Failed to update custom group:', error);
+      throw error;
+    }
+  },
+
+  // 删除自定义组
+  deleteCustomGroup: async (groupId: number): Promise<{
+    message: string;
+    group_id: number;
+  }> => {
+    try {
+      return await api.delete(`/dashboard/watchlist/custom-groups/${groupId}`);
+    } catch (error) {
+      console.error('Failed to delete custom group:', error);
+      throw error;
+    }
+  },
+
+  // 添加tickers到自定义组
+  addTickersToCustomGroup: async (groupId: number, watchlistIds: number[]): Promise<{
+    message: string;
+    group_id: number;
+    group_name: string;
+    added_count: number;
+    skipped_count: number;
+    total_requested: number;
+  }> => {
+    try {
+      return await api.post(`/dashboard/watchlist/custom-groups/${groupId}/members`, {
+        watchlist_ids: watchlistIds
+      });
+    } catch (error) {
+      console.error('Failed to add tickers to custom group:', error);
+      throw error;
+    }
+  },
+
+  // 从自定义组移除tickers
+  removeTickersFromCustomGroup: async (groupId: number, watchlistIds: number[]): Promise<{
+    message: string;
+    group_id: number;
+    group_name: string;
+    removed_count: number;
+    total_requested: number;
+  }> => {
+    try {
+      // Use axios directly for DELETE with data in body
+      const response = await apiClient.delete(`/dashboard/watchlist/custom-groups/${groupId}/members`, {
+        data: { watchlist_ids: watchlistIds }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to remove tickers from custom group:', error);
+      throw error;
+    }
+  },
+
+  // 获取自定义组的成员列表
+  getCustomGroupMembers: async (groupId: number): Promise<{
+    group_id: number;
+    group_name: string;
+    member_count: number;
+    members: CustomGroupMember[];
+  }> => {
+    try {
+      return await api.get(`/dashboard/watchlist/custom-groups/${groupId}/members`);
+    } catch (error) {
+      console.error('Failed to get custom group members:', error);
       throw error;
     }
   }
