@@ -270,6 +270,31 @@ async def create_default_watchlist_news_task_proxy(request: Request, current_use
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create default watchlist news task: {str(e)}")
 
+@router.post("/tasks/cctv-news", summary="create cctv news task")
+async def create_cctv_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建CCTV新闻定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/cctv-news", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create cctv news task: {str(e)}")
+
+@router.post("/tasks/cctv-news/default", summary="create default cctv news task")
+async def create_default_cctv_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认CCTV新闻定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/cctv-news/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create default cctv news task: {str(e)}")
+
 @router.post("/tasks/eodhd-stock-prices", summary="create eodhd stock prices task")
 async def create_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建EODHD股票价格定时任务"""

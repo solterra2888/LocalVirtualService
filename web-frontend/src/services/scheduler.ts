@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -88,6 +88,21 @@ export interface CreateWatchlistNewsTaskParams {
   analysis_template?: string;
   analysis_batch_size?: number;
   max_concurrent?: number;
+}
+
+export interface CreateCCTVNewsTaskParams {
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  enabled?: boolean;
+  // 爬取参数
+  date?: string;  // YYYYMMDD格式
+  max_news?: number;
+  // 🔥 LLM分析参数
+  auto_analyze?: boolean;
+  analysis_templates?: string[];  // 多模板支持
+  max_concurrent?: number;
+  enable_theme_matching?: boolean;
 }
 
 export interface CreateEODHDStockPricesTaskParams {
@@ -591,6 +606,46 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认Watchlist新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建CCTV新闻定时任务
+   */
+  async createCCTVNewsTask(params: CreateCCTVNewsTaskParams): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/cctv-news', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建CCTV新闻定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建CCTV新闻定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建CCTV新闻定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认CCTV新闻定时任务
+   */
+  async createDefaultCCTVNewsTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/cctv-news/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认CCTV新闻定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认CCTV新闻定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认CCTV新闻定时任务失败'
       };
     }
   }

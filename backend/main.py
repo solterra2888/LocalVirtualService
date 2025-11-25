@@ -123,6 +123,10 @@ app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"
 from backend.api import user_news_presets
 app.include_router(user_news_presets.router, prefix="/api", tags=["用户新闻筛选预设"])
 
+# 投资项目管理API
+from backend.api import projects
+app.include_router(projects.router, prefix="/api", tags=["投资项目管理"])
+
 # 静态文件服务
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):

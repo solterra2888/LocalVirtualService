@@ -55,6 +55,7 @@ class SchedulerService:
         self.task_handlers = {
             'eodhd_news': self._execute_eodhd_news_task,
             'watchlist_news': self._execute_watchlist_news_task,
+            'cctv_news': self._execute_cctv_news_task,  # CCTV新闻爬取任务
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
@@ -1235,6 +1236,92 @@ class SchedulerService:
             return {
                 'success': False,
                 'message': f"Watchlist新闻获取失败: {str(e)}",
+                'data': None
+            }
+    
+    async def _execute_cctv_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行CCTV新闻爬取任务"""
+        try:
+            logger.info("开始执行CCTV新闻爬取任务", params=params)
+            
+            # 导入服务
+            from backend.services.cctv_news_service import create_cctv_news_service
+            cctv_service = create_cctv_news_service()
+            
+            # 提取参数
+            date = params.get('date')  # 可选：指定日期(YYYYMMDD格式)
+            max_news = params.get('max_news')  # 可选：限制爬取数量
+            auto_analyze = params.get('auto_analyze', True)  # 默认启用自动分析
+            
+            # 🔥 支持多模板（向后兼容）
+            analysis_templates = params.get('analysis_templates')
+            if not analysis_templates:
+                # 兼容旧的单模板配置
+                single_template = params.get('analysis_template', 'news_cctv_summary_v1')
+                analysis_templates = [single_template, 'news_classification']
+            
+            max_concurrent = params.get('max_concurrent', 5)  # 默认并发5
+            enable_theme_matching = params.get('enable_theme_matching', True)  # 默认启用主题匹配
+            
+            logger.info(f"将使用 {len(analysis_templates)} 个模板进行分析: {analysis_templates}")
+            
+            # 关键：在线程池中执行同步方法（爬虫是同步的，避免阻塞事件循环）
+            import asyncio
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    cctv_service.fetch_and_store_news,
+                    date,
+                    max_news,
+                    'cctv_news',
+                    auto_analyze,
+                    analysis_templates,
+                    max_concurrent,
+                    enable_theme_matching
+                )
+            
+            if result['success']:
+                data = result.get('data', {})
+                fetched_count = data.get('fetched_count', 0)
+                new_count = data.get('new_count', 0)
+                existing_count = data.get('existing_count', 0)
+                analysis_triggered = data.get('analysis_triggered', False)
+                celery_tasks = data.get('celery_tasks', [])
+                
+                message = f"✅ {result['message']}"
+                
+                if celery_tasks:
+                    task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
+                    message += f"，已提交 {len(celery_tasks)} 个模板分析任务: {task_summary}"
+                
+                logger.info("CCTV新闻爬取任务执行成功", 
+                          fetched=fetched_count,
+                          new=new_count,
+                          existing=existing_count,
+                          analysis_triggered=analysis_triggered,
+                          celery_tasks_count=len(celery_tasks))
+                
+                return {
+                    'success': True,
+                    'message': message,
+                    'data': data
+                }
+            else:
+                logger.error("CCTV新闻爬取任务执行失败", error=result['message'])
+                return {
+                    'success': False,
+                    'message': f"❌ {result['message']}",
+                    'data': result.get('data')
+                }
+                
+        except Exception as e:
+            error_msg = f"CCTV新闻爬取任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
                 'data': None
             }
     

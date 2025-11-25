@@ -64,7 +64,7 @@ const { Option } = Select;
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -131,6 +131,24 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/watchlist-news',
           params: {},
           icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'cctv_news',
+      name: 'CCTV News (新闻联播)',
+      type: 'cctv',
+      description: 'Scrape daily news from CCTV News (央视新闻联播) website',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_cctv_news_schedule',
+          name: 'Configure CCTV News Fetch',
+          description: 'Set up periodic CCTV news fetching (daily at 8 PM Beijing time)',
+          endpoint: '/scheduler/tasks/cctv-news',
+          params: {},
+          icon: <GlobalOutlined />
         }
       ]
     },
@@ -393,6 +411,7 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+          (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -451,6 +470,7 @@ const SchedulerPage: React.FC = () => {
       return (
         (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
         (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+        (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
         (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
         (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
         (sourceIdLower === 'futu_themes' && taskType === 'futu_themes') ||
@@ -583,6 +603,37 @@ const SchedulerPage: React.FC = () => {
       return parts.join(' | ');
     }
 
+    // Format cctv_news parameters
+    if (sourceIdLower === 'cctv_news') {
+      const parts: string[] = [];
+      
+      if (params.date) {
+        parts.push(`📅 Date: ${params.date}`);
+      }
+      
+      if (params.max_news) {
+        parts.push(`📰 Max News: ${params.max_news}`);
+      }
+      
+      if (params.auto_analyze !== undefined) {
+        parts.push(`🤖 Auto Analyze: ${params.auto_analyze ? '✅' : '❌'}`);
+      }
+      
+      if (params.analysis_templates && Array.isArray(params.analysis_templates) && params.analysis_templates.length > 0) {
+        parts.push(`📋 Templates: ${params.analysis_templates.join(', ')}`);
+      }
+      
+      if (params.max_concurrent) {
+        parts.push(`⚡ Max Concurrent: ${params.max_concurrent}`);
+      }
+      
+      if (params.enable_theme_matching !== undefined) {
+        parts.push(`🏷️ Theme Matching: ${params.enable_theme_matching ? '✅' : '❌'}`);
+      }
+      
+      return parts.length > 0 ? parts.join(' | ') : null;
+    }
+
     // Default: return formatted JSON
     return JSON.stringify(params, null, 2);
   };
@@ -637,6 +688,7 @@ const SchedulerPage: React.FC = () => {
         return (
           (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+          (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -753,7 +805,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1019,6 +1071,7 @@ const SchedulerPage: React.FC = () => {
                               return (
                                 (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
                                 (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+                                (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
                                 (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                 (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                 (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1224,7 +1277,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals'}
           dataSourceName={selectedDataSource.name}
         />
       )}

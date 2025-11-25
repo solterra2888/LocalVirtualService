@@ -26,6 +26,8 @@ import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import InvestmentThemesPage from './pages/InvestmentThemesPage';
 import CandlestickDemoPage from './pages/CandlestickDemoPage';
 import MarketWeekly from './pages/MarketWeekly';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectDetailPage from './pages/ProjectDetailPage';
 import './App.css';
 
 // 私有路由组件
@@ -118,6 +120,8 @@ const AppContent: React.FC = () => {
           <Route path="scheduler/logs" element={<SchedulerLogsPage />} />
           <Route path="prompt-templates" element={<PromptTemplatesPage />} />
           <Route path="investment-themes" element={<InvestmentThemesPage />} />
+          <Route path="projects" element={<ProjectsPage />} />
+          <Route path="projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
           
           {/* 管理员路由 */}

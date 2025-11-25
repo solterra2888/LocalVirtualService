@@ -16,6 +16,7 @@ export interface ThemeFilterState {
   relatedSectors: string[];
   relatedCountries: string[];
   sourceTypes: string[];
+  schedulerSources: string[];  // 🔥 新增：新闻来源筛选
   minConfidence: number;
   onlyPrimary: boolean;
   dateRange: [Dayjs, Dayjs] | null;
@@ -30,6 +31,7 @@ export interface ThemeFilterRequest {
   related_sectors?: string[];
   related_countries?: string[];
   source_types?: string[];
+  scheduler_sources?: string[];  // 🔥 新增：新闻来源筛选
   min_confidence?: number;
   only_primary?: boolean;
   start_date?: string;
@@ -83,6 +85,7 @@ export interface NewsFilterResponse {
     related_sectors: string[];
     related_countries: string[];
     source_types: string[];
+    scheduler_sources: string[];  // 🔥 新增
     min_confidence: number;
     only_primary: boolean;
     date_range: {

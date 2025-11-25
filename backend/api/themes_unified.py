@@ -74,6 +74,9 @@ class ThemeFilterRequest(BaseModel):
     # 来源类型
     source_types: Optional[List[str]] = Field(None, description="来源类型列表")
     
+    # 🔥 新增：调度器来源筛选
+    scheduler_sources: Optional[List[str]] = Field(None, description="调度器来源列表 (如: eodhd_news, watchlist_news, cctv_news)")
+    
     # 筛选条件
     min_confidence: float = Field(0.5, ge=0.0, le=1.0, description="最低置信度")
     only_primary: bool = Field(False, description="只显示主要主题")
@@ -747,6 +750,12 @@ async def filter_news_by_themes(
             conditions.append(f"ntu.source_type IN ({placeholders})")
             main_params.extend(request.source_types)
         
+        # 🔥 新增：调度器来源筛选
+        if request.scheduler_sources:
+            placeholders = ', '.join(['%s'] * len(request.scheduler_sources))
+            conditions.append(f"n.scheduler_source IN ({placeholders})")
+            main_params.extend(request.scheduler_sources)
+        
         # 组合所有子查询（AND关系）
         if theme_subqueries:
             # 使用INTERSECT实现AND逻辑
@@ -855,6 +864,7 @@ async def filter_news_by_themes(
             'related_sectors': request.related_sectors or [],
             'related_countries': request.related_countries or [],
             'source_types': request.source_types or [],
+            'scheduler_sources': request.scheduler_sources or [],  # 🔥 新增
             'min_confidence': request.min_confidence,
             'only_primary': request.only_primary,
             'date_range': {

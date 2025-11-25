@@ -6,6 +6,8 @@ Earnings Calendar Service
 
 import os
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
@@ -44,11 +46,109 @@ class EarningsCalendarService:
             if not self.api_key:
                 logger.warning("EODHD_API_TOKEN environment variable not set")
             
+            # 🔥 创建 robust session（参考 economic_events_service）
+            self.session = self._create_robust_session()
+            logger.info("HTTP会话创建完成（带重试机制）")
+            
             logger.info("财报日历服务初始化完成")
             
         except Exception as e:
             logger.error(f"初始化财报日历服务失败: {str(e)}")
             raise
+    
+    def _create_robust_session(self) -> requests.Session:
+        """
+        创建具有重试机制和超时设置的HTTP会话
+        （参考 economic_events_service.py 和 eodhd_fundamentals_service.py）
+        """
+        session = requests.Session()
+        
+        # 配置重试策略
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 设置请求头
+        session.headers.update({
+            'User-Agent': 'Universal Glance/1.0',
+            'Accept': 'application/json'
+        })
+        
+        return session
+    
+    def _safe_api_request(self, url: str, params: dict, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+        """
+        安全的API请求函数，处理SSL错误和各种异常
+        （参考 economic_events_service.py 的实现）
+        
+        Args:
+            url: 请求URL
+            params: 请求参数
+            max_retries: 最大重试次数
+            
+        Returns:
+            API响应的JSON数据，失败返回None
+        """
+        import time
+        session = self.session
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🔄 API请求 (第 {attempt + 1}/{max_retries} 次)")
+                
+                # 🔥 使用 session 发送请求，设置合理的超时
+                # 连接超时: 10秒，读取超时: 120秒（因为财报数据量大）
+                response = session.get(url, params=params, timeout=(10, 120))
+                response.raise_for_status()
+                
+                logger.info(f"✅ API请求成功")
+                return response.json()
+                
+            except requests.exceptions.SSLError as e:
+                logger.warning(f"⚠️ SSL错误 (第 {attempt + 1}/{max_retries} 次): {str(e)[:200]}")
+                if attempt < max_retries - 1:
+                    # 🔥 关键：重新创建session以解决SSL连接问题
+                    logger.info("🔧 关闭旧连接，重新创建HTTP会话...")
+                    session.close()
+                    session = self._create_robust_session()
+                    self.session = session
+                    
+                    # 🔥 指数退避：1秒、2秒、4秒
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ 达到最大重试次数，SSL错误持续存在")
+                    raise
+                    
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"⚠️ 请求超时 (第 {attempt + 1}/{max_retries} 次): {str(e)}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ 达到最大重试次数，请求超时")
+                    raise
+                    
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"⚠️ 请求错误 (第 {attempt + 1}/{max_retries} 次): {str(e)[:200]}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ 达到最大重试次数，API请求失败")
+                    raise
+        
+        return None
     
     def fetch_earnings_calendar(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """
@@ -89,40 +189,19 @@ class EarningsCalendarService:
                 "fmt": "json"
             }
             
-            # 发送请求（增加超时时间，因为财报数据量大）
+            # 🔥 使用安全的API请求方法（带SSL错误处理）
             logger.info(f"请求 EODHD API: {url}")
-            timeout = 120  # 增加到 120 秒，因为返回数据量大（9000+ 条记录）
+            logger.info(f"请求参数: from={start_date}, to={end_date}")
             
-            # 添加重试机制
-            max_retries = 3
-            retry_count = 0
-            last_error = None
+            data = self._safe_api_request(url, params, max_retries=3)
             
-            while retry_count < max_retries:
-                try:
-                    logger.info(f"尝试请求 API (第 {retry_count + 1}/{max_retries} 次)...")
-                    response = requests.get(url, params=params, timeout=timeout)
-                    response.raise_for_status()
-                    break  # 成功则跳出循环
-                except requests.exceptions.Timeout as e:
-                    retry_count += 1
-                    last_error = e
-                    if retry_count < max_retries:
-                        wait_seconds = retry_count * 5  # 递增等待时间：5秒、10秒
-                        logger.warning(f"API 请求超时，{wait_seconds} 秒后重试...")
-                        import time
-                        time.sleep(wait_seconds)
-                    else:
-                        logger.error(f"API 请求失败：已重试 {max_retries} 次，仍然超时")
-                        raise
-                except requests.exceptions.RequestException as e:
-                    # 其他请求错误不重试
-                    raise
-            
-            if last_error and retry_count >= max_retries:
-                raise last_error
-            
-            data = response.json()
+            # 🔥 检查请求结果
+            if data is None:
+                logger.error("API请求失败，未获取到数据")
+                return {
+                    'success': False,
+                    'message': 'API请求失败，未获取到数据'
+                }
             
             if not data or not isinstance(data, dict):
                 logger.warning("未获取到财报数据")
@@ -200,8 +279,9 @@ class EarningsCalendarService:
             start_time = time.time()
             fetch_date = datetime.now().strftime('%Y-%m-%d')
             
-            # 预处理数据，准备批量插入
-            records_to_insert = []
+            # 🔥 使用字典去重：key = (code, report_date, fetch_date)
+            records_dict = {}
+            duplicates_found = 0
             
             for earnings in earnings_list:
                 # 提取数据
@@ -244,16 +324,27 @@ class EarningsCalendarService:
                 # 存储完整的原始数据
                 raw_data = json.dumps(earnings)
                 
-                # 准备插入数据
-                records_to_insert.append((
+                # 🔥 创建唯一键（对应数据库唯一约束）
+                unique_key = (code, report_date_str, fetch_date)
+                
+                # 🔥 检测并处理重复数据
+                if unique_key in records_dict:
+                    duplicates_found += 1
+                    logger.debug(f"发现重复记录: code={code}, report_date={report_date_str}, 将被覆盖")
+                
+                # 准备插入数据（后出现的记录会覆盖先出现的）
+                records_dict[unique_key] = (
                     code, name, exchange, report_date_str, str(report_date),
                     before_after_market, currency, actual, estimate,
                     difference, percent, actual_revenue, estimate_revenue,
                     difference_revenue, percent_revenue, raw_data,
                     'eodhd', fetch_date
-                ))
+                )
             
-            logger.info(f"📊 准备插入 {len(records_to_insert)} 条财报记录")
+            # 🔥 转换为列表
+            records_to_insert = list(records_dict.values())
+            
+            logger.info(f"📊 原始数据: {len(earnings_list)} 条，去重后: {len(records_to_insert)} 条，重复: {duplicates_found} 条")
             
             # 🚀 使用高性能批量插入
             total_saved = self._batch_upsert_earnings(records_to_insert)
@@ -545,6 +636,15 @@ class EarningsCalendarService:
         except Exception as e:
             logger.error(f"查询财报数据失败: {str(e)}", exc_info=True)
             return []
+
+
+    def __del__(self):
+        """清理资源"""
+        try:
+            if hasattr(self, 'session'):
+                self.session.close()
+        except:
+            pass
 
 
 def create_earnings_calendar_service() -> EarningsCalendarService:

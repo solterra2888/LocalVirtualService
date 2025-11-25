@@ -46,6 +46,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
     relatedSectors: [],
     relatedCountries: [],
     sourceTypes: [],
+    schedulerSources: [],  // 🔥 新增
     minConfidence: 0.5,
     onlyPrimary: false,
     dateRange: null,
@@ -144,6 +145,7 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
       relatedSectors: [],
       relatedCountries: [],
       sourceTypes: [],
+      schedulerSources: [],  // 🔥 新增
       minConfidence: 0.5,
       onlyPrimary: false,
       dateRange: null,
@@ -316,6 +318,33 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
             'sourceTypes',
             dimensionLoading.source_type || false
           )}
+        </Panel>
+
+        {/* 🔥 新增：Scheduler Source 筛选 */}
+        <Panel header={<span style={{ fontSize: '11px', fontWeight: 'bold' }}>Scheduler Source</span>} key="scheduler_source">
+          <Space wrap style={{ width: '100%' }}>
+            <Checkbox
+              checked={filters.schedulerSources.includes('eodhd_news')}
+              onChange={() => toggleCheckbox('schedulerSources', 'eodhd_news')}
+              style={{ fontSize: '11px' }}
+            >
+              <span style={{ fontSize: '11px' }}>EODHD News</span>
+            </Checkbox>
+            <Checkbox
+              checked={filters.schedulerSources.includes('watchlist_news')}
+              onChange={() => toggleCheckbox('schedulerSources', 'watchlist_news')}
+              style={{ fontSize: '11px' }}
+            >
+              <span style={{ fontSize: '11px' }}>Watchlist News</span>
+            </Checkbox>
+            <Checkbox
+              checked={filters.schedulerSources.includes('cctv_news')}
+              onChange={() => toggleCheckbox('schedulerSources', 'cctv_news')}
+              style={{ fontSize: '11px' }}
+            >
+              <span style={{ fontSize: '11px' }}>CCTV News</span>
+            </Checkbox>
+          </Space>
         </Panel>
 
         {/* 置信度 */}

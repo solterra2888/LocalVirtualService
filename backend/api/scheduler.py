@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -99,6 +99,27 @@ class CreateWatchlistNewsTaskRequest(BaseModel):
     max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数")
     # 投资主题匹配相关参数
     enable_theme_matching: bool = Field(default=True, description="是否启用投资主题向量匹配（推荐启用，成本极低）")
+
+
+class CreateCCTVNewsTaskRequest(BaseModel):
+    """创建CCTV新闻定时任务请求模型"""
+    name: str = Field(default="CCTV News Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="0 20 * * *", description="Cron表达式（默认每天20:00北京时间）")
+    timezone: str = Field(default="Asia/Shanghai", description="时区（北京时间）")
+    enabled: bool = Field(default=True, description="是否启用")
+    
+    # 爬取参数（可选）
+    date: Optional[str] = Field(default=None, description="指定日期(YYYYMMDD)，None为最新")
+    max_news: Optional[int] = Field(default=None, ge=1, le=100, description="最大爬取数量")
+    
+    # 🔥 LLM分析参数（可选）
+    auto_analyze: bool = Field(default=True, description="是否自动触发LLM分析（默认True）")
+    analysis_templates: List[str] = Field(
+        default=["news_cctv_summary_v1", "news_classification"],
+        description="分析使用的Prompt模板列表（支持多模板并行分析）"
+    )
+    max_concurrent: int = Field(default=5, ge=1, le=20, description="最大并发分析数（默认5）")
+    enable_theme_matching: bool = Field(default=True, description="是否启用主题匹配（默认True）")
 
 
 class CreateEODHDFundamentalsTaskRequest(BaseModel):
@@ -1609,6 +1630,97 @@ async def create_default_watchlist_news_task(
     except Exception as e:
         logger.error("创建默认Watchlist新闻定时任务失败", exception=str(e), user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建默认定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/cctv-news", summary="创建CCTV新闻定时任务")
+async def create_cctv_news_task(
+    request: CreateCCTVNewsTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建CCTV新闻爬取定时任务
+    
+    默认配置：
+    - 北京时间每天20:00执行 (0 20 * * *)
+    - 爬取最新日期的所有新闻
+    - 自动保存到news表，标记为scheduler_source='cctv_news'
+    """
+    try:
+        logger.info("创建CCTV新闻定时任务请求", 
+                   user=current_user.username,
+                   task_name=request.name,
+                   cron_expression=request.cron_expression)
+        
+        scheduler_service = await get_scheduler_service()
+        
+        # 构建任务参数
+        task_params = {
+            # 爬取参数
+            'date': request.date,  # 可选：指定日期
+            'max_news': request.max_news,  # 可选：限制数量
+            
+            # 🔥 LLM分析参数
+            'auto_analyze': request.auto_analyze,
+            'analysis_templates': request.analysis_templates,
+            'max_concurrent': request.max_concurrent,
+            'enable_theme_matching': request.enable_theme_matching
+        }
+        
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="cctv_news",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        
+        if result['success']:
+            logger.info("CCTV新闻定时任务创建成功", 
+                       task_id=result['task_id'],
+                       user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("CCTV新闻定时任务创建失败", 
+                        failure_reason=result['message'],
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+    except Exception as e:
+        logger.error("创建CCTV新闻定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建CCTV新闻定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/cctv-news/default", summary="创建默认CCTV新闻定时任务")
+async def create_default_cctv_news_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建默认的CCTV新闻定时任务
+    
+    默认配置：
+    - 任务名称：CCTV News Auto Fetch
+    - 北京时间每天20:00执行 (0 20 * * *)
+    - 爬取最新日期的所有新闻
+    """
+    try:
+        logger.info("创建默认CCTV新闻定时任务请求", user=current_user.username)
+        
+        # 使用默认配置
+        default_request = CreateCCTVNewsTaskRequest()
+        return await create_cctv_news_task(default_request, current_user)
+        
+    except Exception as e:
+        logger.error("创建默认CCTV新闻定时任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建默认CCTV新闻定时任务失败: {str(e)}")
 
 
 # ============ 手动执行任务API ============

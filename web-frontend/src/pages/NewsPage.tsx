@@ -17,7 +17,8 @@ import {
 import {
   CalendarOutlined,
   RobotOutlined,
-  FilterOutlined
+  FilterOutlined,
+  ExportOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -36,7 +37,7 @@ import ThemeFilterPanel from '../components/ThemeFilterPanel';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
-import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, hasAnalysisForTemplate } from '../utils/newsAnalysisHelper';
+import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, getPreferredSummaryTemplate, hasAnalysisForTemplate } from '../utils/newsAnalysisHelper';
 import { 
   getClassificationFromAnalysis, 
   getClassificationTags, 
@@ -122,6 +123,7 @@ const NewsPage: React.FC = () => {
       relatedSectors: [],
       relatedCountries: [],
       sourceTypes: [],
+      schedulerSources: [],  // 🔥 新增
       minConfidence: 0.5,
       onlyPrimary: false,
       dateRange: null,
@@ -196,6 +198,7 @@ const NewsPage: React.FC = () => {
         related_sectors: activeFilters.relatedSectors.length > 0 ? activeFilters.relatedSectors : undefined,
         related_countries: activeFilters.relatedCountries.length > 0 ? activeFilters.relatedCountries : undefined,
         source_types: activeFilters.sourceTypes.length > 0 ? activeFilters.sourceTypes : undefined,
+        scheduler_sources: activeFilters.schedulerSources.length > 0 ? activeFilters.schedulerSources : undefined,  // 🔥 新增
         min_confidence: activeFilters.minConfidence,
         only_primary: activeFilters.onlyPrimary,
         start_date: activeFilters.dateRange?.[0]?.format('YYYY-MM-DD'),
@@ -265,6 +268,100 @@ const NewsPage: React.FC = () => {
   const loadMoreNews = () => {
     if (!state.hasMoreNews || state.loadingMore) return;
     loadFilteredNews(false);
+  };
+
+  // 导出筛选的新闻为CSV
+  const handleExportToCSV = () => {
+    if (state.filteredNewsData.length === 0) {
+      message.warning('No news data to export. Please apply filters first.');
+      return;
+    }
+
+    try {
+      // 定义CSV列
+      const headers = [
+        'ID',
+        'Date',
+        'Title',
+        'Content',
+        'Analysis Result',
+        'Updated At',
+        'Source',
+        'Link',
+        'Themes'
+      ];
+
+      // 转换数据为CSV行
+      const csvRows = [
+        headers.join(','),
+        ...state.filteredNewsData.map(item => {
+          // 处理可能包含逗号、引号或换行符的字段
+          const escapeCSV = (value: any): string => {
+            if (value === null || value === undefined) return '';
+            const str = String(value);
+            // 如果包含逗号、引号或换行符，需要用引号包裹，并转义内部引号
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+              return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+          };
+
+          // 从analysis_result中提取news_cctv_summary_v1的content
+          let analysisContent = '';
+          if (item.analysis_result) {
+            const cctvAnalysis = getAnalysisContent(item.analysis_result, 'news_cctv_summary_v1');
+            if (cctvAnalysis && typeof cctvAnalysis.content === 'string') {
+              analysisContent = cctvAnalysis.content;
+            }
+          }
+          
+          const themes = item.themes && item.themes.length > 0
+            ? item.themes.map(t => `${t.theme_name}${t.display_name ? ` (${t.display_name})` : ''}`).join('; ')
+            : '';
+
+          return [
+            item.id,
+            escapeCSV(item.date),
+            escapeCSV(item.title),
+            escapeCSV(item.content || ''),
+            escapeCSV(analysisContent),
+            escapeCSV(item.updated_at || ''),
+            escapeCSV(item.source),
+            escapeCSV(item.link || ''),
+            escapeCSV(themes)
+          ].join(',');
+        })
+      ];
+
+      // 创建CSV内容
+      const csvContent = csvRows.join('\n');
+
+      // 添加BOM以支持Excel正确显示中文
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+      // 创建下载链接
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // 生成文件名（包含时间戳）
+      const timestamp = dayjs().format('YYYY-MM-DD_HH-mm-ss');
+      link.download = `filtered_news_${timestamp}.csv`;
+      
+      // 触发下载
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // 清理URL对象
+      URL.revokeObjectURL(url);
+
+      message.success(`Successfully exported ${state.filteredNewsData.length} news items to CSV.`);
+    } catch (error) {
+      console.error('Failed to export CSV:', error);
+      message.error('Failed to export CSV. Please try again.');
+    }
   };
 
   // 初始化数据
@@ -609,13 +706,23 @@ const NewsPage: React.FC = () => {
                 </Space>
               }
               extra={
-                <Button
-                  icon={<FilterOutlined />}
-                  onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
-                  size="small"
-                >
-                  Highlight Setting
-                </Button>
+                <Space>
+                  <Button
+                    icon={<FilterOutlined />}
+                    onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
+                    size="small"
+                  >
+                    Highlight Setting
+                  </Button>
+                  <Button
+                    icon={<ExportOutlined />}
+                    onClick={handleExportToCSV}
+                    size="small"
+                    disabled={state.filteredNewsData.length === 0}
+                  >
+                    Export
+                  </Button>
+                </Space>
               }
             >
               {state.loading ? (
@@ -887,21 +994,29 @@ const NewsPage: React.FC = () => {
             {(() => {
               const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
               const hasAnyAnalysis = Object.keys(allResults).length > 0;
-              const summaryResult = getAnalysisContent(state.selectedNews.analysis_result, 'news_summary_v1');
+              // 🔥 使用优先级逻辑获取 summary 模板（支持 CCTV 和通用模板）
+              const preferredSummary = getPreferredSummaryTemplate(state.selectedNews.analysis_result);
 
               if (hasAnyAnalysis) {
                 return (
                   <>
-                    {/* 优先显示 news_summary_v1 的结果 */}
-                    {summaryResult && typeof summaryResult.content === 'string' && (
+                    {/* 优先显示 summary 模板的结果（支持多种 summary 模板） */}
+                    {preferredSummary && typeof preferredSummary.result.content === 'string' && (
                       <>
                         <Card 
-                          title="AI Analysis" 
+                          title={
+                            <Space>
+                              <span>AI Analysis</span>
+                              <Tag color="blue" style={{ fontSize: '10px' }}>
+                                {preferredSummary.templateCode}
+                              </Tag>
+                            </Space>
+                          }
                           size="small"
                           headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
                         >
                           <MarkdownRenderer 
-                            content={summaryResult.content}
+                            content={preferredSummary.result.content}
                             style={{
                               fontSize: '12px',
                               lineHeight: '1.6'
@@ -909,10 +1024,10 @@ const NewsPage: React.FC = () => {
                           />
                           <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
                             <Space size="small">
-                              {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
-                              {summaryResult.model && <span>Model: {summaryResult.model}</span>}
-                              {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
-                              {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
+                              {preferredSummary.result.provider && <span>Provider: {preferredSummary.result.provider}</span>}
+                              {preferredSummary.result.model && <span>Model: {preferredSummary.result.model}</span>}
+                              {preferredSummary.result.tokens && <span>Tokens: {preferredSummary.result.tokens.toLocaleString()}</span>}
+                              {preferredSummary.result.temperature && <span>Temperature: {preferredSummary.result.temperature}</span>}
                             </Space>
                 </div>
                         </Card>
@@ -1148,8 +1263,10 @@ const NewsPage: React.FC = () => {
 
                     {/* 显示其他模板的结果 */}
                     {Object.entries(allResults).map(([templateCode, result]) => {
-                      if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null; // 已经显示过了
-                      if (templateCode === 'news_classification') return null; // 不显示新闻分类分析
+                      // 🔥 跳过已经显示的 summary 模板
+                      if (preferredSummary && templateCode === preferredSummary.templateCode) return null;
+                      // 跳过 news_classification（已经显示在 Tags 中）
+                      if (templateCode === 'news_classification') return null;
                       
                       return (
                   <Card 

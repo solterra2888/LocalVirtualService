@@ -509,7 +509,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'news_analysis', 'futu_themes', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar')),
+                CONSTRAINT valid_task_type CHECK (type IN ('eodhd_news', 'watchlist_news', 'cctv_news', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'news_analysis', 'futu_themes', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -626,7 +626,8 @@ class DatabaseManager:
             # 定义完整的任务类型列表（包括所有可能的类型）
             all_task_types = [
                 'eodhd_news', 
-                'watchlist_news', 
+                'watchlist_news',
+                'cctv_news',
                 'economic_events', 
                 'macro_indicators', 
                 'eodhd_fundamentals',

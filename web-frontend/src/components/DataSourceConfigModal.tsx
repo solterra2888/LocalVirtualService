@@ -15,7 +15,8 @@ import {
   InputNumber,
   Tooltip,
   message,
-  Switch
+  Switch,
+  Divider
 } from 'antd';
 import {
   ClockCircleOutlined,
@@ -27,7 +28,8 @@ import {
   QuestionCircleOutlined,
   DatabaseOutlined,
   LineChartOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  GlobalOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import CronExpressionGuide from './CronExpressionGuide';
@@ -39,7 +41,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -82,6 +84,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '*/15 * * * *',
       defaultName: 'My Watchlist News Auto Fetch',
       description: 'Get news for stocks in your watchlist automatically from EODHD API'
+    },
+    cctv_news: {
+      icon: <GlobalOutlined style={{ color: '#ff4d4f' }} />,
+      params: ['date', 'max_news'],
+      defaultSchedule: '0 20 * * *',
+      defaultName: 'CCTV News Auto Fetch',
+      description: 'Scrape CCTV News (新闻联播) daily at 8 PM Beijing time (Asia/Shanghai timezone)'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
@@ -263,6 +272,23 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             ...data.taskParams  // ✅ 展开所有参数，包括 LLM 分析参数
           };
           result = await schedulerAPI.createWatchlistNewsTask(watchlistParams);
+        } else if (dataSourceType === 'cctv_news') {
+          // CCTV新闻任务的专用创建逻辑
+          const cctvNewsParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            // 爬取参数
+            date: data.taskParams?.date || undefined,
+            max_news: data.taskParams?.max_news || undefined,
+            // 🔥 LLM分析参数
+            auto_analyze: data.taskParams?.auto_analyze !== undefined ? data.taskParams.auto_analyze : true,
+            analysis_templates: data.taskParams?.analysis_templates || ['news_cctv_summary_v1', 'news_classification'],
+            max_concurrent: data.taskParams?.max_concurrent || 5,
+            enable_theme_matching: data.taskParams?.enable_theme_matching !== undefined ? data.taskParams.enable_theme_matching : true
+          };
+          result = await schedulerAPI.createCCTVNewsTask(cctvNewsParams);
         } else if (dataSourceType === 'finviz_screener') {
           // Finviz筛选数据任务的专用创建逻辑
           const finvizParams = {
@@ -863,6 +889,107 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 icon={<CheckCircleOutlined />}
                 style={{ marginBottom: 16 }}
                 description="Vector-based theme matching is 140x cheaper and 20x faster than LLM analysis. Recommended to keep enabled."
+              />
+            </>
+          );
+          
+        case 'cctv_news':
+          return (
+            <>
+              <Alert
+                message="CCTV News Scraper (央视新闻联播)"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Automatically scrape news from CCTV News website. Recommended to run daily at 8 PM Beijing time."
+              />
+              
+              <Divider orientation="left">Scraping Parameters (爬取参数)</Divider>
+              
+              <Form.Item
+                label="Date (Optional)"
+                name={['taskParams', 'date']}
+                extra="Specify date (format: YYYYMMDD). Leave empty to scrape latest news."
+              >
+                <Input 
+                  placeholder="e.g., 20251124 (leave empty for latest)" 
+                  maxLength={8}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Max News (Optional)"
+                name={['taskParams', 'max_news']}
+                extra="Maximum number of news items to scrape (1-100). Leave empty to scrape all."
+              >
+                <InputNumber 
+                  min={1} 
+                  max={100} 
+                  placeholder="Leave empty for all" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Divider orientation="left">LLM Analysis Parameters (分析参数)</Divider>
+              
+              <Form.Item
+                label="Auto Analyze"
+                name={['taskParams', 'auto_analyze']}
+                valuePropName="checked"
+                initialValue={true}
+                extra="Automatically trigger LLM analysis after scraping new news."
+              >
+                <Switch defaultChecked />
+              </Form.Item>
+              
+              <Form.Item
+                label="Analysis Templates"
+                name={['taskParams', 'analysis_templates']}
+                initialValue={['news_cctv_summary_v1', 'news_classification']}
+                extra="Select multiple templates for parallel analysis. Default: CCTV Summary + Classification."
+              >
+                <Select
+                  mode="multiple"
+                  placeholder="Select analysis templates"
+                  options={[
+                    { label: 'CCTV Summary (央视新闻摘要)', value: 'news_cctv_summary_v1' },
+                    { label: 'News Classification (新闻分类)', value: 'news_classification' },
+                    { label: 'News Summary (通用摘要)', value: 'news_summary_v1' },
+                  ]}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Max Concurrent"
+                name={['taskParams', 'max_concurrent']}
+                initialValue={5}
+                extra="Maximum concurrent LLM analysis (1-20). Recommended: 5."
+              >
+                <InputNumber 
+                  min={1} 
+                  max={20} 
+                  placeholder="5" 
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label="Enable Theme Matching"
+                name={['taskParams', 'enable_theme_matching']}
+                valuePropName="checked"
+                initialValue={true}
+                extra="Automatically match news to investment themes after analysis."
+              >
+                <Switch defaultChecked />
+              </Form.Item>
+              
+              <Alert
+                message="Tips (提示)"
+                type="warning"
+                showIcon
+                description="It's recommended to leave scraping parameters empty to get complete daily news. Use multiple templates for comprehensive analysis."
+                style={{ marginTop: 16 }}
               />
             </>
           );

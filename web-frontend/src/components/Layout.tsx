@@ -20,7 +20,8 @@ import {
   CalendarOutlined,
   ControlOutlined,
   BarChartOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  FolderOutlined
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -59,6 +60,11 @@ const Layout: React.FC = () => {
       key: '/dashboard',
       icon: <StockOutlined />,
       label: 'Watchlist',
+    },
+    {
+      key: '/projects',
+      icon: <FolderOutlined />,
+      label: 'Projects',
     },
     {
       key: '/news',
