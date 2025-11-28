@@ -28,6 +28,8 @@ export interface TaskExecution {
   ai_processing_time: number;
   total_tokens?: number;
   total_cost?: number;
+  first_filename?: string;  // 第一个文件的名称
+  rc_agent_status?: string;  // RC Agent状态
 }
 
 export interface TaskCreateRequest {

@@ -97,8 +97,11 @@ class LLMProviderConfig(BaseModel):
     icon: str
 
 class GlobalSettings(BaseModel):
-    timeout: int
-    retryCount: int
+    """
+    全局设置 - 只负责系统级策略
+    注意：不再包含参数默认值（timeout, retryCount等）
+    这些参数由 Provider Config 提供
+    """
     enableLogging: bool
     enableMonitoring: bool
 
@@ -195,14 +198,11 @@ async def get_llm_config(current_user: TokenData = Depends(get_current_admin_use
         default_provider = get_setting_value('default_provider', 'qwen')
         fallback_enabled = get_setting_value('fallback_enabled', True)
         fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'wenxin', 'glm'])
-        global_timeout = get_setting_value('global_timeout', 30)
-        global_retry_count = get_setting_value('global_retry_count', 3)
         enable_logging = get_setting_value('enable_logging', True)
         enable_monitoring = get_setting_value('enable_monitoring', True)
         
+        # Global Settings 只包含系统级策略，不包含参数默认值
         global_settings = GlobalSettings(
-            timeout=int(global_timeout),
-            retryCount=int(global_retry_count),
             enableLogging=bool(enable_logging),
             enableMonitoring=bool(enable_monitoring)
         )
@@ -265,8 +265,7 @@ async def save_llm_config(
         db_manager.update_llm_global_setting('default_provider', json.dumps(config.defaultProvider), current_user.username)
         db_manager.update_llm_global_setting('fallback_enabled', json.dumps(config.fallbackEnabled), current_user.username)
         db_manager.update_llm_global_setting('fallback_order', json.dumps(config.fallbackOrder), current_user.username)
-        db_manager.update_llm_global_setting('global_timeout', json.dumps(config.globalSettings.timeout), current_user.username)
-        db_manager.update_llm_global_setting('global_retry_count', json.dumps(config.globalSettings.retryCount), current_user.username)
+        # Global Settings 只保存系统级策略，不保存参数默认值
         db_manager.update_llm_global_setting('enable_logging', json.dumps(config.globalSettings.enableLogging), current_user.username)
         db_manager.update_llm_global_setting('enable_monitoring', json.dumps(config.globalSettings.enableMonitoring), current_user.username)
         

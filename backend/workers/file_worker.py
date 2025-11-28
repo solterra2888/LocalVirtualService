@@ -103,10 +103,32 @@ class FileProcessingWorker:
             )
             
             use_ai_agent = params.get('use_ai_agent', True)
+            analysis_mode = params.get('analysis_mode', 'remote_agent')  # 'remote_agent' 或 'local_llm'
+            
             rc_agent_service = None
-            if use_ai_agent and task_info.get('token'):
-                base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
-                rc_agent_service = RCAgentService(rc_agent_token=task_info.get('token'), base_url=base_url, log_callback=self.update_status)
+            llm_analysis_service = None
+            
+            if use_ai_agent:
+                if analysis_mode == 'local_llm':
+                    # 使用本地LLM+Template方式
+                    template_id = params.get('template_id')
+                    template_code = params.get('template_code')
+                    
+                    if not template_id and not template_code:
+                        self.update_status(log_message="⚠️ 警告: 未指定模板，将跳过AI分析")
+                    else:
+                        from backend.services.local_llm_analysis_service import LocalLLMAnalysisService
+                        llm_analysis_service = LocalLLMAnalysisService(
+                            template_id=template_id,
+                            template_code=template_code,
+                            log_callback=self.update_status
+                        )
+                        self.update_status(log_message=f"✅ 已初始化本地LLM分析服务 (模板ID: {template_id or template_code})")
+                else:
+                    # 使用远程Dify Agent方式（现有逻辑）
+                    if task_info.get('token'):
+                        base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
+                        rc_agent_service = RCAgentService(rc_agent_token=task_info.get('token'), base_url=base_url, log_callback=self.update_status)
             
             self.update_status("processing", 5.0, log_message="开始处理文件...")
             
@@ -163,38 +185,67 @@ class FileProcessingWorker:
                     self.files_failed += 1
                     self.update_status(log_message=f"文件 {os.path.basename(file_path)} 处理出错: {str(e)}")
             
-            # 如果有成功的结果，发送到RC Agent
+            # 如果有成功的结果，进行AI分析
             final_report = None
             file_ai_times = []
-            rc_agent_success = True  # 跟踪RC Agent处理是否成功
+            ai_analysis_success = True  # 跟踪AI分析处理是否成功
             
-            if successful_results and rc_agent_service and not self.should_stop:
+            if successful_results and (rc_agent_service or llm_analysis_service) and not self.should_stop:
                 try:
-                    self.update_status("ai_processing", 80.0, log_message="正在发送到RC Agent处理...")
-                    agent_type = task_info.get('agent_type', 'chatbot')
-                    final_report, file_ai_times = rc_agent_service.process_all_contents(
-                        successful_results, 
-                        custom_inputs,
-                        agent_type
-                    )
+                    if analysis_mode == 'local_llm' and llm_analysis_service:
+                        # 使用本地LLM分析
+                        self.update_status("ai_processing", 80.0, log_message="正在使用本地LLM分析...")
+                        
+                        # 准备模板变量
+                        template_variables = params.get('template_variables', {})
+                        
+                        # 如果有标签信息，添加到模板变量中
+                        if params.get('sector'):
+                            template_variables['sector'] = params.get('sector', '')
+                        if params.get('industry'):
+                            template_variables['industry'] = params.get('industry', '')
+                        if params.get('ticker'):
+                            template_variables['ticker'] = params.get('ticker', '')
+                        
+                        # 调用本地LLM分析服务
+                        final_report, file_ai_times = await llm_analysis_service.process_all_contents(
+                            successful_results,
+                            custom_variables=template_variables,
+                            user_id=getattr(self, 'user_id', None),
+                            provider=params.get('llm_provider'),
+                            model=params.get('llm_model')
+                        )
+                    elif rc_agent_service:
+                        # 使用远程RC Agent分析（现有逻辑）
+                        self.update_status("ai_processing", 80.0, log_message="正在发送到RC Agent处理...")
+                        agent_type = task_info.get('agent_type', 'chatbot')
+                        final_report, file_ai_times = rc_agent_service.process_all_contents(
+                            successful_results, 
+                            custom_inputs,
+                            agent_type
+                        )
                     
-                    # 检查RC Agent是否真的返回了结果
+                    # 检查AI分析是否真的返回了结果
                     if final_report and file_ai_times:
-                        self.update_status(log_message="RC Agent处理完成")
+                        mode_name = "本地LLM" if analysis_mode == 'local_llm' else "RC Agent"
+                        self.update_status(log_message=f"{mode_name}处理完成")
                     else:
-                        rc_agent_success = False
-                        self.update_status(log_message="RC Agent处理完成但未返回有效结果")
+                        ai_analysis_success = False
+                        mode_name = "本地LLM" if analysis_mode == 'local_llm' else "RC Agent"
+                        self.update_status(log_message=f"{mode_name}处理完成但未返回有效结果")
                         
                 except Exception as e:
-                    rc_agent_success = False
+                    ai_analysis_success = False
                     error_msg = str(e)
-                    self.update_status(log_message=f"RC Agent处理失败: {error_msg}")
+                    mode_name = "本地LLM" if analysis_mode == 'local_llm' else "RC Agent"
+                    self.update_status(log_message=f"{mode_name}处理失败: {error_msg}")
                     
-                    # 如果是认证错误，提供更友好的错误信息
-                    if "401" in error_msg or "unauthorized" in error_msg.lower():
-                        self.update_status(log_message="RC Agent认证失败，请检查token配置")
-                    elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
-                        self.update_status(log_message="RC Agent服务器连接失败，请检查网络连接")
+                    # 如果是远程Agent的认证错误，提供更友好的错误信息
+                    if analysis_mode == 'remote_agent':
+                        if "401" in error_msg or "unauthorized" in error_msg.lower():
+                            self.update_status(log_message="RC Agent认证失败，请检查token配置")
+                        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
+                            self.update_status(log_message="RC Agent服务器连接失败，请检查网络连接")
                     
                     # 确保在失败时也有默认值
                     final_report = None
@@ -204,15 +255,15 @@ class FileProcessingWorker:
             if not self.should_stop:
                 self.update_status("saving", 95.0, log_message="正在保存处理结果...")
                 
-                # 确定RC Agent状态
-                if not successful_results or not rc_agent_service:
-                    # 没有成功的文件或没有RC Agent服务，跳过RC Agent处理
+                # 确定AI分析状态
+                if not successful_results or (not rc_agent_service and not llm_analysis_service):
+                    # 没有成功的文件或没有AI分析服务，跳过AI分析
                     rc_status = 'skipped'
-                elif rc_agent_success and final_report:
-                    # RC Agent处理成功且有报告
+                elif ai_analysis_success and final_report:
+                    # AI分析处理成功且有报告
                     rc_status = 'success'
-                elif not rc_agent_success:
-                    # RC Agent处理失败
+                elif not ai_analysis_success:
+                    # AI分析处理失败
                     rc_status = 'failed'
                 else:
                     # 其他情况（如部分成功）
@@ -233,12 +284,14 @@ class FileProcessingWorker:
                 self.update_status("stopped", log_message="处理已停止")
             else:
                 # 根据处理结果决定最终状态
-                if not rc_agent_success:
-                    # RC Agent处理失败，但文件处理成功，标记为部分成功
-                    self.update_status("completed", 100.0, log_message="文件处理成功，但AI Agent处理失败")
-                elif successful_results and rc_agent_service and not final_report:
-                    # 有成功的LlamaIndex结果，需要RC Agent处理，但未获得报告内容
-                    self.update_status("completed", 100.0, log_message="文件处理成功，但AI Agent未返回有效结果")
+                mode_name = "本地LLM" if analysis_mode == 'local_llm' else "AI Agent"
+                
+                if not ai_analysis_success:
+                    # AI分析处理失败，但文件处理成功，标记为部分成功
+                    self.update_status("completed", 100.0, log_message=f"文件处理成功，但{mode_name}处理失败")
+                elif successful_results and (rc_agent_service or llm_analysis_service) and not final_report:
+                    # 有成功的文件处理结果，需要AI分析，但未获得报告内容
+                    self.update_status("completed", 100.0, log_message=f"文件处理成功，但{mode_name}未返回有效结果")
                 elif failed_files and not successful_results:
                     # 所有文件都处理失败
                     self.update_status("failed", 100.0, log_message="任务处理失败：所有文件处理失败")
@@ -312,6 +365,23 @@ class FileProcessingWorker:
                 file_time.get('total_price', 0) for file_time in (file_ai_times or [])
             )
             
+            # 提取模型信息（从第一个文件的model_usage中）
+            llm_model = None
+            llm_provider = None
+            if file_ai_times:
+                for file_time in file_ai_times:
+                    model_usage_list = file_time.get('model_usage', [])
+                    if model_usage_list and len(model_usage_list) > 0:
+                        llm_model = model_usage_list[0].get('model_name')
+                        # 如果是本地LLM分析，provider信息在file_time中
+                        llm_provider = file_time.get('provider')
+                        break
+            
+            # 如果是远程Agent模式，尝试从params中获取分析模式信息
+            analysis_mode = params.get('analysis_mode', 'remote_agent')
+            if analysis_mode == 'remote_agent':
+                llm_provider = 'Dify Agent'
+            
             # 准备上传参数（转换为JSON字符串）
             upload_params = json.dumps({
                 "task_type": task_info.get('name', ''),
@@ -325,8 +395,8 @@ class FileProcessingWorker:
             (timestamp, files_processed, files_failed, total_time, 
              total_file_processing_time, total_ai_time, task_name, 
              "user", total_tokens, total_price, upload_params, 
-             final_report, rc_agent_status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             final_report, rc_agent_status, llm_model, llm_provider)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """, (
                 datetime.now(),
@@ -341,7 +411,9 @@ class FileProcessingWorker:
                 total_price,
                 upload_params,
                 final_report or "",
-                rc_agent_status
+                rc_agent_status,
+                llm_model,
+                llm_provider
             ))
             
             processing_stats_id = cursor.fetchone()[0]

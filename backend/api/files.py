@@ -33,6 +33,7 @@ from backend.processors.task_manager import TaskManager
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import info, error, warning, debug
 from backend.utils.database_config import get_database_config
+from backend.services.llm_prompt_template_service import LLMPromptTemplateService
 
 # Celery相关导入
 from celery.result import AsyncResult
@@ -204,29 +205,83 @@ async def process_files(
     # 获取数据库连接参数
     db_conn_params = get_database_config()
     
-    # 获取任务信息（快速验证）
-    task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
-    task_manager.load_agent_credentials()
+    # 根据分析模式进行不同的验证
+    task_info = {}
+    analysis_mode = request.analysis_mode
     
-    # 验证任务选择
-    is_valid, message, task_info = task_manager.validate_task_selection(
-        request.task_type, 
-        request.params.get('use_ai_agent', True)
-    )
-    
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=message
+    if analysis_mode == 'local_llm':
+        # 本地LLM模式：验证模板
+        if not request.template_id and not request.template_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="使用本地LLM模式时，必须指定template_id或template_code"
+            )
+        
+        # 获取模板名称
+        template_name = None
+        try:
+            template_service = LLMPromptTemplateService(db_conn_params)
+            if request.template_id:
+                template = template_service.get_template(request.template_id)
+                if template:
+                    template_name = template.get('template_name')
+            elif request.template_code:
+                template = template_service.get_template_by_code(request.template_code)
+                if template:
+                    template_name = template.get('template_name')
+        except Exception as e:
+            warning(f"获取模板名称失败: {str(e)}", source="api", user=current_user.username)
+        
+        # 使用模板名称作为task_name，如果没有获取到则使用fallback
+        task_name = template_name if template_name else (request.template_code or f'ID:{request.template_id}')
+        
+        # 构造task_info用于传递给worker
+        task_info = {
+            'name': task_name,
+            'token': None,  # 本地LLM不需要token
+            'agent_type': 'local_llm'
+        }
+        
+        info(
+            f"使用本地LLM模式: template_id={request.template_id}, "
+            f"template_code={request.template_code}, template_name={template_name}",
+            source="api",
+            user=current_user.username
         )
+    else:
+        # 远程Agent模式：验证任务选择
+        task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
+        task_manager.load_agent_credentials()
+        
+        is_valid, message, task_info = task_manager.validate_task_selection(
+            request.task_type, 
+            request.params.get('use_ai_agent', True)
+        )
+        
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=message
+            )
     
     try:
+        # 准备处理参数，添加分析模式相关参数
+        processing_params = request.params.copy()
+        processing_params['analysis_mode'] = analysis_mode
+        
+        if analysis_mode == 'local_llm':
+            processing_params['template_id'] = request.template_id
+            processing_params['template_code'] = request.template_code
+            processing_params['template_variables'] = request.template_variables
+            processing_params['llm_provider'] = request.llm_provider
+            processing_params['llm_model'] = request.llm_model
+        
         # 🚀 提交到Celery任务队列（立即返回）
         task = process_files_task.delay(
             file_paths=valid_files,
             task_info=task_info,
             custom_inputs=request.custom_inputs,
-            params=request.params,
+            params=processing_params,
             username=current_user.username
         )
         

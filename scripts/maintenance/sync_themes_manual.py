@@ -85,7 +85,7 @@ async def main():
         print("\n💡 后续操作:")
         print("  1. 检查trending主题: curl 'http://localhost:8000/api/themes-unified/trending'")
         print("  2. 查看特定新闻的主题: curl 'http://localhost:8000/api/themes-unified/news/<news_id>/fused-themes'")
-        print("  3. 运行诊断: python scripts/diagnose_unified_themes.py")
+        print("  3. 运行诊断: python scripts/diagnostics/diagnose_unified_themes.py")
         
     except Exception as e:
         logger.error(f"同步失败: {e}", exc_info=True)

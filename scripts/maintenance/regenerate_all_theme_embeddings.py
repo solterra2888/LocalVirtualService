@@ -10,7 +10,7 @@ import sys
 import os
 
 # 添加项目根目录到Python路径
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from backend.services.investment_theme_embedding_service import InvestmentThemeEmbeddingService
 from backend.utils.database_config import get_database_config
@@ -78,7 +78,7 @@ async def main():
                 logger.info("  3. 观察主题匹配效果")
                 logger.info("  4. 如效果良好，可考虑调整阈值到0.50-0.55")
                 logger.info("  5. 运行诊断脚本查看详细效果:")
-                logger.info("     python scripts/diagnose_theme_matching.py")
+                logger.info("     python scripts/diagnostics/diagnose_theme_matching.py")
             
             return 0
         else:

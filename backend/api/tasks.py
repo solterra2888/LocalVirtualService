@@ -268,12 +268,16 @@ async def get_task_executions(
             params.append(current_user.username)
         
         cursor.execute(f"""
-        SELECT id, timestamp, files_processed, files_failed, 
-               total_time, total_file_processing_time, total_ai_time,
-               task_name, "user", total_tokens, total_price, rc_agent_status
-        FROM processing_stats 
+        SELECT ps.id, ps.timestamp, ps.files_processed, ps.files_failed, 
+               ps.total_time, ps.total_file_processing_time, ps.total_ai_time,
+               ps.task_name, ps."user", ps.total_tokens, ps.total_price, ps.rc_agent_status,
+               (SELECT filename FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_filename,
+               ps.llm_model, ps.llm_provider
+        FROM processing_stats ps
         {where_clause}
-        ORDER BY id DESC 
+        ORDER BY ps.id DESC 
         LIMIT %s OFFSET %s
         """, params + [page_size, offset])
         
@@ -292,7 +296,10 @@ async def get_task_executions(
                 ai_processing_time=stat[6],
                 total_tokens=stat[9],
                 total_cost=stat[10],
-                rc_agent_status=stat[11] if len(stat) > 11 else None
+                rc_agent_status=stat[11] if len(stat) > 11 else None,
+                first_filename=stat[12] if len(stat) > 12 else None,
+                llm_model=stat[13] if len(stat) > 13 else None,
+                llm_provider=stat[14] if len(stat) > 14 else None
             )
             for stat in stats
         ]
@@ -324,11 +331,15 @@ async def get_task_execution(
     cursor = conn.cursor()
     try:
         cursor.execute("""
-        SELECT id, timestamp, files_processed, files_failed, 
-               total_time, total_file_processing_time, total_ai_time,
-               task_name, "user", total_tokens, total_price, rc_agent_status
-        FROM processing_stats 
-        WHERE id = %s
+        SELECT ps.id, ps.timestamp, ps.files_processed, ps.files_failed, 
+               ps.total_time, ps.total_file_processing_time, ps.total_ai_time,
+               ps.task_name, ps."user", ps.total_tokens, ps.total_price, ps.rc_agent_status,
+               (SELECT filename FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_filename,
+               ps.llm_model, ps.llm_provider
+        FROM processing_stats ps
+        WHERE ps.id = %s
         """, (execution_id,))
         
         stat = cursor.fetchone()
@@ -357,7 +368,10 @@ async def get_task_execution(
             ai_processing_time=stat[6],
             total_tokens=stat[9],
             total_cost=stat[10],
-            rc_agent_status=stat[11] if len(stat) > 11 else None
+            rc_agent_status=stat[11] if len(stat) > 11 else None,
+            first_filename=stat[12] if len(stat) > 12 else None,
+            llm_model=stat[13] if len(stat) > 13 else None,
+            llm_provider=stat[14] if len(stat) > 14 else None
         )
         
     finally:

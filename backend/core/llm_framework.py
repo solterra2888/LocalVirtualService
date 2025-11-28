@@ -70,7 +70,7 @@ class LLMConfig:
     top_p: float = 0.8
     timeout: int = 90  # 读取超时增加到90秒，适应长文本分析和内容审查
     connect_timeout: int = 15  # 连接超时15秒
-    retry_count: int = 3
+    retry_count: int = 2  # 减少重试次数（从3改为2），避免总体等待时间过长
     enabled: bool = True
 
 
@@ -87,11 +87,14 @@ class LLMProvider(ABC):
         """创建配置了重试的HTTP会话"""
         session = requests.Session()
         
+        # 配置重试策略，但不包含read timeout（由请求时设置）
         retry_strategy = Retry(
             total=self.config.retry_count,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"],
+            # 不设置read参数，避免覆盖请求时的timeout设置
+            raise_on_status=False
         )
         
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -357,13 +360,14 @@ class QwenProvider(LLMProvider):
     async def _make_embedding_request(self, headers: Dict, data: Dict) -> requests.Response:
         """发送Embedding API请求"""
         loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, 'connect_timeout', 15)
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.embedding_url, 
                 headers=headers, 
                 json=data,
-                timeout=(10, 30)  # 连接超时10秒，读取超时30秒
+                timeout=(connect_timeout, self.config.timeout)  # 使用配置的超时时间
             )
         )
 
@@ -634,6 +638,9 @@ class LLMService:
         self.fallback_order: List[str] = []
         self.logger = get_logger("llm_service")
         
+        # 配置解析器（延迟初始化）
+        self.config_resolver = None
+        
         # 加载配置
         self._load_configurations()
     
@@ -680,7 +687,7 @@ class LLMService:
                 max_tokens = row[9] if row[9] else 2000
                 temperature = float(row[10]) if row[10] else 0.7
                 top_p = float(row[11]) if row[11] else 0.8
-                timeout = row[12] if row[12] else 30
+                timeout = row[12] if row[12] else 180  # 默认180秒，适应大文件分析
                 
                 if not enabled or not api_key:
                     continue
@@ -768,8 +775,24 @@ class LLMService:
         self.logger.info("重新加载LLM配置...")
         if self._load_from_database():
             self.logger.info("配置重新加载成功")
+            # 清除配置解析器缓存
+            if self.config_resolver:
+                self.config_resolver.clear_cache()
         else:
             self.logger.warning("配置重新加载失败，保持现有配置")
+    
+    def _init_config_resolver(self):
+        """初始化配置解析器"""
+        if self.config_resolver is None:
+            try:
+                from backend.core.config_resolver import ConfigResolver
+                db_config = get_database_config()
+                db_manager = DatabaseManager(db_config)
+                self.config_resolver = ConfigResolver(db_manager)
+                self.logger.info("配置解析器初始化完成")
+            except Exception as e:
+                self.logger.error(f"配置解析器初始化失败: {str(e)}")
+                # 不抛出异常，允许继续使用旧逻辑
     
     def _load_qwen_config(self):
         """Load Qwen configuration"""
@@ -947,11 +970,37 @@ class LLMService:
             messages.append(LLMMessage(role="system", content=rendered.system_prompt))
         messages.append(LLMMessage(role="user", content=rendered.user_prompt))
         
-        # 3. 使用推荐配置（可被参数覆盖）
-        provider = provider or rendered.recommended_config.get('provider')
-        model = model or rendered.recommended_config.get('model')
-        temperature = kwargs.pop('temperature', rendered.recommended_config.get('temperature'))
-        max_tokens = kwargs.pop('max_tokens', rendered.recommended_config.get('max_tokens'))
+        # 3. 使用配置解析器获取最终配置
+        self._init_config_resolver()
+        
+        # 准备运行时参数（显式传入的优先级最高）
+        runtime_params = {}
+        if provider:
+            runtime_params['provider'] = provider
+        if model:
+            runtime_params['model'] = model
+        if 'temperature' in kwargs:
+            runtime_params['temperature'] = kwargs.pop('temperature')
+        if 'max_tokens' in kwargs:
+            runtime_params['max_tokens'] = kwargs.pop('max_tokens')
+        
+        # 使用ConfigResolver解析配置（优先级：Runtime > Template > Provider）
+        if self.config_resolver:
+            resolved_config = self.config_resolver.resolve_config(
+                template_code=template_code or rendered.template_code,
+                provider_id=provider,
+                runtime_params=runtime_params
+            )
+            provider = resolved_config['provider']
+            model = resolved_config['model']
+            temperature = resolved_config['temperature']
+            max_tokens = resolved_config['max_tokens']
+        else:
+            # 回退到旧逻辑（如果ConfigResolver初始化失败）
+            provider = provider or rendered.recommended_config.get('provider')
+            model = model or rendered.recommended_config.get('model')
+            temperature = runtime_params.get('temperature', rendered.recommended_config.get('temperature'))
+            max_tokens = runtime_params.get('max_tokens', rendered.recommended_config.get('max_tokens'))
         
         # 4. 调用LLM
         import time

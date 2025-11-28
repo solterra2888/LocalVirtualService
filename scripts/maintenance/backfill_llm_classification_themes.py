@@ -244,16 +244,16 @@ async def main():
         epilog="""
 示例:
   # 检查当前状态
-  python scripts/backfill_llm_classification_themes.py --status
+  python scripts/maintenance/backfill_llm_classification_themes.py --status
   
   # 预览前100条需要回填的新闻
-  python scripts/backfill_llm_classification_themes.py --limit 100 --dry-run
+  python scripts/maintenance/backfill_llm_classification_themes.py --limit 100 --dry-run
   
   # 回填最近30天的所有新闻
-  python scripts/backfill_llm_classification_themes.py --days 30 --execute
+  python scripts/maintenance/backfill_llm_classification_themes.py --days 30 --execute
   
   # 回填所有历史新闻（前1000条）
-  python scripts/backfill_llm_classification_themes.py --limit 1000 --execute
+  python scripts/maintenance/backfill_llm_classification_themes.py --limit 1000 --execute
         """
     )
     

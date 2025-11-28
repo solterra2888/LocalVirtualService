@@ -51,9 +51,17 @@ class FileUploadResponse(BaseModel):
 class FileProcessRequest(BaseModel):
     """文件处理请求模型"""
     file_paths: List[str] = Field(..., description="文件路径列表")
-    task_type: str = Field(..., description="AI Agent")
+    task_type: str = Field(..., description="AI Agent或模板标识")
     custom_inputs: Dict[str, Any] = Field(default_factory=dict, description="自定义输入参数")
     params: Dict[str, Any] = Field(default_factory=dict, description="处理参数")
+    
+    # 新增：分析模式相关字段
+    analysis_mode: str = Field('remote_agent', description="分析模式: 'remote_agent' 或 'local_llm'")
+    template_id: Optional[int] = Field(None, description="Prompt模板ID（local_llm模式使用）")
+    template_code: Optional[str] = Field(None, description="Prompt模板代码（local_llm模式使用）")
+    template_variables: Dict[str, Any] = Field(default_factory=dict, description="模板变量（local_llm模式使用）")
+    llm_provider: Optional[str] = Field(None, description="指定LLM提供商（local_llm模式，可选）")
+    llm_model: Optional[str] = Field(None, description="指定LLM模型（local_llm模式，可选）")
 
 
 class FileProcessResponse(BaseModel):

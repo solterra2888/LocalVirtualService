@@ -14,6 +14,13 @@ export interface FileProcessRequest {
   task_type: string;
   custom_inputs: Record<string, any>;
   params: Record<string, any>;
+  // 新增：分析模式相关字段
+  analysis_mode?: 'remote_agent' | 'local_llm';
+  template_id?: number;
+  template_code?: string;
+  template_variables?: Record<string, any>;
+  llm_provider?: string;
+  llm_model?: string;
 }
 
 export interface FileProcessResponse {

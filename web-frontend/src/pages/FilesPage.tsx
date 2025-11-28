@@ -54,6 +54,9 @@ import { getErrorMessage } from '../utils/errorHandler';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
+import TemplateSelector from '../components/TemplateSelector';
+import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
+import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -99,6 +102,9 @@ interface TaskExecution {
   total_tokens?: number;
   total_cost?: number;
   rc_agent_status?: string;
+  first_filename?: string;  // 第一个文件的名称
+  llm_model?: string;  // LLM模型名称
+  llm_provider?: string;  // LLM提供商
 }
 
 interface ProcessingParams {
@@ -154,7 +160,13 @@ const FilesPage: React.FC = () => {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [lastCompletedTaskId, setLastCompletedTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
+  
+  // 新增：分析模式相关状态
+  const [analysisMode, setAnalysisMode] = useState<'remote_agent' | 'local_llm'>('local_llm');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
+  const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
   const [showParams, setShowParams] = useState(false);
+  const [allTemplates, setAllTemplates] = useState<PromptTemplate[]>([]);
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [stoppingTask, setStoppingTask] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -271,6 +283,99 @@ const FilesPage: React.FC = () => {
       logger.logWarning('加载默认配置失败，使用硬编码默认值', 'file-processing');
     }
   }, [logger, setProcessingParams]);
+
+  // 加载所有模板
+  const loadAllTemplates = useCallback(async () => {
+    try {
+      const templates = await promptTemplateService.listTemplates({
+        active_only: true,
+      });
+      setAllTemplates(templates);
+    } catch (error: any) {
+      console.error('加载模板列表失败:', error);
+    }
+  }, []);
+  
+  // 重置所有左侧输入项为原始状态
+  const resetAllInputs = useCallback(() => {
+    // 重置文件列表
+    setFiles([]);
+    
+    // 重置任务类型和自定义输入
+    setSelectedTaskType('');
+    setCustomInputs({});
+    
+    // 重置分析模式相关
+    setAnalysisMode('local_llm');
+    setSelectedTemplateId(undefined);
+    setTemplateVariables({});
+    
+    // 重置行业和股票选择
+    setSelectedSector('');
+    setSelectedIndustry('');
+    setSelectedTicker('');
+    setTickerSearchValue('');
+    setTickerOptions([]);
+    
+    // 重置处理参数为默认值
+    setProcessingParams({
+      language: ['ch_sim', 'en'],
+      fast_mode: false,
+      disable_ocr: false,
+      max_pages: 50,
+      target_pages: '',
+      skip_diagonal_text: false,
+      skip_table_extraction: false,
+      extract_images: false,
+      use_vendor_multimodal_model: false,
+      vendor_multimodal_api_key: '',
+      polling_interval: 8,
+      use_ai_agent: true,
+      llamaindex_api_key: '',
+      ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://111.230.48.119:81/v1/chat-messages'
+    });
+    
+    // 重新加载默认配置（包括API密钥等）
+    loadDefaultConfig();
+    
+    logger.logInfo('所有输入项已重置为原始状态', 'file-processing');
+  }, [logger, loadDefaultConfig]);
+
+  // 获取显示的Agent名称（将template ID映射为template名称）
+  const getDisplayAgentName = useCallback((taskName: string): string => {
+    if (!taskName) return '';
+    
+    // 如果已经是template名称（不是纯数字或ID:xxx格式），直接返回
+    // 但是仍然尝试匹配，以防万一
+    
+    // 尝试解析以下几种格式：
+    // 1. 纯数字：如 "123"
+    // 2. ID:xxx格式：如 "ID:123"
+    let templateId: number | null = null;
+    
+    // 检查是否是ID:xxx格式
+    const idMatch = taskName.match(/^ID:(\d+)$/);
+    if (idMatch) {
+      templateId = parseInt(idMatch[1], 10);
+    } else {
+      // 尝试直接解析为数字
+      const parsed = parseInt(taskName, 10);
+      if (!isNaN(parsed) && parsed.toString() === taskName) {
+        templateId = parsed;
+      }
+    }
+    
+    // 如果解析到了template ID，尝试在templates列表中查找
+    if (templateId !== null && allTemplates.length > 0) {
+      const template = allTemplates.find(t => t.id === templateId);
+      if (template) {
+        return template.template_name;
+      }
+    }
+    
+    // 如果找不到对应的template，返回原始的taskName
+    return taskName;
+  }, [allTemplates]);
 
   // 添加错误重试状态管理
   const [taskTypesLoadAttempts, setTaskTypesLoadAttempts] = useState(0);
@@ -429,6 +534,7 @@ const FilesPage: React.FC = () => {
     loadTaskTypes();
     loadTaskExecutionsFunc();
     loadDefaultConfig();
+    loadAllTemplates();
     
     // 设置定时刷新执行历史列表
     const refreshInterval = setInterval(() => {
@@ -441,7 +547,7 @@ const FilesPage: React.FC = () => {
     return () => {
       clearInterval(refreshInterval);
     };
-  }, [loadDefaultConfig, loadTaskExecutionsFunc, loadTaskTypes]);
+  }, [loadDefaultConfig, loadTaskExecutionsFunc, loadTaskTypes, loadAllTemplates]);
 
   // 加载行业分类数据
   useEffect(() => {
@@ -541,17 +647,51 @@ const FilesPage: React.FC = () => {
       
       // 同步日志到新的日志系统
       if (status.logs && status.logs.length > 0) {
-        // 只添加新的日志条目，避免重复
-        const existingLogIds = new Set(logger.logs.map(log => log.id));
-        status.logs.forEach((log, index) => {
-          const logId = `task-${currentTaskId}-${index}`;
-          if (!existingLogIds.has(logId)) {
+        // 定义关键日志的关键词，只显示这些关键节点的日志
+        const keyLogPatterns = [
+          /文件.*处理成功/,
+          /文件.*处理失败/,
+          /✅.*LLM分析完成/,
+          /❌.*失败/,
+          /批量处理完成/,
+          /处理结果已保存/,
+          /文件处理完成/,
+          /任务.*启动/,
+          /任务.*完成/,
+          /任务.*失败/,
+          /错误/,
+          /error/i,
+          /failed/i,
+          /completed/i,
+        ];
+        
+        // 过滤日志，只保留关键节点
+        const filteredLogs = status.logs.filter((log) => {
+          const message = log.message || '';
+          return keyLogPatterns.some(pattern => pattern.test(message));
+        });
+        
+        // 获取当前任务的已存在日志的消息内容集合
+        const existingMessages = new Set(
+          logger.logs
+            .filter(log => log.source === 'file-processing' && log.details?.taskId === currentTaskId)
+            .map(log => log.message)
+        );
+        
+        // 对于关键日志，只添加第一次出现的，通过消息内容去重
+        filteredLogs.forEach((log) => {
+          const message = log.message || '';
+          
+          // 检查消息是否已存在
+          if (!existingMessages.has(message)) {
             logger.actions.addLog({
               level: log.level as any,
               message: log.message,
               source: 'file-processing',
               details: { taskId: currentTaskId }
             });
+            // 立即添加到集合中，避免同一轮询中的重复
+            existingMessages.add(message);
           }
         });
       }
@@ -583,9 +723,15 @@ const FilesPage: React.FC = () => {
         // 显示任务完成消息
         if (status.status === 'completed') {
           message.success('task processing completed');
+          // 处理成功时，重置所有左侧输入项为原始状态
+          resetAllInputs();
+          // 清空处理结果和显示状态，使界面回到初始状态
+          setProcessingResult(null);
+          setShowResult(false);
         } else {
           message.error('task processing failed');
           logger.logError('task processing failed', 'file-processing');
+          // 处理失败时，保持原样（继续显示reprocess和clear file list）
         }
         
         // 任务完成后刷新执行历史列表
@@ -614,7 +760,7 @@ const FilesPage: React.FC = () => {
     } finally {
       setUpdatingStatus(false);
     }
-  }, [currentTaskId, updateFileStatuses, logger, updatingStatus]);
+  }, [currentTaskId, updateFileStatuses, logger, updatingStatus, resetAllInputs]);
 
   // 定时更新任务状态
   useEffect(() => {
@@ -896,6 +1042,11 @@ const FilesPage: React.FC = () => {
   const [uploadingFiles, setUploadingFiles] = useState(false);
 
   const handleUpload = (file: any) => {
+    // 限制只能上传一份文件
+    if (files.length > 0) {
+      message.warning('只能上传一份文件，请先删除现有文件后再上传');
+      return false; // 阻止上传
+    }
     // 收集待上传的文件，不立即上传
     setPendingFiles(prev => [...prev, file]);
     return false; // 阻止自动上传
@@ -970,10 +1121,31 @@ const FilesPage: React.FC = () => {
     }
   }, [pendingFiles, processPendingFiles]);
 
-  const handleRemoveFile = (fileId: string) => {
-    const fileName = files.find(f => f.id === fileId)?.name;
-    setFiles(prev => prev.filter(f => f.id !== fileId));
-    logger.logInfo(`remove file: ${fileName}`, 'file-processing');
+  const handleRemoveFile = async (fileId: string) => {
+    const file = files.find(f => f.id === fileId);
+    if (!file) return;
+
+    // 如果正在处理，不允许删除
+    if (processing) {
+      message.warning('Cannot delete file while processing');
+      return;
+    }
+
+    try {
+      // 从服务器删除文件
+      const filename = file.path.split('/').pop() || file.name;
+      await filesAPI.deleteUploadedFile(filename);
+      
+      // 从本地状态中移除文件
+      setFiles(prev => prev.filter(f => f.id !== fileId));
+      message.success(`File ${file.name} deleted successfully`);
+      logger.logInfo(`remove file: ${file.name}`, 'file-processing');
+    } catch (error: any) {
+      console.error('Failed to delete file:', error);
+      const errorMessage = getErrorMessage(error, 'Failed to delete file');
+      message.error(errorMessage);
+      logger.logError(`Failed to delete file ${file.name}: ${errorMessage}`, 'file-processing', error);
+    }
   };
 
   const handleMoveFile = (fileId: string, direction: 'up' | 'down') => {
@@ -994,10 +1166,19 @@ const FilesPage: React.FC = () => {
   };
 
   const handleStartProcessing = async () => {
-    if (!selectedTaskType) {
-      message.error('please select RC Agent');
-      logger.logWarning('no RC Agent selected', 'file-processing');
-      return;
+    // 根据分析模式进行不同的验证
+    if (analysisMode === 'remote_agent') {
+      if (!selectedTaskType) {
+        message.error('please select RC Agent');
+        logger.logWarning('no RC Agent selected', 'file-processing');
+        return;
+      }
+    } else if (analysisMode === 'local_llm') {
+      if (!selectedTemplateId) {
+        message.error('please select Prompt Template');
+        logger.logWarning('no template selected', 'file-processing');
+        return;
+      }
     }
 
     if (!selectedSector || !selectedIndustry) {
@@ -1017,7 +1198,7 @@ const FilesPage: React.FC = () => {
       setCurrentTaskId(null);
       setTaskStatus(null);
       
-      logger.logInfo(`start processing ${files.length} files`, 'file-processing');
+      logger.logInfo(`tranforming to markdown, please wait 30-60 seconds`, 'file-processing');
       
       // 将所有文件状态设置为ready
       setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
@@ -1027,9 +1208,16 @@ const FilesPage: React.FC = () => {
       
       const response = await filesAPI.processFiles({
         file_paths: files.map(f => f.path),
-        task_type: selectedTaskType,
+        task_type: analysisMode === 'local_llm' ? 'local_llm_template' : selectedTaskType,
         custom_inputs: customInputs,
-        params: processingParams
+        params: processingParams,
+        // 新增：分析模式相关参数
+        analysis_mode: analysisMode,
+        template_id: analysisMode === 'local_llm' ? selectedTemplateId : undefined,
+        template_code: undefined, // 可选：如果需要使用template_code
+        template_variables: analysisMode === 'local_llm' ? templateVariables : {},
+        llm_provider: undefined, // 可选：指定LLM提供商
+        llm_model: undefined, // 可选：指定LLM模型
       });
       
       setCurrentTaskId(response.task_id);
@@ -1531,52 +1719,141 @@ const FilesPage: React.FC = () => {
       render: (size: number) => filesAPI.formatFileSize(size)
     },
     {
-      title: 'Tags',
-      key: 'tags',
-      render: (text: string, record: FileItem) => {
-        if (record.tag) {
+      title: 'Actions',
+      key: 'actions',
+      width: 80,
+      render: (_: any, record: FileItem) => (
+        <Tooltip title="Delete File">
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleRemoveFile(record.id)}
+            disabled={processing}
+            size="small"
+          />
+        </Tooltip>
+      )
+    }
+  ];
+
+  const executionColumns = [
+    {
+      title: 'File Name',
+      key: 'file_name',
+      width: 220,
+      ellipsis: true,
+      render: (_: any, record: TaskExecution) => {
+        // 如果有first_filename则显示，否则显示文件数量
+        if (record.first_filename) {
           return (
-            <div>
-              <Tag color="blue">{record.tag.sector}</Tag>
-              <Tag color="green">{record.tag.industry}</Tag>
-              {record.tag.ticker && <Tag color="orange">{record.tag.ticker}</Tag>}
-            </div>
-          );
-        } else if (selectedSector && selectedIndustry) {
-          return (
-            <div>
-              <Tag color="blue">{selectedSector}</Tag>
-              <Tag color="green">{selectedIndustry}</Tag>
-              {selectedTicker && <Tag color="orange">{selectedTicker}</Tag>}
-              <Text type="secondary" style={{ fontSize: '10px' }}>(will be applied)</Text>
-            </div>
+            <Tooltip title={record.first_filename} placement="topLeft">
+              <div style={{ 
+                color: '#1890ff', 
+                cursor: 'pointer',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '200px',
+                fontSize: '11px'
+              }}>
+                <FileTextOutlined style={{ marginRight: 6, fontSize: '11px' }} />
+                {record.first_filename}
+              </div>
+            </Tooltip>
           );
         } else {
-          return <Text type="secondary" style={{ fontSize: '12px' }}>No tags</Text>;
+          // 如果没有文件名，显示文件数量作为占位
+          const total = record.files_processed + record.files_failed;
+          return (
+            <div style={{ color: '#999', fontSize: '11px' }}>
+              <FolderOutlined style={{ marginRight: 6, fontSize: '11px' }} />
+              {total} file{total > 1 ? 's' : ''}
+            </div>
+          );
         }
       }
     },
-
+    {
+      title: 'Agent Name',
+      dataIndex: 'task_name',
+      key: 'task_name',
+      width: 180,
+      render: (task_name: string, record: TaskExecution) => {
+        const displayName = getDisplayAgentName(task_name);
+        return (
+          <div>
+            <Tooltip title={displayName} placement="topLeft">
+              <div style={{ 
+                fontWeight: 500,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: '11px'
+              }}>
+                {displayName}
+              </div>
+            </Tooltip>
+            <div style={{ fontSize: '11px', color: '#999' }}>
+              {new Date(record.created_at).toLocaleString()}
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      title: 'Files',
+      key: 'files_info',
+      width: 120,
+      render: (_: any, record: TaskExecution) => {
+        const status = record.rc_agent_status;
+        const isAnalyzed = status === 'success';
+        
+        return (
+          <Space direction="vertical" size={0}>
+            <div style={{ fontSize: '11px' }}>
+              <span style={{ color: '#999' }}>Processed: </span>
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>
+                {record.files_processed}
+              </span>
+            </div>
+            <div style={{ fontSize: '11px' }}>
+              <span style={{ color: '#999' }}>Analyzed: </span>
+              <span style={{ fontWeight: 500 }}>
+                {isAnalyzed ? 'True' : 'False'}
+              </span>
+            </div>
+          </Space>
+        );
+      }
+    },
     {
       title: 'Actions',
       key: 'actions',
-      render: (_: any, record: FileItem, index: number) => (
-        <Space>
-          <Tooltip title="Move Up">
+      width: 200,
+      render: (_: any, record: TaskExecution) => (
+        <Space size="small">
+          <Tooltip title="AI Analysis">
             <Button
               type="text"
-              icon={<UpOutlined />}
-              onClick={() => handleMoveFile(record.id, 'up')}
-              disabled={index === 0 || processing}
+              icon={<RobotOutlined />}
+              onClick={() => handleViewAiAnalysis(record)}
               size="small"
             />
           </Tooltip>
-          <Tooltip title="Move Down">
+          <Tooltip title="View Details">
             <Button
               type="text"
-              icon={<DownOutlined />}
-              onClick={() => handleMoveFile(record.id, 'down')}
-              disabled={index === files.length - 1 || processing}
+              icon={<EyeOutlined />}
+              onClick={() => handleViewExecution(record)}
+              size="small"
+            />
+          </Tooltip>
+          <Tooltip title="Original Files">
+            <Button
+              type="text"
+              icon={<FileTextOutlined />}
+              onClick={() => handleShowOriginalFiles(record)}
               size="small"
             />
           </Tooltip>
@@ -1585,115 +1862,11 @@ const FilesPage: React.FC = () => {
               type="text"
               danger
               icon={<DeleteOutlined />}
-              onClick={() => handleRemoveFile(record.id)}
-              disabled={processing}
+              onClick={() => handleDeleteExecution(record)}
               size="small"
+              loading={deletingExecutions}
             />
           </Tooltip>
-        </Space>
-      )
-    }
-  ];
-
-  const executionColumns = [
-    {
-      title: 'Agent Name',
-      dataIndex: 'task_name',
-      key: 'task_name'
-    },
-    {
-      title: 'User',
-      dataIndex: 'username',
-      key: 'username'
-    },
-    {
-      title: 'Time',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      render: (date: string) => new Date(date).toLocaleString()
-    },
-    {
-      title: 'Files Status',
-      key: 'files_stats',
-      align: 'center' as const,
-      render: (_: any, record: TaskExecution) => (
-        <Space>
-          <span style={{ color: '#63aef5', fontSize: '14px' }}>
-            <CheckCircleOutlined /> {record.files_processed}
-          </span>
-          <span style={{ color: '#ff8c00', fontSize: '14px' }}>
-            <ExclamationCircleOutlined /> {record.files_failed}
-          </span>
-        </Space>
-      )
-    },
-    {
-      title: 'RC Agent Status',
-      dataIndex: 'rc_agent_status',
-      key: 'rc_agent_status',
-      align: 'center' as const,
-      render: (status: string) => {
-        if (!status) return <span style={{ color: '#bfbfbf', fontSize: '16px' }}><ExclamationCircleOutlined /></span>;
-        
-        const statusConfig = {
-          success: { color: '#63aef5', icon: <CheckCircleOutlined /> },
-          failed: { color: '#ff8c00', icon: <ExclamationCircleOutlined /> },
-          pending: { color: '#40a9ff', icon: <ClockCircleOutlined /> },
-          skipped: { color: '#bfbfbf', icon: <ExclamationCircleOutlined /> }
-        };
-        
-        const config = statusConfig[status as keyof typeof statusConfig] || { color: '#bfbfbf', icon: <ExclamationCircleOutlined /> };
-        return (
-          <span style={{ color: config.color, fontSize: '16px' }}>
-            {config.icon}
-          </span>
-        );
-      }
-    },
-    {
-      title: 'Processing Time',
-      dataIndex: 'total_time',
-      key: 'total_time',
-      render: (time: number) => `${time?.toFixed(2)}s`
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      render: (_: any, record: TaskExecution) => (
-        <Space>
-          <Button
-            type="text"
-            icon={<RobotOutlined />}
-            onClick={() => handleViewAiAnalysis(record)}
-            size="small"
-          >
-            AI Analysis
-          </Button>
-          <Button
-            type="text"
-            icon={<FileTextOutlined />}
-            onClick={() => handleShowOriginalFiles(record)}
-            size="small"
-          >
-            Original Files
-          </Button>
-          <Button
-            type="text"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewExecution(record)}
-            size="small"
-          >
-            Details
-          </Button>
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDeleteExecution(record)}
-            size="small"
-            loading={deletingExecutions}
-          >
-          </Button>
         </Space>
       )
     }
@@ -1722,7 +1895,7 @@ const FilesPage: React.FC = () => {
           <Card size="small" title="Basic Information" style={{ marginBottom: 16 }}>
             <Row gutter={16}>
               <Col span={12}>
-                <div><strong>Agent Name:</strong> {selectedExecution.task_name}</div>
+                <div><strong>Agent Name:</strong> {getDisplayAgentName(selectedExecution.task_name)}</div>
               </Col>
               <Col span={12}>
                 <div><strong>User:</strong> {selectedExecution.username}</div>
@@ -1786,6 +1959,24 @@ const FilesPage: React.FC = () => {
                 </div>
               </Col>
             </Row>
+            {(selectedExecution.llm_model || selectedExecution.llm_provider) && (
+              <Row gutter={16} style={{ marginTop: 16 }}>
+                <Col span={24}>
+                  <div><strong>Analysis Model:</strong> 
+                    {selectedExecution.llm_provider && (
+                      <Tag color="blue" style={{ marginLeft: 8 }}>
+                        {selectedExecution.llm_provider}
+                      </Tag>
+                    )}
+                    {selectedExecution.llm_model && (
+                      <Tag color="cyan" style={{ marginLeft: 4 }}>
+                        {selectedExecution.llm_model}
+                      </Tag>
+                    )}
+                  </div>
+                </Col>
+              </Row>
+            )}
           </Card>
 
           {/* 文件处理详情 */}
@@ -1968,7 +2159,7 @@ const FilesPage: React.FC = () => {
         <div>
           <div style={{ marginBottom: 16 }}>
             <Text strong>Report for: </Text>
-            <Tag color="blue">{aiAnalysisData.execution.task_name}</Tag>
+            <Tag color="blue">{getDisplayAgentName(aiAnalysisData.execution.task_name)}</Tag>
             <Text style={{ marginLeft: 16 }}>
               <Text strong>Generated: </Text>
               {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
@@ -2166,121 +2357,71 @@ const FilesPage: React.FC = () => {
 
   return (
     <div>
-      <div className="page-content">
-        <Row gutter={24} style={{ marginTop: 16 }}>
-          <Col span={16}>
-            {/* 根据状态显示不同的内容 */}
-
-            {/* 文件上传区域 - 只在非完成状态显示 */}
+      <div className="page-content" style={{ marginTop: 16 }}>
+        {/* 主体区域：左侧参数配置，右侧执行历史 */}
+        <Row gutter={24}>
+          {/* 左侧：输入参数区域 - 1/3宽度 */}
+          <Col span={8}>
+            {/* 文件上传和处理按钮 */}
             {getUIState() !== 'completed' && (
-              <Card title="File Upload" className="mb-16" size="small">
-                <Dragger
-                  beforeUpload={handleUpload}
-                  showUploadList={false}
-                  multiple
-                  disabled={processing || uploadingFiles}
-                  style={{ padding: '20px 0' }}
-                >
-                  <p className="ant-upload-drag-icon" style={{ marginBottom: 8 }}>
-                    <InboxOutlined style={{ fontSize: '36px' }} />
-                  </p>
-                  <p className="ant-upload-text" style={{ marginBottom: 4 }}>
-                    {uploadingFiles ? 'Uploading files...' : 'Click or drag files to this area to upload'}
-                  </p>
-                  <p className="ant-upload-hint" style={{ marginBottom: 0 }}>
-                    {uploadingFiles ? 'Please wait while files are being uploaded' : 'Support PDF, Excel, Word, image formats and more. Multiple files supported.'}
-                  </p>
-                </Dragger>
-              </Card>
-            )}
-
-            {/* 文件列表 */}
-            {files.length > 0 && (
-              <Card
-                title={
-                  <Space>
-                    <FileTextOutlined />
-                    File List ({files.length})
-                    {getUIState() === 'completed' && (
-                      <Badge 
-                        count={files.filter(f => f.status === 'completed').length} 
-                        style={{ backgroundColor: '#52c41a' }} 
-                      />
-                    )}
-                  </Space>
-                }
-                extra={
-                  <Space>
-                    {files.length > 0 && selectedSector && selectedIndustry && (
-                      <Button
-                        icon={<TagOutlined />}
-                        onClick={() => setShowBatchTagModal(true)}
-                        size="small"
-                        type="primary"
-                        ghost
-                      >
-                        Batch Tag
-                      </Button>
-                    )}
-                    {getUIState() === 'completed' && (
-                      <Button
-                        icon={<ReloadOutlined />}
-                        onClick={refreshFileStatus}
-                        loading={refreshingStatus}
-                        size="small"
-                      >
-                        Refresh Status
-                      </Button>
-                    )}
-                  </Space>
-                }
-                className="mb-16"
-                size="small"
-              >
-                <Table
-                  dataSource={files}
-                  columns={fileColumns}
-                  rowKey="id"
-                  pagination={false}
-                  size="small"
-                />
-              </Card>
-            )}
-
-            {/* 处理进度 */}
-            {processing && taskStatus && (
-              <Card title="Processing Progress" className="mb-12" size="small">
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span>Current Status: {getStatusText(taskStatus.status)}</span>
-                    <span>{taskStatus.progress.toFixed(1)}%</span>
-                  </div>
-                  <Progress
-                    percent={taskStatus.progress}
-                    status={taskStatus.status === 'failed' ? 'exception' : 'active'}
-                    showInfo={false}
-                  />
-                </div>
-                
-                {taskStatus.current_file && (
-                  <div style={{ marginBottom: 16 }}>
-                    <Text>Current File: {taskStatus.current_file}</Text>
+              <div style={{ marginBottom: 16 }}>
+                <Space style={{ width: '100%' }} size="middle">
+                  <Upload
+                    beforeUpload={handleUpload}
+                    showUploadList={false}
+                    disabled={processing || uploadingFiles}
+                    style={{ flex: 1 }}
+                  >
+                    <Button
+                      type="primary"
+                      icon={<InboxOutlined />}
+                      loading={uploadingFiles}
+                      disabled={processing || uploadingFiles}
+                      size="large"
+                      style={{ width: '100%' }}
+                    >
+                      {uploadingFiles ? 'Uploading Files...' : 'Upload Files'}
+                    </Button>
+                  </Upload>
+                  
+                  {getUIState() === 'ready' && files.length > 0 && (
+                    <Button
+                      type="primary"
+                      icon={<PlayCircleOutlined />}
+                      onClick={handleStartProcessing}
+                      loading={processing}
+                      disabled={
+                        files.length === 0 || 
+                        !selectedSector || 
+                        !selectedIndustry ||
+                        (analysisMode === 'remote_agent' && !selectedTaskType) ||
+                        (analysisMode === 'local_llm' && !selectedTemplateId)
+                      }
+                      size="large"
+                      style={{ 
+                        width: '160px',
+                        backgroundColor: '#52c41a',
+                        borderColor: '#52c41a'
+                      }}
+                    >
+                      Start Processing
+                    </Button>
+                  )}
+                </Space>
+                {!uploadingFiles && (
+                  <div style={{ 
+                    marginTop: 8, 
+                    fontSize: '12px', 
+                    color: '#999', 
+                    textAlign: 'left' 
+                  }}>
+                    Support PDF, Excel, Word, Image and more
                   </div>
                 )}
-                
-                <div>
-                  <Space>
-                    <span>Processed: {taskStatus.files_processed}</span>
-                    <span>Failed: {taskStatus.files_failed}</span>
-                    <span>Total: {taskStatus.total_files}</span>
-                  </Space>
-                </div>
-              </Card>
+              </div>
             )}
-          </Col>
 
-          <Col span={8}>
-            {/* 行业和股票选择 - 始终显示 */}
+            {/* 行业和股票选择 */}
             <Card title="Industry & Ticker Selection" className="mb-12" size="small">
               <Form layout="vertical" size="small">
                 <Form.Item 
@@ -2345,8 +2486,119 @@ const FilesPage: React.FC = () => {
               </Form>
             </Card>
 
-            {/* AI Agent选择 - 始终显示 */}
-            <Card title="AI Agent Selection" className="mb-12" size="small">
+            {/* 文件列表 */}
+            {files.length > 0 && (
+              <Card
+                title={
+                  <Space>
+                    <FileTextOutlined />
+                    File List ({files.length})
+                    {getUIState() === 'completed' && (
+                      <Badge 
+                        count={files.filter(f => f.status === 'completed').length} 
+                        style={{ backgroundColor: '#52c41a' }} 
+                      />
+                    )}
+                  </Space>
+                }
+                extra={
+                  <Space>
+                    {getUIState() === 'completed' && (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={refreshFileStatus}
+                        loading={refreshingStatus}
+                        size="small"
+                      >
+                        Refresh Status
+                      </Button>
+                    )}
+                  </Space>
+                }
+                className="mb-16"
+                size="small"
+              >
+                <Table
+                  dataSource={files}
+                  columns={fileColumns}
+                  rowKey="id"
+                  pagination={false}
+                  size="small"
+                />
+              </Card>
+            )}
+
+            {/* 处理进度 */}
+            {processing && taskStatus && (
+              <Card title="Processing Progress" className="mb-12" size="small">
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span>Current Status: {getStatusText(taskStatus.status)}</span>
+                    <span>{taskStatus.progress.toFixed(1)}%</span>
+                  </div>
+                  <Progress
+                    percent={taskStatus.progress}
+                    status={taskStatus.status === 'failed' ? 'exception' : 'active'}
+                    showInfo={false}
+                  />
+                </div>
+                
+                {taskStatus.current_file && (
+                  <div style={{ marginBottom: 16 }}>
+                    <Text>Current File: {taskStatus.current_file}</Text>
+                  </div>
+                )}
+                
+                <div>
+                  <Space>
+                    <span>Processed: {taskStatus.files_processed}</span>
+                    <span>Failed: {taskStatus.files_failed}</span>
+                    <span>Total: {taskStatus.total_files}</span>
+                  </Space>
+                </div>
+              </Card>
+            )}
+
+            {/* 分析模式选择 */}
+            <Card title="Analysis Mode" className="mb-12" size="small">
+              <Form layout="vertical" size="small">
+                <Form.Item label="Analysis Mode" style={{ marginBottom: 0 }}>
+                  <Select
+                    value={analysisMode}
+                    onChange={(value) => {
+                      setAnalysisMode(value);
+                      // 切换模式时清除相关选择
+                      if (value === 'local_llm') {
+                        setSelectedTaskType('');
+                      } else {
+                        setSelectedTemplateId(undefined);
+                        setTemplateVariables({});
+                      }
+                    }}
+                    disabled={processing}
+                    style={{ width: '100%' }}
+                  >
+                    <Option value="local_llm">
+                      <Space>
+                        <FileTextOutlined />
+                        <Text>Local AI Agent</Text>
+                      </Space>
+                    </Option>
+                    <Option value="remote_agent">
+                      <Space>
+                        <RobotOutlined />
+                        <Text>Remote AI Agent (Dify)</Text>
+                      </Space>
+                    </Option>
+                  </Select>
+                </Form.Item>
+              </Form>
+            </Card>
+
+            {/* 根据模式显示不同的选择器 */}
+            {analysisMode === 'remote_agent' ? (
+              // 远程Agent模式 - 显示AI Agent选择
+              <Card title="AI Agent Selection" className="mb-12" size="small">
               <Form layout="vertical" size="small">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {taskTypes.map((task, index) => {
@@ -2407,32 +2659,49 @@ const FilesPage: React.FC = () => {
               
               {renderCustomInputs()}
             </Card>
+            ) : (
+              // 本地LLM模式 - 显示模板选择和变量编辑
+              <Card title="Local LLM Agent" className="mb-12" size="small">
+                <Form layout="vertical" size="small">
+                  <Form.Item label="Select Prompt Template" required>
+                    <TemplateSelector
+                      categoryCode="file_analysis"
+                      value={selectedTemplateId}
+                      onChange={(templateId, template) => {
+                        setSelectedTemplateId(templateId);
+                        // 清空之前的变量
+                        setTemplateVariables({});
+                      }}
+                      disabled={processing}
+                    />
+                  </Form.Item>
+                  
+                  {selectedTemplateId && (
+                    <Form.Item label="Template Parameters Configuration">
+                      <TemplateVariablesEditor
+                        templateId={selectedTemplateId}
+                        values={templateVariables}
+                        onChange={(values) => setTemplateVariables(values)}
+                        disabled={processing}
+                      />
+                    </Form.Item>
+                  )}
+                </Form>
+              </Card>
+            )}
 
             {/* 操作按钮 - 根据状态显示不同的操作 */}
             <Card title="Operation Control" className="mb-12" size="small">
               <Space style={{ width: '100%' }} direction="vertical">
                 {getUIState() === 'ready' && (
-                  <>
-                    <Button
-                      type="primary"
-                      icon={<PlayCircleOutlined />}
-                      onClick={handleStartProcessing}
-                      loading={processing}
-                      disabled={files.length === 0 || !selectedTaskType || !selectedSector || !selectedIndustry}
-                      block
-                    >
-                      Start Processing
-                    </Button>
-                    
-                    <Button
-                      icon={<SettingOutlined />}
-                      onClick={() => setShowParams(true)}
-                      disabled={processing}
-                      block
-                    >
-                      Parameter Settings
-                    </Button>
-                  </>
+                  <Button
+                    icon={<SettingOutlined />}
+                    onClick={() => setShowParams(true)}
+                    disabled={processing}
+                    block
+                  >
+                    Parameter Settings
+                  </Button>
                 )}
 
                 {getUIState() === 'processing' && (
@@ -2501,64 +2770,63 @@ const FilesPage: React.FC = () => {
                 )}
               </Space>
             </Card>
+          </Col>
 
-
+          {/* 右侧：执行历史区域 - 2/3宽度 */}
+          <Col span={16}>
+            <Card 
+              title="Execution History" 
+              size="small"
+              extra={
+                selectedExecutionIds.length > 0 && (
+                  <Space>
+                    <span>Selected {selectedExecutionIds.length} item(s)</span>
+                    <Button
+                      type="primary"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={handleBatchDeleteExecutions}
+                      loading={deletingExecutions}
+                      size="small"
+                    >
+                      Batch Delete
+                    </Button>
+                  </Space>
+                )
+              }
+            >
+              <Table
+                columns={executionColumns}
+                dataSource={taskExecutions}
+                rowKey="id"
+                size="small"
+                rowSelection={{
+                  selectedRowKeys: selectedExecutionIds,
+                  onChange: (selectedRowKeys: React.Key[]) => {
+                    setSelectedExecutionIds(selectedRowKeys as string[]);
+                  },
+                  onSelectAll: (selected, selectedRows, changeRows) => {
+                    if (selected) {
+                      const newSelectedIds = [...selectedExecutionIds, ...changeRows.map(row => row.id)];
+                      setSelectedExecutionIds(Array.from(new Set(newSelectedIds)));
+                    } else {
+                      const changeIds = changeRows.map(row => row.id);
+                      setSelectedExecutionIds(selectedExecutionIds.filter(id => !changeIds.includes(id)));
+                    }
+                  }
+                }}
+                pagination={{
+                  pageSize: 15,
+                  showSizeChanger: true,
+                  showQuickJumper: true,
+                  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                  pageSizeOptions: ['10', '15', '20', '30', '50']
+                }}
+                scroll={{ x: 'max-content' }}
+              />
+            </Card>
           </Col>
         </Row>
-
-        {/* 执行历史部分 */}
-        <div style={{ marginTop: 12 }}>
-          <Card 
-            title="Execution History" 
-            size="small"
-            extra={
-              selectedExecutionIds.length > 0 && (
-                <Space>
-                  <span>Selected {selectedExecutionIds.length} item(s)</span>
-                  <Button
-                    type="primary"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={handleBatchDeleteExecutions}
-                    loading={deletingExecutions}
-                    size="small"
-                  >
-                    Batch Delete
-                  </Button>
-                </Space>
-              )
-            }
-          >
-            <Table
-              columns={executionColumns}
-              dataSource={taskExecutions}
-              rowKey="id"
-              size="small"
-              rowSelection={{
-                selectedRowKeys: selectedExecutionIds,
-                onChange: (selectedRowKeys: React.Key[]) => {
-                  setSelectedExecutionIds(selectedRowKeys as string[]);
-                },
-                onSelectAll: (selected, selectedRows, changeRows) => {
-                  if (selected) {
-                    const newSelectedIds = [...selectedExecutionIds, ...changeRows.map(row => row.id)];
-                    setSelectedExecutionIds(Array.from(new Set(newSelectedIds)));
-                  } else {
-                    const changeIds = changeRows.map(row => row.id);
-                    setSelectedExecutionIds(selectedExecutionIds.filter(id => !changeIds.includes(id)));
-                  }
-                }
-              }}
-              pagination={{
-                pageSize: 10,
-                showSizeChanger: false,
-                showQuickJumper: false,
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                simple: true
-              }}
-            />
-          </Card>
-        </div>
 
         {/* 参数设置对话框 */}
         <Modal
@@ -2597,7 +2865,7 @@ const FilesPage: React.FC = () => {
             <div>
               <p>Are you sure you want to delete the following execution record? This action cannot be undone.</p>
               <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', margin: '12px 0' }}>
-                <p><strong>Task Name:</strong> {executionToDelete.task_name}</p>
+                <p><strong>Task Name:</strong> {getDisplayAgentName(executionToDelete.task_name)}</p>
                 <p><strong>User:</strong> {executionToDelete.username}</p>
                 <p><strong>Execution Time:</strong> {new Date(executionToDelete.created_at).toLocaleString()}</p>
                 <p><strong>Files Processed:</strong> {executionToDelete.files_processed} successful, {executionToDelete.files_failed} failed</p>
@@ -2615,7 +2883,7 @@ const FilesPage: React.FC = () => {
               <FileTextOutlined />
               <span>Select Original File to View</span>
               {selectedExecutionForFiles && (
-                <Tag color="blue">{selectedExecutionForFiles.task_name}</Tag>
+                <Tag color="blue">{getDisplayAgentName(selectedExecutionForFiles.task_name)}</Tag>
               )}
             </Space>
           }

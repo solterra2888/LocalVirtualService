@@ -187,7 +187,7 @@ async def suggest_actions(has_news: int, unified_count: int):
     elif unified_count == 0:
         print("\n⚠️  有新闻但统一表为空")
         print("  建议执行:")
-        print("  1. 手动同步: python scripts/sync_themes_manual.py")
+        print("  1. 手动同步: python scripts/maintenance/sync_themes_manual.py")
         print("  2. 或通过API: POST /api/themes-unified/sync/recent?days=30")
     elif unified_count < has_news * 0.5:
         print("\n⚠️  同步覆盖率低")

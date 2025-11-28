@@ -11,16 +11,16 @@
 
 使用方法:
     # 增量更新（只处理未生成的主题）
-    python scripts/regenerate_theme_embeddings_with_llm.py
+    python scripts/maintenance/regenerate_theme_embeddings_with_llm.py
     
     # 强制重新生成所有主题
-    python scripts/regenerate_theme_embeddings_with_llm.py --force
+    python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --force
     
     # 禁用LLM（使用简单模板）
-    python scripts/regenerate_theme_embeddings_with_llm.py --no-llm
+    python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --no-llm
     
     # 只处理特定市场
-    python scripts/regenerate_theme_embeddings_with_llm.py --market US
+    python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --market US
 """
 
 import os
@@ -123,19 +123,19 @@ def parse_args():
         epilog="""
 示例:
   # 增量更新（只处理未生成的主题）
-  python scripts/regenerate_theme_embeddings_with_llm.py
+  python scripts/maintenance/regenerate_theme_embeddings_with_llm.py
   
   # 强制重新生成所有主题
-  python scripts/regenerate_theme_embeddings_with_llm.py --force
+  python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --force
   
   # 禁用LLM（使用简单模板）
-  python scripts/regenerate_theme_embeddings_with_llm.py --no-llm
+  python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --no-llm
   
   # 只处理美股市场
-  python scripts/regenerate_theme_embeddings_with_llm.py --market US
+  python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --market US
   
   # 强制更新所有美股主题并使用LLM
-  python scripts/regenerate_theme_embeddings_with_llm.py --force --market US
+  python scripts/maintenance/regenerate_theme_embeddings_with_llm.py --force --market US
         """
     )
     

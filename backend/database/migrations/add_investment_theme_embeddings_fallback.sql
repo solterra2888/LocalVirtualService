@@ -286,7 +286,7 @@ BEGIN
     RAISE NOTICE '';
     RAISE NOTICE '下一步操作：';
     RAISE NOTICE '  1. 运行初始化脚本生成主题向量：';
-    RAISE NOTICE '     python scripts/initialize_theme_embeddings.py';
+    RAISE NOTICE '     python scripts/maintenance/initialize_theme_embeddings.py';
     RAISE NOTICE '  2. 修改Python代码使用JSONB格式';
     RAISE NOTICE '  3. 测试向量检索功能';
     RAISE NOTICE '';

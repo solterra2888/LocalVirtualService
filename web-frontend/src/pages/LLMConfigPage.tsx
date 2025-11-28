@@ -962,39 +962,19 @@ const LLMConfigPage: React.FC = () => {
               </Col>
 
               <Col span={12}>
-                <div style={{ marginBottom: 24 }}>
-                  <Text strong>Request Timeout (seconds)</Text>
-                  <InputNumber
-                    min={5}
-                    max={300}
-                    value={config.globalSettings.timeout}
-                    onChange={(value) => setConfig(prev => prev ? {
-                      ...prev,
-                      globalSettings: {
-                        ...prev.globalSettings,
-                        timeout: value || 30
-                      }
-                    } : prev)}
-                    style={{ width: '100%', marginTop: 8 }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: 24 }}>
-                  <Text strong>Retry Count</Text>
-                  <InputNumber
-                    min={0}
-                    max={10}
-                    value={config.globalSettings.retryCount}
-                    onChange={(value) => setConfig(prev => prev ? {
-                      ...prev,
-                      globalSettings: {
-                        ...prev.globalSettings,
-                        retryCount: value || 3
-                      }
-                    } : prev)}
-                    style={{ width: '100%', marginTop: 8 }}
-                  />
-                </div>
+                <Alert
+                  message="参数配置位置说明"
+                  description={
+                    <div>
+                      <p style={{ marginBottom: 8 }}>Global Settings 只负责系统级策略（Provider选择、Fallback等）</p>
+                      <p style={{ marginBottom: 8 }}>参数默认值（Temperature、Max Tokens、Timeout等）请在各个 <strong>Provider 配置</strong>中设置</p>
+                      <p style={{ marginBottom: 0 }}>任务特定的优化参数请在 <strong>Prompt Templates</strong> 中配置</p>
+                    </div>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 24 }}
+                />
               </Col>
             </Row>
 

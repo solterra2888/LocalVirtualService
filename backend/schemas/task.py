@@ -56,6 +56,9 @@ class TaskExecutionResponse(BaseModel):
     total_tokens: Optional[int] = None
     total_cost: Optional[float] = None
     rc_agent_status: Optional[str] = None
+    first_filename: Optional[str] = None  # 第一个文件的名称
+    llm_model: Optional[str] = None  # LLM模型名称
+    llm_provider: Optional[str] = None  # LLM提供商
     
     class Config:
         from_attributes = True

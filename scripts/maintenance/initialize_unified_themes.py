@@ -201,7 +201,7 @@ async def main():
             print("跳过同步")
     else:
         print("\n✅ news_themes_unified 表已有数据，跳过自动同步")
-        print("💡 如需重新同步，请运行: python scripts/sync_themes_manual.py")
+        print("💡 如需重新同步，请运行: python scripts/maintenance/sync_themes_manual.py")
     
     # 步骤6: 显示最终状态
     print("\n📈 步骤4: 验证最终状态...")
@@ -219,7 +219,7 @@ async def main():
     print("\n💡 后续操作:")
     print("  1. 测试API: curl 'http://localhost:8000/api/themes-unified/trending'")
     print("  2. 查看特定新闻: curl 'http://localhost:8000/api/themes-unified/news/<news_id>/fused-themes'")
-    print("  3. 运行诊断: python scripts/diagnose_unified_themes.py")
+    print("  3. 运行诊断: python scripts/diagnostics/diagnose_unified_themes.py")
     print("  4. 查看流程图: cat UNIFIED_THEME_SYSTEM_FLOW.md")
     print()
 

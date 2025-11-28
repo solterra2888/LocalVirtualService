@@ -37,6 +37,7 @@ export interface PromptTemplate {
   template_code: string;
   template_name: string;
   category_id: number;
+  category_code?: string;
   category_name?: string;
   description?: string;
   scope: 'system' | 'user' | 'shared';

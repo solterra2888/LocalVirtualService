@@ -23,8 +23,8 @@ export interface LLMConfig {
   fallbackEnabled: boolean;
   fallbackOrder: string[];
   globalSettings: {
-    timeout: number;
-    retryCount: number;
+    // Global Settings 只负责系统级策略，不包含参数默认值
+    // timeout, retryCount 等参数由各个 Provider 配置提供
     enableLogging: boolean;
     enableMonitoring: boolean;
   };

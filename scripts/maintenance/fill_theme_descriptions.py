@@ -11,16 +11,16 @@
 
 使用方法:
     # 只填充缺失的描述
-    python scripts/fill_theme_descriptions.py
+    python scripts/maintenance/fill_theme_descriptions.py
     
     # 强制重新生成所有描述
-    python scripts/fill_theme_descriptions.py --force
+    python scripts/maintenance/fill_theme_descriptions.py --force
     
     # 只处理特定市场
-    python scripts/fill_theme_descriptions.py --market US
+    python scripts/maintenance/fill_theme_descriptions.py --market US
     
     # 禁用 LLM（使用简单模板）
-    python scripts/fill_theme_descriptions.py --no-llm
+    python scripts/maintenance/fill_theme_descriptions.py --no-llm
 """
 
 import os
@@ -215,7 +215,7 @@ async def fill_descriptions(
         
         if success_count > 0:
             logger.info("💡 下一步:")
-            logger.info("  1. 运行: python scripts/regenerate_theme_embeddings_with_llm.py")
+            logger.info("  1. 运行: python scripts/maintenance/regenerate_theme_embeddings_with_llm.py")
             logger.info("  2. 重新生成主题向量（使用新的描述）")
             logger.info("  3. 测试新闻主题匹配效果")
         
@@ -240,19 +240,19 @@ def parse_args():
         epilog="""
 示例:
   # 只填充缺失的描述（增量更新）
-  python scripts/fill_theme_descriptions.py
+  python scripts/maintenance/fill_theme_descriptions.py
   
   # 强制重新生成所有描述
-  python scripts/fill_theme_descriptions.py --force
+  python scripts/maintenance/fill_theme_descriptions.py --force
   
   # 只处理美股市场
-  python scripts/fill_theme_descriptions.py --market US
+  python scripts/maintenance/fill_theme_descriptions.py --market US
   
   # 禁用LLM（使用简单模板）
-  python scripts/fill_theme_descriptions.py --no-llm
+  python scripts/maintenance/fill_theme_descriptions.py --no-llm
   
   # 限制处理数量（用于测试）
-  python scripts/fill_theme_descriptions.py --limit 10
+  python scripts/maintenance/fill_theme_descriptions.py --limit 10
         """
     )
     

@@ -4,10 +4,10 @@
 从 news 表的 analysis_result 字段同步 classification 数据到 news_themes_unified 表
 
 用法:
-    python scripts/sync_classification_from_analysis_result.py
-    python scripts/sync_classification_from_analysis_result.py --limit 100
-    python scripts/sync_classification_from_analysis_result.py --news-ids 1234,5678
-    python scripts/sync_classification_from_analysis_result.py --force-update
+    python scripts/maintenance/sync_classification_from_analysis_result.py
+    python scripts/maintenance/sync_classification_from_analysis_result.py --limit 100
+    python scripts/maintenance/sync_classification_from_analysis_result.py --news-ids 1234,5678
+    python scripts/maintenance/sync_classification_from_analysis_result.py --force-update
 """
 
 import sys
