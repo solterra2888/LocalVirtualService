@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Card, 
   Button, 
@@ -19,12 +19,14 @@ import {
   Tag,
   Statistic,
   Spin,
-  Tooltip
+  Tooltip,
+  Table,
+  Segmented,
+  Progress
 } from 'antd';
 import { 
   SettingOutlined, 
   RobotOutlined,
-  ExclamationCircleOutlined,
   ExperimentOutlined,
   SaveOutlined,
   ReloadOutlined,
@@ -32,8 +34,26 @@ import {
   EyeTwoTone,
   WarningOutlined,
   DragOutlined,
-  PlayCircleOutlined
+  PlayCircleOutlined,
+  LineChartOutlined,
+  DownloadOutlined
 } from '@ant-design/icons';
+import { 
+  LineChart, 
+  Line, 
+  AreaChart, 
+  Area, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip as RechartsTooltip, 
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
 import {
   DndContext,
   closestCenter,
@@ -159,6 +179,20 @@ const LLMConfigPage: React.FC = () => {
   // 拖拽排序相关状态
   const [fallbackOrder, setFallbackOrder] = useState<string[]>([]);
   
+  // 监控统计增强状态
+  const [monitoringTimeRange, setMonitoringTimeRange] = useState<string>('30d');
+  const [monitoringProvider, setMonitoringProvider] = useState<string | undefined>(undefined);
+  const [monitoringLoading, setMonitoringLoading] = useState<boolean>(false);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [timeSeriesData, setTimeSeriesData] = useState<any[]>([]);
+  const [modelStatsData, setModelStatsData] = useState<any[]>([]);
+  const [templateStatsData, setTemplateStatsData] = useState<any[]>([]);
+  const [errorAnalysisData, setErrorAnalysisData] = useState<any[]>([]);
+  const [detailedLogs, setDetailedLogs] = useState<any[]>([]);
+  const [logsTotal, setLogsTotal] = useState<number>(0);
+  const [logsPage, setLogsPage] = useState<number>(1);
+  const [logsPageSize] = useState<number>(20);
+  
   // 拖拽传感器
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -209,6 +243,42 @@ const LLMConfigPage: React.FC = () => {
       // Don't show error message, statistics are secondary
     }
   };
+
+  // 加载监控数据
+  const loadMonitoringData = useCallback(async () => {
+    if (!config) return;
+    
+    setMonitoringLoading(true);
+    try {
+      // 并行加载所有监控数据
+      const [dashboard, timeSeries, modelStats, templateStats, errorAnalysis, logs] = await Promise.all([
+        llmConfigService.getMonitoringDashboard(monitoringTimeRange, monitoringProvider),
+        llmConfigService.getTimeSeriesData(monitoringTimeRange, monitoringProvider),
+        llmConfigService.getModelStats(monitoringTimeRange, monitoringProvider),
+        llmConfigService.getTemplateStats(monitoringTimeRange, monitoringProvider),
+        llmConfigService.getErrorAnalysis(monitoringTimeRange, monitoringProvider),
+        llmConfigService.getDetailedLogs(monitoringTimeRange, monitoringProvider, undefined, undefined, logsPageSize, (logsPage - 1) * logsPageSize)
+      ]);
+
+      setDashboardData(dashboard);
+      setTimeSeriesData(timeSeries.data || []);
+      setModelStatsData(modelStats.data || []);
+      setTemplateStatsData(templateStats.data || []);
+      setErrorAnalysisData(errorAnalysis.data || []);
+      setDetailedLogs(logs.data || []);
+      setLogsTotal(logs.total || 0);
+    } catch (error) {
+      console.error('Failed to load monitoring data:', error);
+      message.error('加载监控数据失败');
+    } finally {
+      setMonitoringLoading(false);
+    }
+  }, [config, monitoringTimeRange, monitoringProvider, logsPage, logsPageSize]);
+
+  // 监听时间范围和提供商筛选变化
+  useEffect(() => {
+    loadMonitoringData();
+  }, [loadMonitoringData]);
 
   const updateProvider = (providerId: string, updates: Partial<LLMProvider>) => {
     if (!config) return;
@@ -696,9 +766,6 @@ const LLMConfigPage: React.FC = () => {
     count: acc.count + 1
   }), { totalRequests: 0, totalTokens: 0, totalCost: 0, avgSuccessRate: 0, avgResponseTime: 0, count: 0 });
 
-  const avgSuccessRate = totalStats.count > 0 ? totalStats.avgSuccessRate / totalStats.count : 0;
-  const avgResponseTime = totalStats.count > 0 ? totalStats.avgResponseTime / totalStats.count : 0;
-
   // 加载中状态
   if (loading) {
     return (
@@ -1032,120 +1099,533 @@ const LLMConfigPage: React.FC = () => {
         <TabPane 
           tab={
             <span>
-              <ExclamationCircleOutlined />
+              <LineChartOutlined />
               Monitoring Statistics
             </span>
           } 
           key="monitoring"
         >
-          <Row gutter={16} style={{ marginBottom: 24 }}>
-            <Col span={8}>
-              <Card>
-                <Statistic
-                  title="Total Requests"
-                  value={totalStats.totalRequests}
-                  suffix="times"
-                />
-                <Text type="secondary">Past 30 days</Text>
-              </Card>
-            </Col>
-            <Col span={8}>
-              <Card>
-                <Statistic
-                  title="Average Response Time"
-                  value={avgResponseTime}
-                  suffix="seconds"
-                  precision={2}
-                />
-                <Text type="secondary">Past 30 days</Text>
-              </Card>
-            </Col>
-            <Col span={8}>
-              <Card>
-                <Statistic
-                  title="Average Success Rate"
-                  value={avgSuccessRate}
-                  suffix="%"
-                  precision={1}
-                  valueStyle={{ color: avgSuccessRate > 95 ? '#3f8600' : '#ff4d4f' }}
-                />
-                <Text type="secondary">Past 30 days</Text>
-              </Card>
-            </Col>
-          </Row>
+          <Spin spinning={monitoringLoading}>
+            {/* 筛选器 */}
+            <Card style={{ marginBottom: 16 }}>
+              <Row gutter={16} align="middle">
+                <Col span={8}>
+                  <Space>
+                    <Text strong>时间范围:</Text>
+                    <Segmented
+                      options={[
+                        { label: '24小时', value: '1d' },
+                        { label: '7天', value: '7d' },
+                        { label: '30天', value: '30d' },
+                      ]}
+                      value={monitoringTimeRange}
+                      onChange={(value) => setMonitoringTimeRange(value as string)}
+                    />
+                  </Space>
+                </Col>
+                <Col span={8}>
+                  <Space>
+                    <Text strong>提供商:</Text>
+                    <Select
+                      style={{ width: 200 }}
+                      placeholder="All Providers"
+                      allowClear
+                      value={monitoringProvider}
+                      onChange={setMonitoringProvider}
+                    >
+                      {config?.providers.map(p => (
+                        <Option key={p.id} value={p.id}>
+                          {p.icon} {p.displayName}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Space>
+                </Col>
+                <Col span={8} style={{ textAlign: 'right' }}>
+                  <Space>
+                    <Button 
+                      icon={<ReloadOutlined />}
+                      onClick={loadMonitoringData}
+                    >
+                      刷新
+                    </Button>
+                    <Button 
+                      icon={<DownloadOutlined />}
+                      type="primary"
+                    >
+                      导出报告
+                    </Button>
+                  </Space>
+                </Col>
+              </Row>
+            </Card>
 
-          <Card 
-            title="Model Usage Statistics" 
-            extra={
-              <Button 
-                size="small" 
-                icon={<ReloadOutlined />}
-                onClick={loadUsageStats}
-              >
-                Refresh Statistics
-              </Button>
-            }
-          >
-            {usageStats.length === 0 ? (
+            {/* 概览统计 */}
+            {dashboardData && (
+              <Row gutter={16} style={{ marginBottom: 24 }}>
+                <Col span={6}>
+                  <Card>
+                    <Statistic
+                      title="总请求数"
+                      value={dashboardData.summary.total_requests}
+                      suffix="次"
+                      valueStyle={{ color: '#1890ff' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card>
+                    <Statistic
+                      title="平均响应时间"
+                      value={(dashboardData.summary.avg_response_time / 1000).toFixed(2)}
+                      suffix="秒"
+                      valueStyle={{ color: '#52c41a' }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card>
+                    <Statistic
+                      title="成功率"
+                      value={dashboardData.summary.avg_success_rate.toFixed(1)}
+                      suffix="%"
+                      valueStyle={{ 
+                        color: dashboardData.summary.avg_success_rate > 95 ? '#3f8600' : '#ff4d4f' 
+                      }}
+                    />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card>
+                    <Statistic
+                      title="总成本"
+                      value={dashboardData.summary.total_cost.toFixed(2)}
+                      suffix={dashboardData.summary.currency}
+                      valueStyle={{ color: '#fa8c16' }}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+            )}
+
+            {/* 趋势图表 */}
+            {timeSeriesData.length > 0 ? (
+              <Row gutter={16} style={{ marginBottom: 24 }}>
+                <Col span={12}>
+                  <Card title="请求趋势" size="small">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={timeSeriesData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          tickFormatter={(value) => new Date(value).toLocaleDateString()} 
+                        />
+                        <YAxis />
+                        <RechartsTooltip />
+                        <Area 
+                          type="monotone" 
+                          dataKey="requests" 
+                          stroke="#1890ff" 
+                          fill="#1890ff" 
+                          fillOpacity={0.6}
+                          name="请求数"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card title="成功率趋势" size="small">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={timeSeriesData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          tickFormatter={(value) => new Date(value).toLocaleDateString()} 
+                        />
+                        <YAxis domain={[0, 100]} />
+                        <RechartsTooltip />
+                        <Line 
+                          type="monotone" 
+                          dataKey="success_rate" 
+                          stroke="#52c41a" 
+                          strokeWidth={2}
+                          name="成功率 (%)"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card title="响应时间趋势" size="small">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={timeSeriesData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          tickFormatter={(value) => new Date(value).toLocaleDateString()} 
+                        />
+                        <YAxis />
+                        <RechartsTooltip />
+                        <Line 
+                          type="monotone" 
+                          dataKey="avg_response_time" 
+                          stroke="#fa8c16" 
+                          strokeWidth={2}
+                          name="平均响应时间 (ms)"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card title="Token使用趋势" size="small">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={timeSeriesData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          tickFormatter={(value) => new Date(value).toLocaleDateString()} 
+                        />
+                        <YAxis />
+                        <RechartsTooltip />
+                        <Bar dataKey="total_tokens" fill="#722ed1" name="Token数量" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </Col>
+              </Row>
+            ) : (
               <Alert
-                message="No usage statistics available"
-                description="Detailed usage statistics will be displayed here after starting to use LLM services"
+                style={{ marginBottom: 24 }}
+                message="暂无数据"
+                description="当前时间范围内没有使用记录，请使用LLM服务后再查看统计数据"
                 type="info"
                 showIcon
               />
-            ) : (
-              usageStats.map((stat) => {
-                const provider = config.providers.find(p => p.id === stat.provider);
-                return (
-                  <Card 
-                    key={stat.provider}
-                    size="small" 
-                    style={{ marginBottom: 16 }}
-                    title={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>{provider?.icon || '🤖'}</span>
-                        <span>{provider?.displayName || stat.provider}</span>
-                      </div>
-                    }
-                  >
-                    <Row gutter={16}>
-                      <Col span={6}>
-                        <Statistic
-                          title="Requests"
-                          value={stat.totalRequests}
-                        />
-                      </Col>
-                      <Col span={6}>
-                        <Statistic
-                          title="Response Time"
-                          value={stat.avgResponseTime}
-                          suffix="seconds"
-                          precision={2}
-                        />
-                      </Col>
-                      <Col span={6}>
-                        <Statistic
-                          title="Success Rate"
-                          value={stat.successRate}
-                          suffix="%"
-                          precision={1}
-                          valueStyle={{ color: stat.successRate > 95 ? '#3f8600' : '#ff4d4f' }}
-                        />
-                      </Col>
-                      <Col span={6}>
-                        <Statistic
-                          title="Total Cost"
-                          value={stat.totalCost}
-                          suffix={stat.currency}
-                          precision={2}
-                        />
-                      </Col>
-                    </Row>
-                  </Card>
-                );
-              })
             )}
-          </Card>
+
+            {/* 按模板统计 */}
+            {templateStatsData.length > 0 && (
+              <Card 
+                title="按模板统计" 
+                size="small"
+                style={{ marginBottom: 16 }}
+              >
+                <Table
+                  dataSource={templateStatsData}
+                  pagination={false}
+                  size="small"
+                  rowKey={(record) => `template-${record.template_id}`}
+                  columns={[
+                    {
+                      title: '模板ID',
+                      dataIndex: 'template_id',
+                      key: 'template_id',
+                      width: 100
+                    },
+                    {
+                      title: '模板名称',
+                      dataIndex: 'template_name',
+                      key: 'template_name'
+                    },
+                    {
+                      title: '请求数',
+                      dataIndex: 'totalRequests',
+                      key: 'totalRequests',
+                      sorter: (a, b) => a.totalRequests - b.totalRequests,
+                      render: (value) => value.toLocaleString()
+                    },
+                    {
+                      title: '成功率',
+                      dataIndex: 'successRate',
+                      key: 'successRate',
+                      sorter: (a, b) => a.successRate - b.successRate,
+                      render: (value) => (
+                        <Progress 
+                          percent={value} 
+                          size="small" 
+                          status={value > 95 ? 'success' : value > 80 ? 'normal' : 'exception'}
+                        />
+                      )
+                    },
+                    {
+                      title: '平均响应时间',
+                      dataIndex: 'avgResponseTime',
+                      key: 'avgResponseTime',
+                      sorter: (a, b) => a.avgResponseTime - b.avgResponseTime,
+                      render: (value) => `${value.toFixed(0)}ms`
+                    },
+                    {
+                      title: 'Token总数',
+                      dataIndex: 'totalTokens',
+                      key: 'totalTokens',
+                      sorter: (a, b) => a.totalTokens - b.totalTokens,
+                      render: (value) => value.toLocaleString()
+                    },
+                    {
+                      title: '总成本',
+                      dataIndex: 'totalCost',
+                      key: 'totalCost',
+                      sorter: (a, b) => a.totalCost - b.totalCost,
+                      render: (value) => `¥${value.toFixed(2)}`
+                    }
+                  ]}
+                />
+              </Card>
+            )}
+
+            {/* 按模型统计 */}
+            {modelStatsData.length > 0 && (
+              <Card 
+                title="按模型统计" 
+                size="small"
+                style={{ marginBottom: 16 }}
+              >
+                <Table
+                  dataSource={modelStatsData}
+                  pagination={false}
+                  size="small"
+                  rowKey={(record) => `${record.provider}-${record.model}`}
+                  columns={[
+                    {
+                      title: '提供商',
+                      dataIndex: 'provider',
+                      key: 'provider',
+                      render: (text) => {
+                        const provider = config?.providers.find(p => p.id === text);
+                        return (
+                          <Space>
+                            <span>{provider?.icon || '🤖'}</span>
+                            <span>{provider?.displayName || text}</span>
+                          </Space>
+                        );
+                      }
+                    },
+                    {
+                      title: '模型',
+                      dataIndex: 'model',
+                      key: 'model'
+                    },
+                    {
+                      title: '请求数',
+                      dataIndex: 'totalRequests',
+                      key: 'totalRequests',
+                      sorter: (a, b) => a.totalRequests - b.totalRequests,
+                      render: (value) => value.toLocaleString()
+                    },
+                    {
+                      title: '成功率',
+                      dataIndex: 'successRate',
+                      key: 'successRate',
+                      sorter: (a, b) => a.successRate - b.successRate,
+                      render: (value) => (
+                        <Progress 
+                          percent={value} 
+                          size="small" 
+                          status={value > 95 ? 'success' : value > 80 ? 'normal' : 'exception'}
+                        />
+                      )
+                    },
+                    {
+                      title: '平均响应时间',
+                      dataIndex: 'avgResponseTime',
+                      key: 'avgResponseTime',
+                      sorter: (a, b) => a.avgResponseTime - b.avgResponseTime,
+                      render: (value) => `${value.toFixed(0)}ms`
+                    },
+                    {
+                      title: 'Token总数',
+                      dataIndex: 'totalTokens',
+                      key: 'totalTokens',
+                      sorter: (a, b) => a.totalTokens - b.totalTokens,
+                      render: (value) => value.toLocaleString()
+                    },
+                    {
+                      title: '总成本',
+                      dataIndex: 'totalCost',
+                      key: 'totalCost',
+                      sorter: (a, b) => a.totalCost - b.totalCost,
+                      render: (value) => `¥${value.toFixed(2)}`
+                    }
+                  ]}
+                />
+              </Card>
+            )}
+
+            {/* 错误分析 */}
+            {errorAnalysisData.length > 0 && (
+              <Card 
+                title="错误分析" 
+                size="small"
+                style={{ marginBottom: 16 }}
+              >
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Table
+                      dataSource={errorAnalysisData}
+                      pagination={false}
+                      size="small"
+                      rowKey="error_type"
+                      columns={[
+                        {
+                          title: '错误类型',
+                          dataIndex: 'error_type',
+                          key: 'error_type',
+                          render: (text) => <Tag color="error">{text}</Tag>
+                        },
+                        {
+                          title: '次数',
+                          dataIndex: 'count',
+                          key: 'count',
+                          sorter: (a, b) => a.count - b.count
+                        },
+                        {
+                          title: '占比',
+                          dataIndex: 'percentage',
+                          key: 'percentage',
+                          render: (value) => `${value.toFixed(1)}%`
+                        },
+                        {
+                          title: '最后发生',
+                          dataIndex: 'last_occurrence',
+                          key: 'last_occurrence',
+                          render: (value) => new Date(value).toLocaleString()
+                        }
+                      ]}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={errorAnalysisData}
+                          dataKey="count"
+                          nameKey="error_type"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          label={(entry: any) => `${entry.error_type}: ${entry.percentage.toFixed(1)}%`}
+                        >
+                          {errorAnalysisData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={['#ff4d4f', '#ff7a45', '#ffa940'][index % 3]} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Col>
+                </Row>
+              </Card>
+            )}
+
+            {/* 详细日志 */}
+            {detailedLogs.length > 0 && (
+              <Card 
+                title="详细日志" 
+                size="small"
+                extra={
+                  <Text type="secondary">共 {logsTotal} 条记录</Text>
+                }
+              >
+                <Table
+                  dataSource={detailedLogs}
+                  pagination={{
+                    current: logsPage,
+                    pageSize: logsPageSize,
+                    total: logsTotal,
+                    onChange: (page) => setLogsPage(page),
+                    showSizeChanger: false
+                  }}
+                  size="small"
+                  rowKey="id"
+                  scroll={{ x: 1200 }}
+                  columns={[
+                    {
+                      title: '时间',
+                      dataIndex: 'created_at',
+                      key: 'created_at',
+                      width: 180,
+                      render: (value) => new Date(value).toLocaleString()
+                    },
+                    {
+                      title: '模板ID',
+                      dataIndex: 'template_id',
+                      key: 'template_id',
+                      width: 100,
+                      render: (value) => value || '-'
+                    },
+                    {
+                      title: '提供商',
+                      dataIndex: 'provider',
+                      key: 'provider',
+                      width: 120,
+                      render: (text) => {
+                        const provider = config?.providers.find(p => p.id === text);
+                        return `${provider?.icon || '🤖'} ${provider?.displayName || text}`;
+                      }
+                    },
+                    {
+                      title: '模型',
+                      dataIndex: 'model',
+                      key: 'model',
+                      width: 150
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'success',
+                      key: 'success',
+                      width: 100,
+                      render: (value) => (
+                        <Tag color={value ? 'success' : 'error'}>
+                          {value ? '成功' : '失败'}
+                        </Tag>
+                      )
+                    },
+                    {
+                      title: '响应时间',
+                      dataIndex: 'response_time_ms',
+                      key: 'response_time_ms',
+                      width: 100,
+                      render: (value) => `${value}ms`
+                    },
+                    {
+                      title: 'Tokens',
+                      dataIndex: 'tokens_used',
+                      key: 'tokens_used',
+                      width: 100
+                    },
+                    {
+                      title: '成本',
+                      dataIndex: 'cost',
+                      key: 'cost',
+                      width: 100,
+                      render: (value) => `¥${value?.toFixed(4) || 0}`
+                    },
+                    {
+                      title: '用户ID',
+                      dataIndex: 'user_id',
+                      key: 'user_id',
+                      width: 100,
+                      render: (text) => text || '-'
+                    },
+                    {
+                      title: '错误信息',
+                      dataIndex: 'error_message',
+                      key: 'error_message',
+                      render: (text) => text ? (
+                        <Tooltip title={text}>
+                          <Text type="danger" ellipsis style={{ maxWidth: 200 }}>
+                            {text}
+                          </Text>
+                        </Tooltip>
+                      ) : '-'
+                    }
+                  ]}
+                />
+              </Card>
+            )}
+          </Spin>
         </TabPane>
       </Tabs>
     </div>

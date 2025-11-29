@@ -179,6 +179,126 @@ class LLMConfigService {
       throw error;
     }
   }
+
+  // ============ 增强的监控统计 API（基于 llm_prompt_usage_logs 表）============
+
+  // 获取监控仪表板数据
+  async getMonitoringDashboard(timeRange: string = '30d', providerId?: string, templateId?: number): Promise<any> {
+    try {
+      let url = `/llm/monitoring/dashboard?range=${timeRange}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      if (templateId) {
+        url += `&template_id=${templateId}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get monitoring dashboard:', error);
+      throw error;
+    }
+  }
+
+  // 获取时间序列数据
+  async getTimeSeriesData(timeRange: string = '30d', providerId?: string, templateId?: number, interval?: string): Promise<any> {
+    try {
+      let url = `/llm/monitoring/time-series?range=${timeRange}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      if (templateId) {
+        url += `&template_id=${templateId}`;
+      }
+      if (interval) {
+        url += `&interval=${interval}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get time series data:', error);
+      throw error;
+    }
+  }
+
+  // 获取按模型分组的统计
+  async getModelStats(timeRange: string = '30d', providerId?: string, templateId?: number): Promise<any> {
+    try {
+      let url = `/llm/monitoring/model-stats?range=${timeRange}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      if (templateId) {
+        url += `&template_id=${templateId}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get model stats:', error);
+      throw error;
+    }
+  }
+
+  // 获取按模板分组的统计（新增）
+  async getTemplateStats(timeRange: string = '30d', providerId?: string): Promise<any> {
+    try {
+      let url = `/llm/monitoring/template-stats?range=${timeRange}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get template stats:', error);
+      throw error;
+    }
+  }
+
+  // 获取错误分析
+  async getErrorAnalysis(timeRange: string = '30d', providerId?: string, templateId?: number): Promise<any> {
+    try {
+      let url = `/llm/monitoring/error-analysis?range=${timeRange}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      if (templateId) {
+        url += `&template_id=${templateId}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get error analysis:', error);
+      throw error;
+    }
+  }
+
+  // 获取详细日志
+  async getDetailedLogs(
+    timeRange: string = '30d',
+    providerId?: string,
+    templateId?: number,
+    successFilter?: boolean,
+    limit: number = 100,
+    offset: number = 0
+  ): Promise<any> {
+    try {
+      let url = `/llm/monitoring/logs?range=${timeRange}&limit=${limit}&offset=${offset}`;
+      if (providerId) {
+        url += `&provider_id=${providerId}`;
+      }
+      if (templateId) {
+        url += `&template_id=${templateId}`;
+      }
+      if (successFilter !== undefined) {
+        url += `&success_filter=${successFilter}`;
+      }
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get detailed logs:', error);
+      throw error;
+    }
+  }
 }
 
 export const llmConfigService = new LLMConfigService();

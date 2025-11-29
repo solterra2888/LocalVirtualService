@@ -740,3 +740,565 @@ async def reload_llm_config(current_user: TokenData = Depends(get_current_admin_
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"重新加载配置失败: {str(e)}")
+
+
+# ============ 监控统计增强API ============
+# 注意：数据来源为 llm_prompt_usage_logs 表
+
+class TimeSeriesDataPoint(BaseModel):
+    """时间序列数据点"""
+    timestamp: str
+    requests: int
+    success_rate: float
+    avg_response_time: float
+    total_tokens: int
+    total_cost: float
+
+class ModelStats(BaseModel):
+    """按模型统计"""
+    provider: str
+    model: str
+    totalRequests: int
+    successRate: float
+    avgResponseTime: float
+    totalTokens: int
+    totalCost: float
+    currency: str
+
+class TemplateStats(BaseModel):
+    """按模板统计"""
+    template_id: Optional[int]
+    template_name: str
+    totalRequests: int
+    successRate: float
+    avgResponseTime: float
+    totalTokens: int
+    totalCost: float
+
+class ErrorStats(BaseModel):
+    """错误统计"""
+    error_type: str
+    count: int
+    percentage: float
+    last_occurrence: str
+
+class DetailedUsageLog(BaseModel):
+    """详细使用日志"""
+    id: int
+    template_id: Optional[int]
+    user_id: Optional[int]
+    provider: str
+    model: str
+    created_at: str
+    response_time_ms: Optional[int]
+    tokens_used: Optional[int]
+    cost: Optional[float]
+    success: bool
+    error_message: Optional[str]
+
+class MonitoringDashboard(BaseModel):
+    """监控仪表板完整数据"""
+    summary: Dict[str, Any]
+    time_series: List[TimeSeriesDataPoint]
+    model_stats: List[ModelStats]
+    template_stats: List[TemplateStats]
+    error_stats: List[ErrorStats]
+    recent_logs: List[DetailedUsageLog]
+
+
+@router.get("/monitoring/dashboard")
+async def get_monitoring_dashboard(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    template_id: Optional[int] = None,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取监控仪表板完整数据（从llm_prompt_usage_logs表）"""
+    try:
+        # 解析时间范围
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        
+        # 1. 获取汇总统计
+        summary = {
+            "total_requests": 0,
+            "total_success": 0,
+            "total_failed": 0,
+            "avg_response_time": 0.0,
+            "avg_success_rate": 0.0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "currency": "RMB"
+        }
+        
+        conn = db_manager.get_connection()
+        if conn:
+            cursor = conn.cursor()
+            
+            # 获取汇总数据
+            where_clause = "WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL %s"
+            params = [f"{days} days"]
+            
+            if provider_id:
+                where_clause += " AND provider = %s"
+                params.append(provider_id)
+            
+            if template_id:
+                where_clause += " AND template_id = %s"
+                params.append(template_id)
+            
+            cursor.execute(f"""
+                SELECT 
+                    COUNT(*) as total_requests,
+                    COUNT(CASE WHEN success = true THEN 1 END) as total_success,
+                    COUNT(CASE WHEN success = false THEN 1 END) as total_failed,
+                    AVG(response_time_ms) as avg_response_time,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(cost) as total_cost
+                FROM llm_prompt_usage_logs
+                {where_clause}
+            """, params)
+            
+            row = cursor.fetchone()
+            if row and row[0]:
+                summary["total_requests"] = int(row[0])
+                summary["total_success"] = int(row[1]) if row[1] else 0
+                summary["total_failed"] = int(row[2]) if row[2] else 0
+                summary["avg_response_time"] = float(row[3]) if row[3] else 0.0
+                summary["avg_success_rate"] = (summary["total_success"] / summary["total_requests"] * 100) if summary["total_requests"] > 0 else 0.0
+                summary["total_tokens"] = int(row[4]) if row[4] else 0
+                summary["total_cost"] = float(row[5]) if row[5] else 0.0
+                summary["currency"] = "RMB"
+            
+            cursor.close()
+        
+        return {
+            "summary": summary,
+            "time_range": range,
+            "provider_filter": provider_id,
+            "template_filter": template_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get monitoring dashboard: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取监控数据失败: {str(e)}")
+
+
+@router.get("/monitoring/time-series")
+async def get_time_series_data(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    template_id: Optional[int] = None,
+    interval: str = "day",
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取时间序列数据（从llm_prompt_usage_logs表）"""
+    try:
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        # 根据时间范围调整间隔
+        if days <= 1:
+            interval = "hour"
+        elif days <= 7:
+            interval = "hour"
+        else:
+            interval = "day"
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            return {"data": []}
+        
+        cursor = conn.cursor()
+        
+        # 构建时间分组查询
+        if interval == "hour":
+            time_format = "date_trunc('hour', created_at)"
+        else:
+            time_format = "date_trunc('day', created_at)"
+        
+        where_clause = "WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL %s"
+        params = [f"{days} days"]
+        
+        if provider_id:
+            where_clause += " AND provider = %s"
+            params.append(provider_id)
+        
+        if template_id:
+            where_clause += " AND template_id = %s"
+            params.append(template_id)
+        
+        cursor.execute(f"""
+            SELECT 
+                {time_format} as time_bucket,
+                COUNT(*) as requests,
+                COUNT(CASE WHEN success = true THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100 as success_rate,
+                AVG(response_time_ms) as avg_response_time,
+                SUM(tokens_used) as total_tokens,
+                SUM(cost) as total_cost
+            FROM llm_prompt_usage_logs
+            {where_clause}
+            GROUP BY time_bucket
+            ORDER BY time_bucket ASC
+        """, params)
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        data = []
+        for row in rows:
+            data.append({
+                "timestamp": row[0].isoformat() if row[0] else "",
+                "requests": int(row[1]) if row[1] else 0,
+                "success_rate": float(row[2]) if row[2] else 0.0,
+                "avg_response_time": float(row[3]) if row[3] else 0.0,
+                "total_tokens": int(row[4]) if row[4] else 0,
+                "total_cost": float(row[5]) if row[5] else 0.0
+            })
+        
+        return {"data": data, "interval": interval}
+        
+    except Exception as e:
+        logger.error(f"Failed to get time series data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取时间序列数据失败: {str(e)}")
+
+
+@router.get("/monitoring/model-stats")
+async def get_model_stats(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    template_id: Optional[int] = None,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取按模型分组的统计（从llm_prompt_usage_logs表）"""
+    try:
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            return {"data": []}
+        
+        cursor = conn.cursor()
+        
+        where_clause = "WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL %s"
+        params = [f"{days} days"]
+        
+        if provider_id:
+            where_clause += " AND provider = %s"
+            params.append(provider_id)
+        
+        if template_id:
+            where_clause += " AND template_id = %s"
+            params.append(template_id)
+        
+        cursor.execute(f"""
+            SELECT 
+                provider,
+                model,
+                COUNT(*) as total_requests,
+                COUNT(CASE WHEN success = true THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100 as success_rate,
+                AVG(response_time_ms) as avg_response_time,
+                SUM(tokens_used) as total_tokens,
+                SUM(cost) as total_cost
+            FROM llm_prompt_usage_logs
+            {where_clause}
+            GROUP BY provider, model
+            ORDER BY total_requests DESC
+        """, params)
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        data = []
+        for row in rows:
+            data.append({
+                "provider": row[0] if row[0] else "",
+                "model": row[1] if row[1] else "",
+                "totalRequests": int(row[2]) if row[2] else 0,
+                "successRate": float(row[3]) if row[3] else 0.0,
+                "avgResponseTime": float(row[4]) if row[4] else 0.0,
+                "totalTokens": int(row[5]) if row[5] else 0,
+                "totalCost": float(row[6]) if row[6] else 0.0,
+                "currency": "RMB"
+            })
+        
+        return {"data": data}
+        
+    except Exception as e:
+        logger.error(f"Failed to get model stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取模型统计失败: {str(e)}")
+
+
+@router.get("/monitoring/error-analysis")
+async def get_error_analysis(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    template_id: Optional[int] = None,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取错误分析（从llm_prompt_usage_logs表）"""
+    try:
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            return {"data": []}
+        
+        cursor = conn.cursor()
+        
+        where_clause = "WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL %s AND success = false"
+        params = [f"{days} days"]
+        
+        if provider_id:
+            where_clause += " AND provider = %s"
+            params.append(provider_id)
+        
+        if template_id:
+            where_clause += " AND template_id = %s"
+            params.append(template_id)
+        
+        # 获取错误分类统计（按error_message分类）
+        cursor.execute(f"""
+            SELECT 
+                COALESCE(SUBSTRING(error_message FROM 1 FOR 50), 'Unknown Error') as error_type,
+                COUNT(*) as count,
+                MAX(created_at) as last_occurrence
+            FROM llm_prompt_usage_logs
+            {where_clause}
+            GROUP BY error_type
+            ORDER BY count DESC
+            LIMIT 10
+        """, params)
+        
+        rows = cursor.fetchall()
+        
+        # 计算总错误数
+        total_errors = sum(row[1] for row in rows)
+        
+        data = []
+        for row in rows:
+            data.append({
+                "error_type": row[0] if row[0] else "unknown",
+                "count": int(row[1]) if row[1] else 0,
+                "percentage": (row[1] / total_errors * 100) if total_errors > 0 else 0.0,
+                "last_occurrence": row[2].isoformat() if row[2] else ""
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {"data": data, "total_errors": total_errors}
+        
+    except Exception as e:
+        logger.error(f"Failed to get error analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取错误分析失败: {str(e)}")
+
+
+@router.get("/monitoring/logs")
+async def get_detailed_logs(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    template_id: Optional[int] = None,
+    success_filter: Optional[bool] = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取详细日志（从llm_prompt_usage_logs表）"""
+    try:
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            return {"data": [], "total": 0}
+        
+        cursor = conn.cursor()
+        
+        # 构建查询条件
+        where_clauses = ["created_at >= CURRENT_TIMESTAMP - INTERVAL %s"]
+        params = [f"{days} days"]
+        
+        if provider_id:
+            where_clauses.append("provider = %s")
+            params.append(provider_id)
+        
+        if template_id:
+            where_clauses.append("template_id = %s")
+            params.append(template_id)
+        
+        if success_filter is not None:
+            where_clauses.append("success = %s")
+            params.append(success_filter)
+        
+        where_clause = " AND ".join(where_clauses)
+        
+        # 获取总数
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM llm_prompt_usage_logs WHERE {where_clause}
+        """, params)
+        total = cursor.fetchone()[0]
+        
+        # 获取日志数据
+        cursor.execute(f"""
+            SELECT 
+                id, template_id, user_id, provider, model, created_at,
+                response_time_ms, tokens_used, cost, success, error_message
+            FROM llm_prompt_usage_logs
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        data = []
+        for row in rows:
+            data.append({
+                "id": row[0],
+                "template_id": row[1] if row[1] else None,
+                "user_id": row[2] if row[2] else None,
+                "provider": row[3] if row[3] else "",
+                "model": row[4] if row[4] else "",
+                "created_at": row[5].isoformat() if row[5] else "",
+                "response_time_ms": row[6] if row[6] else 0,
+                "tokens_used": row[7] if row[7] else 0,
+                "cost": float(row[8]) if row[8] else 0.0,
+                "success": row[9] if row[9] is not None else True,
+                "error_message": row[10] if row[10] else ""
+            })
+        
+        return {
+            "data": data,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get detailed logs: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取详细日志失败: {str(e)}")
+
+
+@router.get("/monitoring/template-stats")
+async def get_template_stats(
+    range: str = "30d",
+    provider_id: Optional[str] = None,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取按模板分组的统计（从llm_prompt_usage_logs表）"""
+    try:
+        days = 30
+        if range.endswith('d'):
+            try:
+                days = int(range[:-1])
+            except ValueError:
+                days = 30
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            return {"data": []}
+        
+        cursor = conn.cursor()
+        
+        where_clause = "WHERE l.created_at >= CURRENT_TIMESTAMP - INTERVAL %s"
+        params = [f"{days} days"]
+        
+        if provider_id:
+            where_clause += " AND l.provider = %s"
+            params.append(provider_id)
+        
+        # 关联prompt_templates表获取模板名称
+        cursor.execute(f"""
+            SELECT 
+                l.template_id,
+                COALESCE(t.template_name, CONCAT('Template #', l.template_id)) as template_name,
+                COUNT(*) as total_requests,
+                COUNT(CASE WHEN l.success = true THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100 as success_rate,
+                AVG(l.response_time_ms) as avg_response_time,
+                SUM(l.tokens_used) as total_tokens,
+                SUM(l.cost) as total_cost
+            FROM llm_prompt_usage_logs l
+            LEFT JOIN llm_prompt_templates t ON l.template_id = t.id
+            {where_clause}
+            GROUP BY l.template_id, t.template_name
+            ORDER BY total_requests DESC
+        """, params)
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        data = []
+        for row in rows:
+            data.append({
+                "template_id": row[0] if row[0] else None,
+                "template_name": row[1] if row[1] else "Unknown",
+                "totalRequests": int(row[2]) if row[2] else 0,
+                "successRate": float(row[3]) if row[3] else 0.0,
+                "avgResponseTime": float(row[4]) if row[4] else 0.0,
+                "totalTokens": int(row[5]) if row[5] else 0,
+                "totalCost": float(row[6]) if row[6] else 0.0
+            })
+        
+        return {"data": data}
+        
+    except Exception as e:
+        logger.error(f"Failed to get template stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取模板统计失败: {str(e)}")
