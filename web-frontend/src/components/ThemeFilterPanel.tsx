@@ -17,7 +17,8 @@ import {
   ClearOutlined,
   SearchOutlined,
   CalendarOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  SaveOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import locale from 'antd/es/date-picker/locale/en_US';
@@ -30,12 +31,14 @@ const { Panel } = Collapse;
 interface ThemeFilterPanelProps {
   onFilterChange: (filters: ThemeFilterState) => void;
   onApply: (filters?: ThemeFilterState) => void;
+  onSaveAsPreset?: () => void;  // 🔥 新增：保存为预设的回调
   loading?: boolean;
 }
 
 const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
   onFilterChange,
   onApply,
+  onSaveAsPreset,
   loading = false
 }) => {
   const [filters, setFilters] = useState<ThemeFilterState>({
@@ -232,19 +235,31 @@ const ThemeFilterPanel: React.FC<ThemeFilterPanelProps> = ({
           </Space>
         }
         extra={
-          <Space>
-            <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>
-              Clear
-            </Button>
-            <Button
-              size="small"
-              type="primary"
-              icon={<SearchOutlined />}
-              onClick={() => onApply()}
-              loading={loading}
-            >
-              Apply Filter
-            </Button>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Space>
+              <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>
+                Clear
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={() => onApply()}
+                loading={loading}
+              >
+                Apply
+              </Button>
+            </Space>
+            {onSaveAsPreset && (
+              <Button
+                size="small"
+                icon={<SaveOutlined />}
+                onClick={onSaveAsPreset}
+                style={{ width: '100%' }}
+              >
+                Save as Preset
+              </Button>
+            )}
           </Space>
         }
         style={{ height: '100%' }}

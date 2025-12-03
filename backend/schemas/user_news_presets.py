@@ -41,6 +41,7 @@ class CreatePresetRequest(BaseModel):
     symbol_code: Optional[str] = Field(None, max_length=20, description="股票代码（仅symbol_specific时需要）")
     is_default: bool = Field(False, description="是否设为默认")
     is_favorite: bool = Field(False, description="是否收藏")
+    is_system_preset: bool = Field(False, description="是否创建为系统预设（仅admin可用）")
     
     @validator('scope_type')
     def validate_scope_type(cls, v):
@@ -87,7 +88,7 @@ class UpdatePresetRequest(BaseModel):
 class PresetResponse(BaseModel):
     """预设响应"""
     id: int
-    user_id: int
+    user_id: Optional[int]  # 系统预设的 user_id 为 None
     preset_name: str
     preset_type: str
     description: Optional[str]
@@ -100,15 +101,15 @@ class PresetResponse(BaseModel):
     sort_order: int
     usage_count: int
     last_used_at: Optional[datetime]
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
     
     class Config:
         orm_mode = True
         schema_extra = {
             "example": {
                 "id": 1,
-                "user_id": 1,
+                "user_id": 1,  # 用户自定义预设有 user_id，系统预设为 None
                 "preset_name": "⭐ 重要新闻",
                 "preset_type": "custom",
                 "description": "紧急和及时的高相关度新闻",

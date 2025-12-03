@@ -1741,7 +1741,7 @@ const FilesPage: React.FC = () => {
     {
       title: 'File Name',
       key: 'file_name',
-      width: 220,
+      width: 350,
       ellipsis: true,
       render: (_: any, record: TaskExecution) => {
         // 如果有first_filename则显示，否则显示文件数量
@@ -1754,10 +1754,10 @@ const FilesPage: React.FC = () => {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-                maxWidth: '200px',
-                fontSize: '11px'
+                maxWidth: '400px',
+                fontSize: '13px'
               }}>
-                <FileTextOutlined style={{ marginRight: 6, fontSize: '11px' }} />
+                <FileTextOutlined style={{ marginRight: 6, fontSize: '14px' }} />
                 {record.first_filename}
               </div>
             </Tooltip>

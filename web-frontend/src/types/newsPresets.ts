@@ -6,12 +6,24 @@
  * 筛选条件配置
  */
 export interface FilterConfig {
-  event_types?: string[];
-  urgency?: string[];
-  impact_scopes?: string[];
-  min_confidence?: number;
-  only_primary?: boolean;
-  source_types?: string[];
+  // 主题分类维度
+  categories?: string[];              // 主要主题分类 (political, financial, technology...)
+  event_types?: string[];            // 事件类型
+  impact_scopes?: string[];          // 影响范围
+  urgency?: string[];                // 时效性
+  related_sectors?: string[];        // 相关行业
+  related_countries?: string[];      // 相关国家/地区
+  
+  // 来源筛选
+  source_types?: string[];           // 来源类型 (llm_classification, vector_retrieval...)
+  scheduler_sources?: string[];      // 调度器来源 (eodhd_news, watchlist_news, cctv_news)
+  
+  // 其他选项
+  min_confidence?: number;           // 最低置信度
+  only_primary?: boolean;            // 只显示主要主题
+  market?: string;                   // 市场 (HK/US/CN/GLOBAL)
+  
+  // 逻辑关系（暂时保留，未来可能用到）
   custom_logic?: 'AND' | 'OR';
 }
 
@@ -59,6 +71,7 @@ export interface CreatePresetRequest {
   symbol_code?: string;
   is_default?: boolean;
   is_favorite?: boolean;
+  is_system_preset?: boolean;  // 是否创建为系统预设（仅admin可用）
 }
 
 /**

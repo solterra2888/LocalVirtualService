@@ -105,7 +105,7 @@ async def get_user_presets(
     
     - scope_type: 筛选范围类型（global | symbol_specific）
     - symbol_code: 股票代码（获取特定股票的预设）
-    - include_system: 是否包含系统预设
+    - include_system: 是否包含系统预设（从数据库读取）
     """
     try:
         db_config = get_database_config()
@@ -118,8 +118,17 @@ async def get_user_presets(
         cursor = conn.cursor()
         
         # 构建查询条件
-        conditions = ["user_id = %s"]
-        params = [current_user.user_id]
+        conditions = []
+        params = []
+        
+        if include_system:
+            # 包含系统预设和用户预设
+            conditions.append("(user_id = %s OR is_system_global = true)")
+            params.append(current_user.user_id)
+        else:
+            # 仅用户预设
+            conditions.append("user_id = %s")
+            params.append(current_user.user_id)
         
         if scope_type:
             conditions.append("scope_type = %s")
@@ -131,15 +140,17 @@ async def get_user_presets(
         
         where_clause = " AND ".join(conditions)
         
-        # 查询用户预设
+        # 查询预设（包括系统预设和用户预设）
         query = f"""
             SELECT 
                 id, user_id, preset_name, preset_type, description, icon,
                 filter_config, scope_type, symbol_code, is_default, is_favorite,
-                sort_order, usage_count, last_used_at, created_at, updated_at
+                sort_order, usage_count, last_used_at, created_at, updated_at,
+                is_system_global
             FROM user_news_filter_presets
             WHERE {where_clause}
-            ORDER BY is_favorite DESC, is_default DESC, sort_order ASC, usage_count DESC, created_at DESC
+            ORDER BY is_system_global DESC, is_favorite DESC, is_default DESC, 
+                     sort_order ASC, usage_count DESC, created_at DESC
         """
         
         cursor.execute(query, params)
@@ -170,30 +181,6 @@ async def get_user_presets(
         cursor.close()
         conn.close()
         
-        # 如果需要包含系统预设，添加到列表开头
-        if include_system:
-            system_presets_formatted = []
-            for idx, sys_preset in enumerate(SYSTEM_PRESETS):
-                system_presets_formatted.append({
-                    'id': -(idx + 1),  # 使用负数ID表示系统预设
-                    'user_id': current_user.user_id,
-                    'preset_name': sys_preset['preset_name'],
-                    'preset_type': 'system',
-                    'description': sys_preset['description'],
-                    'icon': sys_preset['icon'],
-                    'filter_config': sys_preset['filter_config'],
-                    'scope_type': sys_preset['scope_type'],
-                    'symbol_code': None,
-                    'is_default': False,
-                    'is_favorite': False,
-                    'sort_order': idx,
-                    'usage_count': 0,
-                    'last_used_at': None,
-                    'created_at': None,
-                    'updated_at': None
-                })
-            presets = system_presets_formatted + presets
-        
         return {
             "success": True,
             "total": len(presets),
@@ -210,8 +197,12 @@ async def create_preset(
     request: CreatePresetRequest,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """创建新的筛选预设"""
+    """创建新的筛选预设（admin可以创建系统预设）"""
     try:
+        # 权限检查：只有admin可以创建系统预设
+        if request.is_system_preset and not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="只有管理员可以创建系统预设")
+        
         db_config = get_database_config()
         db_manager = DatabaseManager(db_config)
         conn = db_manager.get_connection()
@@ -221,46 +212,82 @@ async def create_preset(
         
         cursor = conn.cursor()
         
-        # 如果设为默认，需要先取消同scope下的其他默认预设
-        if request.is_default:
-            update_query = """
-                UPDATE user_news_filter_presets
-                SET is_default = false
-                WHERE user_id = %s 
-                  AND scope_type = %s
-                  AND (symbol_code = %s OR (symbol_code IS NULL AND %s IS NULL))
-            """
-            cursor.execute(update_query, (
-                current_user.user_id,
-                request.scope_type,
-                request.symbol_code,
-                request.symbol_code
-            ))
+        # 系统预设不能设为默认或收藏
+        if request.is_system_preset:
+            is_default = False
+            is_favorite = False
+        else:
+            is_default = request.is_default
+            is_favorite = request.is_favorite
+            
+            # 如果设为默认，需要先取消同scope下的其他默认预设
+            if is_default:
+                update_query = """
+                    UPDATE user_news_filter_presets
+                    SET is_default = false
+                    WHERE user_id = %s 
+                      AND scope_type = %s
+                      AND (symbol_code = %s OR (symbol_code IS NULL AND %s IS NULL))
+                """
+                cursor.execute(update_query, (
+                    current_user.user_id,
+                    request.scope_type,
+                    request.symbol_code,
+                    request.symbol_code
+                ))
         
         # 插入新预设
-        insert_query = """
-            INSERT INTO user_news_filter_presets (
-                user_id, preset_name, preset_type, description, icon,
-                filter_config, scope_type, symbol_code, is_default, is_favorite
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, user_id, preset_name, preset_type, description, icon,
-                      filter_config, scope_type, symbol_code, is_default, is_favorite,
-                      sort_order, usage_count, last_used_at, created_at, updated_at
-        """
-        
-        cursor.execute(insert_query, (
-            current_user.user_id,
-            request.preset_name,
-            'custom',
-            request.description,
-            request.icon,
-            json.dumps(request.filter_config.dict(exclude_none=True)),
-            request.scope_type,
-            request.symbol_code,
-            request.is_default,
-            request.is_favorite
-        ))
+        if request.is_system_preset:
+            # 创建系统预设
+            insert_query = """
+                INSERT INTO user_news_filter_presets (
+                    user_id, preset_name, preset_type, description, icon,
+                    filter_config, scope_type, symbol_code, is_default, is_favorite,
+                    is_system_global, created_by_admin_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, user_id, preset_name, preset_type, description, icon,
+                          filter_config, scope_type, symbol_code, is_default, is_favorite,
+                          sort_order, usage_count, last_used_at, created_at, updated_at
+            """
+            cursor.execute(insert_query, (
+                None,  # 系统预设的 user_id 为 NULL
+                request.preset_name,
+                'system',
+                request.description,
+                request.icon,
+                json.dumps(request.filter_config.dict(exclude_none=True)),
+                request.scope_type,
+                request.symbol_code,
+                is_default,
+                is_favorite,
+                True,  # is_system_global
+                current_user.user_id  # created_by_admin_id
+            ))
+        else:
+            # 创建用户自定义预设
+            insert_query = """
+                INSERT INTO user_news_filter_presets (
+                    user_id, preset_name, preset_type, description, icon,
+                    filter_config, scope_type, symbol_code, is_default, is_favorite
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, user_id, preset_name, preset_type, description, icon,
+                          filter_config, scope_type, symbol_code, is_default, is_favorite,
+                          sort_order, usage_count, last_used_at, created_at, updated_at
+            """
+            cursor.execute(insert_query, (
+                current_user.user_id,
+                request.preset_name,
+                'custom',
+                request.description,
+                request.icon,
+                json.dumps(request.filter_config.dict(exclude_none=True)),
+                request.scope_type,
+                request.symbol_code,
+                is_default,
+                is_favorite
+            ))
         
         row = cursor.fetchone()
         conn.commit()
@@ -287,7 +314,8 @@ async def create_preset(
         cursor.close()
         conn.close()
         
-        logger.info(f"用户 {current_user.user_id} 创建预设: {request.preset_name}")
+        preset_type_desc = "系统预设" if request.is_system_preset else "自定义预设"
+        logger.info(f"用户 {current_user.user_id} 创建{preset_type_desc}: {request.preset_name}")
         
         return {
             "success": True,
@@ -314,7 +342,7 @@ async def update_preset(
     request: UpdatePresetRequest,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """更新预设"""
+    """更新预设（admin可以编辑系统预设）"""
     try:
         db_config = get_database_config()
         db_manager = DatabaseManager(db_config)
@@ -325,22 +353,32 @@ async def update_preset(
         
         cursor = conn.cursor()
         
-        # 验证预设是否存在且属于当前用户
+        # 查询预设信息
         cursor.execute("""
-            SELECT id, preset_type, scope_type, symbol_code
+            SELECT id, preset_type, scope_type, symbol_code, user_id, is_system_global
             FROM user_news_filter_presets
-            WHERE id = %s AND user_id = %s
-        """, (preset_id, current_user.user_id))
+            WHERE id = %s
+        """, (preset_id,))
         
         existing = cursor.fetchone()
         if not existing:
-            raise HTTPException(status_code=404, detail="预设不存在或无权限访问")
+            raise HTTPException(status_code=404, detail="预设不存在")
         
-        if existing[1] == 'system':
-            raise HTTPException(status_code=400, detail="系统预设不能修改")
+        preset_id_db, preset_type, scope_type, symbol_code, owner_id, is_system_global = existing
+        
+        # 权限检查
+        if is_system_global:
+            # 系统预设只有admin可以编辑
+            if not current_user.is_admin:
+                raise HTTPException(status_code=403, detail="只有管理员可以编辑系统预设")
+        else:
+            # 用户自定义预设，只有创建者可以编辑
+            if owner_id != current_user.user_id:
+                raise HTTPException(status_code=403, detail="无权限编辑此预设")
         
         # 如果设为默认，需要先取消同scope下的其他默认预设
-        if request.is_default:
+        if request.is_default and not is_system_global:
+            # 只有用户预设才能设为默认
             update_query = """
                 UPDATE user_news_filter_presets
                 SET is_default = false
@@ -351,9 +389,9 @@ async def update_preset(
             """
             cursor.execute(update_query, (
                 current_user.user_id,
-                existing[2],  # scope_type
-                existing[3],  # symbol_code
-                existing[3],
+                scope_type,
+                symbol_code,
+                symbol_code,
                 preset_id
             ))
         
@@ -392,12 +430,19 @@ async def update_preset(
         if not update_fields:
             raise HTTPException(status_code=400, detail="没有要更新的字段")
         
-        update_params.extend([preset_id, current_user.user_id])
+        update_params.append(preset_id)
+        
+        # 构建WHERE条件：系统预设只需匹配ID，用户预设需匹配ID和user_id
+        if is_system_global:
+            where_condition = "id = %s"
+        else:
+            where_condition = "id = %s AND user_id = %s"
+            update_params.append(current_user.user_id)
         
         update_query = f"""
             UPDATE user_news_filter_presets
             SET {', '.join(update_fields)}
-            WHERE id = %s AND user_id = %s
+            WHERE {where_condition}
             RETURNING id, user_id, preset_name, preset_type, description, icon,
                       filter_config, scope_type, symbol_code, is_default, is_favorite,
                       sort_order, usage_count, last_used_at, created_at, updated_at
@@ -452,7 +497,7 @@ async def delete_preset(
     preset_id: int,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """删除预设"""
+    """删除预设（admin可以删除系统预设）"""
     try:
         db_config = get_database_config()
         db_manager = DatabaseManager(db_config)
@@ -463,27 +508,34 @@ async def delete_preset(
         
         cursor = conn.cursor()
         
-        # 验证预设是否存在且属于当前用户
+        # 查询预设信息
         cursor.execute("""
-            SELECT preset_name, preset_type
+            SELECT preset_name, preset_type, user_id, is_system_global
             FROM user_news_filter_presets
-            WHERE id = %s AND user_id = %s
-        """, (preset_id, current_user.user_id))
+            WHERE id = %s
+        """, (preset_id,))
         
         existing = cursor.fetchone()
         if not existing:
-            raise HTTPException(status_code=404, detail="预设不存在或无权限访问")
+            raise HTTPException(status_code=404, detail="预设不存在")
         
-        if existing[1] == 'system':
-            raise HTTPException(status_code=400, detail="系统预设不能删除")
+        preset_name, preset_type, owner_id, is_system_global = existing
         
-        preset_name = existing[0]
+        # 权限检查
+        if is_system_global:
+            # 系统预设只有admin可以删除
+            if not current_user.is_admin:
+                raise HTTPException(status_code=403, detail="只有管理员可以删除系统预设")
+        else:
+            # 用户自定义预设，只有创建者可以删除
+            if owner_id != current_user.user_id:
+                raise HTTPException(status_code=403, detail="无权限删除此预设")
         
         # 删除预设
         cursor.execute("""
             DELETE FROM user_news_filter_presets
-            WHERE id = %s AND user_id = %s
-        """, (preset_id, current_user.user_id))
+            WHERE id = %s
+        """, (preset_id,))
         
         conn.commit()
         cursor.close()
@@ -573,35 +625,28 @@ async def duplicate_preset(
         
         cursor = conn.cursor()
         
-        # 如果是系统预设（负数ID），从SYSTEM_PRESETS中获取
-        if preset_id < 0:
-            idx = abs(preset_id) - 1
-            if idx >= len(SYSTEM_PRESETS):
-                raise HTTPException(status_code=404, detail="系统预设不存在")
-            
-            source_preset = SYSTEM_PRESETS[idx]
-            description = source_preset['description']
-            icon = source_preset['icon']
-            filter_config = json.dumps(source_preset['filter_config'])
-            scope_type = source_preset['scope_type']
-            symbol_code = None
-        else:
-            # 获取源预设（可以是自己的或系统的）
-            cursor.execute("""
-                SELECT description, icon, filter_config, scope_type, symbol_code
-                FROM user_news_filter_presets
-                WHERE id = %s AND user_id = %s
-            """, (preset_id, current_user.user_id))
-            
-            existing = cursor.fetchone()
-            if not existing:
-                raise HTTPException(status_code=404, detail="预设不存在或无权限访问")
-            
-            description = existing[0]
-            icon = existing[1]
-            filter_config = json.dumps(existing[2])
-            scope_type = existing[3]
-            symbol_code = existing[4]
+        # 获取源预设（可以是系统预设或用户预设）
+        cursor.execute("""
+            SELECT description, icon, filter_config, scope_type, symbol_code, is_system_global, user_id
+            FROM user_news_filter_presets
+            WHERE id = %s
+        """, (preset_id,))
+        
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="预设不存在")
+        
+        description = existing[0]
+        icon = existing[1]
+        filter_config = json.dumps(existing[2])
+        scope_type = existing[3]
+        symbol_code = existing[4]
+        is_system_global = existing[5]
+        owner_id = existing[6]
+        
+        # 权限检查：只能复制系统预设或自己的预设
+        if not is_system_global and owner_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="无权限复制此预设")
         
         # 创建副本
         insert_query = """
@@ -680,33 +725,65 @@ async def get_system_presets(
     current_user: TokenData = Depends(get_current_user)
 ):
     """
-    获取系统预设（所有用户共享的预定义筛选条件）
+    获取系统预设（从数据库读取，所有用户共享）
     """
-    system_presets_formatted = []
-    for idx, preset in enumerate(SYSTEM_PRESETS):
-        system_presets_formatted.append({
-            'id': -(idx + 1),  # 使用负数ID表示系统预设
-            'user_id': current_user.user_id,
-            'preset_name': preset['preset_name'],
-            'preset_type': 'system',
-            'description': preset['description'],
-            'icon': preset['icon'],
-            'filter_config': preset['filter_config'],
-            'scope_type': preset['scope_type'],
-            'symbol_code': None,
-            'is_default': False,
-            'is_favorite': False,
-            'sort_order': idx,
-            'usage_count': 0,
-            'last_used_at': None,
-            'created_at': None,
-            'updated_at': None
-        })
-    
-    return {
-        "success": True,
-        "total": len(system_presets_formatted),
-        "presets": system_presets_formatted
-    }
+    try:
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        
+        cursor = conn.cursor()
+        
+        # 从数据库查询系统预设
+        query = """
+            SELECT 
+                id, user_id, preset_name, preset_type, description, icon,
+                filter_config, scope_type, symbol_code, is_default, is_favorite,
+                sort_order, usage_count, last_used_at, created_at, updated_at
+            FROM user_news_filter_presets
+            WHERE is_system_global = true
+            ORDER BY sort_order ASC, created_at ASC
+        """
+        
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        
+        system_presets = []
+        for row in rows:
+            preset = {
+                'id': row[0],
+                'user_id': row[1],
+                'preset_name': row[2],
+                'preset_type': row[3],
+                'description': row[4],
+                'icon': row[5],
+                'filter_config': row[6],
+                'scope_type': row[7],
+                'symbol_code': row[8],
+                'is_default': row[9],
+                'is_favorite': row[10],
+                'sort_order': row[11],
+                'usage_count': row[12],
+                'last_used_at': row[13].isoformat() if row[13] else None,
+                'created_at': row[14].isoformat() if row[14] else None,
+                'updated_at': row[15].isoformat() if row[15] else None
+            }
+            system_presets.append(preset)
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "total": len(system_presets),
+            "presets": system_presets
+        }
+        
+    except Exception as e:
+        logger.error(f"获取系统预设失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取系统预设失败: {str(e)}")
 
 

@@ -18,7 +18,9 @@ import {
   CalendarOutlined,
   RobotOutlined,
   FilterOutlined,
-  ExportOutlined
+  ExportOutlined,
+  SettingOutlined,
+  StarFilled
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -34,10 +36,11 @@ import {
 
 import ThemeManagementModal from '../components/ThemeManagementModal';
 import ThemeFilterPanel from '../components/ThemeFilterPanel';
+import PresetsManager from '../components/PresetsManager';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
-import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, getPreferredSummaryTemplate, hasAnalysisForTemplate } from '../utils/newsAnalysisHelper';
+import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, getPreferredSummaryTemplate } from '../utils/newsAnalysisHelper';
 import { 
   getClassificationFromAnalysis, 
   getClassificationTags, 
@@ -52,30 +55,15 @@ import {
   groupThemesByCanonicalName,
   getBestThemeDisplay,
   getSourceTypeConfig,
-  getThemeCategoryConfig,
   formatQualityScore,
   getQualityScoreColor
 } from '../utils/unifiedThemeHelper';
 import { themesAPI } from '../services/themes';
+import { newsPresetsAPI } from '../services/newsPresets';
 import type { ThemeFilterState, FilteredNews } from '../types/themes';
+import type { NewsFilterPreset, CreatePresetRequest, FilterConfig } from '../types/newsPresets';
 
 const { Text } = Typography;
-
-// 辅助函数：获取情感颜色
-const getSentimentColor = (polarity?: number) => {
-  if (!polarity) return 'default';
-  if (polarity > 0.1) return 'green';
-  if (polarity < -0.1) return 'red';
-  return 'orange';
-};
-
-// 辅助函数：获取情感文本
-const getSentimentText = (polarity?: number) => {
-  if (!polarity) return 'Neutral';
-  if (polarity > 0.1) return 'Positive';
-  if (polarity < -0.1) return 'Negative';
-  return 'Neutral';
-};
 
 interface NewsPageState {
   loading: boolean;
@@ -97,6 +85,12 @@ interface NewsPageState {
   loadingMore: boolean;
   // 主题关键词数据（用于高亮）
   themes: NewsTheme[];
+  // 预设相关
+  activePresetId: number | null;
+  advancedFilterModalVisible: boolean;
+  presetsManagerVisible: boolean;
+  presets: NewsFilterPreset[];
+  presetsLoading: boolean;
 }
 
 const NewsPage: React.FC = () => {
@@ -135,8 +129,27 @@ const NewsPage: React.FC = () => {
     filteredPageSize: 20,
     hasMoreNews: true,
     loadingMore: false,
-    themes: []
+    themes: [],
+    // 预设相关
+    activePresetId: null,
+    advancedFilterModalVisible: false,
+    presetsManagerVisible: false,
+    presets: [],
+    presetsLoading: false
   });
+
+  // 加载预设列表
+  const loadPresets = async () => {
+    setState(prev => ({ ...prev, presetsLoading: true }));
+    try {
+      const response = await newsPresetsAPI.getPresets({ include_system: true });
+      setState(prev => ({ ...prev, presets: response.presets, presetsLoading: false }));
+    } catch (error: any) {
+      console.error('Failed to load presets:', error);
+      message.error('Failed to load presets');
+      setState(prev => ({ ...prev, presetsLoading: false }));
+    }
+  };
 
   // 加载主题和股票代码数据
   const loadMetadata = async () => {
@@ -249,17 +262,22 @@ const NewsPage: React.FC = () => {
 
   // 处理主题筛选变化
   const handleThemeFilterChange = (filters: ThemeFilterState) => {
-    setState(prev => ({ ...prev, themeFilters: filters }));
+    setState(prev => ({ 
+      ...prev, 
+      themeFilters: filters,
+      activePresetId: null // 筛选条件改变时清除预设激活状态
+    }));
   };
 
   // 应用主题筛选（重置并加载）
   const handleApplyThemeFilter = (filters?: ThemeFilterState) => {
-    // 重置 offset 和 hasMore 状态
+    // 重置 offset 和 hasMore 状态，并清除激活的预设
     setState(prev => ({ 
       ...prev, 
       filteredOffset: 0, 
       hasMoreNews: true,
-      filteredNewsData: []
+      filteredNewsData: [],
+      activePresetId: null // 手动修改筛选条件时清除预设激活状态
     }));
     loadFilteredNews(true, filters);
   };
@@ -268,6 +286,68 @@ const NewsPage: React.FC = () => {
   const loadMoreNews = () => {
     if (!state.hasMoreNews || state.loadingMore) return;
     loadFilteredNews(false);
+  };
+
+  // 🔥 新增：应用预设
+  const handleApplyPreset = async (preset: NewsFilterPreset) => {
+    console.log('🎯 应用预设:', preset.preset_name, preset.filter_config);
+    
+    // 将 FilterConfig 转换为 ThemeFilterState
+    const config = preset.filter_config;
+    const newFilters: ThemeFilterState = {
+      categories: config.categories || [],
+      eventTypes: config.event_types || [],
+      impactScopes: config.impact_scopes || [],
+      urgencyLevels: config.urgency || [],
+      relatedSectors: config.related_sectors || [],
+      relatedCountries: config.related_countries || [],
+      sourceTypes: config.source_types || [],
+      schedulerSources: config.scheduler_sources || [],
+      minConfidence: config.min_confidence || 0.5,
+      onlyPrimary: config.only_primary || false,
+      dateRange: null, // 预设不保存日期范围
+      market: config.market || null
+    };
+
+    // 更新筛选条件并应用
+    setState(prev => ({
+      ...prev,
+      themeFilters: newFilters,
+      activePresetId: preset.id,
+      filteredOffset: 0,
+      hasMoreNews: true,
+      filteredNewsData: []
+    }));
+
+    // 如果不是系统预设，更新使用统计
+    if (preset.id > 0 && preset.preset_type !== 'system') {
+      try {
+        await newsPresetsAPI.usePreset(preset.id);
+      } catch (error) {
+        console.error('Failed to update preset usage:', error);
+      }
+    }
+
+    // 立即加载新闻
+    loadFilteredNews(true, newFilters);
+  };
+
+  // 🔥 新增：创建预设
+
+  // 🔥 新增：删除预设
+  const handleDeletePreset = async (presetId: number) => {
+    try {
+      await newsPresetsAPI.deletePreset(presetId);
+      message.success('Preset deleted successfully');
+      await loadPresets();
+      // 如果删除的是当前激活的预设，清除激活状态
+      if (state.activePresetId === presetId) {
+        setState(prev => ({ ...prev, activePresetId: null }));
+      }
+    } catch (error: any) {
+      console.error('Failed to delete preset:', error);
+      message.error('Failed to delete preset');
+    }
   };
 
   // 导出筛选的新闻为CSV
@@ -370,6 +450,7 @@ const NewsPage: React.FC = () => {
       console.log('NewsPage: 用户已认证', { user: user.username, token: !!localStorage.getItem('access_token') });
       loadFilteredNews(true); // 初始加载时也加载筛选新闻（使用默认筛选条件）
       loadMetadata();
+      loadPresets(); // 加载预设列表
     } else {
       console.log('NewsPage: 用户未认证或认证状态未初始化');
     }
@@ -677,36 +758,48 @@ const NewsPage: React.FC = () => {
       </style>
       {/* 主题筛选面板 */}
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
-            <ThemeFilterPanel
-              onFilterChange={handleThemeFilterChange}
-              onApply={handleApplyThemeFilter}
-              loading={state.loading}
-            />
-          </Col>
-          <Col span={18}>
+          <Col span={24}>
             {/* 主题筛选模式下的新闻列表 */}
             <Card
               title={
                 <Space>
                   <FilterOutlined />
-                  <span>Filtered Results</span>
-                  <Badge 
-                    count={state.filteredTotal} 
-                    overflowCount={999}
-                    style={{ 
-                      fontSize: '10px',
-                      height: '18px',
-                      lineHeight: '18px',
-                      padding: '0 6px',
-                      minWidth: '18px',
-                      backgroundColor: '#ff9c9c'
+                  <span>RC News</span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: '#1890ff',
+                      backgroundColor: 'rgba(24, 144, 255, 0.1)',
+                      borderRadius: '12px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      lineHeight: '1',
+                      padding: '4px 8px',
+                      minWidth: '24px',
+                      height: '24px'
                     }}
-                  />
+                  >
+                    {state.filteredTotal.toLocaleString()}
+                  </span>
                 </Space>
               }
               extra={
                 <Space>
+                  <Button
+                    icon={<SettingOutlined />}
+                    onClick={() => setState(prev => ({ ...prev, presetsManagerVisible: true }))}
+                    size="small"
+                  >
+                    Presets Management
+                  </Button>
+                  <Button
+                    icon={<SettingOutlined />}
+                    onClick={() => setState(prev => ({ ...prev, advancedFilterModalVisible: true }))}
+                    size="small"
+                  >
+                    Advanced Filter
+                  </Button>
                   <Button
                     icon={<FilterOutlined />}
                     onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
@@ -725,6 +818,89 @@ const NewsPage: React.FC = () => {
                 </Space>
               }
             >
+              {/* 🔥 新增：预设 Tags 展示 */}
+              {state.presets.length > 0 && (
+                <div style={{ 
+                  marginBottom: '16px'
+                }}>
+                  <Space size={[6, 6]} wrap>
+                    {/* 系统预设（左侧） */}
+                    {state.presets
+                      .filter(p => p.preset_type === 'system')
+                      .map(preset => (
+                        <Tag
+                          key={preset.id}
+                          color={preset.id === state.activePresetId ? 'blue' : 'default'}
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            padding: '4px 8px',
+                            margin: 0,
+                            border: preset.id === state.activePresetId ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                            fontWeight: preset.id === state.activePresetId ? 600 : 400,
+                            backgroundColor: preset.id === state.activePresetId ? undefined : '#f0f0f0'
+                          }}
+                          onClick={() => handleApplyPreset(preset)}
+                        >
+                          <span>{preset.preset_name}</span>
+                        </Tag>
+                      ))}
+                    
+                    {/* 分隔线 */}
+                    {state.presets.filter(p => p.preset_type === 'system').length > 0 && 
+                     state.presets.filter(p => p.preset_type === 'custom').length > 0 && (
+                      <div style={{ width: '1px', height: '20px', backgroundColor: '#d9d9d9', margin: '0 4px' }} />
+                    )}
+                    
+                    {/* 收藏的自定义预设（右侧） */}
+                    {state.presets
+                      .filter(p => p.is_favorite && p.preset_type === 'custom')
+                      .map(preset => (
+                        <Tag
+                          key={preset.id}
+                          color={preset.id === state.activePresetId ? 'blue' : 'default'}
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            padding: '4px 8px',
+                            margin: 0,
+                            border: preset.id === state.activePresetId ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                            fontWeight: preset.id === state.activePresetId ? 600 : 400
+                          }}
+                          onClick={() => handleApplyPreset(preset)}
+                        >
+                          <Space size={4}>
+                            <StarFilled style={{ color: '#faad14', fontSize: '10px' }} />
+                            <span>{preset.preset_name}</span>
+                          </Space>
+                        </Tag>
+                      ))}
+                    
+                    {/* 其他自定义预设 */}
+                    {state.presets
+                      .filter(p => !p.is_favorite && p.preset_type === 'custom')
+                      .slice(0, 5)
+                      .map(preset => (
+                        <Tag
+                          key={preset.id}
+                          color={preset.id === state.activePresetId ? 'blue' : 'default'}
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            padding: '4px 8px',
+                            margin: 0,
+                            border: preset.id === state.activePresetId ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                            fontWeight: preset.id === state.activePresetId ? 600 : 400
+                          }}
+                          onClick={() => handleApplyPreset(preset)}
+                        >
+                          <span>{preset.preset_name}</span>
+                        </Tag>
+                      ))}
+                  </Space>
+                </div>
+              )}
+
               {state.loading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>
                   <Skeleton active />
@@ -769,31 +945,7 @@ const NewsPage: React.FC = () => {
                         
                         {/* Content */}
                         <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
-                          <List.Item
-                            extra={
-                              <Space direction="vertical" align="end">
-                                <Space size={[4, 4]} wrap>
-                                  {/* 情感标签 */}
-                                  <Tag 
-                                    color={getSentimentColor(item.sentiment_polarity)}
-                                    style={{ fontSize: '8px', margin: 0 }}
-                                  >
-                                    {getSentimentText(item.sentiment_polarity)}
-                                  </Tag>
-                                  {/* AI分析标签 */}
-                                  {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
-                                    <Tag 
-                                      color="blue" 
-                                      icon={<RobotOutlined />} 
-                                      style={{ fontSize: '8px', margin: 0 }}
-                                    >
-                                      AI分析
-                                    </Tag>
-                                  )}
-                                </Space>
-                              </Space>
-                            }
-                          >
+                          <List.Item>
                             <List.Item.Meta
                               avatar={
                                 <Text
@@ -948,6 +1100,37 @@ const NewsPage: React.FC = () => {
           </Col>
         </Row>
 
+      {/* 🔥 新增：高级筛选对话框 */}
+      <Modal
+        title={
+          <Space>
+            <FilterOutlined />
+            <span>Advanced Filter</span>
+          </Space>
+        }
+        open={state.advancedFilterModalVisible}
+        onCancel={() => setState(prev => ({ ...prev, advancedFilterModalVisible: false }))}
+        footer={null}
+        width={600}
+        destroyOnClose
+      >
+        <ThemeFilterPanel
+          onFilterChange={handleThemeFilterChange}
+          onApply={(filters) => {
+            handleApplyThemeFilter(filters);
+            setState(prev => ({ ...prev, advancedFilterModalVisible: false, activePresetId: null }));
+          }}
+          onSaveAsPreset={() => {
+            setState(prev => ({ 
+              ...prev, 
+              advancedFilterModalVisible: false,
+              presetsManagerVisible: true 
+            }));
+          }}
+          loading={state.loading}
+        />
+      </Modal>
+
 
       {/* AI Analysis Details Modal */}
       <Modal
@@ -1045,21 +1228,61 @@ const NewsPage: React.FC = () => {
                           </Card>
                         )}
 
-                        {/* Tags Card */}
-                        <Card 
-                          title="Tags" 
-                          size="small"
-                          style={{ marginTop: '16px' }}
-                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
-                        >
-                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                        {/* Tags Section - 美化设计，不使用Card */}
+                        <div style={{ 
+                          marginTop: '20px',
+                          padding: '16px',
+                          backgroundColor: '#fafafa',
+                          borderRadius: '8px',
+                          border: '1px solid #e8e8e8'
+                        }}>
+                          <div style={{ 
+                            marginBottom: '16px',
+                            paddingBottom: '12px',
+                            borderBottom: '2px solid #e8e8e8'
+                          }}>
+                            <Text strong style={{ 
+                              fontSize: '13px', 
+                              color: '#1890ff',
+                              fontWeight: 600,
+                              letterSpacing: '0.5px'
+                            }}>
+                              Tags & Metadata
+                            </Text>
+                          </div>
+
+                          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                             {/* Related Tickers */}
                             {state.selectedNews.symbols && state.selectedNews.symbols.length > 0 && (
-                              <div>
-                                <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Tickers:</Text>
-                                <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                              <div style={{ 
+                                padding: '12px',
+                                backgroundColor: '#fff',
+                                borderRadius: '6px',
+                                border: '1px solid #f0f0f0'
+                              }}>
+                                <Text strong style={{ 
+                                  fontSize: '11px', 
+                                  color: '#595959',
+                                  display: 'block',
+                                  marginBottom: '10px',
+                                  fontWeight: 500
+                                }}>
+                                  Related Tickers
+                                </Text>
+                                <Space size={[6, 6]} wrap>
                                   {state.selectedNews.symbols.map(symbol => (
-                                    <Tag key={symbol} color="default" style={{ fontSize: '9px' }}>
+                                    <Tag 
+                                      key={symbol} 
+                                      color="blue" 
+                                      style={{ 
+                                        fontSize: '11px',
+                                        padding: '4px 10px',
+                                        borderRadius: '4px',
+                                        fontWeight: 500,
+                                        border: 'none',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                      }}
+                                    >
                                       {symbol}
                                     </Tag>
                                   ))}
@@ -1081,54 +1304,120 @@ const NewsPage: React.FC = () => {
                               return (
                                 <>
                                   {/* 主要分类标签 */}
-                                  <div>
-                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Classification Tags:</Text>
-                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                                      {tags.map(({ key, config, value, displayValue }) => (
-                                        <Tag 
-                                          key={key} 
-                                          color={config.color} 
-                                          style={{ fontSize: '9px' }}
-                                          title={`${config.label}: ${displayValue}`}
-                                        >
-                                          {displayValue}
-                    </Tag>
-                  ))}
-                                    </Space>
-                </div>
+                                  {tags.length > 0 && (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Classification Tags
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
+                                        {tags.map(({ key, config, value, displayValue }) => (
+                                          <Tag 
+                                            key={key} 
+                                            color={config.color} 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                            title={`${config.label}: ${displayValue}`}
+                                          >
+                                            {displayValue}
+                                          </Tag>
+                                        ))}
+                                      </Space>
+                                    </div>
+                                  )}
 
                                   {/* 相关行业 */}
                                   {relatedSectors.length > 0 && (
-                                    <div>
-                                      <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Sectors:</Text>
-                                      <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Related Sectors
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
                                         {relatedSectors.map(sector => (
-                                          <Tag key={sector} color="purple" style={{ fontSize: '9px' }}>
+                                          <Tag 
+                                            key={sector} 
+                                            color="purple" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                          >
                                             {sector}
-                    </Tag>
-                  ))}
+                                          </Tag>
+                                        ))}
                                       </Space>
-              </div>
-            )}
+                                    </div>
+                                  )}
 
                                   {/* 相关国家/地区 */}
                                   {relatedCountries.length > 0 && (
-                                    <div>
-                                      <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Countries:</Text>
-                                      <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Related Countries
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
                                         {relatedCountries.map(country => (
                                           <Tag 
                                             key={country} 
                                             color="geekblue" 
-                                            style={{ fontSize: '9px' }}
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
                                             title={country}
                                           >
                                             {COUNTRIES_MAP[country] || country}
-                    </Tag>
-                  ))}
+                                          </Tag>
+                                        ))}
                                       </Space>
-              </div>
-            )}
+                                    </div>
+                                  )}
                                 </>
                               );
                             })()}
@@ -1140,11 +1429,35 @@ const NewsPage: React.FC = () => {
 
                               if (templateCodes.length > 0) {
                                 return (
-            <div>
-                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Analysis Template:</Text>
-                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                  <div style={{ 
+                                    padding: '12px',
+                                    backgroundColor: '#fff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f0f0f0'
+                                  }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      display: 'block',
+                                      marginBottom: '10px',
+                                      fontWeight: 500
+                                    }}>
+                                      Analysis Template
+                                    </Text>
+                                    <Space size={[6, 6]} wrap>
                                       {templateCodes.map(templateCode => (
-                                        <Tag key={templateCode} color="green" style={{ fontSize: '9px' }}>
+                                        <Tag 
+                                          key={templateCode} 
+                                          color="green" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
                                           {templateCode}
                                         </Tag>
                                       ))}
@@ -1153,7 +1466,7 @@ const NewsPage: React.FC = () => {
                                 );
                               }
                               return null;
-                      })()}
+                            })()}
 
                             {/* Confidence Information */}
                             {(() => {
@@ -1166,21 +1479,54 @@ const NewsPage: React.FC = () => {
                               
                               if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
                                 return (
-                                  <div>
-                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Confidence:</Text>
-                                    <Space size="small" style={{ marginTop: '4px' }}>
+                                  <div style={{ 
+                                    padding: '12px',
+                                    backgroundColor: '#fff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f0f0f0'
+                                  }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      display: 'block',
+                                      marginBottom: '10px',
+                                      fontWeight: 500
+                                    }}>
+                                      Confidence
+                                    </Text>
+                                    <Space size="middle" style={{ marginTop: '4px' }}>
                                       {summary.confidence.theme > 0 && (
-                                        <Text style={{ fontSize: '9px' }}>
+                                        <Tag 
+                                          color="orange" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
                                           Theme: {(summary.confidence.theme * 100).toFixed(0)}%
-                                        </Text>
+                                        </Tag>
                                       )}
                                       {summary.confidence.event > 0 && (
-                                        <Text style={{ fontSize: '9px' }}>
+                                        <Tag 
+                                          color="orange" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
                                           Event: {(summary.confidence.event * 100).toFixed(0)}%
-                                        </Text>
+                                        </Tag>
                                       )}
                                     </Space>
-                  </div>
+                                  </div>
                                 );
                               }
                               return null;
@@ -1199,29 +1545,57 @@ const NewsPage: React.FC = () => {
                               }
 
                               return (
-                                <div>
-                                  <Text strong style={{ fontSize: '9px', color: '#666' }}>
-                                    Unified Themes: 
-                                    <Tag color="cyan" style={{ fontSize: '8px', marginLeft: '4px' }}>
+                                <div style={{ 
+                                  padding: '12px',
+                                  backgroundColor: '#fff',
+                                  borderRadius: '6px',
+                                  border: '1px solid #f0f0f0'
+                                }}>
+                                  <div style={{ marginBottom: '10px' }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      fontWeight: 500,
+                                      marginRight: '8px'
+                                    }}>
+                                      Unified Themes
+                                    </Text>
+                                    <Tag 
+                                      color="cyan" 
+                                      style={{ 
+                                        fontSize: '10px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontWeight: 500,
+                                        border: 'none'
+                                      }}
+                                    >
                                       Multi-Source
                                     </Tag>
-                                  </Text>
-                                  <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
+                                  </div>
+                                  <Space size={[6, 6]} wrap>
                                     {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
                                       const displayInfo = getBestThemeDisplay(themes);
-                                      const categoryConfig = getThemeCategoryConfig(displayInfo.category);
                                       const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
                                       
                                       return (
                                         <Tag 
                                           key={canonicalName}
                                           color={qualityColor}
-                                          style={{ fontSize: '9px', cursor: 'help' }}
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                            cursor: 'help'
+                                          }}
                                           title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
                                         >
-                                          {categoryConfig.icon} {displayInfo.displayName}
-                                          {displayInfo.isVerified && <span style={{ marginLeft: '2px' }}>✓</span>}
-                                          {displayInfo.isPrimary && <span style={{ marginLeft: '2px' }}>⭐</span>}
+                                          {displayInfo.displayName}
+                                          {displayInfo.isVerified && <span style={{ marginLeft: '4px' }}>✓</span>}
+                                          {displayInfo.isPrimary && <span style={{ marginLeft: '4px' }}>⭐</span>}
                                           {displayInfo.sources.length > 1 && (
                                             <Badge 
                                               count={displayInfo.sources.length} 
@@ -1240,24 +1614,35 @@ const NewsPage: React.FC = () => {
                                     })}
                                   </Space>
                                   {/* 来源统计 */}
-                                  <div style={{ marginTop: '8px' }}>
-                                    <Text style={{ fontSize: '8px', color: '#999' }}>
-                                      Sources: {' '}
+                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                                    <Text style={{ fontSize: '10px', color: '#8c8c8c', marginRight: '8px' }}>
+                                      Sources:
+                                    </Text>
+                                    <Space size={[4, 4]} wrap>
                                       {Array.from(new Set(state.selectedNews.unified_themes?.map(t => t.source_type) || [])).map(sourceType => {
                                         const config = getSourceTypeConfig(sourceType);
                                         return (
-                                          <Tag key={sourceType} color={config.color} style={{ fontSize: '7px', marginRight: '2px' }}>
+                                          <Tag 
+                                            key={sourceType} 
+                                            color={config.color} 
+                                            style={{ 
+                                              fontSize: '10px',
+                                              padding: '2px 8px',
+                                              borderRadius: '4px',
+                                              border: 'none'
+                                            }}
+                                          >
                                             {config.icon} {config.label}
                                           </Tag>
                                         );
                                       })}
-                                    </Text>
+                                    </Space>
                                   </div>
                                 </div>
                               );
                             })()}
                           </Space>
-                        </Card>
+                        </div>
                       </>
                     )}
 
@@ -1325,6 +1710,15 @@ const NewsPage: React.FC = () => {
         onCancel={() => setState(prev => ({ ...prev, themeManagementModalVisible: false }))}
         onSuccess={() => {
           loadMetadata(); // 刷新主题数据
+        }}
+      />
+
+      {/* 🔥 预设管理对话框 */}
+      <PresetsManager
+        visible={state.presetsManagerVisible}
+        onClose={() => {
+          setState(prev => ({ ...prev, presetsManagerVisible: false }));
+          loadPresets(); // 关闭时重新加载预设列表
         }}
       />
     </div>
