@@ -1,6 +1,6 @@
 import { api } from './api';
 import apiClient from './api';
-import type { NewsAnalysisResult } from '../types/news';
+import type { NewsAnalysisResult, NewsUnifiedTheme } from '../types/news';
 
 // 类型定义
 export interface CompanyInfo {
@@ -39,6 +39,7 @@ export interface DashboardNewsItem {
   scheduler_source?: string;  // 调度器来源
   updated_at?: string;  // 更新时间
   analysis_result?: NewsAnalysisResult;
+  unified_themes?: NewsUnifiedTheme[];  // 统一主题数据
 }
 
 export interface DashboardAnalysisResult {

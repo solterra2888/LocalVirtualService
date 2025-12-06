@@ -59,12 +59,26 @@ class NewsThemeListResponse(BaseModel):
     all_themes: List[Dict[str, Any]]
 
 
+class DimensionOperators(BaseModel):
+    """各维度内部逻辑操作符配置"""
+    news_value: Optional[str] = Field('OR', description="news_value维度内部逻辑: OR或AND")
+    categories: Optional[str] = Field('OR', description="categories维度内部逻辑: OR或AND")
+    event_types: Optional[str] = Field('OR', description="event_types维度内部逻辑: OR或AND")
+    impact_scopes: Optional[str] = Field('OR', description="impact_scopes维度内部逻辑: OR或AND")
+    urgency: Optional[str] = Field('OR', description="urgency维度内部逻辑: OR或AND")
+    related_sectors: Optional[str] = Field('OR', description="related_sectors维度内部逻辑: OR或AND")
+    related_countries: Optional[str] = Field('OR', description="related_countries维度内部逻辑: OR或AND")
+    source_types: Optional[str] = Field('OR', description="source_types维度内部逻辑: OR或AND")
+    scheduler_sources: Optional[str] = Field('OR', description="scheduler_sources维度内部逻辑: OR或AND")
+
+
 class ThemeFilterRequest(BaseModel):
     """主题筛选请求模型"""
     # 标准分类（theme_master_id）
     categories: Optional[List[str]] = Field(None, description="标准主题分类列表")
     
     # 分类维度（llm_classification_title）
+    news_value: Optional[List[str]] = Field(None, description="新闻价值类型列表 (fact/opinion)")
     event_types: Optional[List[str]] = Field(None, description="事件类型列表")
     impact_scopes: Optional[List[str]] = Field(None, description="影响范围列表")
     urgency_levels: Optional[List[str]] = Field(None, description="时效性列表")
@@ -76,6 +90,18 @@ class ThemeFilterRequest(BaseModel):
     
     # 🔥 新增：调度器来源筛选
     scheduler_sources: Optional[List[str]] = Field(None, description="调度器来源列表 (如: eodhd_news, watchlist_news, cctv_news)")
+    
+    # 🔥 新增：Ticker筛选
+    ticker_symbols: Optional[List[str]] = Field(None, description="指定ticker符号列表，如: ['AAPL.US', '0700.HK']")
+    use_watchlist: Optional[bool] = Field(None, description="是否使用当前用户的watchlist中的ticker")
+    watchlist_groups: Optional[List[str]] = Field(None, description="使用特定watchlist分组，如: ['Technology', 'Healthcare']")
+    ticker_filter_mode: Optional[str] = Field('include', description="Ticker过滤模式: 'include'(包含) | 'exclude'(排除)")
+    
+    # 🔥 新增：各维度内部逻辑操作符（默认 OR）
+    dimension_operators: Optional[DimensionOperators] = Field(None, description="各维度内部逻辑操作符配置")
+    
+    # 🔥 新增：搜索功能
+    search_text: Optional[str] = Field(None, description="搜索文本（搜索标题、内容和ticker）")
     
     # 筛选条件
     min_confidence: float = Field(0.5, ge=0.0, le=1.0, description="最低置信度")
@@ -625,13 +651,15 @@ async def filter_news_by_themes(
     多维度主题筛选新闻
     
     筛选逻辑：
-    - categories之间是OR关系（满足任一即可）
+    - 同一维度内可选择OR或AND关系（通过dimension_operators配置）
     - 不同维度之间是AND关系（必须同时满足）
-    - 同一维度内是OR关系
     
     示例：
-    categories=['finance'] AND event_types=['earnings_report'] 
-    → 返回所有"金融类的财报新闻"
+    categories=['finance', 'technology'] (OR) AND event_types=['earnings_report'] 
+    → 返回所有"金融类或科技类的财报新闻"
+    
+    categories=['finance', 'technology'] (AND) 
+    → 返回同时属于金融和科技分类的新闻
     """
     try:
         db_config = get_database_config()
@@ -642,6 +670,88 @@ async def filter_news_by_themes(
             raise HTTPException(status_code=500, detail="数据库连接失败")
         
         cursor = conn.cursor()
+        
+        # 获取维度操作符配置
+        dim_ops = request.dimension_operators or DimensionOperators()
+        
+        # 辅助函数：根据操作符生成子查询
+        def build_dimension_subquery(
+            values: List[str],
+            operator: str,
+            classification_title: str,
+            min_confidence: float,
+            use_category_join: bool = False
+        ) -> tuple:
+            """
+            构建维度筛选子查询
+            
+            Args:
+                values: 筛选值列表
+                operator: 'OR' 或 'AND'
+                classification_title: 分类维度名称
+                min_confidence: 最低置信度
+                use_category_join: 是否使用category JOIN (用于categories维度)
+                
+            Returns:
+                (subquery, params) 元组
+            """
+            params = []
+            
+            if operator == 'AND' and len(values) > 1:
+                # AND逻辑: 找到同时拥有所有指定值的新闻
+                # 使用GROUP BY + HAVING COUNT = len(values)
+                placeholders = ', '.join(['%s'] * len(values))
+                
+                if use_category_join:
+                    subquery = f"""
+                        SELECT news_id FROM (
+                            SELECT ntu.news_id, COUNT(DISTINCT tmd.category) as match_count
+                            FROM news_themes_unified ntu
+                            INNER JOIN theme_master_data tmd ON ntu.theme_master_id = tmd.id
+                            WHERE ntu.is_active = true
+                              AND ntu.confidence_score >= %s
+                              AND tmd.category IN ({placeholders})
+                            GROUP BY ntu.news_id
+                        ) sub WHERE match_count = %s
+                    """
+                    params = [min_confidence] + values + [len(values)]
+                else:
+                    subquery = f"""
+                        SELECT news_id FROM (
+                            SELECT news_id, COUNT(DISTINCT theme_name) as match_count
+                            FROM news_themes_unified
+                            WHERE is_active = true
+                              AND confidence_score >= %s
+                              AND llm_classification_title = %s
+                              AND theme_name IN ({placeholders})
+                            GROUP BY news_id
+                        ) sub WHERE match_count = %s
+                    """
+                    params = [min_confidence, classification_title] + values + [len(values)]
+            else:
+                # OR逻辑: 找到拥有任一指定值的新闻
+                placeholders = ', '.join(['%s'] * len(values))
+                
+                if use_category_join:
+                    subquery = f"""
+                        SELECT DISTINCT news_id FROM news_themes_unified ntu
+                        INNER JOIN theme_master_data tmd ON ntu.theme_master_id = tmd.id
+                        WHERE ntu.is_active = true
+                          AND ntu.confidence_score >= %s
+                          AND tmd.category IN ({placeholders})
+                    """
+                    params = [min_confidence] + values
+                else:
+                    subquery = f"""
+                        SELECT DISTINCT news_id FROM news_themes_unified
+                        WHERE is_active = true
+                          AND confidence_score >= %s
+                          AND llm_classification_title = %s
+                          AND theme_name IN ({placeholders})
+                    """
+                    params = [min_confidence, classification_title] + values
+            
+            return subquery, params
         
         # 构建筛选条件
         conditions = ["ntu.is_active = true"]
@@ -674,87 +784,203 @@ async def filter_news_by_themes(
         
         # 标准分类筛选
         if request.categories:
-            placeholders = ', '.join(['%s'] * len(request.categories))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified ntu
-                INNER JOIN theme_master_data tmd ON ntu.theme_master_id = tmd.id
-                WHERE ntu.is_active = true
-                  AND ntu.confidence_score >= %s
-                  AND tmd.category IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.categories)
+            cat_op = dim_ops.categories or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.categories, cat_op, '', request.min_confidence, use_category_join=True
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
+        
+        # 新闻价值类型筛选 (news_value)
+        if request.news_value:
+            nv_op = dim_ops.news_value or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.news_value, nv_op, 'news_value', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
         # 事件类型筛选
         if request.event_types:
-            placeholders = ', '.join(['%s'] * len(request.event_types))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified
-                WHERE is_active = true
-                  AND confidence_score >= %s
-                  AND llm_classification_title = 'event_type'
-                  AND theme_name IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.event_types)
+            evt_op = dim_ops.event_types or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.event_types, evt_op, 'event_type', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
         # 影响范围筛选
         if request.impact_scopes:
-            placeholders = ', '.join(['%s'] * len(request.impact_scopes))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified
-                WHERE is_active = true
-                  AND confidence_score >= %s
-                  AND llm_classification_title = 'impact_scope'
-                  AND theme_name IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.impact_scopes)
+            imp_op = dim_ops.impact_scopes or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.impact_scopes, imp_op, 'impact_scope', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
         # 时效性筛选
         if request.urgency_levels:
-            placeholders = ', '.join(['%s'] * len(request.urgency_levels))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified
-                WHERE is_active = true
-                  AND confidence_score >= %s
-                  AND llm_classification_title = 'urgency'
-                  AND theme_name IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.urgency_levels)
+            urg_op = dim_ops.urgency or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.urgency_levels, urg_op, 'urgency', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
         # 相关行业筛选
         if request.related_sectors:
-            placeholders = ', '.join(['%s'] * len(request.related_sectors))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified
-                WHERE is_active = true
-                  AND confidence_score >= %s
-                  AND llm_classification_title = 'related_sectors'
-                  AND theme_name IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.related_sectors)
+            sec_op = dim_ops.related_sectors or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.related_sectors, sec_op, 'related_sectors', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
         # 相关国家/地区筛选
         if request.related_countries:
-            placeholders = ', '.join(['%s'] * len(request.related_countries))
-            theme_subqueries.append(f"""
-                SELECT DISTINCT news_id FROM news_themes_unified
-                WHERE is_active = true
-                  AND confidence_score >= %s
-                  AND llm_classification_title = 'related_countries'
-                  AND theme_name IN ({placeholders})
-            """)
-            subquery_params.extend([request.min_confidence] + request.related_countries)
+            ctr_op = dim_ops.related_countries or 'OR'
+            subquery, params = build_dimension_subquery(
+                request.related_countries, ctr_op, 'related_countries', request.min_confidence
+            )
+            theme_subqueries.append(subquery)
+            subquery_params.extend(params)
         
-        # 来源类型筛选
+        # 来源类型筛选 (支持 OR/AND)
         if request.source_types:
-            placeholders = ', '.join(['%s'] * len(request.source_types))
-            conditions.append(f"ntu.source_type IN ({placeholders})")
-            main_params.extend(request.source_types)
+            src_op = dim_ops.source_types or 'OR'
+            if src_op == 'AND' and len(request.source_types) > 1:
+                # AND: 需要同时有多个source_type的记录
+                placeholders = ', '.join(['%s'] * len(request.source_types))
+                theme_subqueries.append(f"""
+                    SELECT news_id FROM (
+                        SELECT news_id, COUNT(DISTINCT source_type) as match_count
+                        FROM news_themes_unified
+                        WHERE is_active = true
+                          AND source_type IN ({placeholders})
+                        GROUP BY news_id
+                    ) sub WHERE match_count = %s
+                """)
+                subquery_params.extend(request.source_types + [len(request.source_types)])
+            else:
+                placeholders = ', '.join(['%s'] * len(request.source_types))
+                conditions.append(f"ntu.source_type IN ({placeholders})")
+                main_params.extend(request.source_types)
         
-        # 🔥 新增：调度器来源筛选
+        # 🔥 调度器来源筛选 (支持 OR/AND)
         if request.scheduler_sources:
-            placeholders = ', '.join(['%s'] * len(request.scheduler_sources))
-            conditions.append(f"n.scheduler_source IN ({placeholders})")
-            main_params.extend(request.scheduler_sources)
+            sch_op = dim_ops.scheduler_sources or 'OR'
+            if sch_op == 'AND' and len(request.scheduler_sources) > 1:
+                # AND: 对于scheduler_source，AND在逻辑上不太合理（一条新闻只有一个source）
+                # 但我们仍然支持它，会返回空结果
+                placeholders = ', '.join(['%s'] * len(request.scheduler_sources))
+                conditions.append(f"n.scheduler_source IN ({placeholders})")
+                main_params.extend(request.scheduler_sources)
+                # 添加一个永假条件确保AND逻辑（因为一条新闻只能有一个scheduler_source）
+                if len(request.scheduler_sources) > 1:
+                    conditions.append("1=0")  # 这会确保AND多个scheduler_source时返回空
+            else:
+                placeholders = ', '.join(['%s'] * len(request.scheduler_sources))
+                conditions.append(f"n.scheduler_source IN ({placeholders})")
+                main_params.extend(request.scheduler_sources)
+        
+        # 🔥 Ticker筛选
+        ticker_symbols_to_filter = []
+        
+        # 收集ticker列表
+        if request.ticker_symbols:
+            ticker_symbols_to_filter.extend(request.ticker_symbols)
+            logger.info(f"[Ticker Filter] Manual ticker symbols: {request.ticker_symbols}")
+        
+        # 如果启用watchlist，获取用户的watchlist tickers
+        if request.use_watchlist:
+            logger.info(f"[Ticker Filter] Use watchlist enabled for user {current_user.user_id}")
+            watchlist_query = """
+                SELECT DISTINCT symbol
+                FROM target_tracking_config
+                WHERE user_id = %s AND enabled = true
+            """
+            watchlist_params = [current_user.user_id]
+            
+            # 如果指定了特定分组
+            if request.watchlist_groups:
+                placeholders = ', '.join(['%s'] * len(request.watchlist_groups))
+                watchlist_query += f" AND group_name IN ({placeholders})"
+                watchlist_params.extend(request.watchlist_groups)
+                logger.info(f"[Ticker Filter] Watchlist groups: {request.watchlist_groups}")
+            
+            cursor.execute(watchlist_query, watchlist_params)
+            watchlist_tickers = [row[0] for row in cursor.fetchall()]
+            logger.info(f"[Ticker Filter] Found {len(watchlist_tickers)} tickers in watchlist: {watchlist_tickers[:10]}")
+            ticker_symbols_to_filter.extend(watchlist_tickers)
+        
+        # 应用ticker过滤
+        if ticker_symbols_to_filter:
+            # 去重
+            ticker_symbols_to_filter = list(set(ticker_symbols_to_filter))
+            logger.info(f"[Ticker Filter] Applying filter with {len(ticker_symbols_to_filter)} unique tickers")
+            logger.info(f"[Ticker Filter] Filter mode: {request.ticker_filter_mode or 'include'}")
+            
+            # 构建ticker过滤子查询
+            # 注意：news_symbols_dict.symbol_code 可能包含市场后缀（如AAPL.US）
+            # 而watchlist可能只有基础symbol（如AAPL），需要模糊匹配
+            placeholders = ', '.join(['%s'] * len(ticker_symbols_to_filter))
+            
+            # 构建匹配条件：支持精确匹配或模糊匹配
+            match_conditions = []
+            for ticker in ticker_symbols_to_filter:
+                match_conditions.append("nsd.symbol_code LIKE %s")
+            
+            ticker_subquery = f"""
+                SELECT DISTINCT ns.news_id
+                FROM news_symbols ns
+                INNER JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
+                WHERE ({' OR '.join(match_conditions)})
+            """
+            
+            # 准备参数：每个ticker添加%通配符以支持模糊匹配
+            ticker_params = [f"%{ticker}%" for ticker in ticker_symbols_to_filter]
+            
+            # 根据filter_mode决定是包含还是排除
+            if request.ticker_filter_mode == 'exclude':
+                # 排除模式：新闻ID不在ticker_subquery中
+                theme_subqueries.append(f"""
+                    SELECT id as news_id FROM news
+                    WHERE id NOT IN ({ticker_subquery})
+                """)
+                logger.info(f"[Ticker Filter] Using EXCLUDE mode")
+            else:
+                # 包含模式（默认）：新闻ID在ticker_subquery中
+                theme_subqueries.append(ticker_subquery)
+                logger.info(f"[Ticker Filter] Using INCLUDE mode")
+            
+            subquery_params.extend(ticker_params)
+        else:
+            logger.info(f"[Ticker Filter] No tickers to filter")
+        
+        # 🔥 搜索文本过滤
+        if request.search_text:
+            search_text = request.search_text.strip()
+            logger.info(f"[Search] Searching for: {search_text}")
+            
+            # 构建搜索子查询：搜索标题、内容和ticker
+            # 使用 ILIKE 进行不区分大小写的模糊搜索
+            search_subquery = f"""
+                SELECT DISTINCT n.id as news_id
+                FROM news n
+                LEFT JOIN news_symbols ns ON n.id = ns.news_id
+                LEFT JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
+                WHERE (
+                    n.title ILIKE %s
+                    OR n.content ILIKE %s
+                    OR nsd.symbol_code ILIKE %s
+                )
+            """
+            
+            search_pattern = f"%{search_text}%"
+            theme_subqueries.append(search_subquery)
+            subquery_params.extend([search_pattern, search_pattern, search_pattern])
+            
+            logger.info(f"[Search] Added search filter for: {search_text}")
         
         # 组合所有子查询（AND关系）
         if theme_subqueries:
@@ -858,18 +1084,31 @@ async def filter_news_by_themes(
         # 构建筛选摘要
         filter_summary = {
             'categories': request.categories or [],
+            'news_value': request.news_value or [],
             'event_types': request.event_types or [],
             'impact_scopes': request.impact_scopes or [],
             'urgency_levels': request.urgency_levels or [],
             'related_sectors': request.related_sectors or [],
             'related_countries': request.related_countries or [],
             'source_types': request.source_types or [],
-            'scheduler_sources': request.scheduler_sources or [],  # 🔥 新增
+            'scheduler_sources': request.scheduler_sources or [],
             'min_confidence': request.min_confidence,
             'only_primary': request.only_primary,
             'date_range': {
                 'start': request.start_date,
                 'end': request.end_date
+            },
+            # 🔥 新增：维度操作符
+            'dimension_operators': {
+                'news_value': dim_ops.news_value or 'OR',
+                'categories': dim_ops.categories or 'OR',
+                'event_types': dim_ops.event_types or 'OR',
+                'impact_scopes': dim_ops.impact_scopes or 'OR',
+                'urgency': dim_ops.urgency or 'OR',
+                'related_sectors': dim_ops.related_sectors or 'OR',
+                'related_countries': dim_ops.related_countries or 'OR',
+                'source_types': dim_ops.source_types or 'OR',
+                'scheduler_sources': dim_ops.scheduler_sources or 'OR'
             }
         }
         
@@ -1078,7 +1317,7 @@ async def get_trending_themes(
 
 @router.get("/dimensions", response_model=DimensionValuesResponse, summary="获取指定维度的所有可能值")
 async def get_dimension_values(
-    dimension: str = Query(..., description="维度：primary_theme, event_type, impact_scope, urgency, related_sectors, related_countries, source_type"),
+    dimension: str = Query(..., description="维度：news_value, primary_theme, event_type, impact_scope, urgency, related_sectors, related_countries, source_type"),
     days: Optional[int] = Query(None, ge=1, le=365, description="统计最近N天的数据"),
     min_count: int = Query(1, ge=1, description="最小新闻数量"),
     current_user: TokenData = Depends(get_current_user)

@@ -3,9 +3,32 @@
  */
 
 /**
+ * 维度内部逻辑操作符
+ */
+export type DimensionOperator = 'OR' | 'AND';
+
+/**
+ * 各维度操作符配置
+ */
+export interface DimensionOperators {
+  news_value?: DimensionOperator;          // 默认 OR - 新闻价值类型
+  categories?: DimensionOperator;          // 默认 OR
+  event_types?: DimensionOperator;         // 默认 OR
+  impact_scopes?: DimensionOperator;       // 默认 OR
+  urgency?: DimensionOperator;             // 默认 OR
+  related_sectors?: DimensionOperator;     // 默认 OR
+  related_countries?: DimensionOperator;   // 默认 OR
+  source_types?: DimensionOperator;        // 默认 OR
+  scheduler_sources?: DimensionOperator;   // 默认 OR
+}
+
+/**
  * 筛选条件配置
  */
 export interface FilterConfig {
+  // 新闻价值分类 (新增)
+  news_value?: string[];             // 新闻价值类型: fact, opinion
+  
   // 主题分类维度
   categories?: string[];              // 主要主题分类 (political, financial, technology...)
   event_types?: string[];            // 事件类型
@@ -18,10 +41,19 @@ export interface FilterConfig {
   source_types?: string[];           // 来源类型 (llm_classification, vector_retrieval...)
   scheduler_sources?: string[];      // 调度器来源 (eodhd_news, watchlist_news, cctv_news)
   
+  // 🔥 新增：Ticker筛选
+  ticker_symbols?: string[];         // 指定ticker符号列表，如: ['AAPL.US', '0700.HK']
+  use_watchlist?: boolean;           // 是否使用用户watchlist中的ticker
+  watchlist_groups?: string[];       // 使用特定watchlist分组，如: ['Technology', 'Healthcare']
+  ticker_filter_mode?: 'include' | 'exclude';  // Ticker过滤模式: 'include'(包含) | 'exclude'(排除)
+  
   // 其他选项
   min_confidence?: number;           // 最低置信度
   only_primary?: boolean;            // 只显示主要主题
   market?: string;                   // 市场 (HK/US/CN/GLOBAL)
+  
+  // 🔥 新增：各维度内部逻辑操作符（默认 OR）
+  dimension_operators?: DimensionOperators;
   
   // 逻辑关系（暂时保留，未来可能用到）
   custom_logic?: 'AND' | 'OR';
@@ -118,6 +150,15 @@ export interface GetPresetsParams {
  * 系统预设配置（用于前端常量）
  */
 export const SYSTEM_PRESETS_CONFIG = {
+  FACTUAL_NEWS: {
+    name: 'Fact',
+    description: 'Only show factual news, filter opinion articles',
+    filter: {
+      news_value: ['fact'],
+      urgency: ['urgent', 'timely'],
+      min_confidence: 0.7
+    }
+  },
   IMPORTANT_NEWS: {
     name: '⭐ 重要新闻',
     icon: '⭐',
@@ -133,6 +174,7 @@ export const SYSTEM_PRESETS_CONFIG = {
     icon: '📊',
     description: '财报发布和业绩相关新闻',
     filter: {
+      news_value: ['fact'],
       event_types: ['earnings_report', 'financial_results'],
       min_confidence: 0.6
     }
@@ -207,6 +249,14 @@ export const SOURCE_TYPE_OPTIONS = [
   { value: 'llm_classification', label: 'LLM分类' },
   { value: 'vector_retrieval', label: '向量检索' },
   { value: 'eodhd_auto_tag', label: 'EODHD标签' }
+];
+
+/**
+ * 新闻价值类型选项 (新增)
+ */
+export const NEWS_VALUE_OPTIONS = [
+  { value: 'fact', label: 'Fact' },
+  { value: 'opinion', label: 'Opinion' }
 ];
 
 

@@ -6,9 +6,11 @@ import {
   Checkbox,
   Space,
   message,
-  Tabs
+  Tabs,
+  Radio,
+  AutoComplete
 } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { SaveOutlined, GlobalOutlined, StockOutlined } from '@ant-design/icons';
 import { NewsFilterPreset, FilterConfig } from '../types/newsPresets';
 import { ThemeFilterState } from '../types/themes';
 import FilterConfigEditor from './FilterConfigEditor';
@@ -98,7 +100,8 @@ const CreatePresetModal: React.FC<CreatePresetModalProps> = ({
         preset_name: values.preset_name,
         description: values.description,
         filter_config: filterConfig,
-        scope_type: 'global', // 默认为全局预设
+        scope_type: values.scope_type || 'global', // 从表单获取
+        symbol_code: values.symbol_code || undefined, // 从表单获取
         is_default: values.is_default || false,
         is_favorite: values.is_favorite || false
       });
@@ -206,6 +209,81 @@ const CreatePresetModal: React.FC<CreatePresetModalProps> = ({
                 rows={2}
                 placeholder="Brief description of this preset..."
               />
+            </Form.Item>
+
+            {/* 🔥 新增：Preset Scope 选择 */}
+            <Form.Item
+              name="scope_type"
+              label="Preset Scope"
+              initialValue="global"
+              rules={[{ required: true }]}
+              tooltip="Choose whether this preset applies globally or to a specific ticker"
+            >
+              <Radio.Group>
+                <Space direction="vertical">
+                  <Radio value="global">
+                    <Space>
+                      <GlobalOutlined style={{ color: '#1890ff' }} />
+                      <div>
+                        <div><strong>Global</strong></div>
+                        <div style={{ fontSize: '12px', color: '#666', marginLeft: 0 }}>
+                          Apply to all news across all tickers
+                        </div>
+                      </div>
+                    </Space>
+                  </Radio>
+                  <Radio value="symbol_specific">
+                    <Space>
+                      <StockOutlined style={{ color: '#52c41a' }} />
+                      <div>
+                        <div><strong>Ticker Specific</strong></div>
+                        <div style={{ fontSize: '12px', color: '#666', marginLeft: 0 }}>
+                          Only apply to a specific ticker
+                        </div>
+                      </div>
+                    </Space>
+                  </Radio>
+                </Space>
+              </Radio.Group>
+            </Form.Item>
+
+            {/* 🔥 新增：Ticker Symbol 输入（当选择symbol_specific时显示） */}
+            <Form.Item
+              noStyle
+              shouldUpdate={(prevValues, currentValues) => 
+                prevValues.scope_type !== currentValues.scope_type
+              }
+            >
+              {({ getFieldValue }) =>
+                getFieldValue('scope_type') === 'symbol_specific' ? (
+                  <Form.Item
+                    name="symbol_code"
+                    label="Ticker Symbol"
+                    rules={[
+                      { required: true, message: 'Please enter ticker symbol' },
+                      { max: 20, message: 'Ticker symbol too long' }
+                    ]}
+                    tooltip="Enter the ticker symbol this preset applies to"
+                  >
+                    <AutoComplete
+                      placeholder="e.g., AAPL.US, 0700.HK, TSLA.US"
+                      options={[
+                        // 一些常见的ticker示例
+                        { value: 'AAPL.US' },
+                        { value: 'TSLA.US' },
+                        { value: 'MSFT.US' },
+                        { value: 'GOOGL.US' },
+                        { value: '0700.HK' },
+                        { value: '9988.HK' },
+                        { value: 'BABA.US' }
+                      ]}
+                      filterOption={(inputValue, option) =>
+                        option!.value.toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
+                      }
+                    />
+                  </Form.Item>
+                ) : null
+              }
             </Form.Item>
 
             {/* 筛选条件预览 */}

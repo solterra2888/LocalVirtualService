@@ -503,7 +503,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
         }
         open={detailVisible}
         onClose={() => setDetailVisible(false)}
-        width={600}
+        width={1000}
       >
         {selectedRecord && (
           <Descriptions column={1} bordered size="small">

@@ -12,7 +12,13 @@ import {
   Modal,
   Badge,
   Empty,
-  Skeleton
+  Skeleton,
+  Switch,
+  Input,
+  Tooltip,
+  Slider,
+  Popover,
+  Drawer
 } from 'antd';
 import {
   CalendarOutlined,
@@ -20,7 +26,15 @@ import {
   FilterOutlined,
   ExportOutlined,
   SettingOutlined,
-  StarFilled
+  StarFilled,
+  StarOutlined,
+  SearchOutlined,
+  CloseCircleOutlined,
+  ControlOutlined,
+  BookOutlined,
+  HighlightOutlined,
+  ColumnHeightOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -38,6 +52,7 @@ import ThemeManagementModal from '../components/ThemeManagementModal';
 import ThemeFilterPanel from '../components/ThemeFilterPanel';
 import PresetsManager from '../components/PresetsManager';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import DeleteNewsByDateModal from '../components/DeleteNewsByDateModal';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, getPreferredSummaryTemplate } from '../utils/newsAnalysisHelper';
@@ -60,10 +75,11 @@ import {
 } from '../utils/unifiedThemeHelper';
 import { themesAPI } from '../services/themes';
 import { newsPresetsAPI } from '../services/newsPresets';
-import type { ThemeFilterState, FilteredNews } from '../types/themes';
-import type { NewsFilterPreset, CreatePresetRequest, FilterConfig } from '../types/newsPresets';
+import type { ThemeFilterState, FilteredNews, ThemeDimensionOperators, DimensionOperatorsRequest } from '../types/themes';
+import type { NewsFilterPreset } from '../types/newsPresets';
 
 const { Text } = Typography;
+const { Search } = Input;
 
 interface NewsPageState {
   loading: boolean;
@@ -72,9 +88,7 @@ interface NewsPageState {
   symbols: NewsSymbol[];
   searchParams: NewsSearchParams;
   selectedNews: NewsItem | null;
-  detailModalVisible: boolean;
   themeManagementModalVisible: boolean;
-  expandedNewsItems: Set<number>;
   // 主题筛选相关
   themeFilters: ThemeFilterState;
   filteredNewsData: FilteredNews[];
@@ -91,6 +105,12 @@ interface NewsPageState {
   presetsManagerVisible: boolean;
   presets: NewsFilterPreset[];
   presetsLoading: boolean;
+  // 新闻内容高度设置
+  newsContentHeight: number;
+  // Sidebar控制
+  sidebarVisible: boolean;
+  // 删除新闻Modal
+  deleteNewsModalVisible: boolean;
 }
 
 const NewsPage: React.FC = () => {
@@ -105,11 +125,10 @@ const NewsPage: React.FC = () => {
       page_size: 20
     },
     selectedNews: null,
-    detailModalVisible: false,
     themeManagementModalVisible: false,
-    expandedNewsItems: new Set(),
     // 主题筛选相关
     themeFilters: {
+      newsValue: [],
       categories: [],
       eventTypes: [],
       impactScopes: [],
@@ -117,11 +136,15 @@ const NewsPage: React.FC = () => {
       relatedSectors: [],
       relatedCountries: [],
       sourceTypes: [],
-      schedulerSources: [],  // 🔥 新增
+      schedulerSources: [],
       minConfidence: 0.5,
       onlyPrimary: false,
       dateRange: null,
-      market: null
+      market: null,
+      dimensionOperators: {},  // 🔥 新增：维度操作符
+      searchText: undefined,  // 🔥 新增：搜索文本
+      useWatchlist: false,  // 默认关闭watchlist过滤
+      tickerFilterMode: 'include' as const  // 默认使用include模式
     },
     filteredNewsData: [],
     filteredTotal: 0,
@@ -135,7 +158,13 @@ const NewsPage: React.FC = () => {
     advancedFilterModalVisible: false,
     presetsManagerVisible: false,
     presets: [],
-    presetsLoading: false
+    presetsLoading: false,
+    // 新闻内容高度设置
+    newsContentHeight: 20,
+    // Sidebar控制
+    sidebarVisible: false,
+    // 删除新闻Modal
+    deleteNewsModalVisible: false
   });
 
   // 加载预设列表
@@ -202,8 +231,28 @@ const NewsPage: React.FC = () => {
     }
     
     try {
+      // 构建维度操作符请求对象
+      const buildDimensionOperators = (): DimensionOperatorsRequest | undefined => {
+        const ops = activeFilters.dimensionOperators;
+        if (!ops) return undefined;
+        
+        const result: DimensionOperatorsRequest = {};
+        if (ops.newsValue) result.news_value = ops.newsValue;
+        if (ops.categories) result.categories = ops.categories;
+        if (ops.eventTypes) result.event_types = ops.eventTypes;
+        if (ops.impactScopes) result.impact_scopes = ops.impactScopes;
+        if (ops.urgencyLevels) result.urgency = ops.urgencyLevels;
+        if (ops.relatedSectors) result.related_sectors = ops.relatedSectors;
+        if (ops.relatedCountries) result.related_countries = ops.relatedCountries;
+        if (ops.sourceTypes) result.source_types = ops.sourceTypes;
+        if (ops.schedulerSources) result.scheduler_sources = ops.schedulerSources;
+        
+        return Object.keys(result).length > 0 ? result : undefined;
+      };
+
       // 构建请求参数（使用 offset 而不是 page）
       const request = {
+        news_value: activeFilters.newsValue && activeFilters.newsValue.length > 0 ? activeFilters.newsValue : undefined,
         categories: activeFilters.categories.length > 0 ? activeFilters.categories : undefined,
         event_types: activeFilters.eventTypes.length > 0 ? activeFilters.eventTypes : undefined,
         impact_scopes: activeFilters.impactScopes.length > 0 ? activeFilters.impactScopes : undefined,
@@ -211,7 +260,15 @@ const NewsPage: React.FC = () => {
         related_sectors: activeFilters.relatedSectors.length > 0 ? activeFilters.relatedSectors : undefined,
         related_countries: activeFilters.relatedCountries.length > 0 ? activeFilters.relatedCountries : undefined,
         source_types: activeFilters.sourceTypes.length > 0 ? activeFilters.sourceTypes : undefined,
-        scheduler_sources: activeFilters.schedulerSources.length > 0 ? activeFilters.schedulerSources : undefined,  // 🔥 新增
+        scheduler_sources: activeFilters.schedulerSources.length > 0 ? activeFilters.schedulerSources : undefined,
+        dimension_operators: buildDimensionOperators(),  // 🔥 新增：维度操作符
+        // 🔥 新增：Ticker过滤参数
+        ticker_symbols: activeFilters.tickerSymbols && activeFilters.tickerSymbols.length > 0 ? activeFilters.tickerSymbols : undefined,
+        use_watchlist: activeFilters.useWatchlist || undefined,
+        watchlist_groups: activeFilters.watchlistGroups && activeFilters.watchlistGroups.length > 0 ? activeFilters.watchlistGroups : undefined,
+        ticker_filter_mode: activeFilters.tickerFilterMode || undefined,
+        // 🔥 新增：搜索文本
+        search_text: activeFilters.searchText && activeFilters.searchText.trim() ? activeFilters.searchText.trim() : undefined,
         min_confidence: activeFilters.minConfidence,
         only_primary: activeFilters.onlyPrimary,
         start_date: activeFilters.dateRange?.[0]?.format('YYYY-MM-DD'),
@@ -220,6 +277,19 @@ const NewsPage: React.FC = () => {
         page: Math.floor(offset / pageSize) + 1,
         page_size: pageSize
       };
+      
+      // 🔥 记录ticker过滤和搜索参数（用于调试）
+      if (request.use_watchlist || request.ticker_symbols) {
+        console.log('🎯 [Ticker Filter] Request parameters:', {
+          use_watchlist: request.use_watchlist,
+          watchlist_groups: request.watchlist_groups,
+          ticker_symbols: request.ticker_symbols,
+          ticker_filter_mode: request.ticker_filter_mode
+        });
+      }
+      if (request.search_text) {
+        console.log('🔍 [Search] Searching for:', request.search_text);
+      }
       
       const response = await themesAPI.filterNews(request);
       const loadTime = Date.now() - startTime;
@@ -231,7 +301,8 @@ const NewsPage: React.FC = () => {
         total_pages: response.total_pages,
         news_count: response.news?.length || 0,
         load_time: `${loadTime}ms`,
-        reset
+        reset,
+        ticker_filter_active: request.use_watchlist || (request.ticker_symbols && request.ticker_symbols.length > 0)
       });
       
       // 根据 reset 模式决定是替换还是追加数据
@@ -294,7 +365,24 @@ const NewsPage: React.FC = () => {
     
     // 将 FilterConfig 转换为 ThemeFilterState
     const config = preset.filter_config;
+    
+    // 转换维度操作符
+    const dimensionOperators: ThemeDimensionOperators = {};
+    if (config.dimension_operators) {
+      const ops = config.dimension_operators;
+      if (ops.news_value) dimensionOperators.newsValue = ops.news_value;
+      if (ops.categories) dimensionOperators.categories = ops.categories;
+      if (ops.event_types) dimensionOperators.eventTypes = ops.event_types;
+      if (ops.impact_scopes) dimensionOperators.impactScopes = ops.impact_scopes;
+      if (ops.urgency) dimensionOperators.urgencyLevels = ops.urgency;
+      if (ops.related_sectors) dimensionOperators.relatedSectors = ops.related_sectors;
+      if (ops.related_countries) dimensionOperators.relatedCountries = ops.related_countries;
+      if (ops.source_types) dimensionOperators.sourceTypes = ops.source_types;
+      if (ops.scheduler_sources) dimensionOperators.schedulerSources = ops.scheduler_sources;
+    }
+    
     const newFilters: ThemeFilterState = {
+      newsValue: config.news_value || [],
       categories: config.categories || [],
       eventTypes: config.event_types || [],
       impactScopes: config.impact_scopes || [],
@@ -306,7 +394,14 @@ const NewsPage: React.FC = () => {
       minConfidence: config.min_confidence || 0.5,
       onlyPrimary: config.only_primary || false,
       dateRange: null, // 预设不保存日期范围
-      market: config.market || null
+      market: config.market || null,
+      dimensionOperators,  // 🔥 新增：维度操作符
+      // 🔥 保留当前的watchlist相关设置（不受预设影响）
+      useWatchlist: state.themeFilters.useWatchlist,
+      tickerFilterMode: state.themeFilters.tickerFilterMode,
+      tickerSymbols: state.themeFilters.tickerSymbols,
+      watchlistGroups: state.themeFilters.watchlistGroups,
+      searchText: state.themeFilters.searchText
     };
 
     // 更新筛选条件并应用
@@ -457,14 +552,14 @@ const NewsPage: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user]);
 
-  // 显示新闻详情
+  // 显示新闻详情（打开sidebar）
   const showNewsDetail = async (newsId: number) => {
     try {
       const newsDetail = await newsAPI.getNewsDetail(newsId);
       setState(prev => ({
         ...prev,
         selectedNews: newsDetail,
-        detailModalVisible: true
+        sidebarVisible: true
       }));
     } catch (error) {
       console.error('Failed to get news detail:', error);
@@ -472,20 +567,6 @@ const NewsPage: React.FC = () => {
     }
   };
 
-  // 新闻展开/收缩功能
-  const toggleNewsExpansion = (newsId: number) => {
-    setState(prev => {
-      const newSet = new Set(prev.expandedNewsItems);
-      if (newSet.has(newsId)) {
-        newSet.delete(newsId);
-      } else {
-        newSet.add(newsId);
-      }
-      return { ...prev, expandedNewsItems: newSet };
-    });
-  };
-
-  const isNewsExpanded = (newsId: number) => state.expandedNewsItems.has(newsId);
 
   // 关键词高亮函数
   const highlightKeywords = (text: string): React.ReactNode => {
@@ -754,8 +835,13 @@ const NewsPage: React.FC = () => {
             background-color: rgba(255, 255, 255, 0.95) !important;
             border: 1px solid #d9d9d9 !important;
           }
+          /* Slider marks字体大小 */
+          .ant-slider-mark-text {
+            font-size: 10px !important;
+          }
         `}
       </style>
+      
       {/* 主题筛选面板 */}
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={24}>
@@ -786,35 +872,163 @@ const NewsPage: React.FC = () => {
               }
               extra={
                 <Space>
-                  <Button
-                    icon={<SettingOutlined />}
-                    onClick={() => setState(prev => ({ ...prev, presetsManagerVisible: true }))}
+                  {/* 🔥 新增：搜索框 */}
+                  <Search
+                    placeholder="Search News by Title or Content..."
+                    allowClear
+                    enterButton={<SearchOutlined />}
                     size="small"
+                    style={{ width: 400 }}
+                    value={state.themeFilters.searchText || ''}
+                    onChange={(e) => {
+                      const searchText = e.target.value;
+                      setState(prev => ({
+                        ...prev,
+                        themeFilters: {
+                          ...prev.themeFilters,
+                          searchText: searchText || undefined
+                        }
+                      }));
+                    }}
+                    onSearch={(value) => {
+                      const searchText = value.trim();
+                      if (searchText) {
+                        message.info(`Searching for: ${searchText}`);
+                      }
+                      const newFilters = {
+                        ...state.themeFilters,
+                        searchText: searchText || undefined
+                      };
+                      setState(prev => ({
+                        ...prev,
+                        themeFilters: newFilters
+                      }));
+                      loadFilteredNews(true, newFilters);
+                    }}
+                    suffix={
+                      state.themeFilters.searchText ? (
+                        <CloseCircleOutlined
+                          style={{ color: '#999', cursor: 'pointer' }}
+                          onClick={() => {
+                            const newFilters = {
+                              ...state.themeFilters,
+                              searchText: undefined
+                            };
+                            setState(prev => ({
+                              ...prev,
+                              themeFilters: newFilters
+                            }));
+                            loadFilteredNews(true, newFilters);
+                            message.info('Search cleared');
+                          }}
+                        />
+                      ) : null
+                    }
+                  />
+                  <Tooltip title="Presets Management">
+                    <Button
+                      icon={<BookOutlined />}
+                      onClick={() => setState(prev => ({ ...prev, presetsManagerVisible: true }))}
+                      size="small"
+                    />
+                  </Tooltip>
+                  <Tooltip title="Advanced Filter">
+                    <Button
+                      icon={<ControlOutlined />}
+                      onClick={() => setState(prev => ({ ...prev, advancedFilterModalVisible: true }))}
+                      size="small"
+                    />
+                  </Tooltip>
+                  <Tooltip title="Highlight Setting">
+                    <Button
+                      icon={<HighlightOutlined />}
+                      onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
+                      size="small"
+                    />
+                  </Tooltip>
+                  <Tooltip title="Export to CSV">
+                    <Button
+                      icon={<ExportOutlined />}
+                      onClick={handleExportToCSV}
+                      size="small"
+                      disabled={state.filteredNewsData.length === 0}
+                    />
+                  </Tooltip>
+                  {/* 删除新闻按钮 - 仅管理员可见 */}
+                  {user?.is_admin && (
+                    <Tooltip title="Delete News by Date Range (Admin Only)">
+                      <Button
+                        icon={<DeleteOutlined />}
+                        onClick={() => setState(prev => ({ ...prev, deleteNewsModalVisible: true }))}
+                        size="small"
+                        danger
+                      />
+                    </Tooltip>
+                  )}
+                  {/* Height Setting */}
+                  <Popover
+                    content={
+                      <div style={{ width: 200, fontSize: '10px' }}>
+                        <div style={{ marginBottom: 8, fontSize: '10px' }}>
+                          <Text strong style={{ fontSize: '10px' }}>News Content Height: {state.newsContentHeight}px</Text>
+                        </div>
+                        <Slider
+                          min={20}
+                          max={800}
+                          value={state.newsContentHeight}
+                          onChange={(value) => setState(prev => ({ ...prev, newsContentHeight: value }))}
+                          marks={{
+                            20: '20px',
+                            200: '200px',
+                            400: '400px',
+                            800: '800px'
+                          }}
+                        />
+                      </div>
+                    }
+                    title="Height Setting"
+                    trigger="click"
                   >
-                    Presets Management
-                  </Button>
-                  <Button
-                    icon={<SettingOutlined />}
-                    onClick={() => setState(prev => ({ ...prev, advancedFilterModalVisible: true }))}
-                    size="small"
-                  >
-                    Advanced Filter
-                  </Button>
-                  <Button
-                    icon={<FilterOutlined />}
-                    onClick={() => setState(prev => ({ ...prev, themeManagementModalVisible: true }))}
-                    size="small"
-                  >
-                    Highlight Setting
-                  </Button>
-                  <Button
-                    icon={<ExportOutlined />}
-                    onClick={handleExportToCSV}
-                    size="small"
-                    disabled={state.filteredNewsData.length === 0}
-                  >
-                    Export
-                  </Button>
+                    <Tooltip title="Height Setting">
+                      <Button
+                        icon={<ColumnHeightOutlined />}
+                        size="small"
+                      />
+                    </Tooltip>
+                  </Popover>
+                  {/* Watchlist开关 */}
+                  <Tooltip title="Only show news from my watchlist">
+                    <Switch
+                      checked={state.themeFilters.useWatchlist || false}
+                      onChange={(checked) => {
+                        const newFilters = {
+                          ...state.themeFilters,
+                          useWatchlist: checked,
+                          // 如果启用watchlist过滤，默认设置为include模式
+                          tickerFilterMode: checked ? 'include' as const : state.themeFilters.tickerFilterMode,
+                          // 如果关闭watchlist，清空相关设置
+                          watchlistGroups: checked ? state.themeFilters.watchlistGroups : undefined
+                        };
+                        
+                        setState(prev => ({ 
+                          ...prev, 
+                          themeFilters: newFilters 
+                        }));
+                        
+                        // 自动应用过滤
+                        if (checked) {
+                          message.info('Loading news from your watchlist...');
+                        } else {
+                          message.info('Watchlist filter removed');
+                        }
+                        
+                        // 重新加载过滤的新闻
+                        loadFilteredNews(true, newFilters);
+                      }}
+                      checkedChildren={<StarFilled />}
+                      unCheckedChildren={<StarOutlined />}
+                    />
+                  </Tooltip>
                 </Space>
               }
             >
@@ -1022,48 +1236,23 @@ const NewsPage: React.FC = () => {
                               </div>
                             )}
 
-                            {/* 新闻内容 - 支持展开/收起 */}
+                            {/* 新闻内容 - 可调整高度 */}
                             <div style={{ fontSize: '13px', marginBottom: '8px' }}>
                               {(() => {
                                 const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
                                 return displayContent ? (
-                                  <div>
-                                    <div style={{ 
-                                      maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
-                                      overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
-                                      position: 'relative'
-                                    }}>
-                                      <MarkdownRenderer 
-                                        content={displayContent}
-                                        style={{
-                                          fontSize: '13px',
-                                          lineHeight: '1.4'
-                                        }}
-                                      />
-                                      {!isNewsExpanded(item.id) && (
-                                        <div style={{
-                                          position: 'absolute',
-                                          bottom: 0,
-                                          left: 0,
-                                          right: 0,
-                                          height: '20px',
-                                          background: 'linear-gradient(transparent, white)',
-                                          pointerEvents: 'none'
-                                        }} />
-                                      )}
-                                    </div>
-                                    <Button
-                                      type="link"
-                                      size="small"
-                                      onClick={() => toggleNewsExpansion(item.id)}
-                                      style={{ 
-                                        padding: '4px 0', 
-                                        fontSize: '12px',
-                                        height: 'auto'
+                                  <div style={{ 
+                                    maxHeight: `${state.newsContentHeight}px`, 
+                                    overflow: 'hidden',
+                                    lineHeight: '1.4'
+                                  }}>
+                                    <MarkdownRenderer 
+                                      content={displayContent}
+                                      style={{
+                                        fontSize: '13px',
+                                        lineHeight: '1.4'
                                       }}
-                                    >
-                                      {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
-                                    </Button>
+                                    />
                                   </div>
                                 ) : null;
                               })()}
@@ -1100,6 +1289,575 @@ const NewsPage: React.FC = () => {
           </Col>
         </Row>
 
+        {/* AI Analysis Details Sidebar */}
+        <Drawer
+          title={
+            <Space>
+              <RobotOutlined style={{ color: '#1890ff' }} />
+              <span>{state.selectedNews?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
+            </Space>
+          }
+          open={state.sidebarVisible}
+          onClose={() => setState(prev => ({ ...prev, sidebarVisible: false }))}
+          width={800}
+          placement="right"
+          destroyOnClose
+          extra={
+            state.selectedNews?.link && (
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => window.open(state.selectedNews?.link, '_blank')}
+              >
+                View Original
+              </Button>
+            )
+          }
+        >
+          {!state.selectedNews ? (
+            <Empty 
+              description="Select a news item to view details"
+              style={{ marginTop: '100px' }}
+            />
+          ) : (
+            <>
+              <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f5f5f5' }}>
+                <Typography.Title level={5} style={{ marginBottom: '12px' }}>
+                  {state.selectedNews.title}
+                </Typography.Title>
+                <Space size="small" wrap>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    <CalendarOutlined /> {state.selectedNews.date ? new Date(state.selectedNews.date).toLocaleString() : 'N/A'}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    Source: {newsUtils.getSourceDisplayName(state.selectedNews.source) || 'N/A'}
+                  </Text>
+                </Space>
+              </Card>
+
+              {(() => {
+                const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
+                const hasAnyAnalysis = Object.keys(allResults).length > 0;
+                const preferredSummary = getPreferredSummaryTemplate(state.selectedNews.analysis_result);
+
+                if (hasAnyAnalysis) {
+                  return (
+                    <>
+                      {preferredSummary && typeof preferredSummary.result.content === 'string' && (
+                        <>
+                          <Card 
+                            title={
+                              <Space>
+                                <span>AI Analysis</span>
+                                <Tag color="blue" style={{ fontSize: '10px' }}>
+                                  {preferredSummary.templateCode}
+                                </Tag>
+                              </Space>
+                            }
+                            size="small"
+                            headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
+                          >
+                            <MarkdownRenderer 
+                              content={preferredSummary.result.content}
+                              style={{
+                                fontSize: '12px',
+                                lineHeight: '1.6'
+                              }}
+                            />
+                            <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                              <Space size="small">
+                                {preferredSummary.result.provider && <span>Provider: {preferredSummary.result.provider}</span>}
+                                {preferredSummary.result.model && <span>Model: {preferredSummary.result.model}</span>}
+                                {preferredSummary.result.tokens && <span>Tokens: {preferredSummary.result.tokens.toLocaleString()}</span>}
+                                {preferredSummary.result.temperature && <span>Temperature: {preferredSummary.result.temperature}</span>}
+                              </Space>
+                            </div>
+                          </Card>
+
+                          {state.selectedNews.content && (
+                            <Card 
+                              title="Original Content" 
+                              size="small"
+                              style={{ marginTop: '16px' }}
+                              headStyle={{ backgroundColor: '#f5f5f5' }}
+                            >
+                              <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.8' }}>
+                                {highlightKeywords(state.selectedNews.content)}
+                              </div>
+                            </Card>
+                          )}
+
+                          {/* Tags Section */}
+                          <div style={{ 
+                            marginTop: '20px',
+                            padding: '16px',
+                            backgroundColor: '#fafafa',
+                            borderRadius: '8px',
+                            border: '1px solid #e8e8e8'
+                          }}>
+                            <div style={{ 
+                              marginBottom: '16px',
+                              paddingBottom: '12px',
+                              borderBottom: '2px solid #e8e8e8'
+                            }}>
+                              <Text strong style={{ 
+                                fontSize: '13px', 
+                                color: '#1890ff',
+                                fontWeight: 600,
+                                letterSpacing: '0.5px'
+                              }}>
+                                Tags & Metadata
+                              </Text>
+                            </div>
+
+                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                              {/* Related Tickers */}
+                              {state.selectedNews.symbols && state.selectedNews.symbols.length > 0 && (
+                                <div style={{ 
+                                  padding: '12px',
+                                  backgroundColor: '#fff',
+                                  borderRadius: '6px',
+                                  border: '1px solid #f0f0f0'
+                                }}>
+                                  <Text strong style={{ 
+                                    fontSize: '11px', 
+                                    color: '#595959',
+                                    display: 'block',
+                                    marginBottom: '10px',
+                                    fontWeight: 500
+                                  }}>
+                                    Related Tickers
+                                  </Text>
+                                  <Space size={[6, 6]} wrap>
+                                    {state.selectedNews.symbols.map(symbol => (
+                                      <Tag 
+                                        key={symbol} 
+                                        color="blue" 
+                                        style={{ 
+                                          fontSize: '11px',
+                                          padding: '4px 10px',
+                                          borderRadius: '4px',
+                                          fontWeight: 500,
+                                          border: 'none',
+                                          boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                        }}
+                                      >
+                                        {symbol}
+                                      </Tag>
+                                    ))}
+                                  </Space>
+                                </div>
+                              )}
+
+                              {/* Classification Tags */}
+                              {(() => {
+                                const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
+                                if (!classification || !hasValidClassification(classification)) {
+                                  return null;
+                                }
+
+                                const tags = getClassificationTags(classification);
+                                const relatedSectors = getRelatedSectors(classification);
+                                const relatedCountries = getRelatedCountries(classification);
+
+                                return (
+                                  <>
+                                    {tags.length > 0 && (
+                                      <div style={{ 
+                                        padding: '12px',
+                                        backgroundColor: '#fff',
+                                        borderRadius: '6px',
+                                        border: '1px solid #f0f0f0'
+                                      }}>
+                                        <Text strong style={{ 
+                                          fontSize: '11px', 
+                                          color: '#595959',
+                                          display: 'block',
+                                          marginBottom: '10px',
+                                          fontWeight: 500
+                                        }}>
+                                          Classification Tags
+                                        </Text>
+                                        <Space size={[6, 6]} wrap>
+                                          {tags.map(({ key, config, value, displayValue }) => (
+                                            <Tag 
+                                              key={key} 
+                                              color={config.color} 
+                                              style={{ 
+                                                fontSize: '11px',
+                                                padding: '4px 10px',
+                                                borderRadius: '4px',
+                                                fontWeight: 500,
+                                                border: 'none',
+                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                              }}
+                                              title={`${config.label}: ${displayValue}`}
+                                            >
+                                              {displayValue}
+                                            </Tag>
+                                          ))}
+                                        </Space>
+                                      </div>
+                                    )}
+
+                                    {relatedSectors.length > 0 && (
+                                      <div style={{ 
+                                        padding: '12px',
+                                        backgroundColor: '#fff',
+                                        borderRadius: '6px',
+                                        border: '1px solid #f0f0f0'
+                                      }}>
+                                        <Text strong style={{ 
+                                          fontSize: '11px', 
+                                          color: '#595959',
+                                          display: 'block',
+                                          marginBottom: '10px',
+                                          fontWeight: 500
+                                        }}>
+                                          Related Sectors
+                                        </Text>
+                                        <Space size={[6, 6]} wrap>
+                                          {relatedSectors.map(sector => (
+                                            <Tag 
+                                              key={sector} 
+                                              color="purple" 
+                                              style={{ 
+                                                fontSize: '11px',
+                                                padding: '4px 10px',
+                                                borderRadius: '4px',
+                                                fontWeight: 500,
+                                                border: 'none',
+                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                              }}
+                                            >
+                                              {sector}
+                                            </Tag>
+                                          ))}
+                                        </Space>
+                                      </div>
+                                    )}
+
+                                    {relatedCountries.length > 0 && (
+                                      <div style={{ 
+                                        padding: '12px',
+                                        backgroundColor: '#fff',
+                                        borderRadius: '6px',
+                                        border: '1px solid #f0f0f0'
+                                      }}>
+                                        <Text strong style={{ 
+                                          fontSize: '11px', 
+                                          color: '#595959',
+                                          display: 'block',
+                                          marginBottom: '10px',
+                                          fontWeight: 500
+                                        }}>
+                                          Related Countries
+                                        </Text>
+                                        <Space size={[6, 6]} wrap>
+                                          {relatedCountries.map(country => (
+                                            <Tag 
+                                              key={country} 
+                                              color="geekblue" 
+                                              style={{ 
+                                                fontSize: '11px',
+                                                padding: '4px 10px',
+                                                borderRadius: '4px',
+                                                fontWeight: 500,
+                                                border: 'none',
+                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                              }}
+                                              title={country}
+                                            >
+                                              {COUNTRIES_MAP[country] || country}
+                                            </Tag>
+                                          ))}
+                                        </Space>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+
+                              {/* Analysis Template Tags */}
+                              {(() => {
+                                const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
+                                const templateCodes = Object.keys(allResults);
+
+                                if (templateCodes.length > 0) {
+                                  return (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Analysis Template
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
+                                        {templateCodes.map(templateCode => (
+                                          <Tag 
+                                            key={templateCode} 
+                                            color="green" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                          >
+                                            {templateCode}
+                                          </Tag>
+                                        ))}
+                                      </Space>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
+
+                              {/* Confidence Information */}
+                              {(() => {
+                                const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
+                                if (!classification || !hasValidClassification(classification)) {
+                                  return null;
+                                }
+
+                                const summary = getClassificationSummary(classification);
+                                
+                                if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
+                                  return (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Confidence
+                                      </Text>
+                                      <Space size="middle" style={{ marginTop: '4px' }}>
+                                        {summary.confidence.theme > 0 && (
+                                          <Tag 
+                                            color="orange" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                          >
+                                            Theme: {(summary.confidence.theme * 100).toFixed(0)}%
+                                          </Tag>
+                                        )}
+                                        {summary.confidence.event > 0 && (
+                                          <Tag 
+                                            color="orange" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                          >
+                                            Event: {(summary.confidence.event * 100).toFixed(0)}%
+                                          </Tag>
+                                        )}
+                                      </Space>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
+
+                              {/* Unified Themes */}
+                              {(() => {
+                                if (!hasValidUnifiedThemes(state.selectedNews.unified_themes)) {
+                                  return null;
+                                }
+
+                                const groupedThemes = groupThemesByCanonicalName(state.selectedNews.unified_themes || []);
+                                
+                                if (groupedThemes.size === 0) {
+                                  return null;
+                                }
+
+                                return (
+                                  <div style={{ 
+                                    padding: '12px',
+                                    backgroundColor: '#fff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f0f0f0'
+                                  }}>
+                                    <div style={{ marginBottom: '10px' }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        fontWeight: 500,
+                                        marginRight: '8px'
+                                      }}>
+                                        Unified Themes
+                                      </Text>
+                                      <Tag 
+                                        color="cyan" 
+                                        style={{ 
+                                          fontSize: '10px',
+                                          padding: '2px 8px',
+                                          borderRadius: '4px',
+                                          fontWeight: 500,
+                                          border: 'none'
+                                        }}
+                                      >
+                                        Multi-Source
+                                      </Tag>
+                                    </div>
+                                    <Space size={[6, 6]} wrap>
+                                      {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
+                                        const displayInfo = getBestThemeDisplay(themes);
+                                        const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
+                                        
+                                        return (
+                                          <Tag 
+                                            key={canonicalName}
+                                            color={qualityColor}
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                              cursor: 'help'
+                                            }}
+                                            title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
+                                          >
+                                            {displayInfo.displayName}
+                                            {displayInfo.isVerified && <span style={{ marginLeft: '4px' }}>✓</span>}
+                                            {displayInfo.isPrimary && <span style={{ marginLeft: '4px' }}>⭐</span>}
+                                            {displayInfo.sources.length > 1 && (
+                                              <Badge 
+                                                count={displayInfo.sources.length} 
+                                                style={{ 
+                                                  backgroundColor: '#52c41a', 
+                                                  fontSize: '8px',
+                                                  height: '14px',
+                                                  lineHeight: '14px',
+                                                  minWidth: '14px',
+                                                  marginLeft: '4px'
+                                                }}
+                                              />
+                                            )}
+                                          </Tag>
+                                        );
+                                      })}
+                                    </Space>
+                                    {/* 来源统计 */}
+                                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                                      <Text style={{ fontSize: '10px', color: '#8c8c8c', marginRight: '8px' }}>
+                                        Sources:
+                                      </Text>
+                                      <Space size={[4, 4]} wrap>
+                                        {Array.from(new Set(state.selectedNews.unified_themes?.map(t => t.source_type) || [])).map(sourceType => {
+                                          const config = getSourceTypeConfig(sourceType);
+                                          return (
+                                            <Tag 
+                                              key={sourceType} 
+                                              color={config.color} 
+                                              style={{ 
+                                                fontSize: '10px',
+                                                padding: '2px 8px',
+                                                borderRadius: '4px',
+                                                border: 'none'
+                                              }}
+                                            >
+                                              {config.icon} {config.label}
+                                            </Tag>
+                                          );
+                                        })}
+                                      </Space>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </Space>
+                          </div>
+                        </>
+                      )}
+
+                      {/* 显示其他模板的结果 */}
+                      {Object.entries(allResults).map(([templateCode, result]) => {
+                        if (preferredSummary && templateCode === preferredSummary.templateCode) return null;
+                        if (templateCode === 'news_classification') return null;
+                        
+                        return (
+                          <Card 
+                            key={templateCode}
+                            title={`AI Analysis (${templateCode})`} 
+                            size="small"
+                            style={{ marginTop: '16px' }}
+                            headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
+                          >
+                            <pre style={{ 
+                              fontSize: '12px', 
+                              whiteSpace: 'pre-wrap', 
+                              wordBreak: 'break-word',
+                              margin: 0
+                            }}>
+                              {typeof result.content === 'string' 
+                                ? result.content 
+                                : JSON.stringify(result.content, null, 2)}
+                            </pre>
+                            <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
+                              <Space size="small">
+                                {result.provider && <span>Provider: {result.provider}</span>}
+                                {result.model && <span>Model: {result.model}</span>}
+                                {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
+                                {result.temperature && <span>Temperature: {result.temperature}</span>}
+                              </Space>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </>
+                  );
+                } else {
+                  return (
+                    <Card 
+                      title="News Content" 
+                      size="small"
+                      headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
+                    >
+                      <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
+                        {state.selectedNews.content 
+                          ? highlightKeywords(state.selectedNews.content)
+                          : 'No content available'}
+                      </div>
+                    </Card>
+                  );
+                }
+              })()}
+            </>
+          )}
+        </Drawer>
+
       {/* 🔥 新增：高级筛选对话框 */}
       <Modal
         title={
@@ -1132,578 +1890,6 @@ const NewsPage: React.FC = () => {
       </Modal>
 
 
-      {/* AI Analysis Details Modal */}
-      <Modal
-        title={
-          <Space>
-            <RobotOutlined style={{ color: '#1890ff' }} />
-            <span>{state.selectedNews?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
-          </Space>
-        }
-        open={state.detailModalVisible}
-        onCancel={() => setState(prev => ({ ...prev, detailModalVisible: false }))}
-        footer={[
-          <Button key="close" onClick={() => setState(prev => ({ ...prev, detailModalVisible: false }))}>
-            Close
-          </Button>,
-          state.selectedNews?.link && (
-            <Button
-              key="original" 
-              type="primary"
-              onClick={() => window.open(state.selectedNews?.link, '_blank')}
-            >
-              View Original
-            </Button>
-          )
-        ]}
-        width={800}
-      >
-        {state.selectedNews && (
-          <>
-            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f5f5f5' }}>
-              <Typography.Title level={5} style={{ marginBottom: '12px' }}>
-                {state.selectedNews.title}
-              </Typography.Title>
-              <Space size="small" wrap>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  <CalendarOutlined /> {state.selectedNews.date ? new Date(state.selectedNews.date).toLocaleString() : 'N/A'}
-                </Text>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  Source: {newsUtils.getSourceDisplayName(state.selectedNews.source) || 'N/A'}
-                </Text>
-              </Space>
-            </Card>
-
-            {(() => {
-              const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
-              const hasAnyAnalysis = Object.keys(allResults).length > 0;
-              // 🔥 使用优先级逻辑获取 summary 模板（支持 CCTV 和通用模板）
-              const preferredSummary = getPreferredSummaryTemplate(state.selectedNews.analysis_result);
-
-              if (hasAnyAnalysis) {
-                return (
-                  <>
-                    {/* 优先显示 summary 模板的结果（支持多种 summary 模板） */}
-                    {preferredSummary && typeof preferredSummary.result.content === 'string' && (
-                      <>
-                        <Card 
-                          title={
-                            <Space>
-                              <span>AI Analysis</span>
-                              <Tag color="blue" style={{ fontSize: '10px' }}>
-                                {preferredSummary.templateCode}
-                              </Tag>
-                            </Space>
-                          }
-                          size="small"
-                          headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
-                        >
-                          <MarkdownRenderer 
-                            content={preferredSummary.result.content}
-                            style={{
-                              fontSize: '12px',
-                              lineHeight: '1.6'
-                            }}
-                          />
-                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
-                            <Space size="small">
-                              {preferredSummary.result.provider && <span>Provider: {preferredSummary.result.provider}</span>}
-                              {preferredSummary.result.model && <span>Model: {preferredSummary.result.model}</span>}
-                              {preferredSummary.result.tokens && <span>Tokens: {preferredSummary.result.tokens.toLocaleString()}</span>}
-                              {preferredSummary.result.temperature && <span>Temperature: {preferredSummary.result.temperature}</span>}
-                            </Space>
-                </div>
-                        </Card>
-
-                        {state.selectedNews.content && (
-                          <Card 
-                            title="Original Content" 
-                            size="small"
-                            style={{ marginTop: '16px' }}
-                            headStyle={{ backgroundColor: '#f5f5f5' }}
-                          >
-                            <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.8' }}>
-                              {highlightKeywords(state.selectedNews.content)}
-                            </div>
-                          </Card>
-                        )}
-
-                        {/* Tags Section - 美化设计，不使用Card */}
-                        <div style={{ 
-                          marginTop: '20px',
-                          padding: '16px',
-                          backgroundColor: '#fafafa',
-                          borderRadius: '8px',
-                          border: '1px solid #e8e8e8'
-                        }}>
-                          <div style={{ 
-                            marginBottom: '16px',
-                            paddingBottom: '12px',
-                            borderBottom: '2px solid #e8e8e8'
-                          }}>
-                            <Text strong style={{ 
-                              fontSize: '13px', 
-                              color: '#1890ff',
-                              fontWeight: 600,
-                              letterSpacing: '0.5px'
-                            }}>
-                              Tags & Metadata
-                            </Text>
-                          </div>
-
-                          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                            {/* Related Tickers */}
-                            {state.selectedNews.symbols && state.selectedNews.symbols.length > 0 && (
-                              <div style={{ 
-                                padding: '12px',
-                                backgroundColor: '#fff',
-                                borderRadius: '6px',
-                                border: '1px solid #f0f0f0'
-                              }}>
-                                <Text strong style={{ 
-                                  fontSize: '11px', 
-                                  color: '#595959',
-                                  display: 'block',
-                                  marginBottom: '10px',
-                                  fontWeight: 500
-                                }}>
-                                  Related Tickers
-                                </Text>
-                                <Space size={[6, 6]} wrap>
-                                  {state.selectedNews.symbols.map(symbol => (
-                                    <Tag 
-                                      key={symbol} 
-                                      color="blue" 
-                                      style={{ 
-                                        fontSize: '11px',
-                                        padding: '4px 10px',
-                                        borderRadius: '4px',
-                                        fontWeight: 500,
-                                        border: 'none',
-                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                      }}
-                                    >
-                                      {symbol}
-                                    </Tag>
-                                  ))}
-                                </Space>
-                              </div>
-                            )}
-
-                            {/* Classification Tags */}
-                            {(() => {
-                              const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
-                              if (!classification || !hasValidClassification(classification)) {
-                                return null;
-                              }
-
-                              const tags = getClassificationTags(classification);
-                              const relatedSectors = getRelatedSectors(classification);
-                              const relatedCountries = getRelatedCountries(classification);
-
-                              return (
-                                <>
-                                  {/* 主要分类标签 */}
-                                  {tags.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: '#fff',
-                                      borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: '#595959',
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Classification Tags
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {tags.map(({ key, config, value, displayValue }) => (
-                                          <Tag 
-                                            key={key} 
-                                            color={config.color} 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                            title={`${config.label}: ${displayValue}`}
-                                          >
-                                            {displayValue}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-
-                                  {/* 相关行业 */}
-                                  {relatedSectors.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: '#fff',
-                                      borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: '#595959',
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Related Sectors
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {relatedSectors.map(sector => (
-                                          <Tag 
-                                            key={sector} 
-                                            color="purple" 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                          >
-                                            {sector}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-
-                                  {/* 相关国家/地区 */}
-                                  {relatedCountries.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: '#fff',
-                                      borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: '#595959',
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Related Countries
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {relatedCountries.map(country => (
-                                          <Tag 
-                                            key={country} 
-                                            color="geekblue" 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                            title={country}
-                                          >
-                                            {COUNTRIES_MAP[country] || country}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
-
-                            {/* Analysis Template Tags */}
-                            {(() => {
-                              const allResults = getAllAnalysisResults(state.selectedNews.analysis_result);
-                              const templateCodes = Object.keys(allResults);
-
-                              if (templateCodes.length > 0) {
-                                return (
-                                  <div style={{ 
-                                    padding: '12px',
-                                    backgroundColor: '#fff',
-                                    borderRadius: '6px',
-                                    border: '1px solid #f0f0f0'
-                                  }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: '#595959',
-                                      display: 'block',
-                                      marginBottom: '10px',
-                                      fontWeight: 500
-                                    }}>
-                                      Analysis Template
-                                    </Text>
-                                    <Space size={[6, 6]} wrap>
-                                      {templateCodes.map(templateCode => (
-                                        <Tag 
-                                          key={templateCode} 
-                                          color="green" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          {templateCode}
-                                        </Tag>
-                                      ))}
-                                    </Space>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })()}
-
-                            {/* Confidence Information */}
-                            {(() => {
-                              const classification = getClassificationFromAnalysis(state.selectedNews.analysis_result);
-                              if (!classification || !hasValidClassification(classification)) {
-                                return null;
-                              }
-
-                              const summary = getClassificationSummary(classification);
-                              
-                              if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
-                                return (
-                                  <div style={{ 
-                                    padding: '12px',
-                                    backgroundColor: '#fff',
-                                    borderRadius: '6px',
-                                    border: '1px solid #f0f0f0'
-                                  }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: '#595959',
-                                      display: 'block',
-                                      marginBottom: '10px',
-                                      fontWeight: 500
-                                    }}>
-                                      Confidence
-                                    </Text>
-                                    <Space size="middle" style={{ marginTop: '4px' }}>
-                                      {summary.confidence.theme > 0 && (
-                                        <Tag 
-                                          color="orange" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          Theme: {(summary.confidence.theme * 100).toFixed(0)}%
-                                        </Tag>
-                                      )}
-                                      {summary.confidence.event > 0 && (
-                                        <Tag 
-                                          color="orange" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          Event: {(summary.confidence.event * 100).toFixed(0)}%
-                                        </Tag>
-                                      )}
-                                    </Space>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })()}
-
-                            {/* Unified Themes (统一主题) */}
-                            {(() => {
-                              if (!hasValidUnifiedThemes(state.selectedNews.unified_themes)) {
-                                return null;
-                              }
-
-                              const groupedThemes = groupThemesByCanonicalName(state.selectedNews.unified_themes || []);
-                              
-                              if (groupedThemes.size === 0) {
-                                return null;
-                              }
-
-                              return (
-                                <div style={{ 
-                                  padding: '12px',
-                                  backgroundColor: '#fff',
-                                  borderRadius: '6px',
-                                  border: '1px solid #f0f0f0'
-                                }}>
-                                  <div style={{ marginBottom: '10px' }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: '#595959',
-                                      fontWeight: 500,
-                                      marginRight: '8px'
-                                    }}>
-                                      Unified Themes
-                                    </Text>
-                                    <Tag 
-                                      color="cyan" 
-                                      style={{ 
-                                        fontSize: '10px',
-                                        padding: '2px 8px',
-                                        borderRadius: '4px',
-                                        fontWeight: 500,
-                                        border: 'none'
-                                      }}
-                                    >
-                                      Multi-Source
-                                    </Tag>
-                                  </div>
-                                  <Space size={[6, 6]} wrap>
-                                    {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
-                                      const displayInfo = getBestThemeDisplay(themes);
-                                      const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
-                                      
-                                      return (
-                                        <Tag 
-                                          key={canonicalName}
-                                          color={qualityColor}
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                                            cursor: 'help'
-                                          }}
-                                          title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
-                                        >
-                                          {displayInfo.displayName}
-                                          {displayInfo.isVerified && <span style={{ marginLeft: '4px' }}>✓</span>}
-                                          {displayInfo.isPrimary && <span style={{ marginLeft: '4px' }}>⭐</span>}
-                                          {displayInfo.sources.length > 1 && (
-                                            <Badge 
-                                              count={displayInfo.sources.length} 
-                                              style={{ 
-                                                backgroundColor: '#52c41a', 
-                                                fontSize: '8px',
-                                                height: '14px',
-                                                lineHeight: '14px',
-                                                minWidth: '14px',
-                                                marginLeft: '4px'
-                                              }}
-                                            />
-                                          )}
-                                        </Tag>
-                                      );
-                                    })}
-                                  </Space>
-                                  {/* 来源统计 */}
-                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
-                                    <Text style={{ fontSize: '10px', color: '#8c8c8c', marginRight: '8px' }}>
-                                      Sources:
-                                    </Text>
-                                    <Space size={[4, 4]} wrap>
-                                      {Array.from(new Set(state.selectedNews.unified_themes?.map(t => t.source_type) || [])).map(sourceType => {
-                                        const config = getSourceTypeConfig(sourceType);
-                                        return (
-                                          <Tag 
-                                            key={sourceType} 
-                                            color={config.color} 
-                                            style={{ 
-                                              fontSize: '10px',
-                                              padding: '2px 8px',
-                                              borderRadius: '4px',
-                                              border: 'none'
-                                            }}
-                                          >
-                                            {config.icon} {config.label}
-                                          </Tag>
-                                        );
-                                      })}
-                                    </Space>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                          </Space>
-                        </div>
-                      </>
-                    )}
-
-                    {/* 显示其他模板的结果 */}
-                    {Object.entries(allResults).map(([templateCode, result]) => {
-                      // 🔥 跳过已经显示的 summary 模板
-                      if (preferredSummary && templateCode === preferredSummary.templateCode) return null;
-                      // 跳过 news_classification（已经显示在 Tags 中）
-                      if (templateCode === 'news_classification') return null;
-                      
-                      return (
-                  <Card 
-                          key={templateCode}
-                          title={`AI Analysis (${templateCode})`} 
-                    size="small"
-                          style={{ marginTop: '16px' }}
-                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
-                        >
-                          <pre style={{ 
-                            fontSize: '12px', 
-                            whiteSpace: 'pre-wrap', 
-                            wordBreak: 'break-word',
-                            margin: 0
-                          }}>
-                            {typeof result.content === 'string' 
-                              ? result.content 
-                              : JSON.stringify(result.content, null, 2)}
-                          </pre>
-                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
-                            <Space size="small">
-                              {result.provider && <span>Provider: {result.provider}</span>}
-                              {result.model && <span>Model: {result.model}</span>}
-                              {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
-                              {result.temperature && <span>Temperature: {result.temperature}</span>}
-                            </Space>
-                    </div>
-                        </Card>
-                      );
-                    })}
-                  </>
-                );
-              } else {
-                return (
-                  <Card 
-                    title="News Content" 
-                    size="small"
-                    headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
-                  >
-                    <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
-                      {state.selectedNews.content 
-                        ? highlightKeywords(state.selectedNews.content)
-                        : 'No content available'}
-                    </div>
-                  </Card>
-                );
-              }
-            })()}
-          </>
-        )}
-      </Modal>
-
       {/* 主题管理模态框 */}
       <ThemeManagementModal
         open={state.themeManagementModalVisible}
@@ -1719,6 +1905,16 @@ const NewsPage: React.FC = () => {
         onClose={() => {
           setState(prev => ({ ...prev, presetsManagerVisible: false }));
           loadPresets(); // 关闭时重新加载预设列表
+        }}
+      />
+
+      {/* 删除新闻Modal */}
+      <DeleteNewsByDateModal
+        visible={state.deleteNewsModalVisible}
+        onClose={() => setState(prev => ({ ...prev, deleteNewsModalVisible: false }))}
+        onSuccess={() => {
+          // 删除成功后刷新新闻列表
+          loadFilteredNews(true);
         }}
       />
     </div>

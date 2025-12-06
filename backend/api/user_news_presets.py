@@ -34,6 +34,18 @@ router = APIRouter(
 
 SYSTEM_PRESETS = [
     {
+        "preset_name": "💎 事实性新闻",
+        "preset_type": "system",
+        "description": "只显示事实性新闻，过滤观点文章",
+        "icon": "💎",
+        "filter_config": {
+            "news_value": ["fact"],
+            "urgency": ["urgent", "timely"],
+            "min_confidence": 0.7
+        },
+        "scope_type": "global"
+    },
+    {
         "preset_name": "⭐ 重要新闻",
         "preset_type": "system",
         "description": "紧急和及时的高相关度新闻",
@@ -51,6 +63,7 @@ SYSTEM_PRESETS = [
         "description": "财报发布和业绩相关新闻",
         "icon": "📊",
         "filter_config": {
+            "news_value": ["fact"],
             "event_types": ["earnings_report", "financial_results"],
             "min_confidence": 0.6
         },

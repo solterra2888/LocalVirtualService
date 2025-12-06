@@ -3,18 +3,21 @@
 新闻API路由 - 基于数据库中的新闻数据
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query, Body
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.schemas.news import (
     NewsResponse,
     NewsListResponse,
     NewsTopicResponse,
     NewsSymbolResponse,
-    NewsTagResponse
+    NewsTagResponse,
+    DeleteNewsByDateRangeRequest,
+    DeleteNewsByDateRangeStats,
+    DeleteNewsByDateRangeResponse
 )
-from backend.auth.jwt_utils import get_current_user
+from backend.auth.jwt_utils import get_current_user, get_current_admin_user
 from backend.database.db_manager import DatabaseManager
 from backend.services.eodhd_news_service import EODHDNewsService, NewsThemeService
 from backend.utils.logger import get_logger
@@ -826,112 +829,418 @@ async def get_news_detail(
     """
     获取指定ID的新闻详情
     """
+    db_conn_params = get_database_config()
+    news_service = NewsService(db_conn_params)
+    
+    conn = news_service.db_manager.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    
     try:
-        db_conn_params = get_database_config()
-        news_service = NewsService(db_conn_params)
+        cursor = conn.cursor()
+        query = """
+            SELECT id, date, title, content, link, source, 
+                   sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
+                   created_at, updated_at, analysis_result
+            FROM news
+            WHERE id = %s
+        """
+        cursor.execute(query, (news_id,))
+        row = cursor.fetchone()
         
-        conn = news_service.db_manager.get_connection()
+        if not row:
+            raise HTTPException(status_code=404, detail="新闻未找到")
+        
+        news_item = {
+            'id': row[0],
+            'date': row[1].isoformat() if row[1] else None,
+            'title': row[2],
+            'content': row[3],
+            'link': row[4],
+            'source': row[5],
+            'sentiment_polarity': row[6],
+            'sentiment_neg': row[7],
+            'sentiment_neu': row[8],
+            'sentiment_pos': row[9],
+            'created_at': row[10].isoformat() if row[10] else None,
+            'updated_at': row[11].isoformat() if row[11] else None,
+            'analysis_result': row[12],  # 添加 analysis_result 字段
+            'symbols': [],
+            'tags': [],
+            'auto_tags': []
+        }
+        
+        # 获取相关股票代码
+        symbol_query = """
+            SELECT nsd.symbol_code
+            FROM news_symbols ns
+            JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
+            WHERE ns.news_id = %s
+        """
+        cursor.execute(symbol_query, (news_id,))
+        symbols = [s[0] for s in cursor.fetchall()]
+        news_item['symbols'] = symbols
+        
+        # 获取相关标签
+        tag_query = """
+            SELECT ntd.tag_name
+            FROM news_tags nt
+            JOIN news_tags_dict ntd ON nt.tag_id = ntd.id
+            WHERE nt.news_id = %s
+        """
+        cursor.execute(tag_query, (news_id,))
+        tags = [t[0] for t in cursor.fetchall()]
+        news_item['tags'] = tags
+        
+        # 获取相关auto tags
+        auto_tag_query = """
+            SELECT nat.tag_name
+            FROM news_auto_tags_relations natr
+            JOIN news_auto_tags nat ON natr.auto_tag_id = nat.id
+            WHERE natr.news_id = %s
+        """
+        cursor.execute(auto_tag_query, (news_id,))
+        auto_tags = [t[0] for t in cursor.fetchall()]
+        news_item['auto_tags'] = auto_tags
+        
+        # 获取投资主题匹配结果
+        theme_query = """
+            SELECT 
+                theme_id, theme_name, category, similarity_score, match_rank
+            FROM news_theme_matches
+            WHERE news_id = %s
+            ORDER BY match_rank ASC
+            LIMIT 5
+        """
+        cursor.execute(theme_query, (news_id,))
+        theme_matches = []
+        for theme_row in cursor.fetchall():
+            theme_matches.append({
+                'theme_id': theme_row[0],
+                'theme_name': theme_row[1],
+                'category': theme_row[2],
+                'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
+                'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
+                'rank': theme_row[4]
+            })
+        news_item['theme_matches'] = theme_matches
+        
+        return news_item
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取新闻详情失败: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ============ 按日期范围删除新闻API ============
+
+@router.post("/delete-by-date-range/preview", response_model=DeleteNewsByDateRangeStats, summary="预览按日期范围删除新闻的统计")
+async def preview_delete_news_by_date_range(
+    request: DeleteNewsByDateRangeRequest,
+    current_user=Depends(get_current_admin_user)
+):
+    """
+    预览按日期范围删除新闻的统计信息
+    
+    **权限要求**: 管理员
+    
+    **注意**: 
+    - 此接口仅预览，不会实际删除数据
+    - 会统计所有将被删除的记录数
+    - 日期范围为左闭右闭区间，包含开始和结束日期当天的所有新闻
+    """
+    try:
+        # 解析日期（左闭右闭区间：包含开始和结束日期）
+        try:
+            start_datetime = datetime.strptime(request.start_date, "%Y-%m-%d")
+            # 结束日期+1天，转换为左闭右开区间以包含结束日期当天的所有数据
+            end_datetime = datetime.strptime(request.end_date, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"日期格式错误: {str(e)}")
+        
+        # 验证日期范围
+        if start_datetime >= end_datetime:
+            raise HTTPException(status_code=400, detail="开始日期必须早于结束日期")
+        
+        # 获取数据库连接
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
         if not conn:
             raise HTTPException(status_code=500, detail="数据库连接失败")
         
         try:
             cursor = conn.cursor()
-            query = """
-                SELECT id, date, title, content, link, source, 
-                       sentiment_polarity, sentiment_neg, sentiment_neu, sentiment_pos,
-                       created_at, updated_at, analysis_result
-                FROM news
-                WHERE id = %s
-            """
-            cursor.execute(query, (news_id,))
-            row = cursor.fetchone()
             
-            if not row:
-                raise HTTPException(status_code=404, detail="新闻未找到")
+            # 统计将要删除的记录数
+            # 1. 统计news数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM news
+                WHERE date >= %s AND date < %s
+            """, (start_datetime, end_datetime))
+            news_count = cursor.fetchone()[0]
             
-            news_item = {
-                'id': row[0],
-                'date': row[1].isoformat() if row[1] else None,
-                'title': row[2],
-                'content': row[3],
-                'link': row[4],
-                'source': row[5],
-                'sentiment_polarity': row[6],
-                'sentiment_neg': row[7],
-                'sentiment_neu': row[8],
-                'sentiment_pos': row[9],
-                'created_at': row[10].isoformat() if row[10] else None,
-                'updated_at': row[11].isoformat() if row[11] else None,
-                'analysis_result': row[12],  # 添加 analysis_result 字段
-                'symbols': [],
-                'tags': [],
-                'auto_tags': []
-            }
+            # 2. 统计news_symbols数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_symbols
+                WHERE news_id IN (
+                    SELECT id FROM news
+                    WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_symbols_count = cursor.fetchone()[0]
             
-            # 获取相关股票代码
-            symbol_query = """
-                SELECT nsd.symbol_code
-                FROM news_symbols ns
-                JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-                WHERE ns.news_id = %s
-            """
-            cursor.execute(symbol_query, (news_id,))
-            symbols = [s[0] for s in cursor.fetchall()]
-            news_item['symbols'] = symbols
+            # 3. 统计news_tags数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_tags
+                WHERE news_id IN (
+                    SELECT id FROM news
+                    WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_tags_count = cursor.fetchone()[0]
             
-            # 获取相关标签
-            tag_query = """
-                SELECT ntd.tag_name
-                FROM news_tags nt
-                JOIN news_tags_dict ntd ON nt.tag_id = ntd.id
-                WHERE nt.news_id = %s
-            """
-            cursor.execute(tag_query, (news_id,))
-            tags = [t[0] for t in cursor.fetchall()]
-            news_item['tags'] = tags
+            # 4. 统计news_theme_matches数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_theme_matches
+                WHERE news_id IN (
+                    SELECT id FROM news
+                    WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_theme_matches_count = cursor.fetchone()[0]
             
-            # 获取相关auto tags
-            auto_tag_query = """
-                SELECT nat.tag_name
-                FROM news_auto_tags_relations natr
-                JOIN news_auto_tags nat ON natr.auto_tag_id = nat.id
-                WHERE natr.news_id = %s
-            """
-            cursor.execute(auto_tag_query, (news_id,))
-            auto_tags = [t[0] for t in cursor.fetchall()]
-            news_item['auto_tags'] = auto_tags
+            # 5. 统计news_themes_unified数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_themes_unified
+                WHERE news_id IN (
+                    SELECT id FROM news
+                    WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_themes_unified_count = cursor.fetchone()[0]
             
-            # 获取投资主题匹配结果
-            theme_query = """
-                SELECT 
-                    theme_id, theme_name, category, similarity_score, match_rank
-                FROM news_theme_matches
-                WHERE news_id = %s
-                ORDER BY match_rank ASC
-                LIMIT 5
-            """
-            cursor.execute(theme_query, (news_id,))
-            theme_matches = []
-            for theme_row in cursor.fetchall():
-                theme_matches.append({
-                    'theme_id': theme_row[0],
-                    'theme_name': theme_row[1],
-                    'category': theme_row[2],
-                    'similarity': float(theme_row[3]) if theme_row[3] is not None else 0.0,
-                    'confidence': float(theme_row[3]) if theme_row[3] is not None else 0.0,  # 使用相似度作为置信度
-                    'rank': theme_row[4]
-                })
-            news_item['theme_matches'] = theme_matches
+            # 6. 统计project_news_tracking数量
+            cursor.execute("""
+                SELECT COUNT(*) FROM project_news_tracking
+                WHERE news_id IN (
+                    SELECT id FROM news
+                    WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            project_news_tracking_count = cursor.fetchone()[0]
             
-            return news_item
+            total_count = (
+                news_count + 
+                news_symbols_count + 
+                news_tags_count + 
+                news_theme_matches_count + 
+                news_themes_unified_count + 
+                project_news_tracking_count
+            )
             
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"获取新闻详情失败: {str(e)}")
+            logger.info(f"预览删除统计 - 用户: {current_user.username}, 日期范围: {request.start_date} ~ {request.end_date}, "
+                       f"news: {news_count}, 总计: {total_count}")
+            
+            return DeleteNewsByDateRangeStats(
+                news_count=news_count,
+                news_symbols_count=news_symbols_count,
+                news_tags_count=news_tags_count,
+                news_theme_matches_count=news_theme_matches_count,
+                news_themes_unified_count=news_themes_unified_count,
+                project_news_tracking_count=project_news_tracking_count,
+                total_count=total_count
+            )
+            
         finally:
             cursor.close()
             conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览删除统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"预览删除统计失败: {str(e)}")
+
+
+@router.delete("/delete-by-date-range", response_model=DeleteNewsByDateRangeResponse, summary="按日期范围删除新闻")
+async def delete_news_by_date_range(
+    request: DeleteNewsByDateRangeRequest = Body(...),
+    current_user=Depends(get_current_admin_user)
+):
+    """
+    按日期范围删除新闻及其所有关联数据
+    
+    **权限要求**: 管理员
+    
+    **注意事项**:
+    - 此操作不可逆，请谨慎使用
+    - 会级联删除以下关联表的数据：
+      - news_symbols (新闻-股票关联)
+      - news_tags (新闻-标签关联)
+      - news_theme_matches (新闻-主题匹配)
+      - news_themes_unified (新闻-统一主题)
+      - project_news_tracking (项目新闻跟踪)
+    - 必须将 confirm 字段设置为 true 才能执行删除
+    - 建议先调用预览接口查看统计信息
+    
+    **删除过程**:
+    1. 验证权限和参数
+    2. 统计将要删除的记录数
+    3. 在事务中执行删除操作
+    4. 记录操作日志
+    
+    **日期范围说明**:
+    - 左闭右闭区间，包含开始和结束日期当天的所有新闻
+    - 例如：start_date=2025-12-05, end_date=2025-12-06 将删除这两天的所有新闻
+    """
+    try:
+        # 验证确认标志
+        if not request.confirm:
+            raise HTTPException(
+                status_code=400, 
+                detail="必须将 confirm 字段设置为 true 才能执行删除操作"
+            )
+        
+        # 解析日期（左闭右闭区间：包含开始和结束日期）
+        try:
+            start_datetime = datetime.strptime(request.start_date, "%Y-%m-%d")
+            # 结束日期+1天，转换为左闭右开区间以包含结束日期当天的所有数据
+            end_datetime = datetime.strptime(request.end_date, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"日期格式错误: {str(e)}")
+        
+        # 验证日期范围
+        if start_datetime >= end_datetime:
+            raise HTTPException(status_code=400, detail="开始日期必须早于结束日期")
+        
+        # 获取数据库连接
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 开始事务
+            conn.autocommit = False
+            
+            # 1. 先统计将要删除的记录数（用于返回）
+            cursor.execute("""
+                SELECT COUNT(*) FROM news
+                WHERE date >= %s AND date < %s
+            """, (start_datetime, end_datetime))
+            news_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_symbols
+                WHERE news_id IN (
+                    SELECT id FROM news WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_symbols_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_tags
+                WHERE news_id IN (
+                    SELECT id FROM news WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_tags_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_theme_matches
+                WHERE news_id IN (
+                    SELECT id FROM news WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_theme_matches_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM news_themes_unified
+                WHERE news_id IN (
+                    SELECT id FROM news WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            news_themes_unified_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM project_news_tracking
+                WHERE news_id IN (
+                    SELECT id FROM news WHERE date >= %s AND date < %s
+                )
+            """, (start_datetime, end_datetime))
+            project_news_tracking_count = cursor.fetchone()[0]
+            
+            total_count = (
+                news_count + 
+                news_symbols_count + 
+                news_tags_count + 
+                news_theme_matches_count + 
+                news_themes_unified_count + 
+                project_news_tracking_count
+            )
+            
+            # 2. 执行删除操作（由于外键CASCADE，只需删除news表即可）
+            logger.info(f"开始删除新闻 - 用户: {current_user.username}, 日期范围: {request.start_date} ~ {request.end_date}, "
+                       f"将删除 {news_count} 条新闻，总计 {total_count} 条记录")
+            
+            cursor.execute("""
+                DELETE FROM news
+                WHERE date >= %s AND date < %s
+            """, (start_datetime, end_datetime))
+            
+            deleted_news_count = cursor.rowcount
+            
+            # 提交事务
+            conn.commit()
+            
+            logger.info(f"删除新闻完成 - 用户: {current_user.username}, "
+                       f"实际删除 {deleted_news_count} 条新闻，预估级联删除 {total_count} 条记录")
+            
+            # 3. 返回删除统计
+            executed_at = datetime.now().isoformat()
+            
+            return DeleteNewsByDateRangeResponse(
+                success=True,
+                message=f"成功删除 {deleted_news_count} 条新闻及其关联数据",
+                deleted_stats=DeleteNewsByDateRangeStats(
+                    news_count=news_count,
+                    news_symbols_count=news_symbols_count,
+                    news_tags_count=news_tags_count,
+                    news_theme_matches_count=news_theme_matches_count,
+                    news_themes_unified_count=news_themes_unified_count,
+                    project_news_tracking_count=project_news_tracking_count,
+                    total_count=total_count
+                ),
+                start_date=request.start_date,
+                end_date=request.end_date,
+                executed_at=executed_at,
+                executed_by=current_user.username
+            )
+            
+        except Exception as e:
+            # 回滚事务
+            conn.rollback()
+            logger.error(f"删除新闻失败，已回滚 - 用户: {current_user.username}, 错误: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"删除新闻失败: {str(e)}")
+        finally:
+            cursor.close()
+            conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除新闻失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除新闻失败: {str(e)}")
             
     except HTTPException:
         raise

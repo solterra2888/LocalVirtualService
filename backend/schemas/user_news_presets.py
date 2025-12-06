@@ -8,25 +8,86 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
+class DimensionOperators(BaseModel):
+    """各维度内部逻辑操作符配置"""
+    news_value: Optional[str] = Field(None, description="news_value维度内部逻辑: OR或AND")
+    categories: Optional[str] = Field(None, description="categories维度内部逻辑: OR或AND")
+    event_types: Optional[str] = Field(None, description="event_types维度内部逻辑: OR或AND")
+    impact_scopes: Optional[str] = Field(None, description="impact_scopes维度内部逻辑: OR或AND")
+    urgency: Optional[str] = Field(None, description="urgency维度内部逻辑: OR或AND")
+    related_sectors: Optional[str] = Field(None, description="related_sectors维度内部逻辑: OR或AND")
+    related_countries: Optional[str] = Field(None, description="related_countries维度内部逻辑: OR或AND")
+    source_types: Optional[str] = Field(None, description="source_types维度内部逻辑: OR或AND")
+    scheduler_sources: Optional[str] = Field(None, description="scheduler_sources维度内部逻辑: OR或AND")
+
+
 class FilterConfig(BaseModel):
     """筛选条件配置"""
+    # 新闻价值分类 (新增)
+    news_value: Optional[List[str]] = Field(None, description="新闻价值类型: fact(事实性新闻), opinion(观点性文章)")
+    
+    # 主题分类维度
+    categories: Optional[List[str]] = Field(None, description="主要主题分类 (political, financial, technology...)")
     event_types: Optional[List[str]] = Field(None, description="事件类型列表")
-    urgency: Optional[List[str]] = Field(None, description="时效性列表: urgent, timely, routine")
     impact_scopes: Optional[List[str]] = Field(None, description="影响范围列表: company_specific, sector_wide, market_wide, global")
-    min_confidence: Optional[float] = Field(0.6, ge=0.0, le=1.0, description="最低置信度")
-    only_primary: Optional[bool] = Field(False, description="只显示主要主题")
+    urgency: Optional[List[str]] = Field(None, description="时效性列表: urgent, timely, routine")
+    related_sectors: Optional[List[str]] = Field(None, description="相关行业列表")
+    related_countries: Optional[List[str]] = Field(None, description="相关国家/地区列表")
+    
+    # 来源筛选
     source_types: Optional[List[str]] = Field(None, description="来源类型: eodhd_auto_tag, vector_retrieval, llm_classification")
-    custom_logic: Optional[str] = Field("AND", description="多条件逻辑: AND | OR")
+    scheduler_sources: Optional[List[str]] = Field(None, description="调度器来源: eodhd_news, watchlist_news, cctv_news")
+    
+    # 🔥 新增：Ticker过滤
+    ticker_symbols: Optional[List[str]] = Field(None, description="指定ticker符号列表，如: ['AAPL.US', '0700.HK']")
+    use_watchlist: Optional[bool] = Field(None, description="是否使用用户watchlist中的ticker")
+    watchlist_groups: Optional[List[str]] = Field(None, description="使用特定watchlist分组，如: ['Technology', 'Healthcare']")
+    ticker_filter_mode: Optional[str] = Field(None, description="Ticker过滤模式: 'include'(包含) | 'exclude'(排除)")
+    
+    # 其他选项
+    min_confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="最低置信度")
+    only_primary: Optional[bool] = Field(None, description="只显示主要主题")
+    market: Optional[str] = Field(None, description="市场: HK/US/CN/GLOBAL")
+    
+    # 🔥 新增：各维度内部逻辑操作符（默认 OR）
+    dimension_operators: Optional[DimensionOperators] = Field(None, description="各维度内部逻辑操作符配置")
+    
+    # 逻辑关系（暂时保留，未来可能用到）
+    custom_logic: Optional[str] = Field(None, description="多条件逻辑: AND | OR")
+    
+    @validator('ticker_filter_mode')
+    def validate_ticker_filter_mode(cls, v):
+        if v and v not in ['include', 'exclude']:
+            raise ValueError('ticker_filter_mode must be either "include" or "exclude"')
+        return v
+    
+    @validator('watchlist_groups')
+    def validate_watchlist_groups(cls, v, values):
+        if v and not values.get('use_watchlist'):
+            raise ValueError('watchlist_groups requires use_watchlist to be True')
+        return v
     
     class Config:
+        # 允许额外字段，防止未知字段被丢弃
+        extra = 'allow'
         schema_extra = {
             "example": {
+                "news_value": ["fact"],
+                "categories": ["financial", "technology"],
                 "event_types": ["earnings_report", "merger_acquisition"],
                 "urgency": ["urgent", "timely"],
                 "impact_scopes": ["company_specific"],
+                "related_countries": ["CN", "JP"],
                 "min_confidence": 0.7,
                 "only_primary": True,
-                "custom_logic": "AND"
+                "dimension_operators": {
+                    "news_value": "OR",
+                    "categories": "OR",
+                    "related_countries": "AND"
+                },
+                "ticker_symbols": ["AAPL.US", "TSLA.US"],
+                "use_watchlist": False,
+                "ticker_filter_mode": "include"
             }
         }
 

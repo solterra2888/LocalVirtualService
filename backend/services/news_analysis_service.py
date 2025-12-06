@@ -400,6 +400,7 @@ class NewsAnalysisService:
                             
                             # 提取所有维度
                             dimensions = {
+                                'news_value': classification_data.get('news_value'),
                                 'primary_theme': classification_data.get('primary_theme'),
                                 'event_type': classification_data.get('event_type'),
                                 'impact_scope': classification_data.get('impact_scope'),
@@ -412,6 +413,7 @@ class NewsAnalysisService:
                             
                             # 提取置信度
                             confidence_scores = {
+                                'news_value_confidence': classification_data.get('news_value_confidence', 0.8),
                                 'primary_theme_confidence': classification_data.get('primary_theme_confidence', 0.8),
                                 'event_type_confidence': classification_data.get('event_type_confidence', 0.8),
                             }

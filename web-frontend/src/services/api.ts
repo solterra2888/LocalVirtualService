@@ -110,8 +110,8 @@ export const api = {
   patch: <T = any>(url: string, data?: any): Promise<T> => 
     apiClient.patch(url, data).then(extractData),
   
-  delete: <T = any>(url: string): Promise<T> => 
-    apiClient.delete(url).then(extractData),
+  delete: <T = any>(url: string, config?: any): Promise<T> => 
+    apiClient.delete(url, config).then(extractData),
   
   // 文件上传专用方法
   upload: <T = any>(url: string, formData: FormData): Promise<T> => 

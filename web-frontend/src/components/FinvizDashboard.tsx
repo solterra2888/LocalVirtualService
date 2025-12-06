@@ -39,6 +39,7 @@ import {
   Segmented,
   Checkbox,
   Tooltip,
+  Badge,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -47,8 +48,19 @@ import {
   getClassificationFromAnalysis, 
   getClassificationTags, 
   hasValidClassification,
-  getClassificationSummary
+  getClassificationSummary,
+  getRelatedSectors,
+  getRelatedCountries,
+  COUNTRIES_MAP
 } from '../utils/newsClassificationHelper';
+import {
+  hasValidUnifiedThemes,
+  groupThemesByCanonicalName,
+  getBestThemeDisplay,
+  getSourceTypeConfig,
+  formatQualityScore,
+  getQualityScoreColor
+} from '../utils/unifiedThemeHelper';
 import {
   SearchOutlined, 
   FileTextOutlined,
@@ -85,7 +97,7 @@ import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type Watchli
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
 import { filesAPI } from '../services/files';
 import { newsAPI } from '../services/news';
-import type { NewsTheme } from '../types/news';
+import type { NewsTheme, NewsUnifiedTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
 import AddToCustomGroupModal from './AddToCustomGroupModal';
@@ -2937,114 +2949,421 @@ const FinvizDashboard: React.FC = () => {
                           </Card>
                         )}
 
-                        {/* Tags Card */}
-                        <Card 
-                          title="Tags" 
-                          size="small"
-                          style={{ marginTop: '16px' }}
-                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
-                        >
-                              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                                {/* Related Tickers */}
-                                {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
-                                  <div>
-                                    <Text strong style={{ fontSize: '9px', color: '#666' }}>Related Tickers:</Text>
-                                    <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                                      {selectedNewsForAnalysis.symbols.map(symbol => (
-                                        <Tag key={symbol} color="default" style={{ fontSize: '9px' }}>
-                                          {symbol}
+                        {/* Tags Section - 美化设计，不使用Card */}
+                        <div style={{ 
+                          marginTop: '20px',
+                          padding: '16px',
+                          backgroundColor: '#fafafa',
+                          borderRadius: '8px',
+                          border: '1px solid #e8e8e8'
+                        }}>
+                          <div style={{ 
+                            marginBottom: '16px',
+                            paddingBottom: '12px',
+                            borderBottom: '2px solid #e8e8e8'
+                          }}>
+                            <Text strong style={{ 
+                              fontSize: '13px', 
+                              color: '#1890ff',
+                              fontWeight: 600,
+                              letterSpacing: '0.5px'
+                            }}>
+                              Tags & Metadata
+                            </Text>
+                          </div>
+
+                          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                            {/* Related Tickers */}
+                            {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
+                              <div style={{ 
+                                padding: '12px',
+                                backgroundColor: '#fff',
+                                borderRadius: '6px',
+                                border: '1px solid #f0f0f0'
+                              }}>
+                                <Text strong style={{ 
+                                  fontSize: '11px', 
+                                  color: '#595959',
+                                  display: 'block',
+                                  marginBottom: '10px',
+                                  fontWeight: 500
+                                }}>
+                                  Related Tickers
+                                </Text>
+                                <Space size={[6, 6]} wrap>
+                                  {selectedNewsForAnalysis.symbols.map(symbol => (
+                                    <Tag 
+                                      key={symbol} 
+                                      color="blue" 
+                                      style={{ 
+                                        fontSize: '11px',
+                                        padding: '4px 10px',
+                                        borderRadius: '4px',
+                                        fontWeight: 500,
+                                        border: 'none',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                      }}
+                                    >
+                                      {symbol}
+                                    </Tag>
+                                  ))}
+                                </Space>
+                              </div>
+                            )}
+
+                            {/* Classification Tags */}
+                            {(() => {
+                              const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
+                              if (!classification || !hasValidClassification(classification)) {
+                                return null;
+                              }
+
+                              const tags = getClassificationTags(classification);
+                              const relatedSectors = getRelatedSectors(classification);
+                              const relatedCountries = getRelatedCountries(classification);
+
+                              return (
+                                <>
+                                  {/* 主要分类标签 */}
+                                  {tags.length > 0 && (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Classification Tags
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
+                                        {tags.map(({ key, config, value, displayValue }) => (
+                                          <Tag 
+                                            key={key} 
+                                            color={config.color} 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                            title={`${config.label}: ${displayValue}`}
+                                          >
+                                            {displayValue}
+                                          </Tag>
+                                        ))}
+                                      </Space>
+                                    </div>
+                                  )}
+
+                                  {/* 相关行业 */}
+                                  {relatedSectors.length > 0 && (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Related Sectors
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
+                                        {relatedSectors.map(sector => (
+                                          <Tag 
+                                            key={sector} 
+                                            color="purple" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                          >
+                                            {sector}
+                                          </Tag>
+                                        ))}
+                                      </Space>
+                                    </div>
+                                  )}
+
+                                  {/* 相关国家/地区 */}
+                                  {relatedCountries.length > 0 && (
+                                    <div style={{ 
+                                      padding: '12px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f0f0f0'
+                                    }}>
+                                      <Text strong style={{ 
+                                        fontSize: '11px', 
+                                        color: '#595959',
+                                        display: 'block',
+                                        marginBottom: '10px',
+                                        fontWeight: 500
+                                      }}>
+                                        Related Countries
+                                      </Text>
+                                      <Space size={[6, 6]} wrap>
+                                        {relatedCountries.map(country => (
+                                          <Tag 
+                                            key={country} 
+                                            color="geekblue" 
+                                            style={{ 
+                                              fontSize: '11px',
+                                              padding: '4px 10px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                              border: 'none',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}
+                                            title={country}
+                                          >
+                                            {COUNTRIES_MAP[country] || country}
+                                          </Tag>
+                                        ))}
+                                      </Space>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            {/* Analysis Template Tags */}
+                            {(() => {
+                              const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
+                              const templateCodes = Object.keys(allResults);
+
+                              if (templateCodes.length > 0) {
+                                return (
+                                  <div style={{ 
+                                    padding: '12px',
+                                    backgroundColor: '#fff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f0f0f0'
+                                  }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      display: 'block',
+                                      marginBottom: '10px',
+                                      fontWeight: 500
+                                    }}>
+                                      Analysis Template
+                                    </Text>
+                                    <Space size={[6, 6]} wrap>
+                                      {templateCodes.map(templateCode => (
+                                        <Tag 
+                                          key={templateCode} 
+                                          color="green" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
+                                          {templateCode}
                                         </Tag>
                                       ))}
                                     </Space>
                                   </div>
-                                )}
+                                );
+                              }
+                              return null;
+                            })()}
 
-                                {/* Classification Tags */}
-                                {(() => {
-                                  const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
-                                  if (!classification || !hasValidClassification(classification)) {
-                                    return null;
-                                  }
+                            {/* Confidence Information */}
+                            {(() => {
+                              const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
+                              if (!classification || !hasValidClassification(classification)) {
+                                return null;
+                              }
 
-                                  const tags = getClassificationTags(classification);
+                              const summary = getClassificationSummary(classification);
+                              
+                              if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
+                                return (
+                                  <div style={{ 
+                                    padding: '12px',
+                                    backgroundColor: '#fff',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f0f0f0'
+                                  }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      display: 'block',
+                                      marginBottom: '10px',
+                                      fontWeight: 500
+                                    }}>
+                                      Confidence
+                                    </Text>
+                                    <Space size="middle" style={{ marginTop: '4px' }}>
+                                      {summary.confidence.theme > 0 && (
+                                        <Tag 
+                                          color="orange" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
+                                          Theme: {(summary.confidence.theme * 100).toFixed(0)}%
+                                        </Tag>
+                                      )}
+                                      {summary.confidence.event > 0 && (
+                                        <Tag 
+                                          color="orange" 
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                          }}
+                                        >
+                                          Event: {(summary.confidence.event * 100).toFixed(0)}%
+                                        </Tag>
+                                      )}
+                                    </Space>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
 
-                                  return (
-                                    <>
-                                      {/* 主要分类标签 */}
-                                      <div>
-                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Classification Tags:</Text>
-                                        <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                                          {tags.map(({ key, config, value, displayValue }) => (
-                                            <Tag 
-                                              key={key} 
-                                              color={config.color} 
-                                              style={{ fontSize: '9px' }}
-                                              title={`${config.label}: ${displayValue}`}
-                                            >
-                                              {displayValue}
-                                            </Tag>
-                                          ))}
-                                        </Space>
-                                      </div>
+                            {/* Unified Themes (统一主题) */}
+                            {(() => {
+                              if (!hasValidUnifiedThemes(selectedNewsForAnalysis.unified_themes)) {
+                                return null;
+                              }
 
-                                    </>
-                                  );
-                                })()}
+                              const groupedThemes = groupThemesByCanonicalName(selectedNewsForAnalysis.unified_themes || []);
+                              
+                              if (groupedThemes.size === 0) {
+                                return null;
+                              }
 
-                                {/* Analysis Template Tags */}
-                                {(() => {
-                                  const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
-                                  const templateCodes = Object.keys(allResults);
-                                  
-                                  if (templateCodes.length > 0) {
-                                    return (
-                                      <div>
-                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Analysis Template:</Text>
-                                        <Space size={[4, 4]} wrap style={{ marginTop: '12px' }}>
-                                          {templateCodes.map(templateCode => (
-                                            <Tag key={templateCode} color="green" style={{ fontSize: '9px' }}>
-                                              {templateCode}
-                                            </Tag>
-                                          ))}
-                                        </Space>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-
-                                {/* Confidence Information */}
-                                {(() => {
-                                  const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
-                                  if (!classification || !hasValidClassification(classification)) {
-                                    return null;
-                                  }
-
-                                  const summary = getClassificationSummary(classification);
-                                  
-                                  if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
-                                    return (
-                                      <div>
-                                        <Text strong style={{ fontSize: '9px', color: '#666' }}>Confidence:</Text>
-                                        <Space size="small" style={{ marginTop: '4px' }}>
-                                          {summary.confidence.theme > 0 && (
-                                            <Text style={{ fontSize: '9px' }}>
-                                              Theme: {(summary.confidence.theme * 100).toFixed(0)}%
-                                            </Text>
+                              return (
+                                <div style={{ 
+                                  padding: '12px',
+                                  backgroundColor: '#fff',
+                                  borderRadius: '6px',
+                                  border: '1px solid #f0f0f0'
+                                }}>
+                                  <div style={{ marginBottom: '10px' }}>
+                                    <Text strong style={{ 
+                                      fontSize: '11px', 
+                                      color: '#595959',
+                                      fontWeight: 500,
+                                      marginRight: '8px'
+                                    }}>
+                                      Unified Themes
+                                    </Text>
+                                    <Tag 
+                                      color="cyan" 
+                                      style={{ 
+                                        fontSize: '10px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontWeight: 500,
+                                        border: 'none'
+                                      }}
+                                    >
+                                      Multi-Source
+                                    </Tag>
+                                  </div>
+                                  <Space size={[6, 6]} wrap>
+                                    {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
+                                      const displayInfo = getBestThemeDisplay(themes);
+                                      const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
+                                      
+                                      return (
+                                        <Tag 
+                                          key={canonicalName}
+                                          color={qualityColor}
+                                          style={{ 
+                                            fontSize: '11px',
+                                            padding: '4px 10px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            border: 'none',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                            cursor: 'help'
+                                          }}
+                                          title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
+                                        >
+                                          {displayInfo.displayName}
+                                          {displayInfo.isVerified && <span style={{ marginLeft: '4px' }}>✓</span>}
+                                          {displayInfo.isPrimary && <span style={{ marginLeft: '4px' }}>⭐</span>}
+                                          {displayInfo.sources.length > 1 && (
+                                            <Badge 
+                                              count={displayInfo.sources.length} 
+                                              style={{ 
+                                                backgroundColor: '#52c41a', 
+                                                fontSize: '8px',
+                                                height: '14px',
+                                                lineHeight: '14px',
+                                                minWidth: '14px',
+                                                marginLeft: '4px'
+                                              }}
+                                            />
                                           )}
-                                          {summary.confidence.event > 0 && (
-                                            <Text style={{ fontSize: '9px' }}>
-                                              Event: {(summary.confidence.event * 100).toFixed(0)}%
-                                            </Text>
-                                          )}
-                                        </Space>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                              </Space>
-                            </Card>
+                                        </Tag>
+                                      );
+                                    })}
+                                  </Space>
+                                  {/* 来源统计 */}
+                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                                    <Text style={{ fontSize: '10px', color: '#8c8c8c', marginRight: '8px' }}>
+                                      Sources:
+                                    </Text>
+                                    <Space size={[4, 4]} wrap>
+                                      {Array.from(new Set(selectedNewsForAnalysis.unified_themes?.map((t: NewsUnifiedTheme) => t.source_type) || [])).map((sourceType: string) => {
+                                        const config = getSourceTypeConfig(sourceType);
+                                        return (
+                                          <Tag 
+                                            key={sourceType} 
+                                            color={config.color} 
+                                            style={{ 
+                                              fontSize: '10px',
+                                              padding: '2px 8px',
+                                              borderRadius: '4px',
+                                              border: 'none'
+                                            }}
+                                          >
+                                            {config.icon} {config.label}
+                                          </Tag>
+                                        );
+                                      })}
+                                    </Space>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </Space>
+                        </div>
                       </>
                     )}
 

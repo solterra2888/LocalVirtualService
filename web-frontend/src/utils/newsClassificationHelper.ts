@@ -7,6 +7,8 @@ import type { NewsAnalysisResult } from '../types/news';
 
 // 分类数据结构
 export interface NewsClassificationData {
+  news_value?: string;  // 新增：新闻价值类型 (fact/opinion)
+  news_value_confidence?: number;  // 新增：新闻价值置信度
   primary_theme: string;
   primary_theme_confidence: number;
   event_type: string;
@@ -28,6 +30,11 @@ export interface ClassificationTagConfig {
 
 // 分类字段配置映射
 export const CLASSIFICATION_CONFIG: Record<string, ClassificationTagConfig> = {
+  news_value: {
+    key: 'news_value',
+    label: 'News Value',
+    color: 'purple'
+  },
   primary_theme: {
     key: 'primary_theme',
     label: '主题',
@@ -52,6 +59,12 @@ export const CLASSIFICATION_CONFIG: Record<string, ClassificationTagConfig> = {
     color: 'red',
     icon: '⚡'
   }
+};
+
+// 新闻价值类型映射
+export const NEWS_VALUE_MAP: Record<string, string> = {
+  'fact': 'Fact',
+  'opinion': 'Opinion'
 };
 
 // 主题映射
@@ -80,6 +93,7 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   'investment_funding': '投资融资',
   'dividend_buyback': '分红回购',
   'outlook_guidance': '展望指引',
+  'analyst_rating': '分析师评级',  // 新增
   'general_news': '一般新闻'
 };
 
@@ -207,6 +221,17 @@ export function getClassificationTags(classification: NewsClassificationData): A
     displayValue: string;
   }> = [];
 
+  // 新闻价值标签（优先显示）
+  if (classification.news_value) {
+    const displayValue = classification.news_value === 'fact' ? 'Fact' : classification.news_value === 'opinion' ? 'Opinion' : classification.news_value;
+    tags.push({
+      key: 'news_value',
+      config: CLASSIFICATION_CONFIG.news_value,
+      value: classification.news_value,
+      displayValue: displayValue
+    });
+  }
+
   // 主题标签
   if (classification.primary_theme) {
     tags.push({
@@ -295,6 +320,7 @@ export function getRelatedCountries(classification: NewsClassificationData | nul
  * @returns 摘要信息
  */
 export function getClassificationSummary(classification: NewsClassificationData | null): {
+  newsValue?: string;
   theme: string;
   event: string;
   impact: string;
@@ -302,6 +328,7 @@ export function getClassificationSummary(classification: NewsClassificationData 
   sectors: string[];
   countries: string[];
   confidence: {
+    newsValue?: number;
     theme: number;
     event: number;
   };
@@ -311,6 +338,7 @@ export function getClassificationSummary(classification: NewsClassificationData 
   }
 
   return {
+    newsValue: classification!.news_value,
     theme: classification!.primary_theme,
     event: classification!.event_type,
     impact: classification!.impact_scope,
@@ -318,9 +346,28 @@ export function getClassificationSummary(classification: NewsClassificationData 
     sectors: classification!.related_sectors || [],
     countries: classification!.related_countries || [],
     confidence: {
+      newsValue: classification!.news_value_confidence,
       theme: classification!.primary_theme_confidence || 0,
       event: classification!.event_type_confidence || 0
     }
   };
+}
+
+/**
+ * 判断是否为事实性新闻
+ * @param classification - 分类数据
+ * @returns 是否为事实性新闻
+ */
+export function isFactualNews(classification: NewsClassificationData | null): boolean {
+  return classification?.news_value === 'fact';
+}
+
+/**
+ * 判断是否为观点性文章
+ * @param classification - 分类数据
+ * @returns 是否为观点性文章
+ */
+export function isOpinionArticle(classification: NewsClassificationData | null): boolean {
+  return classification?.news_value === 'opinion';
 }
 

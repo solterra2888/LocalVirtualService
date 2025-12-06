@@ -78,4 +78,33 @@ class NewsTopicKeywordResponse(BaseModel):
     topic_id: int = Field(..., description="主题ID")
     keyword: str = Field(..., description="关键词")
     weight: float = Field(..., description="权重")
-    created_at: Optional[str] = Field(None, description="创建时间") 
+    created_at: Optional[str] = Field(None, description="创建时间")
+
+
+class DeleteNewsByDateRangeRequest(BaseModel):
+    """按日期范围删除新闻请求模型"""
+    start_date: str = Field(..., description="开始日期 (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: str = Field(..., description="结束日期 (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    confirm: bool = Field(False, description="确认删除（必须为True才能执行）")
+
+
+class DeleteNewsByDateRangeStats(BaseModel):
+    """删除统计信息"""
+    news_count: int = Field(..., description="新闻数量")
+    news_symbols_count: int = Field(..., description="新闻-股票关联数量")
+    news_tags_count: int = Field(..., description="新闻-标签关联数量")
+    news_theme_matches_count: int = Field(..., description="新闻-主题匹配数量")
+    news_themes_unified_count: int = Field(..., description="新闻-统一主题数量")
+    project_news_tracking_count: int = Field(..., description="项目新闻跟踪数量")
+    total_count: int = Field(..., description="总计将删除的记录数")
+
+
+class DeleteNewsByDateRangeResponse(BaseModel):
+    """按日期范围删除新闻响应模型"""
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="响应消息")
+    deleted_stats: DeleteNewsByDateRangeStats = Field(..., description="删除统计信息")
+    start_date: str = Field(..., description="开始日期")
+    end_date: str = Field(..., description="结束日期")
+    executed_at: str = Field(..., description="执行时间")
+    executed_by: str = Field(..., description="执行用户") 

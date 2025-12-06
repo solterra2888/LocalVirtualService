@@ -184,6 +184,50 @@ export const newsAPI = {
     return api.post(`/news/themes/${themeId}/reset`);
   },
 
+  // ============ 按日期范围删除新闻API ============
+
+  // 预览按日期范围删除新闻的统计
+  previewDeleteByDateRange: async (params: {
+    start_date: string;
+    end_date: string;
+    confirm: boolean;
+  }): Promise<{
+    news_count: number;
+    news_symbols_count: number;
+    news_tags_count: number;
+    news_theme_matches_count: number;
+    news_themes_unified_count: number;
+    project_news_tracking_count: number;
+    total_count: number;
+  }> => {
+    return api.post('/news/delete-by-date-range/preview', params);
+  },
+
+  // 按日期范围删除新闻
+  deleteByDateRange: async (params: {
+    start_date: string;
+    end_date: string;
+    confirm: boolean;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    deleted_stats: {
+      news_count: number;
+      news_symbols_count: number;
+      news_tags_count: number;
+      news_theme_matches_count: number;
+      news_themes_unified_count: number;
+      project_news_tracking_count: number;
+      total_count: number;
+    };
+    start_date: string;
+    end_date: string;
+    executed_at: string;
+    executed_by: string;
+  }> => {
+    return api.delete('/news/delete-by-date-range', { data: params });
+  },
+
 };
 
 // 新闻工具函数

@@ -351,6 +351,16 @@ class ThemeMappingService:
             # 2. 准备要插入的各个维度
             dimensions_to_insert = []
             
+            # 2.0 News Value (新增 - fact/opinion)
+            if classification_data.get('news_value'):
+                dimensions_to_insert.append({
+                    'title': 'news_value',
+                    'value': classification_data['news_value'],
+                    'theme_master_id': None,
+                    'confidence': confidence_scores.get('news_value_confidence', 0.8),
+                    'is_primary': False
+                })
+            
             # 2.1 Primary Theme
             if classification_data.get('primary_theme'):
                 theme_master_id = self.get_theme_master_id(classification_data['primary_theme'])
