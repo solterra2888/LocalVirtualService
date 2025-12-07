@@ -75,7 +75,7 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
       const data = await getProjectFiles(projectId);
       setFiles(data);
     } catch (error: any) {
-      message.error(`加载文件列表失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Failed to load file list: ${error.response?.data?.detail || error.message}`);
     } finally {
       setLoading(false);
     }
@@ -99,12 +99,12 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
       };
 
       await addProjectFile(projectId, fileData);
-      message.success('文件记录添加成功');
+      message.success('File record added successfully');
       setAddModalVisible(false);
       form.resetFields();
       loadFiles();
     } catch (error: any) {
-      message.error(`添加失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Add failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -112,10 +112,10 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
   const handleDeleteFile = async (fileId: number, fileName: string) => {
     try {
       await deleteProjectFile(projectId, fileId);
-      message.success(`已删除文件: ${fileName}`);
+      message.success(`File deleted: ${fileName}`);
       loadFiles();
     } catch (error: any) {
-      message.error(`删除失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Delete failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -140,17 +140,17 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
   // 获取分类标签
   const getCategoryTag = (category?: string) => {
     const categoryMap: Record<string, { text: string; color: string }> = {
-      meeting_notes: { text: '会议纪要', color: 'blue' },
-      report: { text: '研究报告', color: 'green' },
-      contract: { text: '合同文档', color: 'red' },
-      presentation: { text: '演示文稿', color: 'orange' },
-      other: { text: '其他', color: 'default' }
+      meeting_notes: { text: 'Meeting Notes', color: 'blue' },
+      report: { text: 'Research Report', color: 'green' },
+      contract: { text: 'Contract', color: 'red' },
+      presentation: { text: 'Presentation', color: 'orange' },
+      other: { text: 'Other', color: 'default' }
     };
     const info = category ? categoryMap[category] : null;
     return info ? (
       <Tag color={info.color}>{info.text}</Tag>
     ) : (
-      <Tag>未分类</Tag>
+      <Tag>Uncategorized</Tag>
     );
   };
 
@@ -159,7 +159,7 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
   // 表格列定义
   const columns: ColumnsType<ProjectFile> = [
     {
-      title: '文件名',
+      title: 'File Name',
       dataIndex: 'file_name',
       key: 'file_name',
       width: 300,
@@ -171,7 +171,7 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
       )
     },
     {
-      title: '类型',
+      title: 'Type',
       dataIndex: 'file_type',
       key: 'file_type',
       width: 150,
@@ -182,21 +182,21 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
       )
     },
     {
-      title: '分类',
+      title: 'Category',
       dataIndex: 'category',
       key: 'category',
       width: 120,
       render: (category: string) => getCategoryTag(category)
     },
     {
-      title: '大小',
+      title: 'Size',
       dataIndex: 'file_size',
       key: 'file_size',
       width: 100,
       render: (size: number) => formatFileSize(size)
     },
     {
-      title: '描述',
+      title: 'Description',
       dataIndex: 'description',
       key: 'description',
       width: 200,
@@ -204,21 +204,21 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
       render: (desc: string) => desc || '-'
     },
     {
-      title: '上传者',
+      title: 'Uploaded By',
       dataIndex: 'uploaded_by_username',
       key: 'uploaded_by',
       width: 120,
-      render: (username: string, record) => username || `用户${record.uploaded_by}`
+      render: (username: string, record) => username || `User ${record.uploaded_by}`
     },
     {
-      title: '上传时间',
+      title: 'Uploaded At',
       dataIndex: 'uploaded_at',
       key: 'uploaded_at',
       width: 150,
       render: (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
     },
     {
-      title: '操作',
+      title: 'Actions',
       key: 'action',
       width: 120,
       fixed: 'right',
@@ -231,15 +231,15 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
               icon={<DownloadOutlined />}
               disabled
             >
-              下载
+              Download
             </Button>
             {canEdit && (
               <Popconfirm
-                title="确认删除文件？"
-                description="此操作将删除文件记录"
+                title="Confirm Delete File?"
+                description="This will delete the file record"
                 onConfirm={() => handleDeleteFile(record.id, record.file_name)}
-                okText="确认"
-                cancelText="取消"
+                okText="Confirm"
+                cancelText="Cancel"
               >
                 <Button
                   type="link"
@@ -265,11 +265,11 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
             icon={<UploadOutlined />}
             onClick={() => setAddModalVisible(true)}
           >
-            添加文件记录
+            Add File Record
           </Button>
         )}
         <Text type="secondary">
-          注：完整的文件上传功能正在开发中，当前仅支持添加文件记录
+          Note: Full file upload functionality is under development, currently only supports adding file records
         </Text>
       </Space>
 
@@ -285,14 +285,14 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
         />
       ) : (
         <Empty
-          description="暂无文件，点击「添加文件记录」开始"
+          description="No files yet, click 'Add File Record' to start"
           style={{ padding: '60px 0' }}
         />
       )}
 
       {/* 添加文件记录模态框 */}
       <Modal
-        title="添加文件记录"
+        title="Add File Record"
         open={addModalVisible}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -300,8 +300,8 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
           form.resetFields();
         }}
         width={600}
-        okText="添加"
-        cancelText="取消"
+        okText="Add"
+        cancelText="Cancel"
       >
         <Form
           form={form}
@@ -309,53 +309,53 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
           onFinish={handleAddFile}
         >
           <Form.Item
-            label="文件名"
+            label="File Name"
             name="file_name"
-            rules={[{ required: true, message: '请输入文件名' }]}
+            rules={[{ required: true, message: 'Please enter file name' }]}
           >
-            <Input placeholder="例如：Q1财报分析.pdf" />
+            <Input placeholder="e.g., Q1 Earnings Analysis.pdf" />
           </Form.Item>
 
           <Form.Item
-            label="文件路径"
+            label="File Path"
             name="file_path"
-            tooltip="可选，文件的存储路径或URL"
+            tooltip="Optional, file storage path or URL"
           >
-            <Input placeholder="文件路径或URL" />
+            <Input placeholder="File path or URL" />
           </Form.Item>
 
           <Form.Item
-            label="文件类型"
+            label="File Type"
             name="file_type"
           >
-            <Input placeholder="例如：application/pdf" />
+            <Input placeholder="e.g., application/pdf" />
           </Form.Item>
 
           <Form.Item
-            label="文件大小（字节）"
+            label="File Size (bytes)"
             name="file_size"
           >
-            <Input type="number" placeholder="文件大小" />
+            <Input type="number" placeholder="File size" />
           </Form.Item>
 
           <Form.Item
-            label="分类"
+            label="Category"
             name="category"
           >
-            <Select placeholder="选择文件分类">
-              <Option value="meeting_notes">会议纪要</Option>
-              <Option value="report">研究报告</Option>
-              <Option value="contract">合同文档</Option>
-              <Option value="presentation">演示文稿</Option>
-              <Option value="other">其他</Option>
+            <Select placeholder="Select file category">
+              <Option value="meeting_notes">Meeting Notes</Option>
+              <Option value="report">Research Report</Option>
+              <Option value="contract">Contract</Option>
+              <Option value="presentation">Presentation</Option>
+              <Option value="other">Other</Option>
             </Select>
           </Form.Item>
 
           <Form.Item
-            label="描述"
+            label="Description"
             name="description"
           >
-            <TextArea rows={3} placeholder="文件描述或备注..." />
+            <TextArea rows={3} placeholder="File description or notes..." />
           </Form.Item>
         </Form>
       </Modal>

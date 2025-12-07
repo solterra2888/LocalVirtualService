@@ -154,7 +154,7 @@ const DeleteNewsByDateModal: React.FC<DeleteNewsByDateModalProps> = ({
                 <li>新闻-标签关联</li>
                 <li>新闻-主题匹配</li>
                 <li>新闻-统一主题</li>
-                <li>项目新闻跟踪</li>
+                <li>Event News Tracking</li>
               </ul>
               <p style={{ marginTop: 8, marginBottom: 0, color: '#ff4d4f' }}>
                 <strong>此操作不可逆，请谨慎操作！</strong>

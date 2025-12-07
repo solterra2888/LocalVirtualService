@@ -155,10 +155,10 @@ export async function getProjectStatistics(
  */
 export function getProjectStatusText(status: string): string {
   const statusMap: Record<string, string> = {
-    active: '进行中',
-    paused: '已暂停',
-    completed: '已完成',
-    archived: '已归档'
+    active: 'Active',
+    paused: 'Paused',
+    completed: 'Completed',
+    archived: 'Archived'
   };
   return statusMap[status] || status;
 }
@@ -168,9 +168,9 @@ export function getProjectStatusText(status: string): string {
  */
 export function getProjectTypeText(type: string): string {
   const typeMap: Record<string, string> = {
-    ticker: '标的研究',
-    industry: '行业研究',
-    sector: '板块研究'
+    ticker: 'Ticker Research',
+    industry: 'Industry Research',
+    sector: 'Sector Research'
   };
   return typeMap[type] || type;
 }
@@ -180,9 +180,9 @@ export function getProjectTypeText(type: string): string {
  */
 export function getPriorityText(priority: number): string {
   const priorityMap: Record<number, string> = {
-    1: '低',
-    2: '中',
-    3: '高'
+    1: 'Low',
+    2: 'Medium',
+    3: 'High'
   };
   return priorityMap[priority] || String(priority);
 }
@@ -192,20 +192,20 @@ export function getPriorityText(priority: number): string {
  */
 export function getMemberRoleText(role: string): string {
   const roleMap: Record<string, string> = {
-    owner: '负责人',
-    admin: '管理员',
-    member: '成员',
-    viewer: '观察者'
+    owner: 'Owner',
+    admin: 'Admin',
+    member: 'Member',
+    viewer: 'Viewer'
   };
   return roleMap[role] || role;
 }
 
 /**
- * 格式化项目标识（ticker/industry/sector）
+ * 格式化项目标识（tickers/industry/sector）
  */
 export function getProjectIdentifier(project: InvestmentProject): string {
-  if (project.ticker_symbol) {
-    return project.ticker_symbol;
+  if (project.tickers && project.tickers.length > 0) {
+    return project.tickers.join(', ');
   }
   if (project.industry) {
     return project.industry;

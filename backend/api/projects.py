@@ -9,7 +9,6 @@ from backend.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse, ProjectListQuery,
     MemberInvite, MemberUpdate, MemberResponse,
     MilestoneCreate, MilestoneUpdate, MilestoneResponse,
-    NewsTrackingCreate, NewsTrackingUpdate, NewsTrackingResponse,
     ProjectFileCreate, ProjectFileResponse, AutoFetchNewsRequest, AutoFetchNewsResponse,
     ProjectDashboard, ProjectStatistics
 )
@@ -219,7 +218,7 @@ async def delete_project(
     project_id: int,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """删除项目（实际为归档，需要owner权限）"""
+    """删除项目（真正删除，需要owner权限）"""
     try:
         service = get_project_service()
         
@@ -463,141 +462,6 @@ async def health_check():
         "service": "Investment Projects API",
         "version": "1.0.0"
     }
-
-
-# ==================== 项目新闻管理 ====================
-
-@router.get("/{project_id}/news", response_model=List[NewsTrackingResponse], summary="获取项目新闻")
-async def get_project_news(
-    project_id: int,
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """获取项目相关新闻列表"""
-    try:
-        service = get_project_service()
-        
-        news_list = service.get_project_news(
-            project_id=project_id,
-            user_id=current_user.user_id
-        )
-        
-        return news_list
-    
-    except Exception as e:
-        logger.error("获取项目新闻失败", project_id=project_id, exception=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取项目新闻失败: {str(e)}"
-        )
-
-
-@router.post("/{project_id}/news", summary="添加新闻到项目")
-async def add_news_to_project(
-    project_id: int,
-    news_data: NewsTrackingCreate,
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """将新闻添加到项目中"""
-    try:
-        service = get_project_service()
-        
-        success, message = service.add_news_to_project(
-            project_id=project_id,
-            user_id=current_user.user_id,
-            news_id=news_data.news_id,
-            relevance_score=news_data.relevance_score,
-            is_important=news_data.is_important or False,
-            user_notes=news_data.user_notes
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=message
-            )
-        
-        return {"success": True, "message": message}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("添加新闻失败", project_id=project_id, exception=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"添加新闻失败: {str(e)}"
-        )
-
-
-@router.put("/{project_id}/news/{news_id}", summary="更新新闻标注")
-async def update_project_news(
-    project_id: int,
-    news_id: int,
-    news_update: NewsTrackingUpdate,
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """更新项目新闻的标注信息"""
-    try:
-        service = get_project_service()
-        
-        update_data = news_update.model_dump(exclude_none=True)
-        
-        success, message = service.update_project_news(
-            project_id=project_id,
-            news_id=news_id,
-            user_id=current_user.user_id,
-            update_data=update_data
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message
-            )
-        
-        return {"success": True, "message": message}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("更新新闻标注失败", project_id=project_id, news_id=news_id, exception=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新新闻标注失败: {str(e)}"
-        )
-
-
-@router.delete("/{project_id}/news/{news_id}", summary="移除新闻")
-async def remove_project_news(
-    project_id: int,
-    news_id: int,
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """从项目中移除新闻"""
-    try:
-        service = get_project_service()
-        
-        success, message = service.remove_project_news(
-            project_id=project_id,
-            news_id=news_id,
-            user_id=current_user.user_id
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message
-            )
-        
-        return {"success": True, "message": message}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("移除新闻失败", project_id=project_id, news_id=news_id, exception=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"移除新闻失败: {str(e)}"
-        )
 
 
 # ==================== 项目里程碑管理 ====================

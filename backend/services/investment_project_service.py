@@ -30,7 +30,7 @@ class InvestmentProjectService:
             identifier: 标识符（ticker/industry/sector）
         
         Returns:
-            str: 项目编号，格式：PROJ-{TYPE}-{DATE}
+            str: 项目编号，格式：PROJ-{IDENTIFIER}-{DATE}
         """
         today = datetime.now().strftime("%Y%m%d")
         type_prefix = project_type.upper()[:4]
@@ -57,15 +57,25 @@ class InvestmentProjectService:
         try:
             # 验证项目类型和关联信息
             project_type = project_data.get('project_type')
-            ticker_symbol = project_data.get('ticker_symbol')
+            tickers = project_data.get('tickers', [])
             industry = project_data.get('industry')
             sector = project_data.get('sector')
             
-            if not any([ticker_symbol, industry, sector]):
-                return False, None, "必须指定ticker、industry或sector之一"
+            # 确保tickers是列表
+            if tickers is None:
+                tickers = []
+            elif isinstance(tickers, str):
+                tickers = [tickers]
             
-            # 生成项目编号
-            identifier = ticker_symbol or industry or sector
+            # 清理tickers：去重、去空、转大写
+            tickers = list(set([t.strip().upper() for t in tickers if t and t.strip()]))
+            project_data['tickers'] = tickers
+            
+            if not tickers and not industry and not sector:
+                return False, None, "必须指定至少一个ticker、industry或sector"
+            
+            # 生成项目编号 - 优先使用第一个ticker，否则用industry或sector
+            identifier = tickers[0] if tickers else (industry or sector)
             project_code = self._generate_project_code(project_type, identifier)
             
             # 检查项目编号是否已存在
@@ -80,13 +90,13 @@ class InvestmentProjectService:
             insert_query = """
             INSERT INTO investment_projects (
                 project_code, project_name, project_type,
-                ticker_symbol, industry, sector, region,
-                status, priority, description, investment_thesis,
-                target_price, current_position,
-                start_date, target_end_date,
+                tickers, industry, sector, region,
+                status, priority, description,
+                current_position,
+                start_date,
                 created_by, owner_id
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             RETURNING id
             """
@@ -95,18 +105,15 @@ class InvestmentProjectService:
                 project_code,
                 project_data.get('project_name'),
                 project_type,
-                ticker_symbol,
+                tickers,  # PostgreSQL数组
                 industry,
                 sector,
                 project_data.get('region'),
                 project_data.get('status', 'active'),
                 project_data.get('priority', 2),
                 project_data.get('description'),
-                project_data.get('investment_thesis'),
-                project_data.get('target_price'),
                 project_data.get('current_position'),
                 project_data.get('start_date'),
-                project_data.get('target_end_date'),
                 user_id,  # created_by
                 user_id   # owner_id
             ]
@@ -166,11 +173,11 @@ class InvestmentProjectService:
             query = """
             SELECT 
                 id, project_code, project_name, project_type,
-                ticker_symbol, industry, sector, region,
-                status, priority, description, investment_thesis,
-                target_price, current_position,
+                tickers, industry, sector, region,
+                status, priority, description,
+                current_position,
                 created_by, owner_id,
-                start_date, target_end_date, actual_end_date,
+                start_date,
                 created_at, updated_at
             FROM investment_projects
             WHERE id = %s
@@ -186,23 +193,19 @@ class InvestmentProjectService:
                 'project_code': result[1],
                 'project_name': result[2],
                 'project_type': result[3],
-                'ticker_symbol': result[4],
+                'tickers': list(result[4]) if result[4] else [],
                 'industry': result[5],
                 'sector': result[6],
                 'region': result[7],
                 'status': result[8],
                 'priority': result[9],
                 'description': result[10],
-                'investment_thesis': result[11],
-                'target_price': float(result[12]) if result[12] else None,
-                'current_position': result[13],
-                'created_by': result[14],
-                'owner_id': result[15],
-                'start_date': result[16].isoformat() if result[16] else None,
-                'target_end_date': result[17].isoformat() if result[17] else None,
-                'actual_end_date': result[18].isoformat() if result[18] else None,
-                'created_at': result[19].isoformat() if result[19] else None,
-                'updated_at': result[20].isoformat() if result[20] else None,
+                'current_position': result[11],
+                'created_by': result[12],
+                'owner_id': result[13],
+                'start_date': result[14].isoformat() if result[14] else None,
+                'created_at': result[15].isoformat() if result[15] else None,
+                'updated_at': result[16].isoformat() if result[16] else None,
             }
             
             # 如果需要统计信息
@@ -240,16 +243,20 @@ class InvestmentProjectService:
             where_conditions = []
             params = []
             
-            # 基础条件：用户必须是项目成员
+            # 基础条件：用户必须是项目成员，或者是项目的创建者/所有者
             where_conditions.append("""
-                EXISTS (
-                    SELECT 1 FROM project_members pm 
-                    WHERE pm.project_id = p.id 
-                    AND pm.user_id = %s 
-                    AND pm.status = 'active'
+                (
+                    EXISTS (
+                        SELECT 1 FROM project_members pm 
+                        WHERE pm.project_id = p.id 
+                        AND pm.user_id = %s 
+                        AND pm.status = 'active'
+                    )
+                    OR p.created_by = %s
+                    OR p.owner_id = %s
                 )
             """)
-            params.append(user_id)
+            params.extend([user_id, user_id, user_id])
             
             # 筛选条件
             if filters.get('status'):
@@ -267,7 +274,10 @@ class InvestmentProjectService:
             if filters.get('search'):
                 where_conditions.append("""
                     (p.project_name ILIKE %s OR p.project_code ILIKE %s 
-                     OR p.ticker_symbol ILIKE %s)
+                     OR EXISTS (
+                        SELECT 1 FROM unnest(p.tickers) AS ticker 
+                        WHERE ticker ILIKE %s
+                     ))
                 """)
                 search_term = f"%{filters['search']}%"
                 params.extend([search_term, search_term, search_term])
@@ -295,16 +305,15 @@ class InvestmentProjectService:
             query = f"""
             SELECT 
                 p.id, p.project_code, p.project_name, p.project_type,
-                p.ticker_symbol, p.industry, p.sector, p.region,
+                p.tickers, p.industry, p.sector, p.region,
                 p.status, p.priority, p.description,
                 p.created_by, p.owner_id, p.created_at, p.updated_at,
                 COUNT(DISTINCT pm.id) FILTER (WHERE pm.status = 'active') as member_count,
-                COUNT(DISTINCT pn.id) as news_count,
+                0 as news_count,
                 COUNT(DISTINCT pf.id) as file_count,
                 COUNT(DISTINCT pms.id) as milestone_count
             FROM investment_projects p
             LEFT JOIN project_members pm ON p.id = pm.project_id
-            LEFT JOIN project_news_tracking pn ON p.id = pn.project_id
             LEFT JOIN project_files pf ON p.id = pf.project_id
             LEFT JOIN project_milestones pms ON p.id = pms.project_id
             WHERE {where_clause}
@@ -323,7 +332,7 @@ class InvestmentProjectService:
                     'project_code': row[1],
                     'project_name': row[2],
                     'project_type': row[3],
-                    'ticker_symbol': row[4],
+                    'tickers': list(row[4]) if row[4] else [],
                     'industry': row[5],
                     'sector': row[6],
                     'region': row[7],
@@ -375,15 +384,25 @@ class InvestmentProjectService:
             params = []
             
             allowed_fields = [
-                'project_name', 'status', 'priority', 'description',
-                'investment_thesis', 'target_price', 'current_position',
-                'target_end_date', 'actual_end_date'
+                'project_name', 'status', 'priority', 'tickers', 'description',
+                'current_position'
             ]
             
             for field in allowed_fields:
                 if field in update_data:
-                    update_fields.append(f"{field} = %s")
-                    params.append(update_data[field])
+                    # 特殊处理tickers字段：清理并去重
+                    if field == 'tickers':
+                        tickers = update_data[field]
+                        if tickers is not None:
+                            if isinstance(tickers, str):
+                                tickers = [tickers]
+                            # 清理tickers：去重、去空、转大写
+                            tickers = list(set([t.strip().upper() for t in tickers if t and t.strip()]))
+                            update_fields.append(f"{field} = %s")
+                            params.append(tickers)
+                    else:
+                        update_fields.append(f"{field} = %s")
+                        params.append(update_data[field])
             
             if not update_fields:
                 return False, "没有可更新的字段"
@@ -414,7 +433,7 @@ class InvestmentProjectService:
         user_id: int
     ) -> Tuple[bool, str]:
         """
-        删除项目（实际上是归档）
+        删除项目（真正删除，会级联删除所有关联数据）
         
         Args:
             project_id: 项目ID
@@ -430,24 +449,23 @@ class InvestmentProjectService:
             ):
                 return False, "只有项目owner可以删除项目"
             
-            # 将状态改为archived而不是真正删除
-            update_query = """
-            UPDATE investment_projects
-            SET status = 'archived'
+            # 真正删除项目（数据库会自动级联删除关联数据）
+            delete_query = """
+            DELETE FROM investment_projects
             WHERE id = %s
             """
             
-            self.db_manager.execute_query(update_query, [project_id])
+            self.db_manager.execute_query(delete_query, [project_id])
             
-            logger.info("归档项目成功", project_id=project_id, user_id=user_id)
-            return True, "项目已归档"
+            logger.info("删除项目成功", project_id=project_id, user_id=user_id)
+            return True, "项目已删除"
         
         except Exception as e:
-            logger.error("归档项目失败", 
+            logger.error("删除项目失败", 
                         project_id=project_id, 
                         user_id=user_id,
                         exception=str(e))
-            return False, f"归档项目失败: {str(e)}"
+            return False, f"删除项目失败: {str(e)}"
     
     # ==================== 项目成员管理 ====================
     
@@ -676,15 +694,14 @@ class InvestmentProjectService:
             SELECT 
                 COUNT(DISTINCT pm.id) FILTER (WHERE pm.status = 'active') as total_members,
                 COUNT(DISTINCT pm.id) FILTER (WHERE pm.status = 'active' AND pm.role IN ('owner', 'admin', 'member')) as active_members,
-                COUNT(DISTINCT pn.id) as total_news,
-                COUNT(DISTINCT pn.id) FILTER (WHERE pn.is_important = true) as important_news,
+                0 as total_news,
+                0 as important_news,
                 COUNT(DISTINCT pf.id) as total_files,
                 COUNT(DISTINCT pms.id) as total_milestones,
                 MAX(pms.milestone_date) as latest_milestone_date,
-                MAX(pn.added_at) as latest_news_added_at
+                NULL::TIMESTAMP WITH TIME ZONE as latest_news_added_at
             FROM investment_projects p
             LEFT JOIN project_members pm ON p.id = pm.project_id
-            LEFT JOIN project_news_tracking pn ON p.id = pn.project_id
             LEFT JOIN project_files pf ON p.id = pf.project_id
             LEFT JOIN project_milestones pms ON p.id = pms.project_id
             WHERE p.id = %s
@@ -710,167 +727,6 @@ class InvestmentProjectService:
         except Exception as e:
             logger.error("获取项目统计信息失败", project_id=project_id, exception=str(e))
             return {}
-    
-    # ==================== 项目新闻管理 ====================
-    
-    def get_project_news(self, project_id: int, user_id: int) -> List[Dict[str, Any]]:
-        """获取项目相关新闻列表"""
-        try:
-            # 权限检查
-            if not self.permission_service.can_user_access_project(user_id, project_id):
-                return []
-            
-            query = """
-            SELECT 
-                pnt.id, pnt.project_id, pnt.news_id, pnt.relevance_score,
-                pnt.is_important, pnt.user_notes, pnt.added_by,
-                pnt.added_at, pnt.updated_at,
-                n.title, n.date as news_date, n.source as news_source
-            FROM project_news_tracking pnt
-            LEFT JOIN news n ON pnt.news_id = n.id
-            WHERE pnt.project_id = %s
-            ORDER BY pnt.added_at DESC
-            """
-            
-            rows = self.db_manager.fetch_all(query, [project_id])
-            
-            news_list = []
-            for row in rows:
-                news_list.append({
-                    'id': row[0],
-                    'project_id': row[1],
-                    'news_id': row[2],
-                    'relevance_score': row[3],
-                    'is_important': row[4],
-                    'user_notes': row[5],
-                    'added_by': row[6],
-                    'added_at': row[7].isoformat() if row[7] else None,
-                    'updated_at': row[8].isoformat() if row[8] else None,
-                    'news_title': row[9],
-                    'news_date': row[10].isoformat() if row[10] else None,
-                    'news_source': row[11]
-                })
-            
-            return news_list
-        
-        except Exception as e:
-            logger.error("获取项目新闻失败", project_id=project_id, exception=str(e))
-            return []
-    
-    def add_news_to_project(
-        self, 
-        project_id: int, 
-        user_id: int, 
-        news_id: int,
-        relevance_score: Optional[int] = None,
-        is_important: bool = False,
-        user_notes: Optional[str] = None
-    ) -> Tuple[bool, str]:
-        """将新闻添加到项目"""
-        try:
-            # 权限检查
-            if not self.permission_service.check_project_permission(user_id, project_id, 'edit'):
-                return False, "没有编辑权限"
-            
-            # 检查新闻是否已添加
-            check_query = """
-            SELECT id FROM project_news_tracking
-            WHERE project_id = %s AND news_id = %s
-            """
-            existing = self.db_manager.fetch_one(check_query, [project_id, news_id])
-            
-            if existing:
-                return False, "该新闻已添加到项目"
-            
-            # 添加新闻
-            insert_query = """
-            INSERT INTO project_news_tracking (
-                project_id, news_id, relevance_score, is_important,
-                user_notes, added_by
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-            """
-            
-            self.db_manager.execute_query(insert_query, [
-                project_id, news_id, relevance_score, is_important,
-                user_notes, user_id
-            ])
-            
-            logger.info("添加新闻到项目成功", project_id=project_id, news_id=news_id)
-            return True, "添加新闻成功"
-        
-        except Exception as e:
-            logger.error("添加新闻失败", exception=str(e))
-            return False, f"添加新闻失败: {str(e)}"
-    
-    def update_project_news(
-        self,
-        project_id: int,
-        news_id: int,
-        user_id: int,
-        update_data: Dict[str, Any]
-    ) -> Tuple[bool, str]:
-        """更新项目新闻标注"""
-        try:
-            # 权限检查
-            if not self.permission_service.check_project_permission(user_id, project_id, 'edit'):
-                return False, "没有编辑权限"
-            
-            # 构建UPDATE语句
-            update_fields = []
-            params = []
-            
-            allowed_fields = ['relevance_score', 'is_important', 'user_notes']
-            
-            for field in allowed_fields:
-                if field in update_data:
-                    update_fields.append(f"{field} = %s")
-                    params.append(update_data[field])
-            
-            if not update_fields:
-                return False, "没有可更新的字段"
-            
-            params.extend([project_id, news_id])
-            
-            update_query = f"""
-            UPDATE project_news_tracking
-            SET {', '.join(update_fields)}
-            WHERE project_id = %s AND news_id = %s
-            """
-            
-            self.db_manager.execute_query(update_query, params)
-            
-            logger.info("更新新闻标注成功", project_id=project_id, news_id=news_id)
-            return True, "更新新闻标注成功"
-        
-        except Exception as e:
-            logger.error("更新新闻标注失败", exception=str(e))
-            return False, f"更新新闻标注失败: {str(e)}"
-    
-    def remove_project_news(
-        self,
-        project_id: int,
-        news_id: int,
-        user_id: int
-    ) -> Tuple[bool, str]:
-        """从项目中移除新闻"""
-        try:
-            # 权限检查
-            if not self.permission_service.check_project_permission(user_id, project_id, 'edit'):
-                return False, "没有编辑权限"
-            
-            delete_query = """
-            DELETE FROM project_news_tracking
-            WHERE project_id = %s AND news_id = %s
-            """
-            
-            self.db_manager.execute_query(delete_query, [project_id, news_id])
-            
-            logger.info("移除新闻成功", project_id=project_id, news_id=news_id)
-            return True, "移除新闻成功"
-        
-        except Exception as e:
-            logger.error("移除新闻失败", exception=str(e))
-            return False, f"移除新闻失败: {str(e)}"
     
     # ==================== 项目里程碑管理 ====================
     

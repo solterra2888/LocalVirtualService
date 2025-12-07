@@ -67,21 +67,17 @@ export interface InvestmentProject {
   project_code: string;
   project_name: string;
   project_type: ProjectType;
-  ticker_symbol?: string;
+  tickers?: string[]; // 支持多个ticker，不分主次
   industry?: string;
   sector?: string;
   region?: string;
   status: ProjectStatus;
   priority: ProjectPriority;
   description?: string;
-  investment_thesis?: string;
-  target_price?: number;
   current_position?: string;
   created_by: number;
   owner_id: number;
   start_date?: string;
-  target_end_date?: string;
-  actual_end_date?: string;
   created_at: string;
   updated_at: string;
   
@@ -95,30 +91,24 @@ export interface InvestmentProject {
 export interface ProjectCreateRequest {
   project_name: string;
   project_type: ProjectType;
-  ticker_symbol?: string;
+  tickers?: string[]; // 支持多个ticker
   industry?: string;
   sector?: string;
   region?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
   description?: string;
-  investment_thesis?: string;
-  target_price?: number;
   current_position?: string;
   start_date?: string;
-  target_end_date?: string;
 }
 
 export interface ProjectUpdateRequest {
   project_name?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  tickers?: string[]; // 支持更新多个ticker
   description?: string;
-  investment_thesis?: string;
-  target_price?: number;
   current_position?: string;
-  target_end_date?: string;
-  actual_end_date?: string;
 }
 
 export interface ProjectListQuery {
@@ -362,44 +352,44 @@ export interface ProjectPriorityOption {
 
 // 常量定义
 export const PROJECT_STATUS_OPTIONS: ProjectStatusOption[] = [
-  { value: ProjectStatus.ACTIVE, label: '进行中', color: 'success' },
-  { value: ProjectStatus.PAUSED, label: '已暂停', color: 'warning' },
-  { value: ProjectStatus.COMPLETED, label: '已完成', color: 'default' },
-  { value: ProjectStatus.ARCHIVED, label: '已归档', color: 'error' }
+  { value: ProjectStatus.ACTIVE, label: 'Active', color: 'success' },
+  { value: ProjectStatus.PAUSED, label: 'Paused', color: 'warning' },
+  { value: ProjectStatus.COMPLETED, label: 'Completed', color: 'default' },
+  { value: ProjectStatus.ARCHIVED, label: 'Archived', color: 'error' }
 ];
 
 export const PROJECT_TYPE_OPTIONS: ProjectTypeOption[] = [
-  { value: ProjectType.TICKER, label: '标的研究', icon: '📊' },
-  { value: ProjectType.INDUSTRY, label: '行业研究', icon: '🏭' },
-  { value: ProjectType.SECTOR, label: '板块研究', icon: '📈' }
+  { value: ProjectType.TICKER, label: 'Ticker Research', icon: '📊' },
+  { value: ProjectType.INDUSTRY, label: 'Industry Research', icon: '🏭' },
+  { value: ProjectType.SECTOR, label: 'Sector Research', icon: '📈' }
 ];
 
 export const PROJECT_PRIORITY_OPTIONS: ProjectPriorityOption[] = [
-  { value: ProjectPriority.HIGH, label: '高', color: 'error' },
-  { value: ProjectPriority.MEDIUM, label: '中', color: 'warning' },
-  { value: ProjectPriority.LOW, label: '低', color: 'default' }
+  { value: ProjectPriority.HIGH, label: 'High', color: 'error' },
+  { value: ProjectPriority.MEDIUM, label: 'Medium', color: 'warning' },
+  { value: ProjectPriority.LOW, label: 'Low', color: 'default' }
 ];
 
 export const MEMBER_ROLE_OPTIONS = [
-  { value: MemberRole.OWNER, label: '负责人', description: '所有权限' },
-  { value: MemberRole.ADMIN, label: '管理员', description: '可管理项目和成员' },
-  { value: MemberRole.MEMBER, label: '成员', description: '可编辑内容' },
-  { value: MemberRole.VIEWER, label: '观察者', description: '仅查看' }
+  { value: MemberRole.OWNER, label: 'Owner', description: 'All permissions' },
+  { value: MemberRole.ADMIN, label: 'Admin', description: 'Can manage events and members' },
+  { value: MemberRole.MEMBER, label: 'Member', description: 'Can edit content' },
+  { value: MemberRole.VIEWER, label: 'Viewer', description: 'View only' }
 ];
 
 export const MILESTONE_TYPE_OPTIONS = [
-  { value: MilestoneType.MEETING_NOTES, label: '会议纪要', icon: '📝' },
-  { value: MilestoneType.RESEARCH_REPORT, label: '研究报告', icon: '📊' },
-  { value: MilestoneType.DECISION, label: '投资决策', icon: '✅' },
-  { value: MilestoneType.UPDATE, label: '进度更新', icon: '🔄' },
-  { value: MilestoneType.OTHER, label: '其他', icon: '📌' }
+  { value: MilestoneType.MEETING_NOTES, label: 'Meeting Notes', icon: '📝' },
+  { value: MilestoneType.RESEARCH_REPORT, label: 'Research Report', icon: '📊' },
+  { value: MilestoneType.DECISION, label: 'Investment Decision', icon: '✅' },
+  { value: MilestoneType.UPDATE, label: 'Progress Update', icon: '🔄' },
+  { value: MilestoneType.OTHER, label: 'Other', icon: '📌' }
 ];
 
 export const DECISION_TYPE_OPTIONS = [
-  { value: DecisionType.BUY, label: '买入', color: 'success' },
-  { value: DecisionType.SELL, label: '卖出', color: 'error' },
-  { value: DecisionType.HOLD, label: '持有', color: 'primary' },
-  { value: DecisionType.WATCH, label: '观望', color: 'warning' },
-  { value: DecisionType.PASS, label: '放弃', color: 'default' }
+  { value: DecisionType.BUY, label: 'Buy', color: 'success' },
+  { value: DecisionType.SELL, label: 'Sell', color: 'error' },
+  { value: DecisionType.HOLD, label: 'Hold', color: 'primary' },
+  { value: DecisionType.WATCH, label: 'Watch', color: 'warning' },
+  { value: DecisionType.PASS, label: 'Pass', color: 'default' }
 ];
 

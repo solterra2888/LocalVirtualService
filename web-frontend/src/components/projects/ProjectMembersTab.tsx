@@ -77,7 +77,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
       const data = await getProjectMembers(projectId);
       setMembers(data);
     } catch (error: any) {
-      message.error(`加载成员列表失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Failed to load member list: ${error.response?.data?.detail || error.message}`);
     } finally {
       setLoading(false);
     }
@@ -100,13 +100,13 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
       };
 
       await inviteMembers(projectId, inviteData);
-      message.success('成员邀请成功');
+      message.success('Member invited successfully');
       setInviteModalVisible(false);
       inviteForm.resetFields();
       loadMembers();
       onUpdate();
     } catch (error: any) {
-      message.error(`邀请失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Invite failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -133,12 +133,12 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
       };
 
       await updateMember(projectId, currentMember.user_id, updateData);
-      message.success('成员信息更新成功');
+      message.success('Member information updated successfully');
       setEditModalVisible(false);
       loadMembers();
       onUpdate();
     } catch (error: any) {
-      message.error(`更新失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Update failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -146,11 +146,11 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
   const handleRemoveMember = async (userId: number, username: string) => {
     try {
       await removeMember(projectId, userId);
-      message.success(`已移除成员: ${username}`);
+      message.success(`Member removed: ${username}`);
       loadMembers();
       onUpdate();
     } catch (error: any) {
-      message.error(`移除失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Remove failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -198,18 +198,18 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
   // 表格列定义
   const columns: ColumnsType<ProjectMember> = [
     {
-      title: '成员',
+      title: 'Member',
       key: 'member',
       width: 200,
       render: (_, record) => (
         <Space>
           {getRoleIcon(record.role)}
-          <span>{record.username || `用户${record.user_id}`}</span>
+          <span>{record.username || `User ${record.user_id}`}</span>
         </Space>
       )
     },
     {
-      title: '角色',
+      title: 'Role',
       dataIndex: 'role',
       key: 'role',
       width: 120,
@@ -220,48 +220,48 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
       )
     },
     {
-      title: '权限',
+      title: 'Permissions',
       key: 'permissions',
       width: 200,
       render: (_, record) => (
         <Space>
-          {record.can_edit && <Tag color="green">可编辑</Tag>}
-          {record.can_invite && <Tag color="blue">可邀请</Tag>}
-          {!record.can_edit && !record.can_invite && <Tag>仅查看</Tag>}
+          {record.can_edit && <Tag color="green">Can Edit</Tag>}
+          {record.can_invite && <Tag color="blue">Can Invite</Tag>}
+          {!record.can_edit && !record.can_invite && <Tag>View Only</Tag>}
         </Space>
       )
     },
     {
-      title: '状态',
+      title: 'Status',
       dataIndex: 'status',
       key: 'status',
       width: 100,
       render: (status: string) => {
         const statusMap: Record<string, { text: string; color: string }> = {
-          active: { text: '活跃', color: 'success' },
-          inactive: { text: '停用', color: 'default' },
-          invited: { text: '邀请中', color: 'processing' }
+          active: { text: 'Active', color: 'success' },
+          inactive: { text: 'Inactive', color: 'default' },
+          invited: { text: 'Invited', color: 'processing' }
         };
         const statusInfo = statusMap[status] || { text: status, color: 'default' };
         return <Tag color={statusInfo.color}>{statusInfo.text}</Tag>;
       }
     },
     {
-      title: '加入时间',
+      title: 'Joined At',
       dataIndex: 'joined_at',
       key: 'joined_at',
       width: 150,
       render: (date: string) => dayjs(date).format('YYYY-MM-DD')
     },
     {
-      title: '操作',
+      title: 'Actions',
       key: 'action',
       width: 150,
       fixed: 'right',
       render: (_, record) => {
         // Owner不能被编辑或移除
         if (record.role === MemberRole.OWNER) {
-          return <Tag color="gold">项目负责人</Tag>;
+          return <Tag color="gold">Event Owner</Tag>;
         }
 
         if (!canManage) {
@@ -270,7 +270,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
 
         return (
           <Space>
-            <Tooltip title="编辑成员">
+            <Tooltip title="Edit Member">
               <Button
                 type="link"
                 size="small"
@@ -279,13 +279,13 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
               />
             </Tooltip>
             <Popconfirm
-              title="确认移除成员？"
-              description={`确定要从项目中移除 ${record.username} 吗？`}
-              onConfirm={() => handleRemoveMember(record.user_id, record.username || `用户${record.user_id}`)}
-              okText="确认"
-              cancelText="取消"
+              title="Confirm Remove Member?"
+              description={`Are you sure you want to remove ${record.username} from the event?`}
+              onConfirm={() => handleRemoveMember(record.user_id, record.username || `User ${record.user_id}`)}
+              okText="Confirm"
+              cancelText="Cancel"
             >
-              <Tooltip title="移除成员">
+              <Tooltip title="Remove Member">
                 <Button
                   type="link"
                   danger
@@ -307,7 +307,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
         <Col>
           <Space>
             <TeamOutlined style={{ fontSize: 16 }} />
-            <span>共 {members.length} 位成员</span>
+            <span>Total {members.length} members</span>
           </Space>
         </Col>
         <Col>
@@ -317,7 +317,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
               icon={<UserAddOutlined />}
               onClick={() => setInviteModalVisible(true)}
             >
-              邀请成员
+              Invite Member
             </Button>
           )}
         </Col>
@@ -335,7 +335,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
 
       {/* 邀请成员模态框 */}
       <Modal
-        title="邀请成员加入项目"
+        title="Invite Member to Event"
         open={inviteModalVisible}
         onOk={() => inviteForm.submit()}
         onCancel={() => {
@@ -343,8 +343,8 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           inviteForm.resetFields();
         }}
         width={600}
-        okText="发送邀请"
-        cancelText="取消"
+        okText="Send Invite"
+        cancelText="Cancel"
       >
         <Form
           form={inviteForm}
@@ -352,23 +352,23 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           onFinish={handleInvite}
         >
           <Form.Item
-            label="用户ID"
+            label="User ID"
             name="user_ids"
-            rules={[{ required: true, message: '请输入用户ID' }]}
-            tooltip="输入要邀请的用户ID，多个用逗号分隔"
+            rules={[{ required: true, message: 'Please enter user ID' }]}
+            tooltip="Enter user IDs to invite, separated by commas"
           >
             <Select
               mode="tags"
-              placeholder="输入用户ID，如: 2, 3, 5"
+              placeholder="Enter user IDs, e.g., 2, 3, 5"
               tokenSeparators={[',']}
             />
           </Form.Item>
 
           <Form.Item
-            label="角色"
+            label="Role"
             name="role"
             initialValue={MemberRole.MEMBER}
-            rules={[{ required: true, message: '请选择角色' }]}
+            rules={[{ required: true, message: 'Please select role' }]}
           >
             <Select>
               {MEMBER_ROLE_OPTIONS.filter(opt => opt.value !== MemberRole.OWNER).map(opt => (
@@ -387,30 +387,30 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                label="可编辑内容"
+                label="Can Edit Content"
                 name="can_edit"
                 valuePropName="checked"
                 initialValue={true}
               >
-                <Switch checkedChildren="是" unCheckedChildren="否" />
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
-                label="可邀请成员"
+                label="Can Invite Members"
                 name="can_invite"
                 valuePropName="checked"
                 initialValue={false}
               >
-                <Switch checkedChildren="是" unCheckedChildren="否" />
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item label="邀请消息（可选）" name="message">
+          <Form.Item label="Invitation Message (Optional)" name="message">
             <Input.TextArea
               rows={3}
-              placeholder="向成员说明项目情况和邀请原因..."
+              placeholder="Explain the event situation and invitation reason to members..."
             />
           </Form.Item>
         </Form>
@@ -418,7 +418,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
 
       {/* 编辑成员模态框 */}
       <Modal
-        title="编辑成员信息"
+        title="Edit Member Information"
         open={editModalVisible}
         onOk={() => editForm.submit()}
         onCancel={() => {
@@ -426,8 +426,8 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           setCurrentMember(null);
         }}
         width={500}
-        okText="保存"
-        cancelText="取消"
+        okText="Save"
+        cancelText="Cancel"
       >
         <Form
           form={editForm}
@@ -435,9 +435,9 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           onFinish={handleUpdateMember}
         >
           <Form.Item
-            label="角色"
+            label="Role"
             name="role"
-            rules={[{ required: true, message: '请选择角色' }]}
+            rules={[{ required: true, message: 'Please select role' }]}
           >
             <Select>
               {MEMBER_ROLE_OPTIONS.filter(opt => opt.value !== MemberRole.OWNER).map(opt => (
@@ -456,20 +456,20 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                label="可编辑内容"
+                label="Can Edit Content"
                 name="can_edit"
                 valuePropName="checked"
               >
-                <Switch checkedChildren="是" unCheckedChildren="否" />
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
-                label="可邀请成员"
+                label="Can Invite Members"
                 name="can_invite"
                 valuePropName="checked"
               >
-                <Switch checkedChildren="是" unCheckedChildren="否" />
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
           </Row>

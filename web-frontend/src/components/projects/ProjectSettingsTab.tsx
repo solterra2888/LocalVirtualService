@@ -1,6 +1,6 @@
 /**
  * Project Settings Tab Component
- * 项目设置Tab - 项目编辑、归档、危险操作
+ * 项目设置Tab - 项目编辑、删除、危险操作
  */
 
 import React, { useState } from 'react';
@@ -9,7 +9,6 @@ import {
   Form,
   Input,
   Select,
-  DatePicker,
   Button,
   Space,
   message,
@@ -52,7 +51,7 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
-  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // 初始化表单值
   React.useEffect(() => {
@@ -60,12 +59,9 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
       project_name: project.project_name,
       status: project.status,
       priority: project.priority,
+      tickers: project.tickers || [],
       description: project.description,
-      investment_thesis: project.investment_thesis,
-      target_price: project.target_price,
-      current_position: project.current_position,
-      target_end_date: project.target_end_date ? dayjs(project.target_end_date) : null,
-      actual_end_date: project.actual_end_date ? dayjs(project.actual_end_date) : null
+      current_position: project.current_position
     });
   }, [project, form]);
 
@@ -77,59 +73,56 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
         project_name: values.project_name,
         status: values.status,
         priority: values.priority,
+        tickers: values.tickers || [],
         description: values.description,
-        investment_thesis: values.investment_thesis,
-        target_price: values.target_price,
-        current_position: values.current_position,
-        target_end_date: values.target_end_date ? values.target_end_date.format('YYYY-MM-DD') : undefined,
-        actual_end_date: values.actual_end_date ? values.actual_end_date.format('YYYY-MM-DD') : undefined
+        current_position: values.current_position
       };
 
       await updateProject(project.id, updateData);
-      message.success('项目设置保存成功');
+      message.success('Event settings saved successfully');
       onUpdate();
     } catch (error: any) {
-      message.error(`保存失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Save failed: ${error.response?.data?.detail || error.message}`);
     } finally {
       setSaving(false);
     }
   };
 
-  // 归档项目
-  const handleArchive = () => {
+  // 删除项目
+  const handleDelete = () => {
     Modal.confirm({
-      title: '确认归档项目',
+      title: 'Confirm Delete Event',
       icon: <WarningOutlined />,
       content: (
         <div>
           <Paragraph>
-            归档后，项目将：
+            After deleting, the event will:
           </Paragraph>
           <ul>
-            <li>状态变更为"已归档"</li>
-            <li>不再显示在活跃项目列表中</li>
-            <li>数据仍然保留，可以查看历史记录</li>
+            <li>Be permanently deleted from the system</li>
+            <li>All associated data will be deleted (files, milestones, members)</li>
+            <li>This action cannot be undone</li>
           </ul>
           <Paragraph strong>
-            确定要归档项目"{project.project_name}"吗？
+            Are you sure you want to delete event "{project.project_name}"?
           </Paragraph>
         </div>
       ),
-      okText: '确认归档',
+      okText: 'Confirm Delete',
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: 'Cancel',
       onOk: async () => {
-        setArchiving(true);
+        setDeleting(true);
         try {
           await deleteProject(project.id);
-          message.success('项目已归档');
+          message.success('Event deleted');
           setTimeout(() => {
             navigate('/projects');
           }, 1000);
         } catch (error: any) {
-          message.error(`归档失败: ${error.response?.data?.detail || error.message}`);
+          message.error(`Delete failed: ${error.response?.data?.detail || error.message}`);
         } finally {
-          setArchiving(false);
+          setDeleting(false);
         }
       }
     });
@@ -145,15 +138,15 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
         title={
           <Space>
             <FolderOpenOutlined />
-            <span>项目设置</span>
+            <span>Event Settings</span>
           </Space>
         }
         style={{ marginBottom: 16 }}
       >
         {!canEdit && (
           <Alert
-            message="您没有编辑权限"
-            description="只有项目管理员和负责人可以修改项目设置"
+            message="No Edit Permission"
+            description="Only event administrators and owners can modify event settings"
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
@@ -167,18 +160,18 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
           disabled={!canEdit}
         >
           <Form.Item
-            label="项目名称"
+            label="Event Name"
             name="project_name"
-            rules={[{ required: true, message: '请输入项目名称' }]}
+            rules={[{ required: true, message: 'Please enter event name' }]}
           >
-            <Input placeholder="项目名称" />
+            <Input placeholder="Event name" />
           </Form.Item>
 
           <Space size="large" style={{ width: '100%' }}>
             <Form.Item
-              label="项目状态"
+              label="Event Status"
               name="status"
-              rules={[{ required: true, message: '请选择状态' }]}
+              rules={[{ required: true, message: 'Please select status' }]}
               style={{ width: 200 }}
             >
               <Select>
@@ -191,7 +184,7 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
             </Form.Item>
 
             <Form.Item
-              label="优先级"
+              label="Priority"
               name="priority"
               style={{ width: 200 }}
             >
@@ -205,51 +198,31 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
             </Form.Item>
           </Space>
 
+          <Form.Item 
+            label="Tickers" 
+            name="tickers"
+            tooltip="You can add multiple tickers, press Enter after each one"
+          >
+            <Select
+              mode="tags"
+              placeholder="e.g., TSLA.US, AAPL.US, 700.HK (Press Enter to add)"
+              tokenSeparators={[',', ' ']}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+
           <Form.Item
-            label="项目描述"
+            label="Description"
             name="description"
           >
-            <TextArea rows={4} placeholder="项目描述" />
+            <TextArea rows={4} placeholder="Event description" />
           </Form.Item>
 
           <Form.Item
-            label="投资论点"
-            name="investment_thesis"
-          >
-            <TextArea rows={6} placeholder="投资论点和理由" />
-          </Form.Item>
-
-          <Space size="large" style={{ width: '100%' }}>
-            <Form.Item
-              label="目标价"
-              name="target_price"
-              style={{ width: 200 }}
-            >
-              <Input type="number" placeholder="目标价" prefix="$" />
-            </Form.Item>
-
-            <Form.Item
-              label="目标完成日期"
-              name="target_end_date"
-              style={{ width: 250 }}
-            >
-              <DatePicker style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item
-              label="实际完成日期"
-              name="actual_end_date"
-              style={{ width: 250 }}
-            >
-              <DatePicker style={{ width: '100%' }} />
-            </Form.Item>
-          </Space>
-
-          <Form.Item
-            label="持仓情况"
+            label="Current Position"
             name="current_position"
           >
-            <TextArea rows={3} placeholder="持仓情况描述" />
+            <TextArea rows={3} placeholder="Current position description" />
           </Form.Item>
 
           {canEdit && (
@@ -260,7 +233,7 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
                 icon={<SaveOutlined />}
                 loading={saving}
               >
-                保存设置
+                Save Settings
               </Button>
             </Form.Item>
           )}
@@ -273,14 +246,14 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
           title={
             <Space>
               <WarningOutlined style={{ color: '#ff4d4f' }} />
-              <span style={{ color: '#ff4d4f' }}>危险操作</span>
+              <span style={{ color: '#ff4d4f' }}>Dangerous Operations</span>
             </Space>
           }
         >
           <Alert
-            message="归档项目"
-            description="归档后，项目将被移到归档列表，不再显示在活跃项目中。归档的项目数据仍会保留。"
-            type="warning"
+            message="Delete Event"
+            description="After deleting, the event and all associated data (files, milestones, members) will be permanently removed. This action cannot be undone."
+            type="error"
             showIcon
             style={{ marginBottom: 16 }}
           />
@@ -288,10 +261,10 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
           <Button
             danger
             icon={<DeleteOutlined />}
-            onClick={handleArchive}
-            loading={archiving}
+            onClick={handleDelete}
+            loading={deleting}
           >
-            归档此项目
+            Delete This Event
           </Button>
         </Card>
       )}
@@ -299,8 +272,8 @@ const ProjectSettingsTab: React.FC<ProjectSettingsTabProps> = ({
       {!canDelete && (
         <Card>
           <Alert
-            message="权限不足"
-            description="只有项目负责人可以归档项目"
+            message="Insufficient Permissions"
+            description="Only event owners can delete events"
             type="info"
             showIcon
           />

@@ -81,22 +81,32 @@ class ProjectBase(BaseModel):
     """项目基础模型"""
     project_name: str = Field(..., min_length=1, max_length=200, description="项目名称")
     project_type: ProjectType = Field(..., description="项目类型")
-    ticker_symbol: Optional[str] = Field(None, max_length=50, description="股票代码")
+    tickers: Optional[List[str]] = Field(default_factory=list, description="股票代码列表（支持多个）")
     industry: Optional[str] = Field(None, max_length=100, description="行业")
     sector: Optional[str] = Field(None, max_length=100, description="板块")
     region: Optional[str] = Field(None, max_length=50, description="区域")
     status: ProjectStatus = Field(ProjectStatus.ACTIVE, description="项目状态")
     priority: ProjectPriority = Field(ProjectPriority.MEDIUM, description="优先级")
     description: Optional[str] = Field(None, description="项目描述")
-    investment_thesis: Optional[str] = Field(None, description="投资论点")
-    target_price: Optional[float] = Field(None, ge=0, description="目标价")
     current_position: Optional[str] = Field(None, description="当前持仓情况")
     start_date: Optional[date] = Field(None, description="项目开始日期")
-    target_end_date: Optional[date] = Field(None, description="预计完成日期")
 
-    @validator('ticker_symbol', 'industry', 'sector')
+    @validator('tickers')
+    def validate_tickers(cls, v):
+        """验证tickers：去重、去空、转大写"""
+        if v is None:
+            return []
+        # 去除空字符串、去重、转大写
+        cleaned = list(set([ticker.strip().upper() for ticker in v if ticker and ticker.strip()]))
+        return cleaned
+    
+    @validator('sector')
     def validate_project_target(cls, v, values):
-        """验证项目必须指定ticker、industry或sector之一"""
+        """验证项目必须指定tickers、industry或sector之一"""
+        tickers = values.get('tickers', [])
+        industry = values.get('industry')
+        if not tickers and not industry and not v:
+            raise ValueError("Project must have at least one ticker, industry, or sector")
         return v
 
 
@@ -110,12 +120,18 @@ class ProjectUpdate(BaseModel):
     project_name: Optional[str] = Field(None, min_length=1, max_length=200)
     status: Optional[ProjectStatus] = None
     priority: Optional[ProjectPriority] = None
+    tickers: Optional[List[str]] = None
     description: Optional[str] = None
-    investment_thesis: Optional[str] = None
-    target_price: Optional[float] = Field(None, ge=0)
     current_position: Optional[str] = None
-    target_end_date: Optional[date] = None
-    actual_end_date: Optional[date] = None
+    
+    @validator('tickers')
+    def validate_tickers_update(cls, v):
+        """验证tickers：去重、去空、转大写"""
+        if v is None:
+            return None
+        # 去除空字符串、去重、转大写
+        cleaned = list(set([ticker.strip().upper() for ticker in v if ticker and ticker.strip()]))
+        return cleaned if cleaned else None
 
 
 class ProjectResponse(ProjectBase):
@@ -124,7 +140,6 @@ class ProjectResponse(ProjectBase):
     project_code: str
     owner_id: int
     created_by: int
-    actual_end_date: Optional[date] = None
     created_at: datetime
     updated_at: datetime
     

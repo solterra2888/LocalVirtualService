@@ -1025,23 +1025,12 @@ async def preview_delete_news_by_date_range(
             """, (start_datetime, end_datetime))
             news_themes_unified_count = cursor.fetchone()[0]
             
-            # 6. 统计project_news_tracking数量
-            cursor.execute("""
-                SELECT COUNT(*) FROM project_news_tracking
-                WHERE news_id IN (
-                    SELECT id FROM news
-                    WHERE date >= %s AND date < %s
-                )
-            """, (start_datetime, end_datetime))
-            project_news_tracking_count = cursor.fetchone()[0]
-            
             total_count = (
                 news_count + 
                 news_symbols_count + 
                 news_tags_count + 
                 news_theme_matches_count + 
-                news_themes_unified_count + 
-                project_news_tracking_count
+                news_themes_unified_count
             )
             
             logger.info(f"预览删除统计 - 用户: {current_user.username}, 日期范围: {request.start_date} ~ {request.end_date}, "
@@ -1053,7 +1042,7 @@ async def preview_delete_news_by_date_range(
                 news_tags_count=news_tags_count,
                 news_theme_matches_count=news_theme_matches_count,
                 news_themes_unified_count=news_themes_unified_count,
-                project_news_tracking_count=project_news_tracking_count,
+                project_news_tracking_count=0,
                 total_count=total_count
             )
             
@@ -1085,7 +1074,7 @@ async def delete_news_by_date_range(
       - news_tags (新闻-标签关联)
       - news_theme_matches (新闻-主题匹配)
       - news_themes_unified (新闻-统一主题)
-      - project_news_tracking (项目新闻跟踪)
+      - project_news_tracking (项目新闻跟踪) - 已移除
     - 必须将 confirm 字段设置为 true 才能执行删除
     - 建议先调用预览接口查看统计信息
     
@@ -1172,21 +1161,12 @@ async def delete_news_by_date_range(
             """, (start_datetime, end_datetime))
             news_themes_unified_count = cursor.fetchone()[0]
             
-            cursor.execute("""
-                SELECT COUNT(*) FROM project_news_tracking
-                WHERE news_id IN (
-                    SELECT id FROM news WHERE date >= %s AND date < %s
-                )
-            """, (start_datetime, end_datetime))
-            project_news_tracking_count = cursor.fetchone()[0]
-            
             total_count = (
                 news_count + 
                 news_symbols_count + 
                 news_tags_count + 
                 news_theme_matches_count + 
-                news_themes_unified_count + 
-                project_news_tracking_count
+                news_themes_unified_count
             )
             
             # 2. 执行删除操作（由于外键CASCADE，只需删除news表即可）
@@ -1218,7 +1198,7 @@ async def delete_news_by_date_range(
                     news_tags_count=news_tags_count,
                     news_theme_matches_count=news_theme_matches_count,
                     news_themes_unified_count=news_themes_unified_count,
-                    project_news_tracking_count=project_news_tracking_count,
+                    project_news_tracking_count=0,
                     total_count=total_count
                 ),
                 start_date=request.start_date,

@@ -64,7 +64,7 @@ const Layout: React.FC = () => {
     {
       key: '/projects',
       icon: <FolderOutlined />,
-      label: 'Projects',
+      label: 'Investment Tracking',
     },
     {
       key: '/news',

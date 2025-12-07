@@ -84,7 +84,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
       const data = await getProjectNews(projectId);
       setNewsList(data);
     } catch (error: any) {
-      message.error(`加载新闻列表失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Failed to load news list: ${error.response?.data?.detail || error.message}`);
     } finally {
       setLoading(false);
     }
@@ -106,12 +106,12 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
       };
 
       await addNewsToProject(projectId, newsData);
-      message.success('新闻添加成功');
+      message.success('News added successfully');
       setAddModalVisible(false);
       addForm.resetFields();
       loadNews();
     } catch (error: any) {
-      message.error(`添加新闻失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Failed to add news: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -138,11 +138,11 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
       };
 
       await updateProjectNews(projectId, currentNews.news_id, updateData);
-      message.success('新闻标注更新成功');
+      message.success('News annotation updated successfully');
       setEditModalVisible(false);
       loadNews();
     } catch (error: any) {
-      message.error(`更新失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Update failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -150,10 +150,10 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
   const handleRemoveNews = async (newsId: number, newsTitle: string) => {
     try {
       await removeProjectNews(projectId, newsId);
-      message.success(`已移除新闻: ${newsTitle}`);
+      message.success(`News removed: ${newsTitle}`);
       loadNews();
     } catch (error: any) {
-      message.error(`移除失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`Remove failed: ${error.response?.data?.detail || error.message}`);
     }
   };
 
@@ -162,7 +162,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
   // 表格列定义
   const columns: ColumnsType<ProjectNewsTracking> = [
     {
-      title: '新闻标题',
+      title: 'News Title',
       dataIndex: 'news_title',
       key: 'news_title',
       width: 400,
@@ -178,14 +178,14 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           </Space>
           {record.news_source && (
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              来源: {record.news_source}
+              Source: {record.news_source}
             </Text>
           )}
         </Space>
       )
     },
     {
-      title: '相关性',
+      title: 'Relevance',
       dataIndex: 'relevance_score',
       key: 'relevance_score',
       width: 150,
@@ -194,7 +194,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
       )
     },
     {
-      title: '标注',
+      title: 'Notes',
       dataIndex: 'user_notes',
       key: 'user_notes',
       width: 250,
@@ -202,27 +202,27 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
       render: (notes: string) => (
         <Tooltip title={notes}>
           <span style={{ color: notes ? '#000' : '#8c8c8c' }}>
-            {notes || '暂无标注'}
+            {notes || 'No notes'}
           </span>
         </Tooltip>
       )
     },
     {
-      title: '日期',
+      title: 'Date',
       dataIndex: 'news_date',
       key: 'news_date',
       width: 120,
       render: (date: string) => date ? dayjs(date).format('YYYY-MM-DD') : '-'
     },
     {
-      title: '添加时间',
+      title: 'Added At',
       dataIndex: 'added_at',
       key: 'added_at',
       width: 150,
       render: (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
     },
     {
-      title: '操作',
+      title: 'Actions',
       key: 'action',
       width: 120,
       fixed: 'right',
@@ -233,7 +233,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
 
         return (
           <Space>
-            <Tooltip title="编辑标注">
+            <Tooltip title="Edit Notes">
               <Button
                 type="link"
                 size="small"
@@ -242,13 +242,13 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
               />
             </Tooltip>
             <Popconfirm
-              title="确认移除新闻？"
-              description="此操作将从项目中移除该新闻"
-              onConfirm={() => handleRemoveNews(record.news_id, record.news_title || `新闻${record.news_id}`)}
-              okText="确认"
-              cancelText="取消"
+              title="Confirm Remove News?"
+              description="This will remove the news from the event"
+              onConfirm={() => handleRemoveNews(record.news_id, record.news_title || `News ${record.news_id}`)}
+              okText="Confirm"
+              cancelText="Cancel"
             >
-              <Tooltip title="移除新闻">
+              <Tooltip title="Remove News">
                 <Button
                   type="link"
                   danger
@@ -273,11 +273,11 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
             icon={<PlusOutlined />}
             onClick={() => setAddModalVisible(true)}
           >
-            添加新闻
+            Add News
           </Button>
         )}
         <Button icon={<FileTextOutlined />} disabled>
-          自动抓取（开发中）
+          Auto Fetch (In Development)
         </Button>
       </Space>
 
@@ -293,14 +293,14 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
         />
       ) : (
         <Empty
-          description="暂无新闻，点击「添加新闻」开始添加"
+          description="No news yet, click 'Add News' to start"
           style={{ padding: '60px 0' }}
         />
       )}
 
       {/* 添加新闻模态框 */}
       <Modal
-        title="添加新闻到项目"
+        title="Add News to Event"
         open={addModalVisible}
         onOk={() => addForm.submit()}
         onCancel={() => {
@@ -308,8 +308,8 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           addForm.resetFields();
         }}
         width={700}
-        okText="添加"
-        cancelText="取消"
+        okText="Add"
+        cancelText="Cancel"
       >
         <Form
           form={addForm}
@@ -317,13 +317,13 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           onFinish={handleAddNews}
         >
           <Alert
-            message="如何获取新闻ID"
+            message="How to Get News ID"
             description={
               <div>
-                <p>1. 前往「新闻」页面查看最新新闻</p>
-                <p>2. 在新闻列表中找到要关联的新闻</p>
-                <p>3. 复制新闻的ID（通常在URL或详情中显示）</p>
-                <p>4. 在下方输入框中粘贴新闻ID</p>
+                <p>1. Go to the "News" page to view the latest news</p>
+                <p>2. Find the news you want to associate in the news list</p>
+                <p>3. Copy the news ID (usually shown in URL or details)</p>
+                <p>4. Paste the news ID in the input box below</p>
               </div>
             }
             type="info"
@@ -332,52 +332,52 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           />
           
           <Form.Item
-            label="新闻ID"
+            label="News ID"
             name="news_id"
             rules={[
-              { required: true, message: '请输入新闻ID' },
+              { required: true, message: 'Please enter news ID' },
               { 
                 validator: async (_, value) => {
                   if (value && value <= 0) {
-                    return Promise.reject(new Error('新闻ID必须大于0'));
+                    return Promise.reject(new Error('News ID must be greater than 0'));
                   }
                   return Promise.resolve();
                 }
               }
             ]}
-            extra="提示：输入不存在的新闻ID会导致添加失败"
+            extra="Note: Entering a non-existent news ID will cause the addition to fail"
           >
             <Input 
               type="number" 
-              placeholder="例如：1234"
+              placeholder="e.g., 1234"
               addonBefore={<FileTextOutlined />}
             />
           </Form.Item>
 
           <Form.Item
-            label="相关性评分"
+            label="Relevance Score"
             name="relevance_score"
-            tooltip="1-5星，表示新闻与项目的相关程度"
+            tooltip="1-5 stars, indicating the relevance of the news to the event"
           >
             <Rate />
           </Form.Item>
 
           <Form.Item
-            label="重要新闻"
+            label="Important News"
             name="is_important"
             valuePropName="checked"
             initialValue={false}
           >
-            <Switch checkedChildren="是" unCheckedChildren="否" />
+            <Switch checkedChildren="Yes" unCheckedChildren="No" />
           </Form.Item>
 
           <Form.Item
-            label="批注"
+            label="Notes"
             name="user_notes"
           >
             <TextArea
               rows={4}
-              placeholder="记录关于这条新闻的想法、要点或后续行动..."
+              placeholder="Record your thoughts, key points, or follow-up actions about this news..."
             />
           </Form.Item>
         </Form>
@@ -385,7 +385,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
 
       {/* 编辑标注模态框 */}
       <Modal
-        title="编辑新闻标注"
+        title="Edit News Annotation"
         open={editModalVisible}
         onOk={() => editForm.submit()}
         onCancel={() => {
@@ -393,8 +393,8 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           setCurrentNews(null);
         }}
         width={600}
-        okText="保存"
-        cancelText="取消"
+        okText="Save"
+        cancelText="Cancel"
       >
         <Form
           form={editForm}
@@ -402,27 +402,27 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
           onFinish={handleUpdateNews}
         >
           <Form.Item
-            label="相关性评分"
+            label="Relevance Score"
             name="relevance_score"
           >
             <Rate />
           </Form.Item>
 
           <Form.Item
-            label="重要新闻"
+            label="Important News"
             name="is_important"
             valuePropName="checked"
           >
-            <Switch checkedChildren="是" unCheckedChildren="否" />
+            <Switch checkedChildren="Yes" unCheckedChildren="No" />
           </Form.Item>
 
           <Form.Item
-            label="批注"
+            label="Notes"
             name="user_notes"
           >
             <TextArea
               rows={4}
-              placeholder="记录关于这条新闻的想法、要点或后续行动..."
+              placeholder="Record your thoughts, key points, or follow-up actions about this news..."
             />
           </Form.Item>
         </Form>
