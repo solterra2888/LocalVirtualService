@@ -41,7 +41,7 @@ weekly_report*/
 development/.dev_pids
 
 # Markdown files
-*.md
+# *.md
 
 # Executables
 *.swf
