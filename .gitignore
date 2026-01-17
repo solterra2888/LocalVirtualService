@@ -13,6 +13,7 @@ deployment/
 development/
 market_data_test_output
 .idea/
+.download/
 .vscode/
 .DS_Store
 .env
