@@ -307,6 +307,9 @@ const ProjectsPage: React.FC = () => {
             <FolderOutlined style={{ marginRight: 12 }} />
             Investment Tracking
           </Title>
+          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+            Currently under design and development. Only partial features are available for preview. 目前正在设计和开发中......
+          </Text>
         </Col>
         <Col>
           <Space>
