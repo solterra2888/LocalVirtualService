@@ -803,7 +803,8 @@ class LLMService:
                 api_key=api_key,
                 base_url=os.getenv('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com'),
                 default_model=os.getenv('QWEN_DEFAULT_MODEL', 'qwen-turbo'),
-                models=['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext'],
+                models=['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext',
+                        'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
                 max_tokens=int(os.getenv('QWEN_MAX_TOKENS', '2000')),
                 temperature=float(os.getenv('QWEN_TEMPERATURE', '0.7')),
                 top_p=float(os.getenv('QWEN_TOP_P', '0.8'))

@@ -1226,7 +1226,7 @@ class DatabaseManager:
                 is_default_provider, fallback_priority
             ) VALUES 
                 ('qwen', 'qwen', 'Qwen', '', 'https://dashscope.aliyuncs.com',
-                 false, 'qwen-turbo', '["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"]',
+                 false, 'qwen-turbo', '["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext", "qwen3-turbo", "qwen3-plus", "qwen3-max"]',
                  2000, 0.7, 0.8, 30, 'Alibaba Cloud Qwen large language model with multiple specifications', '🔷',
                  'system', 'system', true, 1),
                 ('doubao', 'doubao', 'Doubao', '', 'https://ark.cn-beijing.volces.com',

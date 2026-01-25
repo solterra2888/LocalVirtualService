@@ -16,6 +16,7 @@ export interface LLMProvider {
   maxTokens: number;
   temperature: number;
   topP: number;
+  timeout: number;  // API request timeout in seconds
 }
 
 export interface LLMConfig {

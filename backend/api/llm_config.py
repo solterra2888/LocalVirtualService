@@ -40,7 +40,8 @@ def _get_default_providers():
             "displayName": "Qwen",
             "description": "Alibaba Cloud Qwen large language model with multiple specifications",
             "icon": "🔷",
-            "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
+            "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext",
+                      "qwen3-turbo", "qwen3-plus", "qwen3-max"],
             "baseUrl": "https://dashscope.aliyuncs.com"
         },
         "doubao": {
@@ -93,6 +94,7 @@ class LLMProviderConfig(BaseModel):
     maxTokens: int
     temperature: float
     topP: float
+    timeout: int = 30  # API request timeout in seconds
     description: str
     icon: str
 
@@ -165,6 +167,7 @@ async def get_llm_config(current_user: TokenData = Depends(get_current_admin_use
                 maxTokens=row[9] if row[9] else 2000,  # max_tokens
                 temperature=float(row[10]) if row[10] else 0.7,  # temperature
                 topP=float(row[11]) if row[11] else 0.8,  # top_p
+                timeout=row[12] if row[12] else 30,  # timeout (new field)
                 description=row[13] if row[13] else "",  # description
                 icon=row[14] if row[14] else ""  # icon
             )
@@ -456,7 +459,8 @@ async def get_provider_models(
     try:
         # 预定义的模型列表
         model_mapping = {
-            "qwen": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
+            "qwen": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext",
+                    "qwen3-turbo", "qwen3-plus", "qwen3-max"],
             "doubao": ["doubao-seed-1-6-250615"],
             "glm": ["glm-4.6", "glm-4", "glm-4-flash"]
         }

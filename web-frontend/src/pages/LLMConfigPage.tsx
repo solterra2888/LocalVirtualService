@@ -164,6 +164,7 @@ interface LLMProvider {
   maxTokens: number;
   temperature: number;
   topP: number;
+  timeout: number;  // API request timeout in seconds
 }
 
 const LLMConfigPage: React.FC = () => {
@@ -737,6 +738,40 @@ const LLMConfigPage: React.FC = () => {
         </Col>
       </Row>
 
+      <Row gutter={16}>
+        <Col span={8}>
+          <div style={{ marginBottom: 16 }}>
+            <Tooltip title="API request timeout in seconds. Recommended: 180s for long documents, 30s for short texts">
+              <Text strong>Timeout (seconds) ⓘ</Text>
+            </Tooltip>
+            <InputNumber
+              min={10}
+              max={600}
+              value={provider.timeout}
+              onChange={(value) => updateProvider(provider.id, { timeout: value || 30 })}
+              style={{ width: '100%', marginTop: 4 }}
+              placeholder="Default: 30s"
+            />
+          </div>
+        </Col>
+        <Col span={8}>
+          <div style={{ marginBottom: 16 }}>
+            <Text strong>Top P ({provider.topP})</Text>
+            <Slider
+              min={0}
+              max={1}
+              step={0.1}
+              value={provider.topP}
+              onChange={(value) => updateProvider(provider.id, { topP: value })}
+              style={{ marginTop: 4 }}
+            />
+          </div>
+        </Col>
+        <Col span={8}>
+          {/* Placeholder for future settings */}
+        </Col>
+      </Row>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
         <Space wrap>
           {provider.models.map((model) => (
@@ -757,6 +792,7 @@ const LLMConfigPage: React.FC = () => {
   );
 
   // 计算总体统计
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const totalStats = usageStats.reduce((acc, stat) => ({
     totalRequests: acc.totalRequests + stat.totalRequests,
     totalTokens: acc.totalTokens + stat.totalTokens,

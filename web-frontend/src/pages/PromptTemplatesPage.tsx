@@ -53,7 +53,8 @@ const { Panel } = Collapse;
 
 // Provider-Model mapping configuration
 const PROVIDER_MODEL_MAPPING: Record<string, string[]> = {
-  'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext'],
+  'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext',
+           'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
   'doubao': ['doubao-seed-1-6-250615'],
   'glm': ['glm-4.6', 'glm-4', 'glm-4-flash']
 };

@@ -38,6 +38,7 @@ weekly_report*/
 # Other files and folders
 .settings/
 说明/
+docs/
 development/.dev_pids
 
 # Markdown files
