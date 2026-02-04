@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import {
   Card, 
   Button, 
   Input, 
@@ -22,7 +22,9 @@ import {
   Tooltip,
   Table,
   Segmented,
-  Progress
+  Progress,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import { 
   SettingOutlined, 
@@ -74,8 +76,28 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { llmConfigService, LLMConfig, LLMUsageStats } from '../services/llmConfigService';
 import { api } from '../services/api';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Paragraph, Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    textMuted: '#999',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    textMuted: 'rgba(255, 255, 255, 0.4)',
+  },
+} as const;
 const { TabPane } = Tabs;
 const { Option } = Select;
 
@@ -84,9 +106,10 @@ interface SortableItemProps {
   id: string;
   provider: LLMProvider;
   index: number;
+  themeColors?: { cardBorder: string; textMuted: string };
 }
 
-const SortableItem: React.FC<SortableItemProps> = ({ id, provider, index }) => {
+const SortableItem: React.FC<SortableItemProps> = ({ id, provider, index, themeColors }) => {
   const {
     attributes,
     listeners,
@@ -95,6 +118,9 @@ const SortableItem: React.FC<SortableItemProps> = ({ id, provider, index }) => {
     transition,
     isDragging,
   } = useSortable({ id });
+
+  const borderColor = themeColors?.cardBorder ?? '#d9d9d9';
+  const iconColor = themeColors?.textMuted ?? '#999';
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -114,13 +140,13 @@ const SortableItem: React.FC<SortableItemProps> = ({ id, provider, index }) => {
         style={{
           marginBottom: 8,
           cursor: 'grab',
-          border: isDragging ? '2px dashed #1890ff' : '1px solid #d9d9d9',
+          border: isDragging ? '2px dashed #1890ff' : `1px solid ${borderColor}`,
         }}
         bodyStyle={{ padding: '12px 16px' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <DragOutlined style={{ marginRight: 8, color: '#999' }} />
+            <DragOutlined style={{ marginRight: 8, color: iconColor }} />
             <Badge 
               count={index + 1} 
               style={{ backgroundColor: '#52c41a', marginRight: 12 }}
@@ -168,6 +194,9 @@ interface LLMProvider {
 }
 
 const LLMConfigPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [config, setConfig] = useState<LLMConfig | null>(null);
   const [usageStats, setUsageStats] = useState<LLMUsageStats[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -772,7 +801,7 @@ const LLMConfigPage: React.FC = () => {
         </Col>
       </Row>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTop: `1px solid ${colors.cardBorder}` }}>
         <Space wrap>
           {provider.models.map((model) => (
             <Tag key={model} color="blue">{model}</Tag>
@@ -805,50 +834,74 @@ const LLMConfigPage: React.FC = () => {
   // 加载中状态
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        minHeight: '100vh',
-        flexDirection: 'column',
-        gap: 16
-      }}>
-        <Spin size="large" />
-        <Text type="secondary">Loading configuration...</Text>
-      </div>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        }}
+      >
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '100vh',
+          flexDirection: 'column',
+          gap: 16,
+          backgroundColor: colors.pageBg
+        }}>
+          <Spin size="large" />
+          <Text type="secondary">Loading configuration...</Text>
+        </div>
+      </ConfigProvider>
     );
   }
 
   // 加载错误状态
   if (loadError || !config) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Alert
-          message="Failed to load configuration"
-          description={loadError || 'Unable to get configuration data'}
-          type="error"
-          showIcon
-          icon={<WarningOutlined />}
-          action={
-            <Button size="small" onClick={loadConfig}>
-              Reload
-            </Button>
-          }
-        />
-      </div>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        }}
+      >
+        <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100vh' }}>
+          <Alert
+            message="Failed to load configuration"
+            description={loadError || 'Unable to get configuration data'}
+            type="error"
+            showIcon
+            icon={<WarningOutlined />}
+            action={
+              <Button size="small" onClick={loadConfig}>
+                Reload
+              </Button>
+            }
+          />
+        </div>
+      </ConfigProvider>
     );
   }
 
   return (
-    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', background: colors.pageBg, minHeight: '100vh' }}>
       {/* Header */}
-      <div style={{ background: '#fff', padding: '24px', marginBottom: '24px', borderRadius: '8px' }}>
+      <div style={{ background: colors.cardBg, padding: '24px', marginBottom: '24px', borderRadius: '8px', border: `1px solid ${colors.cardBorder}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <RobotOutlined style={{ fontSize: '32px', color: '#1890ff', marginRight: '12px' }} />
             <div>
-              <Title level={2} style={{ margin: 0 }}>Large Language Model Configuration</Title>
-              <Paragraph style={{ margin: 0, color: '#666' }}>
+              <Title level={2} style={{ margin: 0, color: colors.text }}>Large Language Model Configuration</Title>
+              <Paragraph style={{ margin: 0, color: colors.textSecondary }}>
                 Configure and manage Chinese mainstream large language model integration
               </Paragraph>
             </div>
@@ -1046,6 +1099,7 @@ const LLMConfigPage: React.FC = () => {
                               id={providerId}
                               provider={provider}
                               index={index}
+                              themeColors={{ cardBorder: colors.cardBorder, textMuted: colors.textMuted }}
                             />
                           );
                         })}
@@ -1665,6 +1719,7 @@ const LLMConfigPage: React.FC = () => {
         </TabPane>
       </Tabs>
     </div>
+    </ConfigProvider>
   );
 };
 

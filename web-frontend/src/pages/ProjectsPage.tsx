@@ -19,7 +19,9 @@ import {
   Layout,
   Spin,
   Empty,
-  Tabs
+  Tabs,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   PlusOutlined,
@@ -52,14 +54,47 @@ import ProjectMilestonesTab from '../components/projects/ProjectMilestonesTab';
 import ProjectFilesTab from '../components/projects/ProjectFilesTab';
 import ProjectMembersTab from '../components/projects/ProjectMembersTab';
 import ProjectSettingsTab from '../components/projects/ProjectSettingsTab';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    siderBg: '#fafafa',
+    siderHeaderBg: '#fff',
+    border: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    cardSelectedBorder: '#91d5ff',
+    cardSelectedBg: '#e6f7ff',
+    cardHoverShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+    cardShadow: '0 1px 2px rgba(0, 0, 0, 0.02)',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    siderBg: '#212936',
+    siderHeaderBg: '#1a2234',
+    border: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    cardSelectedBorder: '#1890ff',
+    cardSelectedBg: 'rgba(24, 144, 255, 0.15)',
+    cardHoverShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+    cardShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
+  },
+} as const;
 const { Option } = Select;
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
 const { TabPane } = Tabs;
 
 const ProjectsPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [projects, setProjects] = useState<InvestmentProject[]>([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
@@ -299,15 +334,26 @@ const ProjectsPage: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '24px', height: 'calc(100vh - 64px)' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.border,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', height: 'calc(100vh - 64px)', backgroundColor: colors.pageBg }}>
       {/* 页面标题 */}
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
-          <Title level={2} style={{ margin: 0 }}>
+          <Title level={2} style={{ margin: 0, color: colors.text }}>
             <FolderOutlined style={{ marginRight: 12 }} />
             Investment Tracking
           </Title>
-          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+          <Text type="secondary" style={{ display: 'block', marginTop: 8, color: colors.textSecondary }}>
             Currently under design and development. Only partial features are available for preview. 目前正在设计和开发中......
           </Text>
         </Col>
@@ -336,13 +382,13 @@ const ProjectsPage: React.FC = () => {
       </Row>
 
       {/* 左右布局 */}
-      <Layout style={{ background: '#fff', height: 'calc(100% - 60px)' }}>
+      <Layout style={{ background: colors.cardBg, height: 'calc(100% - 60px)', border: `1px solid ${colors.border}` }}>
         {/* 左侧面板 - 事件卡片列表 */}
         <Sider
           width={350}
           style={{
-            background: '#fafafa',
-            borderRight: '1px solid #f0f0f0',
+            background: colors.siderBg,
+            borderRight: `1px solid ${colors.border}`,
             height: '100%',
             overflow: 'hidden',
             display: 'flex',
@@ -351,8 +397,8 @@ const ProjectsPage: React.FC = () => {
         >
           <div style={{ 
             padding: '16px',
-            borderBottom: '1px solid #f0f0f0',
-            background: '#fff'
+            borderBottom: `1px solid ${colors.border}`,
+            background: colors.siderHeaderBg
           }}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               {/* 搜索框 */}
@@ -428,7 +474,7 @@ const ProjectsPage: React.FC = () => {
               </Row>
 
               {/* 显示总数 */}
-              <Text type="secondary" style={{ fontSize: '12px' }}>
+              <Text type="secondary" style={{ fontSize: '12px', color: colors.textSecondary }}>
                 Total: {total} events
               </Text>
             </Space>
@@ -465,6 +511,7 @@ const ProjectsPage: React.FC = () => {
                     project={project}
                     isSelected={selectedProject?.id === project.id}
                     onClick={handleSelectProject}
+                    themeColors={colors}
                   />
                 ))
               )}
@@ -474,7 +521,7 @@ const ProjectsPage: React.FC = () => {
 
         {/* 右侧内容区域 - 事件详情 */}
         <Content style={{ 
-          background: '#fff', 
+          background: colors.cardBg, 
           height: '100%', 
           overflowY: 'auto',
           padding: '24px'
@@ -587,6 +634,7 @@ const ProjectsPage: React.FC = () => {
         </Form>
       </Modal>
     </div>
+    </ConfigProvider>
   );
 };
 

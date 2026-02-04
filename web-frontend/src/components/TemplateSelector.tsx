@@ -7,9 +7,15 @@ import React, { useState, useEffect } from 'react';
 import { Select, Spin, Tag, Tooltip, Space, Typography } from 'antd';
 import { InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import promptTemplateService from '../services/promptTemplateService';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Text } = Typography;
 const { Option } = Select;
+
+const TEMPLATE_BOX_THEME = {
+  light: { boxBg: '#f5f5f5', iconColor: '#1890ff', text: undefined as string | undefined },
+  dark: { boxBg: '#212936', iconColor: '#60a5fa', text: 'rgba(255,255,255,0.85)' },
+} as const;
 
 interface TemplateSelectorProps {
   categoryCode: string;
@@ -43,6 +49,8 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   allowClear = true,
   style = {},
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const boxTheme = TEMPLATE_BOX_THEME[themeMode];
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -131,16 +139,22 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     if (!template) return null;
 
     return (
-      <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+      <div style={{
+        marginTop: 8,
+        padding: 8,
+        background: boxTheme.boxBg,
+        borderRadius: 4,
+        color: boxTheme.text,
+      }}>
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
           <Space>
-            <InfoCircleOutlined style={{ color: '#1890ff' }} />
-            <Text strong>模板配置：</Text>
+            <InfoCircleOutlined style={{ color: boxTheme.iconColor }} />
+            <Text strong style={boxTheme.text ? { color: boxTheme.text } : undefined}>模板配置：</Text>
           </Space>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            提供商: {template.recommended_provider || '未指定'} | 
-            模型: {template.recommended_model || '未指定'} | 
-            温度: {template.temperature} | 
+          <Text type="secondary" style={{ fontSize: '12px', color: boxTheme.text }}>
+            提供商: {template.recommended_provider || '未指定'} |
+            模型: {template.recommended_model || '未指定'} |
+            温度: {template.temperature} |
             最大Token: {template.max_tokens}
           </Text>
         </Space>

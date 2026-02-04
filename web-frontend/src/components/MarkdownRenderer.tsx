@@ -8,13 +8,32 @@ interface MarkdownRendererProps {
   content: string;
   className?: string;
   style?: React.CSSProperties;
+  /** 'dark' 时使用浅色文字与深色背景，适合深色主题弹窗 */
+  variant?: 'light' | 'dark';
 }
+
+const LIGHT = {
+  h1: '#1f2937', h2: '#374151', h3: '#4b5563', h4: '#6b7280',
+  text: '#374151', border: '#e5e7eb', blockquoteBg: '#f8fafc', blockquote: '#475569',
+  codeBg: '#f1f5f9', code: '#e11d48', preBg: '#f8fafc', preBorder: '#e2e8f0',
+  tableBorder: '#e2e8f0', theadBg: '#f8fafc', th: '#374151', td: '#4b5563',
+  link: '#3b82f6', strong: '#1f2937', em: '#6b7280', hr: '#e5e7eb',
+};
+const DARK = {
+  h1: '#e0e6f1', h2: '#c9d1d9', h3: '#b1bac4', h4: '#8b949e',
+  text: 'rgba(255,255,255,0.9)', border: 'rgba(255,255,255,0.2)', blockquoteBg: 'rgba(255,255,255,0.06)', blockquote: 'rgba(255,255,255,0.7)',
+  codeBg: 'rgba(255,255,255,0.1)', code: '#79c0ff', preBg: 'rgba(255,255,255,0.06)', preBorder: 'rgba(255,255,255,0.15)',
+  tableBorder: 'rgba(255,255,255,0.2)', theadBg: 'rgba(255,255,255,0.08)', th: '#e0e6f1', td: 'rgba(255,255,255,0.85)',
+  link: '#58a6ff', strong: '#e0e6f1', em: 'rgba(255,255,255,0.7)', hr: 'rgba(255,255,255,0.2)',
+};
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ 
   content, 
   className, 
-  style 
+  style,
+  variant = 'light'
 }) => {
+  const c = variant === 'dark' ? DARK : LIGHT;
   // 预处理内容：为紧跟在有序列表项后的无序列表添加缩进
   // 这样可以确保有序列表的序号连续（1. 2. 3.）而不是重复（1. 1. 1.）
   const preprocessContent = (text: string): string => {
@@ -48,7 +67,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   const processedContent = preprocessContent(content);
   
   return (
-    <div className={className} style={style}>
+    <div className={[className, variant === 'dark' ? 'markdown-renderer-dark' : ''].filter(Boolean).join(' ')} style={style}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -60,8 +79,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               fontWeight: 'bold', 
               marginBottom: '16px',
               marginTop: '24px',
-              color: '#1f2937',
-              borderBottom: '2px solid #e5e7eb',
+              color: c.h1,
+              borderBottom: `2px solid ${c.border}`,
               paddingBottom: '8px'
             }}>
               {children}
@@ -73,7 +92,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               fontWeight: 'bold', 
               marginBottom: '12px',
               marginTop: '20px',
-              color: '#374151'
+              color: c.h2
             }}>
               {children}
             </h2>
@@ -84,7 +103,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               fontWeight: '600', 
               marginBottom: '10px',
               marginTop: '16px',
-              color: '#4b5563'
+              color: c.h3
             }}>
               {children}
             </h3>
@@ -95,7 +114,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               fontWeight: '600', 
               marginBottom: '8px',
               marginTop: '14px',
-              color: '#6b7280'
+              color: c.h4
             }}>
               {children}
             </h4>
@@ -104,7 +123,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             <p style={{ 
               marginBottom: '12px', 
               lineHeight: '1.6',
-              color: '#374151'
+              color: c.text
             }}>
               {children}
             </p>
@@ -113,7 +132,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             <ul style={{ 
               marginBottom: '12px', 
               paddingLeft: '20px',
-              color: '#374151'
+              color: c.text
             }}>
               {children}
             </ul>
@@ -122,7 +141,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             <ol style={{ 
               marginBottom: '12px', 
               paddingLeft: '20px',
-              color: '#374151'
+              color: c.text
             }}>
               {children}
             </ol>
@@ -137,14 +156,14 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           ),
           blockquote: ({ children }) => (
             <blockquote style={{ 
-              borderLeft: '4px solid #3b82f6',
+              borderLeft: `4px solid ${c.link}`,
               paddingLeft: '16px',
               margin: '16px 0',
-              backgroundColor: '#f8fafc',
+              backgroundColor: c.blockquoteBg,
               padding: '12px 16px',
               borderRadius: '0 4px 4px 0',
               fontStyle: 'italic',
-              color: '#475569'
+              color: c.blockquote
             }}>
               {children}
             </blockquote>
@@ -153,12 +172,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             const isInline = !className;
             return isInline ? (
               <code style={{ 
-                backgroundColor: '#f1f5f9',
+                backgroundColor: c.codeBg,
                 padding: '2px 6px',
                 borderRadius: '4px',
                 fontSize: '0.9em',
                 fontFamily: 'Monaco, Consolas, "Courier New", monospace',
-                color: '#e11d48'
+                color: c.code
               }}>
                 {children}
               </code>
@@ -170,14 +189,15 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           },
           pre: ({ children }) => (
             <pre style={{ 
-              backgroundColor: '#f8fafc',
+              backgroundColor: c.preBg,
               padding: '16px',
               borderRadius: '8px',
               overflow: 'auto',
               margin: '16px 0',
-              border: '1px solid #e2e8f0',
+              border: `1px solid ${c.preBorder}`,
               fontSize: '14px',
-              lineHeight: '1.5'
+              lineHeight: '1.5',
+              color: c.text
             }}>
               {children}
             </pre>
@@ -187,7 +207,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               <table style={{ 
                 width: '100%',
                 borderCollapse: 'collapse',
-                border: '1px solid #e2e8f0',
+                border: `1px solid ${c.tableBorder}`,
                 borderRadius: '8px',
                 overflow: 'hidden'
               }}>
@@ -196,7 +216,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             </div>
           ),
           thead: ({ children }) => (
-            <thead style={{ backgroundColor: '#f8fafc' }}>
+            <thead style={{ backgroundColor: c.theadBg }}>
               {children}
             </thead>
           ),
@@ -205,8 +225,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               padding: '12px 16px',
               textAlign: 'left',
               fontWeight: '600',
-              borderBottom: '1px solid #e2e8f0',
-              color: '#374151'
+              borderBottom: `1px solid ${c.tableBorder}`,
+              color: c.th
             }}>
               {children}
             </th>
@@ -214,8 +234,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           td: ({ children }) => (
             <td style={{ 
               padding: '12px 16px',
-              borderBottom: '1px solid #f1f5f9',
-              color: '#4b5563'
+              borderBottom: `1px solid ${c.tableBorder}`,
+              color: c.td
             }}>
               {children}
             </td>
@@ -226,13 +246,13 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               target="_blank" 
               rel="noopener noreferrer"
               style={{ 
-                color: '#3b82f6',
+                color: c.link,
                 textDecoration: 'none',
                 borderBottom: '1px solid transparent',
                 transition: 'border-bottom-color 0.2s'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderBottomColor = '#3b82f6';
+                e.currentTarget.style.borderBottomColor = c.link;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.borderBottomColor = 'transparent';
@@ -242,12 +262,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             </a>
           ),
           strong: ({ children }) => (
-            <strong style={{ fontWeight: '600', color: '#1f2937' }}>
+            <strong style={{ fontWeight: '600', color: c.strong }}>
               {children}
             </strong>
           ),
           em: ({ children }) => (
-            <em style={{ fontStyle: 'italic', color: '#6b7280' }}>
+            <em style={{ fontStyle: 'italic', color: c.em }}>
               {children}
             </em>
           ),
@@ -255,7 +275,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             <hr style={{ 
               border: 'none',
               height: '1px',
-              backgroundColor: '#e5e7eb',
+              backgroundColor: c.hr,
               margin: '24px 0'
             }} />
           )

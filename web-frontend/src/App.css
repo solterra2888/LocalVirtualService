@@ -3,6 +3,15 @@
   background-color: #f5f5f5;
 }
 
+/* dark 模式：根容器与主内容区深色背景 */
+.App.app-dark {
+  background-color: #1a202c;
+}
+
+.main-layout-dark .layout-content {
+  background: #1a202c !important;
+}
+
 /* 登录页面样式 */
 .login-container {
   min-height: 100vh;
@@ -50,46 +59,22 @@
 .layout-header {
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   position: fixed;
   top: 0;
+  left: 0;
   right: 0;
-  left: 240px; /* 对应侧边栏宽度 */
   z-index: 1000;
   height: 64px;
-  transition: left 0.2s ease;
 }
 
-/* 当侧边栏折叠时，调整header的left值 */
-.main-layout .ant-layout-sider-collapsed + .main-content-layout .layout-header {
-  left: 80px; /* 对应折叠后的侧边栏宽度 */
+/* 顶部导航菜单：水平居中、不换行 */
+.layout-top-nav-menu.ant-menu-horizontal {
+  border-bottom: none;
 }
-
-.layout-sider {
-  box-shadow: 2px 0 8px rgba(29, 35, 41, 0.05);
-  transition: all 0.2s ease;
-  position: fixed;
-  left: 0;
-  top: 0;
-  height: 100vh;
-  z-index: 1001;
-}
-
-.layout-sider.ant-layout-sider-collapsed {
-  box-shadow: 2px 0 8px rgba(29, 35, 41, 0.05);
-}
-
-/* 折叠按钮样式 */
-.collapse-button {
-  transition: all 0.2s ease;
-}
-
-.collapse-button:hover {
-  background-color: #f0f0f0;
-  border-radius: 6px;
+.layout-top-nav-menu.ant-menu-horizontal > .ant-menu-item,
+.layout-top-nav-menu.ant-menu-horizontal > .ant-menu-submenu {
+  margin: 0 4px;
+  padding: 0 12px;
 }
 
 .layout-content {
@@ -97,14 +82,7 @@
   background: #fff;
   border-radius: 8px;
   min-height: calc(100vh - 112px);
-  margin-top: 88px; /* 为固定header留出空间 */
-  margin-left: 264px; /* 为侧边栏留出空间 */
-  transition: margin-left 0.2s ease;
-}
-
-/* 当侧边栏折叠时，调整content的margin-left */
-.main-layout .ant-layout-sider-collapsed + .main-content-layout .layout-content {
-  margin-left: 104px; /* 为折叠后的侧边栏留出空间 */
+  margin-top: 88px; /* 为固定 header 留出空间 */
 }
 
 /* 页面内容样式 */
@@ -257,29 +235,28 @@
 /* 响应式设计 */
 @media (max-width: 768px) {
   .layout-header {
-    left: 0 !important; /* 在小屏幕上，header占满宽度 */
     padding: 0 16px;
-  }
-  
-  .layout-sider {
-    position: fixed;
-    z-index: 1002; /* 确保侧边栏在最上层 */
   }
   
   .layout-content {
     margin: 16px;
-    margin-top: 80px; /* 为固定header留出空间 */
-    margin-left: 16px; /* 在小屏幕上，content占满宽度 */
+    margin-top: 80px; /* 为固定 header 留出空间 */
   }
   
+  .layout-top-nav-menu.ant-menu-horizontal > .ant-menu-item,
+  .layout-top-nav-menu.ant-menu-horizontal > .ant-menu-submenu {
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
   .page-header {
     padding: 16px 16px 0;
   }
-  
+
   .page-content {
     padding: 0 16px 16px;
   }
-  
+
   .login-form-container {
     margin: 16px;
     padding: 24px;
@@ -359,4 +336,52 @@
   background: #fff1f0;
   border-color: #ffa39e;
   color: #ff4d4f;
+}
+
+/* Markdown 深色变体：AI Analysis 弹窗内代码块与正文可读 */
+.markdown-renderer-dark .hljs,
+.markdown-renderer-dark .hljs-subst,
+.markdown-renderer-dark .hljs-attr { color: #e0e6f1; }
+.markdown-renderer-dark .hljs-keyword { color: #ff7b72; }
+.markdown-renderer-dark .hljs-string { color: #79c0ff; }
+.markdown-renderer-dark .hljs-number { color: #79c0ff; }
+.markdown-renderer-dark .hljs-title { color: #d2a8ff; }
+.markdown-renderer-dark .hljs-comment { color: #8b949e; }
+.markdown-renderer-dark .hljs-built_in { color: #ffa657; }
+.markdown-renderer-dark .hljs-function { color: #d2a8ff; }
+.markdown-renderer-dark pre { background: rgba(255,255,255,0.06) !important; }
+
+/* Live Headlines：卡片与标题悬停效果 */
+.live-headlines-card:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+.app-dark .live-headlines-card:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.live-headlines-title:hover {
+  color: #1890ff !important;
+  text-decoration: underline !important;
+}
+.app-dark .live-headlines-title:hover {
+  color: #5dade2 !important;
+  text-decoration: underline !important;
+}
+
+/* AI Analysis Details 弹窗：固定高度，切换 tab 时尺寸与位置一致 */
+.analysis-details-modal .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.analysis-details-modal .ant-tabs-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  height: 100%;
+}
+.analysis-details-modal .ant-tabs-tabpane {
+  height: 100%;
+  overflow: hidden;
 } 

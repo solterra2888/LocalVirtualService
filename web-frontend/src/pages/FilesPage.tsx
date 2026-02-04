@@ -21,14 +21,14 @@ import {
   Tooltip,
   Badge,
   Cascader,
-  AutoComplete
+  AutoComplete,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   InboxOutlined,
   PlayCircleOutlined,
   DeleteOutlined,
-  UpOutlined,
-  DownOutlined,
   StopOutlined,
   SettingOutlined,
   EyeOutlined,
@@ -38,20 +38,18 @@ import {
   FileExcelOutlined,
   FileWordOutlined,
   FileImageOutlined,
-  ClockCircleOutlined,
-  CheckCircleOutlined,
   ExclamationCircleOutlined,
   ClearOutlined,
   DownloadOutlined,
   RobotOutlined,
   FolderOutlined,
-  TagOutlined,
   LoadingOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useGlobalLogger } from '../contexts/LoggerContext';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import TemplateSelector from '../components/TemplateSelector';
@@ -59,8 +57,32 @@ import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 
 const { Text } = Typography;
-const { Dragger } = Upload;
 const { Option } = Select;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    textMuted: '#999',
+    boxMuted: '#f5f5f5',
+    successBg: '#f6ffed',
+    successBorder: '#b7eb8f',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    textMuted: '#94a3b8',
+    boxMuted: '#212936',
+    successBg: 'rgba(82, 196, 26, 0.15)',
+    successBorder: 'rgba(82, 196, 26, 0.45)',
+  },
+} as const;
 
 interface FileItem {
   id: string;
@@ -152,6 +174,9 @@ interface ProcessingResult {
 }
 
 const FilesPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const themeColors = THEME_COLORS[themeMode];
   const [files, setFiles] = useState<FileItem[]>([]);
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [selectedTaskType, setSelectedTaskType] = useState<string>('');
@@ -1148,7 +1173,7 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleMoveFile = (fileId: string, direction: 'up' | 'down') => {
+  const _handleMoveFile = (fileId: string, direction: 'up' | 'down') => {
     setFiles(prev => {
       const index = prev.findIndex(f => f.id === fileId);
       if (index === -1) return prev;
@@ -1766,7 +1791,7 @@ const FilesPage: React.FC = () => {
           // 如果没有文件名，显示文件数量作为占位
           const total = record.files_processed + record.files_failed;
           return (
-            <div style={{ color: '#999', fontSize: '11px' }}>
+            <div style={{ color: themeColors.textMuted, fontSize: '11px' }}>
               <FolderOutlined style={{ marginRight: 6, fontSize: '11px' }} />
               {total} file{total > 1 ? 's' : ''}
             </div>
@@ -1794,7 +1819,7 @@ const FilesPage: React.FC = () => {
                 {displayName}
               </div>
             </Tooltip>
-            <div style={{ fontSize: '11px', color: '#999' }}>
+            <div style={{ fontSize: '11px', color: themeColors.textMuted }}>
               {new Date(record.created_at).toLocaleString()}
             </div>
           </div>
@@ -1812,13 +1837,13 @@ const FilesPage: React.FC = () => {
         return (
           <Space direction="vertical" size={0}>
             <div style={{ fontSize: '11px' }}>
-              <span style={{ color: '#999' }}>Processed: </span>
+              <span style={{ color: themeColors.textMuted }}>Processed: </span>
               <span style={{ color: '#52c41a', fontWeight: 500 }}>
                 {record.files_processed}
               </span>
             </div>
             <div style={{ fontSize: '11px' }}>
-              <span style={{ color: '#999' }}>Analyzed: </span>
+              <span style={{ color: themeColors.textMuted }}>Analyzed: </span>
               <span style={{ fontWeight: 500 }}>
                 {isAnalyzed ? 'True' : 'False'}
               </span>
@@ -2228,7 +2253,7 @@ const FilesPage: React.FC = () => {
     >
       {selectedFileContent ? (
         <div>
-          <div style={{ marginBottom: 16, padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '6px' }}>
+          <div style={{ marginBottom: 16, padding: '12px', backgroundColor: themeColors.boxMuted, borderRadius: '6px' }}>
             <Row gutter={16}>
               <Col span={8}>
                 <Text strong>File Type:</Text> {(() => {
@@ -2260,7 +2285,7 @@ const FilesPage: React.FC = () => {
             border: '1px solid #d9d9d9',
             borderRadius: '6px',
             padding: '16px',
-            backgroundColor: '#fafafa'
+            backgroundColor: themeColors.boxMuted
           }}>
             {selectedFileContent.isOriginalFile && selectedFileContent.originalFileInfo ? (
               // 原始文件显示
@@ -2356,10 +2381,21 @@ const FilesPage: React.FC = () => {
   );
 
   return (
-    <div>
-      <div className="page-content" style={{ marginTop: 16 }}>
-        {/* 主体区域：左侧参数配置，右侧执行历史 */}
-        <Row gutter={24}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: themeColors.cardBg,
+            colorBorderSecondary: themeColors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: themeColors.pageBg, minHeight: '100%' }}>
+        <div className="page-content" style={{ marginTop: 16 }}>
+          {/* 主体区域：左侧参数配置，右侧执行历史 */}
+          <Row gutter={24}>
           {/* 左侧：输入参数区域 - 1/3宽度 */}
           <Col span={8}>
             {/* 文件上传和处理按钮 */}
@@ -2400,8 +2436,8 @@ const FilesPage: React.FC = () => {
                       size="large"
                       style={{ 
                         width: '160px',
-                        backgroundColor: '#52c41a',
-                        borderColor: '#52c41a'
+                        backgroundColor: isDark ? '#38a169' : '#52c41a',
+                        borderColor: isDark ? '#38a169' : '#52c41a'
                       }}
                     >
                       Start Processing
@@ -2412,7 +2448,7 @@ const FilesPage: React.FC = () => {
                   <div style={{ 
                     marginTop: 8, 
                     fontSize: '12px', 
-                    color: '#999', 
+                    color: themeColors.textMuted, 
                     textAlign: 'left' 
                   }}>
                     Support PDF, Excel, Word, Image and more
@@ -2472,8 +2508,8 @@ const FilesPage: React.FC = () => {
                 {(selectedSector && selectedIndustry) && (
                   <div style={{ 
                     padding: '8px 12px', 
-                    backgroundColor: '#f6ffed', 
-                    border: '1px solid #b7eb8f',
+                    backgroundColor: themeColors.successBg, 
+                    border: `1px solid ${themeColors.successBorder}`,
                     borderRadius: '6px',
                     fontSize: '12px',
                     color: '#52c41a'
@@ -2602,8 +2638,8 @@ const FilesPage: React.FC = () => {
               <Form layout="vertical" size="small">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {taskTypes.map((task, index) => {
-                    const colors = ['blue', 'green', 'orange', 'red', 'purple', 'cyan', 'magenta', 'volcano', 'geekblue', 'gold'];
-                    const color = colors[index % colors.length];
+                    const tagColors = ['blue', 'green', 'orange', 'red', 'purple', 'cyan', 'magenta', 'volcano', 'geekblue', 'gold'];
+                    const color = tagColors[index % tagColors.length];
                     const isSelected = selectedTaskType === task.id;
                     
                     return (
@@ -2613,7 +2649,7 @@ const FilesPage: React.FC = () => {
                         style={{
                           cursor: processing ? 'not-allowed' : 'pointer',
                           border: isSelected ? `2px solid ${color === 'blue' ? '#1890ff' : color === 'green' ? '#52c41a' : color === 'orange' ? '#fa8c16' : color === 'red' ? '#f5222d' : color === 'purple' ? '#722ed1' : color === 'cyan' ? '#13c2c2' : color === 'magenta' ? '#eb2f96' : color === 'volcano' ? '#fa541c' : color === 'geekblue' ? '#2f54eb' : '#fadb14'}` : '1px solid #d9d9d9',
-                          backgroundColor: isSelected ? undefined : '#fafafa',
+                          backgroundColor: isSelected ? undefined : themeColors.boxMuted,
                           fontWeight: isSelected ? 'bold' : 'normal',
                           opacity: processing ? 0.6 : 1
                         }}
@@ -2649,7 +2685,7 @@ const FilesPage: React.FC = () => {
                         <LoadingOutlined /> 正在重试加载RC Agent... ({taskTypesLoadAttempts}/{maxTaskTypesRetries})
                       </div>
                     ) : (
-                      <div style={{ color: '#999' }}>
+                      <div style={{ color: themeColors.textMuted }}>
                         No AI Agents available
                       </div>
                     )}
@@ -2983,7 +3019,7 @@ const FilesPage: React.FC = () => {
         >
           <div>
             <p>将为以下文件设置标签：</p>
-            <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
+            <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: themeColors.successBg, border: `1px solid ${themeColors.successBorder}`, borderRadius: '6px' }}>
               <Space direction="vertical" size="small">
                 <div>
                   <Text strong>Sector:</Text> <Tag color="blue">{selectedSector}</Tag>
@@ -3007,14 +3043,15 @@ const FilesPage: React.FC = () => {
               ))}
             </div>
             {files.filter(f => f.fileId).length === 0 && (
-              <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+              <div style={{ textAlign: 'center', color: themeColors.textMuted, padding: '20px' }}>
                 没有可以设置标签的文件
               </div>
             )}
           </div>
         </Modal>
+        </div>
       </div>
-    </div>
+    </ConfigProvider>
   );
 };
 

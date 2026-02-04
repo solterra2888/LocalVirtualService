@@ -28,6 +28,8 @@ import CandlestickDemoPage from './pages/CandlestickDemoPage';
 import MarketWeekly from './pages/MarketWeekly';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+import DashboardSettingsPage from './pages/DashboardSettingsPage';
+import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import './App.css';
 
 // 私有路由组件
@@ -123,6 +125,7 @@ const AppContent: React.FC = () => {
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
+          <Route path="settings/dashboard" element={<DashboardSettingsPage />} />
           
           {/* 管理员路由 */}
           <Route
@@ -171,7 +174,9 @@ const App: React.FC = () => {
     >
       <LoggerProvider>
         <Router>
-          <AppContent />
+          <DashboardSettingsProvider>
+            <AppContent />
+          </DashboardSettingsProvider>
         </Router>
       </LoggerProvider>
     </ConfigProvider>

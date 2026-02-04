@@ -13,7 +13,9 @@ import {
   message,
   Spin,
   Table,
-  Radio
+  Radio,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   DownloadOutlined,
@@ -24,15 +26,38 @@ import {
 import { RangePickerProps } from 'antd/es/date-picker';
 import dayjs, { Dayjs } from 'dayjs';
 import { eodApiService, EODData, EODFetchParams } from '../services/eodApi';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Text, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    textMuted: '#666',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    textMuted: '#94a3b8',
+  },
+} as const;
 
 interface EODFetchProps {
   onDataFetched?: (data: EODData[]) => void;
 }
 
 const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -241,17 +266,28 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
 
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <Title level={2} style={{ marginBottom: 24 }}>
-          <DatabaseOutlined style={{ marginRight: 8 }} />
-          EOD Data Fetch
-        </Title>
-        
-        <Paragraph type="secondary" style={{ marginBottom: 24 }}>
-          Fetch End-of-Day stock price data from EODHD API. Enter a ticker symbol with exchange code 
-          (e.g., AAPL.US, 1810.HK) and select your preferred time period and date range.
-        </Paragraph>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+        <Card>
+          <Title level={2} style={{ marginBottom: 24, color: colors.text }}>
+            <DatabaseOutlined style={{ marginRight: 8 }} />
+            EOD Data Fetch
+          </Title>
+
+          <Paragraph style={{ marginBottom: 24, color: colors.textSecondary }}>
+            Fetch End-of-Day stock price data from EODHD API. Enter a ticker symbol with exchange code
+            (e.g., AAPL.US, 1810.HK) and select your preferred time period and date range.
+          </Paragraph>
 
         <Form
           form={form}
@@ -313,7 +349,7 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
                     ))}
                   </Radio.Group>
                 </Form.Item>
-                <div style={{ fontSize: '12px', color: '#666', textAlign: 'center', minHeight: '16px' }}>
+                <div style={{ fontSize: '12px', color: colors.textMuted, textAlign: 'center', minHeight: '16px' }}>
                   <Text type="secondary">
                     {periodOptions.find(p => p.value === selectedPeriod)?.description || 'Select a period to see description'}
                   </Text>
@@ -395,7 +431,7 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
 
         {eodData.length > 0 && (
           <Card size="small" style={{ marginTop: 16 }}>
-            <Title level={4}>
+            <Title level={4} style={{ color: colors.text }}>
               <BarChartOutlined style={{ marginRight: 8 }} />
               EOD Data Table
             </Title>
@@ -415,8 +451,9 @@ const EODFetch: React.FC<EODFetchProps> = ({ onDataFetched }) => {
             />
           </Card>
         )}
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </ConfigProvider>
   );
 };
 

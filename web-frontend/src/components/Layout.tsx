@@ -1,19 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge } from 'antd';
+import React, { useEffect } from 'react';
+import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge, Switch } from 'antd';
 import {
   FileTextOutlined,
   AppstoreOutlined,
   UserOutlined,
   LogoutOutlined,
   TeamOutlined,
-  ToolOutlined,
   CodeOutlined,
   DatabaseOutlined,
   StockOutlined,
   RobotOutlined,
   SettingOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   NotificationOutlined,
   FundOutlined,
   BuildOutlined,
@@ -26,10 +23,31 @@ import {
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useGlobalLogger } from '../contexts/LoggerContext';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { LogViewer } from '../components/LogViewer';
 import TimeDisplay from './TimeDisplay';
 
-const { Header, Sider, Content } = AntLayout;
+// 导航栏主题（与 Dashboard dark 蓝灰一致）
+const LAYOUT_NAV_THEME = {
+  light: {
+    siderBg: '#fff',
+    siderBorder: '#f0f0f0',
+    navText: 'rgba(0, 0, 0, 0.88)',
+    headerBg: '#fff',
+    headerText: 'rgba(0, 0, 0, 0.88)',
+    headerTextSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    siderBg: '#212936',
+    siderBorder: '#364152',
+    navText: '#e0e6f1',
+    headerBg: '#1a2234',
+    headerText: '#e0e6f1',
+    headerTextSecondary: 'rgba(255, 255, 255, 0.5)',
+  },
+} as const;
+
+const { Header, Content } = AntLayout;
 const { Title } = Typography;
 
 const Layout: React.FC = () => {
@@ -37,7 +55,8 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const globalLogger = useGlobalLogger();
-  const [collapsed, setCollapsed] = useState(false);
+  const { themeMode, setThemeMode } = useDashboardSettings();
+  const navTheme = LAYOUT_NAV_THEME[themeMode];
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -51,6 +70,17 @@ const Layout: React.FC = () => {
     document.addEventListener('keydown', handleKeyPress);
     return () => document.removeEventListener('keydown', handleKeyPress);
   }, [globalLogger]);
+
+  // dark 模式下为根容器设置深色背景，避免露出白色
+  useEffect(() => {
+    const root = document.querySelector('.App');
+    if (root) {
+      root.classList.toggle('app-dark', themeMode === 'dark');
+    }
+    return () => {
+      root?.classList.remove('app-dark');
+    };
+  }, [themeMode]);
 
 
 
@@ -77,15 +107,15 @@ const Layout: React.FC = () => {
       label: 'Market Weekly',
     },
     {
-      key: '/markets/economic-events',
-      icon: <CalendarOutlined />,
-      label: 'Economic Events',
-    },
-    {
       key: 'ug-data',
       icon: <FileTextOutlined />,
       label: 'UG Data',
       children: [
+        {
+          key: '/markets/economic-events',
+          icon: <CalendarOutlined />,
+          label: 'Economic Events',
+        },
         {
           key: '/fundamentals',
           icon: <FileTextOutlined />,
@@ -138,7 +168,7 @@ const Layout: React.FC = () => {
       ],
     },
     {
-      key: 'settings',
+      key: 'system',
       icon: <SettingOutlined />,
       label: 'System',
       children: [
@@ -170,16 +200,8 @@ const Layout: React.FC = () => {
     return true;
   });
 
-  // 用户菜单配置
+  // 用户菜单：仅登出（System 已移至顶栏）
   const userMenuItems = [
-    {
-      key: 'settings',
-      icon: <ToolOutlined />,
-      label: 'Settings',
-      onClick: () => {
-        // TODO: 实现设置功能
-      }
-    },
     {
       key: 'logout',
       icon: <LogoutOutlined />,
@@ -197,26 +219,6 @@ const Layout: React.FC = () => {
     navigate('/login');
   }
 
-  // 获取当前页面标题
-  const getCurrentPageTitle = () => {
-    // 递归查找菜单项
-    const findMenuItemByKey = (items: any[], targetKey: string): any => {
-      for (const item of items) {
-        if (item.key === targetKey) {
-          return item;
-        }
-        if (item.children) {
-          const found = findMenuItemByKey(item.children, targetKey);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    const currentItem = findMenuItemByKey(menuItems, location.pathname);
-    return currentItem?.label || 'Universal Glance';
-  };
-
   // 检查是否有新的错误日志（用于显示红点提示）
   const hasErrorLogs = globalLogger.logs.some(log => 
     log.level === 'error' && 
@@ -224,144 +226,115 @@ const Layout: React.FC = () => {
   );
 
   return (
-    <AntLayout className="main-layout">
-      <Sider 
-        width={240} 
-        className="layout-sider"
-        theme="light"
-        breakpoint="lg"
-        collapsedWidth="80"
-        collapsed={collapsed}
-        trigger={null}
-      >
-        <div style={{ 
-          padding: collapsed ? '16px 8px' : '24px 16px', 
-          borderBottom: '1px solid #f0f0f0',
-          textAlign: collapsed ? 'center' : 'left',
+    <AntLayout
+      className={`main-layout ${themeMode === 'dark' ? 'main-layout-dark' : ''}`}
+      style={{ background: themeMode === 'dark' ? '#1a202c' : undefined }}
+    >
+      <Header
+        className="layout-header"
+        style={{
+          background: navTheme.headerBg,
+          color: navTheme.headerText,
+          boxShadow: themeMode === 'dark' ? '0 1px 4px rgba(0,0,0,0.2)' : undefined,
+          padding: '0 24px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'space-between'
-        }}>
-          <Title 
-            level={collapsed ? 5 : 4} 
-            style={{ 
-              margin: 0, 
-              textAlign: collapsed ? 'center' : 'left',
-              fontSize: collapsed ? '14px' : '20px',
-              cursor: collapsed ? 'pointer' : 'default'
+          justifyContent: 'space-between',
+          gap: 24,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flex: 1, minWidth: 0 }}>
+          <Title
+            level={5}
+            style={{
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 600,
+              color: navTheme.headerText,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
             }}
-            onClick={collapsed ? () => setCollapsed(false) : undefined}
           >
-            {collapsed ? 'UG' : 'Universal Glance'}
+            Universal Glance
           </Title>
-          {!collapsed && (
-            <Button
-              type="text"
-              icon={<MenuFoldOutlined />}
-              onClick={() => setCollapsed(true)}
-              style={{
-                fontSize: '16px',
-                width: 32,
-                height: 32,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            />
-          )}
+          <Menu
+            mode="horizontal"
+            theme={themeMode}
+            selectedKeys={[location.pathname]}
+            items={menuItems}
+            onClick={handleMenuClick}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              flex: 1,
+              minWidth: 0,
+              lineHeight: '64px',
+            }}
+            className="layout-top-nav-menu"
+          />
         </div>
-        
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          defaultOpenKeys={['ug-data', 'ai-agents', 'settings']}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{ border: 'none', height: collapsed ? 'calc(100vh - 120px)' : 'calc(100vh - 120px)' }}
-          inlineCollapsed={collapsed}
-        />
-        {collapsed && (
-          <div style={{ 
-            padding: '16px 8px', 
-            borderTop: '1px solid #f0f0f0',
-            textAlign: 'center'
-          }}>
-            <Button
-              type="text"
-              icon={<MenuUnfoldOutlined />}
-              onClick={() => setCollapsed(false)}
-              title="展开导航栏"
-              style={{
-                fontSize: '16px',
-                width: 32,
-                height: 32,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            />
-          </div>
-        )}
-      </Sider>
 
-      <AntLayout className="main-content-layout">
-        <Header className="layout-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ fontSize: 16, fontWeight: 500 }}>
-              {getCurrentPageTitle()}
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span>Welcome, {user?.username}</span>
-            
-            {/* 时间显示 */}
-            <TimeDisplay />
-            
-            {/* 全局日志按钮 */}
-            <Tooltip title="System Logs (Ctrl + `)">
-              <Badge dot={hasErrorLogs} size="small">
-                <Button
-                  type="text"
-                  icon={<CodeOutlined />}
-                  onClick={() => globalLogger.actions.setShowFloating(true)}
-                  style={{
-                    color: globalLogger.showFloating ? '#1890ff' : '#8c8c8c',
-                    fontSize: '16px'
-                  }}
-                />
-              </Badge>
-            </Tooltip>
-            
-            {user?.is_admin && (
-              <span style={{ 
-                background: '#f50', 
-                color: 'white', 
-                padding: '2px 8px', 
-                borderRadius: 4,
-                fontSize: 12
-              }}>
-                Admin
-              </span>
-            )}
-            
-            <Dropdown 
-              menu={{ items: userMenuItems }}
-              placement="bottomRight"
-            >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: navTheme.headerText, flexShrink: 0 }}>
+          <span style={{ color: navTheme.headerTextSecondary, fontSize: 13 }}>Welcome, {user?.username}</span>
+
+          <TimeDisplay />
+
+          <Tooltip title={themeMode === 'dark' ? 'Dark mode' : 'Light mode'}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: navTheme.headerTextSecondary }}>Dark</span>
+              <Switch
+                size="small"
+                checked={themeMode === 'dark'}
+                onChange={(checked) => setThemeMode(checked ? 'dark' : 'light')}
+              />
+            </span>
+          </Tooltip>
+
+          <Tooltip title="System Logs (Ctrl + `)">
+            <Badge dot={hasErrorLogs} size="small">
               <Button
                 type="text"
-                icon={<Avatar size="small" icon={<UserOutlined />} />}
-                style={{ display: 'flex', alignItems: 'center' }}
+                icon={<CodeOutlined />}
+                onClick={() => globalLogger.actions.setShowFloating(true)}
+                style={{
+                  color: globalLogger.showFloating ? '#1890ff' : navTheme.headerTextSecondary,
+                  fontSize: '16px'
+                }}
               />
-            </Dropdown>
-          </div>
-        </Header>
+            </Badge>
+          </Tooltip>
 
-        <Content className="layout-content">
-          <Outlet />
-        </Content>
-      </AntLayout>
+          {user?.is_admin && (
+            <span style={{
+              background: themeMode === 'dark' ? '#38a169' : '#f50',
+              color: 'white',
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: 12
+            }}>
+              Admin
+            </span>
+          )}
+
+          <Dropdown
+            menu={{ items: userMenuItems }}
+            placement="bottomRight"
+          >
+            <Button
+              type="text"
+              icon={<Avatar size="small" icon={<UserOutlined />} />}
+              style={{ display: 'flex', alignItems: 'center', color: navTheme.headerText }}
+            />
+          </Dropdown>
+        </div>
+      </Header>
+
+      <Content
+        className="layout-content"
+        style={{ background: themeMode === 'dark' ? '#1a202c' : undefined }}
+      >
+        <Outlet />
+      </Content>
       
       {/* 全局日志查看器 */}
       <LogViewer

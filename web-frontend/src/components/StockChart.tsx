@@ -9,6 +9,8 @@ import { EventFormData, ChartEvent } from '../types/events';
 
 const { Title } = Typography;
 
+export type StockChartThemeMode = 'light' | 'dark';
+
 interface StockChartProps {
   symbol: string;
   companyName?: string;
@@ -20,12 +22,34 @@ interface StockChartProps {
   sector?: string;
   industry?: string;
   exchange?: string;
+  themeMode?: StockChartThemeMode;
 }
 
-// 格式化价格变化颜色
-const getPriceChangeColor = (changePercent?: number) => {
-  if (!changePercent) return '#8c8c8c';
-  return changePercent >= 0 ? '#52c41a' : '#f5222d';
+// 走势图区域 UI 主题（与 FinvizDashboard dark 蓝灰一致）
+const STOCK_CHART_UI_THEME = {
+  light: {
+    headerBg: '#fff',
+    headerBorder: '#f0f0f0',
+    chartWrapperBg: '#fff',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: '#8c8c8c',
+    positive: '#52c41a',
+    negative: '#f5222d',
+  },
+  dark: {
+    headerBg: '#1a2234',
+    headerBorder: '#4c5263',
+    chartWrapperBg: '#1a2234',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    positive: '#38a169',
+    negative: '#e53e3e',
+  },
+} as const;
+
+const getPriceChangeColor = (changePercent?: number, themeMode: StockChartThemeMode = 'light') => {
+  if (changePercent === undefined || changePercent === null) return STOCK_CHART_UI_THEME[themeMode].textSecondary;
+  return changePercent >= 0 ? STOCK_CHART_UI_THEME[themeMode].positive : STOCK_CHART_UI_THEME[themeMode].negative;
 };
 
 const StockChart: React.FC<StockChartProps> = ({ 
@@ -38,8 +62,10 @@ const StockChart: React.FC<StockChartProps> = ({
   onRemoveFromWatchlist,
   sector,
   industry,
-  exchange
+  exchange,
+  themeMode = 'light',
 }) => {
+  const ui = STOCK_CHART_UI_THEME[themeMode];
   // 事件管理状态
   const [showEvents, setShowEvents] = useState<boolean>(true);
   const [showVolume, setShowVolume] = useState<boolean>(false); // 默认不显示交易量
@@ -117,10 +143,10 @@ const StockChart: React.FC<StockChartProps> = ({
       {/* Header with Stock Info and Controls */}
       <div 
         style={{ 
-          backgroundColor: '#fff', 
+          backgroundColor: ui.headerBg, 
           padding: '16px 24px', 
           borderRadius: '8px 8px 0 0',
-          borderBottom: '1px solid #f0f0f0'
+          borderBottom: `1px solid ${ui.headerBorder}`,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -128,7 +154,7 @@ const StockChart: React.FC<StockChartProps> = ({
             {/* Company Name and Symbol */}
             <div style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <Title level={4} style={{ margin: 0 }}>
+                <Title level={4} style={{ margin: 0, color: ui.text }}>
                   {companyName || symbol}
                   {' '}({symbol})
                 </Title>
@@ -146,12 +172,12 @@ const StockChart: React.FC<StockChartProps> = ({
                 <Row gutter={16}>
                   <Col span={8}>
                     <div>
-                      <Typography.Text strong style={{ fontSize: '12px' }}>Current Price</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: '12px', color: ui.textSecondary }}>Current Price</Typography.Text>
                       <br />
                       {priceLoading ? (
                         <Skeleton.Input style={{ width: 80, height: 20 }} size="small" active />
                       ) : (
-                        <Typography.Text style={{ fontSize: '16px', fontWeight: 'bold' }}>
+                        <Typography.Text style={{ fontSize: '16px', fontWeight: 'bold', color: ui.text }}>
                           {realTimePriceData.close ? `$${realTimePriceData.close.toFixed(2)}` : 'N/A'}
                         </Typography.Text>
                       )}
@@ -159,7 +185,7 @@ const StockChart: React.FC<StockChartProps> = ({
                   </Col>
                   <Col span={8}>
                     <div>
-                      <Typography.Text strong style={{ fontSize: '12px' }}>Price Change %</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: '12px', color: ui.textSecondary }}>Price Change %</Typography.Text>
                       <br />
                       {priceLoading ? (
                         <Skeleton.Input style={{ width: 60, height: 20 }} size="small" active />
@@ -169,8 +195,8 @@ const StockChart: React.FC<StockChartProps> = ({
                             fontSize: '16px', 
                             fontWeight: 'bold',
                             color: realTimePriceData.change_percent !== undefined 
-                              ? getPriceChangeColor(realTimePriceData.change_percent) 
-                              : '#8c8c8c'
+                              ? getPriceChangeColor(realTimePriceData.change_percent, themeMode) 
+                              : ui.textSecondary,
                           }}
                         >
                           {realTimePriceData.change_percent !== undefined 
@@ -183,12 +209,12 @@ const StockChart: React.FC<StockChartProps> = ({
                   </Col>
                   <Col span={8}>
                     <div>
-                      <Typography.Text strong style={{ fontSize: '12px' }}>Volume</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: '12px', color: ui.textSecondary }}>Volume</Typography.Text>
                       <br />
                       {priceLoading ? (
                         <Skeleton.Input style={{ width: 100, height: 20 }} size="small" active />
                       ) : (
-                        <Typography.Text style={{ fontSize: '14px' }}>
+                        <Typography.Text style={{ fontSize: '14px', color: ui.text }}>
                           {realTimePriceData.volume ? realTimePriceData.volume.toLocaleString() : 'N/A'}
                         </Typography.Text>
                       )}
@@ -196,14 +222,8 @@ const StockChart: React.FC<StockChartProps> = ({
                   </Col>
                 </Row>
                 
-                {/* Update timestamp */}
                 {realTimePriceData.updated_at && (
-                  <div style={{ 
-                    marginTop: '8px',
-                    fontSize: '10px',
-                    color: '#999',
-                    fontStyle: 'italic'
-                  }}>
+                  <div style={{ marginTop: '8px', fontSize: '10px', color: ui.textSecondary, fontStyle: 'italic' }}>
                     Updated at {new Date(realTimePriceData.updated_at).toLocaleString()}
                   </div>
                 )}
@@ -262,7 +282,7 @@ const StockChart: React.FC<StockChartProps> = ({
       </div>
 
       {/* Candlestick Chart */}
-      <div style={{ backgroundColor: '#fff', borderRadius: '0 0 8px 8px', overflow: 'hidden', padding: '16px' }}>
+      <div style={{ backgroundColor: ui.chartWrapperBg, borderRadius: '0 0 8px 8px', overflow: 'hidden', padding: '16px' }}>
         <CandlestickChart
           symbol={symbol}
           companyName={companyName}
@@ -270,6 +290,7 @@ const StockChart: React.FC<StockChartProps> = ({
           width={900}
           height={260}
           showHeader={false}
+          themeMode={themeMode}
           onAddEventClick={handleAddEvent}
           onToggleEvents={handleToggleEvents}
           externalShowEvents={showEvents}

@@ -66,8 +66,24 @@ import {
   ProjectFileCreateRequest,
   FileCategory
 } from '../../types/project';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 
 const { TextArea } = Input;
+
+const TIMELINE_CARD_THEME = {
+  light: {
+    cardBg: '#fafafa',
+    cardBorder: '#f0f0f0',
+    labelColor: '#666',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+  },
+  dark: {
+    cardBg: 'rgba(255, 255, 255, 0.06)',
+    cardBorder: 'rgba(255,255,255,0.08)',
+    labelColor: 'rgba(255, 255, 255, 0.5)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  },
+} as const;
 const { Option } = Select;
 const { Title, Text, Paragraph } = Typography;
 
@@ -119,6 +135,8 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
   projectId,
   permissions
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const timelineTheme = TIMELINE_CARD_THEME[themeMode];
   const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -660,7 +678,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
                     paddingRight: isLeft ? 12 : 0,
                     paddingLeft: isLeft ? 0 : 12,
                     fontWeight: 500,
-                    color: '#666'
+                    color: timelineTheme.labelColor
                   }}>
                     {milestone.milestone_date
                       ? dayjs(milestone.milestone_date).format('YYYY-MM-DD')
@@ -681,7 +699,9 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
                     maxWidth: 360,
                     marginLeft: isLeft ? 0 : 'auto',
                     marginRight: isLeft ? 'auto' : 0,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    backgroundColor: timelineTheme.cardBg,
+                    border: `1px solid ${timelineTheme.cardBorder}`,
+                    boxShadow: timelineTheme.boxShadow,
                     borderRadius: 8
                   }}
                   title={

@@ -18,7 +18,9 @@ import {
   Tabs,
   Row,
   Col,
-  Select
+  Select,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   PlusOutlined,
@@ -31,8 +33,26 @@ import {
 import { tasksAPI } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useAuthStore } from '../store/authStore';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+  },
+} as const;
 const { TabPane } = Tabs;
 
 interface TaskType {
@@ -65,6 +85,9 @@ interface TaskFormData {
 
 const TasksPage: React.FC = () => {
   const { user } = useAuthStore();
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskFormVisible, setTaskFormVisible] = useState(false);
@@ -490,12 +513,23 @@ const TasksPage: React.FC = () => {
 
 
   return (
-    <div>
-      <div className="page-header">
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <div className="page-header" style={{ marginBottom: '24px' }}>
         <div className="flex-between">
           <div style={{ flex: 1, marginRight: '24px' }}>
-            <Title level={3} className="page-title">AI Agent Settings</Title>
-            <div className="page-description">
+            <Title level={3} className="page-title" style={{ color: colors.text }}>AI Agent Settings</Title>
+            <div className="page-description" style={{ color: colors.textSecondary, marginTop: '8px' }}>
               Configure and manage AI agents that integrate with third-party LLMOps platforms. 
               These agents leverage external chatbot and workflow services to provide intelligent 
               automation capabilities. Before configuring agents here, ensure you have already 
@@ -516,7 +550,7 @@ const TasksPage: React.FC = () => {
 
       <div className="page-content">
         <Tabs defaultActiveKey="types">
-                      <TabPane tab="AI Agents" key="types">
+          <TabPane tab="AI Agents" key="types">
             <Card>
               <Table
                 columns={taskTypeColumns}
@@ -538,6 +572,7 @@ const TasksPage: React.FC = () => {
       {renderTaskForm()}
       {renderTaskDetail()}
     </div>
+    </ConfigProvider>
   );
 };
 

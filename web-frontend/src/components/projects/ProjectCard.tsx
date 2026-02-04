@@ -9,18 +9,33 @@ import { InvestmentProject, PROJECT_STATUS_OPTIONS } from '../../types/project';
 
 const { Text } = Typography;
 
+interface ProjectCardThemeColors {
+  border?: string;
+  cardBg?: string;
+  cardSelectedBorder?: string;
+  cardSelectedBg?: string;
+  cardShadow?: string;
+  cardHoverShadow?: string;
+}
+
 interface ProjectCardProps {
   project: InvestmentProject;
   isSelected: boolean;
   onClick: (project: InvestmentProject) => void;
+  themeColors?: ProjectCardThemeColors;
 }
 
 const ProjectCard: React.FC<ProjectCardProps> = ({
   project,
   isSelected,
-  onClick
+  onClick,
+  themeColors
 }) => {
-  // 获取状态显示信息
+  const border = isSelected ? (themeColors?.cardSelectedBorder ?? '#91d5ff') : (themeColors?.border ?? '#f0f0f0');
+  const background = isSelected ? (themeColors?.cardSelectedBg ?? '#e6f7ff') : (themeColors?.cardBg ?? '#ffffff');
+  const shadow = isSelected ? '0 2px 8px rgba(24, 144, 255, 0.15)' : (themeColors?.cardShadow ?? '0 1px 2px rgba(0, 0, 0, 0.02)');
+  const hoverShadow = themeColors?.cardHoverShadow ?? '0 2px 8px rgba(0, 0, 0, 0.08)';
+
   const statusOption = PROJECT_STATUS_OPTIONS.find(opt => opt.value === project.status);
   
   return (
@@ -32,22 +47,20 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         gap: '8px',
         padding: '12px 16px',
         borderRadius: '10px',
-        border: isSelected ? '1px solid #91d5ff' : '1px solid #f0f0f0',
-        background: isSelected ? '#e6f7ff' : '#ffffff',
-        boxShadow: isSelected
-          ? '0 2px 8px rgba(24, 144, 255, 0.15)'
-          : '0 1px 2px rgba(0, 0, 0, 0.02)',
+        border: `1px solid ${border}`,
+        background,
+        boxShadow: shadow,
         transition: 'all 0.2s ease',
         cursor: 'pointer',
       }}
       onMouseEnter={(e) => {
         if (!isSelected) {
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+          e.currentTarget.style.boxShadow = hoverShadow;
         }
       }}
       onMouseLeave={(e) => {
         if (!isSelected) {
-          e.currentTarget.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.02)';
+          e.currentTarget.style.boxShadow = shadow;
         }
       }}
     >

@@ -20,7 +20,9 @@ import {
   AutoComplete,
   Modal,
   Form,
-  DatePicker
+  DatePicker,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   SearchOutlined,
@@ -51,8 +53,48 @@ import type { ColumnsType } from 'antd/es/table';
 import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction, CompanyFundamentalsUpdateResponse, FinancialStatementsExportRequest } from '../services/fundamentals';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Text, Paragraph } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    searchDropdownBg: '#fff',
+    searchDropdownBorder: '#d9d9d9',
+    searchDropdownEmpty: '#999',
+    searchItemBorder: '#f0f0f0',
+    searchItemHover: '#f5f5f5',
+    financialTotalRowBg: '#f0f8ff',
+    financialTotalRowHover: '#e6f7ff',
+    financialTotalRowBorder: '#1890ff',
+    financialTotalRowText: '#1890ff',
+    boxMuted: '#f5f5f5',
+    textMuted: '#666',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    searchDropdownBg: '#1a2234',
+    searchDropdownBorder: '#364152',
+    searchDropdownEmpty: '#94a3b8',
+    searchItemBorder: '#2d3748',
+    searchItemHover: '#212936',
+    financialTotalRowBg: '#1e3a5f',
+    financialTotalRowHover: '#243b5c',
+    financialTotalRowBorder: '#3b82f6',
+    financialTotalRowText: '#60a5fa',
+    boxMuted: '#212936',
+    textMuted: '#94a3b8',
+  },
+} as const;
 const { TabPane } = Tabs;
 
 interface FundamentalsPageState {
@@ -70,6 +112,9 @@ interface FundamentalsPageState {
 }
 
 const FundamentalsPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   // const { user, isAuthenticated } = useAuthStore(); // Temporarily commented out unused variables
   const [state, setState] = useState<FundamentalsPageState>({
     loading: false,
@@ -1836,9 +1881,9 @@ const FundamentalsPage: React.FC = () => {
                     <div key={index} style={{ 
                       marginBottom: '16px',
                       padding: '16px', 
-                      border: '1px solid #f0f0f0', 
+                      border: `1px solid ${colors.cardBorder}`, 
                       borderRadius: '8px',
-                      backgroundColor: '#fafafa'
+                      backgroundColor: colors.boxMuted
                     }}>
                       {/* 主要评级信息 */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1922,7 +1967,7 @@ const FundamentalsPage: React.FC = () => {
                       
                       {/* 券商信息 */}
                       {safeBrokerage && (
-                        <div style={{ marginTop: 8, fontSize: '12px', color: '#666' }}>
+                        <div style={{ marginTop: 8, fontSize: '12px', color: colors.textMuted }}>
                           <Text>
                             {safeBrokerage === 'Multiple Brokers' ? safeBrokerage : `Firm: ${safeBrokerage}`}
                           </Text>
@@ -3006,32 +3051,43 @@ const FundamentalsPage: React.FC = () => {
 
 
   return (
-    <div style={{ padding: '24px' }}>
-      <style>{`
-        .financial-total-row {
-          background-color: #f0f8ff !important;
-          font-weight: bold;
-        }
-        .financial-total-row:hover {
-          background-color: #e6f7ff !important;
-        }
-        .ant-table-tbody > tr.financial-total-row > td {
-          border-top: 2px solid #1890ff;
-        }
-        .ant-table-tbody > tr.financial-total-row > td:first-child {
-          color: #1890ff;
-        }
-      `}</style>
-      {/* Page Title */}
-      <div style={{ marginBottom: 24, textAlign: 'center' }}>
-        <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-          <BuildOutlined style={{ color: '#1890ff', fontSize: '28px' }} />
-          Company Query
-        </Title>
-        <Text type="secondary" style={{ fontSize: '16px' }}>
-          Search and analyze company fundamental data
-        </Text>
-      </div>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+        <style>{`
+          .financial-total-row {
+            background-color: ${colors.financialTotalRowBg} !important;
+            font-weight: bold;
+          }
+          .financial-total-row:hover {
+            background-color: ${colors.financialTotalRowHover} !important;
+          }
+          .ant-table-tbody > tr.financial-total-row > td {
+            border-top: 2px solid ${colors.financialTotalRowBorder};
+          }
+          .ant-table-tbody > tr.financial-total-row > td:first-child {
+            color: ${colors.financialTotalRowText};
+          }
+        `}</style>
+        {/* Page Title */}
+        <div style={{ marginBottom: 24, textAlign: 'center' }}>
+          <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', color: colors.text }}>
+            <BuildOutlined style={{ color: isDark ? '#60a5fa' : '#1890ff', fontSize: '28px' }} />
+            Company Query
+          </Title>
+          <Text style={{ fontSize: '16px', color: colors.textSecondary }}>
+            Search and analyze company fundamental data
+          </Text>
+        </div>
 
       {/* Search area */}
       <Card style={{ marginBottom: 24 }}>
@@ -3061,7 +3117,7 @@ const FundamentalsPage: React.FC = () => {
                   right: '12px', 
                   top: '50%', 
                   transform: 'translateY(-50%)',
-                  color: '#bfbfbf',
+                  color: colors.textSecondary,
                   pointerEvents: 'none'
                 }} 
               />
@@ -3074,16 +3130,16 @@ const FundamentalsPage: React.FC = () => {
                   left: 0,
                   right: 0,
                   zIndex: 1000,
-                  backgroundColor: 'white',
-                  border: '1px solid #d9d9d9',
+                  backgroundColor: colors.searchDropdownBg,
+                  border: `1px solid ${colors.searchDropdownBorder}`,
                   borderRadius: '6px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  boxShadow: isDark ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
                   maxHeight: '300px',
                   overflowY: 'auto'
                 }}>
                   <Spin spinning={state.searchLoading}>
                     {state.searchResults.length === 0 && state.searchQuery ? (
-                      <div style={{ padding: '12px', textAlign: 'center', color: '#999' }}>
+                      <div style={{ padding: '12px', textAlign: 'center', color: colors.searchDropdownEmpty }}>
                         No stocks found
                       </div>
                     ) : (
@@ -3094,11 +3150,11 @@ const FundamentalsPage: React.FC = () => {
                             style={{ 
                               cursor: 'pointer',
                               padding: '8px 12px',
-                              borderBottom: '1px solid #f0f0f0'
+                              borderBottom: `1px solid ${colors.searchItemBorder}`
                             }}
                             onClick={() => handleSelectStock(stock)}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = '#f5f5f5';
+                              e.currentTarget.style.backgroundColor = colors.searchItemHover;
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.backgroundColor = 'transparent';
@@ -3107,8 +3163,8 @@ const FundamentalsPage: React.FC = () => {
                             <List.Item.Meta
                               title={
                                 <Space>
-                                  <Text strong style={{ color: '#1890ff' }}>{stock.ticker}</Text>
-                                  <Text>{stock.company}</Text>
+                                  <Text strong style={{ color: isDark ? '#60a5fa' : '#1890ff' }}>{stock.ticker}</Text>
+                                  <Text style={{ color: colors.text }}>{stock.company}</Text>
                                 </Space>
                               }
                               description={
@@ -3295,7 +3351,7 @@ const FundamentalsPage: React.FC = () => {
             </Select>
           </Form.Item>
 
-          <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 6 }}>
+          <div style={{ marginTop: 16, padding: 12, backgroundColor: colors.boxMuted, borderRadius: 6 }}>
             <Text strong>Export will include:</Text>
             <ul style={{ marginTop: 8, marginBottom: 0 }}>
               <li>Sheet 1: Balance Sheet ({form.getFieldValue('periodType') || 'yearly'})</li>
@@ -3305,7 +3361,8 @@ const FundamentalsPage: React.FC = () => {
           </div>
         </Form>
       </Modal>
-    </div>
+      </div>
+    </ConfigProvider>
   );
 };
 

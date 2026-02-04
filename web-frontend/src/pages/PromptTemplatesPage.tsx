@@ -21,7 +21,9 @@ import {
   Drawer,
   Alert,
   Statistic,
-  Collapse
+  Collapse,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import { 
   PlusOutlined,
@@ -45,8 +47,30 @@ import promptTemplateService, {
 } from '../services/promptTemplateService';
 import VariableHelper from '../components/VariableHelper';
 import { useAuthStore } from '../store/authStore';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Paragraph, Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    codeBlockBg: 'rgba(255, 255, 255, 0.06)',
+    selectedBorder: '#1890ff',
+  },
+} as const;
 const { Option } = Select;
 const { TextArea } = Input;
 const { Panel } = Collapse;
@@ -60,9 +84,11 @@ const PROVIDER_MODEL_MAPPING: Record<string, string[]> = {
 };
 
 const PromptTemplatesPage: React.FC = () => {
-  // Get current user
   const { user } = useAuthStore();
+  const { themeMode } = useDashboardSettings();
   const isAdmin = user?.is_admin || false;
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   
   // State management
   const [categories, setCategories] = useState<PromptCategory[]>([]);
@@ -464,7 +490,7 @@ const PromptTemplatesPage: React.FC = () => {
             onClick={() => setSelectedCategory(category.id)}
             style={{
               cursor: 'pointer',
-              borderColor: selectedCategory === category.id ? '#1890ff' : undefined
+              borderColor: selectedCategory === category.id ? colors.selectedBorder : undefined
             }}
           >
             <Space>
@@ -1061,7 +1087,7 @@ const PromptTemplatesPage: React.FC = () => {
                         <Text strong>System Prompt:</Text>
                         <Paragraph>
                           <pre style={{ 
-                            background: '#f5f5f5', 
+                            background: colors.codeBlockBg, 
                             padding: '12px', 
                             borderRadius: '4px',
                             whiteSpace: 'pre-wrap'
@@ -1074,7 +1100,7 @@ const PromptTemplatesPage: React.FC = () => {
                     <Text strong>User Prompt:</Text>
                     <Paragraph>
                       <pre style={{ 
-                        background: '#f5f5f5', 
+                        background: colors.codeBlockBg, 
                         padding: '12px', 
                         borderRadius: '4px',
                         whiteSpace: 'pre-wrap'
@@ -1090,7 +1116,7 @@ const PromptTemplatesPage: React.FC = () => {
                 <Card title="LLM Response" size="small">
                   <Paragraph>
                     <pre style={{ 
-                      background: '#f5f5f5', 
+                      background: colors.codeBlockBg, 
                       padding: '12px', 
                       borderRadius: '4px',
                       whiteSpace: 'pre-wrap'
@@ -1105,7 +1131,7 @@ const PromptTemplatesPage: React.FC = () => {
                 <Card title="Parsed Output" size="small">
                   <Paragraph>
                     <pre style={{ 
-                      background: '#f5f5f5', 
+                      background: colors.codeBlockBg, 
                       padding: '12px', 
                       borderRadius: '4px',
                       whiteSpace: 'pre-wrap'
@@ -1123,11 +1149,22 @@ const PromptTemplatesPage: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Title level={2}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <Title level={2} style={{ color: colors.text }}>
         <FileTextOutlined /> Prompt Template Management
       </Title>
-      <Paragraph type="secondary">
+      <Paragraph type="secondary" style={{ color: colors.textSecondary }}>
         Manage and optimize your LLM Prompt templates with support for variables, version control, and online testing
       </Paragraph>
 
@@ -1273,6 +1310,7 @@ const PromptTemplatesPage: React.FC = () => {
       </Modal>
 
     </div>
+    </ConfigProvider>
   );
 };
 

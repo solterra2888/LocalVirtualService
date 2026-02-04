@@ -25,7 +25,9 @@ import {
   Alert,
   Switch,
   Form,
-  Upload
+  Upload,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   ReloadOutlined,
@@ -83,11 +85,33 @@ import {
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useAuthStore } from '../store/authStore';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import ThemeConflictModal from '../components/ThemeConflictModal';
 import BatchThemeConflictModal from '../components/BatchThemeConflictModal';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea, Search } = Input;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    textMuted: '#999',
+    codeBlockBg: '#f5f5f5',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    textMuted: 'rgba(255, 255, 255, 0.4)',
+    codeBlockBg: 'rgba(255, 255, 255, 0.06)',
+  },
+} as const;
 
 interface PageState {
   loading: boolean;
@@ -168,7 +192,10 @@ interface PageState {
 
 const InvestmentThemesPage: React.FC = () => {
   const { user } = useAuthStore();
+  const { themeMode } = useDashboardSettings();
   const isAdmin = user?.is_admin === true;
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   
   const [state, setState] = useState<PageState>({
     loading: false,
@@ -1392,7 +1419,7 @@ const InvestmentThemesPage: React.FC = () => {
           </Paragraph>
           <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: 16 }}>
             {selectedThemes.map(theme => (
-              <div key={theme.theme_id} style={{ padding: '8px', background: '#f5f5f5', marginBottom: '4px', borderRadius: '4px' }}>
+              <div key={theme.theme_id} style={{ padding: '8px', background: colors.codeBlockBg, marginBottom: '4px', borderRadius: '4px' }}>
                 <Text strong>{theme.theme_name}</Text>
                 {' '}
                 <Text type="secondary">({theme.theme_id})</Text>
@@ -2208,15 +2235,26 @@ const InvestmentThemesPage: React.FC = () => {
   const uploadPreview = state.uploadPreview;
 
   return (
-    <div style={{ padding: '24px' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
       {/* Page Title */}
       <div style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <Title level={2}>
+            <Title level={2} style={{ color: colors.text }}>
               <FundOutlined /> Investment Themes Settings
             </Title>
-            <Paragraph type="secondary">
+            <Paragraph type="secondary" style={{ color: colors.textSecondary }}>
               Intelligent theme matching system based on Embedding technique, automatically associating news through semantic analysis. All users can create themes. You can edit and delete your own themes{isAdmin ? ', and admin can manage all themes' : ''}.
             </Paragraph>
           </div>
@@ -2317,7 +2355,7 @@ const InvestmentThemesPage: React.FC = () => {
                         onClick={handleForceUpdateVectors}
                       >
                         <Text type="danger">Force Update All Vectors</Text>
-                        <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                        <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: '4px' }}>
                           Only for model upgrade (20-30 mins)
                         </div>
                       </Menu.Item>
@@ -2327,7 +2365,7 @@ const InvestmentThemesPage: React.FC = () => {
                         onClick={handleForceRegenerateDescriptions}
                       >
                         <Text type="danger">Regenerate All Descriptions</Text>
-                        <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                        <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: '4px' }}>
                           Only after Prompt optimization (15-25 mins)
                         </div>
                       </Menu.Item>
@@ -2774,7 +2812,7 @@ const InvestmentThemesPage: React.FC = () => {
                   <>
                     {/* Current Tickers */}
                     <div style={{ marginBottom: '12px' }}>
-                      <Text strong style={{ fontSize: '12px', color: '#666' }}>Current Tickers:</Text>
+                      <Text strong style={{ fontSize: '12px', color: colors.textSecondary }}>Current Tickers:</Text>
                       <div style={{ marginTop: '8px' }}>
                         {state.editTickers.length === 0 ? (
                           <Text type="secondary">No tickers associated</Text>
@@ -2798,7 +2836,7 @@ const InvestmentThemesPage: React.FC = () => {
                     
                     {/* Add New Tickers */}
                     <div>
-                      <Text strong style={{ fontSize: '12px', color: '#666' }}>Add New Tickers:</Text>
+                      <Text strong style={{ fontSize: '12px', color: colors.textSecondary }}>Add New Tickers:</Text>
                       <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
                         <Input
                           placeholder="e.g. NVDA.US, AMD.US, 0700.HK (comma-separated)"
@@ -3296,6 +3334,7 @@ const InvestmentThemesPage: React.FC = () => {
         </Space>
       </Modal>
     </div>
+    </ConfigProvider>
   );
 };
 

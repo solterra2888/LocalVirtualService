@@ -12,7 +12,9 @@ import {
   Col,
   message,
   Tag,
-  Tooltip
+  Tooltip,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   ReloadOutlined,
@@ -21,14 +23,41 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import { marketsAPI, EconomicEvent, CountryInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import CountryFlag from '../components/CountryFlag';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    neutralTagBg: 'rgba(128, 128, 128, 0.1)',
+    neutralTagColor: '#666',
+    neutralTagBorder: 'rgba(128, 128, 128, 0.3)',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    neutralTagBg: 'rgba(148, 163, 184, 0.15)',
+    neutralTagColor: '#94a3b8',
+    neutralTagBorder: 'rgba(148, 163, 184, 0.35)',
+  },
+} as const;
+
 const EconomicEventsPage: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<EconomicEvent[]>([]);
   const [countries, setCountries] = useState<CountryInfo[]>([]);
@@ -218,9 +247,9 @@ const EconomicEventsPage: React.FC = () => {
         return (
           <Tag 
             style={{ 
-              backgroundColor: 'rgba(128, 128, 128, 0.1)', 
-              color: '#666',
-              border: '1px solid rgba(128, 128, 128, 0.3)'
+              backgroundColor: colors.neutralTagBg, 
+              color: colors.neutralTagColor,
+              border: `1px solid ${colors.neutralTagBorder}`
             }}
           >
             No Forecast
@@ -238,9 +267,9 @@ const EconomicEventsPage: React.FC = () => {
         return (
           <Tag 
             style={{ 
-              backgroundColor: 'rgba(128, 128, 128, 0.1)', 
-              color: '#666',
-              border: '1px solid rgba(128, 128, 128, 0.3)'
+              backgroundColor: colors.neutralTagBg, 
+              color: colors.neutralTagColor,
+              border: `1px solid ${colors.neutralTagBorder}`
             }}
           >
             No Previous
@@ -264,31 +293,54 @@ const EconomicEventsPage: React.FC = () => {
   // 如果未认证，显示登录提示
   if (!isAuthenticated) {
     return (
-      <div style={{ padding: '24px', textAlign: 'center' }}>
-        <Card>
-          <Title level={3}>Login Required</Title>
-          <Text type="secondary">
-            Please login to access economic events data
-          </Text>
-        </Card>
-      </div>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+          ...(isDark && {
+            token: {
+              colorBgContainer: colors.cardBg,
+              colorBorderSecondary: colors.cardBorder,
+            },
+          }),
+        }}
+      >
+        <div style={{ padding: '24px', textAlign: 'center', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+          <Card>
+            <Title level={3}>Login Required</Title>
+            <Text type="secondary">
+              Please login to access economic events data
+            </Text>
+          </Card>
+        </div>
+      </ConfigProvider>
     );
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <Title level={2}>
-          <CalendarOutlined /> Economic Events
-        </Title>
-        <Text type="secondary">
-          Real-time economic events, 没有 https://tradingeconomics.com/calendar 全面，未来会改进...
-        </Text>
-      </div>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+        <div style={{ marginBottom: '24px' }}>
+          <Title level={2} style={{ color: colors.text }}>
+            <CalendarOutlined /> Economic Events
+          </Title>
+          <Text style={{ color: colors.textSecondary }}>
+            Real-time economic events, 没有 https://tradingeconomics.com/calendar 全面，未来会改进...
+          </Text>
+        </div>
 
-      {/* 控制面板 */}
-      <Card style={{ marginBottom: 16 }}>
-        <Row gutter={[16, 16]} align="middle">
+        {/* 控制面板 */}
+        <Card style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12} md={8} lg={6}>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
               <Text strong>Date Range:</Text>
@@ -385,29 +437,28 @@ const EconomicEventsPage: React.FC = () => {
               </Button>
             </Space>
           </Col>
-        </Row>
-      </Card>
+          </Row>
+        </Card>
 
-
-
-      {/* 数据表格 */}
-      <Card title={`Economic Events Data (${filteredEvents.length} records${searchText || selectedImpact !== undefined ? ' - filtered' : ' - showing latest 500'})`}>
-        <Table
-          columns={columns}
-          dataSource={filteredEvents.map((item, index) => ({ ...item, key: index }))}
-          loading={loading}
-          size="small"
-          scroll={{ x: 1000 }}
-          pagination={{
-            total: filteredEvents.length,
-            pageSize: 50,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `Showing ${range[0]}-${range[1]} of ${total} records`
-          }}
-        />
-      </Card>
-    </div>
+        {/* 数据表格 */}
+        <Card title={`Economic Events Data (${filteredEvents.length} records${searchText || selectedImpact !== undefined ? ' - filtered' : ' - showing latest 500'})`}>
+          <Table
+            columns={columns}
+            dataSource={filteredEvents.map((item, index) => ({ ...item, key: index }))}
+            loading={loading}
+            size="small"
+            scroll={{ x: 1000 }}
+            pagination={{
+              total: filteredEvents.length,
+              pageSize: 50,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `Showing ${range[0]}-${range[1]} of ${total} records`
+            }}
+          />
+        </Card>
+      </div>
+    </ConfigProvider>
   );
 };
 

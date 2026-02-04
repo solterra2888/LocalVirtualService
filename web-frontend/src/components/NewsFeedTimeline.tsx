@@ -17,8 +17,7 @@ import {
 } from 'antd';
 import {
   CalendarOutlined,
-  FireOutlined,
-  RobotOutlined
+  FireOutlined
 } from '@ant-design/icons';
 import { NewsItem } from '../types/news';
 import { FusedTheme } from '../types/unifiedThemes';
@@ -167,13 +166,19 @@ const NewsFeedTimeline: React.FC<NewsFeedTimelineProps> = ({
                               {getSentimentText(item.sentiment_polarity)}
                             </Tag>
                             {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
-                              <Tag 
-                                color="blue" 
-                                icon={<RobotOutlined />} 
-                                style={{ fontSize: '8px', margin: 0 }}
+                              <span
+                                style={{
+                                  fontSize: 8,
+                                  fontWeight: 600,
+                                  padding: '0 3px',
+                                  borderRadius: 2,
+                                  background: 'rgba(24, 144, 255, 0.06)',
+                                  color: 'rgba(24, 144, 255, 0.75)',
+                                  border: '1px solid rgba(24, 144, 255, 0.35)',
+                                }}
                               >
-                                AI分析
-                              </Tag>
+                                AI
+                              </span>
                             )}
                           </Space>
                         </Space>
@@ -340,7 +345,21 @@ const NewsFeedTimeline: React.FC<NewsFeedTimelineProps> = ({
       <Modal
         title={
           <Space>
-            <RobotOutlined style={{ color: '#1890ff' }} />
+            {selectedNews?.analysis_result && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '1px 4px',
+                  borderRadius: 2,
+                  background: 'rgba(24, 144, 255, 0.06)',
+                  color: 'rgba(24, 144, 255, 0.75)',
+                  border: '1px solid rgba(24, 144, 255, 0.35)',
+                }}
+              >
+                AI
+              </span>
+            )}
             <span>{selectedNews?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
           </Space>
         }

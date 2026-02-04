@@ -13,7 +13,9 @@ import {
   InputNumber,
   Modal,
   Checkbox,
-  Divider
+  Divider,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   ReloadOutlined,
@@ -23,13 +25,34 @@ import {
 import dayjs from 'dayjs';
 import { marketsAPI, MacroIndicator, CountryInfo, IndicatorInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import CountryFlag from '../components/CountryFlag';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+  },
+} as const;
+
 const MacroIndicatorsPage: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [loading, setLoading] = useState(false);
   const [indicators, setIndicators] = useState<MacroIndicator[]>([]);
   const [countries, setCountries] = useState<CountryInfo[]>([]);
@@ -202,31 +225,54 @@ const MacroIndicatorsPage: React.FC = () => {
   // 如果未认证，显示登录提示
   if (!isAuthenticated) {
     return (
-      <div style={{ padding: '24px', textAlign: 'center' }}>
-        <Card>
-          <Title level={3}>Login Required</Title>
-          <Text type="secondary">
-            Please login to access macro indicators data
-          </Text>
-        </Card>
-      </div>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+          ...(isDark && {
+            token: {
+              colorBgContainer: colors.cardBg,
+              colorBorderSecondary: colors.cardBorder,
+            },
+          }),
+        }}
+      >
+        <div style={{ padding: '24px', textAlign: 'center', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+          <Card>
+            <Title level={3}>Login Required</Title>
+            <Text type="secondary">
+              Please login to access macro indicators data
+            </Text>
+          </Card>
+        </div>
+      </ConfigProvider>
     );
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <Title level={2}>
-          <LineChartOutlined /> Macro Indicators
-        </Title>
-        <Text type="secondary">
-          Global macroeconomic indicators and economic data analysis
-        </Text>
-      </div>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+        <div style={{ marginBottom: '24px' }}>
+          <Title level={2} style={{ color: colors.text }}>
+            <LineChartOutlined /> Macro Indicators
+          </Title>
+          <Text style={{ color: colors.textSecondary }}>
+            Global macroeconomic indicators and economic data analysis
+          </Text>
+        </div>
 
-      {/* 控制面板 */}
-      <Card style={{ marginBottom: 16 }}>
-        <Row gutter={[16, 16]} align="middle">
+        {/* 控制面板 */}
+        <Card style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12} md={8} lg={6}>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
               <Text strong>Country:</Text>
@@ -318,29 +364,29 @@ const MacroIndicatorsPage: React.FC = () => {
               </Space>
             </Space>
           </Col>
-        </Row>
-      </Card>
+          </Row>
+        </Card>
 
-      {/* 数据表格 */}
-      <Card title={`Macro Indicators Data (${indicators.length} records)`}>
-        <Table
-          columns={indicatorColumns}
-          dataSource={indicators.map((item, index) => ({ ...item, key: index }))}
-          loading={loading}
-          size="small"
-          scroll={{ x: 760 }}
-          pagination={{
-            total: indicators.length,
-            pageSize: 50,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `Showing ${range[0]}-${range[1]} of ${total} records`
-          }}
-        />
-      </Card>
+        {/* 数据表格 */}
+        <Card title={`Macro Indicators Data (${indicators.length} records)`}>
+          <Table
+            columns={indicatorColumns}
+            dataSource={indicators.map((item, index) => ({ ...item, key: index }))}
+            loading={loading}
+            size="small"
+            scroll={{ x: 760 }}
+            pagination={{
+              total: indicators.length,
+              pageSize: 50,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `Showing ${range[0]}-${range[1]} of ${total} records`
+            }}
+          />
+        </Card>
 
-      {/* 导出CSV弹窗 */}
-      <Modal
+        {/* 导出CSV弹窗 */}
+        <Modal
         title="Export Macro Indicators CSV"
         open={exportModalVisible}
         onOk={handleExportCSV}
@@ -430,7 +476,8 @@ const MacroIndicatorsPage: React.FC = () => {
           </Text>
         </div>
       </Modal>
-    </div>
+      </div>
+    </ConfigProvider>
   );
 };
 

@@ -20,7 +20,9 @@ import {
   Statistic,
   Alert,
   Descriptions,
-  Divider
+  Divider,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -40,6 +42,7 @@ import dayjs from 'dayjs';
 import { InvestmentProject } from '../types/project';
 import { getProject, getMyPermissions } from '../services/projects';
 import { PROJECT_STATUS_OPTIONS, PROJECT_TYPE_OPTIONS, PROJECT_PRIORITY_OPTIONS } from '../types/project';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 // Tab组件
 import ProjectMilestonesTab from '../components/projects/ProjectMilestonesTab';
@@ -51,8 +54,30 @@ import ProjectSettingsTab from '../components/projects/ProjectSettingsTab';
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
 
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f0f2f5',
+    cardBg: '#fff',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    descriptionBg: '#fafafa',
+    descriptionText: '#595959',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    descriptionBg: 'rgba(255, 255, 255, 0.04)',
+    descriptionText: 'rgba(255, 255, 255, 0.65)',
+  },
+} as const;
+
 const ProjectDetailPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const navigate = useNavigate();
   
   const [project, setProject] = useState<InvestmentProject | null>(null);
@@ -99,27 +124,31 @@ const ProjectDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ padding: '24px', textAlign: 'center' }}>
-        <Spin size="large" tip="Loading event information..." />
-      </div>
+      <ConfigProvider theme={{ algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm }}>
+        <div style={{ padding: '24px', textAlign: 'center', backgroundColor: colors.pageBg, minHeight: '100vh' }}>
+          <Spin size="large" tip="Loading event information..." />
+        </div>
+      </ConfigProvider>
     );
   }
 
   if (!project) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Alert
-          message="Event Not Found"
-          description="This event may have been deleted or you do not have access permission"
-          type="warning"
-          showIcon
-          action={
-            <Button type="primary" onClick={handleBack}>
-              Back to List
-            </Button>
-          }
-        />
-      </div>
+      <ConfigProvider theme={{ algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm }}>
+        <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100vh' }}>
+          <Alert
+            message="Event Not Found"
+            description="This event may have been deleted or you do not have access permission"
+            type="warning"
+            showIcon
+            action={
+              <Button type="primary" onClick={handleBack}>
+                Back to List
+              </Button>
+            }
+          />
+        </div>
+      </ConfigProvider>
     );
   }
 
@@ -129,7 +158,18 @@ const ProjectDetailPage: React.FC = () => {
   const priorityOption = PROJECT_PRIORITY_OPTIONS.find(opt => opt.value === project.priority);
 
   return (
-    <div style={{ padding: '24px', backgroundColor: '#f0f2f5', minHeight: '100vh' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: '#364152',
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100vh' }}>
       {/* 面包屑导航 */}
       <Breadcrumb style={{ marginBottom: 16 }}>
         <Breadcrumb.Item>
@@ -270,13 +310,13 @@ const ProjectDetailPage: React.FC = () => {
                   <Card 
                     size="small" 
                     title={<Text strong>Description</Text>}
-                    style={{ backgroundColor: '#fafafa' }}
+                    style={{ backgroundColor: colors.descriptionBg }}
                   >
                     <Paragraph 
                       style={{ 
                         whiteSpace: 'pre-wrap', 
                         marginBottom: 0,
-                        color: '#595959' 
+                        color: colors.descriptionText 
                       }}
                     >
                       {project.description}
@@ -382,6 +422,7 @@ const ProjectDetailPage: React.FC = () => {
         </Tabs>
       </Card>
     </div>
+    </ConfigProvider>
   );
 };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -40,7 +40,9 @@ import {
   Checkbox,
   Tooltip,
   Badge,
+  ConfigProvider,
 } from 'antd';
+import { theme as antdTheme } from 'antd';
 import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
@@ -86,13 +88,14 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   MoreOutlined,
-  RobotOutlined,
   EditOutlined,
   DeleteOutlined,
   CalculatorOutlined,
-  HolderOutlined
+  HolderOutlined,
+  UnorderedListOutlined
 } from '@ant-design/icons';
 import { useGlobalLogger } from '../contexts/LoggerContext';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
 import { filesAPI } from '../services/files';
@@ -114,6 +117,48 @@ const { Content, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
+
+export type DashboardThemeMode = 'light' | 'dark';
+
+// 主题配色（Light / Dark）- Dark 参考 Trading Dashboard 深色蓝灰
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    siderBg: '#fff',
+    siderBorder: '#f0f0f0',
+    contentBg: '#fff',
+    headerBg: '#fff',
+    headerBorder: '#f0f0f0',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    selectedBg: '#e6f7ff',
+    selectedBorder: '#91d5ff',
+    editCheckedBg: '#f6ffed',
+    editCheckedBorder: '#52c41a',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    positive: '#cf1322',
+    negative: '#3f8600',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    siderBg: '#212936',
+    siderBorder: '#2d3748',
+    contentBg: '#1a202c',
+    headerBg: '#1a2234',
+    headerBorder: '#364152',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    selectedBg: 'rgba(56, 161, 105, 0.18)',
+    selectedBorder: '#38a169',
+    editCheckedBg: 'rgba(56, 161, 105, 0.18)',
+    editCheckedBorder: '#38a169',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    positive: '#38a169',
+    negative: '#e53e3e',
+  },
+} as const;
 
 // 缓存配置
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
@@ -153,6 +198,7 @@ interface SortableWatchlistRowProps {
   isEditMode?: boolean;
   isChecked?: boolean;
   onCheckboxToggle?: (watchlistId: number) => void;
+  themeMode?: DashboardThemeMode;
 }
 
 const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
@@ -170,11 +216,13 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
   isEditMode = false,
   isChecked = false,
   onCheckboxToggle,
+  themeMode = 'light',
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.watchlist_id,
     disabled,
   });
+  const colors = THEME_COLORS[themeMode];
 
   const transformStyle = CSS.Transform.toString(transform);
 
@@ -188,8 +236,18 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
   const change = priceData?.change_percent;
   const hasChange = change !== undefined && change !== null;
   const displaySymbol = item.resolvedSymbol ?? resolveBaseSymbol(item.symbol);
-  const changeColor = getChangeColor(change);
+  const changeColor = hasChange ? (change! >= 0 ? colors.positive : colors.negative) : colors.textSecondary;
   const displayName = item.custom_name || item.company || item.symbol;
+
+  const cardBorder = isEditMode && isChecked ? colors.editCheckedBorder : isSelected ? colors.selectedBorder : colors.cardBorder;
+  const cardBg = isEditMode && isChecked ? colors.editCheckedBg : isSelected ? colors.selectedBg : colors.cardBg;
+  const boxShadow = isEditMode && isChecked
+    ? (themeMode === 'dark' ? '0 2px 8px rgba(56, 161, 105, 0.2)' : '0 2px 8px rgba(82, 196, 26, 0.15)')
+    : isSelected
+    ? (themeMode === 'dark' ? '0 2px 8px rgba(56, 161, 105, 0.2)' : '0 2px 8px rgba(24, 144, 255, 0.15)')
+    : isDragging
+    ? '0 4px 12px rgba(0, 0, 0, 0.2)'
+    : themeMode === 'dark' ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.02)';
 
   return (
     <div ref={setNodeRef} style={containerStyle} {...attributes}>
@@ -197,10 +255,8 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
         onClick={() => {
           if (!disabled) {
             if (isEditMode && onCheckboxToggle) {
-              // 在编辑模式下，点击整个卡片切换复选框
               onCheckboxToggle(item.watchlist_id);
             } else {
-              // 正常模式下，选择股票
               onSelect(item as WatchlistStockInfo);
             }
           }
@@ -208,27 +264,13 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          padding: '8px 12px',
-          height: '60px',
-          borderRadius: '10px',
-          border: isEditMode && isChecked 
-            ? '1px solid #52c41a' 
-            : isSelected 
-            ? '1px solid #91d5ff' 
-            : '1px solid #f0f0f0',
-          background: isEditMode && isChecked 
-            ? '#f6ffed' 
-            : isSelected 
-            ? '#e6f7ff' 
-            : '#ffffff',
-          boxShadow: isEditMode && isChecked
-            ? '0 2px 8px rgba(82, 196, 26, 0.15)'
-            : isSelected
-            ? '0 2px 8px rgba(24, 144, 255, 0.15)'
-            : isDragging
-            ? '0 4px 12px rgba(0, 0, 0, 0.12)'
-            : '0 1px 2px rgba(0, 0, 0, 0.02)',
+          gap: '8px',
+          padding: '5px 8px',
+          height: '48px',
+          borderRadius: '8px',
+          border: `1px solid ${cardBorder}`,
+          background: cardBg,
+          boxShadow,
           transition: 'all 0.2s ease',
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled && !isDragging ? 0.7 : 1,
@@ -252,7 +294,7 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
               alignItems: 'center',
               height: '100%',
               padding: '0 4px',
-              color: '#bfbfbf',
+              color: colors.textSecondary,
               cursor: disabled ? 'not-allowed' : 'grab',
               userSelect: 'none',
             }}
@@ -261,29 +303,30 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: 0 }}>
           <Text
             style={{
-              fontSize: '14px',
+              fontSize: '11px',
               fontWeight: 500,
               margin: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              color: colors.text,
             }}
           >
             {displayName}
           </Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
             <Text
-              type="secondary"
               style={{
-                fontSize: '12px',
+                fontSize: '11px',
                 margin: 0,
                 textTransform: 'uppercase',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                color: colors.textSecondary,
               }}
             >
               {displaySymbol}
@@ -292,18 +335,18 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-          <Text strong style={{ fontSize: '14px', color: changeColor, margin: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+          <Text strong style={{ fontSize: '11px', color: changeColor, margin: 0 }}>
             {formatPrice(priceData?.close)}
           </Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
             {hasChange &&
               (change! >= 0 ? (
-                <ArrowUpOutlined style={{ color: '#cf1322', fontSize: '12px' }} />
+                <ArrowUpOutlined style={{ color: colors.positive, fontSize: '11px' }} />
               ) : (
-                <ArrowDownOutlined style={{ color: '#3f8600', fontSize: '12px' }} />
+                <ArrowDownOutlined style={{ color: colors.negative, fontSize: '11px' }} />
               ))}
-            <Text style={{ fontSize: '12px', color: changeColor, fontWeight: 500, margin: 0 }}>
+            <Text style={{ fontSize: '11px', color: changeColor, fontWeight: 500, margin: 0 }}>
               {formatChange(change)}
             </Text>
           </div>
@@ -360,6 +403,7 @@ const restrictToVerticalAxis: Modifier = ({ transform }) => {
 
 const FinvizDashboard: React.FC = () => {
   const logger = useGlobalLogger();
+  const { themeMode } = useDashboardSettings();
   
   // 状态管理
   const [selectedStock, setSelectedStock] = useState<WatchlistStockInfo | null>(null);
@@ -387,7 +431,8 @@ const FinvizDashboard: React.FC = () => {
   const [newsOffset, setNewsOffset] = useState<number>(0);
   const [hasMoreNews, setHasMoreNews] = useState<boolean>(true);
   const [loadingMoreNews, setLoadingMoreNews] = useState<boolean>(false);
-  const NEWS_PAGE_SIZE = 10; // 每页加载10条新闻
+  const NEWS_PAGE_SIZE = 20; // 每页加载20条新闻
+const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度，切换 tab 时尺寸与位置保持一致
   
   // 价格数据
   const [stockPrices, setStockPrices] = useState<Map<string, StockPriceData>>(new Map());
@@ -409,6 +454,13 @@ const FinvizDashboard: React.FC = () => {
   
   // 新闻展开状态管理
   const [expandedNewsItems, setExpandedNewsItems] = useState<Set<number>>(new Set());
+  // 新闻列表最后更新时间（用于 "Updated HH:MM:SS PM"）
+  const [lastNewsUpdate, setLastNewsUpdate] = useState<Date | null>(null);
+  
+  // 鼠标悬停显示AI分析的状态
+  const [hoveredNewsId, setHoveredNewsId] = useState<number | null>(null);
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hideTooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // 主题关键词数据（用于高亮）
   const [themes, setThemes] = useState<NewsTheme[]>([]);
@@ -1105,6 +1157,7 @@ const FinvizDashboard: React.FC = () => {
       if (reset) {
         setNewsData(news);
         setNewsOffset(NEWS_PAGE_SIZE);
+        setLastNewsUpdate(new Date());
       } else {
         setNewsData(prev => [...prev, ...news]);
         setNewsOffset(prev => prev + NEWS_PAGE_SIZE);
@@ -1490,6 +1543,7 @@ const FinvizDashboard: React.FC = () => {
                 isEditMode={isEditMode}
                 isChecked={selectedWatchlistIds.has(item.watchlist_id)}
                 onCheckboxToggle={handleToggleSelectTicker}
+                themeMode={themeMode}
               />
             ))}
           </div>
@@ -1589,6 +1643,158 @@ const FinvizDashboard: React.FC = () => {
     return 'Neutral';
   };
 
+  // Live Headlines / Finviz News 样式用：相对时间
+  const formatTimeAgo = (dateStr?: string): string => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffM = Math.floor(diffMs / 60000);
+    const diffH = Math.floor(diffMs / 3600000);
+    const diffD = Math.floor(diffMs / 86400000);
+    if (diffM < 60) return `${diffM}m ago`;
+    if (diffH < 24) return `${diffH}h ago`;
+    return `${diffD}d ago`;
+  };
+
+  // 从 AI 分析中提取"一句话总结"（第一段，在核心要点之前的内容）
+  const getOneSentenceSummary = (analysisResult: any, maxLength: number = 80): string | null => {
+    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
+    if (!summaryResult || typeof summaryResult.content !== 'string') {
+      return null;
+    }
+    
+    const content = summaryResult.content.trim();
+    // 找到第一个编号列表项（如 "1. **核心要点**"）之前的内容
+    const firstListMatch = content.match(/^([\s\S]*?)(?=\n\s*1\.\s*\*\*)/);
+    let summary = firstListMatch ? firstListMatch[1].trim() : '';
+    
+    // 如果没找到编号格式，尝试取第一段（到第一个双换行为止）
+    if (!summary) {
+      const firstParagraph = content.split(/\n\n/)[0];
+      summary = firstParagraph?.trim() || '';
+    }
+    
+    // 如果还是没有内容，返回 null
+    if (!summary) return null;
+    
+    // 截断并添加省略号
+    if (summary.length > maxLength) {
+      summary = summary.substring(0, maxLength).trim() + '...';
+    }
+    
+    return summary;
+  };
+
+  // 从 AI 分析中提取"市场影响评估"（方向和评分）
+  interface MarketImpact {
+    direction: string;  // 正面、中性偏正面、中性、中性偏负面、负面
+    score: number;      // 1-5
+  }
+  
+  const getMarketImpact = (analysisResult: any): MarketImpact | null => {
+    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
+    if (!summaryResult || typeof summaryResult.content !== 'string') {
+      return null;
+    }
+    
+    const content = summaryResult.content;
+    
+    // 查找"市场影响评估"部分（支持中英文标题）
+    const impactMatch = content.match(/\*\*(?:市场影响评估|Market Impact Assessment)\*\*([\s\S]*?)(?=\n\s*\d+\.\s*\*\*|$)/i);
+    if (!impactMatch) return null;
+    
+    const impactText = impactMatch[1];
+    
+    // 提取方向 - 支持多种格式（中英文）
+    let direction = '中性';
+    // 中文格式1: "- 方向：中性偏正面"
+    const directionMatch1 = impactText.match(/方向[：:]\s*(正面|中性偏正面|中性|中性偏负面|负面)/);
+    // 中文格式2: "- 中性；影响程度" 或 "- 中性｜4分｜" (分号或竖线分隔)
+    const directionMatch2 = impactText.match(/[-\s]*(正面|中性偏正面|中性偏负面|负面|中性)[；;｜|]/);
+    // 中文格式3: 单独一行 "- 正面" 或 "- 负面"
+    const directionMatch3 = impactText.match(/[-\s]*(正面|中性偏正面|中性偏负面|负面|中性)\s*[\n\r]/);
+    // 英文格式: "Direction: Neutral" 或 "Direction: Positive" 或 "Direction: Mixed"
+    const directionMatchEn = impactText.match(/Direction[：:]\s*(Positive|Slightly Positive|Neutral|Mixed|Slightly Negative|Negative)(?:\s*\(|[\s\n\r])/i);
+    
+    if (directionMatch1) {
+      direction = directionMatch1[1];
+    } else if (directionMatch2) {
+      direction = directionMatch2[1];
+    } else if (directionMatch3) {
+      direction = directionMatch3[1];
+    } else if (directionMatchEn) {
+      // 英文转中文
+      const enDirection = directionMatchEn[1].toLowerCase();
+      if (enDirection === 'positive') direction = '正面';
+      else if (enDirection === 'slightly positive') direction = '中性偏正面';
+      else if (enDirection === 'neutral') direction = '中性';
+      else if (enDirection === 'mixed') direction = '中性';
+      else if (enDirection === 'slightly negative') direction = '中性偏负面';
+      else if (enDirection === 'negative') direction = '负面';
+    }
+    
+    // 提取评分 - 支持多种格式（中英文）
+    let score = 0;
+    // 中文格式1: "影响程度：3分" 或 "影响程度：3/5" 或 "影响程度：3"（纯数字）或 "程度：3分"
+    const scoreMatch1 = impactText.match(/(?:影响)?程度[：:]\s*(\d)(?:[分\/]|\s*[；;｜|]|\s*[\n\r]|\s*$)/);
+    // 中文格式2: "正面；4分；" 或 "正面｜4分｜" (分号或竖线分隔)
+    const scoreMatch2 = impactText.match(/[；;｜|]\s*(\d)\s*分[；;｜|]/);
+    // 中文格式3: 单独一行 "- 4分" 或 "- 4 分"
+    const scoreMatch3 = impactText.match(/[-\s]+(\d)\s*分\s*[\n\r]/);
+    // 英文格式: "Impact degree: 3/5" 或 "Impact: 3/5" 或 "Severity: 4/5"
+    const scoreMatchEn = impactText.match(/(?:Impact(?:\s+degree)?|Severity)[：:]\s*(\d)\s*[\/of]\s*5/i);
+    
+    if (scoreMatch1) {
+      score = parseInt(scoreMatch1[1], 10);
+    } else if (scoreMatch2) {
+      score = parseInt(scoreMatch2[1], 10);
+    } else if (scoreMatch3) {
+      score = parseInt(scoreMatch3[1], 10);
+    } else if (scoreMatchEn) {
+      score = parseInt(scoreMatchEn[1], 10);
+    }
+    
+    if (score === 0) return null;
+    
+    return { direction, score };
+  };
+
+  // 根据市场影响方向获取颜色
+  const getMarketImpactColor = (direction: string): { bg: string; text: string; border: string } => {
+    const isDark = themeMode === 'dark';
+    
+    if (direction.includes('正面') && !direction.includes('负面')) {
+      // 正面 / 中性偏正面 → 绿色系
+      return isDark 
+        ? { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: 'rgba(16, 185, 129, 0.3)' }
+        : { bg: 'rgba(16, 185, 129, 0.1)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)' };
+    } else if (direction.includes('负面')) {
+      // 负面 / 中性偏负面 → 红色系
+      return isDark
+        ? { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: 'rgba(239, 68, 68, 0.3)' }
+        : { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)' };
+    } else {
+      // 中性 → 灰色系
+      return isDark
+        ? { bg: 'rgba(107, 114, 128, 0.2)', text: '#9ca3af', border: 'rgba(107, 114, 128, 0.3)' }
+        : { bg: 'rgba(107, 114, 128, 0.1)', text: '#6b7280', border: 'rgba(107, 114, 128, 0.3)' };
+    }
+  };
+
+  // 新闻来源颜色（CNBC 浅蓝，Bloomberg 橙黄；dark 模式下其余来源也使用可见色）
+  const getSourceColor = (source?: string): string => {
+    if (!source) return themeMode === 'dark' ? '#94a3b8' : colors.textSecondary;
+    const s = source.toLowerCase();
+    if (s.includes('cnbc')) return '#5dade2';
+    if (s.includes('bloomberg')) return '#f5b041';
+    if (s.includes('reuters')) return '#7dd3fc';
+    if (s.includes('yahoo') || s.includes('finance')) return themeMode === 'dark' ? '#64748b' : colors.textSecondary;
+    if (s.includes('marketwatch')) return '#fcd34d';
+    if (s.includes('zero') || s.includes('hedge')) return '#f472b6';
+    if (s.includes('fox')) return '#a78bfa';
+    return themeMode === 'dark' ? '#94a3b8' : colors.textSecondary;
+  };
 
   // 新闻列表骨架屏
   const renderNewsSkeleton = () => (
@@ -1604,220 +1810,323 @@ const FinvizDashboard: React.FC = () => {
     </div>
   );
 
-  const renderNewsTab = () => (
-    <div>
-      {contentLoading ? (
-        renderNewsSkeleton()
-      ) : newsData.length === 0 ? (
-        <Empty 
-          description="No related news"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
-      ) : (
-        <div style={{ position: 'relative' }}>
-          {newsData.map((item, index) => (
-            <div key={item.id} style={{ position: 'relative', marginBottom: '24px' }}>
-              {/* Timeline line */}
-              {index < newsData.length - 1 && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '40px',
-                    top: '60px',
-                    bottom: '-24px',
-                    width: '2px',
-                    backgroundColor: '#d9d9d9',
-                    zIndex: 1
-                  }}
-                />
-              )}
-              
-              {/* Timeline dot */}
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '36px',
-                  top: '22px',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: '#1890ff',
-                  border: '1px solid #fff',
-                  boxShadow: '0 0 0 1px #1890ff',
-                  zIndex: 2
-                }}
-              />
-              
-              {/* Content */}
-              <div style={{ marginLeft: '60px', paddingLeft: '16px' }}>
-                <List.Item
-                  extra={
-                    <Space direction="vertical" align="end">
-                      <Space size={[4, 4]} wrap>
-                        {/* 情感标签 */}
-                        <Tag 
-                          color={getSentimentColor(item.sentiment_polarity)}
-                          style={{ fontSize: '8px', margin: 0 }}
-                        >
-                          {getSentimentText(item.sentiment_polarity)}
-                        </Tag>
-                        {hasAnalysisForTemplate(item.analysis_result, 'news_summary_v1') && (
-                          <Tag 
-                            color="blue" 
-                            icon={<RobotOutlined />} 
-                            style={{ fontSize: '8px', margin: 0 }}
-                          >
-                            AI分析
-                          </Tag>
-                        )}
-                      </Space>
-                    </Space>
-                  }
-                >
-                  <List.Item.Meta
-                    avatar={
-                      <Text
-                        type="secondary"
-                        style={{
-                          fontSize: '10px',
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        {(() => {
-                          const segments = [
-                            <span
-                              key="date"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <CalendarOutlined />{' '}
-                              {item.date
-                                ? `${new Date(item.date).toLocaleDateString()} ${new Date(
-                                    item.date
-                                  ).toLocaleTimeString()}`
-                                : 'N/A'}
-                            </span>,
-                            item.updated_at && (
-                              <span key="updated">
-                                Updated:{' '}
-                                {`${new Date(item.updated_at).toLocaleDateString()} ${new Date(
-                                  item.updated_at
-                                ).toLocaleTimeString()}`}
-                              </span>
-                            ),
-                            item.source && <span key="source">{item.source}</span>,
-                          ].filter(Boolean) as React.ReactNode[];
+  // 获取AI Analysis的完整内容用于Tooltip显示
+  const getAIAnalysisForTooltip = (analysisResult: any): string | null => {
+    if (!analysisResult) return null;
+    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
+    if (!summaryResult) return null;
+    
+    // 返回完整的AI分析内容
+    return summaryResult.content || null;
+  };
 
-                          return segments.map((segment, index) => (
-                            <React.Fragment key={index}>
-                              {index > 0 && <span style={{ color: '#d9d9d9' }}>|</span>}
-                              {segment}
-                            </React.Fragment>
-                          ));
-                        })()}
-                      </Text>
-                    }
-                    title={
-                      <Space>
-                        <span
-                          style={{
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            color: '#1890ff',
-                            textDecoration: 'underline',
-                            maxWidth: 'min(800px, 100%)',
-                            whiteSpace: 'normal',
-                            wordBreak: 'break-word',
-                            overflowWrap: 'anywhere',
-                          }}
-                          title={item.title}
-                          onClick={() => {
-                            setSelectedNewsForAnalysis(item);
-                            setAnalysisModalVisible(true);
-                          }}
-                        >
-                          {item.title}
-                        </span>
-                      </Space>
-                    }
-                    description={null}
-                  />
-                  <div style={{ fontSize: '13px', marginBottom: '8px' }}>
-                    {(() => {
-                      const displayContent = getPreferredAnalysisContent(item.analysis_result, item.content);
-                      return displayContent ? (
-                        <div>
-                          <div style={{ 
-                            maxHeight: isNewsExpanded(item.id) ? 'none' : '60px', 
-                            overflow: isNewsExpanded(item.id) ? 'visible' : 'hidden',
-                            position: 'relative'
-                          }}>
-                            <MarkdownRenderer 
-                              content={displayContent}
-                              style={{
-                                fontSize: '13px',
-                                lineHeight: '1.4'
-                              }}
-                            />
-                            {!isNewsExpanded(item.id) && (
-                              <div style={{
-                                position: 'absolute',
-                                bottom: 0,
-                                left: 0,
-                                right: 0,
-                                height: '20px',
-                                background: 'linear-gradient(transparent, white)',
-                                pointerEvents: 'none'
-                              }} />
-                            )}
-                        </div>
-                        <Button
-                          type="link"
-                          size="small"
-                          onClick={() => toggleNewsExpansion(item.id)}
-                          style={{ 
-                            padding: '4px 0', 
-                            fontSize: '12px',
-                            height: 'auto'
-                          }}
-                        >
-                          {isNewsExpanded(item.id) ? 'Collapse' : 'Expand'}
-                        </Button>
+  const renderNewsTab = () => {
+    const isDark = themeMode === 'dark';
+    const liveHeadlinesHeaderBg = '#1e3a5f';
+    const updateTimeStr = lastNewsUpdate
+      ? lastNewsUpdate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
+      : '--:--:-- --';
+
+    if (contentLoading) {
+      return <div style={{ minHeight: 400 }}>{renderNewsSkeleton()}</div>;
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 500 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minWidth: 0,
+            background: isDark ? colors.cardBg : '#fff',
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px',
+              background: liveHeadlinesHeaderBg,
+              flexShrink: 0,
+            }}
+          >
+            <Space>
+              <UnorderedListOutlined style={{ color: '#fff', fontSize: 16 }} />
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Live Headlines</span>
+            </Space>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
+              Updated {updateTimeStr}
+            </Text>
+          </div>
+          <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+            {newsData.length === 0 ? (
+              <Empty description="No related news" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ marginTop: 24 }} />
+            ) : (
+              <>
+                {newsData.map((item) => {
+                  const aiAnalysisContent = getAIAnalysisForTooltip(item.analysis_result);
+                  
+                  return (
+                    <div
+                      key={item.id}
+                      className="live-headlines-card"
+                      style={{
+                        padding: '10px 12px',
+                        marginBottom: '4px',
+                        borderRadius: '8px',
+                        borderBottom: `1px solid ${colors.cardBorder}`,
+                        cursor: 'pointer',
+                        transition: 'background-color 0.2s ease',
+                        position: 'relative',
+                      }}
+                      onClick={() => {
+                        setSelectedNewsForAnalysis(item);
+                        setAnalysisModalVisible(true);
+                      }}
+                    >
+                      <div style={{ fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
+                        {item.link ? (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="live-headlines-title"
+                            style={{ color: colors.text, textDecoration: 'none' }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseEnter={(e) => {
+                              if (aiAnalysisContent) {
+                                if (hideTooltipTimeoutRef.current) {
+                                  clearTimeout(hideTooltipTimeoutRef.current);
+                                  hideTooltipTimeoutRef.current = null;
+                                }
+                                setHoveredNewsId(item.id);
+                                setMousePosition({ x: e.clientX, y: e.clientY });
+                              }
+                            }}
+                            onMouseMove={(e) => {
+                              if (aiAnalysisContent && hoveredNewsId === item.id) {
+                                setMousePosition({ x: e.clientX, y: e.clientY });
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              if (hideTooltipTimeoutRef.current) {
+                                clearTimeout(hideTooltipTimeoutRef.current);
+                              }
+                              hideTooltipTimeoutRef.current = setTimeout(() => {
+                                setHoveredNewsId(null);
+                                hideTooltipTimeoutRef.current = null;
+                              }, 300);
+                            }}
+                          >
+                            {item.title}
+                          </a>
+                        ) : (
+                          <span 
+                            className="live-headlines-title" 
+                            style={{ color: colors.text }}
+                            onMouseEnter={(e) => {
+                              if (aiAnalysisContent) {
+                                if (hideTooltipTimeoutRef.current) {
+                                  clearTimeout(hideTooltipTimeoutRef.current);
+                                  hideTooltipTimeoutRef.current = null;
+                                }
+                                setHoveredNewsId(item.id);
+                                setMousePosition({ x: e.clientX, y: e.clientY });
+                              }
+                            }}
+                            onMouseMove={(e) => {
+                              if (aiAnalysisContent && hoveredNewsId === item.id) {
+                                setMousePosition({ x: e.clientX, y: e.clientY });
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              if (hideTooltipTimeoutRef.current) {
+                                clearTimeout(hideTooltipTimeoutRef.current);
+                              }
+                              hideTooltipTimeoutRef.current = setTimeout(() => {
+                                setHoveredNewsId(null);
+                                hideTooltipTimeoutRef.current = null;
+                              }, 300);
+                            }}
+                          >
+                            {item.title}
+                          </span>
+                        )}
                       </div>
-                    ) : null;
-                    })()}
-                  </div>
-                </List.Item>
+                      {/* 一句话总结 - 仅有 AI 分析时显示 */}
+                      {(() => {
+                        const summary = getOneSentenceSummary(item.analysis_result);
+                        if (!summary) return null;
+                        return (
+                          <div 
+                            style={{ 
+                              fontSize: 12, 
+                              color: themeMode === 'dark' ? '#94a3b8' : '#64748b',
+                              marginBottom: 6,
+                              lineHeight: 1.5,
+                              paddingLeft: 2,
+                            }}
+                          >
+                            {summary}
+                          </div>
+                        );
+                      })()}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ color: getSourceColor(item.source), fontSize: 12 }}>{item.source || '—'}</span>
+                        <span style={{ color: colors.textSecondary, fontSize: 12 }}>{formatTimeAgo(item.date)}</span>
+                        {/* AI 分析标识 */}
+                        {item.analysis_result && getAnalysisContent(item.analysis_result, 'news_summary_v1') && (
+                          <span
+                            style={{
+                              fontSize: 8,
+                              fontWeight: 600,
+                              padding: '0 3px',
+                              borderRadius: 2,
+                              background: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
+                              color: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
+                              border: `1px solid ${themeMode === 'dark' ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
+                            }}
+                          >
+                            AI
+                          </span>
+                        )}
+                        {/* 市场影响评估徽章 */}
+                        {(() => {
+                          const impact = getMarketImpact(item.analysis_result);
+                          if (!impact) return null;
+                          const impactColor = getMarketImpactColor(impact.direction);
+                          // 简化方向显示
+                          const shortDirection = impact.direction
+                            .replace('中性偏正面', '偏正面')
+                            .replace('中性偏负面', '偏负面');
+                          return (
+                            <span
+                              style={{
+                                fontSize: 8,
+                                padding: '0 3px',
+                                borderRadius: 2,
+                                backgroundColor: impactColor.bg,
+                                color: impactColor.text,
+                                border: `1px solid ${impactColor.border}`,
+                                fontWeight: 500,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {shortDirection} {impact.score}/5
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                {/* 鼠标跟随的AI分析提示框 */}
+                {hoveredNewsId && (() => {
+                  const hoveredItem = newsData.find(item => item.id === hoveredNewsId);
+                  const aiAnalysisContent = hoveredItem ? getAIAnalysisForTooltip(hoveredItem.analysis_result) : null;
+                  
+                  if (!aiAnalysisContent) return null;
+                  
+                  // 智能定位计算
+                  const tooltipWidth = 650;
+                  const tooltipMaxHeight = 450;
+                  const offset = 20;
+                  const viewportWidth = window.innerWidth;
+                  const viewportHeight = window.innerHeight;
+                  
+                  // 计算水平位置：优先显示在鼠标右侧，如果空间不够则显示在左侧
+                  let left = mousePosition.x + offset;
+                  if (left + tooltipWidth > viewportWidth - 20) {
+                    // 右侧空间不够，显示在左侧
+                    left = mousePosition.x - tooltipWidth - offset;
+                    // 如果左侧也不够，则贴近右边缘
+                    if (left < 20) {
+                      left = viewportWidth - tooltipWidth - 20;
+                    }
+                  }
+                  
+                  // 计算垂直位置：优先显示在鼠标下方，如果空间不够则显示在上方
+                  let top = mousePosition.y + 10;
+                  if (top + tooltipMaxHeight > viewportHeight - 20) {
+                    // 下方空间不够，显示在上方
+                    top = mousePosition.y - tooltipMaxHeight - 10;
+                    // 如果上方也不够，则贴近底部
+                    if (top < 20) {
+                      top = viewportHeight - tooltipMaxHeight - 20;
+                    }
+                  }
+                  
+                  return (
+                    <div
+                      style={{
+                        position: 'fixed',
+                        left: Math.max(20, left),
+                        top: Math.max(20, top),
+                        width: tooltipWidth,
+                        maxHeight: tooltipMaxHeight,
+                        overflow: 'auto',
+                        backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                        border: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                        padding: '12px 16px',
+                        borderRadius: 8,
+                        zIndex: 9999,
+                        pointerEvents: 'auto',
+                        fontSize: '9pt',
+                      }}
+                      onMouseEnter={() => {
+                        if (hideTooltipTimeoutRef.current) {
+                          clearTimeout(hideTooltipTimeoutRef.current);
+                          hideTooltipTimeoutRef.current = null;
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (hideTooltipTimeoutRef.current) {
+                          clearTimeout(hideTooltipTimeoutRef.current);
+                          hideTooltipTimeoutRef.current = null;
+                        }
+                        setHoveredNewsId(null);
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: 600, 
+                        marginBottom: 8, 
+                        fontSize: '10pt',
+                        color: isDark ? '#e0e6f1' : '#1f2937',
+                        borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
+                        paddingBottom: 6
+                      }}>
+                        AI Analysis
+                      </div>
+                      <div style={{ fontSize: '9pt', lineHeight: '1.6' }}>
+                        <MarkdownRenderer 
+                          content={aiAnalysisContent} 
+                          variant={isDark ? 'dark' : 'light'}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+            {hasMoreNews && newsData.length > 0 && (
+              <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                <Button type="primary" size="small" loading={loadingMoreNews} onClick={loadMoreNews} disabled={loadingMoreNews}>
+                  {loadingMoreNews ? 'Loading...' : 'Load More News'}
+                </Button>
               </div>
-            </div>
-          ))}
-          
-          {/* 加载更多按钮 */}
-          {hasMoreNews && (
-            <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
-              <Button 
-                type="primary" 
-                loading={loadingMoreNews}
-                onClick={loadMoreNews}
-                disabled={loadingMoreNews}
-              >
-                {loadingMoreNews ? 'Loading...' : 'Load More News'}
-              </Button>
-            </div>
-          )}
-          
-          {/* 没有更多数据提示 */}
-          {!hasMoreNews && newsData.length > 0 && (
-            <div style={{ textAlign: 'center', marginTop: '24px', marginBottom: '24px' }}>
-              <Text type="secondary">All news loaded</Text>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderOverviewTab = () => {
     const chartSection = renderStockDetails();
@@ -1865,6 +2174,7 @@ const FinvizDashboard: React.FC = () => {
 
     const { company, highlights, valuations, analyst_ratings, technicals } = overviewData;
     const currencyCode = company.currencycode || 'USD';
+    const overviewColors = THEME_COLORS[themeMode];
 
     return (
       <div>
@@ -2094,9 +2404,9 @@ const FinvizDashboard: React.FC = () => {
                       style={{
                         marginBottom: '16px',
                         padding: '16px',
-                        border: '1px solid #f0f0f0',
+                        border: `1px solid ${overviewColors.cardBorder}`,
                         borderRadius: '8px',
-                        backgroundColor: '#fafafa'
+                        backgroundColor: overviewColors.cardBg
                       }}
                     >
                       <div
@@ -2230,7 +2540,7 @@ const FinvizDashboard: React.FC = () => {
                       )}
 
                       {safeBrokerage && (
-                        <div style={{ marginTop: 8, fontSize: '12px', color: '#666' }}>
+                        <div style={{ marginTop: 8, fontSize: '12px', color: overviewColors.textSecondary }}>
                           <Text>
                             {safeBrokerage === 'Multiple Brokers' ? safeBrokerage : `Firm: ${safeBrokerage}`}
                           </Text>
@@ -2508,20 +2818,32 @@ const FinvizDashboard: React.FC = () => {
           sector={selectedStock.sector}
           industry={selectedStock.industry}
           exchange={selectedStock.exchange}
+          themeMode={themeMode}
         />
       </div>
     );
   };
 
+  const colors = THEME_COLORS[themeMode];
+
   return (
-    <div style={{ height: '100%', background: '#f5f5f5' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: themeMode === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(themeMode === 'dark' && {
+          token: { colorBgContainer: '#1a2234' },
+          components: { Card: { colorBgContainer: '#1a2234' } },
+        }),
+      }}
+    >
+    <div style={{ height: '100%', background: colors.pageBg }}>
       <Layout style={{ height: '100%' }}>
         {/* 左侧选择器 */}
         <Sider 
           width={watchlistCollapsed ? 80 : 350} 
           style={{ 
-            background: '#fff', 
-            borderRight: '1px solid #f0f0f0',
+            background: colors.siderBg, 
+            borderRight: `1px solid ${colors.siderBorder}`,
             height: '100%',
             overflowY: 'auto'
           }}
@@ -2541,7 +2863,8 @@ const FinvizDashboard: React.FC = () => {
                   margin: 0,
                   textAlign: watchlistCollapsed ? 'center' : 'left',
                   fontSize: watchlistCollapsed ? '14px' : '20px',
-                  cursor: watchlistCollapsed ? 'pointer' : 'default'
+                  cursor: watchlistCollapsed ? 'pointer' : 'default',
+                  color: colors.text
                 }}
                 onClick={watchlistCollapsed ? () => setWatchlistCollapsed(false) : undefined}
               >
@@ -2710,7 +3033,7 @@ const FinvizDashboard: React.FC = () => {
             {watchlistCollapsed && (
               <div style={{ 
                 padding: '16px 8px', 
-                borderTop: '1px solid #f0f0f0',
+                borderTop: `1px solid ${colors.siderBorder}`,
                 textAlign: 'center'
               }}>
                 <Button
@@ -2733,8 +3056,20 @@ const FinvizDashboard: React.FC = () => {
         </Sider>
 
         {/* 右侧内容区域 */}
-        <Content style={{ background: '#fff', margin: '0', height: '100%' }}>
-          <div style={{ padding: '24px', height: '100%' }}>
+        <Content style={{ background: colors.contentBg, margin: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* 顶部栏：标题 */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 24px',
+            borderBottom: `1px solid ${colors.headerBorder}`,
+            background: colors.headerBg,
+            flexShrink: 0,
+          }}>
+            <Title level={5} style={{ margin: 0, color: colors.text }}>Dashboard</Title>
+          </div>
+          <div style={{ padding: '24px', height: '100%', overflow: 'auto', color: colors.text }}>
             {loading ? (
               <div style={{ 
                 display: 'flex', 
@@ -2856,8 +3191,24 @@ const FinvizDashboard: React.FC = () => {
       <Modal
         title={
           <Space>
-            <RobotOutlined style={{ color: '#1890ff' }} />
-            <span>{selectedNewsForAnalysis?.analysis_result ? 'AI Analysis Details' : 'News Details'}</span>
+            {selectedNewsForAnalysis?.analysis_result && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '1px 4px',
+                  borderRadius: 2,
+                  background: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
+                  color: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
+                  border: `1px solid ${themeMode === 'dark' ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
+                }}
+              >
+                AI
+              </span>
+            )}
+            <span style={{ color: themeMode === 'dark' ? colors.text : undefined }}>
+              {selectedNewsForAnalysis?.analysis_result ? 'AI Analysis Details' : 'News Details'}
+            </span>
           </Space>
         }
         open={analysisModalVisible}
@@ -2884,23 +3235,60 @@ const FinvizDashboard: React.FC = () => {
           )
         ]}
         width={800}
+        className="analysis-details-modal"
+        styles={{
+          body: {
+            height: ANALYSIS_MODAL_BODY_HEIGHT,
+            minHeight: '480px',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            ...(themeMode === 'dark' ? { backgroundColor: '#252d3d' } : {}),
+          },
+          ...(themeMode === 'dark' ? {
+            wrapper: { backdropFilter: 'brightness(0.7)' },
+            content: {
+              backgroundColor: '#252d3d',
+              border: `1px solid ${colors.cardBorder}`,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
+            },
+            header: {
+              backgroundColor: '#252d3d',
+              borderBottomColor: colors.headerBorder,
+            },
+          } : {}),
+        }}
       >
-        {selectedNewsForAnalysis && (
-          <>
-            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f5f5f5' }}>
-              <Typography.Title level={5} style={{ marginBottom: '12px' }}>
+        {selectedNewsForAnalysis && (() => {
+          const isDarkModal = themeMode === 'dark';
+          const modalCardBg = isDarkModal ? colors.cardBg : '#f5f5f5';
+          const modalHeadBg = isDarkModal ? 'rgba(22, 119, 255, 0.2)' : '#e6f7ff';
+          const modalHeadBgAlt = isDarkModal ? colors.siderBg : '#f5f5f5';
+          const modalHeadBgAlt2 = isDarkModal ? colors.siderBg : '#f0f5ff';
+          const modalText = colors.text;
+          const modalTextSecondary = colors.textSecondary;
+          const modalSectionBg = isDarkModal ? colors.siderBg : '#fafafa';
+          const modalBoxBg = isDarkModal ? colors.cardBg : '#fff';
+          const modalBorder = colors.cardBorder;
+          const modalLabelColor = isDarkModal ? 'rgba(255,255,255,0.65)' : '#595959';
+          const modalMetaColor = isDarkModal ? 'rgba(255,255,255,0.45)' : '#999';
+          const modalContentColor = isDarkModal ? 'rgba(255,255,255,0.85)' : '#666';
+          const tabContentStyle = { padding: '4px 0', height: '100%', overflow: 'auto' as const };
+          return (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Card size="small" style={{ flexShrink: 0, marginBottom: '16px', backgroundColor: modalCardBg, borderColor: modalBorder }}>
+              <Typography.Title level={5} style={{ marginBottom: '12px', color: modalText }}>
                 {selectedNewsForAnalysis.title}
               </Typography.Title>
               <Space size="small" wrap>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
+                <Text style={{ fontSize: '12px', color: modalTextSecondary }}>
                   <CalendarOutlined /> {selectedNewsForAnalysis.date ? new Date(selectedNewsForAnalysis.date).toLocaleString() : 'N/A'}
                 </Text>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
+                <Text style={{ fontSize: '12px', color: modalTextSecondary }}>
                   Source: {selectedNewsForAnalysis.source || 'N/A'}
                 </Text>
               </Space>
             </Card>
-
 
             {(() => {
               const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
@@ -2908,110 +3296,59 @@ const FinvizDashboard: React.FC = () => {
               const summaryResult = getAnalysisContent(selectedNewsForAnalysis.analysis_result, 'news_summary_v1');
 
               if (hasAnyAnalysis) {
+                const tagLabelStyle = { fontSize: '11px', color: modalLabelColor, display: 'block' as const, marginBottom: '10px', fontWeight: 500 };
+                const tagBoxStyle = { padding: '12px', backgroundColor: modalBoxBg, borderRadius: '6px', border: `1px solid ${modalBorder}` };
+                const tagItemStyle = { fontSize: '11px', padding: '4px 10px', borderRadius: '4px', fontWeight: 500, border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' };
+
                 return (
-                  <>
-
-                    {/* 优先显示 news_summary_v1 的结果 */}
-                    {summaryResult && typeof summaryResult.content === 'string' && (
-                      <>
-                        <Card 
-                          title="AI Analysis" 
-                          size="small"
-                          headStyle={{ backgroundColor: '#e6f7ff', fontWeight: 'bold' }}
-                        >
-                          <MarkdownRenderer 
-                            content={summaryResult.content}
-                            style={{
-                              fontSize: '12px',
-                              lineHeight: '1.6'
-                            }}
-                          />
-                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
-                            <Space size="small">
-                              {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
-                              {summaryResult.model && <span>Model: {summaryResult.model}</span>}
-                              {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
-                              {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
-                            </Space>
+                  <Tabs
+                    defaultActiveKey="ai"
+                    size="small"
+                    style={{ marginTop: '4px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+                    items={[
+                      {
+                        key: 'ai',
+                        label: 'AI Analysis',
+                        children: summaryResult && typeof summaryResult.content === 'string' ? (
+                          <div style={tabContentStyle}>
+                            <MarkdownRenderer
+                              content={summaryResult.content}
+                              variant={isDarkModal ? 'dark' : 'light'}
+                              style={{ fontSize: '12px', lineHeight: '1.6', color: modalText }}
+                            />
                           </div>
-                        </Card>
-
-                        {selectedNewsForAnalysis.content && (
-                          <Card 
-                            title="Original Content" 
-                            size="small"
-                            style={{ marginTop: '16px' }}
-                            headStyle={{ backgroundColor: '#f5f5f5' }}
-                          >
-                            <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.8' }}>
-                              {highlightKeywords(selectedNewsForAnalysis.content)}
-                            </div>
-                          </Card>
-                        )}
-
-                        {/* Tags Section - 美化设计，不使用Card */}
-                        <div style={{ 
-                          marginTop: '20px',
-                          padding: '16px',
-                          backgroundColor: '#fafafa',
-                          borderRadius: '8px',
-                          border: '1px solid #e8e8e8'
-                        }}>
-                          <div style={{ 
-                            marginBottom: '16px',
-                            paddingBottom: '12px',
-                            borderBottom: '2px solid #e8e8e8'
-                          }}>
-                            <Text strong style={{ 
-                              fontSize: '13px', 
-                              color: '#1890ff',
-                              fontWeight: 600,
-                              letterSpacing: '0.5px'
-                            }}>
-                              Tags & Metadata
-                            </Text>
+                        ) : (
+                          <Empty description="No AI analysis" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                        ),
+                      },
+                      {
+                        key: 'original',
+                        label: 'Original Content',
+                        children: selectedNewsForAnalysis.content ? (
+                          <div style={{ fontSize: '13px', color: modalContentColor, lineHeight: '1.8', ...tabContentStyle }}>
+                            {highlightKeywords(selectedNewsForAnalysis.content)}
                           </div>
-
-                          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                            {/* Related Tickers */}
-                            {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
-                              <div style={{ 
-                                padding: '12px',
-                                backgroundColor: '#fff',
-                                borderRadius: '6px',
-                                border: '1px solid #f0f0f0'
-                              }}>
-                                <Text strong style={{ 
-                                  fontSize: '11px', 
-                                  color: '#595959',
-                                  display: 'block',
-                                  marginBottom: '10px',
-                                  fontWeight: 500
-                                }}>
-                                  Related Tickers
-                                </Text>
-                                <Space size={[6, 6]} wrap>
-                                  {selectedNewsForAnalysis.symbols.map(symbol => (
-                                    <Tag 
-                                      key={symbol} 
-                                      color="blue" 
-                                      style={{ 
-                                        fontSize: '11px',
-                                        padding: '4px 10px',
-                                        borderRadius: '4px',
-                                        fontWeight: 500,
-                                        border: 'none',
-                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                      }}
-                                    >
-                                      {symbol}
-                                    </Tag>
-                                  ))}
-                                </Space>
-                              </div>
-                            )}
-
-                            {/* Classification Tags */}
+                        ) : (
+                          <Empty description="No content" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                        ),
+                      },
+                      {
+                        key: 'tags',
+                        label: 'Tags',
+                        children: (
+                          <div style={tabContentStyle}>
+                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                              {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
+                                <div style={tagBoxStyle}>
+                                  <Text strong style={tagLabelStyle}>Related Tickers</Text>
+                                  <Space size={[6, 6]} wrap>
+                                    {selectedNewsForAnalysis.symbols.map(symbol => (
+                                      <Tag key={symbol} color="blue" style={tagItemStyle}>{symbol}</Tag>
+                                    ))}
+                                  </Space>
+                                </div>
+                              )}
+                              {/* Classification Tags */}
                             {(() => {
                               const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
                               if (!classification || !hasValidClassification(classification)) {
@@ -3028,13 +3365,13 @@ const FinvizDashboard: React.FC = () => {
                                   {tags.length > 0 && (
                                     <div style={{ 
                                       padding: '12px',
-                                      backgroundColor: '#fff',
+                                      backgroundColor: modalBoxBg,
                                       borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
+                                      border: `1px solid ${modalBorder}`
                                     }}>
                                       <Text strong style={{ 
                                         fontSize: '11px', 
-                                        color: '#595959',
+                                        color: modalLabelColor,
                                         display: 'block',
                                         marginBottom: '10px',
                                         fontWeight: 500
@@ -3067,13 +3404,13 @@ const FinvizDashboard: React.FC = () => {
                                   {relatedSectors.length > 0 && (
                                     <div style={{ 
                                       padding: '12px',
-                                      backgroundColor: '#fff',
+                                      backgroundColor: modalBoxBg,
                                       borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
+                                      border: `1px solid ${modalBorder}`
                                     }}>
                                       <Text strong style={{ 
                                         fontSize: '11px', 
-                                        color: '#595959',
+                                        color: modalLabelColor,
                                         display: 'block',
                                         marginBottom: '10px',
                                         fontWeight: 500
@@ -3105,13 +3442,13 @@ const FinvizDashboard: React.FC = () => {
                                   {relatedCountries.length > 0 && (
                                     <div style={{ 
                                       padding: '12px',
-                                      backgroundColor: '#fff',
+                                      backgroundColor: modalBoxBg,
                                       borderRadius: '6px',
-                                      border: '1px solid #f0f0f0'
+                                      border: `1px solid ${modalBorder}`
                                     }}>
                                       <Text strong style={{ 
                                         fontSize: '11px', 
-                                        color: '#595959',
+                                        color: modalLabelColor,
                                         display: 'block',
                                         marginBottom: '10px',
                                         fontWeight: 500
@@ -3143,116 +3480,6 @@ const FinvizDashboard: React.FC = () => {
                               );
                             })()}
 
-                            {/* Analysis Template Tags */}
-                            {(() => {
-                              const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
-                              const templateCodes = Object.keys(allResults);
-
-                              if (templateCodes.length > 0) {
-                                return (
-                                  <div style={{ 
-                                    padding: '12px',
-                                    backgroundColor: '#fff',
-                                    borderRadius: '6px',
-                                    border: '1px solid #f0f0f0'
-                                  }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: '#595959',
-                                      display: 'block',
-                                      marginBottom: '10px',
-                                      fontWeight: 500
-                                    }}>
-                                      Analysis Template
-                                    </Text>
-                                    <Space size={[6, 6]} wrap>
-                                      {templateCodes.map(templateCode => (
-                                        <Tag 
-                                          key={templateCode} 
-                                          color="green" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          {templateCode}
-                                        </Tag>
-                                      ))}
-                                    </Space>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })()}
-
-                            {/* Confidence Information */}
-                            {(() => {
-                              const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
-                              if (!classification || !hasValidClassification(classification)) {
-                                return null;
-                              }
-
-                              const summary = getClassificationSummary(classification);
-                              
-                              if (summary && (summary.confidence.theme > 0 || summary.confidence.event > 0)) {
-                                return (
-                                  <div style={{ 
-                                    padding: '12px',
-                                    backgroundColor: '#fff',
-                                    borderRadius: '6px',
-                                    border: '1px solid #f0f0f0'
-                                  }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: '#595959',
-                                      display: 'block',
-                                      marginBottom: '10px',
-                                      fontWeight: 500
-                                    }}>
-                                      Confidence
-                                    </Text>
-                                    <Space size="middle" style={{ marginTop: '4px' }}>
-                                      {summary.confidence.theme > 0 && (
-                                        <Tag 
-                                          color="orange" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          Theme: {(summary.confidence.theme * 100).toFixed(0)}%
-                                        </Tag>
-                                      )}
-                                      {summary.confidence.event > 0 && (
-                                        <Tag 
-                                          color="orange" 
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                          }}
-                                        >
-                                          Event: {(summary.confidence.event * 100).toFixed(0)}%
-                                        </Tag>
-                                      )}
-                                    </Space>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })()}
-
                             {/* Unified Themes (统一主题) */}
                             {(() => {
                               if (!hasValidUnifiedThemes(selectedNewsForAnalysis.unified_themes)) {
@@ -3268,14 +3495,14 @@ const FinvizDashboard: React.FC = () => {
                               return (
                                 <div style={{ 
                                   padding: '12px',
-                                  backgroundColor: '#fff',
+                                  backgroundColor: modalBoxBg,
                                   borderRadius: '6px',
-                                  border: '1px solid #f0f0f0'
+                                  border: `1px solid ${modalBorder}`
                                 }}>
                                   <div style={{ marginBottom: '10px' }}>
                                     <Text strong style={{ 
                                       fontSize: '11px', 
-                                      color: '#595959',
+                                      color: modalLabelColor,
                                       fontWeight: 500,
                                       marginRight: '8px'
                                     }}>
@@ -3335,8 +3562,8 @@ const FinvizDashboard: React.FC = () => {
                                     })}
                                   </Space>
                                   {/* 来源统计 */}
-                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
-                                    <Text style={{ fontSize: '10px', color: '#8c8c8c', marginRight: '8px' }}>
+                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${modalBorder}` }}>
+                                    <Text style={{ fontSize: '10px', color: modalMetaColor, marginRight: '8px' }}>
                                       Sources:
                                     </Text>
                                     <Space size={[4, 4]} wrap>
@@ -3362,55 +3589,87 @@ const FinvizDashboard: React.FC = () => {
                                 </div>
                               );
                             })()}
-                          </Space>
-                        </div>
-                      </>
-                    )}
-
-                    {/* 显示其他模板的结果 */}
-                    {Object.entries(allResults).map(([templateCode, result]) => {
-                      if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null; // 已经显示过了
-                      if (templateCode === 'news_classification') return null; // 不显示新闻分类分析
-                      
-                      return (
-                        <Card 
-                          key={templateCode}
-                          title={`AI Analysis (${templateCode})`} 
-                          size="small"
-                          style={{ marginTop: '16px' }}
-                          headStyle={{ backgroundColor: '#f0f5ff', fontWeight: 'bold' }}
-                        >
-                          <pre style={{ 
-                            fontSize: '12px', 
-                            whiteSpace: 'pre-wrap', 
-                            wordBreak: 'break-word',
-                            margin: 0
-                          }}>
-                            {typeof result.content === 'string' 
-                              ? result.content 
-                              : JSON.stringify(result.content, null, 2)}
-                          </pre>
-                          <div style={{ marginTop: '12px', fontSize: '10px', color: '#999' }}>
-                            <Space size="small">
-                              {result.provider && <span>Provider: {result.provider}</span>}
-                              {result.model && <span>Model: {result.model}</span>}
-                              {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
-                              {result.temperature && <span>Temperature: {result.temperature}</span>}
                             </Space>
                           </div>
-                        </Card>
-                      );
-                    })}
-                  </>
+                        ),
+                      },
+                      {
+                        key: 'meta',
+                        label: 'Metadata',
+                        children: (
+                          <div style={tabContentStyle}>
+                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                              {summaryResult && (
+                                <div style={tagBoxStyle}>
+                                  <Text strong style={tagLabelStyle}>AI 模型信息</Text>
+                                  <Space size="small" style={{ fontSize: '12px', color: modalMetaColor }} wrap>
+                                    {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
+                                    {summaryResult.model && <span>Model: {summaryResult.model}</span>}
+                                    {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
+                                    {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
+                                  </Space>
+                                </div>
+                              )}
+                              {(() => {
+                                const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
+                                if (!classification || !hasValidClassification(classification)) return null;
+                                const summary = getClassificationSummary(classification);
+                                if (!summary || (summary.confidence.theme === 0 && summary.confidence.event === 0)) return null;
+                                return (
+                                  <div style={tagBoxStyle}>
+                                    <Text strong style={tagLabelStyle}>Confidence</Text>
+                                    <Space size="middle" wrap>
+                                      {summary.confidence.theme > 0 && <Tag color="orange" style={tagItemStyle}>Theme: {(summary.confidence.theme * 100).toFixed(0)}%</Tag>}
+                                      {summary.confidence.event > 0 && <Tag color="orange" style={tagItemStyle}>Event: {(summary.confidence.event * 100).toFixed(0)}%</Tag>}
+                                    </Space>
+                                  </div>
+                                );
+                              })()}
+                              {Object.keys(allResults).length > 0 && (
+                                <div style={tagBoxStyle}>
+                                  <Text strong style={tagLabelStyle}>Analysis Template</Text>
+                                  <Space size={[6, 6]} wrap>
+                                    {Object.keys(allResults).map(templateCode => (
+                                      <Tag key={templateCode} color="green" style={tagItemStyle}>{templateCode}</Tag>
+                                    ))}
+                                  </Space>
+                                </div>
+                              )}
+                              {Object.entries(allResults).map(([templateCode, result]) => {
+                                if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null;
+                                if (templateCode === 'news_classification') return null;
+                                return (
+                                  <Card key={templateCode} title={`${templateCode}`} size="small" style={{ marginTop: '8px', borderColor: modalBorder }} headStyle={{ backgroundColor: modalHeadBgAlt2, fontWeight: 'bold', color: modalText, borderColor: modalBorder }}>
+                                    <pre style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, color: modalText }}>
+                                      {typeof result.content === 'string' ? result.content : JSON.stringify(result.content, null, 2)}
+                                    </pre>
+                                    <div style={{ marginTop: '12px', fontSize: '10px', color: modalMetaColor }}>
+                                      <Space size="small" wrap>
+                                        {result.provider && <span>Provider: {result.provider}</span>}
+                                        {result.model && <span>Model: {result.model}</span>}
+                                        {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
+                                        {result.temperature && <span>Temperature: {result.temperature}</span>}
+                                      </Space>
+                                    </div>
+                                  </Card>
+                                );
+                              })}
+                            </Space>
+                          </div>
+                        ),
+                      },
+                    ]}
+                  />
                 );
               } else {
                 return (
                   <Card 
                     title="News Content" 
                     size="small"
-                    headStyle={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}
+                    style={{ borderColor: modalBorder }}
+                    headStyle={{ backgroundColor: modalHeadBgAlt, fontWeight: 'bold', color: modalText, borderColor: modalBorder }}
                   >
-                    <div style={{ fontSize: '14px', lineHeight: '1.8' }}>
+                    <div style={{ fontSize: '14px', lineHeight: '1.8', color: modalText }}>
                       {selectedNewsForAnalysis.content 
                         ? highlightKeywords(selectedNewsForAnalysis.content)
                         : 'No content available'}
@@ -3419,11 +3678,13 @@ const FinvizDashboard: React.FC = () => {
                 );
               }
             })()}
-          </>
-        )}
+          </div>
+          );
+        })()}
       </Modal>
 
     </div>
+    </ConfigProvider>
   );
 };
 

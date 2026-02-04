@@ -56,11 +56,59 @@ interface CandlestickChartProps {
   onEventCreate?: (eventData: EventFormData) => Promise<void>;
   onEventUpdate?: (eventId: string, eventData: EventFormData) => Promise<void>;
   onEventDelete?: (eventId: string) => Promise<void>;
+  /** 主题：light / dark，用于走势图背景、网格、K 线颜色 */
+  themeMode?: 'light' | 'dark';
 }
 
 // 默认加载1年数据，初始显示最近6个月
 const DEFAULT_DATA_DAYS = 365; // 1年
 const INITIAL_DISPLAY_MONTHS = 6; // 初始显示最近6个月
+
+// 走势图主题（lightweight-charts 的 layout/grid/scale/candlestick + 容器/图例边框）
+const CHART_THEME = {
+  light: {
+    layout: { background: { color: '#ffffff' }, textColor: '#333' },
+    grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+    rightPriceScale: { borderColor: '#cccccc' },
+    timeScale: { borderColor: '#cccccc' },
+    containerBg: '#ffffff',
+    containerBorder: '#e0e0e0',
+    legendBg: 'rgba(255,255,255,0.9)',
+    legendBorder: '#e0e0e0',
+    legendText: '#555',
+    overlayBg: 'rgba(255,255,255,0.8)',
+    markerBorder: '#e0e0e0',
+    candlestick: {
+      upColor: 'rgba(0, 0, 0, 0)',
+      downColor: '#EA6D61',
+      borderUpColor: '#999999',
+      borderDownColor: '#EA6D61',
+      wickUpColor: '#999999',
+      wickDownColor: '#EA6D61',
+    },
+  },
+  dark: {
+    layout: { background: { color: '#1a2234' }, textColor: '#e0e6f1' },
+    grid: { vertLines: { color: '#364152' }, horzLines: { color: '#364152' } },
+    rightPriceScale: { borderColor: '#4c5263' },
+    timeScale: { borderColor: '#4c5263' },
+    containerBg: '#1a2234',
+    containerBorder: '#4c5263',
+    legendBg: 'rgba(44, 52, 68, 0.95)',
+    legendBorder: '#4c5263',
+    legendText: '#e0e6f1',
+    overlayBg: 'rgba(26, 34, 52, 0.85)',
+    markerBorder: '#4c5263',
+    candlestick: {
+      upColor: '#38a169',
+      downColor: '#e53e3e',
+      borderUpColor: '#38a169',
+      borderDownColor: '#e53e3e',
+      wickUpColor: '#38a169',
+      wickDownColor: '#e53e3e',
+    },
+  },
+} as const;
 
 // 生成模拟数据用于离线测试
 const generateMockData = (days: number = 90): CandlestickDataPoint[] => {
@@ -117,8 +165,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   externalEventsLoading,
   onEventCreate,
   onEventUpdate,
-  onEventDelete
+  onEventDelete,
+  themeMode = 'light',
 }) => {
+  const chartTheme = CHART_THEME[themeMode];
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -238,22 +288,18 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const chart = createChart(chartContainerRef.current, {
         width: containerWidth,
         height: containerHeight,
-        autoSize: false, // 禁用自动调整，使用固定尺寸
-        layout: {
-          background: { color: '#ffffff' },
-          textColor: '#333',
-        },
-        grid: {
-          vertLines: { color: '#f0f0f0' },
-          horzLines: { color: '#f0f0f0' },
-        },
-        rightPriceScale: {
-          borderColor: '#cccccc',
-        },
+        autoSize: false,
+        layout: chartTheme.layout,
+        grid: chartTheme.grid,
+        rightPriceScale: { borderColor: chartTheme.rightPriceScale.borderColor },
         timeScale: {
-          borderColor: '#cccccc',
+          borderColor: chartTheme.timeScale.borderColor,
           timeVisible: true,
           secondsVisible: false,
+        },
+        crosshair: {
+          vertLine: { color: chartTheme.rightPriceScale.borderColor, labelBackgroundColor: chartTheme.containerBorder },
+          horzLine: { color: chartTheme.timeScale.borderColor, labelBackgroundColor: chartTheme.containerBorder },
         },
       });
 
@@ -295,10 +341,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   width: containerWidth,
                   height: containerHeight,
                   autoSize: false,
-                  layout: {
-                    background: { color: '#ffffff' },
-                    textColor: '#333',
-                  },
+                  layout: chartTheme.layout,
+                  grid: chartTheme.grid,
+                  rightPriceScale: { borderColor: chartTheme.rightPriceScale.borderColor },
+                  timeScale: { borderColor: chartTheme.timeScale.borderColor, timeVisible: true, secondsVisible: false },
                 });
                 chartRef.current = newChart;
                 console.log('Chart recreated:', newChart);
@@ -333,15 +379,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       // 立即检查
       setTimeout(checkInitialDOM, 10);
       
-      // 创建 K 线图系列
-      const candlestickSeries = chart.addCandlestickSeries({
-        upColor: 'rgba(0, 0, 0, 0)',
-        downColor: '#EA6D61',
-        borderUpColor: '#999999',
-        borderDownColor: '#EA6D61',
-        wickUpColor: '#999999',
-        wickDownColor: '#EA6D61',
-      });
+      // 创建 K 线图系列（使用当前主题颜色）
+      const candlestickSeries = chart.addCandlestickSeries(chartTheme.candlestick);
       candlestickSeriesRef.current = candlestickSeries;
       
       // 添加一个空的占位数据点，确保图表渲染
@@ -407,7 +446,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       console.error('Error creating chart:', error);
       return false;
     }
-  }, [width, height]);
+  }, [width, height, themeMode]);
 
   // 处理图表双击事件，创建新事件
   const handleChartDoubleClick = useCallback((event: MouseEvent) => {
@@ -894,6 +933,25 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     };
   }, [symbol, width, height, initializeChart]); // 当 symbol 改变时也重新初始化
 
+  // themeMode 变化时仅更新图表主题（不销毁重建）
+  useEffect(() => {
+    if (!chartRef.current || !candlestickSeriesRef.current) return;
+    const chart = chartRef.current;
+    const candlestickSeries = candlestickSeriesRef.current;
+    chart.applyOptions({
+      layout: chartTheme.layout,
+      grid: chartTheme.grid,
+      rightPriceScale: { borderColor: chartTheme.rightPriceScale.borderColor },
+      timeScale: { borderColor: chartTheme.timeScale.borderColor },
+      crosshair: {
+        vertLine: { color: chartTheme.rightPriceScale.borderColor, labelBackgroundColor: chartTheme.containerBorder },
+        horzLine: { color: chartTheme.timeScale.borderColor, labelBackgroundColor: chartTheme.containerBorder },
+      },
+    });
+    // lightweight-charts 运行时支持 applyOptions，类型定义可能未包含
+    (candlestickSeries as unknown as { applyOptions: (opts: typeof chartTheme.candlestick) => void }).applyOptions(chartTheme.candlestick);
+  }, [themeMode]);
+
   // 计算移动平均线
   const calculateEMA = (data: number[], period: number): number[] => {
     const ema: number[] = [];
@@ -1202,16 +1260,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       `}</style>
       
       {loading && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: 'flex',
-          alignItems: 'center',
+        <div style={{ 
+          position: 'absolute', 
+          top: 0, 
+          left: 0, 
+          right: 0, 
+          bottom: 0, 
+          display: 'flex', 
+          alignItems: 'center', 
           justifyContent: 'center',
-          background: 'rgba(255, 255, 255, 0.8)',
+          background: chartTheme.overlayBg,
           zIndex: 10
         }}>
           <Spin size="large" />
@@ -1225,8 +1283,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           minWidth: '400px',
           minHeight: '300px',
           position: 'relative',
-          backgroundColor: '#ffffff',
-          border: '1px solid #e8e8e8',
+          backgroundColor: chartTheme.containerBg,
+          border: `1px solid ${chartTheme.containerBorder}`,
           borderRadius: '4px',
           display: 'block',
           overflow: 'hidden',
@@ -1242,11 +1300,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           display: 'flex',
           gap: '14px',
           fontSize: '11px',
-          color: '#555',
-          background: 'rgba(255, 255, 255, 0.85)',
+          color: chartTheme.legendText,
+          background: chartTheme.legendBg,
           padding: '4px 10px',
           borderRadius: '4px',
-          border: '1px solid rgba(0, 0, 0, 0.08)',
+          border: `1px solid ${chartTheme.legendBorder}`,
           zIndex: 6,
           pointerEvents: 'none',
         }}
@@ -1324,7 +1382,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                     height: '28px',
                     borderRadius: '50%',
                     background: config.color,
-                    border: '3px solid #fff',
+                    border: `3px solid ${chartTheme.markerBorder}`,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
                     display: 'flex',
                     alignItems: 'center',
