@@ -131,6 +131,9 @@ class DatabaseManager:
             # 迁移：为file_processing_details表添加original_file_path字段
             self._migrate_add_original_file_path(cursor)
             
+            # 迁移：为file_processing_details表添加asr_with_diarization字段
+            self._migrate_add_asr_with_diarization(cursor)
+            
             conn.commit()
             print("数据库表创建/验证完成")
         except Exception as e:
@@ -178,6 +181,27 @@ class DatabaseManager:
                 print("已添加original_file_path字段到file_processing_details表")
         except Exception as e:
             print(f"迁移original_file_path字段时出错: {str(e)}")
+            # 迁移失败不应该阻止整个表创建过程
+    
+    def _migrate_add_asr_with_diarization(self, cursor):
+        """迁移：为file_processing_details表添加asr_with_diarization字段（用于存储说话人分离的结构化数据）"""
+        try:
+            # 检查字段是否已存在
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='file_processing_details' AND column_name='asr_with_diarization'
+            """)
+            
+            if not cursor.fetchone():
+                # 字段不存在，添加它（使用 JSONB 类型以支持高效查询）
+                cursor.execute("""
+                ALTER TABLE file_processing_details 
+                ADD COLUMN asr_with_diarization JSONB DEFAULT NULL
+                """)
+                print("已添加asr_with_diarization字段到file_processing_details表")
+        except Exception as e:
+            print(f"迁移asr_with_diarization字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
     def _migrate_add_primaryticker_to_target_tracking_config(self, cursor):

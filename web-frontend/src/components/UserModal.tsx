@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
-import { Modal, Form, Input, Switch, message } from 'antd';
+import { Modal, Form, Input, Switch, message, ConfigProvider, theme as antdTheme } from 'antd';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 interface UserModalProps {
   visible: boolean;
@@ -11,6 +12,17 @@ interface UserModalProps {
   onSubmit: (userData: CreateUserRequest | UpdateUserRequest) => Promise<void>;
 }
 
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+  },
+} as const;
+
 const UserModal: React.FC<UserModalProps> = ({
   visible,
   onCancel,
@@ -19,6 +31,9 @@ const UserModal: React.FC<UserModalProps> = ({
   loading = false,
   onSubmit
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const isEdit = !!user;
 
@@ -75,15 +90,26 @@ const UserModal: React.FC<UserModalProps> = ({
   };
 
   return (
-    <Modal
-      title={isEdit ? 'Edit User' : 'Create User'}
-      open={visible}
-      onCancel={handleCancel}
-      onOk={handleSubmit}
-      confirmLoading={loading}
-      destroyOnClose
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
     >
-      <Form
+      <Modal
+        title={isEdit ? 'Edit User' : 'Create User'}
+        open={visible}
+        onCancel={handleCancel}
+        onOk={handleSubmit}
+        confirmLoading={loading}
+        destroyOnClose
+      >
+        <Form
         form={form}
         layout="vertical"
         preserve={false}
@@ -143,6 +169,7 @@ const UserModal: React.FC<UserModalProps> = ({
         </Form.Item>
       </Form>
     </Modal>
+    </ConfigProvider>
   );
 };
 

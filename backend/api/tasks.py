@@ -3,8 +3,10 @@
 任务管理API路由
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query, Body
 from typing import List, Optional
+from pydantic import BaseModel
+import os
 
 from backend.schemas.task import (
     TaskTypeCreateRequest,
@@ -235,13 +237,17 @@ async def delete_task_type(
 async def get_task_executions(
     current_user=Depends(get_current_user),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页大小")
+    page_size: int = Query(20, ge=1, le=100, description="每页大小"),
+    search_type: Optional[str] = Query(None, description="搜索类型: file_name 或 content"),
+    q: Optional[str] = Query(None, description="搜索关键词")
 ):
     """
     获取任务执行历史
     
     - **page**: 页码
     - **page_size**: 每页大小
+    - **search_type**: 搜索类型（file_name 按文件名，content 按文件内容）
+    - **q**: 搜索关键词，与 search_type 配合使用
     """
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
@@ -267,6 +273,22 @@ async def get_task_executions(
             where_clause = 'WHERE "user" = %s'
             params.append(current_user.username)
         
+        # 搜索条件：仅当 q 有值且 search_type 有效时生效
+        if q and q.strip():
+            q_pattern = f"%{q.strip()}%"
+            if search_type == "file_name":
+                if where_clause:
+                    where_clause += " AND (SELECT filename FROM file_processing_details WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1) ILIKE %s"
+                else:
+                    where_clause = "WHERE (SELECT filename FROM file_processing_details WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1) ILIKE %s"
+                params.append(q_pattern)
+            elif search_type == "content":
+                if where_clause:
+                    where_clause += " AND EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
+                else:
+                    where_clause = "WHERE EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
+                params.append(q_pattern)
+        
         cursor.execute(f"""
         SELECT ps.id, ps.timestamp, ps.files_processed, ps.files_failed, 
                ps.total_time, ps.total_file_processing_time, ps.total_ai_time,
@@ -274,7 +296,13 @@ async def get_task_executions(
                (SELECT filename FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
                 ORDER BY id ASC LIMIT 1) as first_filename,
-               ps.llm_model, ps.llm_provider
+               (SELECT file_type FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_file_type,
+               ps.llm_model, ps.llm_provider,
+               (SELECT task_id FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_task_id
         FROM processing_stats ps
         {where_clause}
         ORDER BY ps.id DESC 
@@ -298,8 +326,10 @@ async def get_task_executions(
                 total_cost=stat[10],
                 rc_agent_status=stat[11] if len(stat) > 11 else None,
                 first_filename=stat[12] if len(stat) > 12 else None,
-                llm_model=stat[13] if len(stat) > 13 else None,
-                llm_provider=stat[14] if len(stat) > 14 else None
+                first_file_type=stat[13] if len(stat) > 13 else None,
+                llm_model=stat[14] if len(stat) > 14 else None,
+                llm_provider=stat[15] if len(stat) > 15 else None,
+                first_task_id=stat[16] if len(stat) > 16 else None
             )
             for stat in stats
         ]
@@ -337,6 +367,9 @@ async def get_task_execution(
                (SELECT filename FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
                 ORDER BY id ASC LIMIT 1) as first_filename,
+               (SELECT file_type FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_file_type,
                ps.llm_model, ps.llm_provider
         FROM processing_stats ps
         WHERE ps.id = %s
@@ -370,8 +403,9 @@ async def get_task_execution(
             total_cost=stat[10],
             rc_agent_status=stat[11] if len(stat) > 11 else None,
             first_filename=stat[12] if len(stat) > 12 else None,
-            llm_model=stat[13] if len(stat) > 13 else None,
-            llm_provider=stat[14] if len(stat) > 14 else None
+            first_file_type=stat[13] if len(stat) > 13 else None,
+            llm_model=stat[14] if len(stat) > 14 else None,
+            llm_provider=stat[15] if len(stat) > 15 else None
         )
         
     finally:
@@ -431,6 +465,100 @@ async def delete_task_execution(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除任务执行记录失败: {str(e)}"
+        )
+    finally:
+        conn.close()
+
+
+class RenameExecutionRequest(BaseModel):
+    filename: str
+
+
+@router.patch("/executions/{execution_id}/rename", summary="重命名执行记录的首个文件")
+async def rename_execution_file(
+    execution_id: str,
+    body: RenameExecutionRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    重命名执行记录中首个文件的filename，新文件名不能与数据库中已有的filename重复
+    """
+    filename = (body.filename or "").strip()
+    if not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件名不能为空"
+        )
+    
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法连接到数据库"
+        )
+    
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'SELECT ps.id, ps."user" FROM processing_stats ps WHERE ps.id = %s',
+            (execution_id,)
+        )
+        stat = cursor.fetchone()
+        if not stat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务执行不存在"
+            )
+        if not current_user.is_admin and stat[1] != current_user.username:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足"
+            )
+        
+        cursor.execute(
+            "SELECT id, filename FROM file_processing_details WHERE processing_stats_id = %s ORDER BY id ASC LIMIT 1",
+            (execution_id,)
+        )
+        first_file = cursor.fetchone()
+        if not first_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="该执行记录下无文件"
+            )
+        file_id, current_filename = first_file[0], first_file[1]
+        current_ext = os.path.splitext(current_filename or "")[1].lower()
+        new_ext = os.path.splitext(filename)[1].lower()
+        if current_ext and current_ext != new_ext:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"文件后缀必须保持不变 ({current_ext})"
+            )
+        
+        cursor.execute(
+            "SELECT id FROM file_processing_details WHERE filename = %s AND id != %s",
+            (filename, file_id)
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="file name already exists, please use another name"
+            )
+        
+        cursor.execute(
+            "UPDATE file_processing_details SET filename = %s WHERE id = %s",
+            (filename, file_id)
+        )
+        conn.commit()
+        return {"message": "rename successfully", "filename": filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"rename failed: {str(e)}"
         )
     finally:
         conn.close()

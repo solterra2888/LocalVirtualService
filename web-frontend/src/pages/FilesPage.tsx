@@ -23,8 +23,11 @@ import {
   Cascader,
   AutoComplete,
   ConfigProvider,
+  Dropdown,
+  Checkbox,
   theme as antdTheme
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   InboxOutlined,
   PlayCircleOutlined,
@@ -43,13 +46,17 @@ import {
   DownloadOutlined,
   RobotOutlined,
   FolderOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  EllipsisOutlined,
+  EditOutlined,
+  SoundOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useFileProcessing } from '../contexts/FileProcessingContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import TemplateSelector from '../components/TemplateSelector';
@@ -125,8 +132,10 @@ interface TaskExecution {
   total_cost?: number;
   rc_agent_status?: string;
   first_filename?: string;  // 第一个文件的名称
+  first_file_type?: string;  // 第一个文件的类型（用于列表筛选）
   llm_model?: string;  // LLM模型名称
   llm_provider?: string;  // LLM提供商
+  first_task_id?: string;  // 第一个文件的task_id（用于判断是否正在处理）
 }
 
 interface ProcessingParams {
@@ -154,7 +163,7 @@ interface TaskStatus {
   progress: number;
   current_file?: string;
   files_processed: number;
-  files_failed: number;
+  files_failed?: number;
   total_files: number;
   logs: Array<{
     timestamp: string;
@@ -167,7 +176,7 @@ interface TaskStatus {
 interface ProcessingResult {
   task_id: string;
   files_processed: number;
-  files_failed: number;
+  files_failed?: number;
   total_files: number;
   processing_time: number;
   final_report?: string;
@@ -175,6 +184,7 @@ interface ProcessingResult {
 
 const FilesPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
+  const { addTask, updateTaskStatus: updateGlobalTaskStatus } = useFileProcessing();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -245,15 +255,35 @@ const FilesPage: React.FC = () => {
   const [executionDetailData, setExecutionDetailData] = useState<TaskExecutionDetail | null>(null);
   const [executionDetailLoading, setExecutionDetailLoading] = useState(false);
   const [selectedExecutionIds, setSelectedExecutionIds] = useState<string[]>([]);
+  const [batchMode, setBatchMode] = useState(false);
   const [deleteExecutionVisible, setDeleteExecutionVisible] = useState(false);
   const [executionToDelete, setExecutionToDelete] = useState<TaskExecution | null>(null);
   const [deletingExecutions, setDeletingExecutions] = useState(false);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [executionToRename, setExecutionToRename] = useState<TaskExecution | null>(null);
+  const [renameInputValue, setRenameInputValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
   
   // AI Analysis 相关状态
   const [aiAnalysisVisible, setAiAnalysisVisible] = useState(false);
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  
+  // AI分析相关状态（音频+文档）
+  const [audioAnalyzingIds, setAudioAnalyzingIds] = useState<Set<string>>(new Set());
+  const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
+  const [aiAnalysisExecution, setAiAnalysisExecution] = useState<TaskExecution | null>(null);
+  const [modalSelectedTemplateId, setModalSelectedTemplateId] = useState<number | undefined>(undefined);
+  
+  // 新布局相关状态
+  const [selectedExecutionForView, setSelectedExecutionForView] = useState<TaskExecution | null>(null);
+  const [viewMode, setViewMode] = useState<'original' | 'analysis'>('original');
+  const [selectedFileForView, setSelectedFileForView] = useState<any>(null);
+  const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
+  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio'>('all');
+  const [searchType, setSearchType] = useState<'file_name' | 'content'>('file_name');
+  const [searchQuery, setSearchQuery] = useState('');
   
   
   // 文件内容查看相关状态
@@ -289,6 +319,11 @@ const FilesPage: React.FC = () => {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [logger.logs, logger.autoScroll]);
+
+  // 切换 execution 时清空 Original 标签栏的文件信息（会由 OriginalContentView 重新加载）
+  useEffect(() => {
+    setOriginalFileInfoForTabs(null);
+  }, [selectedExecutionForView?.id]);
 
   // 加载任务执行历史的函数 - 将在状态声明后重新定义
 
@@ -414,8 +449,17 @@ const FilesPage: React.FC = () => {
   const maxTaskHistoryRetries = 3; // 最大重试次数
   const taskHistoryRetryInterval = 30000; // 重试间隔30秒
 
+  // 分页与无限滚动
+  const EXECUTIONS_PAGE_SIZE = 20;
+  const [executionsPage, setExecutionsPage] = useState(1);
+  const [hasMoreExecutions, setHasMoreExecutions] = useState(true);
+  const [loadingMoreExecutions, setLoadingMoreExecutions] = useState(false);
+  const filesListScrollRef = useRef<HTMLDivElement>(null);
+
   // 加载任务执行历史的函数
-  const loadTaskExecutionsFunc = useCallback(async (showError = true, isAutoRefresh = false) => {
+  const loadTaskExecutionsFunc = useCallback(async (showError = true, isAutoRefresh = false, append = false) => {
+    if (append && (!hasMoreExecutions || loadingMoreExecutions)) return;
+    
     const now = Date.now();
     
     // 如果最近有错误且未超过重试间隔，则跳过（除非是手动刷新）
@@ -431,9 +475,23 @@ const FilesPage: React.FC = () => {
     }
 
     try {
-      console.log('开始加载任务执行历史...');
-      const executions = await tasksAPI.getTaskExecutions();
-      setTaskExecutions(executions);
+      const pageToLoad = append ? executionsPage + 1 : 1;
+      if (append) setLoadingMoreExecutions(true);
+      
+      const executions = await tasksAPI.getTaskExecutions({
+        page: pageToLoad,
+        page_size: EXECUTIONS_PAGE_SIZE,
+        ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
+      });
+      
+      if (append) {
+        setTaskExecutions(prev => [...prev, ...executions]);
+        setExecutionsPage(pageToLoad);
+      } else {
+        setTaskExecutions(executions);
+        setExecutionsPage(1);
+      }
+      setHasMoreExecutions(executions.length === EXECUTIONS_PAGE_SIZE);
       
       // 重置错误状态
       setTaskHistoryLoadAttempts(0);
@@ -476,8 +534,58 @@ const FilesPage: React.FC = () => {
         message.error('任务执行历史加载失败，请检查网络连接或联系管理员');
         logger.logError('任务执行历史加载失败，已达到最大重试次数', 'file-processing', error);
       }
+    } finally {
+      if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, setTaskExecutions, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery]);
+
+  // 无限滚动：接近底部时加载更多
+  // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
+  const hasMoreExecutionsRef = useRef(hasMoreExecutions);
+  const loadingMoreExecutionsRef = useRef(loadingMoreExecutions);
+  const loadTaskExecutionsFuncForScrollRef = useRef(loadTaskExecutionsFunc);
+  
+  useEffect(() => {
+    hasMoreExecutionsRef.current = hasMoreExecutions;
+    loadingMoreExecutionsRef.current = loadingMoreExecutions;
+    loadTaskExecutionsFuncForScrollRef.current = loadTaskExecutionsFunc;
+  }, [hasMoreExecutions, loadingMoreExecutions, loadTaskExecutionsFunc]);
+
+  const handleFilesListScroll = useCallback(() => {
+    const el = filesListScrollRef.current;
+    if (!el || !hasMoreExecutionsRef.current || loadingMoreExecutionsRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const threshold = 80;
+    if (scrollTop + clientHeight >= scrollHeight - threshold) {
+      loadTaskExecutionsFuncForScrollRef.current(false, false, true);
+    }
+  }, []); // 空依赖数组，函数只创建一次
+
+  useEffect(() => {
+    const el = filesListScrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', handleFilesListScroll);
+    return () => el.removeEventListener('scroll', handleFilesListScroll);
+  }, [handleFilesListScroll]);
+
+  // content 搜索：切换为 content 或搜索词变化时重新拉取列表（搜索词防抖）
+  // 使用 ref 避免 loadTaskExecutionsFunc 变化导致的重复执行
+  const searchTypeRef = useRef(searchType);
+  const searchQueryRef = useRef(searchQuery);
+  
+  useEffect(() => {
+    searchTypeRef.current = searchType;
+    searchQueryRef.current = searchQuery;
+  }, [searchType, searchQuery]);
+
+  useEffect(() => {
+    if (searchType !== 'content') return;
+    const delay = searchQuery.trim() ? 400 : 0;
+    const t = setTimeout(() => {
+      loadTaskExecutionsFuncRef.current(false, false, false);
+    }, delay);
+    return () => clearTimeout(t);
+  }, [searchType, searchQuery]); // 只依赖搜索相关的状态，不依赖函数
 
   // loadTaskTypes 函数定义需要移到这里
   const loadTaskTypes = useCallback(async (showError = true) => {
@@ -554,17 +662,25 @@ const FilesPage: React.FC = () => {
     }
   }, [logger, setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
 
-  // 加载RC Agent和执行历史
+  // 初始化加载：仅在组件挂载时执行一次
   useEffect(() => {
     loadTaskTypes();
     loadTaskExecutionsFunc();
     loadDefaultConfig();
     loadAllTemplates();
-    
-    // 设置定时刷新执行历史列表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 空依赖数组，只在组件挂载时执行一次
+
+  // 定时刷新执行历史列表：使用 ref 避免依赖项导致的重复执行
+  const loadTaskExecutionsFuncRef = useRef(loadTaskExecutionsFunc);
+  useEffect(() => {
+    loadTaskExecutionsFuncRef.current = loadTaskExecutionsFunc;
+  }, [loadTaskExecutionsFunc]);
+
+  useEffect(() => {
     const refreshInterval = setInterval(() => {
-      // 静默刷新，不显示错误消息，标记为自动刷新
-      loadTaskExecutionsFunc(false, true).catch(() => {
+      // 使用 ref 中的最新函数，避免依赖项变化
+      loadTaskExecutionsFuncRef.current(false, true).catch(() => {
         // 静默处理错误，避免在自动刷新时显示错误消息
       });
     }, 30000); // 每30秒自动刷新一次执行历史列表
@@ -572,7 +688,7 @@ const FilesPage: React.FC = () => {
     return () => {
       clearInterval(refreshInterval);
     };
-  }, [loadDefaultConfig, loadTaskExecutionsFunc, loadTaskTypes, loadAllTemplates]);
+  }, []); // 空依赖数组，定时器只创建一次
 
   // 加载行业分类数据
   useEffect(() => {
@@ -759,24 +875,13 @@ const FilesPage: React.FC = () => {
           // 处理失败时，保持原样（继续显示reprocess和clear file list）
         }
         
-        // 任务完成后刷新执行历史列表
-        try {
-          const executions = await tasksAPI.getTaskExecutions();
-          setTaskExecutions(executions);
-        } catch (error) {
-          console.error('failed to refresh execution history:', error);
-          logger.logError('failed to refresh execution history', 'file-processing', error);
-        }
+        // 任务完成后刷新执行历史列表（重置为第一页）
+        // 使用 ref 避免依赖项问题
+        loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
         
         // 延迟一段时间后再次刷新，确保数据同步
-        setTimeout(async () => {
-          try {
-            const executions = await tasksAPI.getTaskExecutions();
-            setTaskExecutions(executions);
-          } catch (error) {
-            console.error('failed to refresh execution history:', error);
-            logger.logError('failed to refresh execution history', 'file-processing', error);
-          }
+        setTimeout(() => {
+          loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
         }, 5000); // 等待5秒后再次刷新，确保数据完全同步
       }
     } catch (error) {
@@ -785,7 +890,7 @@ const FilesPage: React.FC = () => {
     } finally {
       setUpdatingStatus(false);
     }
-  }, [currentTaskId, updateFileStatuses, logger, updatingStatus, resetAllInputs]);
+  }, [currentTaskId, updateFileStatuses, logger, updatingStatus, resetAllInputs]); // 移除 loadTaskExecutionsFunc 依赖
 
   // 定时更新任务状态
   useEffect(() => {
@@ -836,6 +941,7 @@ const FilesPage: React.FC = () => {
     try {
       setAiAnalysisLoading(true);
       setAiAnalysisVisible(true);
+      setAiAnalysisExecution(execution);
       
       logger.logInfo(`view AI analysis report: ${execution.task_name}`, 'file-processing');
       
@@ -888,6 +994,183 @@ const FilesPage: React.FC = () => {
   };
 
 
+  // 音频AI分析 - 触发分析
+  const handleAnalyzeAudio = async (record: TaskExecution) => {
+    const executionId = Number(record.id);
+    const fileName = record.first_filename || record.task_name || 'Audio file';
+    
+    try {
+      setAudioAnalyzingIds(prev => new Set(prev).add(record.id));
+      message.loading({ content: 'Submitting audio analysis task...', key: 'audioAnalyze', duration: 0 });
+
+      const result = await filesAPI.analyzeAudio({ execution_id: executionId });
+
+      if (result.success && result.task_id) {
+        message.loading({ content: 'AI analyzing audio...', key: 'audioAnalyze', duration: 0 });
+        logger.logInfo(`Audio analysis task submitted: ${result.task_id}`, 'audio-analysis');
+
+        // 添加任务到全局进度显示
+        addTask(result.task_id, fileName, 'audio');
+
+        // 开始轮询任务状态
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResult = await filesAPI.getAudioAnalysisStatus(result.task_id);
+            
+            // 更新全局任务状态
+            updateGlobalTaskStatus(result.task_id, {
+              status: statusResult.status,
+              progress: statusResult.progress || 0,
+              current_file: fileName,
+              files_processed: 0,
+              files_failed: 0,
+              total_files: 1,
+              logs: []
+            });
+            
+            if (statusResult.status === 'completed') {
+              clearInterval(pollInterval);
+              message.destroy('audioAnalyze');
+              message.success('Audio AI analysis completed!');
+              setAudioAnalyzingIds(prev => {
+                const next = new Set(prev);
+                next.delete(record.id);
+                return next;
+              });
+              // 刷新执行列表
+              loadTaskExecutionsFunc(false);
+              // 如果当前正在查看该记录的AI Analysis，刷新报告数据
+              try {
+                const details = await tasksAPI.getTaskExecutionDetails(record.id);
+                setAiAnalysisData(details);
+              } catch (_) { /* ignore */ }
+            } else if (statusResult.status === 'failed') {
+              clearInterval(pollInterval);
+              message.destroy('audioAnalyze');
+              message.error(`Audio analysis failed: ${statusResult.message}`);
+              setAudioAnalyzingIds(prev => {
+                const next = new Set(prev);
+                next.delete(record.id);
+                return next;
+              });
+              loadTaskExecutionsFunc(false);
+            }
+          } catch (err) {
+            console.error('Failed to poll audio analysis status:', err);
+          }
+        }, 8000);
+
+        // 安全超时：5分钟后停止轮询
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          setAudioAnalyzingIds(prev => {
+            const next = new Set(prev);
+            next.delete(record.id);
+            return next;
+          });
+        }, 300000);
+      }
+    } catch (error: any) {
+      message.destroy('audioAnalyze');
+      const errorMsg = getErrorMessage(error, 'Failed to start audio analysis');
+      message.error(errorMsg);
+      setAudioAnalyzingIds(prev => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  };
+
+  // 文档AI分析 - 触发分析（需要指定模板ID）
+  const handleAnalyzeDocument = async (record: TaskExecution, templateId: number) => {
+    const executionId = Number(record.id);
+    const fileName = record.first_filename || record.task_name || 'Document';
+    
+    try {
+      setDocAnalyzingIds(prev => new Set(prev).add(record.id));
+      message.loading({ content: 'Submitting document analysis task...', key: 'docAnalyze', duration: 0 });
+
+      const result = await filesAPI.analyzeDocument({
+        execution_id: executionId,
+        template_id: templateId,
+      });
+
+      if (result.success && result.task_id) {
+        message.loading({ content: 'AI analyzing document...', key: 'docAnalyze', duration: 0 });
+        logger.logInfo(`Document analysis task submitted: ${result.task_id}`, 'doc-analysis');
+
+        // 添加任务到全局进度显示
+        addTask(result.task_id, fileName, 'document');
+
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResult = await filesAPI.getDocumentAnalysisStatus(result.task_id);
+            
+            // 更新全局任务状态
+            updateGlobalTaskStatus(result.task_id, {
+              status: statusResult.status,
+              progress: statusResult.progress || 0,
+              current_file: fileName,
+              files_processed: 0,
+              files_failed: 0,
+              total_files: 1,
+              logs: []
+            });
+            
+            if (statusResult.status === 'completed') {
+              clearInterval(pollInterval);
+              message.destroy('docAnalyze');
+              message.success('Document AI analysis completed!');
+              setDocAnalyzingIds(prev => {
+                const next = new Set(prev);
+                next.delete(record.id);
+                return next;
+              });
+              loadTaskExecutionsFunc(false);
+              // 如果当前正在查看该记录的AI Analysis，刷新报告数据
+              try {
+                const details = await tasksAPI.getTaskExecutionDetails(record.id);
+                setAiAnalysisData(details);
+              } catch (_) { /* ignore */ }
+            } else if (statusResult.status === 'failed') {
+              clearInterval(pollInterval);
+              message.destroy('docAnalyze');
+              message.error(`Document analysis failed: ${statusResult.message}`);
+              setDocAnalyzingIds(prev => {
+                const next = new Set(prev);
+                next.delete(record.id);
+                return next;
+              });
+              loadTaskExecutionsFunc(false);
+            }
+          } catch (err) {
+            console.error('Failed to poll document analysis status:', err);
+          }
+        }, 8000);
+
+        // 安全超时：10分钟后停止轮询（文档可能需要LlamaParse+AI分析，时间更长）
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          setDocAnalyzingIds(prev => {
+            const next = new Set(prev);
+            next.delete(record.id);
+            return next;
+          });
+        }, 600000);
+      }
+    } catch (error: any) {
+      message.destroy('docAnalyze');
+      const errorMsg = getErrorMessage(error, 'Failed to start document analysis');
+      message.error(errorMsg);
+      setDocAnalyzingIds(prev => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  };
+
   const handleViewFileContent = (fileData: any) => {
     setSelectedFileContent(fileData);
     setFileContentVisible(true);
@@ -929,9 +1212,18 @@ const FilesPage: React.FC = () => {
         document.body.removeChild(link);
         message.success(`downloading file: ${originalFileInfo.filename}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to get original file info:', error);
-      message.error('failed to get original file info');
+      
+      // 提供更友好的错误信息
+      if (error.response?.status === 404) {
+        message.error(`File not found (ID: ${fileData.id}). The file may have been deleted or the database record is missing.`);
+        logger.logError(`File not found in database: ${fileData.filename} (ID: ${fileData.id})`, 'file-processing', error);
+      } else {
+        const errorMsg = getErrorMessage(error, 'Failed to load original file');
+        message.error(errorMsg);
+        logger.logError(`Failed to load original file: ${fileData.filename}`, 'file-processing', error);
+      }
     }
   };
 
@@ -971,6 +1263,41 @@ const FilesPage: React.FC = () => {
     logger.logInfo(`prepare to delete task execution: ${execution.task_name}`, 'file-processing');
   };
 
+  const handleOpenRename = (execution: TaskExecution) => {
+    setExecutionToRename(execution);
+    setRenameInputValue(execution.first_filename || `${execution.files_processed} file(s)`);
+    setRenameModalVisible(true);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!executionToRename || !renameInputValue.trim()) return;
+    try {
+      setRenameLoading(true);
+      await tasksAPI.renameExecutionFile(executionToRename.id, renameInputValue.trim());
+      setTaskExecutions(prev =>
+        prev.map(exec =>
+          exec.id === executionToRename.id
+            ? { ...exec, first_filename: renameInputValue.trim() }
+            : exec
+        )
+      );
+      if (selectedExecutionForView?.id === executionToRename.id) {
+        setSelectedExecutionForView(prev =>
+          prev ? { ...prev, first_filename: renameInputValue.trim() } : null
+        );
+      }
+      message.success('Renamed successfully');
+      setRenameModalVisible(false);
+      setExecutionToRename(null);
+      setRenameInputValue('');
+    } catch (error: any) {
+      const errMsg = error?.response?.data?.detail || getErrorMessage(error, 'Rename failed');
+      message.error(errMsg);
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
   const confirmDeleteExecution = async () => {
     if (!executionToDelete) return;
     
@@ -982,6 +1309,10 @@ const FilesPage: React.FC = () => {
       
       // 只有API调用成功后才更新本地状态
       setTaskExecutions(prev => prev.filter(exec => exec.id !== executionToDelete.id));
+      setSelectedExecutionIds(prev => prev.filter(id => id !== executionToDelete.id));
+      if (selectedExecutionForView?.id === executionToDelete.id) {
+        setSelectedExecutionForView(null);
+      }
       
       message.success('Execution record deleted successfully');
       
@@ -1007,25 +1338,58 @@ const FilesPage: React.FC = () => {
     }
     
     Modal.confirm({
-      title: 'Batch Delete Confirmation',
-      content: `Are you sure you want to delete the selected ${selectedExecutionIds.length} execution record(s)? This action cannot be undone.`,
+      title: 'Batch Delete Warning',
+      content: (
+        <div>
+          <p>
+            <strong>Are you sure you want to permanently delete the selected {selectedExecutionIds.length} file(s)?</strong>
+          </p>
+          <p style={{ color: '#ff4d4f', marginTop: 8, marginBottom: 0 }}>
+            Warning: The deleted files and all AI-analyzed content will be permanently removed and cannot be recovered.
+          </p>
+        </div>
+      ),
       okText: 'Confirm Delete',
       cancelText: 'Cancel',
       okType: 'danger',
       onOk: async () => {
         try {
           setDeletingExecutions(true);
-          
-          // 并行删除所有选中的记录
-          await Promise.all(
-            selectedExecutionIds.map(id => tasksAPI.deleteTaskExecution(id))
-          );
-          
-          // 只有所有API调用都成功后才更新本地状态
-          setTaskExecutions(prev => prev.filter(exec => !selectedExecutionIds.includes(exec.id)));
+
+          // 限制并发：每批最多 10 个请求，避免 200+ 并发导致后端连接池耗尽或 500 错误
+          const BATCH_SIZE = 10;
+          const ids = [...selectedExecutionIds];
+          const succeeded: string[] = [];
+          const failed: { id: string; error: string }[] = [];
+
+          for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+            const batch = ids.slice(i, i + BATCH_SIZE);
+            const results = await Promise.allSettled(
+              batch.map(id => tasksAPI.deleteTaskExecution(id))
+            );
+            results.forEach((result, idx) => {
+              const id = batch[idx];
+              if (result.status === 'fulfilled') {
+                succeeded.push(id);
+              } else {
+                failed.push({ id, error: (result.reason as Error)?.message || String(result.reason) });
+              }
+            });
+          }
+
+          const idsToDelete = succeeded;
+          setTaskExecutions(prev => prev.filter(exec => !idsToDelete.includes(exec.id)));
           setSelectedExecutionIds([]);
-          
-          message.success(`Successfully deleted ${selectedExecutionIds.length} execution record(s)`);
+          if (selectedExecutionForView && idsToDelete.includes(selectedExecutionForView.id)) {
+            setSelectedExecutionForView(null);
+          }
+
+          if (failed.length > 0) {
+            message.warning(`Deleted ${succeeded.length} of ${ids.length} records. ${failed.length} failed.`);
+            logger.logError(`Batch delete partial failure: ${failed.length}/${ids.length} failed`, 'file-processing', failed);
+          } else {
+            message.success(`Successfully deleted ${idsToDelete.length} execution record(s)`);
+          }
           
         } catch (error: any) {
           console.error('failed to batch delete execution records:', error);
@@ -1062,89 +1426,67 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  // 批量文件上传状态
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  // 单文件上传状态
   const [uploadingFiles, setUploadingFiles] = useState(false);
 
-  const handleUpload = (file: any) => {
+  const handleUpload = async (file: any) => {
     // 限制只能上传一份文件
     if (files.length > 0) {
       message.warning('只能上传一份文件，请先删除现有文件后再上传');
       return false; // 阻止上传
     }
-    // 收集待上传的文件，不立即上传
-    setPendingFiles(prev => [...prev, file]);
-    return false; // 阻止自动上传
-  };
-
-  // 处理批量文件上传
-  const processPendingFiles = useCallback(async (filesToUpload: File[]) => {
-    if (filesToUpload.length === 0) return;
     
     setUploadingFiles(true);
     try {
-      const uploadedFiles = await filesAPI.uploadFiles(filesToUpload);
-      const newFiles = uploadedFiles.map((f, index) => ({
-        id: `${Date.now()}-${index}`,
-        name: f.filename,
-        path: f.file_path,
-        size: f.file_size,
-        type: f.file_type,
-        status: 'ready' as const,
-        fileId: (f as any).id // 添加实际的文件ID，用于标签设置
-      }));
+      // 只上传单个文件
+      const uploadedFiles = await filesAPI.uploadFiles([file]);
+      const uploadedFile = uploadedFiles[0];
       
-      setFiles(prev => [...prev, ...newFiles]);
+      const newFile = {
+        id: `${Date.now()}`,
+        name: uploadedFile.filename,
+        path: uploadedFile.file_path,
+        size: uploadedFile.file_size,
+        type: uploadedFile.file_type,
+        status: 'ready' as const,
+        fileId: (uploadedFile as any).id // 添加实际的文件ID，用于标签设置
+      };
+      
+      setFiles([newFile]); // 直接设置为单个文件
       
       // 如果用户已选择标签，自动为新上传的文件设置标签
-      if (selectedSector && selectedIndustry) {
+      if (selectedSector && selectedIndustry && newFile.fileId) {
         try {
-          // 从响应中获取真实的文件ID
-          const fileIds = uploadedFiles.map((f: any) => f.id).filter(id => id);
-          if (fileIds.length > 0) {
-            await filesAPI.batchCreateFileTags({
-              file_ids: fileIds,
-              sector: selectedSector,
-              industry: selectedIndustry,
-              ticker: selectedTicker || undefined
-            });
-            message.success(`successfully uploaded ${uploadedFiles.length} files and set tags`);
-            logger.logInfo(`set tags for ${fileIds.length} files: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
-          } else {
-            message.success(`successfully uploaded ${uploadedFiles.length} files`);
-          }
+          await filesAPI.batchCreateFileTags({
+            file_ids: [newFile.fileId],
+            sector: selectedSector,
+            industry: selectedIndustry,
+            ticker: selectedTicker || undefined
+          });
+          message.success('files uploaded successfully and tags set');
+          logger.logInfo(`set tags for files: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
         } catch (tagError: any) {
           console.error('failed to set file tags:', tagError);
           const tagErrorMessage = getErrorMessage(tagError, 'failed to set file tags');
-          message.warning(`file uploaded successfully, but tags setting failed: ${tagErrorMessage}`);
+          message.warning(`files uploaded successfully, but tags setting failed: ${tagErrorMessage}`);
           logger.logWarning(`failed to set file tags: ${tagErrorMessage}`, 'file-processing', tagError);
         }
       } else {
-        message.success(`Successfully uploaded ${uploadedFiles.length} files`);
+        message.success('files uploaded successfully');
         logger.logInfo('file uploaded successfully', 'file-processing');
       }
       
     } catch (error: any) {
-      console.error('failed to upload files:', error);
-      const errorMessage = getErrorMessage(error, 'failed to upload files');
+      console.error('failed to upload file:', error);
+      const errorMessage = getErrorMessage(error, 'failed to upload file');
       message.error(errorMessage);
       logger.logError(errorMessage, 'file-processing', error);
     } finally {
       setUploadingFiles(false);
     }
-  }, [logger, setFiles, setUploadingFiles, selectedSector, selectedIndustry, selectedTicker]);
-
-  // 当有新文件添加到待上传列表时，延迟处理以支持批量上传
-  useEffect(() => {
-    if (pendingFiles.length > 0) {
-      const timer = setTimeout(() => {
-        processPendingFiles([...pendingFiles]);
-        setPendingFiles([]);
-      }, 100); // 100ms 延迟，允许多个文件同时选择
-
-      return () => clearTimeout(timer);
-    }
-  }, [pendingFiles, processPendingFiles]);
+    
+    return false; // 阻止自动上传
+  };
 
   const handleRemoveFile = async (fileId: string) => {
     const file = files.find(f => f.id === fileId);
@@ -1163,7 +1505,7 @@ const FilesPage: React.FC = () => {
       
       // 从本地状态中移除文件
       setFiles(prev => prev.filter(f => f.id !== fileId));
-      message.success(`File ${file.name} deleted successfully`);
+      message.success(`file ${file.name} deleted successfully`);
       logger.logInfo(`remove file: ${file.name}`, 'file-processing');
     } catch (error: any) {
       console.error('Failed to delete file:', error);
@@ -1194,7 +1536,7 @@ const FilesPage: React.FC = () => {
     // 根据分析模式进行不同的验证
     if (analysisMode === 'remote_agent') {
       if (!selectedTaskType) {
-        message.error('please select RC Agent');
+        message.error('please select reverse capital agent');
         logger.logWarning('no RC Agent selected', 'file-processing');
         return;
       }
@@ -1206,12 +1548,6 @@ const FilesPage: React.FC = () => {
       }
     }
 
-    if (!selectedSector || !selectedIndustry) {
-      message.error('please select industry classification');
-      logger.logWarning('no industry classification selected', 'file-processing');
-      return;
-    }
-    
     try {
       setProcessing(true);
       setLastCompletedTaskId(null); // 清空上次的任务ID
@@ -1246,11 +1582,15 @@ const FilesPage: React.FC = () => {
       });
       
       setCurrentTaskId(response.task_id);
+      // 添加任务到全局进度显示
+      if (files.length > 0) {
+        addTask(response.task_id, files[0].name, 'document');
+      }
       message.success('file processing task started');
       
       // 任务启动后立即刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
+        loadTaskExecutionsFuncRef.current(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保任务状态已更新
     } catch (error: any) {
       setProcessing(false);
@@ -1270,15 +1610,9 @@ const FilesPage: React.FC = () => {
       message.info('stop task request sent');
       logger.logInfo('stop task request sent', 'file-processing');
       
-      // 停止任务后，等待一段时间再刷新执行历史列表
-      setTimeout(async () => {
-        try {
-          const executions = await tasksAPI.getTaskExecutions();
-          setTaskExecutions(executions);
-        } catch (error) {
-          console.error('failed to refresh execution history after task stopped:', error);
-          logger.logError('failed to refresh execution history after task stopped', 'file-processing', error);
-        }
+      // 停止任务后，等待一段时间再刷新执行历史列表（重置为第一页）
+      setTimeout(() => {
+        loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
       }, 3000); // 等待3秒后刷新，确保任务状态已更新
       
     } catch (error: any) {
@@ -1314,7 +1648,7 @@ const FilesPage: React.FC = () => {
     
           // 重新处理时也刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
+        loadTaskExecutionsFuncRef.current(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保状态已更新
   };
 
@@ -1328,7 +1662,7 @@ const FilesPage: React.FC = () => {
     
           // 清除文件列表时也刷新执行历史列表
       setTimeout(() => {
-        loadTaskExecutionsFunc(true, false); // 手动刷新，显示错误
+        loadTaskExecutionsFuncRef.current(true, false); // 手动刷新，显示错误
       }, 1000); // 延迟1秒后刷新，确保状态已更新
   };
 
@@ -1831,23 +2165,29 @@ const FilesPage: React.FC = () => {
       key: 'files_info',
       width: 120,
       render: (_: any, record: TaskExecution) => {
-        const status = record.rc_agent_status;
-        const isAnalyzed = status === 'success';
+        const agentStatus = record.rc_agent_status;
+        const isAnalyzed = agentStatus === 'success';
+        const isUploadOnly = agentStatus === 'uploaded';
+        const isAnalyzing = agentStatus === 'analyzing' || audioAnalyzingIds.has(record.id) || docAnalyzingIds.has(record.id);
         
         return (
           <Space direction="vertical" size={0}>
             <div style={{ fontSize: '11px' }}>
-              <span style={{ color: themeColors.textMuted }}>Processed: </span>
-              <span style={{ color: '#52c41a', fontWeight: 500 }}>
+              <span style={{ color: themeColors.textMuted }}>
+                {isUploadOnly ? 'Uploaded: ' : 'Processed: '}
+              </span>
+              <span style={{ color: isUploadOnly ? '#1890ff' : '#52c41a', fontWeight: 500 }}>
                 {record.files_processed}
               </span>
             </div>
-            <div style={{ fontSize: '11px' }}>
-              <span style={{ color: themeColors.textMuted }}>Analyzed: </span>
-              <span style={{ fontWeight: 500 }}>
-                {isAnalyzed ? 'True' : 'False'}
-              </span>
-            </div>
+            {(!isUploadOnly || isAnalyzing) && (
+              <div style={{ fontSize: '11px' }}>
+                <span style={{ color: themeColors.textMuted }}>Analyzed: </span>
+                <span style={{ fontWeight: 500, color: isAnalyzing ? '#faad14' : isAnalyzed ? '#52c41a' : undefined }}>
+                  {isAnalyzing ? 'Analyzing...' : isAnalyzed ? 'True' : 'False'}
+                </span>
+              </div>
+            )}
           </Space>
         );
       }
@@ -1855,15 +2195,54 @@ const FilesPage: React.FC = () => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 200,
-      render: (_: any, record: TaskExecution) => (
+      width: 220,
+      render: (_: any, record: TaskExecution) => {
+        const isUploadOnly = record.rc_agent_status === 'uploaded';
+        const isAudioFile = record.first_file_type === 'audio';
+        const isAudioAnalyzing = record.rc_agent_status === 'analyzing' || audioAnalyzingIds.has(record.id);
+        const isDocAnalyzing = record.rc_agent_status === 'analyzing' || docAnalyzingIds.has(record.id);
+        const isAnalyzing = isAudioAnalyzing || isDocAnalyzing;
+        const hasAnalysis = record.rc_agent_status === 'success';
+        // 音频文件且ASR已完成但未进行AI分析
+        const canAnalyzeAudio = isAudioFile && !hasAnalysis && !isAudioAnalyzing && record.rc_agent_status === 'completed';
+        // 文档分析：需要区分"仅上传"和"正在处理"
+        // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
+        // 2. 如果rc_agent_status为failed，允许重新分析
+        // 3. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
+        const isProcessingDoc = record.rc_agent_status === 'processing' || 
+                                record.rc_agent_status === 'initializing' ||
+                                (record.first_task_id != null && record.rc_agent_status === 'uploaded');
+        const canAnalyzeDoc = !isAudioFile && !hasAnalysis && !isDocAnalyzing && !isProcessingDoc && (
+          record.rc_agent_status === 'uploaded' ||
+          record.rc_agent_status === 'failed'
+        );
+        
+        return (
         <Space size="small">
-          <Tooltip title="AI Analysis">
+          {/* 音频文件专属：Analyze 按钮 */}
+          {isAudioFile && (canAnalyzeAudio || isAudioAnalyzing) && (
+            <Tooltip title={isAudioAnalyzing ? "AI Analyzing..." : "AI Analyze Audio"}>
+              <Button
+                type="text"
+                icon={isAudioAnalyzing ? <LoadingOutlined /> : <SoundOutlined />}
+                onClick={() => !isAudioAnalyzing && handleAnalyzeAudio(record)}
+                size="small"
+                loading={isAudioAnalyzing}
+                style={{ color: isAudioAnalyzing ? '#faad14' : '#1890ff' }}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title={isUploadOnly ? "AI Analysis (click to analyze)" : "AI Analysis"}>
             <Button
               type="text"
-              icon={<RobotOutlined />}
+              icon={isDocAnalyzing ? <LoadingOutlined /> : <RobotOutlined />}
               onClick={() => handleViewAiAnalysis(record)}
               size="small"
+              disabled={isAudioFile && !hasAnalysis && !isAudioAnalyzing}
+              style={{ 
+                opacity: (isAudioFile && !hasAnalysis && !isAudioAnalyzing) ? 0.3 : 1,
+                color: isDocAnalyzing ? '#faad14' : undefined
+              }}
             />
           </Tooltip>
           <Tooltip title="View Details">
@@ -1893,7 +2272,8 @@ const FilesPage: React.FC = () => {
             />
           </Tooltip>
         </Space>
-      )
+        );
+      }
     }
   ];
 
@@ -1966,14 +2346,17 @@ const FilesPage: React.FC = () => {
             </Row>
             <Row gutter={16} style={{ marginTop: 16 }}>
               <Col span={12}>
-                <div><strong>RC Agent Status:</strong> 
+                <div><strong>Status:</strong> 
                   {selectedExecution.rc_agent_status ? (
                     (() => {
                       const statusConfig = {
-                        success: { color: 'success', text: 'Success' },
+                        success: { color: 'success', text: 'AI Analysis Complete' },
                         failed: { color: 'error', text: 'Failed' },
                         pending: { color: 'processing', text: 'Pending' },
-                        skipped: { color: 'default', text: 'Skipped' }
+                        skipped: { color: 'default', text: 'Skipped' },
+                        uploaded: { color: 'blue', text: 'Upload Only' },
+                        analyzing: { color: 'warning', text: 'AI Analyzing...' },
+                        completed: { color: 'cyan', text: 'ASR Complete' }
                       };
                       const config = statusConfig[selectedExecution.rc_agent_status as keyof typeof statusConfig] || { color: 'default', text: selectedExecution.rc_agent_status };
                       return <Tag color={config.color} style={{ marginLeft: 8 }}>{config.text}</Tag>;
@@ -2193,32 +2576,125 @@ const FilesPage: React.FC = () => {
           <Divider />
           <div 
             id="ai-analysis-content"
+            className={isDark ? 'ai-analysis-content ai-analysis-content--dark' : 'ai-analysis-content'}
             style={{ 
-              background: '#ffffff', 
+              background: isDark ? '#151b26' : '#ffffff', 
               padding: '20px', 
-              borderRadius: '8px', 
-              border: '1px solid #e1e4e8',
+              borderRadius: '12px', 
+              border: isDark ? '1px solid #364152' : '1px solid #e1e4e8',
               maxHeight: '60vh',
-              overflow: 'auto'
+              overflow: 'auto',
+              boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.04)'
             }}
           >
             <MarkdownRenderer 
               content={aiAnalysisData.execution.final_report}
+              variant={isDark ? 'dark' : 'light'}
               style={{
                 fontSize: '14px',
-                lineHeight: '1.6'
+                lineHeight: '1.6',
+                color: isDark ? themeColors.text : undefined
               }}
             />
           </div>
         </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-          <div style={{ marginTop: 16, fontSize: '16px' }}>
-            No AI analysis report available for this execution.
+      ) : (() => {
+        const isAudioModal = aiAnalysisExecution?.first_file_type === 'audio';
+        
+        // 音频分析：只有转写完成(completed)或失败(failed)时才允许AI分析
+        const canAnalyzeAudioModal = isAudioModal && 
+          (aiAnalysisExecution?.rc_agent_status === 'completed' || aiAnalysisExecution?.rc_agent_status === 'failed');
+        
+        // 文档分析：需要区分"仅上传"和"正在处理"
+        // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
+        // 2. 如果rc_agent_status为failed，允许重新分析
+        // 3. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
+        const isProcessingDocModal = aiAnalysisExecution?.rc_agent_status === 'processing' || 
+                                      aiAnalysisExecution?.rc_agent_status === 'initializing' ||
+                                      (aiAnalysisExecution?.first_task_id != null && aiAnalysisExecution?.rc_agent_status === 'uploaded');
+        const canAnalyzeDocModal = !isAudioModal && aiAnalysisExecution && !isProcessingDocModal && (
+          aiAnalysisExecution?.rc_agent_status === 'uploaded' ||
+          aiAnalysisExecution?.rc_agent_status === 'failed'
+        );
+        
+        const isAudioAnalyzingModal = aiAnalysisExecution ? audioAnalyzingIds.has(aiAnalysisExecution.id) : false;
+        const isDocAnalyzingModal = aiAnalysisExecution ? docAnalyzingIds.has(aiAnalysisExecution.id) : false;
+        const isAnalyzingModal = isAudioAnalyzingModal || isDocAnalyzingModal;
+
+        return (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            {isAnalyzingModal ? (
+              <>
+                <LoadingOutlined style={{ fontSize: '48px', color: '#1890ff' }} />
+                <div style={{ marginTop: 16, fontSize: '16px' }}>
+                  {isAudioModal ? 'AI is analyzing your audio transcription...' : 'AI is processing and analyzing your document...'}
+                </div>
+                <div style={{ marginTop: 8, fontSize: '13px', color: '#999' }}>
+                  {isAudioModal
+                    ? 'This may take a moment. The report will appear here once completed.'
+                    : 'The document will be parsed and analyzed. This may take a few minutes.'}
+                </div>
+              </>
+            ) : (
+              <>
+                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
+                <div style={{ marginTop: 16, fontSize: '16px' }}>
+                  No AI analysis report available for this execution.
+                </div>
+                {canAnalyzeAudioModal && aiAnalysisExecution && (
+                  <Button
+                    type="primary"
+                    icon={<SoundOutlined />}
+                    size="large"
+                    onClick={() => handleAnalyzeAudio(aiAnalysisExecution)}
+                    style={{ 
+                      marginTop: '20px',
+                      height: '44px',
+                      paddingInline: '28px',
+                      fontSize: '15px',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    Analyze Audio
+                  </Button>
+                )}
+                {canAnalyzeDocModal && aiAnalysisExecution && (
+                  <div style={{ maxWidth: '420px', margin: '20px auto 0', textAlign: 'left' }}>
+                    <div style={{ marginBottom: '12px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+                      Select a prompt template and click "Analyze" to start AI analysis
+                    </div>
+                    <TemplateSelector
+                      categoryCode="file_analysis"
+                      value={modalSelectedTemplateId}
+                      onChange={(value) => setModalSelectedTemplateId(value)}
+                      placeholder="Select analysis template"
+                      style={{ marginBottom: '16px' }}
+                    />
+                    <div style={{ textAlign: 'center' }}>
+                      <Button
+                        type="primary"
+                        icon={<RobotOutlined />}
+                        size="large"
+                        disabled={!modalSelectedTemplateId}
+                        onClick={() => modalSelectedTemplateId && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId)}
+                        style={{ 
+                          marginTop: '4px',
+                          height: '44px',
+                          paddingInline: '28px',
+                          fontSize: '15px',
+                          borderRadius: '8px',
+                        }}
+                      >
+                        Analyze Document
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </Modal>
     );
   };
@@ -2380,6 +2856,27 @@ const FilesPage: React.FC = () => {
     </Modal>
   );
 
+  // 按 file_type 筛选列表（image 包含 jpg/jpeg/png/gif/bmp/image）
+  const matchesFileType = (firstFileType: string | undefined, tab: typeof fileTypeFilter): boolean => {
+    const t = firstFileType?.toLowerCase() || '';
+    if (tab === 'all') return true;
+    if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t);
+    return t === tab;
+  };
+  const filteredByType = taskExecutions.filter(exec => matchesFileType(exec.first_file_type, fileTypeFilter));
+  const filteredExecutions = searchType === 'file_name' && searchQuery.trim()
+    ? filteredByType.filter(exec => (exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : filteredByType;
+
+  const FILE_TYPE_TABS: { key: typeof fileTypeFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'pdf', label: 'PDF' },
+    { key: 'doc', label: 'Doc' },
+    { key: 'excel', label: 'Excel' },
+    { key: 'image', label: 'Image' },
+    { key: 'audio', label: 'Audio' },
+  ];
+
   return (
     <ConfigProvider
       theme={{
@@ -2392,489 +2889,325 @@ const FilesPage: React.FC = () => {
         }),
       }}
     >
-      <div style={{ padding: '24px', backgroundColor: themeColors.pageBg, minHeight: '100%' }}>
-        <div className="page-content" style={{ marginTop: 16 }}>
-          {/* 主体区域：左侧参数配置，右侧执行历史 */}
-          <Row gutter={24}>
-          {/* 左侧：输入参数区域 - 1/3宽度 */}
-          <Col span={8}>
-            {/* 文件上传和处理按钮 */}
-            {getUIState() !== 'completed' && (
-              <div style={{ marginBottom: 16 }}>
-                <Space style={{ width: '100%' }} size="middle">
-                  <Upload
-                    beforeUpload={handleUpload}
-                    showUploadList={false}
-                    disabled={processing || uploadingFiles}
-                    style={{ flex: 1 }}
-                  >
-                    <Button
-                      type="primary"
-                      icon={<InboxOutlined />}
-                      loading={uploadingFiles}
-                      disabled={processing || uploadingFiles}
-                      size="large"
-                      style={{ width: '100%' }}
-                    >
-                      {uploadingFiles ? 'Uploading Files...' : 'Upload Files'}
-                    </Button>
-                  </Upload>
-                  
-                  {getUIState() === 'ready' && files.length > 0 && (
-                    <Button
-                      type="primary"
-                      icon={<PlayCircleOutlined />}
-                      onClick={handleStartProcessing}
-                      loading={processing}
-                      disabled={
-                        files.length === 0 || 
-                        !selectedSector || 
-                        !selectedIndustry ||
-                        (analysisMode === 'remote_agent' && !selectedTaskType) ||
-                        (analysisMode === 'local_llm' && !selectedTemplateId)
-                      }
-                      size="large"
-                      style={{ 
-                        width: '160px',
-                        backgroundColor: isDark ? '#38a169' : '#52c41a',
-                        borderColor: isDark ? '#38a169' : '#52c41a'
-                      }}
-                    >
-                      Start Processing
-                    </Button>
-                  )}
-                </Space>
-                {!uploadingFiles && (
-                  <div style={{ 
-                    marginTop: 8, 
-                    fontSize: '12px', 
-                    color: themeColors.textMuted, 
-                    textAlign: 'left' 
-                  }}>
-                    Support PDF, Excel, Word, Image and more
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 行业和股票选择 */}
-            <Card title="Industry & Ticker Selection" className="mb-12" size="small">
-              <Form layout="vertical" size="small">
-                <Form.Item 
-                  label="Sector & Industry" 
-                  required
-                  tooltip="Select sector and industry for analysis context"
-                >
-                  <Cascader
-                    options={sectors}
-                    value={selectedSector && selectedIndustry ? [selectedSector, selectedIndustry] : []}
-                    onChange={handleSectorIndustryChange}
-                    placeholder="Select sector and industry"
-                    loading={loadingSectors}
-                    disabled={processing}
-                    showSearch={{
-                      filter: (inputValue, path) => {
-                        return path.some(option => 
-                          option.label.toLowerCase().includes(inputValue.toLowerCase())
-                        );
-                      }
-                    }}
-                    style={{ width: '100%' }}
-                  />
-                </Form.Item>
-
-                <Form.Item 
-                  label="Ticker" 
-                  tooltip="Select or search for a specific ticker (optional)"
-                >
-                  <AutoComplete
-                    value={tickerSearchValue}
-                    options={tickerOptions.map(ticker => ({
-                      value: ticker.value,
-                      label: ticker.label,
-                      sector: ticker.sector,
-                      industry: ticker.industry
-                    }))}
-                    onSearch={handleTickerSearch}
-                    onSelect={handleTickerSelect}
-                    placeholder="Search ticker by code or name (global search)"
-                    disabled={processing}
-                    style={{ width: '100%' }}
-                    filterOption={false}
-                    notFoundContent={loadingTickers ? 'Loading...' : 'No tickers found'}
-                  />
-                </Form.Item>
-
-                {(selectedSector && selectedIndustry) && (
-                  <div style={{ 
-                    padding: '8px 12px', 
-                    backgroundColor: themeColors.successBg, 
-                    border: `1px solid ${themeColors.successBorder}`,
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    color: '#52c41a'
-                  }}>
-                    <strong>Selected:</strong> {selectedSector} → {selectedIndustry}
-                    {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
-                    {!selectedTicker && <><br /><em>No ticker selected (optional)</em></>}
-                  </div>
-                )}
-              </Form>
-            </Card>
-
-            {/* 文件列表 */}
-            {files.length > 0 && (
-              <Card
-                title={
-                  <Space>
-                    <FileTextOutlined />
-                    File List ({files.length})
-                    {getUIState() === 'completed' && (
-                      <Badge 
-                        count={files.filter(f => f.status === 'completed').length} 
-                        style={{ backgroundColor: '#52c41a' }} 
-                      />
-                    )}
-                  </Space>
-                }
-                extra={
-                  <Space>
-                    {getUIState() === 'completed' && (
-                      <Button
-                        icon={<ReloadOutlined />}
-                        onClick={refreshFileStatus}
-                        loading={refreshingStatus}
-                        size="small"
-                      >
-                        Refresh Status
-                      </Button>
-                    )}
-                  </Space>
-                }
-                className="mb-16"
-                size="small"
-              >
-                <Table
-                  dataSource={files}
-                  columns={fileColumns}
-                  rowKey="id"
-                  pagination={false}
+      <div className="files-page-layout" style={{ backgroundColor: themeColors.pageBg }}>
+        <div className="files-page-inner">
+          {/* 左侧：Behance 风格文件列表 */}
+          <div className="files-list-panel">
+            <div className="files-list-header">
+              <Space size={8}>
+                <FileTextOutlined />
+                <span>File List</span>
+                <span style={{ fontWeight: 400, fontSize: '13px', opacity: 0.7 }}>({filteredExecutions.length})</span>
+              </Space>
+              <Space size={2}>
+                <Button
+                  type={batchMode ? 'primary' : 'text'}
                   size="small"
-                />
-              </Card>
-            )}
-
-            {/* 处理进度 */}
-            {processing && taskStatus && (
-              <Card title="Processing Progress" className="mb-12" size="small">
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span>Current Status: {getStatusText(taskStatus.status)}</span>
-                    <span>{taskStatus.progress.toFixed(1)}%</span>
-                  </div>
-                  <Progress
-                    percent={taskStatus.progress}
-                    status={taskStatus.status === 'failed' ? 'exception' : 'active'}
-                    showInfo={false}
-                  />
-                </div>
-                
-                {taskStatus.current_file && (
-                  <div style={{ marginBottom: 16 }}>
-                    <Text>Current File: {taskStatus.current_file}</Text>
-                  </div>
-                )}
-                
-                <div>
-                  <Space>
-                    <span>Processed: {taskStatus.files_processed}</span>
-                    <span>Failed: {taskStatus.files_failed}</span>
-                    <span>Total: {taskStatus.total_files}</span>
-                  </Space>
-                </div>
-              </Card>
-            )}
-
-            {/* 分析模式选择 */}
-            <Card title="Analysis Mode" className="mb-12" size="small">
-              <Form layout="vertical" size="small">
-                <Form.Item label="Analysis Mode" style={{ marginBottom: 0 }}>
-                  <Select
-                    value={analysisMode}
-                    onChange={(value) => {
-                      setAnalysisMode(value);
-                      // 切换模式时清除相关选择
-                      if (value === 'local_llm') {
-                        setSelectedTaskType('');
-                      } else {
-                        setSelectedTemplateId(undefined);
-                        setTemplateVariables({});
-                      }
-                    }}
-                    disabled={processing}
-                    style={{ width: '100%' }}
-                  >
-                    <Option value="local_llm">
-                      <Space>
-                        <FileTextOutlined />
-                        <Text>Local AI Agent</Text>
-                      </Space>
-                    </Option>
-                    <Option value="remote_agent">
-                      <Space>
-                        <RobotOutlined />
-                        <Text>Remote AI Agent (Dify)</Text>
-                      </Space>
-                    </Option>
-                  </Select>
-                </Form.Item>
-              </Form>
-            </Card>
-
-            {/* 根据模式显示不同的选择器 */}
-            {analysisMode === 'remote_agent' ? (
-              // 远程Agent模式 - 显示AI Agent选择
-              <Card title="AI Agent Selection" className="mb-12" size="small">
-              <Form layout="vertical" size="small">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {taskTypes.map((task, index) => {
-                    const tagColors = ['blue', 'green', 'orange', 'red', 'purple', 'cyan', 'magenta', 'volcano', 'geekblue', 'gold'];
-                    const color = tagColors[index % tagColors.length];
-                    const isSelected = selectedTaskType === task.id;
-                    
-                    return (
-                      <Tag
-                        key={task.id}
-                        color={isSelected ? color : undefined}
-                        style={{
-                          cursor: processing ? 'not-allowed' : 'pointer',
-                          border: isSelected ? `2px solid ${color === 'blue' ? '#1890ff' : color === 'green' ? '#52c41a' : color === 'orange' ? '#fa8c16' : color === 'red' ? '#f5222d' : color === 'purple' ? '#722ed1' : color === 'cyan' ? '#13c2c2' : color === 'magenta' ? '#eb2f96' : color === 'volcano' ? '#fa541c' : color === 'geekblue' ? '#2f54eb' : '#fadb14'}` : '1px solid #d9d9d9',
-                          backgroundColor: isSelected ? undefined : themeColors.boxMuted,
-                          fontWeight: isSelected ? 'bold' : 'normal',
-                          opacity: processing ? 0.6 : 1
-                        }}
-                        onClick={() => !processing && handleTaskTypeChange(task.id)}
-                      >
-                        {task.name} {task.is_default && '[Default]'}
-                      </Tag>
-                    );
-                  })}
-                </div>
-                {taskTypes.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    {taskTypesLoadAttempts >= maxTaskTypesRetries ? (
-                      <div>
-                        <div style={{ color: '#ff4d4f', marginBottom: '10px' }}>
-                          <ExclamationCircleOutlined /> RC Agent加载失败
-                        </div>
-                        <Button 
-                          type="primary" 
-                          size="small" 
-                          onClick={() => {
-                            setTaskTypesLoadAttempts(0);
-                            setLastTaskTypesError(0);
-                            loadTaskTypes(true);
-                          }}
-                          icon={<ReloadOutlined />}
-                        >
-                          重新加载
-                        </Button>
-                      </div>
-                    ) : taskTypesLoadAttempts > 0 ? (
-                      <div style={{ color: '#faad14' }}>
-                        <LoadingOutlined /> 正在重试加载RC Agent... ({taskTypesLoadAttempts}/{maxTaskTypesRetries})
-                      </div>
-                    ) : (
-                      <div style={{ color: themeColors.textMuted }}>
-                        No AI Agents available
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Form>
-              
-              {renderCustomInputs()}
-            </Card>
-            ) : (
-              // 本地LLM模式 - 显示模板选择和变量编辑
-              <Card title="Local LLM Agent" className="mb-12" size="small">
-                <Form layout="vertical" size="small">
-                  <Form.Item label="Select Prompt Template" required>
-                    <TemplateSelector
-                      categoryCode="file_analysis"
-                      value={selectedTemplateId}
-                      onChange={(templateId, template) => {
-                        setSelectedTemplateId(templateId);
-                        // 清空之前的变量
-                        setTemplateVariables({});
+                  onClick={() => {
+                    setBatchMode(prev => !prev);
+                    if (batchMode) setSelectedExecutionIds([]);
+                  }}
+                  className="files-list-batch-btn"
+                >
+                  Batch
+                </Button>
+                {batchMode && (
+                  <>
+                    <Button
+                      type="text"
+                      size="small"
+                      onClick={() => {
+                        setSelectedExecutionIds(filteredExecutions.map(e => e.id));
                       }}
-                      disabled={processing}
-                    />
-                  </Form.Item>
-                  
-                  {selectedTemplateId && (
-                    <Form.Item label="Template Parameters Configuration">
-                      <TemplateVariablesEditor
-                        templateId={selectedTemplateId}
-                        values={templateVariables}
-                        onChange={(values) => setTemplateVariables(values)}
-                        disabled={processing}
-                      />
-                    </Form.Item>
-                  )}
-                </Form>
-              </Card>
-            )}
-
-            {/* 操作按钮 - 根据状态显示不同的操作 */}
-            <Card title="Operation Control" className="mb-12" size="small">
-              <Space style={{ width: '100%' }} direction="vertical">
-                {getUIState() === 'ready' && (
-                  <Button
-                    icon={<SettingOutlined />}
-                    onClick={() => setShowParams(true)}
-                    disabled={processing}
-                    block
-                  >
-                    Parameter Settings
-                  </Button>
-                )}
-
-                {getUIState() === 'processing' && (
-                  <>
-                    <Button
-                      icon={<StopOutlined />}
-                      onClick={handleStopProcessing}
-                      block
-                      danger
-                      loading={stoppingTask}
-                      disabled={stoppingTask}
+                      className="files-list-batch-btn"
                     >
-                      Stop Processing
+                      All
                     </Button>
-                    
                     <Button
-                      icon={<EyeOutlined />}
-                      onClick={() => logger.actions.setShowFloating(true)}
-                      block
+                      type="text"
+                      size="small"
+                      onClick={() => {
+                        setBatchMode(false);
+                        setSelectedExecutionIds([]);
+                      }}
+                      className="files-list-batch-btn"
                     >
-                      View Real-time Logs
-                    </Button>
-                  </>
-                )}
-
-                {getUIState() === 'completed' && processingResult && (
-                  <>
-                    <Button
-                      type="primary"
-                      icon={<ReloadOutlined />}
-                      onClick={handleReprocess}
-                      block
-                    >
-                      Reprocess
-                    </Button>
-                    
-                    <Button
-                      icon={<EyeOutlined />}
-                      onClick={() => logger.actions.setShowFloating(true)}
-                      block
-                      disabled={!logger.logs || logger.logs.length === 0}
-                    >
-                      View Processing Logs
-                    </Button>
-                    
-                    <Button
-                      icon={<ClearOutlined />}
-                      onClick={handleClearFiles}
-                      block
-                    >
-                      Clear File List
-                    </Button>
-                  </>
-                )}
-
-                {getUIState() === 'empty' && (
-                  <>
-                    <Button
-                      icon={<SettingOutlined />}
-                      onClick={() => setShowParams(true)}
-                      block
-                    >
-                      Parameter Settings
+                      Done
                     </Button>
                   </>
                 )}
               </Space>
-            </Card>
-          </Col>
-
-          {/* 右侧：执行历史区域 - 2/3宽度 */}
-          <Col span={16}>
-            <Card 
-              title="Execution History" 
-              size="small"
-              extra={
-                selectedExecutionIds.length > 0 && (
-                  <Space>
-                    <span>Selected {selectedExecutionIds.length} item(s)</span>
-                    <Button
-                      type="primary"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={handleBatchDeleteExecutions}
-                      loading={deletingExecutions}
-                      size="small"
-                    >
-                      Batch Delete
-                    </Button>
-                  </Space>
-                )
-              }
-            >
-              <Table
-                columns={executionColumns}
-                dataSource={taskExecutions}
-                rowKey="id"
+            </div>
+            <div className="files-list-type-tabs">
+              {FILE_TYPE_TABS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
+                  onClick={() => setFileTypeFilter(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="files-list-search-bar">
+              <Select
+                value={searchType}
+                onChange={(v) => setSearchType(v)}
                 size="small"
-                rowSelection={{
-                  selectedRowKeys: selectedExecutionIds,
-                  onChange: (selectedRowKeys: React.Key[]) => {
-                    setSelectedExecutionIds(selectedRowKeys as string[]);
-                  },
-                  onSelectAll: (selected, selectedRows, changeRows) => {
-                    if (selected) {
-                      const newSelectedIds = [...selectedExecutionIds, ...changeRows.map(row => row.id)];
-                      setSelectedExecutionIds(Array.from(new Set(newSelectedIds)));
-                    } else {
-                      const changeIds = changeRows.map(row => row.id);
-                      setSelectedExecutionIds(selectedExecutionIds.filter(id => !changeIds.includes(id)));
-                    }
-                  }
-                }}
-                pagination={{
-                  pageSize: 15,
-                  showSizeChanger: true,
-                  showQuickJumper: true,
-                  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                  pageSizeOptions: ['10', '15', '20', '30', '50']
-                }}
-                scroll={{ x: 'max-content' }}
+                className="files-list-search-type"
+                dropdownClassName="files-list-search-type-dropdown"
+                options={[
+                  { value: 'file_name', label: 'Title' },
+                  { value: 'content', label: 'Content' },
+                ]}
               />
-            </Card>
-          </Col>
-        </Row>
+              <Input
+                size="small"
+                placeholder={searchType === 'file_name' ? 'Search by title' : 'Search by content'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                allowClear
+                className="files-list-search-input"
+              />
+            </div>
+            {batchMode && selectedExecutionIds.length > 0 && (
+              <div className="files-list-batch-bar">
+                <span className="files-list-batch-count">{selectedExecutionIds.length} selected</span>
+                <Button
+                  type="primary"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  loading={deletingExecutions}
+                  onClick={handleBatchDeleteExecutions}
+                  className="files-list-batch-bar-btn"
+                >
+                  Batch Delete
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={() => setSelectedExecutionIds([])}
+                  className="files-list-batch-bar-btn"
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+            <div
+              ref={filesListScrollRef}
+              className="files-list-scroll"
+            >
+              {filteredExecutions.map(execution => {
+                const isSelected = selectedExecutionForView?.id === execution.id;
+                const isUploadOnly = execution.rc_agent_status === 'uploaded';
+                const isAudioFile = execution.first_file_type === 'audio';
+                const canAnalyze = isUploadOnly || execution.rc_agent_status === 'failed';
+                const isDocAnalyzing = docAnalyzingIds.has(execution.id);
+                const isAudioAnalyzing = audioAnalyzingIds.has(execution.id);
+                const isItemAnalyzing = execution.rc_agent_status === 'analyzing' || isDocAnalyzing || isAudioAnalyzing;
+                const cardMenuItems: MenuProps['items'] = [
+                  // 文档文件：未分析时显示 Analyze 入口
+                  ...(!isAudioFile && canAnalyze && !isItemAnalyzing ? [{
+                    key: 'analyze',
+                    icon: <RobotOutlined />,
+                    label: 'AI Analyze',
+                    onClick: (e: any) => {
+                      e.domEvent.stopPropagation();
+                      setSelectedExecutionForView(execution);
+                      setViewMode('analysis');
+                    },
+                  }] : []),
+                  {
+                    key: 'view-details',
+                    icon: <EyeOutlined />,
+                    label: 'View Details',
+                    onClick: (e) => {
+                      e.domEvent.stopPropagation();
+                      handleViewExecution(execution);
+                    },
+                  },
+                  {
+                    key: 'rename',
+                    icon: <EditOutlined />,
+                    label: 'Rename',
+                    onClick: (e) => {
+                      e.domEvent.stopPropagation();
+                      handleOpenRename(execution);
+                    },
+                  },
+                  {
+                    key: 'delete',
+                    icon: <DeleteOutlined />,
+                    label: 'Delete',
+                    danger: true,
+                    onClick: (e) => {
+                      e.domEvent.stopPropagation();
+                      handleDeleteExecution(execution);
+                    },
+                  },
+                ];
+                const isChecked = selectedExecutionIds.includes(execution.id);
+                return (
+                  <div
+                    key={execution.id}
+                    className={`files-list-item ${isSelected ? 'is-selected' : ''} ${isChecked ? 'is-checked' : ''}`}
+                    onClick={() => {
+                      setSelectedExecutionForView(execution);
+                      setViewMode('original');
+                      setSelectedFileForView(null);
+                    }}
+                  >
+                    <div className="files-list-item-header">
+                      {batchMode && (
+                        <Checkbox
+                          checked={isChecked}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            if (e.target.checked) {
+                              setSelectedExecutionIds(prev => [...prev, execution.id]);
+                            } else {
+                              setSelectedExecutionIds(prev => prev.filter(id => id !== execution.id));
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="files-list-item-checkbox"
+                        />
+                      )}
+                      <div className="files-list-item-title">
+                        {execution.first_filename || `${execution.files_processed} file(s)`}
+                      </div>
+                      <Dropdown
+                        menu={{ items: cardMenuItems }}
+                        trigger={['click']}
+                        placement="bottomRight"
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<EllipsisOutlined />}
+                          className="files-list-item-more-btn"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </Dropdown>
+                    </div>
+                    <div className="files-list-item-meta">
+                      {new Date(execution.created_at).toLocaleString()}
+                    </div>
+                    <div className="files-list-item-tags">
+                      <Tag
+                        color={isItemAnalyzing ? 'warning' : isUploadOnly ? 'blue' : (execution.rc_agent_status === 'success' ? 'success' : 'default')}
+                        style={{ margin: 0, fontSize: '11px' }}
+                      >
+                        {isItemAnalyzing ? 'Analyzing...' : isUploadOnly ? 'Uploaded' : (execution.rc_agent_status === 'success' ? 'Analyzed' : 'Not Analyzed')}
+                      </Tag>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredExecutions.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '48px 20px', color: themeColors.textMuted }}>
+                  <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
+                  <div>{taskExecutions.length === 0 ? 'no file records' : `no ${fileTypeFilter} files`}</div>
+                </div>
+              )}
+              {loadingMoreExecutions && (
+                <div style={{ textAlign: 'center', padding: '16px', color: themeColors.textMuted }}>
+                  <LoadingOutlined spin style={{ marginRight: 8 }} />
+                  Loading...
+                </div>
+              )}
+            </div>
+          </div>
 
-        {/* 参数设置对话框 */}
-        <Modal
-          title="Processing Parameter Settings"
-          open={showParams}
-          onOk={() => setShowParams(false)}
-          onCancel={() => setShowParams(false)}
-          width={800}
-          centered
-        >
-          {renderProcessingParams()}
-        </Modal>
+          {/* 右侧：内容展示区 */}
+          <div className="files-detail-panel">
+            {selectedExecutionForView ? (
+              <>
+                <div className="files-detail-tabs">
+                  <div
+                    className={`files-detail-tab ${viewMode === 'original' ? 'is-active' : ''}`}
+                    onClick={() => setViewMode('original')}
+                  >
+                    Original
+                  </div>
+                  <div
+                    className={`files-detail-tab ${viewMode === 'analysis' ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setViewMode('analysis');
+                    }}
+                  >
+                    AI Analysis
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  {viewMode === 'original' && originalFileInfoForTabs && (
+                    <Space size={12} style={{ fontSize: 13, fontWeight: 400, color: themeColors.textSecondary }}>
+                      <span title={originalFileInfoForTabs.filename} style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {originalFileInfoForTabs.filename}
+                      </span>
+                      <Tag color="blue" style={{ margin: 0 }}>{originalFileInfoForTabs.file_type?.toUpperCase() || 'Unknown'}</Tag>
+                    </Space>
+                  )}
+                  {viewMode === 'analysis' && aiAnalysisData?.execution?.final_report && (
+                    <Button
+                      icon={<DownloadOutlined />}
+                      onClick={handleDownloadPdf}
+                      loading={pdfDownloading}
+                      size="small"
+                      className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                    >
+                      Export PDF
+                    </Button>
+                  )}
+                </div>
+
+                <div className="files-detail-content">
+                  {viewMode === 'original' ? (
+                    <OriginalContentView
+                      execution={selectedExecutionForView}
+                      themeColors={themeColors}
+                      isDark={isDark}
+                      onFileSelect={setSelectedFileForView}
+                      selectedFile={selectedFileForView}
+                      onFileInfoLoaded={setOriginalFileInfoForTabs}
+                    />
+                  ) : (
+                    <AIAnalysisView
+                      execution={selectedExecutionForView}
+                      themeColors={themeColors}
+                      isDark={isDark}
+                      aiAnalysisData={aiAnalysisData}
+                      aiAnalysisLoading={aiAnalysisLoading}
+                      onLoadAnalysis={async () => {
+                        try {
+                          setAiAnalysisLoading(true);
+                          const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                          setAiAnalysisData(details);
+                        } catch (error) {
+                          message.error('Failed to load AI analysis report');
+                        } finally {
+                          setAiAnalysisLoading(false);
+                        }
+                      }}
+                      onAnalyzeAudio={handleAnalyzeAudio}
+                      onAnalyzeDocument={handleAnalyzeDocument}
+                      audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
+                      docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
+                    />
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="files-detail-empty">
+                <div className="files-detail-empty-inner">
+                  <EyeOutlined />
+                  <div>Please select a file from the left to view content</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* 执行详情对话框 */}
         {renderExecutionDetail()}
@@ -2906,6 +3239,36 @@ const FilesPage: React.FC = () => {
                 <p><strong>Execution Time:</strong> {new Date(executionToDelete.created_at).toLocaleString()}</p>
                 <p><strong>Files Processed:</strong> {executionToDelete.files_processed} successful, {executionToDelete.files_failed} failed</p>
               </div>
+            </div>
+          )}
+        </Modal>
+
+        {/* 重命名对话框 */}
+        <Modal
+          title="Rename File"
+          open={renameModalVisible}
+          onOk={handleConfirmRename}
+          okButtonProps={{ disabled: !renameInputValue.trim() }}
+          onCancel={() => {
+            setRenameModalVisible(false);
+            setExecutionToRename(null);
+            setRenameInputValue('');
+          }}
+          okText="Save"
+          cancelText="Cancel"
+          confirmLoading={renameLoading}
+          centered
+          destroyOnClose
+        >
+          {executionToRename && (
+            <div>
+              <p style={{ marginBottom: 8 }}>New file name:</p>
+              <Input
+                value={renameInputValue}
+                onChange={(e) => setRenameInputValue(e.target.value)}
+                placeholder="Enter new file name"
+                onPressEnter={handleConfirmRename}
+              />
             </div>
           )}
         </Modal>
@@ -3018,7 +3381,7 @@ const FilesPage: React.FC = () => {
           centered
         >
           <div>
-            <p>将为以下文件设置标签：</p>
+            <p>Will set tags for the following files:</p>
             <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: themeColors.successBg, border: `1px solid ${themeColors.successBorder}`, borderRadius: '6px' }}>
               <Space direction="vertical" size="small">
                 <div>
@@ -3044,14 +3407,783 @@ const FilesPage: React.FC = () => {
             </div>
             {files.filter(f => f.fileId).length === 0 && (
               <div style={{ textAlign: 'center', color: themeColors.textMuted, padding: '20px' }}>
-                没有可以设置标签的文件
+                No files available to set tags
               </div>
             )}
           </div>
         </Modal>
-        </div>
       </div>
     </ConfigProvider>
+  );
+};
+
+// 原文内容查看组件（仅支持单文件，不再显示文件列表）
+const OriginalContentView: React.FC<{
+  execution: TaskExecution;
+  themeColors: any;
+  isDark: boolean;
+  onFileSelect: (file: any) => void;
+  selectedFile: any;
+  onFileInfoLoaded?: (info: { filename?: string; file_type?: string }) => void;
+}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded }) => {
+  const [loading, setLoading] = useState(true);
+  const [fileContent, setFileContent] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadAndShowFile = async () => {
+      try {
+        setLoading(true);
+        setLoadError(null);
+        const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+        const files = details.files || [];
+        if (files.length === 0) {
+          setLoadError('No original file');
+          return;
+        }
+        const file = files[0];
+        onFileSelect(file);
+        const originalFileInfo = await filesAPI.getOriginalFileInfo(file.id);
+        
+        // 在URL中添加token参数（用于iframe认证）
+        const token = localStorage.getItem('access_token');
+        if (token && originalFileInfo.file_url) {
+          const separator = originalFileInfo.file_url.includes('?') ? '&' : '?';
+          originalFileInfo.file_url = `${originalFileInfo.file_url}${separator}token=${token}`;
+        }
+        
+        console.log('🔍 [DEBUG] Original File Info:', originalFileInfo);
+        console.log('🔍 [DEBUG] File URL with token:', originalFileInfo.file_url);
+        setFileContent(originalFileInfo);
+        onFileInfoLoaded?.({ filename: originalFileInfo.filename, file_type: originalFileInfo.file_type });
+      } catch (error) {
+        console.error('Failed to load file:', error);
+        setLoadError('Failed to load file content');
+        message.error('Failed to load file content');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAndShowFile();
+  }, [execution.id, onFileSelect, onFileInfoLoaded]);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.text }}>
+        <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+        <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading...</div>
+      </div>
+    );
+  }
+
+  if (loadError || !fileContent) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '40px',
+        color: themeColors.textMuted 
+      }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
+        <div>{loadError || 'No original file'}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', color: themeColors.text }}>
+      {(() => {
+        const fileType = fileContent.file_type.toLowerCase();
+        console.log('🔍 [DEBUG] Rendering file type:', fileType);
+        console.log('🔍 [DEBUG] File URL for iframe:', fileContent.file_url);
+        
+        if (fileType === 'pdf') {
+          return (
+            <div style={{ 
+              border: `1px solid ${themeColors.cardBorder}`,
+              borderRadius: '8px',
+              overflow: 'hidden',
+              flex: 1,
+              minHeight: 0
+            }}>
+              <iframe
+                src={fileContent.file_url}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title={fileContent.filename}
+                onLoad={() => console.log('✅ [DEBUG] iframe loaded successfully')}
+                onError={(e) => console.error('❌ [DEBUG] iframe load error:', e)}
+              />
+            </div>
+          );
+        } else if (['doc', 'docx', 'word'].includes(fileType)) {
+          // Word文档预览：使用Microsoft Office Online Viewer
+          // 需要文件URL是公网可访问的（生产环境有效）
+          // 对于本地开发，提供替代方案
+          const isLocalDev = fileContent.file_url.includes('localhost');
+          
+          if (isLocalDev) {
+            // 本地开发环境：显示提示和下载按钮
+            return (
+              <div style={{ 
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px',
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                color: themeColors.text
+              }}>
+                <FileWordOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
+                <div style={{ marginBottom: '8px', fontSize: '16px', fontWeight: 500 }}>
+                  {fileContent.filename}
+                </div>
+                <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
+                  Word document preview is available in production environment<br/>
+                  Please download and view locally for development
+                </div>
+                <Button 
+                  type="primary" 
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = fileContent.file_url;
+                    link.download = fileContent.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                >
+                  Download Word File
+                </Button>
+              </div>
+            );
+          } else {
+            // 生产环境：使用Microsoft Office Online Viewer
+            const encodedUrl = encodeURIComponent(fileContent.file_url);
+            const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
+            
+            return (
+              <div style={{ 
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                overflow: 'hidden',
+                flex: 1,
+                minHeight: 0
+              }}>
+                <iframe
+                  src={officeViewerUrl}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title={fileContent.filename}
+                  onLoad={() => console.log('✅ [DEBUG] Word viewer loaded successfully')}
+                  onError={(e) => console.error('❌ [DEBUG] Word viewer load error:', e)}
+                />
+              </div>
+            );
+          }
+        } else if (['excel', 'xlsx', 'xls'].includes(fileType)) {
+          // Excel文档预览：同样使用Microsoft Office Online Viewer
+          const isLocalDev = fileContent.file_url.includes('localhost');
+          
+          if (isLocalDev) {
+            return (
+              <div style={{ 
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px',
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                color: themeColors.text
+              }}>
+                <FileExcelOutlined style={{ fontSize: '48px', color: '#52c41a', marginBottom: '16px' }} />
+                <div style={{ marginBottom: '8px', fontSize: '16px', fontWeight: 500 }}>
+                  {fileContent.filename}
+                </div>
+                <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
+                  Excel document preview is available in production environment<br/>
+                  Please download and view locally for development
+                </div>
+                <Button 
+                  type="primary" 
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = fileContent.file_url;
+                    link.download = fileContent.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                >
+                  Download Excel File
+                </Button>
+              </div>
+            );
+          } else {
+            const encodedUrl = encodeURIComponent(fileContent.file_url);
+            const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
+            
+            return (
+              <div style={{ 
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                overflow: 'hidden',
+                flex: 1,
+                minHeight: 0
+              }}>
+                <iframe
+                  src={officeViewerUrl}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title={fileContent.filename}
+                  onLoad={() => console.log('✅ [DEBUG] Excel viewer loaded successfully')}
+                  onError={(e) => console.error('❌ [DEBUG] Excel viewer load error:', e)}
+                />
+              </div>
+            );
+          }
+        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'image'].includes(fileType)) {
+          return (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img 
+                src={fileContent.file_url} 
+                alt={fileContent.filename}
+                style={{ 
+                  maxWidth: '100%', 
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  border: `1px solid ${themeColors.cardBorder}`,
+                  borderRadius: '8px'
+                }}
+              />
+            </div>
+          );
+        } else if (fileType === 'audio' && fileContent.asr_with_diarization) {
+          // 音频文件：显示说话人分离可视化界面
+          return <AudioDiarizationView fileContent={fileContent} themeColors={themeColors} isDark={isDark} />;
+        } else {
+          return (
+            <div style={{ 
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '40px',
+              border: `1px solid ${themeColors.cardBorder}`,
+              borderRadius: '8px',
+              color: themeColors.text
+            }}>
+              <FileTextOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
+              <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
+                This file type cannot be previewed online
+              </div>
+              <Button 
+                type="primary" 
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = fileContent.file_url;
+                  link.download = fileContent.filename;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+              >
+                Download File
+              </Button>
+            </div>
+          );
+        }
+      })()}
+    </div>
+  );
+};
+
+// 音频说话人分离可视化组件
+const AudioDiarizationView: React.FC<{
+  fileContent: any;
+  themeColors: any;
+  isDark: boolean;
+  onSpeakerUpdated?: () => void;
+}> = ({ fileContent, themeColors, isDark, onSpeakerUpdated }) => {
+  const [localAsrData, setLocalAsrData] = useState(fileContent.asr_with_diarization);
+  const [editingSpeaker, setEditingSpeaker] = useState<{ id: number; currentLabel: string } | null>(null);
+  const [newSpeakerLabel, setNewSpeakerLabel] = useState('');
+  const [savingLabel, setSavingLabel] = useState(false);
+  
+  const asrData = localAsrData;
+  
+  if (!asrData || !asrData.sentences || asrData.sentences.length === 0) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '40px',
+        color: themeColors.textMuted 
+      }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
+        <div>No speaker diarization data available</div>
+      </div>
+    );
+  }
+  
+  // 格式化时间（毫秒转为 MM:SS 格式）
+  const formatTime = (milliseconds: number) => {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+  
+  // 格式化时间（毫秒转为 MM:SS.mmm 格式，更精确）
+  const formatTimeDetailed = (milliseconds: number) => {
+    const seconds = Math.floor(milliseconds / 1000);
+    const ms = milliseconds % 1000;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}.${Math.floor(ms / 100)}`;
+  };
+  
+  // 说话人颜色映射
+  const speakerColors = [
+    '#1890ff', // 蓝色
+    '#52c41a', // 绿色
+    '#fa8c16', // 橙色
+    '#eb2f96', // 粉色
+    '#722ed1', // 紫色
+    '#13c2c2', // 青色
+    '#faad14', // 金色
+    '#f5222d', // 红色
+  ];
+  
+  const getSpeakerColor = (speakerId: number) => {
+    return speakerColors[speakerId % speakerColors.length];
+  };
+
+  const handleDownloadDialogueTxt = () => {
+    const lines = asrData.sentences.map((s: any) => {
+      const speakerLabel = asrData.speakers.find((sp: any) => sp.speaker_id === s.speaker_id)?.label || `Speaker ${s.speaker_id}`;
+      const timeRange = `${formatTimeDetailed(s.begin_time)} - ${formatTimeDetailed(s.end_time)}`;
+      return `${speakerLabel} [${timeRange}]:\n${s.text || ''}`;
+    });
+    const content = lines.join('\n\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(fileContent.filename || 'dialogue').replace(/\.[^.]+$/, '')}_对话.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleEditSpeaker = (speaker: any) => {
+    setEditingSpeaker({ id: speaker.speaker_id, currentLabel: speaker.label });
+    setNewSpeakerLabel(speaker.label);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingSpeaker(null);
+    setNewSpeakerLabel('');
+  };
+
+  const handleSaveSpeakerLabel = async () => {
+    if (!editingSpeaker || !newSpeakerLabel.trim()) {
+      message.warning('Please input a valid speaker name');
+      return;
+    }
+
+    setSavingLabel(true);
+    try {
+      await filesAPI.updateSpeakerLabel(fileContent.file_id, editingSpeaker.id, newSpeakerLabel.trim());
+      
+      // 更新本地状态
+      const updatedAsrData = { ...asrData };
+      const speakerToUpdate = updatedAsrData.speakers.find((sp: any) => sp.speaker_id === editingSpeaker.id);
+      if (speakerToUpdate) {
+        speakerToUpdate.label = newSpeakerLabel.trim();
+      }
+      setLocalAsrData(updatedAsrData);
+      
+      message.success('Speaker name updated successfully');
+      handleCancelEdit();
+      
+      // 通知父组件刷新
+      if (onSpeakerUpdated) {
+        onSpeakerUpdated();
+      }
+    } catch (error: any) {
+      message.error(`Update failed: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setSavingLabel(false);
+    }
+  };
+  
+  return (
+    <div style={{ 
+      flex: 1, 
+      minHeight: 0, 
+      overflow: 'auto',
+      padding: '20px',
+      border: `1px solid ${themeColors.cardBorder}`,
+      borderRadius: '8px',
+      backgroundColor: isDark ? '#1a1d2e' : '#fafafa'
+    }}>
+      {/* 头部信息 */}
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ 
+            fontSize: '16px', 
+            fontWeight: 600, 
+            color: themeColors.text,
+            marginBottom: '12px'
+          }}>
+            {fileContent.filename}
+          </div>
+          <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: themeColors.textSecondary }}>
+            <span>duration: {formatTime(asrData.properties.duration_ms)}</span>
+            <span>speaker count: {asrData.speaker_count}</span>
+            <span>sentence count: {asrData.total_sentences}</span>
+          </div>
+        </div>
+        <Button
+          type="primary"
+          icon={<DownloadOutlined />}
+          onClick={handleDownloadDialogueTxt}
+          size="small"
+        >
+          download
+        </Button>
+      </div>
+      
+      {/* 说话人列表 */}
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ 
+          fontSize: '12px', 
+          fontWeight: 500, 
+          color: themeColors.text,
+          marginBottom: '8px'
+        }}>
+          speaker list
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {asrData.speakers.map((speaker: any) => (
+            <Tag 
+              key={speaker.speaker_id}
+              color={getSpeakerColor(speaker.speaker_id)}
+              style={{ 
+                margin: 0,
+                padding: '4px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onClick={() => handleEditSpeaker(speaker)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '0.8';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              {speaker.label} <EditOutlined style={{ fontSize: '10px', marginLeft: '4px' }} />
+            </Tag>
+          ))}
+        </div>
+      </div>
+      
+      <Divider style={{ margin: '16px 0', borderColor: themeColors.cardBorder }} />
+      
+      {/* 时间轴 */}
+      <div style={{ 
+        fontSize: '11px', 
+        fontWeight: 500, 
+        color: themeColors.text,
+        marginBottom: '12px'
+      }}>
+        time axis
+      </div>
+      
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '12px' 
+      }}>
+        {asrData.sentences.map((sentence: any, index: number) => {
+          const speakerColor = getSpeakerColor(sentence.speaker_id);
+          const timeRange = `${formatTimeDetailed(sentence.begin_time)} - ${formatTimeDetailed(sentence.end_time)}`;
+          
+          return (
+            <div
+              key={sentence.sentence_id || index}
+              style={{
+                display: 'flex',
+                gap: '12px',
+                padding: '12px',
+                backgroundColor: isDark ? '#252a3e' : '#ffffff',
+                borderLeft: `4px solid ${speakerColor}`,
+                borderRadius: '6px',
+                boxShadow: isDark 
+                  ? '0 1px 3px rgba(0,0,0,0.3)' 
+                  : '0 1px 2px rgba(0,0,0,0.06)',
+                transition: 'all 0.2s ease',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateX(4px)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 2px 8px rgba(0,0,0,0.4)'
+                  : '0 2px 8px rgba(0,0,0,0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(0)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 1px 3px rgba(0,0,0,0.3)'
+                  : '0 1px 2px rgba(0,0,0,0.06)';
+              }}
+            >
+              {/* 说话人标签 */}
+              <div style={{ 
+                minWidth: '80px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                paddingTop: '2px'
+              }}>
+                <Tag 
+                  color={speakerColor}
+                  style={{ 
+                    margin: 0,
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    padding: '2px 8px'
+                  }}
+                >
+                  {asrData.speakers.find((sp: any) => sp.speaker_id === sentence.speaker_id)?.label || `speaker ${sentence.speaker_id}`}
+                </Tag>
+              </div>
+              
+              {/* 时间和文本 */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: themeColors.textSecondary,
+                  marginBottom: '4px',
+                  fontFamily: 'monospace'
+                }}>
+                  {timeRange}
+                </div>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: themeColors.text,
+                  lineHeight: '1.6',
+                  wordBreak: 'break-word'
+                }}>
+                  {sentence.text}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 编辑说话人名称的 Modal */}
+      <Modal
+        title="Modify speaker name"
+        open={!!editingSpeaker}
+        onOk={handleSaveSpeakerLabel}
+        onCancel={handleCancelEdit}
+        okText="save"
+        cancelText="cancel"
+        confirmLoading={savingLabel}
+      >
+        <div style={{ marginTop: '16px' }}>
+          <div style={{ marginBottom: '8px', fontSize: '14px', color: themeColors.textSecondary }}>
+            Current name: <strong>{editingSpeaker?.currentLabel}</strong>
+          </div>
+          <Input
+            placeholder="input new speaker name"
+            value={newSpeakerLabel}
+            onChange={(e) => setNewSpeakerLabel(e.target.value)}
+            onPressEnter={handleSaveSpeakerLabel}
+            autoFocus
+          />
+        </div>
+      </Modal>
+    </div>
+  );
+};
+
+// AI Analysis 查看组件
+const AIAnalysisView: React.FC<{
+  execution: TaskExecution;
+  themeColors: any;
+  isDark: boolean;
+  aiAnalysisData: TaskExecutionDetail | null;
+  aiAnalysisLoading: boolean;
+  onLoadAnalysis: () => Promise<void>;
+  onAnalyzeAudio?: (record: TaskExecution) => void;
+  onAnalyzeDocument?: (record: TaskExecution, templateId: number) => void;
+  audioAnalyzing?: boolean;
+  docAnalyzing?: boolean;
+}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onAnalyzeAudio, onAnalyzeDocument, audioAnalyzing, docAnalyzing }) => {
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!aiAnalysisData || aiAnalysisData.execution.id !== execution.id) {
+      onLoadAnalysis();
+    }
+  }, [execution.id, aiAnalysisData, onLoadAnalysis]);
+
+  if (aiAnalysisLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+        <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading AI analysis report...</div>
+      </div>
+    );
+  }
+
+  // 正在分析中：显示分析进度（音频或文档）
+  if (audioAnalyzing || docAnalyzing) {
+    const isAudio = execution.first_file_type === 'audio';
+    return (
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <LoadingOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
+        <div style={{ color: themeColors.text, fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>
+          {isAudio ? 'AI Analyzing Audio...' : 'AI Analyzing Document...'}
+        </div>
+        <div style={{ color: themeColors.textSecondary, fontSize: '13px' }}>
+          {isAudio
+            ? 'The AI is analyzing your audio transcription. This may take a moment.'
+            : 'The AI is processing and analyzing your document. This may take a few minutes.'}
+        </div>
+      </div>
+    );
+  }
+
+  if (!aiAnalysisData?.execution?.final_report) {
+    const isAudioFile = execution.first_file_type === 'audio';
+    const canAnalyzeAudio = isAudioFile && onAnalyzeAudio && 
+      (execution.rc_agent_status === 'completed' || execution.rc_agent_status === 'failed');
+    // 文档分析：需要区分"仅上传"和"正在处理"
+    // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
+    // 2. 如果rc_agent_status为failed，允许重新分析
+    // 3. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
+    const isProcessingDoc = execution.rc_agent_status === 'processing' || 
+                            execution.rc_agent_status === 'initializing' ||
+                            (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
+    const canAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && (
+      execution.rc_agent_status === 'uploaded' ||
+      execution.rc_agent_status === 'failed'
+    );
+
+    return (
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+        <div style={{ color: themeColors.textSecondary, marginBottom: (canAnalyzeAudio || canAnalyzeDoc) ? '20px' : 0 }}>
+          This file has no AI analysis report
+        </div>
+        {canAnalyzeAudio && (
+          <Button
+            type="primary"
+            icon={<SoundOutlined />}
+            size="large"
+            onClick={() => onAnalyzeAudio(execution)}
+            style={{ 
+              marginTop: '8px',
+              height: '44px',
+              paddingInline: '28px',
+              fontSize: '15px',
+              borderRadius: '8px',
+            }}
+          >
+            Analyze Audio
+          </Button>
+        )}
+        {canAnalyzeDoc && (
+          <div style={{ maxWidth: '420px', margin: '0 auto', textAlign: 'left' }}>
+            <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px', textAlign: 'center' }}>
+              Select a prompt template and click "Analyze" to start AI analysis
+            </div>
+            <TemplateSelector
+              categoryCode="file_analysis"
+              value={selectedTemplateId}
+              onChange={(value) => setSelectedTemplateId(value)}
+              placeholder="Select analysis template"
+              style={{ marginBottom: '16px' }}
+            />
+            <div style={{ textAlign: 'center' }}>
+              <Button
+                type="primary"
+                icon={<RobotOutlined />}
+                size="large"
+                disabled={!selectedTemplateId}
+                onClick={() => selectedTemplateId && onAnalyzeDocument(execution, selectedTemplateId)}
+                style={{ 
+                  marginTop: '4px',
+                  height: '44px',
+                  paddingInline: '28px',
+                  fontSize: '15px',
+                  borderRadius: '8px',
+                }}
+              >
+                Analyze Document
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ 
+        marginBottom: '16px', 
+        padding: '12px',
+        backgroundColor: themeColors.boxMuted,
+        borderRadius: '6px'
+      }}>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Text strong>Analysis Time:</Text> {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
+          </Col>
+          <Col span={12}>
+            <Text strong>Token Usage:</Text> {aiAnalysisData.execution.total_tokens?.toLocaleString() || '-'}
+          </Col>
+        </Row>
+      </div>
+      
+      <div 
+        id="ai-analysis-content"
+        className={isDark ? 'ai-analysis-content ai-analysis-content--dark' : 'ai-analysis-content'}
+        style={{ 
+          background: isDark ? '#151b26' : '#ffffff', 
+          padding: '24px', 
+          borderRadius: '12px', 
+          border: `1px solid ${themeColors.cardBorder}`,
+          boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.04)',
+        }}
+      >
+        <MarkdownRenderer 
+          content={aiAnalysisData.execution.final_report}
+          variant={isDark ? 'dark' : 'light'}
+          style={{
+            fontSize: '14px',
+            lineHeight: '1.8',
+            color: themeColors.text
+          }}
+        />
+      </div>
+    </div>
   );
 };
 

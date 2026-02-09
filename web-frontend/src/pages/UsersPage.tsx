@@ -1,15 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Tag, Space, Typography, Modal, message, Popconfirm } from 'antd';
+import { Card, Button, Table, Tag, Space, Typography, Modal, message, Popconfirm, ConfigProvider, theme as antdTheme } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { usersApi } from '../services/users';
 import UserModal from '../components/UserModal';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title } = Typography;
 const { confirm } = Modal;
 
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+  },
+} as const;
+
 const UsersPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -208,60 +229,74 @@ const UsersPage: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div className="page-header">
-        <div className="flex-between">
-          <div>
-            <Title level={3} className="page-title">User Management</Title>
-            <div className="page-description">Manage system users and permissions</div>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+        <div className="page-header" style={{ marginBottom: '24px' }}>
+          <div className="flex-between">
+            <div style={{ flex: 1, marginRight: '24px' }}>
+              <Title level={3} className="page-title" style={{ color: colors.text }}>User Management</Title>
+              <div className="page-description" style={{ color: colors.textSecondary, marginTop: '8px' }}>
+                Manage system users and permissions
+              </div>
+            </div>
+            <Space>
+              <Button 
+                icon={<ReloadOutlined />}
+                onClick={() => loadUsers(pagination.current, pagination.pageSize)}
+                loading={loading}
+              >
+                Refresh
+              </Button>
+              <Button 
+                type="primary" 
+                icon={<PlusOutlined />}
+                onClick={handleCreateUser}
+              >
+                Create User
+              </Button>
+            </Space>
           </div>
-          <Space>
-            <Button 
-              icon={<ReloadOutlined />}
-              onClick={() => loadUsers(pagination.current, pagination.pageSize)}
-              loading={loading}
-            >
-              Refresh
-            </Button>
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />}
-              onClick={handleCreateUser}
-            >
-              Create User
-            </Button>
-          </Space>
         </div>
-      </div>
 
-      <div className="page-content">
-        <Card title="User List">
-          <Table
-            columns={columns}
-            dataSource={users}
-            rowKey="id"
-            loading={loading}
-            pagination={{
-              ...pagination,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => 
-                `${range[0]}-${range[1]} of ${total} items`
-            }}
-            onChange={handleTableChange}
-          />
-        </Card>
-      </div>
+        <div className="page-content">
+          <Card title="User List">
+            <Table
+              columns={columns}
+              dataSource={users}
+              rowKey="id"
+              loading={loading}
+              pagination={{
+                ...pagination,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => 
+                  `${range[0]}-${range[1]} of ${total} items`
+              }}
+              onChange={handleTableChange}
+            />
+          </Card>
+        </div>
 
-      <UserModal
-        visible={modalVisible}
-        onCancel={handleModalCancel}
-        onSuccess={handleModalSuccess}
-        user={editingUser}
-        loading={modalLoading}
-        onSubmit={handleUserSubmit}
-      />
-    </div>
+        <UserModal
+          visible={modalVisible}
+          onCancel={handleModalCancel}
+          onSuccess={handleModalSuccess}
+          user={editingUser}
+          loading={modalLoading}
+          onSubmit={handleUserSubmit}
+        />
+      </div>
+    </ConfigProvider>
   );
 };
 

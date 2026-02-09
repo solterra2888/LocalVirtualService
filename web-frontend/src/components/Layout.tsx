@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge, Switch } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge, Switch, Modal, Popover } from 'antd';
 import {
   FileTextOutlined,
   AppstoreOutlined,
@@ -10,7 +10,6 @@ import {
   DatabaseOutlined,
   StockOutlined,
   RobotOutlined,
-  SettingOutlined,
   NotificationOutlined,
   FundOutlined,
   BuildOutlined,
@@ -18,14 +17,22 @@ import {
   ControlOutlined,
   BarChartOutlined,
   HistoryOutlined,
-  FolderOutlined
+  FolderOutlined,
+  UploadOutlined,
+  SoundOutlined,
+  LinkOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useFileProcessing } from '../contexts/FileProcessingContext';
 import { LogViewer } from '../components/LogViewer';
 import TimeDisplay from './TimeDisplay';
+import UploadFilesModal from './UploadFilesModal';
+import UploadAudioModal from './UploadAudioModal';
+import { TaskProgressPopover } from './TaskProgressPopover';
 
 // 导航栏主题（与 Dashboard dark 蓝灰一致）
 const LAYOUT_NAV_THEME = {
@@ -50,13 +57,22 @@ const LAYOUT_NAV_THEME = {
 const { Header, Content } = AntLayout;
 const { Title } = Typography;
 
+// Note: getFileProcessingStatusText removed as it's no longer needed with the new multi-task UI
+
 const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const globalLogger = useGlobalLogger();
   const { themeMode, setThemeMode } = useDashboardSettings();
+  const { tasks } = useFileProcessing();
   const navTheme = LAYOUT_NAV_THEME[themeMode];
+  
+  // 浮动上传按钮相关状态
+  const [floatingExpanded, setFloatingExpanded] = useState(false);
+  const [showUploadOptions, setShowUploadOptions] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -84,7 +100,7 @@ const Layout: React.FC = () => {
 
 
 
-  // 菜单项配置
+  // 主导航：仅保留日常业务入口 + Upload Files
   const menuItems = [
     {
       key: '/dashboard',
@@ -111,103 +127,34 @@ const Layout: React.FC = () => {
       icon: <FileTextOutlined />,
       label: 'UG Data',
       children: [
-        {
-          key: '/markets/economic-events',
-          icon: <CalendarOutlined />,
-          label: 'Economic Events',
-        },
-        {
-          key: '/fundamentals',
-          icon: <FileTextOutlined />,
-          label: 'Company Query',
-        },
-        {
-          key: '/markets/macro-indicators',
-          icon: <CodeOutlined />,
-          label: 'Macro Indicators',
-        },
-        {
-          key: '/eod-fetch',
-          icon: <DatabaseOutlined />,
-          label: 'EOD Fetch',
-        },
+        { key: '/markets/economic-events', icon: <CalendarOutlined />, label: 'Economic Events' },
+        { key: '/fundamentals', icon: <FileTextOutlined />, label: 'Company Query' },
+        { key: '/markets/macro-indicators', icon: <CodeOutlined />, label: 'Macro Indicators' },
+        { key: '/eod-fetch', icon: <DatabaseOutlined />, label: 'EOD Fetch' },
       ],
     },
     {
-      key: 'ai-agents',
-      icon: <RobotOutlined />,
-      label: 'AI Agents',
-      children: [
-        {
-          key: '/files',
-          icon: <FileTextOutlined />,
-          label: 'Upload Files',
-        },
-        {
-          key: '/prompt-templates',
-          icon: <BuildOutlined />,
-          label: 'Prompt Templates',
-        },
-        {
-          key: '/investment-themes',
-          icon: <FundOutlined />,
-          label: 'Themes Settings',
-        },
-        {
-          key: '/tasks',
-          icon: <AppstoreOutlined />,
-          label: 'AI Agent Settings',
-        },
-        ...(user?.is_admin ? [
-          {
-            key: '/llm-config',
-            icon: <RobotOutlined />,
-            label: 'LLM Settings',
-          }
-        ] : []),
-      ],
-    },
-    {
-      key: 'system',
-      icon: <SettingOutlined />,
-      label: 'System',
-      children: [
-        {
-          key: '/scheduler',
-          icon: <ControlOutlined />,
-          label: 'Scheduler Management',
-        },
-        {
-          key: '/scheduler/logs',
-          icon: <HistoryOutlined />,
-          label: 'Scheduler Logs',
-        },
-        ...(user?.is_admin ? [
-          {
-            key: '/users',
-            icon: <TeamOutlined />,
-            label: 'User Management',
-          }
-        ] : []),
-      ],
+      key: '/files',
+      icon: <FileTextOutlined />,
+      label: 'Upload Files',
     },
   ].filter(item => {
-    // 如果菜单项有子菜单，检查是否有可见的子菜单项
-    if (item.children) {
-      return item.children.length > 0;
-    }
-    // 如果没有子菜单，直接显示
+    if (item.children) return item.children.length > 0;
     return true;
   });
 
-  // 用户菜单：仅登出（System 已移至顶栏）
+  // 用户头像下拉：配置类功能 + 登出
   const userMenuItems = [
-    {
-      key: 'logout',
-      icon: <LogoutOutlined />,
-      label: 'Logout',
-      onClick: handleLogout
-    }
+    { key: '/prompt-templates', icon: <BuildOutlined />, label: 'Prompt Templates', onClick: () => navigate('/prompt-templates') },
+    { key: '/investment-themes', icon: <FundOutlined />, label: 'Themes Settings', onClick: () => navigate('/investment-themes') },
+    { key: '/tasks', icon: <AppstoreOutlined />, label: 'AI Agent Settings', onClick: () => navigate('/tasks') },
+    ...(user?.is_admin ? [{ key: '/llm-config', icon: <RobotOutlined />, label: 'LLM Settings', onClick: () => navigate('/llm-config') }] : []),
+    { type: 'divider' as const },
+    { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
+    { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
+    ...(user?.is_admin ? [{ key: '/users', icon: <TeamOutlined />, label: 'User Management', onClick: () => navigate('/users') }] : []),
+    { type: 'divider' as const },
+    { key: 'logout', icon: <LogoutOutlined />, label: 'Logout', onClick: handleLogout },
   ];
 
   function handleMenuClick({ key }: { key: string }) {
@@ -275,6 +222,52 @@ const Layout: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: navTheme.headerText, flexShrink: 0 }}>
+          {tasks.size > 0 && (
+            <Popover
+              content={<TaskProgressPopover tasks={tasks} themeMode={themeMode} />}
+              placement="bottomRight"
+              trigger="hover"
+              overlayStyle={{
+                boxShadow: themeMode === 'dark' 
+                  ? '0 6px 16px rgba(0, 0, 0, 0.5)' 
+                  : '0 3px 12px rgba(0, 0, 0, 0.15)'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 6,
+                  background: themeMode === 'dark' ? 'rgba(24, 144, 255, 0.1)' : 'rgba(24, 144, 255, 0.05)',
+                  border: `1px solid ${themeMode === 'dark' ? 'rgba(24, 144, 255, 0.3)' : 'rgba(24, 144, 255, 0.2)'}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                }}
+                onClick={() => navigate('/files')}
+              >
+                <SyncOutlined spin style={{ color: '#1890ff', fontSize: 14 }} />
+                <span style={{ 
+                  fontSize: 13, 
+                  fontWeight: 500,
+                  color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.85)' 
+                }}>
+                  {tasks.size} {tasks.size === 1 ? 'task' : 'tasks'}
+                </span>
+                <span style={{ 
+                  fontSize: 12, 
+                  color: themeMode === 'dark' ? '#94a3b8' : '#666'
+                }}>
+                  {Math.round(
+                    Array.from(tasks.values())
+                      .reduce((sum, task) => sum + task.status.progress, 0) / tasks.size
+                  )}%
+                </span>
+              </div>
+            </Popover>
+          )}
           <span style={{ color: navTheme.headerTextSecondary, fontSize: 13 }}>Welcome, {user?.username}</span>
 
           <TimeDisplay />
@@ -317,7 +310,11 @@ const Layout: React.FC = () => {
           )}
 
           <Dropdown
-            menu={{ items: userMenuItems }}
+            menu={{
+              items: userMenuItems,
+              selectedKeys: userMenuItems.some((i: { key?: string }) => i.key === location.pathname) ? [location.pathname] : [],
+              style: { minWidth: 200 },
+            }}
             placement="bottomRight"
           >
             <Button
@@ -335,6 +332,197 @@ const Layout: React.FC = () => {
       >
         <Outlet />
       </Content>
+      
+      {/* 浮动上传按钮：收起时左侧始终露出上传图标，悬停展开显示 "Upload" */}
+      <div
+        style={{
+          position: 'fixed',
+          left: floatingExpanded ? 0 : -10,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          transition: 'left 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          zIndex: 999,
+        }}
+        onMouseEnter={() => setFloatingExpanded(true)}
+        onMouseLeave={() => setFloatingExpanded(false)}
+      >
+        <Button
+          type="primary"
+          size="large"
+          icon={<UploadOutlined style={{ fontSize: floatingExpanded ? '20px' : '22px', transition: 'font-size 0.3s' }} />}
+          onClick={() => setShowUploadOptions(true)}
+          style={{
+            width: floatingExpanded ? 140 : 48,
+            height: 48,
+            borderRadius: '0 24px 24px 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: floatingExpanded ? 'flex-start' : 'center',
+            paddingLeft: floatingExpanded ? 24 : 0,
+            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            background: themeMode === 'dark' ? 'linear-gradient(135deg, #1890ff 0%, #096dd9 100%)' : 'linear-gradient(135deg, #40a9ff 0%, #1890ff 100%)',
+            border: 'none',
+            boxShadow: floatingExpanded
+              ? '4px 4px 16px rgba(24, 144, 255, 0.4)'
+              : '2px 2px 12px rgba(24, 144, 255, 0.35)',
+          }}
+        >
+          {floatingExpanded && (
+            <span style={{
+              marginLeft: 10,
+              fontSize: 15,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}>
+              Upload
+            </span>
+          )}
+        </Button>
+      </div>
+
+      {/* 上传选项菜单 Modal - 弹出式菜单 */}
+      <Modal
+        open={showUploadOptions}
+        onCancel={() => setShowUploadOptions(false)}
+        footer={null}
+        width={360}
+        centered
+        closable={false}
+        maskStyle={{
+          background: themeMode === 'dark' ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={
+          themeMode === 'dark'
+            ? {
+                content: {
+                  background: '#1a2234',
+                  border: '1px solid #364152',
+                  borderRadius: '12px',
+                  boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
+                },
+                body: {
+                  padding: '24px 16px',
+                  background: '#1a2234',
+                  color: '#e0e6f1',
+                  borderRadius: '12px',
+                },
+              }
+            : undefined
+        }
+        bodyStyle={
+          themeMode === 'dark'
+            ? undefined
+            : {
+                padding: '24px 16px',
+                background: '#fff',
+                borderRadius: '12px',
+              }
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <Button
+            type="text"
+            size="large"
+            icon={<FileTextOutlined style={{ fontSize: '18px' }} />}
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowUploadModal(true);
+            }}
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+              border: 'none',
+              borderRadius: '26px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Upload Files</span>
+          </Button>
+          <Button
+            type="text"
+            size="large"
+            icon={<SoundOutlined style={{ fontSize: '18px' }} />}
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowUploadAudioModal(true);
+            }}
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+              border: 'none',
+              borderRadius: '26px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Upload Audio</span>
+          </Button>
+          <Button
+            type="text"
+            size="large"
+            icon={<LinkOutlined style={{ fontSize: '18px' }} />}
+            disabled
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#64748b' : 'rgba(0, 0, 0, 0.25)',
+              border: 'none',
+              borderRadius: '26px',
+              cursor: 'not-allowed',
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>YouTube Link</span>
+            <span style={{ marginLeft: 'auto', fontSize: '12px', color: themeMode === 'dark' ? '#64748b' : 'rgba(0, 0, 0, 0.25)' }}>Coming soon</span>
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Upload Files Modal */}
+      <UploadFilesModal
+        visible={showUploadModal}
+        onCancel={() => setShowUploadModal(false)}
+        themeMode={themeMode}
+      />
+
+      {/* Upload Audio Modal */}
+      <UploadAudioModal
+        visible={showUploadAudioModal}
+        onCancel={() => setShowUploadAudioModal(false)}
+        themeMode={themeMode}
+      />
       
       {/* 全局日志查看器 */}
       <LogViewer

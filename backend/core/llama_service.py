@@ -103,7 +103,7 @@ class LlamaService:
     
     def get_supported_extensions(self):
         """获取支持的文件扩展名"""
-        return ['.pdf', '.xlsx', '.xls', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif', '.bmp']
+        return ['.pdf', '.xlsx', '.xls', '.csv', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif', '.bmp']
     
     def validate_file(self, file_path):
         """验证文件是否支持处理"""
@@ -127,7 +127,7 @@ class LlamaService:
             ext = file_extension[1:]  # 移除点号
             if ext in ['pdf']:
                 file_type = 'pdf'
-            elif ext in ['xlsx', 'xls']:
+            elif ext in ['xlsx', 'xls', 'csv']:
                 file_type = 'excel'
             elif ext in ['doc', 'docx']:
                 file_type = 'doc'
@@ -202,6 +202,8 @@ class LlamaService:
                     
                     if file_extension in ['.xlsx', '.xls']:
                         mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    elif file_extension == '.csv':
+                        mime_type = 'text/csv'
                     elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
                         mime_type = f'image/{file_extension[1:]}' if file_extension != '.jpg' else 'image/jpeg'
                     
@@ -225,21 +227,21 @@ class LlamaService:
                         result = response.json()
                         job_id = result.get('id')
                         if job_id:
-                            print(f"✅ 文件上传成功，任务ID: {job_id}")
+                            print(f"✅ file upload success, job ID: {job_id}")
                             return job_id, params
                         else:
-                            print(f"❌ 上传响应中未找到任务ID")
-                            print(f"   响应内容: {response.text}")
+                            print(f"❌ no job ID found in the upload response")
+                            print(f"    response content: {response.text}")
                             return None, None
                     else:
-                        print(f"❌ 上传文件失败，HTTP状态码: {response.status_code}")
-                        print(f"   响应内容: {response.text}")
+                        print(f"❌ file upload failed, HTTP status code: {response.status_code}")
+                        print(f"    response content: {response.text}")
                         
                         # 尝试解析错误信息
                         try:
                             error_data = response.json()
                             error_message = error_data.get('error', error_data.get('message', 'Unknown error'))
-                            print(f"   错误信息: {error_message}")
+                            print(f"    error message: {error_message}")
                         except:
                             pass
                         
@@ -247,49 +249,49 @@ class LlamaService:
                         if response.status_code >= 500:
                             retry_count += 1
                             if retry_count < max_retries:
-                                print(f"   将在 {retry_count * 2} 秒后重试...")
+                                print(f"    will retry in {retry_count * 2} seconds...")
                                 time.sleep(retry_count * 2)
                                 continue
                         
                         return None, None
                     
             except FileNotFoundError:
-                print(f"❌ 错误：文件未找到 {file_path}")
+                print(f"❌ error: file not found {file_path}")
                 return None, None
             except requests.exceptions.Timeout:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 上传超时，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ upload timeout, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 错误：上传超时，已重试 {max_retries} 次 {file_path}")
+                    print(f"❌ error: upload timeout, already retried {max_retries} times {file_path}")
                     return None, None
             except requests.exceptions.ConnectionError:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 网络连接失败，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ network connection failed, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 错误：网络连接失败，已重试 {max_retries} 次 {file_path}")
+                    print(f"❌ error: network connection failed, already retried {max_retries} times {file_path}")
                     return None, None
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 网络请求错误: {e}，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ network request error: {e}, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 上传文件时出错，已重试 {max_retries} 次 {file_path}: {e}")
+                    print(f"❌ error: upload file failed, already retried {max_retries} times {file_path}: {e}")
                     try:
                         if hasattr(e, 'response') and e.response:
-                            print(f"   响应内容: {e.response.text}")
+                            print(f"    response content: {e.response.text}")
                     except:
                         pass
                     return None, None
             except Exception as e:
-                print(f"❌ 处理文件时发生未知错误 {file_path}: {e}")
+                print(f"❌ error: unknown error while processing file {file_path}: {e}")
                 return None, None
         
         return None, None
@@ -326,9 +328,9 @@ class LlamaService:
                 data = response.json()
                 status = data.get('status')
                 if poll_count == 1:
-                    print(f"🔄 监控任务状态: {status}")
+                    print(f"🔄 monitoring job status: {status}")
                 elif status in ['SUCCESS', 'ERROR', 'PARTIAL_SUCCESS', 'CANCELLED']:
-                    print(f"✅ 任务完成: {status} (轮询{poll_count}次)")
+                    print(f"✅ job completed: {status} (polled {poll_count} times)")
                 
                 # 重置连续失败计数
                 consecutive_failures = 0
@@ -338,48 +340,48 @@ class LlamaService:
                     if status == 'ERROR':
                         error_message = data.get('error', 'Unknown error')
                         error_details = data.get('error_details', '')
-                        print(f"❌ 任务 {job_id} 处理失败:")
-                        print(f"   错误信息: {error_message}")
+                        print(f"❌ job {job_id} processing failed:")
+                        print(f"    error message: {error_message}")
                         if error_details:
-                            print(f"   错误详情: {error_details}")
-                        print(f"   完整响应: {json.dumps(data, ensure_ascii=False, indent=2)}")
+                            print(f"    error details: {error_details}")
+                        print(f"    full response: {json.dumps(data, ensure_ascii=False, indent=2)}")
                     return data, poll_count
                     
             except requests.exceptions.Timeout:
                 consecutive_failures += 1
-                print(f"⚠️ 轮询任务 {job_id} 超时 (第{poll_count}次轮询，连续失败 {consecutive_failures} 次)")
+                print(f"⚠️ polling job {job_id} timeout (polled {poll_count} times, consecutive failures {consecutive_failures} times)")
                 if consecutive_failures >= max_consecutive_failures:
-                    print(f"❌ 连续失败 {max_consecutive_failures} 次，停止轮询")
+                    print(f"❌ consecutive failures {max_consecutive_failures} times, stopping polling")
                     return None, poll_count
             except requests.exceptions.ConnectionError:
                 consecutive_failures += 1
-                print(f"⚠️ 轮询任务 {job_id} 网络连接失败 (第{poll_count}次轮询，连续失败 {consecutive_failures} 次)")
+                print(f"⚠️ polling job {job_id} network connection failed (polled {poll_count} times, consecutive failures {consecutive_failures} times)")
                 if consecutive_failures >= max_consecutive_failures:
-                    print(f"❌ 连续失败 {max_consecutive_failures} 次，停止轮询")
+                    print(f"❌ consecutive failures {max_consecutive_failures} times, stopping polling")
                     return None, poll_count
             except requests.exceptions.RequestException as e:
                 consecutive_failures += 1
-                print(f"⚠️ 轮询任务 {job_id} 时出错 (第{poll_count}次轮询，连续失败 {consecutive_failures} 次): {e}")
+                print(f"⚠️ polling job {job_id} error (polled {poll_count} times, consecutive failures {consecutive_failures} times): {e}")
                 if consecutive_failures >= max_consecutive_failures:
-                    print(f"❌ 连续失败 {max_consecutive_failures} 次，停止轮询")
+                    print(f"❌ consecutive failures {max_consecutive_failures} times, stopping polling")
                     return None, poll_count
                 # 尝试获取响应内容
                 try:
                     if hasattr(e, 'response') and e.response:
-                        print(f"错误响应内容: {e.response.text}")
+                        print(f"error response content: {e.response.text}")
                 except:
                     pass
             except Exception as e:
                 consecutive_failures += 1
-                print(f"⚠️ 轮询任务 {job_id} 时发生未知错误 (第{poll_count}次轮询，连续失败 {consecutive_failures} 次): {e}")
+                print(f"⚠️ polling job {job_id} unknown error (polled {poll_count} times, consecutive failures {consecutive_failures} times): {e}")
                 if consecutive_failures >= max_consecutive_failures:
-                    print(f"❌ 连续失败 {max_consecutive_failures} 次，停止轮询")
+                    print(f"❌ consecutive failures {max_consecutive_failures} times, stopping polling")
                     return None, poll_count
 
             # 如果有连续失败，增加等待时间
             if consecutive_failures > 0:
                 wait_time = self.polling_interval * (1 + consecutive_failures)
-                print(f"   等待 {wait_time} 秒后重试...")
+                print(f"    will retry in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
             else:
                 # 等待后再次轮询
@@ -407,7 +409,7 @@ class LlamaService:
         
         while retry_count < max_retries:
             try:
-                print(f"🔄 正在获取任务 {job_id} 的处理结果... (尝试 {retry_count + 1}/{max_retries})")
+                print(f"🔄 getting job {job_id} processing result... (attempt {retry_count + 1}/{max_retries})")
                 
                 response = self.session.get(
                     url, 
@@ -421,21 +423,21 @@ class LlamaService:
                     
                     if markdown_content:
                         content_length = len(markdown_content.split())
-                        print(f"✅ 任务 {job_id} ({os.path.basename(original_file_path)}) 的 Markdown 内容已获取 ({content_length} 词)")
+                        print(f"✅ job {job_id} ({os.path.basename(original_file_path)}) markdown content retrieved ({content_length} words)")
                         return markdown_content
                     else:
-                        print(f"❌ 任务 {job_id} ({os.path.basename(original_file_path)}) 返回空内容")
+                        print(f"❌ job {job_id} ({os.path.basename(original_file_path)}) returned empty content")
                         return None
                 else:
-                    print(f"❌ 获取任务 {job_id} ({os.path.basename(original_file_path)}) 结果失败")
-                    print(f"   HTTP状态码: {response.status_code}")
-                    print(f"   响应内容: {response.text}")
+                    print(f"❌ getting job {job_id} ({os.path.basename(original_file_path)}) result failed")
+                    print(f"   HTTP status code: {response.status_code}")
+                    print(f"    response content: {response.text}")
                     
                     # 尝试解析错误信息
                     try:
                         error_data = response.json()
                         error_message = error_data.get('error', error_data.get('message', 'Unknown error'))
-                        print(f"   错误信息: {error_message}")
+                        print(f"    error message: {error_message}")
                     except:
                         pass
                     
@@ -443,7 +445,7 @@ class LlamaService:
                     if response.status_code >= 500:
                         retry_count += 1
                         if retry_count < max_retries:
-                            print(f"   将在 {retry_count * 2} 秒后重试...")
+                            print(f"    will retry in {retry_count * 2} seconds...")
                             time.sleep(retry_count * 2)
                             continue
                     
@@ -452,37 +454,37 @@ class LlamaService:
             except requests.exceptions.Timeout:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 获取结果超时，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ getting result timeout, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 获取任务 {job_id} ({os.path.basename(original_file_path)}) 结果超时，已重试 {max_retries} 次")
+                    print(f"❌ getting job {job_id} ({os.path.basename(original_file_path)}) result timeout, already retried {max_retries} times")
                     return None
             except requests.exceptions.ConnectionError:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 获取结果时网络连接失败，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ getting result network connection failed, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 获取任务 {job_id} ({os.path.basename(original_file_path)}) 结果时网络连接失败，已重试 {max_retries} 次")
+                    print(f"❌ getting job {job_id} ({os.path.basename(original_file_path)}) result network connection failed, already retried {max_retries} times")
                     return None
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 if retry_count < max_retries:
-                    print(f"❌ 获取结果时网络请求错误: {e}，将在 {retry_count * 2} 秒后重试... (尝试 {retry_count + 1}/{max_retries})")
+                    print(f"❌ getting result network request error: {e}, will retry in {retry_count * 2} seconds... (attempt {retry_count + 1}/{max_retries})")
                     time.sleep(retry_count * 2)
                     continue
                 else:
-                    print(f"❌ 获取任务 {job_id} ({os.path.basename(original_file_path)}) 结果时出错，已重试 {max_retries} 次: {e}")
+                    print(f"❌ getting job {job_id} ({os.path.basename(original_file_path)}) result error, already retried {max_retries} times: {e}")
                     try:
                         if hasattr(e, 'response') and e.response:
-                            print(f"   响应内容: {e.response.text}")
+                            print(f"    response content: {e.response.text}")
                     except:
                         pass
                     return None
             except Exception as e:
-                print(f"❌ 处理任务 {job_id} ({os.path.basename(original_file_path)}) 结果时发生未知错误: {e}")
+                print(f"❌ error: unknown error while getting job {job_id} ({os.path.basename(original_file_path)}) result: {e}")
                 return None
         
         return None
@@ -500,7 +502,7 @@ class LlamaService:
         Returns:
             tuple: (file_info, processing_time) 包含元数据和处理时间
         """
-        self.log(f"开始处理文件: {file_path}")
+        self.log(f"starting to process file: {file_path}")
         file_start_time = time.time()
 
         # 计算文件大小 (MB)
@@ -514,13 +516,18 @@ class LlamaService:
         job_id, upload_params = self.upload_file(file_path, params)
 
         if not job_id:
-            self.log(f"文件上传失败，跳过处理: {file_path}", "error")
-            failed_files.append(file_path)
+            self.log(f"file upload failed, skipping processing: {file_path}", "error")
             
             # 计算处理时间（即使失败）
             file_end_time = time.time()
             file_total_time = file_end_time - file_start_time
-            self.log(f"文件处理失败: {os.path.basename(file_path)}, 耗时: {file_total_time:.2f} 秒", "error")
+            self.log(f"file processing failed: {os.path.basename(file_path)}, time: {file_total_time:.2f} seconds", "error")
+            
+            # 添加到失败文件列表（使用字典格式以保持一致性）
+            failed_files.append({
+                'file_path': file_path,
+                'error': 'File upload to LlamaIndex failed'
+            })
             
             # 返回失败文件信息
             file_info = {
@@ -530,18 +537,19 @@ class LlamaService:
                 'file_size_mb': file_size_mb,
                 'processing_time': file_total_time,
                 'content': None,
-                'is_success': False
+                'is_success': False,
+                'error': 'File upload to LlamaIndex failed'
             }
             return file_info, file_total_time
 
 
         # 步骤2: 轮询任务状态
         status_data, poll_count = await self.poll_job_status(job_id)
-        final_status = status_data.get('status') if status_data else "未知 (监听失败)"
+        final_status = status_data.get('status') if status_data else "unknown (monitoring failed)"
 
         # 步骤3: 如果成功，获取结果
         if final_status == 'SUCCESS':
-            self.log(f"任务 {job_id} 处理成功，正在获取结果...")
+            self.log(f"job {job_id} processing success, getting result...")
             content = self.get_markdown_result(job_id, file_path)
             
             if content is not None:
@@ -558,7 +566,7 @@ class LlamaService:
                     'content_length': content_length,
                     'processing_time': file_total_time
                 })
-                self.log(f"✅ 文件处理完成: {os.path.basename(file_path)} ({file_total_time:.1f}s)")
+                self.log(f"✅ file processing completed: {os.path.basename(file_path)} ({file_total_time:.1f}s)")
                 
                 # 返回成功文件信息
                 file_info = {
@@ -574,24 +582,30 @@ class LlamaService:
                 }
                 return file_info, file_total_time
             else:
-                self.log(f"任务 {job_id} ({os.path.basename(file_path)}) 获取内容失败", "error")
-                failed_files.append(file_path)
+                self.log(f"job {job_id} ({os.path.basename(file_path)}) getting content failed", "error")
+                failed_files.append({
+                    'file_path': file_path,
+                    'error': 'Failed to retrieve processed content from LlamaIndex'
+                })
         else:
             # 获取错误信息
-            error_message = "处理失败"
+            error_message = "processing failed"
             if status_data:
                 error_message = status_data.get('error', error_message)
                 error_details = status_data.get('error_details', '')
                 if error_details:
                     error_message += f": {error_details}"
             
-            self.log(f"任务 {job_id} ({os.path.basename(file_path)}) 未成功完成，最终状态: {final_status}", "error")
-            self.log(f"错误信息: {error_message}", "error")
-            failed_files.append(file_path)
+            self.log(f"job {job_id} ({os.path.basename(file_path)}) not completed successfully, final status: {final_status}", "error")
+            self.log(f"error message: {error_message}", "error")
+            failed_files.append({
+                'file_path': file_path,
+                'error': error_message
+            })
 
         file_end_time = time.time()
         file_total_time = file_end_time - file_start_time
-        self.log(f"文件处理完成: {os.path.basename(file_path)}, 耗时: {file_total_time:.2f} 秒, 轮询次数: {poll_count}次")
+        self.log(f"file processing completed: {os.path.basename(file_path)}, time: {file_total_time:.2f} seconds, poll count: {poll_count} times")
         
         # 返回失败文件信息，包含错误信息
         file_info = {
@@ -619,6 +633,6 @@ class LlamaService:
         Note: 这个方法已废弃，因为内容现在保存到数据库中
         """
         # 不再创建文件，因为内容存储在数据库中
-        print(f"文件结果已保存到数据库: {os.path.basename(file_path)}")
+        print(f"file result saved to database: {os.path.basename(file_path)}")
         return None
  

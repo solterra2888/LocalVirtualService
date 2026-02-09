@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.schemas.file import (
     FileUploadResponse,
@@ -34,11 +35,18 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import info, error, warning, debug
 from backend.utils.database_config import get_database_config
 from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+from backend.services.oss_service import OSSService
+from backend.services.asr_service import ASRService
 
 # Celery相关导入
 from celery.result import AsyncResult
 from backend.celery_app import app as celery_app
-from backend.tasks.file_tasks import process_files_task
+from backend.tasks.file_tasks import (
+    process_files_task, 
+    analyze_audio_task, 
+    analyze_document_task,
+    upload_and_transcribe_audio_task
+)
 
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
@@ -48,6 +56,109 @@ router = APIRouter()
 # 上传文件目录
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _extract_filename_from_audio_url(audio_url: str) -> str:
+    """
+    从 audio_url 中提取原始文件名
+    
+    处理签名 URL 的情况：
+    - 移除查询参数（?OSSAccessKeyId=...）
+    - URL 解码（%E9%A6%99... → 香）
+    - 提取文件名部分
+    
+    Args:
+        audio_url: 音频文件 URL（可能包含查询参数）
+    
+    Returns:
+        原始文件名
+    
+    Examples:
+        - 输入: "https://bucket.oss.com/audio%2Fadmin%2F20260207_165504_%E9%A6%99.aac?OSSAccessKeyId=..."
+        - 输出: "20260207_165504_香.aac"
+    """
+    from urllib.parse import unquote, urlparse
+    
+    try:
+        # 移除查询参数
+        url_without_params = audio_url.split('?')[0]
+        
+        # URL 解码
+        decoded_url = unquote(url_without_params)
+        
+        # 提取最后的文件名部分
+        filename = decoded_url.split('/')[-1]
+        
+        return filename
+    except Exception as e:
+        # 如果提取失败，返回 URL 的最后部分
+        warning(f"从 URL 提取文件名失败: {str(e)}", source="api")
+        return audio_url.split('/')[-1].split('?')[0]
+
+
+def _build_asr_structured_data(transcriptions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    构建结构化的 ASR 数据，用于前端说话人分离可视化
+    
+    Args:
+        transcriptions: ASR 转写结果列表
+    
+    Returns:
+        结构化的 ASR 数据，包含说话人列表和句子列表
+    """
+    if not transcriptions or len(transcriptions) == 0:
+        return None
+    
+    # 提取第一个转写结果（通常只有一个）
+    transcript = transcriptions[0]
+    
+    # 获取音频属性
+    properties = {}
+    if 'properties' in transcript:
+        props = transcript['properties']
+        properties = {
+            'duration_ms': props.get('original_duration_in_milliseconds', 0),
+            'audio_format': props.get('audio_format', ''),
+            'channels': props.get('channels', []),
+            'sampling_rate': props.get('original_sampling_rate', 0)
+        }
+    
+    # 提取句子信息
+    sentences = []
+    speaker_ids = set()
+    
+    if 'transcripts' in transcript:
+        for trans in transcript['transcripts']:
+            for sent in trans.get('sentences', []):
+                speaker_id = sent.get('speaker_id')
+                if speaker_id is not None:
+                    speaker_ids.add(speaker_id)
+                
+                sentence_data = {
+                    'sentence_id': sent.get('sentence_id'),
+                    'begin_time': sent.get('begin_time', 0),
+                    'end_time': sent.get('end_time', 0),
+                    'text': sent.get('text', ''),
+                    'speaker_id': speaker_id
+                }
+                sentences.append(sentence_data)
+    
+    # 按时间排序
+    sentences.sort(key=lambda x: x['begin_time'])
+    
+    # 构建说话人列表
+    speakers = [{'speaker_id': sid, 'label': f'speaker {sid}'} for sid in sorted(speaker_ids)]
+    
+    # 构建最终数据结构
+    structured_data = {
+        'properties': properties,
+        'speakers': speakers,
+        'speaker_count': len(speakers),
+        'sentences': sentences,
+        'total_sentences': len(sentences)
+    }
+    
+    return structured_data
 
 
 def safe_file_type_conversion(file_type_str: str) -> FileType:
@@ -66,14 +177,21 @@ async def upload_files(
     current_user=Depends(get_current_user)
 ):
     """
-    上传文件到服务器
+    上传文件到服务器并创建数据库记录
     
-    - **files**: 要上传的文件列表
+    - **files**: 要上传的文件列表（当前版本仅支持单个文件）
     """
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="请选择要上传的文件"
+            detail="please select the files to upload"
+        )
+    
+    # 验证只能上传单个文件
+    if len(files) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="only one file is supported, please select one file at a time"
         )
     
     file_processor = FileProcessor()
@@ -83,7 +201,7 @@ async def upload_files(
     for file in files:
         try:
             if not file.filename:
-                failed_files.append({"filename": "未知文件", "error": "文件名为空"})
+                failed_files.append({"filename": "unknown file", "error": "file name is empty"})
                 continue
             
             # 检查文件类型
@@ -119,10 +237,10 @@ async def upload_files(
                 upload_time=datetime.now()
             ))
             
-            info(f"文件上传成功: {file.filename} -> {file_path}", source="api", user=current_user.username)
+            info(f"file uploaded successfully: {file.filename} -> {file_path}", source="api", user=current_user.username)
             
         except Exception as e:
-            error(f"文件上传失败: {file.filename}, 错误: {str(e)}", source="api", user=current_user.username)
+            error(f"file upload failed: {file.filename}, error: {str(e)}", source="api", user=current_user.username)
             failed_files.append({
                 "filename": file.filename,
                 "error": str(e)
@@ -132,8 +250,79 @@ async def upload_files(
     if failed_files and not uploaded_files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"所有文件上传失败: {[f['filename'] for f in failed_files]}"
+            detail=f"all files upload failed: {[f['filename'] for f in failed_files]}"
         )
+    
+    # 为成功上传的文件创建数据库记录
+    if uploaded_files:
+        try:
+            db_conn_params = get_database_config()
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            
+            if conn:
+                cursor = conn.cursor()
+                
+                # 创建processing_stats记录（状态为uploaded）
+                cursor.execute("""
+                INSERT INTO processing_stats 
+                (timestamp, files_processed, files_failed, total_time, 
+                 total_file_processing_time, total_ai_time, task_name, 
+                 "user", total_tokens, total_price, upload_params, 
+                 final_report, rc_agent_status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """, (
+                    datetime.now(),
+                    len(uploaded_files),  # files_processed = 上传的文件数
+                    len(failed_files),    # files_failed = 失败的文件数
+                    0,  # total_time
+                    0,  # total_file_processing_time
+                    0,  # total_ai_time
+                    'File Upload Only',  # task_name
+                    current_user.username,
+                    0,  # total_tokens
+                    0,  # total_price
+                    json.dumps({"upload_only": True}),  # upload_params
+                    '',  # final_report
+                    'uploaded'  # rc_agent_status = 'uploaded' 表示仅上传
+                ))
+                
+                processing_stats_id = cursor.fetchone()[0]
+                
+                # 为每个上传的文件创建file_processing_details记录
+                for uploaded_file in uploaded_files:
+                    file_info = file_processor.get_file_info(uploaded_file.file_path)
+                    
+                    cursor.execute("""
+                    INSERT INTO file_processing_details 
+                    (processing_stats_id, filename, file_type, file_size_mb, 
+                     processing_time, ai_time, content_length, status, 
+                     total_tokens, cost, content, created_at, task_id, original_file_path)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        processing_stats_id,
+                        uploaded_file.filename,
+                        uploaded_file.file_type.value,
+                        file_info['file_size_mb'],
+                        0,  # processing_time
+                        0,  # ai_time
+                        0,  # content_length
+                        'uploaded',  # status = 'uploaded' 表示仅上传
+                        0,  # total_tokens
+                        0,  # cost
+                        '',  # content
+                        datetime.now(),
+                        None,  # task_id (仅上传没有task_id)
+                        uploaded_file.file_path  # original_file_path
+                    ))
+                
+                conn.commit()
+                info(f"created {len(uploaded_files)} database records for files", source="api", user=current_user.username)
+                conn.close()
+        except Exception as e:
+            error(f"failed to create database records: {str(e)}", source="api", user=current_user.username)
+            # 数据库记录失败不影响文件上传，只记录错误
     
     return uploaded_files
 
@@ -190,6 +379,13 @@ async def process_files(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="请选择要处理的文件"
+        )
+    
+    # 验证只能处理单个文件
+    if len(request.file_paths) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前版本只支持处理单个文件，请一次只选择一个文件"
         )
     
     # 验证文件存在（快速验证，保留在API层）
@@ -354,7 +550,19 @@ async def get_task_status(
                 "logs": result.get("logs", [])
             }
         else:  # FAILURE or other states
-            info = task_result.info or {}
+            # 尝试获取失败信息，如果获取失败则使用默认信息
+            try:
+                info = task_result.info or {}
+                if isinstance(info, Exception):
+                    # 如果info本身是异常对象，转换为字典
+                    info = {"error": str(info)}
+                elif isinstance(info, str):
+                    # 如果info是字符串，转换为字典
+                    info = {"error": info}
+            except Exception as info_error:
+                # 如果无法获取info（比如异常反序列化失败），使用默认值
+                info = {"error": f"任务失败，无法获取详细错误信息"}
+            
             return {
                 "task_id": task_id,
                 "status": "failed",
@@ -417,7 +625,7 @@ async def get_task_files(
         if not conn:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="无法连接到数据库"
+                detail="failed to connect to database"
             )
         
         cursor = conn.cursor()
@@ -455,10 +663,10 @@ async def get_task_files(
         return files
         
     except Exception as e:
-        error(f"获取任务文件详情失败: {str(e)}", source="api", task_id=task_id)
+        error(f"failed to get task file details: {str(e)}", source="api", task_id=task_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取文件详情失败"
+            detail="failed to get file details"
         )
 
 
@@ -484,7 +692,7 @@ async def get_files(
         if not conn:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="无法连接到数据库"
+                detail="failed to connect to database"
             )
         
         cursor = conn.cursor()
@@ -867,9 +1075,10 @@ async def get_original_file_info(
         
         cursor = conn.cursor()
         
-        # 查询文件信息
+        # 查询文件信息（包含ASR说话人分离数据）
         cursor.execute("""
-            SELECT filename, file_type, file_size_mb, original_file_path, created_at
+            SELECT filename, file_type, file_size_mb, original_file_path, created_at, 
+                   content, asr_with_diarization
             FROM file_processing_details 
             WHERE id = %s
         """, (file_id,))
@@ -878,13 +1087,37 @@ async def get_original_file_info(
         conn.close()
         
         if result:
+            # 构造文件访问URL
+            # 本地开发环境需要使用后端端口，生产环境使用相对路径
+            import os
+            if os.getenv('ENV', 'development') == 'development':
+                # 本地开发：直接指向后端端口8000
+                file_url = f"http://localhost:8000/api/files/serve/{file_id}"
+            else:
+                # 生产环境：使用相对路径
+                file_url = f"/api/files/serve/{file_id}"
+            
+            # 解析 asr_with_diarization JSON 数据
+            asr_data = None
+            if result[6]:  # asr_with_diarization 字段
+                try:
+                    if isinstance(result[6], str):
+                        asr_data = json.loads(result[6])
+                    else:
+                        asr_data = result[6]  # 已经是dict（JSONB类型）
+                except Exception as e:
+                    warning(f"解析 asr_with_diarization 数据失败: {str(e)}", source="api", file_id=file_id)
+            
             return {
                 "file_id": file_id,
                 "filename": result[0],
                 "file_type": result[1],
                 "file_size_mb": result[2],
                 "original_file_path": result[3],
-                "created_at": result[4]
+                "file_url": file_url,  # 返回HTTP可访问的URL
+                "created_at": result[4],
+                "content": result[5],  # 转写文本内容
+                "asr_with_diarization": asr_data  # 结构化的ASR数据（说话人分离）
             }
         else:
             raise HTTPException(
@@ -897,6 +1130,218 @@ async def get_original_file_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取文件信息失败"
+        )
+
+
+@router.patch("/{file_id}/speaker/{speaker_id}", summary="更新说话人名称")
+async def update_speaker_label(
+    file_id: str,
+    speaker_id: int,
+    new_label: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    更新音频文件中指定说话人的标签名称
+    
+    - **file_id**: 文件ID
+    - **speaker_id**: 说话人ID
+    - **new_label**: 新的标签名称
+    """
+    try:
+        db_manager = DatabaseManager(get_database_config())
+        
+        # 1. 获取当前的 asr_with_diarization 数据
+        query = """
+            SELECT asr_with_diarization 
+            FROM file_processing_details 
+            WHERE id = %s
+        """
+        result = db_manager.fetch_one(query, (file_id,))
+        
+        if not result or not result[0]:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在或无ASR数据"
+            )
+        
+        # 2. 解析 JSON 数据
+        asr_data = result[0]
+        if isinstance(asr_data, str):
+            asr_data = json.loads(asr_data)
+        
+        # 3. 更新 speakers 列表中的 label
+        speaker_found = False
+        if 'speakers' in asr_data:
+            for speaker in asr_data['speakers']:
+                if speaker.get('speaker_id') == speaker_id:
+                    speaker['label'] = new_label
+                    speaker_found = True
+                    break
+        
+        if not speaker_found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"说话人 ID {speaker_id} 不存在"
+            )
+        
+        # 4. 更新数据库
+        update_query = """
+            UPDATE file_processing_details 
+            SET asr_with_diarization = %s
+            WHERE id = %s
+        """
+        success = db_manager.execute_query(
+            update_query,
+            (json.dumps(asr_data), file_id)
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="数据库更新失败"
+            )
+        
+        info(f"更新说话人标签成功: file_id={file_id}, speaker_id={speaker_id}, new_label={new_label}", source="api")
+        
+        return {
+            "success": True,
+            "message": "说话人标签更新成功",
+            "speaker_id": speaker_id,
+            "new_label": new_label
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"更新说话人标签失败: {str(e)}", source="api", file_id=file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新说话人标签失败: {str(e)}"
+        )
+
+
+@router.get("/serve/{file_id}", summary="直接提供文件内容")
+async def serve_file(
+    file_id: str,
+    token: str = None
+):
+    """
+    直接提供文件内容供浏览器访问
+    这个接口支持本地开发和云服务器部署
+    支持通过查询参数传递token（用于iframe等无法设置header的场景）
+    
+    - **file_id**: 文件ID
+    - **token**: 可选，认证token（query参数）
+    """
+    # 验证token
+    from backend.auth.jwt_utils import verify_token
+    
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="需要认证token。请在URL中添加 ?token=YOUR_TOKEN"
+        )
+    
+    try:
+        # 验证token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的token"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"token验证失败: {str(e)}"
+        )
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        # 查询文件路径
+        cursor.execute("""
+            SELECT filename, file_type, original_file_path
+            FROM file_processing_details 
+            WHERE id = %s
+        """, (file_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
+            )
+        
+        filename, file_type, file_path = result
+        
+        # 检查文件是否存在
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件未找到"
+            )
+        
+        # 根据文件类型设置MIME type
+        mime_types = {
+            'pdf': 'application/pdf',
+            'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'doc': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'image': 'image/jpeg',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp'
+        }
+        
+        media_type = mime_types.get(file_type.lower(), 'application/octet-stream')
+        
+        # 对文件名进行URL编码以支持中文等非ASCII字符
+        # 使用RFC 2231标准的filename*参数
+        from urllib.parse import quote
+        encoded_filename = quote(filename)
+        
+        # 使用FileResponse直接返回文件
+        # 对于PDF和图片，使用inline模式让浏览器直接显示
+        # 对于其他文件类型，使用attachment模式让浏览器下载
+        if file_type.lower() in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image']:
+            # inline模式 - 浏览器直接显示
+            return FileResponse(
+                path=file_path,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
+                }
+            )
+        else:
+            # attachment模式 - 浏览器下载
+            return FileResponse(
+                path=file_path,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"提供文件失败: {str(e)}", source="api", file_id=file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="提供文件失败"
         )
 
 
@@ -1039,4 +1484,917 @@ async def search_tickers(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"搜索股票代码失败: {str(e)}"
+        )
+
+
+# ===========================================
+# 音频文件上传 API（用于 ASR 语音识别）
+# ===========================================
+
+@router.post("/upload-audio", summary="上传音频文件并异步处理")
+async def upload_audio(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    上传音频文件到阿里云 OSS 并异步进行语音识别
+    
+    ⚠️ 重要：此端点使用异步 Celery 任务处理，不会阻塞主线程
+    - 适合处理大文件（200MB+）
+    - 立即返回任务 ID，不等待上传和识别完成
+    - 前端通过轮询或 WebSocket 获取进度
+    
+    支持的音频格式：
+    - aac, amr, avi, flac, flv, m4a, mkv, mov
+    - mp3, mp4, mpeg, ogg, opus, wav, webm, wma, wmv
+    
+    文件要求：
+    - 最大文件大小：2GB
+    - 最长时长：12小时
+    
+    返回：
+    - task_id: Celery 任务 ID（用于查询进度）
+    - filename: 文件名
+    - file_size: 文件大小（字节）
+    """
+    try:
+        # 检查文件名
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件名为空"
+            )
+        
+        # 初始化 OSS 服务（只做基本检查）
+        oss_service = OSSService()
+        
+        # 检查 OSS 是否配置
+        if not oss_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OSS 服务未配置。请在 .env 文件中配置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET"
+            )
+        
+        # 检查文件格式
+        if not oss_service.is_audio_file(file.filename):
+            ext = os.path.splitext(file.filename)[1]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的音频格式: {ext}。支持的格式: {', '.join(sorted(OSSService.SUPPORTED_AUDIO_FORMATS))}"
+            )
+        
+        # 使用流式写入临时文件，避免一次性加载整个文件到内存
+        temp_file_id = str(uuid.uuid4())[:8]
+        name, ext = os.path.splitext(file.filename)
+        temp_filename = f"{name}_{temp_file_id}{ext}"
+        temp_file_path = os.path.join(UPLOAD_DIR, temp_filename)
+        
+        # 流式写入文件（分块读取，不占用大量内存）
+        file_size = 0
+        chunk_size = 1024 * 1024  # 1MB chunks
+        
+        with open(temp_file_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+                file_size += len(chunk)
+        
+        # 验证文件大小
+        if file_size > OSSService.MAX_FILE_SIZE:
+            # 删除临时文件
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            
+            size_gb = file_size / (1024 * 1024 * 1024)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"音频文件过大: {size_gb:.2f}GB。最大支持 2GB"
+            )
+        
+        info(f"音频文件已保存到临时目录: {file.filename} ({file_size / (1024 * 1024):.2f} MB)", 
+             source="api", user=current_user.username)
+        
+        # 提交异步任务到 Celery
+        task = upload_and_transcribe_audio_task.apply_async(
+            args=[temp_file_path, file.filename, current_user.username],
+            kwargs={
+                'model': 'fun-asr',
+                'language_hints': ['zh', 'en'],
+                'diarization_enabled': True
+            },
+            queue='file_processing'
+        )
+        
+        info(f"音频上传任务已提交: task_id={task.id}, file={file.filename}", 
+             source="api", user=current_user.username)
+        
+        # 立即返回任务 ID，不等待完成
+        return {
+            "success": True,
+            "message": "音频文件已接收，正在后台处理",
+            "task_id": task.id,
+            "filename": file.filename,
+            "file_size": file_size,
+            "file_size_mb": round(file_size / (1024 * 1024), 2),
+            "status": "processing",
+            "note": "请使用 task_id 查询处理进度（GET /api/files/task-status/{task_id}）"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"上传音频文件失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"上传音频文件失败: {str(e)}"
+        )
+
+
+@router.get("/audio/supported-formats", summary="获取支持的音频格式")
+async def get_supported_audio_formats():
+    """
+    获取支持的音频格式列表（用于 Fun-ASR）
+    """
+    return {
+        "supported_formats": sorted(list(OSSService.SUPPORTED_AUDIO_FORMATS)),
+        "max_file_size_gb": 2,
+        "max_duration_hours": 12,
+        "description": "支持的音频格式（Fun-ASR 兼容）"
+    }
+
+
+@router.post("/audio/transcribe", summary="语音识别 - Fun-ASR")
+async def transcribe_audio(
+    request: Dict[str, Any],
+    current_user=Depends(get_current_user)
+):
+    """
+    调用 Fun-ASR 进行语音识别
+    
+    请求体:
+    {
+        "audio_url": "https://...",  # 必填：音频文件的公网 URL
+        "model": "fun-asr",           # 可选：模型名称，默认 fun-asr
+        "language_hints": ["zh", "en"],  # 可选：语言提示
+        "wait_for_result": true,      # 可选：是否等待结果，默认 true
+        "diarization_enabled": true   # 可选：是否启用说话人分离，默认 true
+    }
+    
+    返回:
+    {
+        "success": true,
+        "task_id": "xxx",
+        "status": "COMPLETED",
+        "transcriptions": [...],  # 详细转写结果（包含说话人信息）
+        "text": "转写文本",       # 合并的文本
+        "formatted_text": "格式化的文本"  # 包含时间戳和说话人的格式化文本
+    }
+    """
+    try:
+        # 获取请求参数
+        audio_url = request.get('audio_url')
+        model = request.get('model', 'fun-asr')
+        language_hints = request.get('language_hints', ['zh', 'en'])
+        wait_for_result = request.get('wait_for_result', True)
+        diarization_enabled = request.get('diarization_enabled', True)
+        
+        # 验证必填参数
+        if not audio_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少必填参数: audio_url"
+            )
+        
+        info(f"开始语音识别: audio_url={audio_url}, model={model}", 
+             source="api", user=current_user.username)
+        
+        # 初始化 ASR 服务
+        asr_service = ASRService()
+        
+        # 检查 ASR 服务是否配置
+        if not asr_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ASR 服务未配置。请设置 DASHSCOPE_API_KEY 环境变量并安装 dashscope SDK (pip install dashscope)"
+            )
+        
+        # 调用语音识别
+        result = asr_service.transcribe_audio(
+            audio_url=audio_url,
+            model=model,
+            language_hints=language_hints,
+            wait_for_result=wait_for_result,
+            diarization_enabled=diarization_enabled
+        )
+        
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"语音识别失败: {result.get('error', 'Unknown error')}"
+            )
+        
+        # 格式化结果
+        formatted_texts = []
+        if result.get("transcriptions"):
+            for trans_data in result["transcriptions"]:
+                formatted = asr_service.format_transcription_result(
+                    trans_data,
+                    include_timestamps=True,
+                    include_words=False,
+                    include_speaker=diarization_enabled
+                )
+                formatted_texts.append(formatted)
+        
+        # 使用格式化的文本（包含说话人信息）或原始文本
+        final_report_text = "\n\n".join(formatted_texts) if formatted_texts else result.get("text", "")
+        
+        # 构建结构化的 ASR 数据（用于前端可视化）
+        asr_structured_data = None
+        if result.get("transcriptions") and diarization_enabled:
+            try:
+                asr_structured_data = _build_asr_structured_data(result["transcriptions"])
+            except Exception as e:
+                warning(f"构建结构化 ASR 数据失败: {str(e)}", source="api", user=current_user.username)
+        
+        # 记录到数据库（可选）
+        try:
+            db_conn_params = get_database_config()
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            
+            if conn:
+                cursor = conn.cursor()
+                
+                # 创建 processing_stats 记录
+                cursor.execute("""
+                INSERT INTO processing_stats 
+                (timestamp, files_processed, files_failed, total_time, 
+                 total_file_processing_time, total_ai_time, task_name, 
+                 "user", total_tokens, total_price, upload_params, 
+                 final_report, rc_agent_status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """, (
+                    datetime.now(),
+                    1 if result["success"] else 0,
+                    0 if result["success"] else 1,
+                    0,
+                    0,
+                    0,
+                    'ASR Transcription',
+                    current_user.username,
+                    0,
+                    0,
+                    json.dumps({
+                        "audio_url": audio_url,
+                        "model": model,
+                        "language_hints": language_hints,
+                        "diarization_enabled": diarization_enabled
+                    }),
+                    '',  # final_report 保留为空，等待未来的 AI Agent 填充总结内容
+                    'completed' if result["success"] else 'failed'
+                ))
+                
+                processing_stats_id = cursor.fetchone()[0]
+                
+                # 从 audio_url 中提取原始文件名（处理 URL 编码和查询参数）
+                original_filename = _extract_filename_from_audio_url(audio_url)
+                
+                # 创建 file_processing_details 记录
+                cursor.execute("""
+                INSERT INTO file_processing_details 
+                (processing_stats_id, filename, file_type, file_size_mb, 
+                 processing_time, ai_time, content_length, status, 
+                 total_tokens, cost, content, created_at, task_id, original_file_path, asr_with_diarization)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    processing_stats_id,
+                    original_filename,  # 使用提取的原始文件名，而不是 URL
+                    'audio',
+                    0,
+                    0,
+                    0,
+                    len(final_report_text),
+                    'completed' if result["success"] else 'failed',
+                    0,
+                    0,
+                    final_report_text,  # 使用格式化的文本（包含说话人标签）
+                    datetime.now(),
+                    result.get("task_id"),
+                    audio_url,
+                    json.dumps(asr_structured_data) if asr_structured_data else None
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                info(f"ASR 结果已记录到数据库", source="api", user=current_user.username)
+        except Exception as db_error:
+            warning(f"记录 ASR 结果到数据库失败: {str(db_error)}", source="api", user=current_user.username)
+        
+        # 返回结果
+        response_data = {
+            "success": result["success"],
+            "task_id": result["task_id"],
+            "status": result["status"],
+            "text": result.get("text", ""),
+            "formatted_text": "\n\n".join(formatted_texts) if formatted_texts else "",
+            "transcriptions": result.get("transcriptions", [])
+        }
+        
+        info(f"语音识别完成: task_id={result['task_id']}, text_length={len(result.get('text', ''))}", 
+             source="api", user=current_user.username)
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"语音识别失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"语音识别失败: {str(e)}"
+        )
+
+
+@router.post("/audio/transcribe-async", summary="提交语音识别任务（异步）")
+async def transcribe_audio_async(
+    request: Dict[str, Any],
+    current_user=Depends(get_current_user)
+):
+    """
+    提交语音识别任务（异步，不等待结果）
+    
+    请求体:
+    {
+        "audio_url": "https://...",
+        "model": "fun-asr",
+        "language_hints": ["zh", "en"],
+        "diarization_enabled": true  # 可选：是否启用说话人分离，默认 true
+    }
+    
+    返回:
+    {
+        "success": true,
+        "task_id": "xxx",
+        "message": "任务已提交"
+    }
+    """
+    try:
+        audio_url = request.get('audio_url')
+        model = request.get('model', 'fun-asr')
+        language_hints = request.get('language_hints', ['zh', 'en'])
+        diarization_enabled = request.get('diarization_enabled', True)
+        
+        if not audio_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少必填参数: audio_url"
+            )
+        
+        # 初始化 ASR 服务
+        asr_service = ASRService()
+        
+        if not asr_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ASR 服务未配置"
+            )
+        
+        # 提交任务（不等待结果）
+        result = asr_service.submit_transcription_task(
+            audio_url=audio_url,
+            model=model,
+            language_hints=language_hints,
+            diarization_enabled=diarization_enabled
+        )
+        
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"提交任务失败: {result.get('error')}"
+            )
+        
+        return {
+            "success": True,
+            "task_id": result["task_id"],
+            "message": "语音识别任务已提交，请使用 task_id 查询结果"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交任务失败: {str(e)}"
+        )
+
+
+@router.get("/audio/transcribe/{task_id}", summary="查询语音识别结果")
+async def get_transcription_result(
+    task_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    查询语音识别任务结果
+    
+    返回:
+    {
+        "success": true,
+        "task_id": "xxx",
+        "status": "COMPLETED",
+        "transcriptions": [...],
+        "text": "转写文本"
+    }
+    """
+    try:
+        # 初始化 ASR 服务
+        asr_service = ASRService()
+        
+        if not asr_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ASR 服务未配置"
+            )
+        
+        # 获取结果
+        result = asr_service.get_transcription_results(task_id)
+        
+        if not result["success"]:
+            # 如果任务还在进行中，返回状态
+            if result["status"] in ["PENDING", "RUNNING"]:
+                return {
+                    "success": True,
+                    "task_id": task_id,
+                    "status": result["status"],
+                    "message": "任务处理中，请稍后查询"
+                }
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"获取结果失败: {result.get('error')}"
+                )
+        
+        # 格式化结果（包含说话人信息）
+        formatted_texts = []
+        if result.get("transcriptions"):
+            for trans_data in result["transcriptions"]:
+                formatted = asr_service.format_transcription_result(
+                    trans_data,
+                    include_timestamps=True,
+                    include_words=False,
+                    include_speaker=True  # 总是包含说话人信息（如果有）
+                )
+                formatted_texts.append(formatted)
+        
+        # 提取文本
+        texts = []
+        for trans in result.get("transcriptions", []):
+            for transcript in trans.get('transcripts', []):
+                text = transcript.get('text', '')
+                if text:
+                    texts.append(text)
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "status": result["status"],
+            "text": "\n".join(texts),
+            "formatted_text": "\n\n".join(formatted_texts),
+            "transcriptions": result.get("transcriptions", [])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询结果失败: {str(e)}"
+        )
+
+
+@router.post("/audio/analyze", summary="音频AI分析 - 分析ASR转写内容")
+async def analyze_audio(
+    request: Dict[str, Any],
+    current_user=Depends(get_current_user)
+):
+    """
+    对已完成语音识别的音频文件进行AI分析。
+    
+    从 file_processing_details.asr_with_diarization 读取ASR数据，
+    使用指定的 Prompt Template（默认 audio_analysis_v1）进行分析，
+    分析结果保存到 processing_stats.final_report。
+    
+    请求体:
+    {
+        "execution_id": 123,           # 必填：processing_stats.id
+        "template_id": 32,             # 可选：模板ID（默认使用 audio_analysis_v1）
+        "template_variables": {},       # 可选：额外模板变量
+    }
+    
+    返回:
+    {
+        "success": true,
+        "task_id": "celery-task-id",
+        "message": "音频分析任务已提交"
+    }
+    """
+    try:
+        execution_id = request.get('execution_id')
+        template_id = request.get('template_id')
+        template_variables = request.get('template_variables', {})
+        
+        if not execution_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少必填参数: execution_id"
+            )
+        
+        # 获取数据库连接
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        try:
+            # 验证 execution 存在且属于当前用户
+            cursor.execute("""
+                SELECT id, "user", rc_agent_status, task_name
+                FROM processing_stats
+                WHERE id = %s
+            """, (execution_id,))
+            ps_row = cursor.fetchone()
+            
+            if not ps_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"执行记录不存在: {execution_id}"
+                )
+            
+            if not current_user.is_admin and ps_row[1] != current_user.username:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足，只能分析自己的记录"
+                )
+            
+            # 检查是否已在分析中
+            if ps_row[2] == 'analyzing':
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="该记录正在分析中，请等待完成"
+                )
+            
+            # 获取对应的 file_processing_details（音频文件）
+            cursor.execute("""
+                SELECT id, filename, file_type, asr_with_diarization, content
+                FROM file_processing_details
+                WHERE processing_stats_id = %s
+                ORDER BY id ASC
+                LIMIT 1
+            """, (execution_id,))
+            file_row = cursor.fetchone()
+            
+            if not file_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="找不到对应的文件记录"
+                )
+            
+            file_detail_id = file_row[0]
+            file_type = file_row[2]
+            asr_data = file_row[3]
+            content = file_row[4]
+            
+            # 验证有 ASR 数据或转写内容
+            if not asr_data and not content:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该文件没有ASR数据或转写内容，请先进行语音识别"
+                )
+            
+            # 如果未指定模板，使用默认的 audio_analysis_v1
+            if not template_id:
+                template_service = LLMPromptTemplateService()
+                template = template_service.get_template_by_code('audio_analysis_v1')
+                if template:
+                    template_id = template['id']
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="默认音频分析模板 audio_analysis_v1 不存在，请联系管理员创建"
+                    )
+            
+            # 更新状态为 analyzing
+            cursor.execute("""
+                UPDATE processing_stats
+                SET rc_agent_status = 'analyzing'
+                WHERE id = %s
+            """, (execution_id,))
+            conn.commit()
+            
+        finally:
+            conn.close()
+        
+        # 提交 Celery 任务
+        task = analyze_audio_task.delay(
+            execution_id=execution_id,
+            file_detail_id=file_detail_id,
+            template_id=template_id,
+            template_variables=template_variables,
+            username=current_user.username
+        )
+        
+        info(
+            f"音频AI分析任务已提交: task_id={task.id}, execution_id={execution_id}",
+            source="api", user=current_user.username
+        )
+        
+        return {
+            "success": True,
+            "task_id": task.id,
+            "execution_id": execution_id,
+            "message": "音频AI分析任务已提交，正在异步处理"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"提交音频分析任务失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交音频分析任务失败: {str(e)}"
+        )
+
+
+@router.get("/audio/analyze/{task_id}/status", summary="查询音频AI分析任务状态")
+async def get_audio_analysis_status(
+    task_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    查询音频AI分析的Celery任务状态
+    """
+    try:
+        task_result = AsyncResult(task_id, app=celery_app)
+        
+        if task_result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "status": "pending",
+                "progress": 0,
+                "message": "任务等待处理中..."
+            }
+        elif task_result.state == 'PROGRESS':
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": task_info.get("status", "processing"),
+                "progress": task_info.get("progress", 0),
+                "message": task_info.get("message", "正在分析..."),
+                "execution_id": task_info.get("execution_id"),
+                "logs": task_info.get("logs", [])
+            }
+        elif task_result.state == 'SUCCESS':
+            result = task_result.result or {}
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "progress": 100,
+                "message": "分析完成",
+                "execution_id": result.get("execution_id"),
+                "total_tokens": result.get("total_tokens", 0),
+                "total_price": result.get("total_price", 0),
+                "llm_model": result.get("llm_model"),
+                "llm_provider": result.get("llm_provider"),
+                "logs": result.get("logs", [])
+            }
+        else:
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "progress": 0,
+                "message": str(task_info.get("error", "分析失败")),
+                "execution_id": task_info.get("execution_id"),
+                "logs": task_info.get("logs", [])
+            }
+    
+    except Exception as e:
+        error(f"获取音频分析状态失败: {str(e)}", source="api", task_id=task_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取分析状态失败"
+        )
+
+
+@router.post("/document/analyze", summary="文档AI分析 - 对已上传文档进行AI分析")
+async def analyze_document(
+    request: Dict[str, Any],
+    current_user=Depends(get_current_user)
+):
+    """
+    对已上传但未经AI分析的文档进行AI分析。
+    
+    如果文档未经LlamaParse解析（content为空），会先自动解析，再进行AI分析。
+    分析结果保存到 processing_stats.final_report。
+    
+    请求体:
+    {
+        "execution_id": 123,           # 必填：processing_stats.id
+        "template_id": 32,             # 必填：模板ID
+        "template_variables": {},       # 可选：额外模板变量
+    }
+    """
+    try:
+        execution_id = request.get('execution_id')
+        template_id = request.get('template_id')
+        template_variables = request.get('template_variables', {})
+        
+        if not execution_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少必填参数: execution_id"
+            )
+        
+        if not template_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少必填参数: template_id（文档分析需要选择模板）"
+            )
+        
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        
+        cursor = conn.cursor()
+        
+        try:
+            # 验证 execution 存在且属于当前用户
+            cursor.execute("""
+                SELECT id, "user", rc_agent_status, task_name
+                FROM processing_stats
+                WHERE id = %s
+            """, (execution_id,))
+            ps_row = cursor.fetchone()
+            
+            if not ps_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"执行记录不存在: {execution_id}"
+                )
+            
+            if not current_user.is_admin and ps_row[1] != current_user.username:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足，只能分析自己的记录"
+                )
+            
+            if ps_row[2] == 'analyzing':
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="该记录正在分析中，请等待完成"
+                )
+            
+            # 获取对应的 file_processing_details（文档文件）
+            cursor.execute("""
+                SELECT id, filename, file_type, content, original_file_path
+                FROM file_processing_details
+                WHERE processing_stats_id = %s
+                ORDER BY id ASC
+                LIMIT 1
+            """, (execution_id,))
+            file_row = cursor.fetchone()
+            
+            if not file_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="找不到对应的文件记录"
+                )
+            
+            file_detail_id = file_row[0]
+            content = file_row[3]
+            original_file_path = file_row[4]
+            
+            # 验证有内容或有原始文件可以解析
+            if not content and not original_file_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该文件没有内容且没有原始文件路径，无法进行分析"
+                )
+            
+            # 更新状态为 analyzing
+            cursor.execute("""
+                UPDATE processing_stats
+                SET rc_agent_status = 'analyzing'
+                WHERE id = %s
+            """, (execution_id,))
+            conn.commit()
+            
+        finally:
+            conn.close()
+        
+        # 提交 Celery 任务
+        task = analyze_document_task.delay(
+            execution_id=execution_id,
+            file_detail_id=file_detail_id,
+            template_id=template_id,
+            template_variables=template_variables,
+            username=current_user.username
+        )
+        
+        info(
+            f"文档AI分析任务已提交: task_id={task.id}, execution_id={execution_id}, template_id={template_id}",
+            source="api", user=current_user.username
+        )
+        
+        return {
+            "success": True,
+            "task_id": task.id,
+            "execution_id": execution_id,
+            "message": "文档AI分析任务已提交，正在异步处理"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"提交文档分析任务失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交文档分析任务失败: {str(e)}"
+        )
+
+
+@router.get("/document/analyze/{task_id}/status", summary="查询文档AI分析任务状态")
+async def get_document_analysis_status(
+    task_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    查询文档AI分析的Celery任务状态
+    """
+    try:
+        task_result = AsyncResult(task_id, app=celery_app)
+        
+        if task_result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "status": "pending",
+                "progress": 0,
+                "message": "任务等待处理中..."
+            }
+        elif task_result.state == 'PROGRESS':
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": task_info.get("status", "processing"),
+                "progress": task_info.get("progress", 0),
+                "message": task_info.get("message", "正在分析..."),
+                "execution_id": task_info.get("execution_id"),
+                "logs": task_info.get("logs", [])
+            }
+        elif task_result.state == 'SUCCESS':
+            result = task_result.result or {}
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "progress": 100,
+                "message": "文档分析完成",
+                "execution_id": result.get("execution_id"),
+                "total_tokens": result.get("total_tokens", 0),
+                "total_price": result.get("total_price", 0),
+                "llm_model": result.get("llm_model"),
+                "llm_provider": result.get("llm_provider"),
+                "logs": result.get("logs", [])
+            }
+        else:
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "progress": 0,
+                "message": str(task_info.get("error", "文档分析失败")),
+                "execution_id": task_info.get("execution_id"),
+                "logs": task_info.get("logs", [])
+            }
+    
+    except Exception as e:
+        error(f"获取文档分析状态失败: {str(e)}", source="api", task_id=task_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取文档分析状态失败"
         )

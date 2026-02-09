@@ -29,6 +29,7 @@ export interface TaskExecution {
   total_tokens?: number;
   total_cost?: number;
   first_filename?: string;  // 第一个文件的名称
+  first_file_type?: string;  // 第一个文件的类型（用于列表筛选）
   rc_agent_status?: string;  // RC Agent状态
 }
 
@@ -91,6 +92,8 @@ export interface TaskExecutionDetail {
 export interface PaginationParams {
   page?: number;
   page_size?: number;
+  search_type?: 'file_name' | 'content';
+  q?: string;
 }
 
 export const tasksAPI = {
@@ -146,10 +149,9 @@ export const tasksAPI = {
     }
   },
 
-  // 获取任务执行历史
+  // 获取任务执行历史（支持分页：page, page_size）
   getTaskExecutions: async (params?: PaginationParams): Promise<TaskExecution[]> => {
     try {
-      console.log('正在获取任务执行历史:', params);
       const result = await api.get<TaskExecution[]>('/tasks/executions', params);
       console.log('任务执行历史获取成功:', result);
       return result;
@@ -172,6 +174,17 @@ export const tasksAPI = {
   // 删除任务执行记录
   deleteTaskExecution: async (executionId: string): Promise<{ message: string }> => {
     return api.delete<{ message: string }>(`/tasks/executions/${executionId}`);
+  },
+
+  // 重命名执行记录的首个文件
+  renameExecutionFile: async (
+    executionId: string,
+    filename: string
+  ): Promise<{ message: string; filename: string }> => {
+    return api.patch<{ message: string; filename: string }>(
+      `/tasks/executions/${executionId}/rename`,
+      { filename }
+    );
   },
 
   // 健康检查

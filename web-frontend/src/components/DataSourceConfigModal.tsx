@@ -32,9 +32,23 @@ import {
   GlobalOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import CronExpressionGuide from './CronExpressionGuide';
 
 const { Title, Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    cardSecondaryBg: '#f9f9f9',
+    borderSecondary: '#f0f0f0',
+    headingPrimary: '#1890ff',
+  },
+  dark: {
+    cardSecondaryBg: '#252d3d',
+    borderSecondary: '#364152',
+    headingPrimary: '#60a5fa',
+  },
+} as const;
 const { Option } = Select;
 
 interface DataSourceConfigModalProps {
@@ -61,6 +75,8 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   dataSourceType,
   dataSourceName
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const colors = THEME_COLORS[themeMode];
   const [currentStep, setCurrentStep] = useState(0);
   const [form] = Form.useForm<ConfigFormData>();
   const [loading, setLoading] = useState(false);
@@ -463,7 +479,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
       {/* Data source information card */}
       <Card 
-        style={{ marginBottom: 24, backgroundColor: '#f9f9f9' }}
+        style={{ marginBottom: 24, backgroundColor: colors.cardSecondaryBg }}
         size="small"
       >
         <Row align="middle">
@@ -693,12 +709,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <div style={{ 
-                borderTop: '1px solid #f0f0f0', 
+                borderTop: `1px solid ${colors.borderSecondary}`, 
                 paddingTop: 24, 
                 marginTop: 24, 
                 marginBottom: 16 
               }}>
-                <h4 style={{ marginBottom: 16, color: '#1890ff' }}>
+                <h4 style={{ marginBottom: 16, color: colors.headingPrimary }}>
                   🎯 Investment Theme Matching (Vector Search)
                 </h4>
               </div>
@@ -853,12 +869,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               </Form.Item>
               
               <div style={{ 
-                borderTop: '1px solid #f0f0f0', 
+                borderTop: `1px solid ${colors.borderSecondary}`, 
                 paddingTop: 24, 
                 marginTop: 24, 
                 marginBottom: 16 
               }}>
-                <h4 style={{ marginBottom: 16, color: '#1890ff' }}>
+                <h4 style={{ marginBottom: 16, color: colors.headingPrimary }}>
                   🎯 Investment Theme Matching (Vector Search)
                 </h4>
               </div>

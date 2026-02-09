@@ -48,6 +48,15 @@ class FileProcessingWorker:
         
         # 是否停止标志
         self.should_stop = False
+
+    async def _progress_ticker(self, progress_ref: List[float], max_pct: float, interval: float = 6, increment: float = 8):
+        """在长时间等待（如文档解析）期间缓慢增加进度显示，避免长时间停在 10%。"""
+        while not self.should_stop:
+            await asyncio.sleep(interval)
+            if self.should_stop:
+                break
+            progress_ref[0] = min(progress_ref[0] + increment, max_pct)
+            self.update_status(progress=progress_ref[0])
     
     def set_status_callback(self, callback: Callable):
         """设置状态更新回调函数"""
@@ -132,6 +141,50 @@ class FileProcessingWorker:
             
             self.update_status("processing", 5.0, log_message="开始处理文件...")
             
+            # 🔍 立即更新数据库中已存在的 uploaded 记录，标记为正在处理（写入 task_id）
+            # 这样前端可以立即知道文件正在处理，防止重复提交
+            try:
+                conn = self.db_manager.get_connection()
+                if conn and file_paths:
+                    cursor = conn.cursor()
+                    first_file_path = file_paths[0]
+                    
+                    # 查找对应的 uploaded 记录
+                    cursor.execute("""
+                    SELECT fpd.id, fpd.processing_stats_id
+                    FROM file_processing_details fpd
+                    JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
+                    WHERE fpd.original_file_path = %s 
+                      AND ps.rc_agent_status = 'uploaded'
+                      AND ps."user" = %s
+                    ORDER BY fpd.id DESC
+                    LIMIT 1
+                    """, (first_file_path, self.username))
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        file_detail_id = result[0]
+                        # 更新 file_processing_details 的 task_id
+                        cursor.execute("""
+                        UPDATE file_processing_details
+                        SET task_id = %s,
+                            status = 'processing'
+                        WHERE id = %s
+                        """, (self.task_id, file_detail_id))
+                        
+                        # 同时更新 processing_stats 的状态
+                        cursor.execute("""
+                        UPDATE processing_stats
+                        SET rc_agent_status = 'processing'
+                        WHERE id = %s
+                        """, (result[1],))
+                        
+                        conn.commit()
+                        self.update_status(log_message=f"✅ 已标记文件为处理中状态 (task_id: {self.task_id})")
+                    conn.close()
+            except Exception as e:
+                self.update_status(log_message=f"⚠️ 更新文件状态失败: {str(e)}")
+            
             # 处理文件
             successful_results = []
             failed_files = []
@@ -143,38 +196,61 @@ class FileProcessingWorker:
                 
                 try:
                     file_name = os.path.basename(file_path)
+                    extraction_max = 75.0  # 文档解析阶段进度上限，留 80+ 给 AI 阶段
+                    progress_ref = [10.0 + (i / len(file_paths)) * (extraction_max - 10.0)]
                     self.update_status(
                         current_file=file_name,
-                        progress=10.0 + (i / len(file_paths)) * 70.0,
+                        progress=progress_ref[0],
                         log_message=f"正在处理文件: {file_name}"
                     )
                     
-                    # 准备LlamaService参数
-                    llama_params = {
-                        "language": params.get('language', ['ch_sim', 'en']),
-                        "fast_mode": params.get('fast_mode', False),
-                        "disable_ocr": params.get('disable_ocr', False),
-                        "max_pages": params.get('max_pages', 10),
-                        "target_pages": params.get('target_pages', ''),
-                        "skip_diagonal_text": params.get('skip_diagonal_text', False),
-                        "skip_table_extraction": params.get('skip_table_extraction', False),
-                        "extract_images": params.get('extract_images', False),
-                        "use_vendor_multimodal_model": params.get('use_vendor_multimodal_model', False),
-                        "vendor_multimodal_api_key": params.get('vendor_multimodal_api_key', ''),
-                        "polling_interval": params.get('polling_interval', 10)
-                    }
+                    # 文档解析可能很久，启动进度 ticker，避免长时间停在 10%
+                    ticker = asyncio.create_task(
+                        self._progress_ticker(progress_ref, max_pct=extraction_max, interval=6, increment=8)
+                    )
+                    try:
+                        # 准备LlamaService参数
+                        llama_params = {
+                            "language": params.get('language', ['ch_sim', 'en']),
+                            "fast_mode": params.get('fast_mode', False),
+                            "disable_ocr": params.get('disable_ocr', False),
+                            "max_pages": params.get('max_pages', 10),
+                            "target_pages": params.get('target_pages', ''),
+                            "skip_diagonal_text": params.get('skip_diagonal_text', False),
+                            "skip_table_extraction": params.get('skip_table_extraction', False),
+                            "extract_images": params.get('extract_images', False),
+                            "use_vendor_multimodal_model": params.get('use_vendor_multimodal_model', False),
+                            "vendor_multimodal_api_key": params.get('vendor_multimodal_api_key', ''),
+                            "polling_interval": params.get('polling_interval', 10)
+                        }
+                        
+                        # 使用LlamaService处理文件
+                        result = await llama_service.process_file(file_path, successful_results, failed_files, llama_params)
+                    finally:
+                        ticker.cancel()
+                        try:
+                            await ticker
+                        except asyncio.CancelledError:
+                            pass
                     
-                    # 使用LlamaService处理文件
-                    result = await llama_service.process_file(file_path, successful_results, failed_files, llama_params)
+                    # 单个文件完成后更新到真实进度（解析阶段结束，即将进入 AI 或保存）
+                    self.update_status(progress=10.0 + ((i + 1) / len(file_paths)) * (extraction_max - 10.0))
                     
                     if result:
                         # LlamaService返回的是元组 (file_info, processing_time)
                         file_info, processing_time = result
                         
-                        # LlamaService已经将结果添加到successful_results中，
-                        # 这里只需要更新计数器和状态
-                        self.files_processed += 1
-                        self.update_status(log_message=f"文件 {file_name} 处理成功")
+                        # 检查文件是否真的处理成功
+                        if file_info.get('is_success', False):
+                            # LlamaService已经将结果添加到successful_results中
+                            self.files_processed += 1
+                            self.update_status(log_message=f"文件 {file_name} 处理成功")
+                        else:
+                            # 处理失败，记录错误
+                            error_msg = file_info.get('error', '处理失败')
+                            failed_files.append({"file_path": file_path, "error": error_msg})
+                            self.files_failed += 1
+                            self.update_status(log_message=f"文件 {file_name} 处理失败: {error_msg}")
                     else:
                         failed_files.append({"file_path": file_path, "error": "处理失败"})
                         self.files_failed += 1
@@ -389,34 +465,102 @@ class FileProcessingWorker:
                 "processing_params": params
             })
             
-            # 插入处理统计记录
-            cursor.execute("""
-            INSERT INTO processing_stats 
-            (timestamp, files_processed, files_failed, total_time, 
-             total_file_processing_time, total_ai_time, task_name, 
-             "user", total_tokens, total_price, upload_params, 
-             final_report, rc_agent_status, llm_model, llm_provider)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """, (
-                datetime.now(),
-                self.files_processed,
-                self.files_failed,
-                total_time,
-                total_file_processing_time,
-                total_ai_time,
-                task_info.get('name', ''),
-                self.username,
-                total_tokens,
-                total_price,
-                upload_params,
-                final_report or "",
-                rc_agent_status,
-                llm_model,
-                llm_provider
-            ))
+            # 🔍 查找是否已存在 uploaded/processing 状态的记录（通过 original_file_path 匹配）
+            processing_stats_id = None
+            if successful_results:
+                # 获取第一个文件的路径来查找对应的 uploaded/processing 记录
+                first_file_path = successful_results[0].get('original_file')
+                if first_file_path:
+                    cursor.execute("""
+                    SELECT ps.id
+                    FROM processing_stats ps
+                    JOIN file_processing_details fpd ON ps.id = fpd.processing_stats_id
+                    WHERE fpd.original_file_path = %s 
+                      AND ps.rc_agent_status IN ('uploaded', 'processing')
+                      AND ps."user" = %s
+                    ORDER BY ps.timestamp DESC
+                    LIMIT 1
+                    """, (first_file_path, self.username))
+                    
+                    existing_record = cursor.fetchone()
+                    if existing_record:
+                        processing_stats_id = existing_record[0]
+                        self.update_status(log_message=f"找到已存在的上传记录(ID: {processing_stats_id})，将更新该记录")
             
-            processing_stats_id = cursor.fetchone()[0]
+            if processing_stats_id:
+                # 🔄 更新已存在的记录
+                cursor.execute("""
+                UPDATE processing_stats
+                SET timestamp = %s,
+                    files_processed = %s,
+                    files_failed = %s,
+                    total_time = %s,
+                    total_file_processing_time = %s,
+                    total_ai_time = %s,
+                    task_name = %s,
+                    total_tokens = %s,
+                    total_price = %s,
+                    upload_params = %s,
+                    final_report = %s,
+                    rc_agent_status = %s,
+                    llm_model = %s,
+                    llm_provider = %s
+                WHERE id = %s
+                """, (
+                    datetime.now(),
+                    self.files_processed,
+                    self.files_failed,
+                    total_time,
+                    total_file_processing_time,
+                    total_ai_time,
+                    task_info.get('name', ''),
+                    total_tokens,
+                    total_price,
+                    upload_params,
+                    final_report or "",
+                    rc_agent_status,
+                    llm_model,
+                    llm_provider,
+                    processing_stats_id
+                ))
+                
+                # 删除旧的 file_processing_details 记录（状态为 uploaded 或 processing 的）
+                cursor.execute("""
+                DELETE FROM file_processing_details
+                WHERE processing_stats_id = %s AND status IN ('uploaded', 'processing')
+                """, (processing_stats_id,))
+                
+                self.update_status(log_message="已更新现有处理记录")
+            else:
+                # ➕ 如果没有找到已有记录，创建新记录
+                cursor.execute("""
+                INSERT INTO processing_stats 
+                (timestamp, files_processed, files_failed, total_time, 
+                 total_file_processing_time, total_ai_time, task_name, 
+                 "user", total_tokens, total_price, upload_params, 
+                 final_report, rc_agent_status, llm_model, llm_provider)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """, (
+                    datetime.now(),
+                    self.files_processed,
+                    self.files_failed,
+                    total_time,
+                    total_file_processing_time,
+                    total_ai_time,
+                    task_info.get('name', ''),
+                    self.username,
+                    total_tokens,
+                    total_price,
+                    upload_params,
+                    final_report or "",
+                    rc_agent_status,
+                    llm_model,
+                    llm_provider
+                ))
+                
+                processing_stats_id = cursor.fetchone()[0]
+                self.update_status(log_message="已创建新的处理记录")
             
             # 插入文件处理详情
             for result in successful_results:

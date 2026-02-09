@@ -30,17 +30,20 @@ export interface FileProcessResponse {
 }
 
 export interface TaskStatusResponse {
+  task_id?: string;
   status: string;
   progress: number;
+  message?: string;
   current_file?: string;
   files_processed: number;
-  files_failed: number;
+  files_failed?: number;
   total_files: number;
   logs: Array<{
     timestamp: string;
     level: string;
     message: string;
   }>;
+  result?: any;
 }
 
 export interface FileDetail {
@@ -165,6 +168,99 @@ export const filesAPI = {
     return api.upload<FileUploadResponse[]>('/files/upload', formData);
   },
 
+  // 上传音频文件到 OSS（异步，立即返回任务 ID）
+  uploadAudioFile: async (file: File): Promise<{
+    success: boolean;
+    message: string;
+    task_id: string;
+    filename: string;
+    file_size: number;
+    file_size_mb: number;
+    status: string;
+    note?: string;
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    return api.upload('/files/upload-audio', formData);
+  },
+
+  // 获取支持的音频格式
+  getSupportedAudioFormats: async (): Promise<{
+    supported_formats: string[];
+    max_file_size_gb: number;
+    max_duration_hours: number;
+    description: string;
+  }> => {
+    return api.get('/files/audio/supported-formats');
+  },
+
+  // 检查是否为音频文件
+  isAudioFile: (filename: string): boolean => {
+    const audioExtensions = [
+      'aac', 'amr', 'avi', 'flac', 'flv', 'm4a', 'mkv', 'mov',
+      'mp3', 'mp4', 'mpeg', 'ogg', 'opus', 'wav', 'webm', 'wma', 'wmv'
+    ];
+    const ext = filesAPI.getFileExtension(filename);
+    return audioExtensions.includes(ext);
+  },
+
+  // 语音识别 - Fun-ASR（同步，等待结果）
+  transcribeAudio: async (params: {
+    audio_url: string;
+    model?: string;
+    language_hints?: string[];
+    wait_for_result?: boolean;
+    diarization_enabled?: boolean;
+  }): Promise<{
+    success: boolean;
+    task_id: string;
+    status: string;
+    text: string;
+    formatted_text: string;
+    transcriptions: any[];
+  }> => {
+    return api.post('/files/audio/transcribe', {
+      audio_url: params.audio_url,
+      model: params.model || 'fun-asr',
+      language_hints: params.language_hints || ['zh', 'en'],
+      wait_for_result: params.wait_for_result !== false,
+      diarization_enabled: params.diarization_enabled !== false
+    });
+  },
+
+  // 提交语音识别任务（异步，不等待）
+  submitTranscriptionTask: async (params: {
+    audio_url: string;
+    model?: string;
+    language_hints?: string[];
+    diarization_enabled?: boolean;
+  }): Promise<{
+    success: boolean;
+    task_id: string;
+    message: string;
+  }> => {
+    return api.post('/files/audio/transcribe-async', {
+      audio_url: params.audio_url,
+      model: params.model || 'fun-asr',
+      language_hints: params.language_hints || ['zh', 'en'],
+      diarization_enabled: params.diarization_enabled !== false
+    });
+  },
+
+  // 查询语音识别结果
+  getTranscriptionResult: async (taskId: string): Promise<{
+    success: boolean;
+    task_id: string;
+    status: string;
+    text?: string;
+    formatted_text?: string;
+    transcriptions?: any[];
+    message?: string;
+  }> => {
+    return api.get(`/files/audio/transcribe/${taskId}`);
+  },
+
   // 获取支持的文件类型
   getSupportedFileTypes: async (): Promise<SupportedFileTypesResponse> => {
     return api.get<SupportedFileTypesResponse>('/files/supported-types');
@@ -273,6 +369,28 @@ export const filesAPI = {
     file_size_mb: number;
     original_file_path: string;
     file_url: string;
+    content?: string;
+    asr_with_diarization?: {
+      properties: {
+        duration_ms: number;
+        audio_format: string;
+        channels: number[];
+        sampling_rate: number;
+      };
+      speakers: Array<{
+        speaker_id: number;
+        label: string;
+      }>;
+      speaker_count: number;
+      sentences: Array<{
+        sentence_id: number;
+        begin_time: number;
+        end_time: number;
+        text: string;
+        speaker_id: number;
+      }>;
+      total_sentences: number;
+    };
   }> => {
     return api.get<{
       filename: string;
@@ -280,6 +398,28 @@ export const filesAPI = {
       file_size_mb: number;
       original_file_path: string;
       file_url: string;
+      content?: string;
+      asr_with_diarization?: {
+        properties: {
+          duration_ms: number;
+          audio_format: string;
+          channels: number[];
+          sampling_rate: number;
+        };
+        speakers: Array<{
+          speaker_id: number;
+          label: string;
+        }>;
+        speaker_count: number;
+        sentences: Array<{
+          sentence_id: number;
+          begin_time: number;
+          end_time: number;
+          text: string;
+          speaker_id: number;
+        }>;
+        total_sentences: number;
+      };
     }>(`/files/original/${fileId}`);
   },
 
@@ -416,5 +556,71 @@ export const filesAPI = {
     if (url) {
       URL.revokeObjectURL(url);
     }
+  },
+
+  // 更新说话人标签
+  updateSpeakerLabel: async (fileId: string, speakerId: number, newLabel: string): Promise<{ success: boolean; message: string }> => {
+    const response = await api.patch(`/files/${fileId}/speaker/${speakerId}?new_label=${encodeURIComponent(newLabel)}`);
+    return response.data;
+  },
+
+  // 音频AI分析 - 提交分析任务
+  analyzeAudio: async (params: {
+    execution_id: number;
+    template_id?: number;
+    template_variables?: Record<string, any>;
+  }): Promise<{
+    success: boolean;
+    task_id: string;
+    execution_id: number;
+    message: string;
+  }> => {
+    return api.post('/files/audio/analyze', params);
+  },
+
+  // 音频AI分析 - 查询任务状态
+  getAudioAnalysisStatus: async (taskId: string): Promise<{
+    task_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    execution_id?: number;
+    total_tokens?: number;
+    total_price?: number;
+    llm_model?: string;
+    llm_provider?: string;
+    logs?: Array<{ timestamp: string; level: string; message: string }>;
+  }> => {
+    return api.get(`/files/audio/analyze/${taskId}/status`);
+  },
+
+  // 文档AI分析 - 提交分析任务
+  analyzeDocument: async (params: {
+    execution_id: number;
+    template_id: number;
+    template_variables?: Record<string, any>;
+  }): Promise<{
+    success: boolean;
+    task_id: string;
+    execution_id: number;
+    message: string;
+  }> => {
+    return api.post('/files/document/analyze', params);
+  },
+
+  // 文档AI分析 - 查询任务状态
+  getDocumentAnalysisStatus: async (taskId: string): Promise<{
+    task_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    execution_id?: number;
+    total_tokens?: number;
+    total_price?: number;
+    llm_model?: string;
+    llm_provider?: string;
+    logs?: Array<{ timestamp: string; level: string; message: string }>;
+  }> => {
+    return api.get(`/files/document/analyze/${taskId}/status`);
   }
 }; 

@@ -265,7 +265,7 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
             <Panel
               header={
                 <Text strong style={{ fontSize: '14px' }}>
-                  <InfoCircleOutlined /> 可选参数 ({optionalVars.length})
+                  <InfoCircleOutlined /> Optional Parameters ({optionalVars.length})
                 </Text>
               }
               key="optional"

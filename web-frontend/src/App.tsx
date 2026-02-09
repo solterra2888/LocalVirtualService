@@ -30,6 +30,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import DashboardSettingsPage from './pages/DashboardSettingsPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
+import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
 
 // 私有路由组件
@@ -175,7 +176,9 @@ const App: React.FC = () => {
       <LoggerProvider>
         <Router>
           <DashboardSettingsProvider>
-            <AppContent />
+            <FileProcessingProvider>
+              <AppContent />
+            </FileProcessingProvider>
           </DashboardSettingsProvider>
         </Router>
       </LoggerProvider>

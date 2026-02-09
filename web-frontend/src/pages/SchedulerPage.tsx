@@ -22,7 +22,9 @@ import {
   InputNumber,
   Table,
   Badge,
-  Popconfirm
+  Popconfirm,
+  ConfigProvider,
+  theme as antdTheme
 } from 'antd';
 import {
   ReloadOutlined,
@@ -52,6 +54,7 @@ import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
 import { useAuthStore } from '../store/authStore';
 import { useNavigate } from 'react-router-dom';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
 import TaskStatusModal from '../components/TaskStatusModal';
@@ -59,6 +62,35 @@ import TaskStatusModal from '../components/TaskStatusModal';
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
+
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    scheduleValidBg: '#f6f8fa',
+    scheduleInvalidBg: '#fff2f0',
+    scheduleValidBorder: '#e1e4e8',
+    scheduleInvalidBorder: '#ffccc7',
+    codeBlockBg: '#fff',
+    codeBlockText: '#000',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#1a2234',
+    cardBorder: '#364152',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    scheduleValidBg: '#252d3d',
+    scheduleInvalidBg: '#2d1f1f',
+    scheduleValidBorder: '#334155',
+    scheduleInvalidBorder: '#7f1d1d',
+    codeBlockBg: '#1e293b',
+    codeBlockText: '#e0e6f1',
+  },
+} as const;
 
 // Data source configuration
 interface DataSource {
@@ -97,6 +129,9 @@ interface NewsTheme {
 const SchedulerPage: React.FC = () => {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [dataSources, setDataSources] = useState<DataSource[]>([
     {
       id: 'eodhd_news',
@@ -958,34 +993,57 @@ const SchedulerPage: React.FC = () => {
 
   if (!user?.is_admin) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Card>
-          <Result
-            status="info"
-            title="Scheduler configuration requires admin access"
-            subTitle="Task Management and Execution History have moved to Scheduler Logs."
-            extra={
-              <Button type="primary" onClick={() => navigate('/scheduler/logs')}>
-                Go to Scheduler Logs
-              </Button>
-            }
-          />
-        </Card>
-      </div>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+          ...(isDark && {
+            token: {
+              colorBgContainer: colors.cardBg,
+              colorBorderSecondary: colors.cardBorder,
+            },
+          }),
+        }}
+      >
+        <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+          <Card>
+            <Result
+              status="info"
+              title="Scheduler configuration requires admin access"
+              subTitle="Task Management and Execution History have moved to Scheduler Logs."
+              extra={
+                <Button type="primary" onClick={() => navigate('/scheduler/logs')}>
+                  Go to Scheduler Logs
+                </Button>
+              }
+            />
+          </Card>
+        </div>
+      </ConfigProvider>
     );
   }
 
 
   return (
-    <div style={{ padding: '24px' }}>
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
       {/* Page title */}
       <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <Title level={2} style={{ margin: 0 }}>
+          <Title level={2} style={{ margin: 0, color: colors.text }}>
             <DatabaseOutlined style={{ marginRight: '8px' }} />
             Scheduler Management
           </Title>
-          <Text type="secondary" style={{ margin: '8px 0 0 0', display: 'block' }}>
+          <Text type="secondary" style={{ margin: '8px 0 0 0', display: 'block', color: colors.textSecondary }}>
             Simplified data fetching scheduler - Manage EODHD, Alpha Vantage, Finviz and other data sources
           </Text>
         </div>
@@ -1180,14 +1238,14 @@ const SchedulerPage: React.FC = () => {
                       <div style={{ 
                         marginBottom: '16px', 
                         padding: '12px', 
-                        backgroundColor: cronInfo.isValid ? '#f6f8fa' : '#fff2f0', 
+                        backgroundColor: cronInfo.isValid ? colors.scheduleValidBg : colors.scheduleInvalidBg, 
                         borderRadius: '6px', 
-                        border: `1px solid ${cronInfo.isValid ? '#e1e4e8' : '#ffccc7'}` 
+                        border: `1px solid ${cronInfo.isValid ? colors.scheduleValidBorder : colors.scheduleInvalidBorder}` 
                       }}>
                         <div style={{ marginBottom: '8px' }}>
                           <Space>
                             <ScheduleOutlined style={{ color: cronInfo.isValid ? '#1890ff' : '#ff4d4f' }} />
-                            <Text strong style={{ fontSize: '13px' }}>Current Schedule:</Text>
+                            <Text strong style={{ fontSize: '13px', color: colors.text }}>Current Schedule:</Text>
                             {cronInfo.isValid ? (
                               <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '12px' }} />
                             ) : (
@@ -1198,10 +1256,10 @@ const SchedulerPage: React.FC = () => {
                         <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <Text code style={{ 
                             fontSize: '12px', 
-                            backgroundColor: '#fff', 
+                            backgroundColor: colors.codeBlockBg, 
                             padding: '2px 6px', 
                             borderRadius: '3px',
-                            color: cronInfo.isValid ? '#000' : '#ff4d4f'
+                            color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f'
                           }}>
                             {cronInfo.expression}
                           </Text>
@@ -1672,6 +1730,7 @@ const SchedulerPage: React.FC = () => {
         } : undefined}
       />
     </div>
+    </ConfigProvider>
   );
 };
 

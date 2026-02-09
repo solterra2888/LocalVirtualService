@@ -57,8 +57,10 @@ class TaskExecutionResponse(BaseModel):
     total_cost: Optional[float] = None
     rc_agent_status: Optional[str] = None
     first_filename: Optional[str] = None  # 第一个文件的名称
+    first_file_type: Optional[str] = None  # 第一个文件的类型（用于列表筛选）
     llm_model: Optional[str] = None  # LLM模型名称
     llm_provider: Optional[str] = None  # LLM提供商
+    first_task_id: Optional[str] = None  # 第一个文件的task_id（用于判断是否正在处理）
     
     class Config:
         from_attributes = True

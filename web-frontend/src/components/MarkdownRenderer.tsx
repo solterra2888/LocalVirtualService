@@ -16,14 +16,16 @@ const LIGHT = {
   h1: '#1f2937', h2: '#374151', h3: '#4b5563', h4: '#6b7280',
   text: '#374151', border: '#e5e7eb', blockquoteBg: '#f8fafc', blockquote: '#475569',
   codeBg: '#f1f5f9', code: '#e11d48', preBg: '#f8fafc', preBorder: '#e2e8f0',
-  tableBorder: '#e2e8f0', theadBg: '#f8fafc', th: '#374151', td: '#4b5563',
+  tableBorder: '#e2e8f0', theadBg: '#f8fafc', tbodyBg: '#fff',
+  th: '#374151', td: '#4b5563',
   link: '#3b82f6', strong: '#1f2937', em: '#6b7280', hr: '#e5e7eb',
 };
 const DARK = {
   h1: '#e0e6f1', h2: '#c9d1d9', h3: '#b1bac4', h4: '#8b949e',
   text: 'rgba(255,255,255,0.9)', border: 'rgba(255,255,255,0.2)', blockquoteBg: 'rgba(255,255,255,0.06)', blockquote: 'rgba(255,255,255,0.7)',
   codeBg: 'rgba(255,255,255,0.1)', code: '#79c0ff', preBg: 'rgba(255,255,255,0.06)', preBorder: 'rgba(255,255,255,0.15)',
-  tableBorder: 'rgba(255,255,255,0.2)', theadBg: 'rgba(255,255,255,0.08)', th: '#e0e6f1', td: 'rgba(255,255,255,0.85)',
+  tableBorder: 'rgba(255,255,255,0.2)', theadBg: 'rgba(255,255,255,0.08)', tbodyBg: 'transparent',
+  th: '#e0e6f1', td: 'rgba(255,255,255,0.85)',
   link: '#58a6ff', strong: '#e0e6f1', em: 'rgba(255,255,255,0.7)', hr: 'rgba(255,255,255,0.2)',
 };
 
@@ -209,7 +211,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 borderCollapse: 'collapse',
                 border: `1px solid ${c.tableBorder}`,
                 borderRadius: '8px',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                backgroundColor: variant === 'dark' ? 'rgba(0,0,0,0.15)' : (c.tbodyBg ?? undefined)
               }}>
                 {children}
               </table>
@@ -226,7 +229,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               textAlign: 'left',
               fontWeight: '600',
               borderBottom: `1px solid ${c.tableBorder}`,
-              color: c.th
+              color: c.th,
+              backgroundColor: c.theadBg
             }}>
               {children}
             </th>
@@ -235,7 +239,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             <td style={{ 
               padding: '12px 16px',
               borderBottom: `1px solid ${c.tableBorder}`,
-              color: c.td
+              color: c.td,
+              backgroundColor: variant === 'dark' ? 'transparent' : undefined
             }}>
               {children}
             </td>
