@@ -68,13 +68,54 @@ interface ProcessingResult {
 
 const INPUT_CONTROL_HEIGHT = 32;
 
+/* 与 FRONTEND_STYLE_GUIDE 一致 */
+const THEME_COLORS = {
+  light: {
+    pageBg: '#f5f5f5',
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined,
+  },
+  dark: {
+    pageBg: '#1E202B',
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
 const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, themeMode }) => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const { addTask } = useFileProcessing();
 
-  const inputStyle: React.CSSProperties = { width: '100%', height: INPUT_CONTROL_HEIGHT };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    height: INPUT_CONTROL_HEIGHT,
+    ...(isDark && colors.inputBg ? { backgroundColor: colors.inputBg } : {}),
+  };
   
   // 文件相关状态
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -121,7 +162,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
   });
   
   // AI Analysis 启用开关
-  const [enableAIAnalysis, setEnableAIAnalysis] = useState(true);
+  const [enableAIAnalysis, setEnableAIAnalysis] = useState(false);
 
   // 加载初始数据
   useEffect(() => {
@@ -373,9 +414,15 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
   };
 
   const handleStartProcessing = async () => {
-    // 验证必填项
     if (files.length === 0) {
       message.warning('Please upload a file first');
+      return;
+    }
+
+    // 禁用 AI Analysis 时：文件已在拖放时上传，仅关闭弹窗即可
+    if (!enableAIAnalysis) {
+      message.success('File uploaded. You can view it on the Files page.');
+      resetAndClose();
       return;
     }
 
@@ -412,8 +459,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
 
       // 添加任务到全局进度显示
       addTask(response.task_id, files[0].name, 'document');
-      message.success('File processing task started. Check progress in NavBar.');
-      
+
       // 立即关闭弹窗
       resetAndClose();
     } catch (error: any) {
@@ -434,7 +480,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
     setSelectedIndustry('');
     setSelectedTicker('');
     setAnalysisMode('local_llm');
-    setEnableAIAnalysis(true); // 重置AI Analysis开关
+    setEnableAIAnalysis(false); // 重置AI Analysis开关，默认关闭
     setProcessingParams({
       language: ['ch_sim', 'en'],
       fast_mode: false,
@@ -458,22 +504,30 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
   const modalStyles = isDark
     ? {
         header: {
-          background: '#1a2234',
-          color: '#e0e6f1',
-          borderBottom: '1px solid #364152',
+          background: colors.cardBg,
+          color: colors.text,
+          borderBottom: `1px solid ${colors.cardBorder}`,
         } as React.CSSProperties,
         content: {
-          background: '#1a2234',
-          boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
+          background: colors.cardBg,
+          borderRadius: CARD_STYLE_BEHANCE_DARK.borderRadius,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
         } as React.CSSProperties,
         body: {
-          background: '#1a2234',
-          color: '#e0e6f1',
+          background: colors.cardBg,
+          color: colors.text,
           maxHeight: '85vh',
           overflowY: 'auto' as const,
         } as React.CSSProperties,
       }
-    : undefined;
+    : {
+        content: {
+          borderRadius: CARD_STYLE_BEHANCE.borderRadius,
+          boxShadow: CARD_STYLE_BEHANCE.boxShadow,
+          border: `1px solid ${colors.cardBorder}`,
+        } as React.CSSProperties,
+      };
 
   return (
     <ConfigProvider
@@ -481,12 +535,16 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         ...(isDark && {
           token: {
-            colorBgContainer: '#212936',
-            colorBorder: '#364152',
-            colorBorderSecondary: '#364152',
-            colorText: '#e0e6f1',
-            colorTextSecondary: '#94a3b8',
-            colorPrimary: '#1890ff',
+            colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
@@ -507,21 +565,17 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         closable={true}
         maskClosable={true}
         maskStyle={{
-          background: isDark ? 'rgba(0, 0, 0, 0.6)' : undefined,
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.45)',
           backdropFilter: 'blur(6px)',
           WebkitBackdropFilter: 'blur(6px)',
         }}
         styles={modalStyles}
-        bodyStyle={
-          modalStyles
-            ? undefined
-            : {
-                maxHeight: '85vh',
-                overflowY: 'auto',
-              }
-        }
+        bodyStyle={{
+          maxHeight: '85vh',
+          overflowY: 'auto',
+        }}
       >
-      <Form form={form} layout="vertical" style={{ padding: '8px 0' }}>
+      <Form form={form} layout="vertical" style={{ padding: '12px 0' }}>
         {/* 文件上传区域 */}
         {files.length === 0 ? (
           <Upload.Dragger
@@ -529,26 +583,28 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             showUploadList={false}
             disabled={uploadingFiles}
             style={{
-              background: isDark ? '#212936' : '#fafafa',
-              border: `1px dashed ${isDark ? '#364152' : '#d9d9d9'}`,
+              background: colors.codeBlockBg,
+              border: `1px dashed ${colors.cardBorder}`,
+              borderRadius: 8,
             }}
           >
             <p className="ant-upload-drag-icon">
-              <InboxOutlined style={{ color: isDark ? '#1890ff' : undefined }} />
+              <InboxOutlined style={{ color: colors.selectedBorder }} />
             </p>
-            <p className="ant-upload-text" style={{ color: isDark ? '#e0e6f1' : undefined }}>
+            <p className="ant-upload-text" style={{ color: colors.text }}>
               Click or drag file to this area to upload
             </p>
-            <p className="ant-upload-hint" style={{ color: isDark ? '#94a3b8' : undefined }}>
+            <p className="ant-upload-hint" style={{ color: colors.textSecondary }}>
               Support PDF, Excel, Word, Image and more (for AI Analysis)
             </p>
           </Upload.Dragger>
         ) : (
           <div
             style={{
-              padding: '16px',
-              background: isDark ? '#212936' : '#fafafa',
-              borderRadius: '8px',
+              padding: '16px 20px',
+              background: colors.codeBlockBg,
+              border: `1px solid ${colors.cardBorder}`,
+              borderRadius: 8,
               marginBottom: '16px',
             }}
           >
@@ -567,7 +623,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
           </div>
         )}
 
-        <Divider style={{ margin: '16px 0' }} />
+        <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
 
         {/* AI Analysis 启用开关 */}
         <Form.Item 
@@ -593,19 +649,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             checkedChildren="Enabled"
             unCheckedChildren="Disabled"
           />
-          {!enableAIAnalysis && (
-            <div style={{
-              marginTop: '8px',
-              padding: '8px 12px',
-              backgroundColor: isDark ? 'rgba(250, 173, 20, 0.15)' : '#fffbe6',
-              border: `1px solid ${isDark ? 'rgba(250, 173, 20, 0.45)' : '#ffe58f'}`,
-              borderRadius: '6px',
-              fontSize: '12px',
-              color: '#faad14'
-            }}>
-              Files will be uploaded only. No AI analysis or document processing will be performed.
-            </div>
-          )}
         </Form.Item>
 
         {/* AI Analysis */}
@@ -615,7 +658,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             fontSize: '14px',
             fontWeight: 600,
             marginBottom: '12px',
-            color: isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+            color: colors.text,
           }}>
             AI Analysis
           </div>
@@ -664,10 +707,11 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                       color={isSelected ? color : undefined}
                       style={{
                         cursor: 'pointer',
-                        border: isSelected ? '2px solid #1890ff' : `1px solid ${isDark ? '#364152' : '#d9d9d9'}`,
-                        backgroundColor: isSelected ? undefined : (isDark ? '#212936' : '#f5f5f5'),
+                        border: isSelected ? `2px solid ${colors.selectedBorder}` : `1px solid ${colors.cardBorder}`,
+                        backgroundColor: isSelected ? undefined : colors.codeBlockBg,
                         fontWeight: isSelected ? 'bold' : 'normal',
-                        padding: '4px 12px'
+                        padding: '4px 12px',
+                        borderRadius: 8,
                       }}
                       onClick={() => handleTaskTypeChange(task.id)}
                     >
@@ -701,7 +745,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                       <LoadingOutlined /> 正在重试加载RC Agent... ({taskTypesLoadAttempts}/{maxTaskTypesRetries})
                     </div>
                   ) : (
-                    <div style={{ color: isDark ? '#94a3b8' : '#999' }}>
+                    <div style={{ color: colors.textSecondary }}>
                       No AI Agents available
                     </div>
                   )}
@@ -784,9 +828,9 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                 padding: '8px 12px',
                 backgroundColor: isDark ? 'rgba(82, 196, 26, 0.15)' : '#f6ffed',
                 border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.45)' : '#b7eb8f'}`,
-                borderRadius: '6px',
+                borderRadius: 8,
                 fontSize: '12px',
-                color: '#52c41a'
+                color: '#52c41a',
               }}>
                 <strong>Selected:</strong> {selectedSector} → {selectedIndustry}
                 {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
@@ -804,7 +848,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             fontSize: '14px',
             fontWeight: 600,
             marginBottom: '8px',
-            color: isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+            color: colors.text,
           }}>
             Document Processing (LlamaParse Server)
           </div>
@@ -887,7 +931,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                     </Col>
                   </Row>
 
-                  <Divider style={{ margin: '12px 0' }} />
+                  <Divider style={{ margin: '12px 0', borderColor: colors.cardBorder }} />
 
                   <Row gutter={[12, 12]}>
                     <Col span={8}>
@@ -992,42 +1036,37 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         </div>
         )}
 
-        {/* 提示信息 */}
-        {files.length > 0 && (
-          <div
+        {/* 操作按钮 */}
+        <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Button
+            onClick={handleClose}
             style={{
-              padding: '12px 16px',
-              background: isDark ? (enableAIAnalysis ? 'rgba(24, 144, 255, 0.1)' : 'rgba(82, 196, 26, 0.1)') : (enableAIAnalysis ? '#e6f7ff' : '#f6ffed'),
-              border: `1px solid ${isDark ? (enableAIAnalysis ? 'rgba(24, 144, 255, 0.3)' : 'rgba(82, 196, 26, 0.3)') : (enableAIAnalysis ? '#91d5ff' : '#b7eb8f')}`,
-              borderRadius: '8px',
-              marginBottom: '16px',
+              borderRadius: 8,
+              ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
             }}
           >
-            <p style={{ margin: 0, fontSize: '13px', color: isDark ? (enableAIAnalysis ? '#91d5ff' : '#95de64') : (enableAIAnalysis ? '#1890ff' : '#52c41a') }}>
-              {enableAIAnalysis 
-                ? 'File uploaded successfully. Click "Start Processing" to analyze. Progress will be shown in NavBar.'
-                : 'File uploaded successfully. You can now close this window or upload another file.'
-              }
-            </p>
-          </div>
-        )}
-
-        {/* 操作按钮 */}
-        <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button onClick={handleClose}>
             Close
           </Button>
           <Space>
-            {/* 显示 Start Processing (仅当启用AI Analysis且有文件时) */}
-            {files.length > 0 && enableAIAnalysis && (
+            {/* 有文件时始终显示 Start Processing；禁用 AI 时点击仅确认并关闭，启用 AI 时需选择模板/Agent 后才可点击 */}
+            {files.length > 0 && (
               <Button
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 onClick={handleStartProcessing}
                 disabled={
-                  (analysisMode === 'remote_agent' && !selectedTaskType) ||
-                  (analysisMode === 'local_llm' && !selectedTemplateId)
+                  enableAIAnalysis &&
+                  ((analysisMode === 'remote_agent' && !selectedTaskType) ||
+                    (analysisMode === 'local_llm' && !selectedTemplateId))
                 }
+                style={{
+                  borderRadius: 10,
+                  fontWeight: 500,
+                  height: 36,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                }}
               >
                 Start Processing
               </Button>
@@ -1038,6 +1077,10 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
               onClick={() => {
                 onCancel();
                 navigate('/files');
+              }}
+              style={{
+                borderRadius: 8,
+                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
               }}
             >
               Go to Files Page

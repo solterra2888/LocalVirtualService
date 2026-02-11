@@ -5,9 +5,31 @@ import {
   StarFilled,
   StarOutlined
 } from '@ant-design/icons';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, type WatchlistItem } from '../services/dashboard';
 
 const { Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: 'rgba(0, 0, 0, 0.06)',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 // 渲染星星图标的辅助函数
 const renderStars = (count: number, filled: boolean = true) => {
@@ -37,6 +59,9 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
   onCancel,
   onSuccess
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const [updating, setUpdating] = React.useState<boolean>(false);
 
@@ -86,10 +111,26 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
     return null;
   }
 
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
+          backgroundColor: colors.cardBg,
+        },
+        header: {
+          color: colors.text,
+          borderBottomColor: colors.cardBorder,
+        },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   return (
     <Modal
       title={
-        <Space>
+        <Space style={{ color: 'inherit' }}>
           <EditOutlined />
           <span>Edit Watchlist Item</span>
         </Space>
@@ -103,6 +144,7 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
       footer={null}
       width={600}
       destroyOnClose
+      styles={modalStyles}
     >
       <div style={{ marginBottom: '16px' }}>
         <Text strong>Stock:</Text>
@@ -159,17 +201,21 @@ const EditWatchlistItemModal: React.FC<EditWatchlistItemModalProps> = ({
 
         <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
           <Space>
-            <Button onClick={() => {
-              resetForm();
-              onCancel();
-            }}>
+            <Button
+              onClick={() => {
+                resetForm();
+                onCancel();
+              }}
+              style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+            >
               Cancel
             </Button>
-            <Button 
-              type="primary" 
+            <Button
+              type="primary"
               htmlType="submit"
               loading={updating}
               icon={<EditOutlined />}
+              style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
             >
               Update
             </Button>

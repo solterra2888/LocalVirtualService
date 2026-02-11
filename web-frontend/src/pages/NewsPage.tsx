@@ -84,7 +84,7 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 const { Text } = Typography;
 const { Search } = Input;
 
-// 主题配色（与 FinvizDashboard / Dashboard 一致）
+// 主题配色（与 FRONTEND_STYLE_GUIDE 一致，Behance 风格）
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -92,23 +92,39 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: '#fff',
     hoverBg: '#f5f5f5',
     borderSub: '#e8e8e8',
     siderBg: '#fff',
     headerBorder: '#f0f0f0',
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    hoverBg: '#212936',
-    borderSub: '#2d3748',
-    siderBg: '#212936',
-    headerBorder: '#364152',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
+    borderSub: 'rgba(255, 255, 255, 0.06)',
+    siderBg: '#252d3d',
+    headerBorder: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
+
+// Behance 卡片风格：圆角 12px、柔和阴影、细边框
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+};
 
 const ANALYSIS_MODAL_BODY_HEIGHT = '68vh';
 
@@ -152,6 +168,9 @@ const NewsPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const colors = THEME_COLORS[themeMode];
   const isDark = themeMode === 'dark';
+  const cardStyleBehance = isDark
+    ? { ...CARD_STYLE_BEHANCE_DARK, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}` }
+    : { ...CARD_STYLE_BEHANCE, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}` };
   const hideTooltipTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   
   const [state, setState] = useState<NewsPageState>({
@@ -928,12 +947,20 @@ const NewsPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <div style={{ padding: '12px 16px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
       <style>
         {`
           .ant-select-dropdown .ant-select-item {
@@ -1061,20 +1088,20 @@ const NewsPage: React.FC = () => {
           .ant-select-selection-placeholder {
             line-height: 20px !important;
           }
-          /* Tooltip样式覆盖 - 随主题，与 FinvizDashboard 一致：暗色下文字为浅色且可交互 */
+          /* Tooltip 随主题（Behance 风格）：使用语义色 */
           .news-page-tooltip .ant-tooltip-inner {
-            background-color: ${isDark ? '#1e293b' : 'rgba(255, 255, 255, 0.95)'} !important;
-            color: ${isDark ? '#e0e6f1' : '#333'} !important;
-            border: 1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#d9d9d9'} !important;
-            box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05) !important;
+            background-color: ${isDark ? colors.codeBlockBg : colors.cardBg} !important;
+            color: ${colors.text} !important;
+            border: 1px solid ${colors.cardBorder} !important;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12) !important;
           }
           .news-page-tooltip .ant-tooltip-inner,
           .news-page-tooltip .ant-tooltip-inner * {
-            color: ${isDark ? '#e0e6f1' : '#333'} !important;
+            color: ${colors.text} !important;
           }
           .news-page-tooltip .ant-tooltip-arrow::before {
-            background-color: ${isDark ? '#1e293b' : 'rgba(255, 255, 255, 0.95)'} !important;
-            border: 1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#d9d9d9'} !important;
+            background: ${isDark ? colors.codeBlockBg : colors.cardBg} !important;
+            border: 1px solid ${colors.cardBorder} !important;
           }
           /* Slider marks字体大小 */
           .ant-slider-mark-text {
@@ -1088,8 +1115,9 @@ const NewsPage: React.FC = () => {
           <Col span={24}>
             {/* 主题筛选模式下的新闻列表 */}
             <Card
-              style={{ backgroundColor: colors.cardBg, borderColor: colors.cardBorder }}
-              bodyStyle={{ backgroundColor: colors.cardBg }}
+              style={cardStyleBehance}
+              bodyStyle={{ backgroundColor: colors.cardBg, padding: '20px 24px' }}
+              headStyle={isDark ? { backgroundColor: colors.cardBg, borderBottomColor: colors.cardBorder, color: colors.text } : undefined}
               title={
                 <Space>
                   <FilterOutlined />
@@ -1097,8 +1125,8 @@ const NewsPage: React.FC = () => {
                   <span
                     style={{
                       fontSize: '11px',
-                      color: isDark ? '#5dade2' : '#1890ff',
-                      backgroundColor: isDark ? 'rgba(93, 173, 226, 0.2)' : 'rgba(24, 144, 255, 0.1)',
+                      color: colors.selectedBorder,
+                      backgroundColor: isDark ? 'rgba(33, 150, 243, 0.12)' : 'rgba(24, 144, 255, 0.1)',
                       borderRadius: '12px',
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -1121,7 +1149,7 @@ const NewsPage: React.FC = () => {
                     allowClear
                     enterButton={<SearchOutlined />}
                     size="small"
-                    style={{ width: 400 }}
+                    style={{ width: 400, ...(isDark && { backgroundColor: colors.inputBg }) }}
                     value={state.themeFilters.searchText || ''}
                     onChange={(e) => {
                       const searchText = e.target.value;
@@ -1151,7 +1179,7 @@ const NewsPage: React.FC = () => {
                     suffix={
                       state.themeFilters.searchText ? (
                         <CloseCircleOutlined
-                          style={{ color: '#999', cursor: 'pointer' }}
+                          style={{ color: colors.textSecondary, cursor: 'pointer' }}
                           onClick={() => {
                             const newFilters = {
                               ...state.themeFilters,
@@ -1293,9 +1321,9 @@ const NewsPage: React.FC = () => {
                             fontSize: '11px',
                             padding: '4px 8px',
                             margin: 0,
-                            border: preset.id === state.activePresetId ? `2px solid ${isDark ? '#5dade2' : '#1890ff'}` : `1px solid ${colors.cardBorder}`,
+                            border: preset.id === state.activePresetId ? `2px solid ${colors.selectedBorder}` : `1px solid ${colors.cardBorder}`,
                             fontWeight: preset.id === state.activePresetId ? 600 : 400,
-                            backgroundColor: preset.id === state.activePresetId ? undefined : (isDark ? colors.hoverBg : '#f0f0f0')
+                            backgroundColor: preset.id === state.activePresetId ? (isDark ? 'rgba(33, 150, 243, 0.12)' : undefined) : (isDark ? colors.hoverBg : '#f0f0f0')
                           }}
                           onClick={() => handleApplyPreset(preset)}
                         >
@@ -1321,8 +1349,9 @@ const NewsPage: React.FC = () => {
                             fontSize: '11px',
                             padding: '4px 8px',
                             margin: 0,
-                            border: preset.id === state.activePresetId ? `2px solid ${isDark ? '#5dade2' : '#1890ff'}` : `1px solid ${colors.cardBorder}`,
-                            fontWeight: preset.id === state.activePresetId ? 600 : 400
+                            border: preset.id === state.activePresetId ? `2px solid ${colors.selectedBorder}` : `1px solid ${colors.cardBorder}`,
+                            fontWeight: preset.id === state.activePresetId ? 600 : 400,
+                            backgroundColor: preset.id === state.activePresetId ? (isDark ? 'rgba(33, 150, 243, 0.12)' : undefined) : undefined
                           }}
                           onClick={() => handleApplyPreset(preset)}
                         >
@@ -1346,8 +1375,9 @@ const NewsPage: React.FC = () => {
                             fontSize: '11px',
                             padding: '4px 8px',
                             margin: 0,
-                            border: preset.id === state.activePresetId ? `2px solid ${isDark ? '#5dade2' : '#1890ff'}` : `1px solid ${colors.cardBorder}`,
-                            fontWeight: preset.id === state.activePresetId ? 600 : 400
+                            border: preset.id === state.activePresetId ? `2px solid ${colors.selectedBorder}` : `1px solid ${colors.cardBorder}`,
+                            fontWeight: preset.id === state.activePresetId ? 600 : 400,
+                            backgroundColor: preset.id === state.activePresetId ? (isDark ? 'rgba(33, 150, 243, 0.12)' : undefined) : undefined
                           }}
                           onClick={() => handleApplyPreset(preset)}
                         >
@@ -1375,21 +1405,24 @@ const NewsPage: React.FC = () => {
                         <div
                           key={item.id}
                           style={{
-                            padding: '10px 12px',
-                            marginBottom: '4px',
-                            borderRadius: '8px',
-                            borderBottom: `1px solid ${colors.borderSub}`,
+                            padding: '12px 16px',
+                            marginBottom: '8px',
+                            borderRadius: 12,
+                            border: `1px solid ${colors.cardBorder}`,
+                            boxShadow: isDark ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 2px 8px rgba(0, 0, 0, 0.06)',
                             cursor: 'pointer',
-                            transition: 'background-color 0.2s ease',
+                            transition: 'background-color 0.2s ease, box-shadow 0.2s ease',
                             position: 'relative',
                             backgroundColor: colors.cardBg
                           }}
                           onClick={() => showNewsDetail(item.id)}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.backgroundColor = colors.hoverBg;
+                            e.currentTarget.style.boxShadow = isDark ? '0 4px 16px rgba(0, 0, 0, 0.3)' : '0 4px 16px rgba(0, 0, 0, 0.1)';
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.backgroundColor = colors.cardBg;
+                            e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 2px 8px rgba(0, 0, 0, 0.06)';
                           }}
                         >
                           {/* 标题 */}
@@ -1522,9 +1555,9 @@ const NewsPage: React.FC = () => {
                                   fontWeight: 600,
                                   padding: '0 3px',
                                   borderRadius: 2,
-                                  background: isDark ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
-                                  color: isDark ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
-                                  border: `1px solid ${isDark ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
+                                  background: isDark ? 'rgba(33, 150, 243, 0.12)' : 'rgba(24, 144, 255, 0.06)',
+                                  color: colors.selectedBorder,
+                                  border: `1px solid ${isDark ? 'rgba(33, 150, 243, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
                                 }}
                               >
                                 AI
@@ -1603,14 +1636,15 @@ const NewsPage: React.FC = () => {
                             width: tooltipWidth,
                             maxHeight: tooltipMaxHeight,
                             overflow: 'auto',
-                            backgroundColor: isDark ? '#1e293b' : '#ffffff',
-                            border: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
-                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                            backgroundColor: colors.cardBg,
+                            border: `1px solid ${colors.cardBorder}`,
+                            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.12)',
                             padding: '12px 16px',
                             borderRadius: 8,
                             zIndex: 9999,
                             pointerEvents: 'auto',
                             fontSize: '9pt',
+                            color: colors.text,
                           }}
                           onMouseEnter={() => {
                             if (hideTooltipTimeoutRef.current) {
@@ -1630,8 +1664,8 @@ const NewsPage: React.FC = () => {
                             fontWeight: 600, 
                             marginBottom: 8, 
                             fontSize: '10pt',
-                            color: isDark ? '#e0e6f1' : '#1f2937',
-                            borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
+                            color: colors.text,
+                            borderBottom: `1px solid ${colors.cardBorder}`,
                             paddingBottom: 6
                           }}>
                             AI Analysis
@@ -1684,9 +1718,9 @@ const NewsPage: React.FC = () => {
                     fontWeight: 600,
                     padding: '1px 4px',
                     borderRadius: 2,
-                    background: isDark ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
-                    color: isDark ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
-                    border: `1px solid ${isDark ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
+                    background: isDark ? 'rgba(33, 150, 243, 0.12)' : 'rgba(24, 144, 255, 0.06)',
+                    color: colors.selectedBorder,
+                    border: `1px solid ${isDark ? 'rgba(33, 150, 243, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
                   }}
                 >
                   AI
@@ -1704,6 +1738,7 @@ const NewsPage: React.FC = () => {
             <Button
               key="close"
               onClick={() => setState(prev => ({ ...prev, sidebarVisible: false, selectedNews: null }))}
+              style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
             >
               Close
             </Button>,
@@ -1711,6 +1746,11 @@ const NewsPage: React.FC = () => {
               <Button
                 key="original"
                 type="primary"
+                style={{
+                  borderRadius: 10,
+                  fontWeight: 500,
+                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                }}
                 onClick={() => window.open(state.selectedNews?.link, '_blank')}
               >
                 View Original
@@ -1726,22 +1766,27 @@ const NewsPage: React.FC = () => {
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              ...(isDark ? { backgroundColor: '#252d3d' } : {}),
+              backgroundColor: colors.cardBg,
+              color: colors.text,
             },
-            ...(isDark
-              ? {
-                  wrapper: { backdropFilter: 'brightness(0.7)' },
-                  content: {
-                    backgroundColor: '#252d3d',
+            content: {
+              borderRadius: 12,
+              ...(isDark
+                ? {
+                    backgroundColor: colors.cardBg,
                     border: `1px solid ${colors.cardBorder}`,
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
-                  },
-                  header: {
-                    backgroundColor: '#252d3d',
-                    borderBottomColor: colors.headerBorder,
-                  },
-                }
-              : {}),
+                    boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+                  }
+                : {
+                    boxShadow: CARD_STYLE_BEHANCE.boxShadow,
+                    border: `1px solid ${colors.cardBorder}`,
+                  }),
+            },
+            header: {
+              color: colors.text,
+              borderBottomColor: colors.cardBorder,
+              backgroundColor: colors.cardBg,
+            },
           }}
         >
           {!state.selectedNews ? (
@@ -1759,9 +1804,9 @@ const NewsPage: React.FC = () => {
               const modalSectionBg = isDarkModal ? colors.siderBg : '#fafafa';
               const modalBoxBg = isDarkModal ? colors.cardBg : '#fff';
               const modalBorder = colors.cardBorder;
-              const modalLabelColor = isDarkModal ? 'rgba(255,255,255,0.65)' : '#595959';
-              const modalMetaColor = isDarkModal ? 'rgba(255,255,255,0.45)' : '#999';
-              const modalContentColor = isDarkModal ? 'rgba(255,255,255,0.85)' : '#666';
+              const modalLabelColor = colors.textSecondary;
+              const modalMetaColor = colors.textSecondary;
+              const modalContentColor = colors.text;
               const tabContentStyle = { padding: '4px 0', height: '100%', overflow: 'auto' as const };
               const tagLabelStyle = { fontSize: '11px', color: modalLabelColor, display: 'block' as const, marginBottom: '10px', fontWeight: 500 };
               const tagBoxStyle = { padding: '12px', backgroundColor: modalBoxBg, borderRadius: '6px', border: `1px solid ${modalBorder}` };

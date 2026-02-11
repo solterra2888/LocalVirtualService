@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Tag, Space, Typography, Modal, message, Popconfirm, ConfigProvider, theme as antdTheme } from 'antd';
+import { Card, Button, Table, Tag, Space, Typography, message, Popconfirm, ConfigProvider, App, Tooltip, theme as antdTheme } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { usersApi } from '../services/users';
@@ -8,8 +8,8 @@ import { getErrorMessage } from '../utils/errorHandler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title } = Typography;
-const { confirm } = Modal;
 
+// Aligned with FRONTEND_STYLE_GUIDE: semantic colors + Behance
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -17,20 +17,40 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined,
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
 
-const UsersPage: React.FC = () => {
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(0, 0, 0, 0.06)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
+const UsersPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
+  const { modal } = App.useApp();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -80,9 +100,9 @@ const UsersPage: React.FC = () => {
     setModalVisible(true);
   };
 
-  // 处理删除用户
+  // 处理删除用户（使用 App.useApp().modal 以继承 ConfigProvider 主题，见 FRONTEND_STYLE_GUIDE §7.3）
   const handleDeleteUser = (user: User) => {
-    confirm({
+    modal.confirm({
       title: 'Confirm User Deletion',
       content: `Are you sure you want to delete user "${user.username}"? This action cannot be undone.`,
       okText: 'Confirm',
@@ -95,9 +115,8 @@ const UsersPage: React.FC = () => {
           loadUsers(pagination.current, pagination.pageSize);
         } catch (error) {
           console.error('删除用户失败:', error);
-          // 错误信息已在API层处理
         }
-      }
+      },
     });
   };
 
@@ -198,16 +217,17 @@ const UsersPage: React.FC = () => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 150,
+      width: 100,
       render: (_: any, record: User) => (
         <Space>
-          <Button 
-            icon={<EditOutlined />} 
-            size="small"
-            onClick={() => handleEditUser(record)}
-          >
-            Edit
-          </Button>
+          <Tooltip title="Edit">
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEditUser(record)}
+            />
+          </Tooltip>
           <Popconfirm
             title="Are you sure you want to delete this user?"
             description="This action cannot be undone"
@@ -215,18 +235,102 @@ const UsersPage: React.FC = () => {
             okText="Confirm"
             cancelText="Cancel"
           >
-            <Button 
-              icon={<DeleteOutlined />} 
-              size="small" 
-              danger
-            >
-              Delete
-            </Button>
+            <Tooltip title="Delete">
+              <Button
+                type="text"
+                icon={<DeleteOutlined />}
+                size="small"
+                danger
+              />
+            </Tooltip>
           </Popconfirm>
         </Space>
       )
     }
   ];
+
+  return (
+    <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <div className="page-header" style={{ marginBottom: 20 }}>
+        <div className="flex-between">
+          <div style={{ flex: 1, marginRight: 24 }}>
+            <Title level={3} className="page-title" style={{ color: colors.text, marginTop: 0, marginBottom: 4 }}>
+              User Management
+            </Title>
+            <div className="page-description" style={{ color: colors.textSecondary, marginBottom: 20 }}>
+              Manage system users and permissions
+            </div>
+          </div>
+          <Space>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => loadUsers(pagination.current, pagination.pageSize)}
+              loading={loading}
+              style={{
+                borderRadius: 8,
+                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+              }}
+            >
+              Refresh
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleCreateUser}
+              style={{
+                borderRadius: 10,
+                fontWeight: 500,
+                height: 36,
+                paddingLeft: 16,
+                paddingRight: 16,
+                ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+              }}
+            >
+              Create User
+            </Button>
+          </Space>
+        </div>
+      </div>
+
+      <div className="page-content">
+        <Card
+          title={<span style={{ color: colors.text }}>User List</span>}
+          style={{ ...cardStyle, flex: 1 }}
+          bodyStyle={{ padding: '20px 24px' }}
+        >
+          <Table
+            columns={columns}
+            dataSource={users}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              ...pagination,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) =>
+                `${range[0]}-${range[1]} of ${total} items`,
+            }}
+            onChange={handleTableChange}
+          />
+        </Card>
+      </div>
+
+      <UserModal
+        visible={modalVisible}
+        onCancel={handleModalCancel}
+        onSuccess={handleModalSuccess}
+        user={editingUser}
+        loading={modalLoading}
+        onSubmit={handleUserSubmit}
+      />
+    </div>
+  );
+};
+
+const UsersPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
 
   return (
     <ConfigProvider
@@ -235,67 +339,22 @@ const UsersPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-        <div className="page-header" style={{ marginBottom: '24px' }}>
-          <div className="flex-between">
-            <div style={{ flex: 1, marginRight: '24px' }}>
-              <Title level={3} className="page-title" style={{ color: colors.text }}>User Management</Title>
-              <div className="page-description" style={{ color: colors.textSecondary, marginTop: '8px' }}>
-                Manage system users and permissions
-              </div>
-            </div>
-            <Space>
-              <Button 
-                icon={<ReloadOutlined />}
-                onClick={() => loadUsers(pagination.current, pagination.pageSize)}
-                loading={loading}
-              >
-                Refresh
-              </Button>
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />}
-                onClick={handleCreateUser}
-              >
-                Create User
-              </Button>
-            </Space>
-          </div>
-        </div>
-
-        <div className="page-content">
-          <Card title="User List">
-            <Table
-              columns={columns}
-              dataSource={users}
-              rowKey="id"
-              loading={loading}
-              pagination={{
-                ...pagination,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) => 
-                  `${range[0]}-${range[1]} of ${total} items`
-              }}
-              onChange={handleTableChange}
-            />
-          </Card>
-        </div>
-
-        <UserModal
-          visible={modalVisible}
-          onCancel={handleModalCancel}
-          onSuccess={handleModalSuccess}
-          user={editingUser}
-          loading={modalLoading}
-          onSubmit={handleUserSubmit}
-        />
-      </div>
+      <App>
+        <UsersPageInner />
+      </App>
     </ConfigProvider>
   );
 };

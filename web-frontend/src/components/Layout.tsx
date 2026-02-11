@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Tooltip, Badge, Switch, Modal, Popover } from 'antd';
+import type { MenuProps } from 'antd';
+import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Badge, Switch, Modal, Popover } from 'antd';
 import {
   FileTextOutlined,
   AppstoreOutlined,
@@ -22,6 +23,8 @@ import {
   SoundOutlined,
   LinkOutlined,
   SyncOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -100,7 +103,7 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：仅保留日常业务入口 + Upload Files
+  // 主导航：仅保留日常业务入口 + Add Content（文档/音频/链接等）
   const menuItems = [
     {
       key: '/dashboard',
@@ -136,15 +139,44 @@ const Layout: React.FC = () => {
     {
       key: '/files',
       icon: <FileTextOutlined />,
-      label: 'Upload Files',
+      label: 'Source',
     },
   ].filter(item => {
     if (item.children) return item.children.length > 0;
     return true;
   });
 
-  // 用户头像下拉：配置类功能 + 登出
+  // 检查是否有新的错误日志（用于显示红点提示）
+  const hasErrorLogs = globalLogger.logs.some(log =>
+    log.level === 'error' &&
+    Date.now() - new Date(log.timestamp).getTime() < 5 * 60 * 1000 // 5分钟内的错误
+  );
+
+  // 用户头像下拉：主题 + 配置类功能 + 登出
   const userMenuItems = [
+    {
+      key: 'theme',
+      icon: themeMode === 'dark' ? <MoonOutlined /> : <SunOutlined />,
+      label: (
+        <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8 }}>
+          <span>Mode</span>
+          <Switch size="small" checked={themeMode === 'dark'} onChange={(checked) => setThemeMode(checked ? 'dark' : 'light')} />
+        </span>
+      ),
+      onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
+    },
+    { type: 'divider' as const },
+    {
+      key: 'system-logs',
+      icon: <CodeOutlined />,
+      label: (
+        <Badge dot={hasErrorLogs} size="small">
+          <span>System Logs</span>
+        </Badge>
+      ),
+      onClick: () => globalLogger.actions.setShowFloating(true),
+    },
+    { type: 'divider' as const },
     { key: '/prompt-templates', icon: <BuildOutlined />, label: 'Prompt Templates', onClick: () => navigate('/prompt-templates') },
     { key: '/investment-themes', icon: <FundOutlined />, label: 'Themes Settings', onClick: () => navigate('/investment-themes') },
     { key: '/tasks', icon: <AppstoreOutlined />, label: 'AI Agent Settings', onClick: () => navigate('/tasks') },
@@ -165,12 +197,6 @@ const Layout: React.FC = () => {
     logout();
     navigate('/login');
   }
-
-  // 检查是否有新的错误日志（用于显示红点提示）
-  const hasErrorLogs = globalLogger.logs.some(log => 
-    log.level === 'error' && 
-    Date.now() - new Date(log.timestamp).getTime() < 5 * 60 * 1000 // 5分钟内的错误
-  );
 
   return (
     <AntLayout
@@ -227,10 +253,18 @@ const Layout: React.FC = () => {
               content={<TaskProgressPopover tasks={tasks} themeMode={themeMode} />}
               placement="bottomRight"
               trigger="hover"
+              overlayClassName={themeMode === 'dark' ? 'task-progress-popover-dark' : undefined}
               overlayStyle={{
-                boxShadow: themeMode === 'dark' 
-                  ? '0 6px 16px rgba(0, 0, 0, 0.5)' 
-                  : '0 3px 12px rgba(0, 0, 0, 0.15)'
+                ...(themeMode === 'dark'
+                  ? {
+                      background: '#1a2234',
+                      border: '1px solid #364152',
+                      borderRadius: 8,
+                    }
+                  : {}),
+                boxShadow: themeMode === 'dark'
+                  ? '0 6px 16px rgba(0, 0, 0, 0.5)'
+                  : '0 3px 12px rgba(0, 0, 0, 0.15)',
               }}
             >
               <div
@@ -271,31 +305,6 @@ const Layout: React.FC = () => {
           <span style={{ color: navTheme.headerTextSecondary, fontSize: 13 }}>Welcome, {user?.username}</span>
 
           <TimeDisplay />
-
-          <Tooltip title={themeMode === 'dark' ? 'Dark mode' : 'Light mode'}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: navTheme.headerTextSecondary }}>Dark</span>
-              <Switch
-                size="small"
-                checked={themeMode === 'dark'}
-                onChange={(checked) => setThemeMode(checked ? 'dark' : 'light')}
-              />
-            </span>
-          </Tooltip>
-
-          <Tooltip title="System Logs (Ctrl + `)">
-            <Badge dot={hasErrorLogs} size="small">
-              <Button
-                type="text"
-                icon={<CodeOutlined />}
-                onClick={() => globalLogger.actions.setShowFloating(true)}
-                style={{
-                  color: globalLogger.showFloating ? '#1890ff' : navTheme.headerTextSecondary,
-                  fontSize: '16px'
-                }}
-              />
-            </Badge>
-          </Tooltip>
 
           {user?.is_admin && (
             <span style={{

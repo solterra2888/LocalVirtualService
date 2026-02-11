@@ -19,9 +19,35 @@ import {
   StarFilled,
   StarOutlined
 } from '@ant-design/icons';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 
 const { Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    selectedBg: '#f0f8ff',
+    borderSecondary: '#d9d9d9',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    selectedBg: 'rgba(33, 150, 243, 0.12)',
+    borderSecondary: 'rgba(255, 255, 255, 0.2)',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 // 渲染星星图标的辅助函数
 const renderStars = (count: number, filled: boolean = true) => {
@@ -49,6 +75,9 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
   onCancel,
   onSuccess
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
@@ -135,6 +164,22 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
   };
 
 
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
+          backgroundColor: colors.cardBg,
+        },
+        header: {
+          color: colors.text,
+          borderBottomColor: colors.cardBorder,
+        },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   return (
     <Modal
       title="Add Stock to Watchlist"
@@ -147,6 +192,7 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
       footer={null}
       width={700}
       destroyOnClose
+      styles={modalStyles}
     >
       <div style={{ marginBottom: '16px' }}>
         <Input
@@ -176,14 +222,14 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
                 <List.Item
                   style={{ 
                     cursor: 'pointer',
-                    backgroundColor: selectedStock?.ticker === stock.ticker ? '#f0f8ff' : 'transparent'
+                    backgroundColor: selectedStock?.ticker === stock.ticker ? colors.selectedBg : 'transparent'
                   }}
                   onClick={() => handleSelectStock(stock)}
                 >
                   <List.Item.Meta
                     title={
                       <Space>
-                        <Text strong style={{ color: '#1890ff' }}>{stock.ticker}</Text>
+                        <Text strong style={{ color: isDark ? '#2196F3' : '#1890ff' }}>{stock.ticker}</Text>
                         <Text>{stock.company}</Text>
                       </Space>
                     }
@@ -205,7 +251,7 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
       </div>
 
       {selectedStock && (
-        <div style={{ border: '1px solid #d9d9d9', borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
+        <div style={{ border: `1px solid ${colors.borderSecondary}`, borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
           <Text strong>Selected: </Text>
           <Tag color="blue" style={{ marginLeft: '8px' }}>
             {selectedStock.ticker} - {selectedStock.company}
@@ -262,17 +308,21 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
 
             <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
               <Space>
-                <Button onClick={() => {
-                  resetModal();
-                  onCancel();
-                }}>
+                <Button
+                  onClick={() => {
+                    resetModal();
+                    onCancel();
+                  }}
+                  style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+                >
                   Cancel
                 </Button>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   htmlType="submit"
                   loading={addingLoading}
                   icon={<PlusOutlined />}
+                  style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
                 >
                   Add to Watchlist
                 </Button>

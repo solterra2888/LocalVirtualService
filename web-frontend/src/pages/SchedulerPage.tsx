@@ -63,6 +63,7 @@ const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
+// Theme colors per FRONTEND_STYLE_GUIDE: Light/Dark + Behance
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -70,27 +71,45 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined,
+    hoverBg: undefined as string | undefined,
     scheduleValidBg: '#f6f8fa',
     scheduleInvalidBg: '#fff2f0',
     scheduleValidBorder: '#e1e4e8',
     scheduleInvalidBorder: '#ffccc7',
-    codeBlockBg: '#fff',
     codeBlockText: '#000',
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    scheduleValidBg: '#252d3d',
-    scheduleInvalidBg: '#2d1f1f',
-    scheduleValidBorder: '#334155',
-    scheduleInvalidBorder: '#7f1d1d',
-    codeBlockBg: '#1e293b',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
+    scheduleValidBg: 'rgba(33, 150, 243, 0.08)',
+    scheduleInvalidBg: 'rgba(244, 67, 54, 0.12)',
+    scheduleValidBorder: 'rgba(255, 255, 255, 0.08)',
+    scheduleInvalidBorder: 'rgba(244, 67, 54, 0.4)',
     codeBlockText: '#e0e6f1',
   },
 } as const;
+
+// Behance-style: rounded corners, soft shadow, minimal border (per FRONTEND_STYLE_GUIDE §3)
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid #f0f0f0',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 // Data source configuration
 interface DataSource {
@@ -132,6 +151,7 @@ const SchedulerPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
   const [dataSources, setDataSources] = useState<DataSource[]>([
     {
       id: 'eodhd_news',
@@ -999,19 +1019,57 @@ const SchedulerPage: React.FC = () => {
           ...(isDark && {
             token: {
               colorBgContainer: colors.cardBg,
+              colorBgElevated: colors.cardBg,
               colorBorderSecondary: colors.cardBorder,
+              colorPrimary: '#2196F3',
+              colorText: colors.text,
+              colorTextSecondary: colors.textSecondary,
+              colorFillQuaternary: colors.inputBg ?? '#1E202B',
+              colorBgLayout: colors.pageBg,
+              borderRadius: 8,
+              borderRadiusLG: 12,
             },
           }),
         }}
       >
-        <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-          <Card>
+        <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+          <Card style={cardStyle} bodyStyle={{ padding: '20px 24px' }}>
             <Result
               status="info"
               title="Scheduler configuration requires admin access"
               subTitle="Task Management and Execution History have moved to Scheduler Logs."
               extra={
-                <Button type="primary" onClick={() => navigate('/scheduler/logs')}>
+                <Button
+                  type="primary"
+                  onClick={() => navigate('/scheduler/logs')}
+                  style={{
+                    borderRadius: 20,
+                    fontWeight: 500,
+                    height: 40,
+                    paddingLeft: 24,
+                    paddingRight: 24,
+                    background: isDark ? '#2196F3' : '#1890ff',
+                    borderColor: isDark ? '#2196F3' : '#1890ff',
+                    boxShadow: isDark 
+                      ? '0 4px 16px rgba(33, 150, 243, 0.35)' 
+                      : '0 4px 16px rgba(24, 144, 255, 0.3)',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  }}
+                  onMouseEnter={(e) => {
+                    const btn = e.currentTarget as HTMLButtonElement;
+                    btn.style.transform = 'translateY(-2px)';
+                    btn.style.boxShadow = isDark 
+                      ? '0 6px 20px rgba(33, 150, 243, 0.45)' 
+                      : '0 6px 20px rgba(24, 144, 255, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    const btn = e.currentTarget as HTMLButtonElement;
+                    btn.style.transform = 'translateY(0)';
+                    btn.style.boxShadow = isDark 
+                      ? '0 4px 16px rgba(33, 150, 243, 0.35)' 
+                      : '0 4px 16px rgba(24, 144, 255, 0.3)';
+                  }}
+                >
                   Go to Scheduler Logs
                 </Button>
               }
@@ -1030,99 +1088,207 @@ const SchedulerPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+    <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
       {/* Page title */}
-      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <Title level={2} style={{ margin: 0, color: colors.text }}>
+          <Title level={2} style={{ margin: 0, marginBottom: 4, color: colors.text }}>
             <DatabaseOutlined style={{ marginRight: '8px' }} />
             Scheduler Management
           </Title>
-          <Text type="secondary" style={{ margin: '8px 0 0 0', display: 'block', color: colors.textSecondary }}>
+          <Text type="secondary" style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
             Simplified data fetching scheduler - Manage EODHD, Alpha Vantage, Finviz and other data sources
           </Text>
         </div>
         <Space>
-          <Button 
-            icon={<ReloadOutlined />} 
+          <Button
+            icon={<ReloadOutlined />}
             onClick={refreshAllSources}
             loading={loading}
+            style={{
+              borderRadius: 20,
+              fontWeight: 500,
+              height: 36,
+              paddingLeft: 16,
+              paddingRight: 16,
+              border: `1.5px solid ${colors.cardBorder}`,
+              color: colors.text,
+              background: 'transparent',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+            onMouseEnter={(e) => {
+              const btn = e.currentTarget as HTMLButtonElement;
+              if (!btn.disabled) {
+                btn.style.background = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+                btn.style.transform = 'translateY(-1px)';
+                btn.style.borderColor = isDark ? '#2196F3' : '#1890ff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              const btn = e.currentTarget as HTMLButtonElement;
+              if (!btn.disabled) {
+                btn.style.background = 'transparent';
+                btn.style.transform = 'translateY(0)';
+                btn.style.borderColor = colors.cardBorder;
+              }
+            }}
           >
             Refresh Status
           </Button>
         </Space>
       </div>
 
-      {/* Main content area - simplified without Tabs */}
-      <Card>
-        {/* Statistics cards */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-          <Col xs={24} sm={8} md={6}>
-            <Card>
-              <Statistic
-                title="Total Data Sources"
-                value={dataSources.length}
-                prefix={<DatabaseOutlined />}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8} md={6}>
-            <Card>
-              <Statistic
-                title="Enabled"
-                value={enabledSources}
-                prefix={<CheckCircleOutlined />}
-                valueStyle={{ color: '#52c41a' }}
-                suffix={`/ ${dataSources.length}`}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8} md={6}>
-            <Card>
-              <Statistic
-                title="Running"
-                value={runningSources}
-                prefix={<SyncOutlined spin={runningSources > 0} />}
-                valueStyle={{ color: '#faad14' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8} md={6}>
-            <Card>
-              <Statistic
-                title="Scheduled Tasks"
-                value={scheduledTasks.length}
-                prefix={<ScheduleOutlined />}
-                valueStyle={{ color: '#722ed1' }}
-                suffix={`(${enabledTasks} enabled)`}
-              />
-            </Card>
-          </Col>
-        </Row>
+      {/* Main content - Behance list container */}
+      <div
+        style={{
+          ...cardStyle,
+          marginBottom: 0,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Stats bar - inline, no cards */}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 24,
+            padding: '20px 24px',
+            borderBottom: `1px solid ${colors.cardBorder}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#2196F3' : '#1890ff' }}>{dataSources.length}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>Data Sources</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: '#52c41a' }}>{enabledSources}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>Enabled</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: '#faad14' }}>{runningSources}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>Running</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: '#722ed1' }}>{scheduledTasks.length}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>Scheduled ({enabledTasks} on)</span>
+          </div>
+        </div>
 
-        {/* Data source cards */}
-        <Row gutter={[16, 16]}>
-          {dataSources.map(source => (
-            <Col xs={24} lg={12} xl={8} key={source.id}>
-              <Card
-                title={
+        {/* Data source list - Behance list style */}
+        <div style={{ padding: 0 }}>
+          {dataSources.map((source, index) => {
+            const cronInfo = getCronInfo(source.id);
+            const formattedParams = cronInfo ? formatTaskParams(source.id, cronInfo.params) : null;
+            const configContent = cronInfo ? (
+              <div style={{ maxWidth: 400, color: '#fff' }}>
+                <div style={{ marginBottom: 10 }}>
                   <Space>
-                    <span>{source.name}</span>
-                    {getStatusTag(source.status)}
+                    <ScheduleOutlined style={{ color: '#2196F3' }} />
+                    <span style={{ fontSize: 13, fontWeight: 'bold' }}>Configuration Details</span>
                   </Space>
-                }
-                extra={
-                  source.id === 'eodhd_fundamentals' ? null : (
+                </div>
+                <div style={{ marginBottom: 8, fontSize: 12 }}>
+                  Timezone: <span style={{ color: '#2196F3' }}>{cronInfo.timezone}</span>
+                </div>
+                {cronInfo.description && (
+                  <div style={{ marginBottom: 8, fontSize: 12 }}>
+                    Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
+                  </div>
+                )}
+                {formattedParams && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>Configuration Parameters:</div>
+                    <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#2196F3', backgroundColor: 'rgba(0,0,0,0.3)', padding: 8, borderRadius: 8, maxHeight: 200, overflow: 'auto' }}>
+                      {formattedParams}
+                    </pre>
+                    {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Full JSON:</div>
+                        <pre style={{ margin: 0, fontSize: 10, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#52c41a', backgroundColor: 'rgba(0,0,0,0.3)', padding: 6, borderRadius: 4, maxHeight: 150, overflow: 'auto' }}>
+                          {JSON.stringify(cronInfo.params, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null;
+
+            return (
+              <div
+                key={source.id}
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 16,
+                  padding: '16px 24px',
+                  borderBottom: index < dataSources.length - 1 ? `1px solid ${colors.cardBorder}` : 'none',
+                  backgroundColor: 'transparent',
+                  transition: 'background-color 0.2s',
+                  opacity: source.enabled ? 1 : 0.65,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = isDark ? colors.hoverBg ?? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                {/* Left: name, status, description, schedule */}
+                <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{source.name}</span>
+                    {getStatusTag(source.status)}
+                    {source.lastRun && (
+                      <span style={{ fontSize: 12, color: colors.textSecondary }}>Last: {source.lastRun}</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: cronInfo ? 8 : 0 }}>
+                    {source.description}
+                  </div>
+                  {cronInfo && (
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '6px 10px',
+                        borderRadius: 8,
+                        backgroundColor: cronInfo.isValid ? colors.scheduleValidBg : colors.scheduleInvalidBg,
+                        border: `1px solid ${cronInfo.isValid ? colors.scheduleValidBorder : colors.scheduleInvalidBorder}`,
+                      }}
+                    >
+                      <ScheduleOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 12 }} />
+                      <Text code style={{ fontSize: 11, backgroundColor: 'transparent', padding: 0, color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f' }}>
+                        {cronInfo.expression}
+                      </Text>
+                      <Tooltip title={configContent} placement="top" overlayStyle={{ maxWidth: 450 }} overlayInnerStyle={{ backgroundColor: 'rgba(0,0,0,0.85)', padding: 12, borderRadius: 8 }}>
+                        <SettingOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 14, cursor: 'pointer' }} />
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+                {/* Right: switch + primary action - Modern style */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  {source.id !== 'eodhd_fundamentals' && (
                     <Tooltip
                       title={
-                        source.description.includes('Coming soon') 
-                          ? 'This data source is coming soon' 
+                        source.description.includes('Coming soon')
+                          ? 'This data source is coming soon'
                           : !source.enabled && scheduledTasks.filter(task => {
                               const taskType = task.type.toLowerCase();
                               const sourceIdLower = source.id.toLowerCase();
@@ -1141,186 +1307,81 @@ const SchedulerPage: React.FC = () => {
                           : undefined
                       }
                     >
-                      <Switch
-                        checked={source.enabled}
-                        onChange={(checked) => toggleDataSource(source.id, checked)}
-                        disabled={source.description.includes('Coming soon') || loading}
-                        loading={loading && source.status === 'running'}
-                      />
+                      <div
+                        style={{
+                          position: 'relative',
+                          display: 'inline-block',
+                        }}
+                      >
+                        <Switch
+                          checked={source.enabled}
+                          onChange={(checked) => toggleDataSource(source.id, checked)}
+                          disabled={source.description.includes('Coming soon') || loading}
+                          loading={loading && source.status === 'running'}
+                          style={{
+                            backgroundColor: source.enabled 
+                              ? (isDark ? '#2196F3' : '#1890ff')
+                              : undefined,
+                            boxShadow: source.enabled 
+                              ? `0 0 12px ${isDark ? 'rgba(33, 150, 243, 0.4)' : 'rgba(24, 144, 255, 0.3)'}`
+                              : undefined,
+                          }}
+                        />
+                      </div>
                     </Tooltip>
-                  )
-                }
-                style={{ 
-                  height: '100%',
-                  opacity: source.enabled ? 1 : 0.6
-                }}
-              >
-                <div style={{ marginBottom: '16px' }}>
-                  <Text type="secondary">{source.description}</Text>
-                </div>
-
-                {source.lastRun && (
-                  <div style={{ marginBottom: '16px' }}>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      Last Run: {source.lastRun}
-                    </Text>
-                  </div>
-                )}
-
-                {/* Cron Expression Display with Configuration Icon */}
-                {(() => {
-                  const cronInfo = getCronInfo(source.id);
-                  if (cronInfo) {
-                    // Format configuration content for tooltip (excluding cron expression)
-                    const formattedParams = formatTaskParams(source.id, cronInfo.params);
-                    const configContent = (
-                      <div style={{ maxWidth: '400px', color: '#fff' }}>
-                        <div style={{ marginBottom: '10px' }}>
-                          <Space>
-                            <ScheduleOutlined style={{ color: '#1890ff' }} />
-                            <span style={{ fontSize: '13px', fontWeight: 'bold' }}>Configuration Details</span>
-                          </Space>
-                        </div>
-                        <div style={{ marginBottom: '8px', fontSize: '12px' }}>
-                          Timezone: <span style={{ color: '#1890ff' }}>{cronInfo.timezone}</span>
-                        </div>
-                        {cronInfo.description && (
-                          <div style={{ marginBottom: '8px', fontSize: '12px' }}>
-                            Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
-                          </div>
-                        )}
-                        {formattedParams && (
-                          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>
-                              Configuration Parameters:
-                            </div>
-                            <pre style={{ 
-                              margin: 0, 
-                              fontSize: '11px', 
-                              fontFamily: 'monospace',
-                              whiteSpace: 'pre-wrap',
-                              color: '#1890ff',
-                              backgroundColor: 'rgba(0,0,0,0.3)',
-                              padding: '8px',
-                              borderRadius: '4px',
-                              maxHeight: '200px',
-                              overflow: 'auto'
-                            }}>
-                              {formattedParams}
-                            </pre>
-                            {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
-                              <div style={{ marginTop: '10px' }}>
-                                <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '4px' }}>
-                                  Full JSON:
-                                </div>
-                                <pre style={{ 
-                                  margin: 0, 
-                                  fontSize: '10px', 
-                                  fontFamily: 'monospace',
-                                  whiteSpace: 'pre-wrap',
-                                  color: '#52c41a',
-                                  backgroundColor: 'rgba(0,0,0,0.3)',
-                                  padding: '6px',
-                                  borderRadius: '4px',
-                                  maxHeight: '150px',
-                                  overflow: 'auto'
-                                }}>
-                                  {JSON.stringify(cronInfo.params, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-
-                    return (
-                      <div style={{ 
-                        marginBottom: '16px', 
-                        padding: '12px', 
-                        backgroundColor: cronInfo.isValid ? colors.scheduleValidBg : colors.scheduleInvalidBg, 
-                        borderRadius: '6px', 
-                        border: `1px solid ${cronInfo.isValid ? colors.scheduleValidBorder : colors.scheduleInvalidBorder}` 
-                      }}>
-                        <div style={{ marginBottom: '8px' }}>
-                          <Space>
-                            <ScheduleOutlined style={{ color: cronInfo.isValid ? '#1890ff' : '#ff4d4f' }} />
-                            <Text strong style={{ fontSize: '13px', color: colors.text }}>Current Schedule:</Text>
-                            {cronInfo.isValid ? (
-                              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '12px' }} />
-                            ) : (
-                              <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '12px' }} />
-                            )}
-                          </Space>
-                        </div>
-                        <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Text code style={{ 
-                            fontSize: '12px', 
-                            backgroundColor: colors.codeBlockBg, 
-                            padding: '2px 6px', 
-                            borderRadius: '3px',
-                            color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f'
-                          }}>
-                            {cronInfo.expression}
-                          </Text>
-                          <Tooltip 
-                            title={configContent}
-                            placement="top"
-                            overlayStyle={{ maxWidth: '450px' }}
-                            overlayInnerStyle={{ 
-                              backgroundColor: 'rgba(0,0,0,0.85)',
-                              padding: '12px',
-                              borderRadius: '6px'
-                            }}
-                          >
-                            <SettingOutlined 
-                              style={{ 
-                                color: cronInfo.isValid ? '#1890ff' : '#ff4d4f', 
-                                fontSize: '16px',
-                                cursor: 'pointer',
-                                transition: 'color 0.3s'
-                              }} 
-                            />
-                          </Tooltip>
-                        </div>
-                        {!cronInfo.isValid && cronInfo.validationMessage && (
-                          <div style={{ marginBottom: '4px' }}>
-                            <Text type="danger" style={{ fontSize: '11px' }}>
-                              {cronInfo.validationMessage}
-                            </Text>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  {source.quickActions.map(action => (
-                    <Tooltip key={action.id} title={action.description}>
+                  )}
+                  {source.quickActions.map((action) => (
+                    <Tooltip key={action.id} title={action.description} placement="topRight">
                       <Button
-                        block
+                        type="default"
+                        size="middle"
                         icon={action.icon}
                         onClick={() => showQuickActionModal(action, source)}
-                        disabled={
-                          // Configuration buttons should always be clickable
-                          action.id.includes('configure') 
-                            ? false 
-                            : !source.enabled
-                        }
+                        disabled={action.id.includes('configure') ? false : !source.enabled}
                         loading={source.status === 'running'}
+                        style={{
+                          borderRadius: 20,
+                          fontWeight: 500,
+                          height: 36,
+                          paddingLeft: 16,
+                          paddingRight: 16,
+                          border: `1.5px solid ${isDark ? '#2196F3' : '#1890ff'}`,
+                          color: isDark ? '#2196F3' : '#1890ff',
+                          background: 'transparent',
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: 'none',
+                        }}
+                        onMouseEnter={(e) => {
+                          const btn = e.currentTarget as HTMLButtonElement;
+                          if (!btn.disabled) {
+                            btn.style.background = isDark ? '#2196F3' : '#1890ff';
+                            btn.style.color = '#fff';
+                            btn.style.transform = 'translateY(-2px) scale(1.02)';
+                            btn.style.boxShadow = isDark 
+                              ? '0 6px 20px rgba(33, 150, 243, 0.4)' 
+                              : '0 6px 20px rgba(24, 144, 255, 0.3)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          const btn = e.currentTarget as HTMLButtonElement;
+                          if (!btn.disabled) {
+                            btn.style.background = 'transparent';
+                            btn.style.color = isDark ? '#2196F3' : '#1890ff';
+                            btn.style.transform = 'translateY(0) scale(1)';
+                            btn.style.boxShadow = 'none';
+                          }
+                        }}
                       >
                         {action.name}
                       </Button>
                     </Tooltip>
                   ))}
-                </Space>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-      </Card>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
 
 
@@ -1340,10 +1401,10 @@ const SchedulerPage: React.FC = () => {
         />
       )}
 
-      {/* Quick action parameter configuration dialog */}
+      {/* Quick action parameter configuration dialog - Behance modal */}
       <Modal
         title={
-          <Space>
+          <Space style={{ color: colors.text }}>
             <CloudDownloadOutlined />
             {quickActionModal.action?.name}
           </Space>
@@ -1358,10 +1419,49 @@ const SchedulerPage: React.FC = () => {
         cancelText="Cancel"
         width={800}
         destroyOnClose
+        styles={{
+          content: {
+            borderRadius: 12,
+            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.12)',
+            border: `1px solid ${colors.cardBorder}`,
+            backgroundColor: colors.cardBg,
+          },
+          header: {
+            borderBottomColor: colors.cardBorder,
+            color: colors.text,
+          },
+          body: {
+            color: colors.text,
+          },
+        }}
+        okButtonProps={{
+          style: {
+            borderRadius: 10,
+            fontWeight: 500,
+            height: 38,
+            paddingLeft: 24,
+            paddingRight: 24,
+            background: isDark ? '#2196F3' : '#1890ff',
+            borderColor: isDark ? '#2196F3' : '#1890ff',
+            boxShadow: isDark
+              ? '0 4px 12px rgba(33, 150, 243, 0.3)'
+              : '0 4px 12px rgba(24, 144, 255, 0.25)',
+            transition: 'all 0.3s ease',
+          },
+        }}
+        cancelButtonProps={{
+          style: {
+            borderRadius: 8,
+            height: 38,
+            paddingLeft: 20,
+            paddingRight: 20,
+            border: `1px solid ${colors.cardBorder}`,
+            color: colors.textSecondary,
+            background: 'transparent',
+            transition: 'all 0.3s ease',
+          },
+        }}
       >
-        {/* Progress bar */}
-
-
         {quickActionModal.action && (
           <div>
             <div style={{ marginBottom: '16px' }}>
@@ -1478,6 +1578,18 @@ const SchedulerPage: React.FC = () => {
                             themeForm.resetFields();
                           }}
                           size="small"
+                          style={{
+                            borderRadius: 16,
+                            fontWeight: 500,
+                            height: 32,
+                            paddingLeft: 14,
+                            paddingRight: 14,
+                            background: isDark ? '#2196F3' : '#1890ff',
+                            borderColor: isDark ? '#2196F3' : '#1890ff',
+                            boxShadow: isDark 
+                              ? '0 2px 8px rgba(33, 150, 243, 0.3)' 
+                              : '0 2px 8px rgba(24, 144, 255, 0.25)',
+                          }}
                         >
                           New Theme
                         </Button>
@@ -1485,6 +1597,15 @@ const SchedulerPage: React.FC = () => {
                           icon={<BulbOutlined />}
                           onClick={initializeDefaultThemes}
                           size="small"
+                          style={{
+                            borderRadius: 16,
+                            height: 32,
+                            paddingLeft: 14,
+                            paddingRight: 14,
+                            border: `1.5px solid ${colors.cardBorder}`,
+                            color: colors.textSecondary,
+                            background: 'transparent',
+                          }}
                         >
                           Initialize Default Themes
                         </Button>
@@ -1492,6 +1613,15 @@ const SchedulerPage: React.FC = () => {
                           icon={<ReloadOutlined />}
                           onClick={loadThemes}
                           size="small"
+                          style={{
+                            borderRadius: 16,
+                            height: 32,
+                            paddingLeft: 14,
+                            paddingRight: 14,
+                            border: `1.5px solid ${colors.cardBorder}`,
+                            color: colors.textSecondary,
+                            background: 'transparent',
+                          }}
                         >
                           Refresh
                         </Button>
@@ -1636,9 +1766,9 @@ const SchedulerPage: React.FC = () => {
         )}
       </Modal>
 
-      {/* Theme editing modal */}
+      {/* Theme editing modal - Behance */}
       <Modal
-        title={selectedTheme ? "Edit Theme" : "New Theme"}
+        title={<span style={{ color: colors.text }}>{selectedTheme ? 'Edit Theme' : 'New Theme'}</span>}
         open={themeModalVisible}
         onOk={() => themeForm.submit()}
         onCancel={() => {
@@ -1648,6 +1778,48 @@ const SchedulerPage: React.FC = () => {
         }}
         okText="Save"
         cancelText="Cancel"
+        styles={{
+          content: {
+            borderRadius: 12,
+            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.12)',
+            border: `1px solid ${colors.cardBorder}`,
+            backgroundColor: colors.cardBg,
+          },
+          header: {
+            borderBottomColor: colors.cardBorder,
+            color: colors.text,
+          },
+          body: {
+            color: colors.text,
+          },
+        }}
+        okButtonProps={{
+          style: {
+            borderRadius: 10,
+            fontWeight: 500,
+            height: 38,
+            paddingLeft: 24,
+            paddingRight: 24,
+            background: isDark ? '#2196F3' : '#1890ff',
+            borderColor: isDark ? '#2196F3' : '#1890ff',
+            boxShadow: isDark
+              ? '0 4px 12px rgba(33, 150, 243, 0.3)'
+              : '0 4px 12px rgba(24, 144, 255, 0.25)',
+            transition: 'all 0.3s ease',
+          },
+        }}
+        cancelButtonProps={{
+          style: {
+            borderRadius: 8,
+            height: 38,
+            paddingLeft: 20,
+            paddingRight: 20,
+            border: `1px solid ${colors.cardBorder}`,
+            color: colors.textSecondary,
+            background: 'transparent',
+            transition: 'all 0.3s ease',
+          },
+        }}
       >
         <Form
           form={themeForm}

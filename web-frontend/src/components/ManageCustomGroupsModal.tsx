@@ -1,7 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, List, Button, Space, Popconfirm, message, Empty, Tag, Input, Form } from 'antd';
 import { FolderOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, CustomGroup } from '../services/dashboard';
+
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    inputBg: '#f5f5f5',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    inputBg: '#1E202B',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 interface ManageCustomGroupsModalProps {
   visible: boolean;
@@ -14,6 +38,9 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
   onClose,
   onUpdate,
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
@@ -86,10 +113,26 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
     }
   };
 
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
+          backgroundColor: colors.cardBg,
+        },
+        header: {
+          color: colors.text,
+          borderBottomColor: colors.cardBorder,
+        },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   return (
     <Modal
       title={
-        <Space>
+        <Space style={{ color: 'inherit' }}>
           <FolderOutlined />
           <span>Manage Custom Groups</span>
         </Space>
@@ -97,18 +140,28 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
       open={visible}
       onCancel={onClose}
       footer={[
-        <Button key="close" onClick={onClose}>
+        <Button
+          key="close"
+          onClick={onClose}
+          style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+        >
           Close
         </Button>,
       ]}
       width={600}
+      styles={modalStyles}
     >
       {customGroups.length === 0 ? (
         <Empty
           description="No custom groups yet"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         >
-          <Button type="primary" icon={<PlusOutlined />} onClick={onClose}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={onClose}
+            style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
+          >
             Create Your First Group
           </Button>
         </Empty>
@@ -121,10 +174,10 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
               key={group.id}
               style={{
                 padding: '16px',
-                border: '1px solid #f0f0f0',
+                border: `1px solid ${colors.cardBorder}`,
                 borderRadius: '8px',
                 marginBottom: '12px',
-                backgroundColor: editingGroupId === group.id ? '#f5f5f5' : '#fff',
+                backgroundColor: editingGroupId === group.id ? colors.inputBg : colors.cardBg,
               }}
             >
               {editingGroupId === group.id ? (
@@ -158,10 +211,15 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
                       type="primary"
                       size="small"
                       onClick={() => handleSaveEdit(group.id)}
+                      style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
                     >
                       Save
                     </Button>
-                    <Button size="small" onClick={handleCancelEdit}>
+                    <Button
+                      size="small"
+                      onClick={handleCancelEdit}
+                      style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+                    >
                       Cancel
                     </Button>
                   </Space>
@@ -191,7 +249,7 @@ const ManageCustomGroupsModal: React.FC<ManageCustomGroupsModalProps> = ({
                       <Tag color="blue">{group.member_count || 0} tickers</Tag>
                     </Space>
                     {group.description && (
-                      <div style={{ color: '#8c8c8c', fontSize: '13px' }}>
+                      <div style={{ color: colors.textSecondary, fontSize: '13px' }}>
                         {group.description}
                       </div>
                     )}

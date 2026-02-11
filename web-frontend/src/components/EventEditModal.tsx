@@ -13,6 +13,7 @@ import {
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { 
   ChartEvent, 
   EventType, 
@@ -24,6 +25,29 @@ import {
 const { TextArea } = Input;
 const { Option } = Select;
 const { Text } = Typography;
+
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: 'rgba(0, 0, 0, 0.06)',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f6f6f6',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 interface EventEditModalProps {
   visible: boolean;
@@ -46,6 +70,9 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
   loading = false,
   availableTradingDates = []
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const [deleteLoading, setDeleteLoading] = useState(false);
   const isEdit = !!event;
@@ -145,10 +172,26 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
     }
   };
 
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
+          backgroundColor: colors.cardBg,
+        },
+        header: {
+          color: colors.text,
+          borderBottomColor: colors.cardBorder,
+        },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   return (
     <Modal
       title={
-        <Space>
+        <Space style={{ color: 'inherit' }}>
           <PlusOutlined />
           {isEdit ? 'Edit Event' : 'Add Event Marker'}
         </Space>
@@ -160,6 +203,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
       confirmLoading={loading}
       width={500}
       destroyOnClose
+      styles={modalStyles}
       footer={[
         isEdit && onDelete && (
           <Popconfirm
@@ -181,7 +225,11 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
             </Button>
           </Popconfirm>
         ),
-        <Button key="cancel" onClick={handleCancel}>
+        <Button
+          key="cancel"
+          onClick={handleCancel}
+          style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+        >
           Cancel
         </Button>,
         <Button
@@ -189,6 +237,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
           type="primary"
           onClick={handleSave}
           loading={loading}
+          style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
         >
           {isEdit ? 'Update' : 'Create'}
         </Button>
@@ -294,7 +343,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
         </Form.Item>
       </Form>
       
-      <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f6f6f6', borderRadius: '6px' }}>
+      <div style={{ marginTop: '16px', padding: '12px', backgroundColor: colors.codeBlockBg, borderRadius: '6px' }}>
         <Text type="secondary" style={{ fontSize: '12px' }}>
           💡 Tip: Event markers will be displayed on the candlestick chart for the corresponding date. Different event types have different icons and colors for easy identification.
           {availableTradingDates.length > 0 && (

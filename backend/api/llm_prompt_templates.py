@@ -386,7 +386,7 @@ async def delete_template(
     template_id: int,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """删除模板（软删除）"""
+    """删除模板：系统模板软删除，用户/共享模板硬删除（从数据库物理删除）"""
     try:
         service = LLMPromptTemplateService()
         

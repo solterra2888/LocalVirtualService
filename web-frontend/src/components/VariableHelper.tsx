@@ -428,28 +428,6 @@ const VariableHelper: React.FC<VariableHelperProps> = ({
           </div>
         )}
 
-        {/* 提示信息 */}
-        {currentCategoryId && (
-          <Alert
-            message="Tips"
-            description={
-              <div>
-                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                  • Variables shown are filtered based on the selected category
-                </Paragraph>
-                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                  • Supported types: string, integer, float, boolean, array, object
-                </Paragraph>
-                <Paragraph style={{ margin: 0, fontSize: '12px' }}>
-                  • Click a variable to insert it into the template
-                </Paragraph>
-              </div>
-            }
-            type="info"
-            showIcon
-            style={{ fontSize: '12px' }}
-          />
-        )}
       </Space>
     </Card>
   );

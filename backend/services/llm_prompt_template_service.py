@@ -599,7 +599,7 @@ class LLMPromptTemplateService:
     
     def delete_template(self, template_id: int, user_id: Optional[int] = None) -> bool:
         """
-        删除模板（软删除，设置is_active=false）
+        删除模板：系统模板(scope=system)软删除(is_active=false)，用户/共享模板硬删除(物理删除)。
         
         Args:
             template_id: 模板ID
@@ -608,7 +608,31 @@ class LLMPromptTemplateService:
         Returns:
             成功返回True，失败返回False
         """
-        return self.update_template(template_id, {'is_active': False}, user_id)
+        template = self.get_template(template_id)
+        if not template:
+            return False
+        if template.get('scope') == 'system':
+            # 系统模板：软删除，保留数据
+            return self.update_template(template_id, {'is_active': False}, user_id)
+        # user/shared 模板：硬删除（表中外键已配置 ON DELETE CASCADE / SET NULL）
+        conn = self.db_manager.get_connection()
+        if not conn:
+            return False
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM llm_prompt_templates WHERE id = %s", (template_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            cursor.close()
+            conn.close()
+            if deleted:
+                logger.info(f"Hard deleted template: {template_id} (scope={template.get('scope')})")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to hard delete template: {str(e)}")
+            conn.rollback()
+            conn.close()
+            return False
     
     # ==================== 用户偏好管理 ====================
     

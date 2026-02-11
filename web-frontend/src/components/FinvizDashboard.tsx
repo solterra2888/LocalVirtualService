@@ -16,7 +16,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  Layout,
   Input,
   Tabs,
   List,
@@ -113,14 +112,13 @@ import {
   resolveBaseSymbol,
   type ExchangeFilterValue
 } from '../utils/watchlistExchange';
-const { Content, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
 const { Option } = Select;
 
 export type DashboardThemeMode = 'light' | 'dark';
 
-// 主题配色（Light / Dark）- Dark 参考 Trading Dashboard 深色蓝灰
+// 主题配色（Light / Dark）- 与 FRONTEND_STYLE_GUIDE 统一，Behance 风格
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -132,32 +130,49 @@ const THEME_COLORS = {
     cardBg: '#fff',
     cardBorder: '#f0f0f0',
     selectedBg: '#e6f7ff',
-    selectedBorder: '#91d5ff',
+    selectedBorder: '#1890ff',
     editCheckedBg: '#f6ffed',
     editCheckedBorder: '#52c41a',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
     positive: '#cf1322',
     negative: '#3f8600',
   },
   dark: {
-    pageBg: '#1a202c',
-    siderBg: '#212936',
-    siderBorder: '#2d3748',
-    contentBg: '#1a202c',
+    pageBg: '#1E202B',
+    siderBg: '#1a2234',
+    siderBorder: 'rgba(255, 255, 255, 0.06)',
+    contentBg: '#1E202B',
     headerBg: '#1a2234',
-    headerBorder: '#364152',
+    headerBorder: 'rgba(255, 255, 255, 0.06)',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    selectedBg: 'rgba(56, 161, 105, 0.18)',
-    selectedBorder: '#38a169',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    selectedBg: 'rgba(33, 150, 243, 0.12)',
+    selectedBorder: '#2196F3',
     editCheckedBg: 'rgba(56, 161, 105, 0.18)',
     editCheckedBorder: '#38a169',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
     positive: '#38a169',
     negative: '#e53e3e',
   },
+} as const;
+
+// Behance 卡片风格（与 FRONTEND_STYLE_GUIDE 一致）
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(0, 0, 0, 0.06)',
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
 } as const;
 
 // 缓存配置
@@ -218,6 +233,7 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
   onCheckboxToggle,
   themeMode = 'light',
 }) => {
+  const [hovered, setHovered] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.watchlist_id,
     disabled,
@@ -239,19 +255,30 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
   const changeColor = hasChange ? (change! >= 0 ? colors.positive : colors.negative) : colors.textSecondary;
   const displayName = item.custom_name || item.company || item.symbol;
 
+  const isDark = themeMode === 'dark';
+  const cardStyleBehance = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
   const cardBorder = isEditMode && isChecked ? colors.editCheckedBorder : isSelected ? colors.selectedBorder : colors.cardBorder;
-  const cardBg = isEditMode && isChecked ? colors.editCheckedBg : isSelected ? colors.selectedBg : colors.cardBg;
-  const boxShadow = isEditMode && isChecked
-    ? (themeMode === 'dark' ? '0 2px 8px rgba(56, 161, 105, 0.2)' : '0 2px 8px rgba(82, 196, 26, 0.15)')
+  const hoverBg = (colors as { hoverBg?: string }).hoverBg;
+  const cardBg = isEditMode && isChecked
+    ? colors.editCheckedBg
     : isSelected
-    ? (themeMode === 'dark' ? '0 2px 8px rgba(56, 161, 105, 0.2)' : '0 2px 8px rgba(24, 144, 255, 0.15)')
+    ? colors.selectedBg
+    : isDark && hovered && hoverBg
+    ? hoverBg
+    : colors.cardBg;
+  const boxShadow = isEditMode && isChecked
+    ? (isDark ? '0 4px 16px rgba(56, 161, 105, 0.2)' : '0 4px 16px rgba(82, 196, 26, 0.15)')
+    : isSelected
+    ? (isDark ? '0 6px 24px rgba(33, 150, 243, 0.25)' : '0 4px 24px rgba(24, 144, 255, 0.18)')
     : isDragging
-    ? '0 4px 12px rgba(0, 0, 0, 0.2)'
-    : themeMode === 'dark' ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.02)';
+    ? '0 8px 24px rgba(0, 0, 0, 0.25)'
+    : cardStyleBehance.boxShadow;
 
   return (
     <div ref={setNodeRef} style={containerStyle} {...attributes}>
       <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onClick={() => {
           if (!disabled) {
             if (isEditMode && onCheckboxToggle) {
@@ -265,10 +292,11 @@ const SortableWatchlistRow: React.FC<SortableWatchlistRowProps> = ({
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          padding: '5px 8px',
+          padding: '8px 12px',
           height: '48px',
-          borderRadius: '8px',
+          borderRadius: cardStyleBehance.borderRadius,
           border: `1px solid ${cardBorder}`,
+          ...(isSelected && isDark && { borderLeft: '3px solid #2196F3' }),
           background: cardBg,
           boxShadow,
           transition: 'all 0.2s ease',
@@ -410,7 +438,7 @@ const FinvizDashboard: React.FC = () => {
   const [searchValue, setSearchValue] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<number | string>('all');
   const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilterValue>('all');
-  const [activeTab, setActiveTab] = useState<string>('overview');
+  const [activeTab, setActiveTab] = useState<string>('news');
   const [watchlistCollapsed, setWatchlistCollapsed] = useState<boolean>(false);
   
   // 数据状态
@@ -778,7 +806,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setSelectedStock(firstStock);
         setResearchReports([]);
         setNewsData([]);
-        setActiveTab('overview');
+        setActiveTab('news');
 
         const query =
           (firstStock.primaryticker && firstStock.primaryticker.trim()) ||
@@ -1059,7 +1087,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       setOverviewData(null);
       setOverviewError(null);
       setOverviewLoading(false);
-      setActiveTab('overview');
+      setActiveTab('news');
       return;
     }
 
@@ -1084,7 +1112,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       setOverviewLoading(false);
     }
 
-    setActiveTab('overview');
+    setActiveTab('news');
     logger.logInfo(`选择了股票: ${stock.custom_name || stock.company} (${stock.symbol})`, 'finviz-dashboard');
   }, [logger, overviewCache, getOverviewQueryForStock]);
 
@@ -1195,23 +1223,19 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
   }, [hasMoreNews, loadingMoreNews, selectedStock, loadStockNews, logger]);
 
-  // 滚动检测和自动加载更多新闻
+  // 滚动检测和自动加载更多新闻（使用右侧 Tab 内容区作为滚动容器）
   useEffect(() => {
     const handleScroll = () => {
       if (!hasMoreNews || loadingMoreNews || activeTab !== 'news') return;
-      
-      const scrollContainer = document.querySelector('.ant-layout-content');
+      const scrollContainer = document.querySelector('.watchlist-detail-panel .ant-tabs-tabpane.ant-tabs-tabpane-active');
       if (!scrollContainer) return;
-      
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-      const threshold = 200; // 距离底部200px时触发加载
-      
+      const threshold = 200;
       if (scrollTop + clientHeight >= scrollHeight - threshold) {
         loadMoreNews();
       }
     };
-
-    const scrollContainer = document.querySelector('.ant-layout-content');
+    const scrollContainer = document.querySelector('.watchlist-detail-panel .ant-tabs-tabpane.ant-tabs-tabpane-active');
     if (scrollContainer) {
       scrollContainer.addEventListener('scroll', handleScroll);
       return () => scrollContainer.removeEventListener('scroll', handleScroll);
@@ -1315,7 +1339,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setOverviewData(null);
         setOverviewError(null);
         setOverviewLoading(false);
-        setActiveTab('overview');
+        setActiveTab('news');
       }
       
       logger.logInfo(`从watchlist移除: ${symbol}`, 'finviz-dashboard');
@@ -1490,6 +1514,12 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
             type="primary" 
             icon={<PlusOutlined />}
             onClick={() => setAddModalVisible(true)}
+            style={{
+              borderRadius: 10,
+              fontWeight: 500,
+              height: 36,
+              ...(themeMode === 'dark' ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+            }}
           >
             Add First Stock
           </Button>
@@ -1522,7 +1552,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px',
+              gap: '6px',
               opacity: isReordering ? 0.7 : 1,
             }}
           >
@@ -1822,7 +1852,9 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
 
   const renderNewsTab = () => {
     const isDark = themeMode === 'dark';
-    const liveHeadlinesHeaderBg = '#1e3a5f';
+    const liveHeadlinesHeaderBg = isDark ? '#1e3a5f' : '#b8d4e8';
+    const liveHeadlinesHeaderFg = isDark ? '#fff' : '#1a3a5c';
+    const liveHeadlinesHeaderFgMuted = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(26,58,92,0.7)';
     const updateTimeStr = lastNewsUpdate
       ? lastNewsUpdate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
       : '--:--:-- --';
@@ -1856,10 +1888,10 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
             }}
           >
             <Space>
-              <UnorderedListOutlined style={{ color: '#fff', fontSize: 16 }} />
-              <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Live Headlines</span>
+              <UnorderedListOutlined style={{ color: liveHeadlinesHeaderFg, fontSize: 16 }} />
+              <span style={{ color: liveHeadlinesHeaderFg, fontWeight: 600, fontSize: 14 }}>Live Headlines</span>
             </Space>
-            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
+            <Text style={{ color: liveHeadlinesHeaderFgMuted, fontSize: 12 }}>
               Updated {updateTimeStr}
             </Text>
           </div>
@@ -2804,9 +2836,24 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       }
     }
 
+    const stockTitle = selectedStock.custom_name || selectedStock.company || selectedStock.symbol;
+    const cardStyle = themeMode === 'dark'
+      ? { marginBottom: 24, ...CARD_STYLE_BEHANCE_DARK }
+      : { marginBottom: 24, ...CARD_STYLE_BEHANCE };
+
     return (
-      <div style={{ marginBottom: 24 }}>
-        {/* Candlestick Chart */}
+      <Card
+        title={
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <LineChartOutlined style={{ color: themeMode === 'dark' ? '#2196F3' : '#1890ff' }} />
+            {stockTitle}
+            <Text type="secondary" style={{ fontWeight: 400, fontSize: 14 }}>
+              ({selectedStock.symbol})
+            </Text>
+          </span>
+        }
+        style={cardStyle}
+      >
         <StockChart 
           key={`${selectedStock.symbol}-${selectedStock.watchlist_id}`}
           symbol={selectedStock.symbol}
@@ -2820,7 +2867,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
           exchange={selectedStock.exchange}
           themeMode={themeMode}
         />
-      </div>
+      </Card>
     );
   };
 
@@ -2831,216 +2878,125 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       theme={{
         algorithm: themeMode === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         ...(themeMode === 'dark' && {
-          token: { colorBgContainer: '#1a2234' },
-          components: { Card: { colorBgContainer: '#1a2234' } },
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: (colors as { inputBg?: string }).inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
+          },
+          components: { Card: { colorBgContainer: colors.cardBg } },
         }),
       }}
     >
-    <div style={{ height: '100%', background: colors.pageBg }}>
-      <Layout style={{ height: '100%' }}>
-        {/* 左侧选择器 */}
-        <Sider 
-          width={watchlistCollapsed ? 80 : 350} 
-          style={{ 
-            background: colors.siderBg, 
-            borderRight: `1px solid ${colors.siderBorder}`,
-            height: '100%',
-            overflowY: 'auto'
+    <div className="watchlist-page-layout" style={{ background: colors.pageBg }}>
+      <div className="watchlist-page-inner">
+        {/* 左侧：Watchlist 列表栏（固定卡片，仅列表区域滚动） */}
+        <div
+          className="watchlist-list-panel"
+          style={{
+            width: watchlistCollapsed ? 80 : 350,
+            minWidth: watchlistCollapsed ? 80 : 350,
+            background: colors.siderBg,
+            border: `1px solid ${colors.siderBorder}`,
+            ...(themeMode === 'dark' ? { boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow } : { boxShadow: CARD_STYLE_BEHANCE.boxShadow }),
           }}
         >
-          <div style={{ padding: watchlistCollapsed ? '16px 8px' : '16px' }}>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center', 
-              marginBottom: '16px',
+          <div
+            className="watchlist-list-header"
+            style={{
+              borderBottomColor: colors.siderBorder,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
               flexDirection: watchlistCollapsed ? 'column' : 'row',
-              gap: watchlistCollapsed ? '8px' : '0'
-            }}>
-              <Title 
-                level={watchlistCollapsed ? 5 : 4} 
-                style={{ 
-                  margin: 0,
-                  textAlign: watchlistCollapsed ? 'center' : 'left',
-                  fontSize: watchlistCollapsed ? '14px' : '20px',
-                  cursor: watchlistCollapsed ? 'pointer' : 'default',
-                  color: colors.text
-                }}
-                onClick={watchlistCollapsed ? () => setWatchlistCollapsed(false) : undefined}
-              >
-                {watchlistCollapsed ? (
-                  <HeartOutlined />
-                ) : (
+              gap: watchlistCollapsed ? '8px' : '0',
+            }}
+          >
+            <Title 
+              level={watchlistCollapsed ? 5 : 4} 
+              style={{ 
+                margin: 0,
+                textAlign: watchlistCollapsed ? 'center' : 'left',
+                fontSize: watchlistCollapsed ? '14px' : '20px',
+                cursor: watchlistCollapsed ? 'pointer' : 'default',
+                color: colors.text
+              }}
+              onClick={watchlistCollapsed ? () => setWatchlistCollapsed(false) : undefined}
+            >
+              {watchlistCollapsed ? (
+                <HeartOutlined />
+              ) : (
+                <>
+                  <HeartOutlined /> Watchlist
+                </>
+              )}
+            </Title>
+            {!watchlistCollapsed && (
+              <Space size="small">
+                {!isEditMode ? (
                   <>
-                    <HeartOutlined /> Watchlist
-                  </>
-                )}
-              </Title>
-              {!watchlistCollapsed && (
-                <Space size="small">
-                  {!isEditMode ? (
-                    <>
-                      <Tooltip title="Add - Add a new stock to your watchlist">
-                        <Button 
-                          type="primary" 
-                          icon={<PlusOutlined />} 
-                          size="small"
-                          onClick={() => setAddModalVisible(true)}
-                        />
-                      </Tooltip>
-                      <Tooltip title="Edit - Enter edit mode to select and manage multiple tickers">
-                        <Button 
-                          icon={<EditOutlined />} 
-                          size="small"
-                          onClick={handleToggleEditMode}
-                        />
-                      </Tooltip>
-                    </>
-                  ) : (
-                    <>
+                    <Tooltip title="Add - Add a new stock to your watchlist">
                       <Button 
-                        type="primary"
+                        type="primary" 
+                        icon={<PlusOutlined />} 
                         size="small"
-                        onClick={handleOpenAddToGroup}
-                        disabled={selectedWatchlistIds.size === 0}
-                      >
-                        Add to ({selectedWatchlistIds.size})
-                      </Button>
+                        onClick={() => setAddModalVisible(true)}
+                        style={{
+                          borderRadius: 8,
+                          fontWeight: 500,
+                          ...(themeMode === 'dark' ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Edit - Enter edit mode to select and manage multiple tickers">
                       <Button 
+                        icon={<EditOutlined />} 
                         size="small"
                         onClick={handleToggleEditMode}
-                      >
-                        Cancel
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    type="text"
-                    icon={<MenuFoldOutlined />}
-                    onClick={() => setWatchlistCollapsed(true)}
-                    style={{
-                      fontSize: '16px',
-                      width: 32,
-                      height: 32,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    title="收缩Watchlist"
-                  />
-                </Space>
-              )}
-            </div>
-            
-            {!watchlistCollapsed && (
-              <>
-                <Input
-                  placeholder="Search stocks..."
-                  prefix={<SearchOutlined />}
-                  value={searchValue}
-                  onChange={e => setSearchValue(e.target.value)}
-                  style={{ marginBottom: '12px' }}
-                  allowClear
-                />
-                
-                {isEditMode && filteredStocks.length > 0 && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <Checkbox
-                      checked={selectedWatchlistIds.size === filteredStocks.length && filteredStocks.length > 0}
-                      indeterminate={selectedWatchlistIds.size > 0 && selectedWatchlistIds.size < filteredStocks.length}
-                      onChange={handleToggleSelectAll}
+                        style={{
+                          borderRadius: 8,
+                          ...(themeMode === 'dark' ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+                        }}
+                      />
+                    </Tooltip>
+                  </>
+                ) : (
+                  <>
+                    <Button 
+                      type="primary"
+                      size="small"
+                      onClick={handleOpenAddToGroup}
+                      disabled={selectedWatchlistIds.size === 0}
+                      style={{
+                        borderRadius: 8,
+                        fontWeight: 500,
+                        ...(themeMode === 'dark' ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                      }}
                     >
-                      Select All ({selectedWatchlistIds.size}/{filteredStocks.length})
-                    </Checkbox>
-                  </div>
+                      Add to ({selectedWatchlistIds.size})
+                    </Button>
+                    <Button 
+                      size="small"
+                      onClick={handleToggleEditMode}
+                      style={{
+                        borderRadius: 8,
+                        ...(themeMode === 'dark' ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
                 )}
-                
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-                  <Segmented
-                    size="small"
-                    value={exchangeFilter}
-                    onChange={value => setExchangeFilter(value as ExchangeFilterValue)}
-                    options={EXCHANGE_FILTER_TABS}
-                    block
-                    style={{ flex: 1 }}
-                  />
-                  <Select
-                    placeholder="Priority"
-                    value={priorityFilter}
-                    onChange={setPriorityFilter}
-                    size="small"
-                    style={{ width: 140, border: 'none' }}
-                    variant="borderless"
-                  >
-                    {PRIORITY_FILTER_OPTIONS.map(option => (
-                      <Option key={option.value} value={option.value}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {option.stars ? renderStars(option.stars) : <span style={{ fontSize: '12px' }}>All Priorities</span>}
-                        </div>
-                      </Option>
-                    ))}
-                  </Select>
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <Select
-                      placeholder="Custom Groups"
-                      value={selectedCustomGroupId}
-                      onChange={setSelectedCustomGroupId}
-                      size="small"
-                      allowClear
-                      style={{ flex: 1 }}
-                    >
-                      {customGroups.map(group => (
-                        <Option key={group.id} value={group.id}>
-                          <Space>
-                            <div
-                              style={{
-                                width: 12,
-                                height: 12,
-                                borderRadius: '50%',
-                                backgroundColor: group.color || '#1890ff',
-                              }}
-                            />
-                            <span>{group.group_name}</span>
-                            <Tag color="default" style={{ marginLeft: 'auto' }}>
-                              {group.member_count || 0}
-                            </Tag>
-                          </Space>
-                        </Option>
-                      ))}
-                    </Select>
-                    <Button
-                      type="text"
-                      icon={<EditOutlined />}
-                      size="small"
-                      onClick={() => setManageGroupsModalVisible(true)}
-                      title="Manage custom groups"
-                      style={{ flexShrink: 0 }}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-            
-            {!watchlistCollapsed && (
-              <Spin spinning={loading || pricesLoading}>
-                {renderWatchlistList()}
-              </Spin>
-            )}
-            
-            {watchlistCollapsed && (
-              <div style={{ 
-                padding: '16px 8px', 
-                borderTop: `1px solid ${colors.siderBorder}`,
-                textAlign: 'center'
-              }}>
                 <Button
                   type="text"
-                  icon={<MenuUnfoldOutlined />}
-                  onClick={() => setWatchlistCollapsed(false)}
-                  title="展开Watchlist"
+                  icon={<MenuFoldOutlined />}
+                  onClick={() => setWatchlistCollapsed(true)}
                   style={{
                     fontSize: '16px',
                     width: 32,
@@ -3049,94 +3005,232 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}
+                  title="收缩Watchlist"
                 />
-              </div>
+              </Space>
             )}
           </div>
-        </Sider>
 
-        {/* 右侧内容区域 */}
-        <Content style={{ background: colors.contentBg, margin: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* 顶部栏：标题 */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 24px',
-            borderBottom: `1px solid ${colors.headerBorder}`,
-            background: colors.headerBg,
-            flexShrink: 0,
-          }}>
-            <Title level={5} style={{ margin: 0, color: colors.text }}>Dashboard</Title>
-          </div>
-          <div style={{ padding: '24px', height: '100%', overflow: 'auto', color: colors.text }}>
+          {!watchlistCollapsed && (
+            <div
+              className="watchlist-list-filters"
+              style={{ borderBottomColor: colors.siderBorder }}
+            >
+              <Input
+                placeholder="Search stocks..."
+                prefix={<SearchOutlined />}
+                value={searchValue}
+                onChange={e => setSearchValue(e.target.value)}
+                style={{
+                  marginBottom: '12px',
+                  borderRadius: 8,
+                  ...(themeMode === 'dark' && (colors as { inputBg?: string }).inputBg
+                    ? { backgroundColor: (colors as { inputBg?: string }).inputBg }
+                    : {}),
+                }}
+                allowClear
+              />
+              {isEditMode && filteredStocks.length > 0 && (
+                <div style={{ marginBottom: '12px' }}>
+                  <Checkbox
+                    checked={selectedWatchlistIds.size === filteredStocks.length && filteredStocks.length > 0}
+                    indeterminate={selectedWatchlistIds.size > 0 && selectedWatchlistIds.size < filteredStocks.length}
+                    onChange={handleToggleSelectAll}
+                  >
+                    Select All ({selectedWatchlistIds.size}/{filteredStocks.length})
+                  </Checkbox>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                <Segmented
+                  size="small"
+                  value={exchangeFilter}
+                  onChange={value => setExchangeFilter(value as ExchangeFilterValue)}
+                  options={EXCHANGE_FILTER_TABS}
+                  block
+                  style={{ flex: 1 }}
+                />
+                <Select
+                  placeholder="Priority"
+                  value={priorityFilter}
+                  onChange={setPriorityFilter}
+                  size="small"
+                  style={{
+                    width: 140,
+                    border: 'none',
+                    borderRadius: 8,
+                    ...(themeMode === 'dark' && (colors as { inputBg?: string }).inputBg
+                      ? { backgroundColor: (colors as { inputBg?: string }).inputBg }
+                      : {}),
+                  }}
+                  variant="borderless"
+                >
+                  {PRIORITY_FILTER_OPTIONS.map(option => (
+                    <Option key={option.value} value={option.value}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {option.stars ? renderStars(option.stars) : <span style={{ fontSize: '12px' }}>All Priorities</span>}
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <Select
+                  placeholder="Custom Groups"
+                  value={selectedCustomGroupId}
+                  onChange={setSelectedCustomGroupId}
+                  size="small"
+                  allowClear
+                  style={{
+                    flex: 1,
+                    borderRadius: 8,
+                    ...(themeMode === 'dark' && (colors as { inputBg?: string }).inputBg
+                      ? { backgroundColor: (colors as { inputBg?: string }).inputBg }
+                      : {}),
+                  }}
+                >
+                  {customGroups.map(group => (
+                    <Option key={group.id} value={group.id}>
+                      <Space>
+                        <div
+                          style={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            backgroundColor: group.color || '#1890ff',
+                          }}
+                        />
+                        <span>{group.group_name}</span>
+                        <Tag color="default" style={{ marginLeft: 'auto' }}>
+                          {group.member_count || 0}
+                        </Tag>
+                      </Space>
+                    </Option>
+                  ))}
+                </Select>
+                <Button
+                  type="text"
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => setManageGroupsModalVisible(true)}
+                  title="Manage custom groups"
+                  style={{ flexShrink: 0 }}
+                />
+              </div>
+            </div>
+          )}
+
+          {!watchlistCollapsed && (
+            <div className="watchlist-list-scroll">
+              <Spin spinning={loading || pricesLoading}>
+                {renderWatchlistList()}
+              </Spin>
+            </div>
+          )}
+
+          {watchlistCollapsed && (
+            <div style={{ 
+              padding: '16px 8px', 
+              borderTop: `1px solid ${colors.siderBorder}`,
+              textAlign: 'center',
+              flexShrink: 0
+            }}>
+              <Button
+                type="text"
+                icon={<MenuUnfoldOutlined />}
+                onClick={() => setWatchlistCollapsed(false)}
+                title="展开Watchlist"
+                style={{
+                  fontSize: '16px',
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto'
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 右侧内容区域（固定卡片，仅 Tab 内容区滚动） */}
+        <div
+          className="watchlist-detail-panel"
+          style={{
+            background: colors.contentBg,
+            border: `1px solid ${colors.siderBorder}`,
+            ...(themeMode === 'dark' ? { boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow } : { boxShadow: CARD_STYLE_BEHANCE.boxShadow }),
+          }}
+        >
+          <div className="watchlist-detail-inner" style={{ color: colors.text }}>
             {loading ? (
               <div style={{ 
                 display: 'flex', 
                 justifyContent: 'center', 
                 alignItems: 'center', 
-                height: '50%',
+                flex: 1,
+                minHeight: 200,
                 flexDirection: 'column'
               }}>
                 <Spin size="large" tip="Loading watchlist..." />
               </div>
             ) : selectedStock ? (
-              <>
-                <Tabs 
-                  activeKey={activeTab}
-                  onChange={(key) => {
-                    setActiveTab(key);
-                    if (key === 'reports' && selectedStock) {
-                      loadResearchReports(selectedStock.symbol);
-                    } else if (key === 'news') {
-                      loadRelatedNews();
-                    } else if (key === 'overview' && selectedStock) {
-                      loadStockOverview(selectedStock);
-                    }
-                  }}
-                  size="large"
+              <Tabs 
+                activeKey={activeTab}
+                onChange={(key) => {
+                  setActiveTab(key);
+                  if (key === 'reports' && selectedStock) {
+                    loadResearchReports(selectedStock.symbol);
+                  } else if (key === 'news') {
+                    loadRelatedNews();
+                  } else if (key === 'overview' && selectedStock) {
+                    loadStockOverview(selectedStock);
+                  }
+                }}
+                size="large"
+              >
+                <TabPane 
+                  tab={
+                    <span>
+                      <FileTextOutlined />
+                      News
+                    </span>
+                  } 
+                  key="news"
                 >
-                  <TabPane
-                    tab={
-                      <span>
-                        <DashboardOutlined />
-                        Overview
-                      </span>
-                    }
-                    key="overview"
-                  >
-                    {renderOverviewTab()}
-                  </TabPane>
-                  <TabPane 
-                    tab={
-                      <span>
-                        <FileTextOutlined />
-                        News
-                      </span>
-                    } 
-                    key="news"
-                  >
-                    {renderNewsTab()}
-                  </TabPane>
-                  <TabPane 
-                    tab={
-                      <span>
-                        <FileTextOutlined />
-                        Research Report
-                      </span>
-                    } 
-                    key="reports"
-                  >
-                    {renderResearchReportsTab()}
-                  </TabPane>
-                </Tabs>
-              </>
+                  {renderNewsTab()}
+                </TabPane>
+                <TabPane
+                  tab={
+                    <span>
+                      <DashboardOutlined />
+                      Overview
+                    </span>
+                  }
+                  key="overview"
+                >
+                  {renderOverviewTab()}
+                </TabPane>
+                <TabPane 
+                  tab={
+                    <span>
+                      <FileTextOutlined />
+                      Research Report
+                    </span>
+                  } 
+                  key="reports"
+                >
+                  {renderResearchReportsTab()}
+                </TabPane>
+              </Tabs>
             ) : (
               <div style={{ 
                 display: 'flex', 
                 justifyContent: 'center', 
                 alignItems: 'center', 
-                height: '50%',
+                flex: 1,
+                minHeight: 200,
                 flexDirection: 'column'
               }}>
                 <Empty
@@ -3151,9 +3245,10 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
               </div>
             )}
           </div>
-        </Content>
-      </Layout>
-      
+        </div>
+      </div>
+    </div>
+
       {/* 添加股票到关注列表的模态框 */}
       <AddToWatchlistModal
         open={addModalVisible}
@@ -3682,8 +3777,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
           );
         })()}
       </Modal>
-
-    </div>
     </ConfigProvider>
   );
 };

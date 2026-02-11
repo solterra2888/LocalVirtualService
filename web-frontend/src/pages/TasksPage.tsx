@@ -44,15 +44,34 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: '#f5f5f5',
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
+
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
 const { TabPane } = Tabs;
 
 interface TaskType {
@@ -88,6 +107,7 @@ const TasksPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [loading, setLoading] = useState(false);
   const [taskFormVisible, setTaskFormVisible] = useState(false);
@@ -326,9 +346,21 @@ const TasksPage: React.FC = () => {
 
 
 
+  const modalContentStyle = {
+    borderRadius: 12,
+    boxShadow: isDark ? CARD_STYLE_BEHANCE_DARK.boxShadow : CARD_STYLE_BEHANCE.boxShadow,
+    border: isDark ? CARD_STYLE_BEHANCE_DARK.border : CARD_STYLE_BEHANCE.border,
+    backgroundColor: colors.cardBg,
+  };
+  const modalStyles = {
+    content: modalContentStyle,
+    header: { color: colors.text, borderBottomColor: colors.cardBorder },
+    body: { color: colors.text },
+  };
+
   const renderTaskForm = () => (
     <Modal
-              title={editingTask ? 'Edit AI Agent' : 'Create AI Agent'}
+      title={editingTask ? 'Edit AI Agent' : 'Create AI Agent'}
       open={taskFormVisible}
       onOk={handleSubmitTask}
       onCancel={() => setTaskFormVisible(false)}
@@ -336,6 +368,17 @@ const TasksPage: React.FC = () => {
       okText="Save"
       cancelText="Cancel"
       confirmLoading={submittingTask}
+      styles={modalStyles}
+      okButtonProps={{
+        style: {
+          borderRadius: 8,
+          fontWeight: 500,
+          ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+        },
+      }}
+      cancelButtonProps={{
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      }}
     >
       <Tabs defaultActiveKey="basic">
         <TabPane tab="Basic Information" key="basic">
@@ -393,7 +436,16 @@ const TasksPage: React.FC = () => {
               {(fields, { add, remove }) => (
                 <>
                   {fields.map(({ key, name, ...restField }) => (
-                    <Card key={key} size="small" style={{ marginBottom: 16 }}>
+                    <Card
+                      key={key}
+                      size="small"
+                      style={{
+                        marginBottom: 16,
+                        borderRadius: 8,
+                        backgroundColor: colors.codeBlockBg,
+                        border: isDark ? `1px solid ${colors.cardBorder}` : undefined,
+                      }}
+                    >
                       <Row gutter={16}>
                         <Col span={12}>
                           <Form.Item
@@ -461,6 +513,7 @@ const TasksPage: React.FC = () => {
       onCancel={() => setTaskDetailVisible(false)}
       footer={null}
       width={600}
+      styles={modalStyles}
     >
       {viewingTask && (
         <Descriptions bordered size="small">
@@ -519,29 +572,56 @@ const TasksPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-      <div className="page-header" style={{ marginBottom: '24px' }}>
+    <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <div className="page-header" style={{ marginBottom: 20 }}>
         <div className="flex-between">
-          <div style={{ flex: 1, marginRight: '24px' }}>
-            <Title level={3} className="page-title" style={{ color: colors.text }}>AI Agent Settings</Title>
-            <div className="page-description" style={{ color: colors.textSecondary, marginTop: '8px' }}>
-              Configure and manage AI agents that integrate with third-party LLMOps platforms. 
-              These agents leverage external chatbot and workflow services to provide intelligent 
-              automation capabilities. Before configuring agents here, ensure you have already 
-              set up the corresponding chatbots or workflows on the Dify platform, as this 
+          <div style={{ flex: 1, marginRight: 24 }}>
+            <Title level={3} className="page-title" style={{ color: colors.text, marginTop: 0, marginBottom: 4 }}>
+              AI Agent Settings
+            </Title>
+            <div className="page-description" style={{ color: colors.textSecondary, marginBottom: 20 }}>
+              Configure and manage AI agents that integrate with third-party LLMOps platforms.
+              These agents leverage external chatbot and workflow services to provide intelligent
+              automation capabilities. Before configuring agents here, ensure you have already
+              set up the corresponding chatbots or workflows on the Dify platform, as this
               interface serves as the configuration and invocation layer for those external services.
             </div>
           </div>
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => loadTaskTypes(true)} loading={loading}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => loadTaskTypes(true)}
+              loading={loading}
+              style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+            >
               Refresh
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTask}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleCreateTask}
+              style={{
+                borderRadius: 10,
+                fontWeight: 500,
+                height: 36,
+                paddingLeft: 16,
+                paddingRight: 16,
+                ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+              }}
+            >
               Create Task
             </Button>
           </Space>
@@ -551,7 +631,10 @@ const TasksPage: React.FC = () => {
       <div className="page-content">
         <Tabs defaultActiveKey="types">
           <TabPane tab="AI Agents" key="types">
-            <Card>
+            <Card
+              style={{ ...cardStyle, background: colors.cardBg }}
+              bodyStyle={{ padding: '20px 24px' }}
+            >
               <Table
                 columns={taskTypeColumns}
                 dataSource={taskTypes}

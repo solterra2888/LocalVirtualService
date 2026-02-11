@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Body
 from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.schemas.file import (
@@ -1130,6 +1130,74 @@ async def get_original_file_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取文件信息失败"
+        )
+
+
+@router.patch("/details/{file_id}/content", summary="更新文件处理详情中的 content（Markdown）")
+async def update_file_detail_content(
+    file_id: str,
+    content: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    更新 file_processing_details 表中的 content 字段（用于编辑 Content 标签页的 Markdown 内容）。
+    仅允许该文件所属任务执行记录的用户（或管理员）更新。
+    """
+    try:
+        db_manager = DatabaseManager(get_database_config())
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法连接到数据库"
+            )
+        cursor = conn.cursor()
+        # 获取文件所属的 processing_stats_id，并校验归属
+        cursor.execute("""
+            SELECT fpd.id, fpd.processing_stats_id
+            FROM file_processing_details fpd
+            WHERE fpd.id = %s
+        """, (file_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在"
+            )
+        processing_stats_id = row[1]
+        cursor.execute("""
+            SELECT "user" FROM processing_stats WHERE id = %s
+        """, (processing_stats_id,))
+        owner = cursor.fetchone()
+        if not owner:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务执行记录不存在"
+            )
+        if not current_user.is_admin and owner[0] != current_user.username:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足，只能编辑自己的文件内容"
+            )
+        cursor.execute("""
+            UPDATE file_processing_details
+            SET content = %s
+            WHERE id = %s
+        """, (content, file_id))
+        conn.commit()
+        conn.close()
+        info(f"更新文件 content 成功: file_id={file_id}", source="api", user=current_user.username)
+        return {"success": True, "message": "Content updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"更新文件 content 失败: {str(e)}", source="api", file_id=file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新内容失败"
         )
 
 

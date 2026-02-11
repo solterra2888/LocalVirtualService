@@ -2,9 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, Button, Space, message, Divider, Tag, ColorPicker, Spin } from 'antd';
 import { PlusOutlined, FolderOutlined } from '@ant-design/icons';
 import type { Color } from 'antd/es/color-picker';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, CustomGroup } from '../services/dashboard';
 
 const { Option } = Select;
+
+const THEME_COLORS = {
+  light: {
+    cardBg: '#fff',
+    cardBorder: 'rgba(0, 0, 0, 0.06)',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+  },
+  dark: {
+    cardBg: '#1a2234',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+  },
+} as const;
+
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 interface AddToCustomGroupModalProps {
   visible: boolean;
@@ -19,6 +41,9 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>([]);
@@ -115,10 +140,26 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
     setNewGroupColor(color.toHexString());
   };
 
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+          border: CARD_STYLE_BEHANCE_DARK.border,
+          backgroundColor: colors.cardBg,
+        },
+        header: {
+          color: colors.text,
+          borderBottomColor: colors.cardBorder,
+        },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   return (
     <Modal
       title={
-        <Space>
+        <Space style={{ color: 'inherit' }}>
           <FolderOutlined />
           <span>Add to Custom Group</span>
         </Space>
@@ -126,7 +167,11 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
       open={visible}
       onCancel={handleCancel}
       footer={[
-        <Button key="cancel" onClick={handleCancel}>
+        <Button
+          key="cancel"
+          onClick={handleCancel}
+          style={isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined}
+        >
           Cancel
         </Button>,
         <Button
@@ -135,11 +180,13 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
           loading={loading}
           onClick={handleSubmit}
           disabled={selectedWatchlistIds.length === 0}
+          style={isDark ? { background: '#2196F3', borderColor: '#2196F3' } : undefined}
         >
           Add to Group
         </Button>,
       ]}
       width={560}
+      styles={modalStyles}
     >
       <div style={{ marginBottom: 16 }}>
         <Space>
@@ -147,7 +194,7 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
         </Space>
       </div>
 
-      <Divider style={{ margin: '16px 0' }} />
+      <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
 
       <Form form={form} layout="vertical">
         <Form.Item label="Select Option">
@@ -171,7 +218,7 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
           </Space>
         </Form.Item>
 
-        <Divider style={{ margin: '16px 0' }} />
+        <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
 
         {!isCreatingNew ? (
           // 选择现有组

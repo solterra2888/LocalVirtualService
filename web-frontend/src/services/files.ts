@@ -423,6 +423,11 @@ export const filesAPI = {
     }>(`/files/original/${fileId}`);
   },
 
+  // 更新 file_processing_details 的 content（Content 标签页编辑后保存）
+  updateFileDetailContent: async (fileId: number, content: string): Promise<{ success: boolean; message: string }> => {
+    return api.patch<{ success: boolean; message: string }>(`/files/details/${fileId}/content`, { content });
+  },
+
   // 获取支持的文件类型扩展名
   getSupportedFileExtensions: (): string[] => {
     return [

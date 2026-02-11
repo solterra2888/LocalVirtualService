@@ -51,6 +51,7 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Paragraph, Text } = Typography;
 
+// Dark: card #1a2234 + Behance-style (rounded, soft shadow). Light: default.
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -62,15 +63,37 @@ const THEME_COLORS = {
     selectedBorder: '#1890ff',
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    codeBlockBg: 'rgba(255, 255, 255, 0.06)',
-    selectedBorder: '#1890ff',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
+
+// Behance-style: rounded corners, soft shadow, minimal border
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
+// Create/Edit Template modal: unified control size and font
+const EDITOR_FORM_CONTROL = {
+  height: 32,
+  fontSize: 14,
+};
+const EDITOR_FORM_TEXTAREA = { fontSize: 14 };
+
 const { Option } = Select;
 const { TextArea } = Input;
 const { Panel } = Collapse;
@@ -462,11 +485,20 @@ const PromptTemplatesPage: React.FC = () => {
     }
   };
 
-  // Render category list
+  const cardStyleBehance = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
+
+  // Render category list (stretches to match right column, scrolls inside if needed)
   const renderCategories = () => (
     <Card 
       title="Template Categories" 
       size="small"
+      style={{ ...cardStyleBehance, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+      bodyStyle={{
+        ...(isDark ? { padding: '16px 20px' } : {}),
+        flex: 1,
+        overflow: 'auto',
+        minHeight: 0,
+      }}
       extra={
         <Button 
           type="text" 
@@ -480,7 +512,7 @@ const PromptTemplatesPage: React.FC = () => {
         </Button>
       }
     >
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
         {categories.map(category => (
           <Card
             key={category.id}
@@ -489,9 +521,15 @@ const PromptTemplatesPage: React.FC = () => {
             className={selectedCategory === category.id ? 'selected-category' : ''}
             onClick={() => setSelectedCategory(category.id)}
             style={{
+              ...cardStyleBehance,
               cursor: 'pointer',
-              borderColor: selectedCategory === category.id ? colors.selectedBorder : undefined
+              borderColor: selectedCategory === category.id ? colors.selectedBorder : undefined,
+              ...(isDark && selectedCategory === category.id && {
+                backgroundColor: 'rgba(33, 150, 243, 0.12)',
+                borderLeft: '3px solid #2196F3',
+              }),
             }}
+            bodyStyle={{ padding: '12px 16px' }}
           >
             <Space>
               <span style={{ fontSize: '20px' }}>{category.icon}</span>
@@ -570,6 +608,8 @@ const PromptTemplatesPage: React.FC = () => {
                 size="small"
                 hoverable
                 actions={actions}
+                style={cardStyleBehance}
+                bodyStyle={{ padding: '16px 20px' }}
               >
                 <Row justify="space-between" align="top">
                   <Col span={18}>
@@ -648,6 +688,16 @@ const PromptTemplatesPage: React.FC = () => {
         onCancel={() => setIsEditorVisible(false)}
         width={1200}
         footer={null}
+        styles={isDark ? {
+          content: {
+            borderRadius: 12,
+            boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
+            border: CARD_STYLE_BEHANCE_DARK.border,
+            backgroundColor: colors.cardBg,
+          },
+          header: { color: colors.text, borderBottomColor: colors.cardBorder },
+          body: { color: colors.text },
+        } : {}}
       >
         <Row gutter={16}>
           <Col span={16}>
@@ -664,34 +714,31 @@ const PromptTemplatesPage: React.FC = () => {
               form={form}
               layout="vertical"
               onFinish={handleSaveTemplate}
-              size="small"
               disabled={isReadOnly}
             >
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Template Name</Text>}
+              label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
               name="template_name"
               rules={[{ required: true, message: 'Please enter template name' }]}
             >
               <Input 
                 placeholder="e.g.: News Summary Generation" 
-                style={{ fontSize: '12px' }}
-                size="small"
+                style={EDITOR_FORM_CONTROL}
               />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Template Code</Text>}
+              label={<Text style={{ fontSize: 14 }}>Template Code</Text>}
               name="template_code"
               rules={[{ required: true, message: 'Please enter template code' }]}
             >
               <Input 
                 placeholder="e.g.: news_summary_v1" 
                 disabled={!!editingTemplate}
-                style={{ fontSize: '12px' }}
-                size="small"
+                style={EDITOR_FORM_CONTROL}
               />
             </Form.Item>
           </Col>
@@ -700,14 +747,13 @@ const PromptTemplatesPage: React.FC = () => {
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Category</Text>}
+              label={<Text style={{ fontSize: 14 }}>Category</Text>}
               name="category_id"
               rules={[{ required: true, message: 'Please select a category' }]}
             >
               <Select 
                 placeholder="Select category"
-                size="small"
-                style={{ fontSize: '12px' }}
+                style={EDITOR_FORM_CONTROL}
                 onChange={(value) => setCurrentEditingCategoryId(value)}
               >
                 {categories.map(cat => (
@@ -720,7 +766,7 @@ const PromptTemplatesPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Visibility Scope</Text>}
+              label={<Text style={{ fontSize: 14 }}>Visibility Scope</Text>}
               name="scope"
               initialValue="user"
               extra={
@@ -730,8 +776,7 @@ const PromptTemplatesPage: React.FC = () => {
               }
             >
               <Select 
-                size="small" 
-                style={{ fontSize: '12px' }}
+                style={EDITOR_FORM_CONTROL}
                 onChange={handleScopeChange}
               >
                 <Option value="user">🔒 Private (Only Me)</Option>
@@ -743,31 +788,29 @@ const PromptTemplatesPage: React.FC = () => {
         </Row>
 
         <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>Description</Text>}
+          label={<Text style={{ fontSize: 14 }}>Description</Text>}
           name="description"
         >
           <TextArea 
             rows={6} 
             placeholder="Briefly describe the purpose of this template"
-            style={{ fontSize: '12px' }}
-            size="small"
+            style={EDITOR_FORM_TEXTAREA}
           />
         </Form.Item>
 
         <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>System Prompt (Optional)</Text>}
+          label={<Text style={{ fontSize: 14 }}>System Prompt (Optional)</Text>}
           name="system_prompt"
         >
           <TextArea 
             rows={6} 
             placeholder="Define AI's role and behavior, e.g.: You are a professional financial analyst..."
-            style={{ fontSize: '12px' }}
-            size="small"
+            style={EDITOR_FORM_TEXTAREA}
           />
         </Form.Item>
 
         <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>User Prompt Template</Text>}
+          label={<Text style={{ fontSize: 14 }}>User Prompt Template</Text>}
           name="user_prompt_template"
           rules={[{ required: true, message: 'Please enter user prompt template' }]}
           extra="Use {{variable_name}} format to define variables"
@@ -775,24 +818,22 @@ const PromptTemplatesPage: React.FC = () => {
           <TextArea 
             rows={6} 
             placeholder="Please analyze the following news:\n\nTitle: {{title}}\nContent: {{content}}"
-            style={{ fontSize: '12px' }}
-            size="small"
+            style={EDITOR_FORM_TEXTAREA}
           />
         </Form.Item>
 
-        <Divider style={{ fontSize: '12px', margin: '12px 0' }}>Recommended Configuration (Required)</Divider>
+        <Divider style={{ fontSize: 14, margin: '12px 0' }}>Recommended Configuration (Required)</Divider>
 
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Recommended Provider <Text type="danger">*</Text></Text>}
+              label={<Text style={{ fontSize: 14 }}>Recommended Provider <Text type="danger">*</Text></Text>}
               name="recommended_provider"
               rules={[{ required: true, message: 'Please select a provider' }]}
             >
               <Select 
                 placeholder="Select LLM provider" 
-                size="small"
-                style={{ fontSize: '12px' }}
+                style={EDITOR_FORM_CONTROL}
                 onChange={handleProviderChange}
               >
                 <Option value="qwen">🔷 Qwen</Option>
@@ -803,15 +844,14 @@ const PromptTemplatesPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Recommended Model <Text type="danger">*</Text></Text>}
+              label={<Text style={{ fontSize: 14 }}>Recommended Model <Text type="danger">*</Text></Text>}
               name="recommended_model"
               rules={[{ required: true, message: 'Please select a model' }]}
               extra={selectedProvider ? `Available models for ${selectedProvider}` : 'Please select a provider first'}
             >
               <Select 
                 placeholder={selectedProvider ? "Select model" : "Select provider first"}
-                style={{ fontSize: '12px' }}
-                size="small"
+                style={EDITOR_FORM_CONTROL}
                 disabled={!selectedProvider || availableModels.length === 0}
               >
                 {availableModels.map(model => (
@@ -825,7 +865,7 @@ const PromptTemplatesPage: React.FC = () => {
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Temperature</Text>}
+              label={<Text style={{ fontSize: 14 }}>Temperature</Text>}
               name="temperature"
               initialValue={0.7}
             >
@@ -833,14 +873,13 @@ const PromptTemplatesPage: React.FC = () => {
                 min={0} 
                 max={2} 
                 step={0.1} 
-                style={{ width: '100%', fontSize: '12px' }}
-                size="small"
+                style={{ width: '100%', ...EDITOR_FORM_CONTROL }}
               />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Max Tokens</Text>}
+              label={<Text style={{ fontSize: 14 }}>Max Tokens</Text>}
               name="max_tokens"
               initialValue={2000}
             >
@@ -848,22 +887,20 @@ const PromptTemplatesPage: React.FC = () => {
                 min={100} 
                 max={10000} 
                 step={100} 
-                style={{ width: '100%', fontSize: '12px' }}
-                size="small"
+                style={{ width: '100%', ...EDITOR_FORM_CONTROL }}
               />
             </Form.Item>
           </Col>
         </Row>
 
         <Form.Item
-          label={<Text style={{ fontSize: '12px' }}>Tags</Text>}
+          label={<Text style={{ fontSize: 14 }}>Tags</Text>}
           name="tags"
         >
           <Select 
             mode="tags" 
             placeholder="Add tags, press Enter to confirm"
-            size="small"
-            style={{ fontSize: '12px' }}
+            style={EDITOR_FORM_CONTROL}
           />
         </Form.Item>
 
@@ -873,10 +910,10 @@ const PromptTemplatesPage: React.FC = () => {
             message="Shared Template Publishing"
             description={
               <>
-                <Paragraph style={{ marginBottom: 8, fontSize: '12px' }}>
+                <Paragraph style={{ marginBottom: 8, fontSize: 14 }}>
                   Shared templates have two states:
                 </Paragraph>
-                <ul style={{ marginBottom: 0, paddingLeft: 20, fontSize: '12px' }}>
+                <ul style={{ marginBottom: 0, paddingLeft: 20, fontSize: 14 }}>
                   <li><Text strong>Draft (Unpublished)</Text>: Only you can see and edit this template</li>
                   <li><Text strong>Published</Text>: All users can see and use this template</li>
                 </ul>
@@ -884,7 +921,7 @@ const PromptTemplatesPage: React.FC = () => {
             }
             type="info"
             showIcon
-            style={{ marginBottom: 16, fontSize: '12px' }}
+            style={{ marginBottom: 16, fontSize: 14 }}
           />
         )}
 
@@ -892,7 +929,7 @@ const PromptTemplatesPage: React.FC = () => {
           {currentScope === 'shared' && (
             <Col span={12}>
               <Form.Item
-                label={<Text style={{ fontSize: '12px' }}>Published Status</Text>}
+                label={<Text style={{ fontSize: 14 }}>Published Status</Text>}
                 name="is_public"
                 valuePropName="checked"
                 initialValue={false}
@@ -908,7 +945,7 @@ const PromptTemplatesPage: React.FC = () => {
           )}
           <Col span={currentScope === 'shared' ? 12 : 24}>
             <Form.Item
-              label={<Text style={{ fontSize: '12px' }}>Active Status</Text>}
+              label={<Text style={{ fontSize: 14 }}>Active Status</Text>}
               name="is_active"
               valuePropName="checked"
               initialValue={true}
@@ -926,11 +963,20 @@ const PromptTemplatesPage: React.FC = () => {
         <Form.Item style={{ marginBottom: 0 }}>
           <Space size="small">
             {!isReadOnly && (
-              <Button type="primary" htmlType="submit" size="small">
+              <Button
+                type="primary"
+                htmlType="submit"
+                size="small"
+                style={{ borderRadius: 8, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) }}
+              >
                 Save
               </Button>
             )}
-            <Button onClick={() => setIsEditorVisible(false)} size="small">
+            <Button
+              onClick={() => setIsEditorVisible(false)}
+              size="small"
+              style={{ borderRadius: 8, ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}) }}
+            >
               {isReadOnly ? 'Close' : 'Cancel'}
             </Button>
           </Space>
@@ -971,7 +1017,7 @@ const PromptTemplatesPage: React.FC = () => {
             showIcon
           />
 
-          <Card title="Template Information" size="small">
+          <Card title="Template Information" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
             <Paragraph>
               <Text strong>Template Code:</Text> {selectedTemplate.template_code}
             </Paragraph>
@@ -988,7 +1034,7 @@ const PromptTemplatesPage: React.FC = () => {
             layout="vertical"
             onFinish={handleRunTest}
           >
-            <Card title="Test Variables" size="small">
+            <Card title="Test Variables" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
               {Object.entries(selectedTemplate.variables || {}).map(([varName, varDef]) => (
                 <Form.Item
                   key={varName}
@@ -1025,6 +1071,7 @@ const PromptTemplatesPage: React.FC = () => {
                 icon={<ThunderboltOutlined />}
                 loading={testing}
                 block
+                style={{ borderRadius: 10, fontWeight: 500, height: 40, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) }}
               >
                 Run Test
               </Button>
@@ -1045,6 +1092,8 @@ const PromptTemplatesPage: React.FC = () => {
                   </Space>
                 }
                 size="small"
+                style={cardStyleBehance}
+                bodyStyle={{ padding: '16px 20px' }}
               >
                 {testResult.success && (
                   <>
@@ -1089,7 +1138,7 @@ const PromptTemplatesPage: React.FC = () => {
                           <pre style={{ 
                             background: colors.codeBlockBg, 
                             padding: '12px', 
-                            borderRadius: '4px',
+                            borderRadius: '8px',
                             whiteSpace: 'pre-wrap'
                           }}>
                             {testResult.rendered_prompt.system_prompt}
@@ -1102,7 +1151,7 @@ const PromptTemplatesPage: React.FC = () => {
                       <pre style={{ 
                         background: colors.codeBlockBg, 
                         padding: '12px', 
-                        borderRadius: '4px',
+                        borderRadius: '8px',
                         whiteSpace: 'pre-wrap'
                       }}>
                         {testResult.rendered_prompt.user_prompt}
@@ -1113,12 +1162,12 @@ const PromptTemplatesPage: React.FC = () => {
               )}
 
               {testResult.llm_response && (
-                <Card title="LLM Response" size="small">
+                <Card title="LLM Response" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
                   <Paragraph>
                     <pre style={{ 
                       background: colors.codeBlockBg, 
                       padding: '12px', 
-                      borderRadius: '4px',
+                      borderRadius: '8px',
                       whiteSpace: 'pre-wrap'
                     }}>
                       {testResult.llm_response}
@@ -1128,12 +1177,12 @@ const PromptTemplatesPage: React.FC = () => {
               )}
 
               {testResult.parsed_output && (
-                <Card title="Parsed Output" size="small">
+                <Card title="Parsed Output" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
                   <Paragraph>
                     <pre style={{ 
                       background: colors.codeBlockBg, 
                       padding: '12px', 
-                      borderRadius: '4px',
+                      borderRadius: '8px',
                       whiteSpace: 'pre-wrap'
                     }}>
                       {JSON.stringify(testResult.parsed_output, null, 2)}
@@ -1155,29 +1204,37 @@ const PromptTemplatesPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: (colors as any).cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: (colors as any).inputBg ?? '#1E202B',
+            colorBgLayout: (colors as any).pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-      <Title level={2} style={{ color: colors.text }}>
+    <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <Title level={2} style={{ color: colors.text, marginTop: 0, marginBottom: 4 }}>
         <FileTextOutlined /> Prompt Template Management
       </Title>
-      <Paragraph type="secondary" style={{ color: colors.textSecondary }}>
+      <Paragraph type="secondary" style={{ color: colors.textSecondary, marginBottom: 20 }}>
         Manage and optimize your LLM Prompt templates with support for variables, version control, and online testing
       </Paragraph>
 
       <Spin spinning={loading}>
-        <Row gutter={[16, 16]}>
-          {/* Left: Category list */}
-          <Col xs={24} md={6}>
+        <Row gutter={[16, 16]} style={{ alignItems: 'stretch' }}>
+          {/* Left: Category list — stretches to match right column height */}
+          <Col xs={24} md={6} style={{ display: 'flex' }}>
             {renderCategories()}
           </Col>
 
           {/* Right: Template list and operations */}
-          <Col xs={24} md={18}>
-            <Card>
+          <Col xs={24} md={18} style={{ display: 'flex' }}>
+            <Card style={{ ...cardStyleBehance, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }} bodyStyle={{ padding: '20px 24px', flex: 1, overflow: 'auto' }}>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 {/* Toolbar */}
                 <Row gutter={[16, 16]} align="middle">
@@ -1188,11 +1245,14 @@ const PromptTemplatesPage: React.FC = () => {
                       value={searchText}
                       onChange={e => setSearchText(e.target.value)}
                       allowClear
+                      {...(isDark && {
+                        style: { backgroundColor: (colors as any).inputBg ?? '#1E202B' },
+                      })}
                     />
                   </Col>
                   <Col>
                     <Select
-                      style={{ width: 140 }}
+                      style={{ width: 140, ...(isDark ? { backgroundColor: (colors as any).inputBg } : {}) }}
                       value={scopeFilter}
                       onChange={setScopeFilter}
                     >
@@ -1204,7 +1264,7 @@ const PromptTemplatesPage: React.FC = () => {
                   </Col>
                   <Col>
                     <Select
-                      style={{ width: 130 }}
+                      style={{ width: 130, ...(isDark ? { backgroundColor: (colors as any).inputBg } : {}) }}
                       value={activeFilter}
                       onChange={setActiveFilter}
                     >
@@ -1218,6 +1278,14 @@ const PromptTemplatesPage: React.FC = () => {
                       type="primary" 
                       icon={<PlusOutlined />}
                       onClick={handleCreateTemplate}
+                      style={{
+                        borderRadius: 10,
+                        fontWeight: 500,
+                        height: 36,
+                        paddingLeft: 16,
+                        paddingRight: 16,
+                        ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                      }}
                     >
                       Create Template
                     </Button>

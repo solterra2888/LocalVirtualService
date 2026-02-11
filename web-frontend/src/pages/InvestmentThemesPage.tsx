@@ -15,6 +15,7 @@ import {
   Col,
   message,
   Modal,
+  App,
   Input,
   Select,
   Divider,
@@ -92,6 +93,7 @@ import BatchThemeConflictModal from '../components/BatchThemeConflictModal';
 const { Title, Text, Paragraph } = Typography;
 const { TextArea, Search } = Input;
 
+// Aligned with FRONTEND_STYLE_GUIDE: semantic colors for Light/Dark + Behance card style
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -99,19 +101,33 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
-    textMuted: '#999',
     codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined, // only used in dark; present for type union
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    textMuted: 'rgba(255, 255, 255, 0.4)',
-    codeBlockBg: 'rgba(255, 255, 255, 0.06)',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
+
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
 
 interface PageState {
   loading: boolean;
@@ -190,13 +206,27 @@ interface PageState {
     batchTagging: boolean;
 }
 
-const InvestmentThemesPage: React.FC = () => {
+const InvestmentThemesPageInner: React.FC = () => {
   const { user } = useAuthStore();
   const { themeMode } = useDashboardSettings();
+  const { modal } = App.useApp();
   const isAdmin = user?.is_admin === true;
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
-  
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
+  const modalStyles = isDark
+    ? {
+        content: {
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+          border: '1px solid rgba(255, 255, 255, 0.06)',
+          backgroundColor: colors.cardBg,
+        },
+        header: { color: colors.text, borderBottomColor: colors.cardBorder },
+        body: { color: colors.text },
+      }
+    : undefined;
+
   const [state, setState] = useState<PageState>({
     loading: false,
     themes: [],
@@ -616,10 +646,17 @@ const InvestmentThemesPage: React.FC = () => {
 
   // 🌟 Sync Theme Data (merged functionality - using Celery async tasks)
   const handleSyncThemes = async () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Sync Theme Data',
       icon: <SyncOutlined />,
       width: 600,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -728,10 +765,17 @@ const InvestmentThemesPage: React.FC = () => {
 
   // 🌟 Optimize: Enhance Description Quality (fill descriptions only)
   const handleOptimizeDescriptions = async () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Optimize Description Quality',
       icon: <ExperimentOutlined />,
       width: 600,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -809,10 +853,17 @@ const InvestmentThemesPage: React.FC = () => {
 
   // 🚨 Dangerous Operation: Force Update All Vectors
   const handleForceUpdateVectors = async () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Warning: Force Update All Vectors',
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 650,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500 },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -914,10 +965,17 @@ const InvestmentThemesPage: React.FC = () => {
 
   // 🚨 Dangerous Operation: Regenerate All Descriptions
   const handleForceRegenerateDescriptions = async () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Warning: Regenerate All Descriptions',
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 650,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500 },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -1055,10 +1113,18 @@ const InvestmentThemesPage: React.FC = () => {
   // View description details
   const showDescriptionModal = (theme: InvestmentTheme) => {
     const sourceLabel = getDescriptionSourceLabel(theme.description_source);
-    Modal.info({
+    modal.info({
       title: `${theme.theme_name} Theme Description`,
       width: 800,
       okText: 'Close',
+      styles: modalStyles,
+      okButtonProps: {
+        style: {
+          borderRadius: 10,
+          fontWeight: 500,
+          ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+        },
+      },
       content: (
         <div>
           <Paragraph>
@@ -1301,9 +1367,16 @@ const InvestmentThemesPage: React.FC = () => {
     const newStatus = !theme.is_shared;
     const actionText = newStatus ? '分享' : '取消分享';
     
-    Modal.confirm({
+    modal.confirm({
       title: newStatus ? 'Confirm Share Theme?' : 'Confirm Unshare Theme?',
       icon: <InfoCircleOutlined />,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: newStatus 
         ? 'After sharing, all users can view and use this theme (but cannot edit).'
         : 'After unsharing, only you can view and use this theme.',
@@ -1329,10 +1402,17 @@ const InvestmentThemesPage: React.FC = () => {
       return;
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: 'Confirm Delete Theme?',
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 600,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500 },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -1402,10 +1482,17 @@ const InvestmentThemesPage: React.FC = () => {
       }
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: `Confirm Batch Delete ${selectedThemes.length} Themes?`,
       icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
       width: 700,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500 },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       content: (
         <div>
           <Alert
@@ -1419,7 +1506,7 @@ const InvestmentThemesPage: React.FC = () => {
           </Paragraph>
           <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: 16 }}>
             {selectedThemes.map(theme => (
-              <div key={theme.theme_id} style={{ padding: '8px', background: colors.codeBlockBg, marginBottom: '4px', borderRadius: '4px' }}>
+              <div key={theme.theme_id} style={{ padding: '8px', background: colors.codeBlockBg, marginBottom: '4px', borderRadius: 8 }}>
                 <Text strong>{theme.theme_name}</Text>
                 {' '}
                 <Text type="secondary">({theme.theme_id})</Text>
@@ -1446,9 +1533,17 @@ const InvestmentThemesPage: React.FC = () => {
           
           if (result.success || result.deleted_count > 0) {
             if (result.failed_count > 0) {
-              Modal.info({
+              modal.info({
                 title: 'Batch Delete Completed with Issues',
                 width: 700,
+                styles: modalStyles,
+                okButtonProps: {
+                  style: {
+                    borderRadius: 10,
+                    fontWeight: 500,
+                    ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+                  },
+                },
                 content: (
                   <div>
                     <Paragraph>
@@ -1765,11 +1860,18 @@ const InvestmentThemesPage: React.FC = () => {
 
   // Handle cancel create
   const handleCancelCreate = () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Confirm Cancel?',
       content: 'Unsaved changes will be lost.',
       okText: 'Yes, Cancel',
       cancelText: 'Continue Editing',
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
       onOk: () => {
         setState(prev => ({
           ...prev,
@@ -2235,26 +2337,15 @@ const InvestmentThemesPage: React.FC = () => {
   const uploadPreview = state.uploadPreview;
 
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        ...(isDark && {
-          token: {
-            colorBgContainer: colors.cardBg,
-            colorBorderSecondary: colors.cardBorder,
-          },
-        }),
-      }}
-    >
-    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+    <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
       {/* Page Title */}
-      <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <Title level={2} style={{ color: colors.text }}>
+            <Title level={2} style={{ color: colors.text, marginTop: 0, marginBottom: 4 }}>
               <FundOutlined /> Investment Themes Settings
             </Title>
-            <Paragraph type="secondary" style={{ color: colors.textSecondary }}>
+            <Paragraph type="secondary" style={{ color: colors.textSecondary, marginBottom: 0 }}>
               Intelligent theme matching system based on Embedding technique, automatically associating news through semantic analysis. All users can create themes. You can edit and delete your own themes{isAdmin ? ', and admin can manage all themes' : ''}.
             </Paragraph>
           </div>
@@ -2263,7 +2354,7 @@ const InvestmentThemesPage: React.FC = () => {
 
 
       {/* Action Buttons - Optimized Layout */}
-      <Card style={{ marginBottom: '24px' }}>
+      <Card style={{ ...cardStyle, marginBottom: '24px' }}>
 
          {/* Operations */}
          <div style={{ marginBottom: '16px' }}>
@@ -2274,6 +2365,14 @@ const InvestmentThemesPage: React.FC = () => {
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={() => setState(prev => ({ ...prev, createModalVisible: true }))}
+                style={{
+                  borderRadius: 10,
+                  fontWeight: 500,
+                  height: 36,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                }}
               >
                 Create New Theme
               </Button>
@@ -2355,7 +2454,7 @@ const InvestmentThemesPage: React.FC = () => {
                         onClick={handleForceUpdateVectors}
                       >
                         <Text type="danger">Force Update All Vectors</Text>
-                        <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: '4px' }}>
+                        <div style={{ fontSize: '12px', color: colors.textSecondary, marginTop: '4px' }}>
                           Only for model upgrade (20-30 mins)
                         </div>
                       </Menu.Item>
@@ -2365,7 +2464,7 @@ const InvestmentThemesPage: React.FC = () => {
                         onClick={handleForceRegenerateDescriptions}
                       >
                         <Text type="danger">Regenerate All Descriptions</Text>
-                        <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: '4px' }}>
+                        <div style={{ fontSize: '12px', color: colors.textSecondary, marginTop: '4px' }}>
                           Only after Prompt optimization (15-25 mins)
                         </div>
                       </Menu.Item>
@@ -2414,6 +2513,7 @@ const InvestmentThemesPage: React.FC = () => {
 
       {/* Theme List Table */}
       <Card
+        style={cardStyle}
         title="Investment Themes List"
         extra={
           <Space size="middle" wrap>
@@ -2425,14 +2525,14 @@ const InvestmentThemesPage: React.FC = () => {
               value={state.searchKeyword}
               onChange={handleSearchInputChange}
               onSearch={handleSearchThemes}
-              style={{ width: 260 }}
+              style={{ width: 260, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
             />
             <Space size="small">
               <Text type="secondary">Ownership:</Text>
               <Select
                 value={state.ownershipFilter}
                 onChange={handleOwnershipFilterChange}
-                style={{ width: 120 }}
+                style={{ width: 120, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
                 size="small"
               >
                 <Select.Option value="all">All</Select.Option>
@@ -2447,7 +2547,7 @@ const InvestmentThemesPage: React.FC = () => {
                 placeholder={state.loadingTags ? "Loading tags..." : "Select tags"}
                 value={state.selectedFilterTags}
                 onChange={handleTagFilterChange}
-                style={{ minWidth: 200 }}
+                style={{ minWidth: 200, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
                 size="small"
                 allowClear
                 maxTagCount="responsive"
@@ -2473,7 +2573,7 @@ const InvestmentThemesPage: React.FC = () => {
                   placeholder={state.loadingUsers ? "Loading users..." : "Select users"}
                   value={state.selectedUsers}
                   onChange={handleUserFilterChange}
-                  style={{ minWidth: 200 }}
+                  style={{ minWidth: 200, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
                   size="small"
                   allowClear
                   maxTagCount="responsive"
@@ -2572,6 +2672,7 @@ const InvestmentThemesPage: React.FC = () => {
         onCancel={handleCloseAssociationsModal}
         footer={null}
         width={520}
+        styles={modalStyles}
       >
         <Alert
           type="warning"
@@ -2606,6 +2707,7 @@ const InvestmentThemesPage: React.FC = () => {
         }))}
         footer={null}
         width={800}
+        styles={modalStyles}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <div>
@@ -2615,7 +2717,7 @@ const InvestmentThemesPage: React.FC = () => {
               placeholder="Please enter news title and content..."
               value={state.testNewsText}
               onChange={(e) => setState(prev => ({ ...prev, testNewsText: e.target.value }))}
-              style={{ marginTop: '8px' }}
+              style={{ marginTop: '8px', ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
             />
           </div>
 
@@ -2626,6 +2728,11 @@ const InvestmentThemesPage: React.FC = () => {
             onClick={handleTestMatch}
             loading={state.testLoading}
             block
+            style={{
+              borderRadius: 10,
+              fontWeight: 500,
+              ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+            }}
           >
             Match Themes
           </Button>
@@ -2637,7 +2744,7 @@ const InvestmentThemesPage: React.FC = () => {
               <Title level={5}>Match Results (Top {state.testResults.length}):</Title>
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 {state.testResults.map((result, index) => (
-                  <Card key={index} size="small">
+                  <Card key={index} size="small" style={cardStyle}>
                     <Row gutter={16} align="middle">
                       <Col span={2}>
                         <Text strong style={{ fontSize: '16px' }}>#{result.rank}</Text>
@@ -2678,6 +2785,7 @@ const InvestmentThemesPage: React.FC = () => {
       <Modal
         title={`Edit Theme${state.editingTheme ? ` - ${state.editingTheme.theme_name}` : ''}`}
         open={state.editModalVisible}
+        styles={modalStyles}
         onCancel={() => setState(prev => ({ 
           ...prev, 
           editModalVisible: false, 
@@ -2693,6 +2801,16 @@ const InvestmentThemesPage: React.FC = () => {
         cancelText="Cancel"
         confirmLoading={state.editLoading}
         width={700}
+        okButtonProps={{
+          style: {
+            borderRadius: 10,
+            fontWeight: 500,
+            ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+          },
+        }}
+        cancelButtonProps={{
+          style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+        }}
       >
         {state.editingTheme && (
           <div>
@@ -2877,6 +2995,7 @@ const InvestmentThemesPage: React.FC = () => {
         footer={null}
         width={800}
         destroyOnClose
+        styles={modalStyles}
       >
         {state.createStep === 1 && (
           <div>
@@ -3088,6 +3207,17 @@ const InvestmentThemesPage: React.FC = () => {
         okText={state.batchTagAction === 'add' ? '添加标签' : '移除标签'}
         cancelText="取消"
         width={600}
+        styles={modalStyles}
+        okButtonProps={{
+          style: {
+            borderRadius: 10,
+            fontWeight: 500,
+            ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+          },
+        }}
+        cancelButtonProps={{
+          style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+        }}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <Alert
@@ -3176,17 +3306,39 @@ const InvestmentThemesPage: React.FC = () => {
         open={state.batchUploadModalVisible}
         onCancel={handleCloseBatchUploadModal}
         width={800}
+        styles={modalStyles}
         footer={
           state.batchTaskId ? (
-            <Button onClick={handleCloseBatchUploadModal}>Close</Button>
+            <Button
+              onClick={handleCloseBatchUploadModal}
+              style={{
+                borderRadius: 8,
+                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+              }}
+            >
+              Close
+            </Button>
           ) : (
             <>
-              <Button onClick={handleCloseBatchUploadModal}>Cancel</Button>
+              <Button
+                onClick={handleCloseBatchUploadModal}
+                style={{
+                  borderRadius: 8,
+                  ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 type="primary"
                 onClick={handleStartBatchUpload}
                 loading={state.uploadingFile}
                 disabled={!state.uploadedFile}
+                style={{
+                  borderRadius: 10,
+                  fontWeight: 500,
+                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                }}
               >
                 Start Upload
               </Button>
@@ -3281,7 +3433,7 @@ const InvestmentThemesPage: React.FC = () => {
               <Divider>Upload Preview</Divider>
               
               {/* Theme Name */}
-              <Card size="small">
+              <Card size="small" style={cardStyle}>
                 <Text strong>Theme Name:</Text> <Tag color="blue">{uploadPreview.theme_name}</Tag>
                 <br />
                 <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -3291,7 +3443,7 @@ const InvestmentThemesPage: React.FC = () => {
               
               <Row gutter={16}>
                 <Col span={12}>
-                  <Card size="small">
+                  <Card size="small" style={cardStyle}>
                     <Text strong>Themes to Create:</Text> {uploadPreview.total_themes}
                     <br />
                     <Text type="secondary" style={{ fontSize: '12px' }}>
@@ -3300,14 +3452,14 @@ const InvestmentThemesPage: React.FC = () => {
                   </Card>
                 </Col>
                 <Col span={12}>
-                  <Card size="small">
+                  <Card size="small" style={cardStyle}>
                     <Text strong>Total Tickers:</Text> {uploadPreview.total_tickers}
                   </Card>
                 </Col>
               </Row>
 
               {/* Categories Distribution */}
-              <Card size="small" title={`Categories Distribution (${uploadPreview.total_themes} categories → ${uploadPreview.total_themes} themes)`}>
+              <Card size="small" style={cardStyle} title={`Categories Distribution (${uploadPreview.total_themes} categories → ${uploadPreview.total_themes} themes)`}>
                 <Space wrap>
                   {Object.entries(uploadPreview.categories).map(([category, count]) => (
                     <Tag key={category} color="green">
@@ -3334,6 +3486,36 @@ const InvestmentThemesPage: React.FC = () => {
         </Space>
       </Modal>
     </div>
+  );
+};
+
+const InvestmentThemesPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
+          },
+        }),
+      }}
+    >
+      <App>
+        <InvestmentThemesPageInner />
+      </App>
     </ConfigProvider>
   );
 };

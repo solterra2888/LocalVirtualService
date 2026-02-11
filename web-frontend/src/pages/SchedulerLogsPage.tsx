@@ -1,29 +1,57 @@
 import React, { useState } from 'react';
-import { Card, Tabs, Space, ConfigProvider, theme as antdTheme } from 'antd';
-import { ScheduleOutlined, BarChartOutlined } from '@ant-design/icons';
+import { Card, Tabs, Space, ConfigProvider, theme as antdTheme, Typography } from 'antd';
+import { ScheduleOutlined, BarChartOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import DatabaseTableViewer from '../components/DatabaseTableViewer';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
 
 type SchedulerLogsTabKey = 'task_management' | 'execution_history';
 
+// Theme colors per FRONTEND_STYLE_GUIDE §2: Light/Dark + Behance
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
     cardBg: '#fff',
     cardBorder: '#f0f0f0',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.45)',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined,
+    hoverBg: undefined as string | undefined,
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
+
+// Behance-style: rounded corners, soft shadow, minimal border (per FRONTEND_STYLE_GUIDE §3)
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid #f0f0f0',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
+const { Title, Text } = Typography;
 
 const SchedulerLogsPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
   const [activeTab, setActiveTab] = useState<SchedulerLogsTabKey>('execution_history');
 
   const handleTabChange = (key: string) => {
@@ -38,53 +66,77 @@ const SchedulerLogsPage: React.FC = () => {
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
             colorBorderSecondary: colors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: colors.inputBg ?? '#1E202B',
+            colorBgLayout: colors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
           },
         }),
       }}
     >
-    <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Card>
+      <div
+        style={{
+          padding: '12px 40px 32px',
+          backgroundColor: colors.pageBg,
+          minHeight: '100%',
+        }}
+      >
+        <div style={{ marginBottom: 20 }}>
+          <Title level={2} style={{ margin: 0, marginBottom: 4, color: colors.text }}>
+            <UnorderedListOutlined style={{ marginRight: 8 }} />
+            Scheduler Logs
+          </Title>
+          <Text style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
+            Execution history and task management for scheduled data sources
+          </Text>
+        </div>
+
+        <Card
+          style={{
+            ...cardStyle,
+            overflow: 'hidden',
+          }}
+          bodyStyle={{
+            padding: '20px 24px',
+          }}
+        >
           <Tabs
-          activeKey={activeTab}
-          onChange={handleTabChange}
-          items={[
-            {
-              key: 'execution_history',
-              label: (
-                <Space>
-                  <BarChartOutlined />
-                  Execution History
-                </Space>
-              ),
-              children: (
-                <TaskExecutionHistory
-                  height={600}
-                />
-              )
-            },
-            {
-              key: 'task_management',
-              label: (
-                <Space>
-                  <ScheduleOutlined />
-                  Task Management
-                </Space>
-              ),
-              children: (
-                <DatabaseTableViewer />
-              )
-            }
-          ]}
-        />
-      </Card>
-    </Space>
-    </div>
+            activeKey={activeTab}
+            onChange={handleTabChange}
+            items={[
+              {
+                key: 'execution_history',
+                label: (
+                  <Space>
+                    <BarChartOutlined />
+                    Execution History
+                  </Space>
+                ),
+                children: (
+                  <TaskExecutionHistory height={600} />
+                ),
+              },
+              {
+                key: 'task_management',
+                label: (
+                  <Space>
+                    <ScheduleOutlined />
+                    Task Management
+                  </Space>
+                ),
+                children: <DatabaseTableViewer />,
+              },
+            ]}
+          />
+        </Card>
+      </div>
     </ConfigProvider>
   );
 };
 
 export default SchedulerLogsPage;
-
-

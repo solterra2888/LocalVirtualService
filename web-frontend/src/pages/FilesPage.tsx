@@ -1,7 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
-  Upload,
   Button,
   Progress,
   Typography,
@@ -19,37 +19,32 @@ import {
   Modal,
   Table,
   Tooltip,
-  Badge,
-  Cascader,
-  AutoComplete,
   ConfigProvider,
   Dropdown,
   Checkbox,
+  App,
+  Descriptions,
   theme as antdTheme
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  InboxOutlined,
-  PlayCircleOutlined,
   DeleteOutlined,
-  StopOutlined,
-  SettingOutlined,
   EyeOutlined,
-  ReloadOutlined,
   FileTextOutlined,
   FilePdfOutlined,
   FileExcelOutlined,
   FileWordOutlined,
   FileImageOutlined,
   ExclamationCircleOutlined,
-  ClearOutlined,
   DownloadOutlined,
   RobotOutlined,
   FolderOutlined,
   LoadingOutlined,
   EllipsisOutlined,
   EditOutlined,
-  SoundOutlined
+  SoundOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -60,12 +55,12 @@ import { useFileProcessing } from '../contexts/FileProcessingContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import TemplateSelector from '../components/TemplateSelector';
-import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 
 const { Text } = Typography;
 const { Option } = Select;
 
+// 与 FRONTEND_STYLE_GUIDE 一致：语义化色板 + Behance 风格
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -73,23 +68,61 @@ const THEME_COLORS = {
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
-    textMuted: '#999',
-    boxMuted: '#f5f5f5',
+    codeBlockBg: '#f5f5f5',
+    selectedBorder: '#1890ff',
+    inputBg: undefined as string | undefined,
     successBg: '#f6ffed',
     successBorder: '#b7eb8f',
+    textMuted: '#999',
+    boxMuted: '#f5f5f5',
   },
   dark: {
-    pageBg: '#1a202c',
+    pageBg: '#1E202B',
     cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    textMuted: '#94a3b8',
-    boxMuted: '#212936',
+    cardBorder: 'rgba(255, 255, 255, 0.06)',
+    text: '#FFFFFF',
+    textSecondary: '#A0A3AD',
+    codeBlockBg: '#1E202B',
+    selectedBorder: '#2196F3',
+    inputBg: '#1E202B',
+    hoverBg: 'rgba(255, 255, 255, 0.06)',
     successBg: 'rgba(82, 196, 26, 0.15)',
     successBorder: 'rgba(82, 196, 26, 0.45)',
+    textMuted: '#A0A3AD',
+    boxMuted: '#1E202B',
   },
 } as const;
+
+// Behance 风格：圆角 12px、柔和阴影、细边框
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+};
+
+// Modal Behance 样式（Dark 模式与 CARD_STYLE_BEHANCE 一致）
+const getModalStyles = (isDark: boolean, colors: typeof THEME_COLORS.light | typeof THEME_COLORS.dark) => {
+  if (!isDark) return {};
+  const cardStyle = CARD_STYLE_BEHANCE_DARK;
+  return {
+    content: {
+      ...cardStyle,
+      backgroundColor: colors.cardBg,
+    },
+    header: {
+      color: colors.text,
+      borderBottomColor: colors.cardBorder,
+    },
+    body: {
+      color: colors.text,
+    },
+  };
+};
 
 interface FileItem {
   id: string;
@@ -182,9 +215,10 @@ interface ProcessingResult {
   final_report?: string;
 }
 
-const FilesPage: React.FC = () => {
+const FilesPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const { addTask, updateTaskStatus: updateGlobalTaskStatus } = useFileProcessing();
+  const { modal } = App.useApp();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -194,13 +228,13 @@ const FilesPage: React.FC = () => {
   const [processing, setProcessing] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [lastCompletedTaskId, setLastCompletedTaskId] = useState<string | null>(null);
-  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
+  const [, setTaskStatus] = useState<TaskStatus | null>(null);
   
   // 新增：分析模式相关状态
   const [analysisMode, setAnalysisMode] = useState<'remote_agent' | 'local_llm'>('local_llm');
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
   const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
-  const [showParams, setShowParams] = useState(false);
+  const [, setShowParams] = useState(false);
   const [allTemplates, setAllTemplates] = useState<PromptTemplate[]>([]);
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [stoppingTask, setStoppingTask] = useState(false);
@@ -208,14 +242,14 @@ const FilesPage: React.FC = () => {
   const [updatingFiles, setUpdatingFiles] = useState(false);
   
   // 行业和股票选择相关状态
-  const [sectors, setSectors] = useState<SectorOption[]>([]);
+  const [, setSectors] = useState<SectorOption[]>([]);
   const [selectedSector, setSelectedSector] = useState<string>('');
   const [selectedIndustry, setSelectedIndustry] = useState<string>('');
   const [tickerOptions, setTickerOptions] = useState<TickerOption[]>([]);
   const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const [tickerSearchValue, setTickerSearchValue] = useState<string>('');
-  const [loadingSectors, setLoadingSectors] = useState(false);
-  const [loadingTickers, setLoadingTickers] = useState(false);
+  const [_tickerSearchValue, setTickerSearchValue] = useState<string>('');
+  const [, setLoadingSectors] = useState(false);
+  const [, setLoadingTickers] = useState(false);
   const [showBatchTagModal, setShowBatchTagModal] = useState(false);
   const [batchTagging, setBatchTagging] = useState(false);
   
@@ -250,10 +284,6 @@ const FilesPage: React.FC = () => {
   
   // 执行历史相关状态
   const [taskExecutions, setTaskExecutions] = useState<TaskExecution[]>([]);
-  const [executionDetailVisible, setExecutionDetailVisible] = useState(false);
-  const [selectedExecution, setSelectedExecution] = useState<TaskExecution | null>(null);
-  const [executionDetailData, setExecutionDetailData] = useState<TaskExecutionDetail | null>(null);
-  const [executionDetailLoading, setExecutionDetailLoading] = useState(false);
   const [selectedExecutionIds, setSelectedExecutionIds] = useState<string[]>([]);
   const [batchMode, setBatchMode] = useState(false);
   const [deleteExecutionVisible, setDeleteExecutionVisible] = useState(false);
@@ -278,9 +308,13 @@ const FilesPage: React.FC = () => {
   
   // 新布局相关状态
   const [selectedExecutionForView, setSelectedExecutionForView] = useState<TaskExecution | null>(null);
-  const [viewMode, setViewMode] = useState<'original' | 'analysis'>('original');
+  const [viewMode, setViewMode] = useState<'original' | 'content'>('original');
+  const [rightPanelView, setRightPanelView] = useState<'info' | 'analysis'>('analysis');
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [selectedFileForView, setSelectedFileForView] = useState<any>(null);
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
+  const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
+  const [contentDetailLoading, setContentDetailLoading] = useState(false);
   const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio'>('all');
   const [searchType, setSearchType] = useState<'file_name' | 'content'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
@@ -320,10 +354,12 @@ const FilesPage: React.FC = () => {
     }
   }, [logger.logs, logger.autoScroll]);
 
-  // 切换 execution 时清空 Original 标签栏的文件信息（会由 OriginalContentView 重新加载）
+  // 切换 execution 时清空 Original 标签栏的文件信息及 Content 数据（会由对应视图重新加载）
   useEffect(() => {
     setOriginalFileInfoForTabs(null);
+    setContentDetailData(null);
   }, [selectedExecutionForView?.id]);
+
 
   // 加载任务执行历史的函数 - 将在状态声明后重新定义
 
@@ -916,27 +952,6 @@ const FilesPage: React.FC = () => {
 
 
 
-  const handleViewExecution = async (execution: TaskExecution) => {
-    try {
-      setSelectedExecution(execution);
-      setExecutionDetailVisible(true);
-      setExecutionDetailLoading(true);
-      
-      logger.logInfo(`view task execution details: ${execution.task_name}`, 'file-processing');
-      
-      // 获取包含文件详情的完整执行信息
-      const details = await tasksAPI.getTaskExecutionDetails(execution.id);
-      setExecutionDetailData(details);
-      
-    } catch (error) {
-      message.error('failed to get execution details');
-      logger.logError(`failed to get execution details: ${execution.task_name}`, 'file-processing', error);
-      setExecutionDetailVisible(false);
-    } finally {
-      setExecutionDetailLoading(false);
-    }
-  };
-
   const handleViewAiAnalysis = async (execution: TaskExecution) => {
     try {
       setAiAnalysisLoading(true);
@@ -1337,7 +1352,7 @@ const FilesPage: React.FC = () => {
       return;
     }
     
-    Modal.confirm({
+    modal.confirm({
       title: 'Batch Delete Warning',
       content: (
         <div>
@@ -1405,7 +1420,7 @@ const FilesPage: React.FC = () => {
     });
   };
 
-  const refreshFileStatus = async () => {
+  const _refreshFileStatus = async () => {
     if (refreshingStatus) return;
     
     setRefreshingStatus(true);
@@ -1427,9 +1442,9 @@ const FilesPage: React.FC = () => {
   };
 
   // 单文件上传状态
-  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [, setUploadingFiles] = useState(false);
 
-  const handleUpload = async (file: any) => {
+  const _handleUpload = async (file: any) => {
     // 限制只能上传一份文件
     if (files.length > 0) {
       message.warning('只能上传一份文件，请先删除现有文件后再上传');
@@ -1532,7 +1547,7 @@ const FilesPage: React.FC = () => {
     });
   };
 
-  const handleStartProcessing = async () => {
+  const _handleStartProcessing = async () => {
     // 根据分析模式进行不同的验证
     if (analysisMode === 'remote_agent') {
       if (!selectedTaskType) {
@@ -1601,7 +1616,7 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleStopProcessing = async () => {
+  const _handleStopProcessing = async () => {
     if (!currentTaskId || stoppingTask) return;
     
     setStoppingTask(true);
@@ -1625,7 +1640,7 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleTaskTypeChange = (taskId: string) => {
+  const _handleTaskTypeChange = (taskId: string) => {
     setSelectedTaskType(taskId);
     const taskType = taskTypes.find(t => t.id === taskId);
     if (taskType) {
@@ -1640,7 +1655,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 新增：重新处理函数
-  const handleReprocess = () => {
+  const _handleReprocess = () => {
     setShowResult(false);
     setProcessingResult(null);
     setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
@@ -1653,7 +1668,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 新增：清除文件列表函数
-  const handleClearFiles = () => {
+  const _handleClearFiles = () => {
     setFiles([]);
     setShowResult(false);
     setProcessingResult(null);
@@ -1667,7 +1682,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 行业选择处理函数
-  const handleSectorIndustryChange = (value: string[]) => {
+  const _handleSectorIndustryChange = (value: string[]) => {
     if (value && value.length >= 2) {
       setSelectedSector(value[0]);
       setSelectedIndustry(value[1]);
@@ -1689,7 +1704,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 股票代码搜索处理函数
-  const handleTickerSearch = async (searchValue: string) => {
+  const _handleTickerSearch = async (searchValue: string) => {
     setTickerSearchValue(searchValue);
     
     if (!searchValue.trim()) {
@@ -1713,7 +1728,7 @@ const FilesPage: React.FC = () => {
   };
 
   // 股票代码选择处理函数
-  const handleTickerSelect = (value: string, option: any) => {
+  const _handleTickerSelect = (value: string, option: any) => {
     setSelectedTicker(value);
     setTickerSearchValue(option.label);
     
@@ -1776,14 +1791,14 @@ const FilesPage: React.FC = () => {
   };
 
   // 获取当前界面状态
-  const getUIState = () => {
+  const _getUIState = () => {
     if (processing) return 'processing';
     if (showResult && processingResult) return 'completed';
     if (files.length === 0) return 'empty';
     return 'ready';
   };
 
-  const renderCustomInputs = () => {
+  const _renderCustomInputs = () => {
     const selectedTask = taskTypes.find(t => t.id === selectedTaskType);
     if (!selectedTask || !selectedTask.input_fields.length) {
       return null;
@@ -1816,7 +1831,7 @@ const FilesPage: React.FC = () => {
     );
   };
 
-  const renderProcessingParams = () => (
+  const _renderProcessingParams = () => (
     <Form form={form} layout="vertical">
       <Row gutter={16}>
         <Col span={12}>
@@ -2012,7 +2027,7 @@ const FilesPage: React.FC = () => {
     </Form>
   );
 
-  const getStatusText = (status: string) => {
+  const _getStatusText = (status: string) => {
     switch (status) {
       case 'ready':
       case 'pending':
@@ -2040,7 +2055,7 @@ const FilesPage: React.FC = () => {
 
 
 
-  const fileColumns = [
+  const _fileColumns = [
     {
       title: 'File Name',
       dataIndex: 'name',
@@ -2096,7 +2111,7 @@ const FilesPage: React.FC = () => {
     }
   ];
 
-  const executionColumns = [
+  const _executionColumns = [
     {
       title: 'File Name',
       key: 'file_name',
@@ -2201,7 +2216,7 @@ const FilesPage: React.FC = () => {
         const isAudioFile = record.first_file_type === 'audio';
         const isAudioAnalyzing = record.rc_agent_status === 'analyzing' || audioAnalyzingIds.has(record.id);
         const isDocAnalyzing = record.rc_agent_status === 'analyzing' || docAnalyzingIds.has(record.id);
-        const isAnalyzing = isAudioAnalyzing || isDocAnalyzing;
+        const _isAnalyzing = isAudioAnalyzing || isDocAnalyzing;
         const hasAnalysis = record.rc_agent_status === 'success';
         // 音频文件且ASR已完成但未进行AI分析
         const canAnalyzeAudio = isAudioFile && !hasAnalysis && !isAudioAnalyzing && record.rc_agent_status === 'completed';
@@ -2212,7 +2227,7 @@ const FilesPage: React.FC = () => {
         const isProcessingDoc = record.rc_agent_status === 'processing' || 
                                 record.rc_agent_status === 'initializing' ||
                                 (record.first_task_id != null && record.rc_agent_status === 'uploaded');
-        const canAnalyzeDoc = !isAudioFile && !hasAnalysis && !isDocAnalyzing && !isProcessingDoc && (
+        const _canAnalyzeDoc = !isAudioFile && !hasAnalysis && !isDocAnalyzing && !isProcessingDoc && (
           record.rc_agent_status === 'uploaded' ||
           record.rc_agent_status === 'failed'
         );
@@ -2245,14 +2260,6 @@ const FilesPage: React.FC = () => {
               }}
             />
           </Tooltip>
-          <Tooltip title="View Details">
-            <Button
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => handleViewExecution(record)}
-              size="small"
-            />
-          </Tooltip>
           <Tooltip title="Original Files">
             <Button
               type="text"
@@ -2277,252 +2284,6 @@ const FilesPage: React.FC = () => {
     }
   ];
 
-  const renderExecutionDetail = () => (
-    <Modal
-      title="Execution Details"
-      open={executionDetailVisible}
-      onCancel={() => {
-        setExecutionDetailVisible(false);
-        setExecutionDetailData(null);
-      }}
-      footer={null}
-      width={1200}
-      centered
-    >
-      {executionDetailLoading ? (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <Progress type="circle" percent={50} showInfo={false} />
-          <div style={{ marginTop: 16 }}>Loading Execution Details...</div>
-        </div>
-      ) : selectedExecution && (
-        <div>
-          {/* 基础信息 */}
-          <Card size="small" title="Basic Information" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={12}>
-                <div><strong>Agent Name:</strong> {getDisplayAgentName(selectedExecution.task_name)}</div>
-              </Col>
-              <Col span={12}>
-                <div><strong>User:</strong> {selectedExecution.username}</div>
-              </Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={24}>
-                <div><strong>Time:</strong> {new Date(selectedExecution.created_at).toLocaleString()}</div>
-              </Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={8}>
-                <div><strong>Number of Files:</strong> {selectedExecution.files_processed}</div>
-              </Col>
-              <Col span={8}>
-                <div><strong>Number of Failed Files:</strong> {selectedExecution.files_failed}</div>
-              </Col>
-              <Col span={8}>
-                <div><strong>Success Rate:</strong> {selectedExecution.files_processed > 0 ? 
-                  `${((selectedExecution.files_processed / (selectedExecution.files_processed + selectedExecution.files_failed)) * 100).toFixed(1)}%` : 
-                  '0%'
-                }</div>
-              </Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={8}>
-                <div><strong>Processing Time:</strong> {selectedExecution.total_time.toFixed(2)}秒</div>
-              </Col>
-              <Col span={8}>
-                <div><strong>File Processing Time:</strong> {selectedExecution.file_processing_time.toFixed(2)}秒</div>
-              </Col>
-              <Col span={8}>
-                <div><strong>RC Agent Processing Time:</strong> {selectedExecution.ai_processing_time.toFixed(2)}秒</div>
-              </Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={12}>
-                <div><strong>Token Consumption:</strong> {selectedExecution.total_tokens ? selectedExecution.total_tokens.toLocaleString() : '-'}</div>
-              </Col>
-              <Col span={12}>
-                <div><strong>Approximate Cost:</strong> {selectedExecution.total_cost ? `¥${selectedExecution.total_cost.toFixed(4)}` : '-'}</div>
-              </Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={12}>
-                <div><strong>Status:</strong> 
-                  {selectedExecution.rc_agent_status ? (
-                    (() => {
-                      const statusConfig = {
-                        success: { color: 'success', text: 'AI Analysis Complete' },
-                        failed: { color: 'error', text: 'Failed' },
-                        pending: { color: 'processing', text: 'Pending' },
-                        skipped: { color: 'default', text: 'Skipped' },
-                        uploaded: { color: 'blue', text: 'Upload Only' },
-                        analyzing: { color: 'warning', text: 'AI Analyzing...' },
-                        completed: { color: 'cyan', text: 'ASR Complete' }
-                      };
-                      const config = statusConfig[selectedExecution.rc_agent_status as keyof typeof statusConfig] || { color: 'default', text: selectedExecution.rc_agent_status };
-                      return <Tag color={config.color} style={{ marginLeft: 8 }}>{config.text}</Tag>;
-                    })()
-                  ) : (
-                    <Tag color="default" style={{ marginLeft: 8 }}>Unknown</Tag>
-                  )}
-                </div>
-              </Col>
-            </Row>
-            {(selectedExecution.llm_model || selectedExecution.llm_provider) && (
-              <Row gutter={16} style={{ marginTop: 16 }}>
-                <Col span={24}>
-                  <div><strong>Analysis Model:</strong> 
-                    {selectedExecution.llm_provider && (
-                      <Tag color="blue" style={{ marginLeft: 8 }}>
-                        {selectedExecution.llm_provider}
-                      </Tag>
-                    )}
-                    {selectedExecution.llm_model && (
-                      <Tag color="cyan" style={{ marginLeft: 4 }}>
-                        {selectedExecution.llm_model}
-                      </Tag>
-                    )}
-                  </div>
-                </Col>
-              </Row>
-            )}
-          </Card>
-
-          {/* 文件处理详情 */}
-          {executionDetailData?.files && executionDetailData.files.length > 0 ? (
-            <Card size="small" title="File Processing Details">
-              <Table
-                dataSource={executionDetailData.files}
-                rowKey="id"
-                size="small"
-                scroll={{ y: 400 }}
-                pagination={false}
-                columns={[
-                  {
-                    title: 'File Name',
-                    dataIndex: 'filename',
-                    key: 'filename',
-                    width: 300,
-                    ellipsis: false,
-                    render: (filename, record) => (
-                      <div style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
-                        {record.content ? (
-                          <Button 
-                            type="link" 
-                            style={{ 
-                              padding: 0, 
-                              height: 'auto', 
-                              textAlign: 'left',
-                              whiteSpace: 'normal',
-                              wordBreak: 'break-all'
-                            }}
-                            onClick={() => handleViewFileContent(record)}
-                          >
-                            {filename}
-                          </Button>
-                        ) : (
-                          <span>{filename}</span>
-                        )}
-                      </div>
-                    )
-                  },
-                  {
-                    title: 'Type',
-                    dataIndex: 'file_type',
-                    key: 'file_type',
-                    width: 80,
-                    render: (file_type) => {
-                      const typeMapping = {
-                        'pdf': { color: 'red', text: 'PDF' },
-                        'excel': { color: 'green', text: 'Excel' },
-                        'doc': { color: 'blue', text: 'Word' },
-                        'image': { color: 'orange', text: 'Image' }
-                      };
-                      const config = typeMapping[file_type as keyof typeof typeMapping] || { color: 'default', text: file_type?.toUpperCase() || 'Unknown' };
-                      return <Tag color={config.color}>{config.text}</Tag>;
-                    }
-                  },
-                  {
-                    title: 'Size (MB)',
-                    dataIndex: 'file_size_mb',
-                    key: 'file_size_mb',
-                    width: 100,
-                    render: (size) => size?.toFixed(2)
-                  },
-                  {
-                    title: 'Processing Time (s)',
-                    dataIndex: 'processing_time',
-                    key: 'processing_time',
-                    width: 120,
-                    render: (time) => time?.toFixed(2) || '-'
-                  },
-                  {
-                    title: 'AI Time (s)',
-                    dataIndex: 'ai_time',
-                    key: 'ai_time',
-                    width: 100,
-                    render: (time) => time?.toFixed(2) || '-'
-                  },
-                  {
-                    title: 'Tokens',
-                    dataIndex: 'total_tokens',
-                    key: 'total_tokens',
-                    width: 100,
-                    render: (tokens) => tokens ? tokens.toLocaleString() : '-'
-                  },
-                  {
-                    title: 'Cost (¥)',
-                    dataIndex: 'cost',
-                    key: 'cost',
-                    width: 100,
-                    render: (cost) => cost ? cost.toFixed(4) : '-'
-                  },
-                  {
-                    title: 'Actions',
-                    key: 'actions',
-                    width: 120,
-                    render: (_, record) => (
-                      <Space>
-                        {record.content && (
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<RobotOutlined />}
-                            onClick={() => handleViewFileContent(record)}
-                            title="View AI Content"
-                          >
-                          </Button>
-                        )}
-                        {record.original_file_path && (
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<FileTextOutlined />}
-                            onClick={() => handleViewOriginalFile(record)}
-                            title="View Original File"
-                          >
-                          </Button>
-                        )}
-                      </Space>
-                    )
-                  }
-                ]}
-              />
-            </Card>
-          ) : (
-            <Card size="small" title="File Processing Details">
-              <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-                <div style={{ marginTop: 16, fontSize: '16px' }}>
-                  No file processing details available for this execution.
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-    </Modal>
-  );
-
   const renderAiAnalysisModal = () => {
     console.log('Rendering AI Analysis Modal');
     console.log('aiAnalysisData:', aiAnalysisData);
@@ -2537,6 +2298,7 @@ const FilesPage: React.FC = () => {
           setAiAnalysisVisible(false);
           setAiAnalysisData(null);
         }}
+        styles={modalStyles}
         footer={[
           <Button key="cancel" onClick={() => {
             setAiAnalysisVisible(false);
@@ -2670,15 +2432,14 @@ const FilesPage: React.FC = () => {
                       placeholder="Select analysis template"
                       style={{ marginBottom: '16px' }}
                     />
-                    <div style={{ textAlign: 'center' }}>
+                    <div style={{ textAlign: 'center', marginTop: '24px' }}>
                       <Button
                         type="primary"
                         icon={<RobotOutlined />}
                         size="large"
                         disabled={!modalSelectedTemplateId}
                         onClick={() => modalSelectedTemplateId && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId)}
-                        style={{ 
-                          marginTop: '4px',
+                        style={{
                           height: '44px',
                           paddingInline: '28px',
                           fontSize: '15px',
@@ -2726,10 +2487,11 @@ const FilesPage: React.FC = () => {
       width={1000}
       centered
       style={{ top: 20 }}
+      styles={modalStyles}
     >
       {selectedFileContent ? (
         <div>
-          <div style={{ marginBottom: 16, padding: '12px', backgroundColor: themeColors.boxMuted, borderRadius: '6px' }}>
+          <div style={{ marginBottom: 16, padding: '12px', backgroundColor: themeColors.codeBlockBg, borderRadius: 8 }}>
             <Row gutter={16}>
               <Col span={8}>
                 <Text strong>File Type:</Text> {(() => {
@@ -2758,10 +2520,10 @@ const FilesPage: React.FC = () => {
           <div style={{ 
             maxHeight: '500px', 
             overflow: 'auto',
-            border: '1px solid #d9d9d9',
-            borderRadius: '6px',
+            border: `1px solid ${themeColors.cardBorder}`,
+            borderRadius: 8,
             padding: '16px',
-            backgroundColor: themeColors.boxMuted
+            backgroundColor: themeColors.codeBlockBg
           }}>
             {selectedFileContent.isOriginalFile && selectedFileContent.originalFileInfo ? (
               // 原始文件显示
@@ -2831,7 +2593,7 @@ const FilesPage: React.FC = () => {
                 fontFamily: 'Monaco, Menlo, "Ubuntu Mono", Consolas, source-code-pro, monospace',
                 fontSize: '13px',
                 lineHeight: '1.5',
-                color: '#333'
+                color: themeColors.text
               }}>
                 {selectedFileContent.content}
               </pre>
@@ -2877,18 +2639,20 @@ const FilesPage: React.FC = () => {
     { key: 'audio', label: 'Audio' },
   ];
 
+  // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple)
+  const getFileTypeTagConfig = (firstFileType: string | undefined): { color: string; text: string } => {
+    const t = (firstFileType || '').toLowerCase();
+    if (['pdf'].includes(t)) return { color: 'red', text: 'PDF' };
+    if (['doc', 'docx', 'word'].includes(t)) return { color: 'blue', text: 'Word' };
+    if (['excel', 'xlsx', 'xls'].includes(t)) return { color: 'green', text: 'Excel' };
+    if (['audio'].includes(t)) return { color: 'purple', text: 'Audio' };
+    if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
+    return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
+  };
+
+  const modalStyles = getModalStyles(isDark, themeColors);
+
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        ...(isDark && {
-          token: {
-            colorBgContainer: themeColors.cardBg,
-            colorBorderSecondary: themeColors.cardBorder,
-          },
-        }),
-      }}
-    >
       <div className="files-page-layout" style={{ backgroundColor: themeColors.pageBg }}>
         <div className="files-page-inner">
           {/* 左侧：Behance 风格文件列表 */}
@@ -2896,7 +2660,7 @@ const FilesPage: React.FC = () => {
             <div className="files-list-header">
               <Space size={8}>
                 <FileTextOutlined />
-                <span>File List</span>
+                <span>Sources</span>
                 <span style={{ fontWeight: 400, fontSize: '13px', opacity: 0.7 }}>({filteredExecutions.length})</span>
               </Space>
               <Space size={2}>
@@ -3004,6 +2768,7 @@ const FilesPage: React.FC = () => {
                 const isUploadOnly = execution.rc_agent_status === 'uploaded';
                 const isAudioFile = execution.first_file_type === 'audio';
                 const canAnalyze = isUploadOnly || execution.rc_agent_status === 'failed';
+                const fileTypeTag = getFileTypeTagConfig(execution.first_file_type);
                 const isDocAnalyzing = docAnalyzingIds.has(execution.id);
                 const isAudioAnalyzing = audioAnalyzingIds.has(execution.id);
                 const isItemAnalyzing = execution.rc_agent_status === 'analyzing' || isDocAnalyzing || isAudioAnalyzing;
@@ -3016,18 +2781,8 @@ const FilesPage: React.FC = () => {
                     onClick: (e: any) => {
                       e.domEvent.stopPropagation();
                       setSelectedExecutionForView(execution);
-                      setViewMode('analysis');
                     },
                   }] : []),
-                  {
-                    key: 'view-details',
-                    icon: <EyeOutlined />,
-                    label: 'View Details',
-                    onClick: (e) => {
-                      e.domEvent.stopPropagation();
-                      handleViewExecution(execution);
-                    },
-                  },
                   {
                     key: 'rename',
                     icon: <EditOutlined />,
@@ -3096,6 +2851,9 @@ const FilesPage: React.FC = () => {
                       {new Date(execution.created_at).toLocaleString()}
                     </div>
                     <div className="files-list-item-tags">
+                      <Tag color={fileTypeTag.color} style={{ margin: 0, fontSize: '11px' }}>
+                        {fileTypeTag.text}
+                      </Tag>
                       <Tag
                         color={isItemAnalyzing ? 'warning' : isUploadOnly ? 'blue' : (execution.rc_agent_status === 'success' ? 'success' : 'default')}
                         style={{ margin: 0, fontSize: '11px' }}
@@ -3125,77 +2883,152 @@ const FilesPage: React.FC = () => {
           <div className="files-detail-panel">
             {selectedExecutionForView ? (
               <>
-                <div className="files-detail-tabs">
-                  <div
-                    className={`files-detail-tab ${viewMode === 'original' ? 'is-active' : ''}`}
-                    onClick={() => setViewMode('original')}
-                  >
-                    Original
+                <div className={`files-detail-split ${rightPanelCollapsed ? 'files-detail-split--right-collapsed' : ''}`}>
+                  {/* 左侧：Original + Content */}
+                  <div className="files-detail-left">
+                    <div className="files-detail-left-tabs">
+                      <div
+                        className={`files-detail-tab ${viewMode === 'original' ? 'is-active' : ''}`}
+                        onClick={() => setViewMode('original')}
+                      >
+                        Original
+                      </div>
+                      <div
+                        className={`files-detail-tab ${viewMode === 'content' ? 'is-active' : ''}`}
+                        onClick={() => setViewMode('content')}
+                      >
+                        Content
+                      </div>
+                      <div style={{ flex: 1 }} />
+                    </div>
+                    <div className="files-detail-left-content">
+                      {viewMode === 'original' ? (
+                        <OriginalContentView
+                          execution={selectedExecutionForView}
+                          themeColors={themeColors}
+                          isDark={isDark}
+                          onFileSelect={setSelectedFileForView}
+                          selectedFile={selectedFileForView}
+                          onFileInfoLoaded={setOriginalFileInfoForTabs}
+                        />
+                      ) : (
+                        <ContentMarkdownView
+                          execution={selectedExecutionForView}
+                          themeColors={themeColors}
+                          isDark={isDark}
+                          contentDetailData={contentDetailData}
+                          contentDetailLoading={contentDetailLoading}
+                          onLoadContent={async () => {
+                            if (!selectedExecutionForView) return;
+                            try {
+                              setContentDetailLoading(true);
+                              const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                              setContentDetailData(details);
+                            } catch (error) {
+                              message.error('Failed to load content');
+                            } finally {
+                              setContentDetailLoading(false);
+                            }
+                          }}
+                          onContentSaved={(fileId, newContent) => {
+                            setContentDetailData(prev => {
+                              if (!prev) return prev;
+                              return {
+                                ...prev,
+                                files: prev.files.map(f =>
+                                  f.id === fileId ? { ...f, content: newContent } : f
+                                ),
+                              };
+                            });
+                          }}
+                          selectedFileForView={selectedFileForView}
+                        />
+                      )}
+                    </div>
                   </div>
-                  <div
-                    className={`files-detail-tab ${viewMode === 'analysis' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setViewMode('analysis');
-                    }}
-                  >
-                    AI Analysis
+                  {/* 右侧：Info + AI Analysis（可收缩） */}
+                  <div className={`files-detail-right ${rightPanelCollapsed ? 'files-detail-right--collapsed' : ''}`}>
+                    {rightPanelCollapsed ? (
+                      <div className="files-detail-right-collapsed-bar">
+                        <Tooltip title="Expand panel">
+                          <span
+                            className="files-detail-right-expand-btn"
+                            onClick={() => setRightPanelCollapsed(false)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === 'Enter' && setRightPanelCollapsed(false)}
+                          >
+                            <MenuUnfoldOutlined />
+                          </span>
+                        </Tooltip>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="files-detail-right-header">
+                          <div
+                            className={`files-detail-tab ${rightPanelView === 'info' ? 'is-active' : ''}`}
+                            onClick={() => setRightPanelView('info')}
+                          >
+                            Info
+                          </div>
+                          <div
+                            className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
+                            onClick={() => setRightPanelView('analysis')}
+                          >
+                            AI Analysis
+                          </div>
+                          <div style={{ flex: 1 }} />
+                          <Tooltip title="Collapse panel">
+                            <span
+                              className="files-detail-right-collapse-btn"
+                              onClick={() => setRightPanelCollapsed(true)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => e.key === 'Enter' && setRightPanelCollapsed(true)}
+                            >
+                              <MenuFoldOutlined />
+                            </span>
+                          </Tooltip>
+                        </div>
+                        <div className="files-detail-right-content">
+                          {rightPanelView === 'info' ? (
+                            selectedExecutionForView && (
+                              <ExecutionDetailsPanel
+                                execution={selectedExecutionForView}
+                                themeColors={themeColors}
+                                getDisplayAgentName={getDisplayAgentName}
+                              />
+                            )
+                          ) : (
+                            <AIAnalysisView
+                              execution={selectedExecutionForView}
+                              themeColors={themeColors}
+                              isDark={isDark}
+                              aiAnalysisData={aiAnalysisData}
+                              aiAnalysisLoading={aiAnalysisLoading}
+                              onDownloadPdf={handleDownloadPdf}
+                              pdfDownloading={pdfDownloading}
+                              onLoadAnalysis={async () => {
+                                try {
+                                  setAiAnalysisLoading(true);
+                                  const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                                  setAiAnalysisData(details);
+                                } catch (error) {
+                                  message.error('Failed to load AI analysis report');
+                                } finally {
+                                  setAiAnalysisLoading(false);
+                                }
+                              }}
+                              onAnalyzeAudio={handleAnalyzeAudio}
+                              onAnalyzeDocument={handleAnalyzeDocument}
+                              audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
+                              docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
+                            />
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div style={{ flex: 1 }} />
-                  {viewMode === 'original' && originalFileInfoForTabs && (
-                    <Space size={12} style={{ fontSize: 13, fontWeight: 400, color: themeColors.textSecondary }}>
-                      <span title={originalFileInfoForTabs.filename} style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {originalFileInfoForTabs.filename}
-                      </span>
-                      <Tag color="blue" style={{ margin: 0 }}>{originalFileInfoForTabs.file_type?.toUpperCase() || 'Unknown'}</Tag>
-                    </Space>
-                  )}
-                  {viewMode === 'analysis' && aiAnalysisData?.execution?.final_report && (
-                    <Button
-                      icon={<DownloadOutlined />}
-                      onClick={handleDownloadPdf}
-                      loading={pdfDownloading}
-                      size="small"
-                      className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
-                    >
-                      Export PDF
-                    </Button>
-                  )}
-                </div>
-
-                <div className="files-detail-content">
-                  {viewMode === 'original' ? (
-                    <OriginalContentView
-                      execution={selectedExecutionForView}
-                      themeColors={themeColors}
-                      isDark={isDark}
-                      onFileSelect={setSelectedFileForView}
-                      selectedFile={selectedFileForView}
-                      onFileInfoLoaded={setOriginalFileInfoForTabs}
-                    />
-                  ) : (
-                    <AIAnalysisView
-                      execution={selectedExecutionForView}
-                      themeColors={themeColors}
-                      isDark={isDark}
-                      aiAnalysisData={aiAnalysisData}
-                      aiAnalysisLoading={aiAnalysisLoading}
-                      onLoadAnalysis={async () => {
-                        try {
-                          setAiAnalysisLoading(true);
-                          const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
-                          setAiAnalysisData(details);
-                        } catch (error) {
-                          message.error('Failed to load AI analysis report');
-                        } finally {
-                          setAiAnalysisLoading(false);
-                        }
-                      }}
-                      onAnalyzeAudio={handleAnalyzeAudio}
-                      onAnalyzeDocument={handleAnalyzeDocument}
-                      audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
-                      docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
-                    />
-                  )}
                 </div>
               </>
             ) : (
@@ -3208,9 +3041,6 @@ const FilesPage: React.FC = () => {
             )}
           </div>
         </div>
-
-        {/* 执行详情对话框 */}
-        {renderExecutionDetail()}
 
         {/* AI分析报告对话框 */}
         {renderAiAnalysisModal()}
@@ -3229,11 +3059,12 @@ const FilesPage: React.FC = () => {
           okType="danger"
           confirmLoading={deletingExecutions}
           centered
+          styles={modalStyles}
         >
           {executionToDelete && (
             <div>
               <p>Are you sure you want to delete the following execution record? This action cannot be undone.</p>
-              <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', margin: '12px 0' }}>
+              <div style={{ background: themeColors.codeBlockBg, padding: '12px', borderRadius: 8, margin: '12px 0', border: `1px solid ${themeColors.cardBorder}` }}>
                 <p><strong>Task Name:</strong> {getDisplayAgentName(executionToDelete.task_name)}</p>
                 <p><strong>User:</strong> {executionToDelete.username}</p>
                 <p><strong>Execution Time:</strong> {new Date(executionToDelete.created_at).toLocaleString()}</p>
@@ -3259,6 +3090,7 @@ const FilesPage: React.FC = () => {
           confirmLoading={renameLoading}
           centered
           destroyOnClose
+          styles={modalStyles}
         >
           {executionToRename && (
             <div>
@@ -3292,6 +3124,7 @@ const FilesPage: React.FC = () => {
             setAvailableFiles([]);
             setSelectedExecutionForFiles(null);
           }}
+          styles={modalStyles}
           footer={[
             <Button key="close" onClick={() => {
               setFileSelectionVisible(false);
@@ -3379,6 +3212,7 @@ const FilesPage: React.FC = () => {
           onCancel={() => setShowBatchTagModal(false)}
           confirmLoading={batchTagging}
           centered
+          styles={modalStyles}
         >
           <div>
             <p>Will set tags for the following files:</p>
@@ -3397,7 +3231,7 @@ const FilesPage: React.FC = () => {
                 )}
               </Space>
             </div>
-            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: '4px', padding: '8px' }}>
+            <div style={{ maxHeight: '200px', overflow: 'auto', border: `1px solid ${themeColors.cardBorder}`, borderRadius: 8, padding: '8px', backgroundColor: themeColors.codeBlockBg }}>
               {files.filter(f => f.fileId).map(file => (
                 <div key={file.id} style={{ padding: '4px 0', display: 'flex', alignItems: 'center' }}>
                   {getFileTypeIcon(file.type)}
@@ -3413,7 +3247,259 @@ const FilesPage: React.FC = () => {
           </div>
         </Modal>
       </div>
+  );
+};
+
+// 外层：ConfigProvider + App，供 modal.confirm 继承主题
+const FilesPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const themeColors = THEME_COLORS[themeMode];
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: themeColors.cardBg,
+            colorBgElevated: themeColors.cardBg,
+            colorBorderSecondary: themeColors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: themeColors.text,
+            colorTextSecondary: themeColors.textSecondary,
+            colorFillQuaternary: themeColors.inputBg ?? '#1E202B',
+            colorBgLayout: themeColors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
+          },
+        }),
+      }}
+    >
+      <App>
+        <FilesPageInner />
+      </App>
     </ConfigProvider>
+  );
+};
+
+// 右侧 Info Tab：仅展示 Basic Information（不含 File Processing Details）
+const ExecutionDetailsPanel: React.FC<{
+  execution: TaskExecution;
+  themeColors: any;
+  getDisplayAgentName: (name: string) => string;
+}> = ({ execution, themeColors, getDisplayAgentName }) => {
+  const statusConfig: Record<string, { color: string; text: string }> = {
+    success: { color: 'success', text: 'AI Analysis Complete' },
+    failed: { color: 'error', text: 'Failed' },
+    pending: { color: 'processing', text: 'Pending' },
+    skipped: { color: 'default', text: 'Skipped' },
+    uploaded: { color: 'blue', text: 'Upload Only' },
+    analyzing: { color: 'warning', text: 'AI Analyzing...' },
+    completed: { color: 'cyan', text: 'ASR Complete' },
+  };
+
+  const successRate = execution.files_processed > 0
+    ? `${((execution.files_processed / (execution.files_processed + execution.files_failed)) * 100).toFixed(1)}%`
+    : '0%';
+  const statusItem = execution.rc_agent_status
+    ? (statusConfig[execution.rc_agent_status] || { color: 'default', text: execution.rc_agent_status })
+    : { color: 'default', text: 'Unknown' };
+
+  return (
+    <div style={{ color: themeColors.text }}>
+      <Card size="small" title="Basic Information" style={{ marginBottom: 16 }}>
+        <Descriptions
+          column={1}
+          layout="horizontal"
+          size="small"
+          labelStyle={{ fontWeight: 600, color: themeColors.textSecondary, width: 160 }}
+          contentStyle={{ color: themeColors.text }}
+        >
+          <Descriptions.Item label="Agent Name">{getDisplayAgentName(execution.task_name)}</Descriptions.Item>
+          <Descriptions.Item label="User">{execution.username}</Descriptions.Item>
+          <Descriptions.Item label="Document Name">{execution.first_filename ?? '-'}</Descriptions.Item>
+          <Descriptions.Item label="Document Type">
+            {execution.first_file_type ? <Tag color="blue">{execution.first_file_type.toUpperCase()}</Tag> : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Time">{new Date(execution.created_at).toLocaleString()}</Descriptions.Item>
+          <Descriptions.Item label="Number of Files">{execution.files_processed}</Descriptions.Item>
+          <Descriptions.Item label="Number of Failed Files">{execution.files_failed}</Descriptions.Item>
+          <Descriptions.Item label="Success Rate">{successRate}</Descriptions.Item>
+          <Descriptions.Item label="Processing Time">{execution.total_time.toFixed(2)}秒</Descriptions.Item>
+          <Descriptions.Item label="File Processing Time">{execution.file_processing_time.toFixed(2)}秒</Descriptions.Item>
+          <Descriptions.Item label="RC Agent Processing Time">{execution.ai_processing_time.toFixed(2)}秒</Descriptions.Item>
+          <Descriptions.Item label="Token Consumption">
+            {execution.total_tokens ? execution.total_tokens.toLocaleString() : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Approximate Cost">
+            {execution.total_cost ? `¥${execution.total_cost.toFixed(4)}` : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Status">
+            <Tag color={statusItem.color as any}>{statusItem.text}</Tag>
+          </Descriptions.Item>
+          {(execution.llm_model || execution.llm_provider) && (
+            <Descriptions.Item label="Analysis Model">
+              <Space size={4}>
+                {execution.llm_provider && <Tag color="blue">{execution.llm_provider}</Tag>}
+                {execution.llm_model && <Tag color="cyan">{execution.llm_model}</Tag>}
+              </Space>
+            </Descriptions.Item>
+          )}
+        </Descriptions>
+      </Card>
+    </div>
+  );
+};
+
+// Content 标签页：展示并编辑 file_processing_details 中的 content（Markdown）
+const ContentMarkdownView: React.FC<{
+  execution: TaskExecution;
+  themeColors: any;
+  isDark: boolean;
+  contentDetailData: TaskExecutionDetail | null;
+  contentDetailLoading: boolean;
+  onLoadContent: () => Promise<void>;
+  onContentSaved?: (fileId: number, newContent: string) => void;
+  selectedFileForView: any;
+}> = ({ execution, themeColors, isDark, contentDetailData, contentDetailLoading, onLoadContent, onContentSaved, selectedFileForView }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!contentDetailData || contentDetailData.execution.id !== execution.id) {
+      onLoadContent();
+    }
+  }, [execution.id, contentDetailData, onLoadContent]);
+
+  if (contentDetailLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.text }}>
+        <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+        <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading content...</div>
+      </div>
+    );
+  }
+
+  const files = contentDetailData?.files ?? [];
+  const fileToShow = selectedFileForView?.id
+    ? files.find((f: { id: number }) => f.id === selectedFileForView.id)
+    : files[0];
+  const content = fileToShow?.content;
+  const contentStr = content == null ? '' : typeof content === 'string' ? content : String(content);
+
+  if (!fileToShow) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.textMuted }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
+        <div>No file in this execution</div>
+      </div>
+    );
+  }
+
+  const handleStartEdit = () => {
+    setEditContent(contentStr);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent('');
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await filesAPI.updateFileDetailContent(fileToShow.id, editContent);
+      onContentSaved?.(fileToShow.id, editContent);
+      setIsEditing(false);
+      setEditContent('');
+      message.success('Content saved');
+    } catch (error) {
+      message.error('Failed to save content');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '16px 20px',
+          color: themeColors.text,
+        }}
+      >
+        <Input.TextArea
+          value={editContent}
+          onChange={(e) => setEditContent(e.target.value)}
+          placeholder="Markdown content..."
+          style={{
+            flex: 1,
+            minHeight: 280,
+            fontFamily: 'monospace',
+            fontSize: 13,
+            background: themeColors.codeBlockBg,
+            borderColor: themeColors.cardBorder,
+            color: themeColors.text,
+          }}
+          className={isDark ? 'files-content-textarea-dark' : ''}
+        />
+        <Space style={{ marginTop: 12 }}>
+          <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
+            Save
+          </Button>
+          <Button onClick={handleCancelEdit} disabled={saving}>
+            Cancel
+          </Button>
+        </Space>
+      </div>
+    );
+  }
+
+  if (content == null || content === '') {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.textMuted }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
+        <div>No extracted content for {fileToShow.filename}</div>
+        <Button
+          type="primary"
+          icon={<EditOutlined />}
+          style={{ marginTop: 16 }}
+          onClick={handleStartEdit}
+        >
+          Add content
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="files-detail-content-markdown"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        padding: '16px 20px',
+        color: themeColors.text,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
+          Edit
+        </Button>
+      </div>
+      <MarkdownRenderer
+        content={contentStr}
+        variant={isDark ? 'dark' : 'light'}
+      />
+    </div>
   );
 };
 
@@ -3871,16 +3957,17 @@ const AudioDiarizationView: React.FC<{
         }}>
           speaker list
         </div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {asrData.speakers.map((speaker: any) => (
             <Tag 
               key={speaker.speaker_id}
               color={getSpeakerColor(speaker.speaker_id)}
               style={{ 
                 margin: 0,
-                padding: '4px 12px',
-                fontSize: '12px',
+                padding: '4px 6px',
+                fontSize: '10px',
                 fontWeight: 500,
+                lineHeight: 1.4,
                 cursor: 'pointer',
                 transition: 'all 0.2s'
               }}
@@ -3894,7 +3981,7 @@ const AudioDiarizationView: React.FC<{
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
-              {speaker.label} <EditOutlined style={{ fontSize: '10px', marginLeft: '4px' }} />
+              {speaker.label} <EditOutlined style={{ fontSize: '9px', marginLeft: '2px' }} />
             </Tag>
           ))}
         </div>
@@ -3950,24 +4037,22 @@ const AudioDiarizationView: React.FC<{
                   : '0 1px 2px rgba(0,0,0,0.06)';
               }}
             >
-              {/* 说话人标签 */}
+              {/* 说话人（非标签形式） */}
               <div style={{ 
-                minWidth: '80px',
+                minWidth: '64px',
                 display: 'flex',
                 alignItems: 'flex-start',
                 paddingTop: '2px'
               }}>
-                <Tag 
-                  color={speakerColor}
-                  style={{ 
-                    margin: 0,
-                    fontSize: '12px',
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: speakerColor,
                     fontWeight: 500,
-                    padding: '2px 8px'
                   }}
                 >
                   {asrData.speakers.find((sp: any) => sp.speaker_id === sentence.speaker_id)?.label || `speaker ${sentence.speaker_id}`}
-                </Tag>
+                </span>
               </div>
               
               {/* 时间和文本 */}
@@ -4003,6 +4088,7 @@ const AudioDiarizationView: React.FC<{
         okText="save"
         cancelText="cancel"
         confirmLoading={savingLabel}
+        styles={getModalStyles(isDark, themeColors)}
       >
         <div style={{ marginTop: '16px' }}>
           <div style={{ marginBottom: '8px', fontSize: '14px', color: themeColors.textSecondary }}>
@@ -4029,11 +4115,13 @@ const AIAnalysisView: React.FC<{
   aiAnalysisData: TaskExecutionDetail | null;
   aiAnalysisLoading: boolean;
   onLoadAnalysis: () => Promise<void>;
+  onDownloadPdf?: () => void;
+  pdfDownloading?: boolean;
   onAnalyzeAudio?: (record: TaskExecution) => void;
   onAnalyzeDocument?: (record: TaskExecution, templateId: number) => void;
   audioAnalyzing?: boolean;
   docAnalyzing?: boolean;
-}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onAnalyzeAudio, onAnalyzeDocument, audioAnalyzing, docAnalyzing }) => {
+}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, audioAnalyzing, docAnalyzing }) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
 
   useEffect(() => {
@@ -4120,15 +4208,14 @@ const AIAnalysisView: React.FC<{
               placeholder="Select analysis template"
               style={{ marginBottom: '16px' }}
             />
-            <div style={{ textAlign: 'center' }}>
+            <div style={{ textAlign: 'center', marginTop: '24px' }}>
               <Button
                 type="primary"
                 icon={<RobotOutlined />}
                 size="large"
                 disabled={!selectedTemplateId}
                 onClick={() => selectedTemplateId && onAnalyzeDocument(execution, selectedTemplateId)}
-                style={{ 
-                  marginTop: '4px',
+                style={{
                   height: '44px',
                   paddingInline: '28px',
                   fontSize: '15px',
@@ -4152,12 +4239,23 @@ const AIAnalysisView: React.FC<{
         backgroundColor: themeColors.boxMuted,
         borderRadius: '6px'
       }}>
-        <Row gutter={16}>
+        <Row gutter={16} align="middle">
           <Col span={12}>
             <Text strong>Analysis Time:</Text> {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
           </Col>
-          <Col span={12}>
+          <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
             <Text strong>Token Usage:</Text> {aiAnalysisData.execution.total_tokens?.toLocaleString() || '-'}
+            {onDownloadPdf && (
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={onDownloadPdf}
+                loading={pdfDownloading}
+                size="small"
+                className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+              >
+                Export
+              </Button>
+            )}
           </Col>
         </Row>
       </div>
