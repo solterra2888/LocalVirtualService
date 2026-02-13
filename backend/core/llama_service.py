@@ -127,8 +127,10 @@ class LlamaService:
             ext = file_extension[1:]  # 移除点号
             if ext in ['pdf']:
                 file_type = 'pdf'
-            elif ext in ['xlsx', 'xls', 'csv']:
+            elif ext in ['xlsx', 'xls']:
                 file_type = 'excel'
+            elif ext in ['csv']:
+                file_type = 'csv'  # CSV 单独分类，不用 Office Viewer 预览
             elif ext in ['doc', 'docx']:
                 file_type = 'doc'
             elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp']:

@@ -25,6 +25,8 @@ interface TemplateSelectorProps {
   disabled?: boolean;
   allowClear?: boolean;
   style?: React.CSSProperties;
+  /** 选择模板后是否显示模板配置信息，默认 true */
+  showConfigWhenSelected?: boolean;
 }
 
 interface Template {
@@ -48,6 +50,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   disabled = false,
   allowClear = true,
   style = {},
+  showConfigWhenSelected = true,
 }) => {
   const { themeMode } = useDashboardSettings();
   const boxTheme = TEMPLATE_BOX_THEME[themeMode];
@@ -178,7 +181,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
       >
         {templates.map((template) => renderTemplateOption(template))}
       </Select>
-      {value && getSelectedTemplateInfo()}
+      {value && showConfigWhenSelected && getSelectedTemplateInfo()}
     </div>
   );
 };

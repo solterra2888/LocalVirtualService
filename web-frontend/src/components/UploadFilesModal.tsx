@@ -389,8 +389,11 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         message.success('File uploaded successfully');
       }
     } catch (error: any) {
-      const errorMessage = getErrorMessage(error, 'Failed to upload file');
-      message.error(errorMessage);
+      // 避免与 api 拦截器的 toast 重复：拦截器已对带 response 的请求展示过错误
+      if (!error.response) {
+        const errorMessage = getErrorMessage(error, 'Failed to upload file');
+        message.error(errorMessage);
+      }
     } finally {
       setUploadingFiles(false);
     }

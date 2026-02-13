@@ -71,34 +71,43 @@ class FileProcessor:
         """
         return self.llama_service.get_file_info(file_path)
     
+    def _is_oss_object_key(self, file_path):
+        """
+        判断是否为 OSS 对象键（云端路径）。
+        上传到 OSS 时返回的 file_path 为 object_name，如 documents/admin/2026-02-12/xxx.pdf
+        """
+        if not file_path or os.path.isabs(file_path):
+            return False
+        return file_path.startswith("documents/")
+
     def validate_files(self, file_paths):
         """
-        验证文件列表
-        
-        Args:
-            file_paths: 文件路径列表
-            
-        Returns:
-            tuple: (valid_files, invalid_files)
+        验证文件列表。
+        支持本地路径与 OSS 对象键：本地路径检查 os.path.exists；OSS 键（documents/...）仅校验扩展名。
         """
         valid_files = []
         invalid_files = []
-        
+
         for file_path in file_paths:
-            if not os.path.exists(file_path):
-                invalid_files.append({'path': file_path, 'reason': '文件不存在'})
-                continue
-            
             if not self.is_supported_file(file_path):
                 file_ext = os.path.splitext(file_path)[1].lower()
                 invalid_files.append({
-                    'path': file_path, 
+                    'path': file_path,
                     'reason': f'不支持的文件类型: {file_ext}'
                 })
                 continue
-            
-            valid_files.append(file_path)
-        
+
+            if os.path.exists(file_path):
+                valid_files.append(file_path)
+                continue
+
+            if self._is_oss_object_key(file_path):
+                valid_files.append(file_path)
+                continue
+
+            invalid_files.append({'path': file_path, 'reason': '文件不存在'})
+            continue
+
         return valid_files, invalid_files
     
     def get_file_type_summary(self, file_paths):

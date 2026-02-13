@@ -83,9 +83,13 @@ apiClient.interceptors.response.use(
     } else if (error.code === 'ECONNABORTED') {
       message.error('request timeout, please try again later');
     } else {
-      // 显示具体的错误信息
-      const errorMessage = (error.response?.data as any)?.detail || error.message || 'unknown error';
-      message.error(`request failed: ${errorMessage}`);
+      // 显示具体的错误信息；若后端已返回 detail，只展示该文案，避免与业务层重复并保持一条提示
+      const detail = (error.response?.data as any)?.detail;
+      const errorMessage =
+        detail != null
+          ? (typeof detail === 'string' ? detail : (detail?.message ?? String(detail)))
+          : error.message || 'unknown error';
+      message.error(error.response?.data != null ? errorMessage : `request failed: ${errorMessage}`);
     }
     return Promise.reject(error);
   }

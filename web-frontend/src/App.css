@@ -391,10 +391,27 @@
   background: #1a2234 !important;
   border: 1px solid #364152;
   border-radius: 8px;
+  color: #e0e6f1;
 }
 .task-progress-popover-dark.ant-popover .ant-popover-arrow::before {
   background: #1a2234 !important;
   border: 1px solid #364152;
+}
+/* 确保弹窗内所有文字与图标在 dark 模式下不为黑色 */
+.task-progress-popover-dark.ant-popover .ant-popover-inner-content {
+  color: #e0e6f1;
+}
+/* 处理数量 Tag：深蓝底 + 白字，确保在 dark 模式下可读 */
+.task-progress-popover-dark.ant-popover .ant-tag.ant-tag-blue {
+  background: #1677ff !important;
+  border-color: #1677ff !important;
+  color: #fff !important;
+}
+.task-progress-popover-dark.ant-popover .ant-progress-text {
+  color: #94a3b8 !important;
+}
+.task-progress-popover-dark.ant-popover .anticon-loading {
+  color: #1890ff !important;
 }
 
 /* Upload & Process Files 弹窗：所有 Select / Input 统一高度 32px */
@@ -1051,6 +1068,7 @@
 
 .app-dark .files-page-layout .files-detail-right-collapsed-bar {
   --files-content-bg: #1E202B;
+  --files-panel-text: #FFFFFF;
 }
 
 .files-page-layout .files-detail-right-expand-btn,

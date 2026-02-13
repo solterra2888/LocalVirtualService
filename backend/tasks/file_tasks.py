@@ -14,6 +14,48 @@ from backend.workers.file_worker import FileProcessingWorker
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import info, error, warning
 
+# 导入打标签任务（延迟导入避免循环依赖）
+def get_tagging_task():
+    """延迟导入打标签任务"""
+    from backend.tasks.tagging_tasks import tag_file_content_task
+    return tag_file_content_task
+
+
+def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
+    """
+    触发自动打标签任务
+    
+    Args:
+        file_detail_ids: 文件detail ID列表或单个ID
+        username: 用户名
+        delay: 延迟执行时间（秒），默认2秒，确保DB事务已提交
+    """
+    # 检查是否启用自动打标签
+    auto_tag_enabled = os.getenv('AUTO_TAG_ENABLED', 'true').lower() == 'true'
+    if not auto_tag_enabled:
+        info("自动打标签功能已禁用", source="auto_tagging")
+        return
+    
+    # 确保是列表
+    if not isinstance(file_detail_ids, list):
+        file_detail_ids = [file_detail_ids]
+    
+    if not file_detail_ids:
+        return
+    
+    tag_task = get_tagging_task()
+    
+    # 异步调用每个文件的打标签任务
+    for file_id in file_detail_ids:
+        try:
+            tag_task.apply_async(
+                args=(file_id, username),
+                countdown=delay
+            )
+            info(f"已触发自动打标签任务: file_id={file_id}, delay={delay}s", source="auto_tagging")
+        except Exception as e:
+            error(f"触发打标签任务失败: file_id={file_id}, error={str(e)}", source="auto_tagging")
+
 @app.task(bind=True, name='process_files_async', queue='file_processing')
 def process_files_task(self, file_paths, task_info, custom_inputs, params, username):
     """
@@ -132,6 +174,31 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
         }
         
         info(f"任务 {self.request.id} 执行成功: {final_result}", source="celery_task")
+        
+        # 🏷️ 触发自动打标签任务
+        try:
+            # 查询该任务创建的所有file_processing_details ID
+            db_conn_params = get_database_config()
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id FROM file_processing_details
+                    WHERE task_id = %s AND status = 'completed' AND content IS NOT NULL AND content != ''
+                """, (self.request.id,))
+                
+                file_ids = [row[0] for row in cursor.fetchall()]
+                conn.close()
+                
+                if file_ids:
+                    info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_task")
+                    trigger_auto_tagging(file_ids, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_task")
+        
         return final_result
         
     except Exception as e:
@@ -375,6 +442,13 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
             'logs': getattr(update_progress, 'logs', [])
         }
         info(f"音频分析任务 {self.request.id} 完成: {final_result}", source="celery_audio_analysis")
+        
+        # 🏷️ 触发自动打标签任务
+        try:
+            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_audio_analysis")
+        
         return final_result
 
     except Exception as e:
@@ -478,7 +552,7 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
 
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT filename, content, original_file_path, file_type
+            SELECT filename, content, original_file_path, file_type, file_storage_type, oss_bucket
             FROM file_processing_details
             WHERE id = %s
         """, (file_detail_id,))
@@ -488,17 +562,49 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         if not row:
             raise ValueError(f"找不到文件记录: file_detail_id={file_detail_id}")
 
-        filename, content_text, original_file_path, file_type = row[0], row[1], row[2], row[3]
+        filename, content_text, original_file_path, file_type, file_storage_type, oss_bucket = row[0], row[1], row[2], row[3], row[4], row[5]
 
         update_progress(progress=10, log_message=f"已读取文件数据: {filename}")
 
         # 2. 如果 content 为空，需要先用 LlamaParse 解析文档
         file_content_for_llm = content_text.strip() if content_text else ""
         doc_processing_time = 0
+        temp_file_path = None  # 用于存储临时下载的文件路径
 
         if not file_content_for_llm:
-            if not original_file_path or not os.path.exists(original_file_path):
-                raise ValueError(f"文档文件不存在: {original_file_path}，无法进行解析")
+            if not original_file_path:
+                raise ValueError(f"文档文件路径为空，无法进行解析")
+            
+            # 检查文件存储类型
+            local_file_path = original_file_path
+            
+            if file_storage_type == 'oss':
+                # 文件存储在 OSS，需要先下载到本地临时目录
+                update_progress(progress=12, log_message=f"文件存储在 OSS，正在下载: {original_file_path}")
+                
+                from backend.services.oss_service import OSSService
+                oss_service = OSSService()
+                
+                # 创建临时目录
+                temp_dir = os.path.join(os.getcwd(), 'uploads', 'temp_oss_download')
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # 生成临时文件路径（保留原始文件扩展名）
+                import uuid
+                file_ext = os.path.splitext(filename)[1]
+                temp_file_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}{file_ext}")
+                
+                # 从 OSS 下载文件
+                try:
+                    oss_service.download_to_file(original_file_path, temp_file_path)
+                    local_file_path = temp_file_path
+                    update_progress(progress=14, log_message=f"OSS 文件下载完成，临时路径: {os.path.basename(temp_file_path)}")
+                except Exception as e:
+                    raise ValueError(f"从 OSS 下载文件失败: {str(e)}")
+            else:
+                # 文件存储在本地
+                if not os.path.exists(original_file_path):
+                    raise ValueError(f"本地文档文件不存在: {original_file_path}，无法进行解析")
 
             update_progress(status="parsing", progress=15, log_message="文档内容为空，正在使用LlamaParse解析文档...")
 
@@ -516,10 +622,17 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
             asyncio.set_event_loop(loop)
             try:
                 result = loop.run_until_complete(
-                    llama_service.process_file(original_file_path, successful_results, failed_files, None)
+                    llama_service.process_file(local_file_path, successful_results, failed_files, None)
                 )
             finally:
                 loop.close()
+                # 清理临时下载的文件
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                        info(f"已清理临时文件: {temp_file_path}", source="celery_doc_analysis")
+                    except Exception as e:
+                        error(f"清理临时文件失败: {e}", source="celery_doc_analysis")
 
             if successful_results:
                 file_content_for_llm = successful_results[0].get('content', '')
@@ -667,11 +780,26 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
             'logs': getattr(update_progress, 'logs', [])
         }
         info(f"文档分析任务 {self.request.id} 完成: {final_result}", source="celery_doc_analysis")
+        
+        # 🏷️ 触发自动打标签任务
+        try:
+            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_doc_analysis")
+        
         return final_result
 
     except Exception as e:
         error_msg = f"文档分析任务失败: {str(e)}"
         error(f"DocAnalysis {self.request.id}: {error_msg}", source="celery_doc_analysis")
+
+        # 清理临时文件
+        if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                info(f"已清理临时文件: {temp_file_path}", source="celery_doc_analysis")
+            except Exception as cleanup_error:
+                error(f"清理临时文件失败: {cleanup_error}", source="celery_doc_analysis")
 
         try:
             db_conn_params = get_database_config()
@@ -907,6 +1035,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
          processing_time, ai_time, content_length, status, 
          total_tokens, cost, content, created_at, task_id, original_file_path, asr_with_diarization)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
         """, (
             processing_stats_id,
             filename,
@@ -924,6 +1053,8 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             audio_url,
             json.dumps(asr_structured_data) if asr_structured_data else None
         ))
+        
+        file_detail_id = cursor.fetchone()[0]
         
         conn.commit()
         conn.close()
@@ -943,6 +1074,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             'filename': filename,
             'task_id': task_id,
             'processing_stats_id': processing_stats_id,
+            'file_detail_id': file_detail_id,
             'audio_url': audio_url,
             'text': plain_text,
             'text_length': len(plain_text),
@@ -950,6 +1082,13 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         }
         
         info(f"音频上传和转写任务 {self.request.id} 完成: {filename}", source="celery_audio_upload")
+        
+        # 🏷️ 触发自动打标签任务
+        try:
+            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_audio_upload")
+        
         return final_result
         
     except Exception as e:

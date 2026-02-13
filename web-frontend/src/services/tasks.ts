@@ -187,6 +187,17 @@ export const tasksAPI = {
     );
   },
 
+  // 更新任务执行的 AI 分析报告内容
+  updateExecutionFinalReport: async (
+    executionId: string,
+    finalReport: string
+  ): Promise<{ success: boolean; message: string }> => {
+    return api.patch<{ success: boolean; message: string }>(
+      `/tasks/executions/${executionId}/final-report`,
+      { final_report: finalReport }
+    );
+  },
+
   // 健康检查
   healthCheck: async (): Promise<{ status: string; message: string }> => {
     try {

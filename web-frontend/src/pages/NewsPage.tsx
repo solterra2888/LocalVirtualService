@@ -1814,7 +1814,9 @@ const NewsPage: React.FC = () => {
 
               const allResults = getAllAnalysisResults(item.analysis_result);
               const hasAnyAnalysis = Object.keys(allResults).length > 0;
-              const summaryResult = getAnalysisContent(item.analysis_result, 'news_summary_v1');
+              // 使用首选 summary 模板（CCTV 用 news_cctv_summary_v1，其他用 news_summary_v1 等）
+              const preferredSummary = getPreferredSummaryTemplate(item.analysis_result);
+              const summaryResult = preferredSummary ? preferredSummary.result : null;
 
               return (
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

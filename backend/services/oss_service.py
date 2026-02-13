@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 阿里云 OSS 服务
-用于上传音频文件到 OSS 并生成公网访问 URL
+用于上传文件到 OSS 并生成公网访问 URL
+支持音频、文档、图片等多种文件类型
 """
 
 import os
+import re
+import uuid
 import oss2
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -16,13 +19,24 @@ load_project_env()
 
 
 class OSSService:
-    """阿里云 OSS 服务类"""
+    """阿里云 OSS 服务类 - 支持多种文件类型上传"""
     
     # 支持的音频格式（根据 Fun-ASR 要求）
     SUPPORTED_AUDIO_FORMATS = {
         '.aac', '.amr', '.avi', '.flac', '.flv', '.m4a', '.mkv', 
         '.mov', '.mp3', '.mp4', '.mpeg', '.ogg', '.opus', '.wav', 
         '.webm', '.wma', '.wmv'
+    }
+    
+    # 支持的文档格式
+    SUPPORTED_DOCUMENT_FORMATS = {
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.txt', '.csv', '.md', '.rtf'
+    }
+    
+    # 支持的图片格式
+    SUPPORTED_IMAGE_FORMATS = {
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'
     }
     
     # 最大文件大小：2GB
@@ -35,7 +49,17 @@ class OSSService:
         self.access_key_secret = os.getenv('OSS_ACCESS_KEY_SECRET')
         self.bucket_name = os.getenv('OSS_BUCKET_NAME', 'rc-audio-files')
         self.endpoint = os.getenv('OSS_ENDPOINT', 'oss-cn-shenzhen.aliyuncs.com')
+        
+        # 各类文件的 OSS 前缀
         self.audio_prefix = os.getenv('OSS_AUDIO_PREFIX', 'audio/')
+        self.document_prefix = os.getenv('OSS_DOCUMENT_PREFIX', 'documents/')
+        self.image_prefix = os.getenv('OSS_IMAGE_PREFIX', 'images/')
+        self.temp_prefix = os.getenv('OSS_TEMP_PREFIX', 'temp/')
+        
+        # 自定义域名（可选，用于在浏览器内预览 PDF）
+        self.custom_domain = os.getenv('OSS_CUSTOM_DOMAIN', '').strip()
+        if self.custom_domain:
+            info(f"OSS 自定义域名已配置: {self.custom_domain}")
         
         # 验证配置
         if not self.access_key_id or not self.access_key_secret:
@@ -69,6 +93,51 @@ class OSSService:
         ext = os.path.splitext(filename)[1].lower()
         return ext in self.SUPPORTED_AUDIO_FORMATS
     
+    def is_document_file(self, filename: str) -> bool:
+        """
+        检查文件是否为支持的文档格式
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            bool: 是否为支持的文档格式
+        """
+        ext = os.path.splitext(filename)[1].lower()
+        return ext in self.SUPPORTED_DOCUMENT_FORMATS
+    
+    def is_image_file(self, filename: str) -> bool:
+        """
+        检查文件是否为支持的图片格式
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            bool: 是否为支持的图片格式
+        """
+        ext = os.path.splitext(filename)[1].lower()
+        return ext in self.SUPPORTED_IMAGE_FORMATS
+    
+    def get_file_category(self, filename: str) -> str:
+        """
+        根据文件名判断文件类别
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            str: 'audio', 'document', 'image', 或 'other'
+        """
+        if self.is_audio_file(filename):
+            return 'audio'
+        elif self.is_document_file(filename):
+            return 'document'
+        elif self.is_image_file(filename):
+            return 'image'
+        else:
+            return 'other'
+    
     def validate_audio_file(self, file_path: str, file_size: int) -> tuple[bool, str]:
         """
         验证音频文件是否符合要求
@@ -92,64 +161,160 @@ class OSSService:
         
         return True, ""
     
-    def generate_object_name(self, filename: str, username: str = "anonymous") -> str:
+    def _sanitize_filename(self, filename: str) -> str:
         """
-        生成 OSS 对象名称
+        清理文件名，移除特殊字符
+        
+        Args:
+            filename: 原始文件名
+            
+        Returns:
+            str: 清理后的文件名
+        """
+        # 保留中文、英文、数字、下划线、连字符、点
+        name, ext = os.path.splitext(filename)
+        # 替换空格为下划线
+        name = name.replace(' ', '_')
+        # 移除其他特殊字符（保留中文）
+        name = re.sub(r'[^\w\u4e00-\u9fff\-]', '', name)
+        return f"{name}{ext}"
+    
+    def _get_content_type(self, filename: str) -> str:
+        """
+        根据文件扩展名获取 MIME 类型
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            str: MIME 类型
+        """
+        ext = os.path.splitext(filename)[1].lower()
+        mime_types = {
+            # 文档
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.txt': 'text/plain',
+            '.csv': 'text/csv',
+            '.md': 'text/markdown',
+            '.rtf': 'application/rtf',
+            # 图片
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+            '.ico': 'image/x-icon',
+            # 音频
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+            '.ogg': 'audio/ogg',
+            '.flac': 'audio/flac',
+        }
+        return mime_types.get(ext, 'application/octet-stream')
+    
+    def generate_object_name(
+        self, 
+        filename: str, 
+        username: str = "anonymous",
+        file_category: str = None
+    ) -> str:
+        """
+        生成 OSS 对象名称（兼容旧版 audio 调用）
         
         Args:
             filename: 原始文件名
             username: 用户名
+            file_category: 文件类别（可选，自动检测）
             
         Returns:
             str: OSS 对象名称
         """
-        # 获取文件扩展名
-        _, ext = os.path.splitext(filename)
+        # 如果未指定类别，自动检测
+        if file_category is None:
+            file_category = self.get_file_category(filename)
         
-        # 生成时间戳
+        # 获取对应前缀
+        prefix_map = {
+            'audio': self.audio_prefix,
+            'document': self.document_prefix,
+            'image': self.image_prefix,
+            'other': self.temp_prefix
+        }
+        prefix = prefix_map.get(file_category, self.audio_prefix)
+        
+        # 清理文件名
+        safe_filename = self._sanitize_filename(filename)
+        
+        # 生成时间戳和唯一 ID
+        date_str = datetime.now().strftime("%Y-%m-%d")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
         
-        # 生成对象名: audio/{username}/{timestamp}_{filename}
-        object_name = f"{self.audio_prefix}{username}/{timestamp}_{filename}"
+        # 生成对象名: prefix/username/date/uniqueid_timestamp_filename
+        object_name = f"{prefix}{username}/{date_str}/{unique_id}_{timestamp}_{safe_filename}"
         
         return object_name
     
-    def upload_audio_file(
-        self, 
-        file_path: str, 
+    def upload_file(
+        self,
+        file_path: str,
         filename: str,
-        username: str = "anonymous"
+        username: str = "anonymous",
+        file_category: str = None,
+        content_type: str = None,
+        expires: int = 3600
     ) -> Dict[str, Any]:
         """
-        上传音频文件到 OSS
+        通用文件上传到 OSS（支持文档、图片、音频等）
         
         Args:
             file_path: 本地文件路径
             filename: 原始文件名
             username: 用户名
+            file_category: 文件类别（'document', 'image', 'audio', 'other'），不指定则自动检测
+            content_type: MIME 类型（可选，自动检测）
+            expires: 签名 URL 过期时间（秒），默认 1 小时
             
         Returns:
             Dict[str, Any]: 上传结果
                 {
-                    "success": bool,
-                    "object_name": str,  # OSS 对象名称
-                    "public_url": str,   # 公网访问 URL
-                    "file_size": int,    # 文件大小（字节）
-                    "error": str         # 错误信息（如果有）
+                    "success": True/False,
+                    "object_name": "documents/user/2026-02-11/xxx.pdf",
+                    "public_url": "https://bucket.oss-cn-shenzhen.aliyuncs.com/...",
+                    "signed_url": "https://...?Expires=...",
+                    "bucket": "rc-files-bucket",
+                    "file_size": 12345,
+                    "file_category": "document",
+                    "upload_time": "2026-02-11T10:30:00",
+                    "error": ""  # 如果失败
                 }
         """
         result = {
             "success": False,
-            "object_name": "",
-            "public_url": "",
+            "object_name": None,
+            "public_url": None,
+            "signed_url": None,
+            "bucket": self.bucket_name,
             "file_size": 0,
-            "error": ""
+            "file_category": file_category,
+            "upload_time": None,
+            "error": None
         }
         
         try:
             # 检查 OSS 是否配置
             if not self.is_configured():
-                result["error"] = "OSS 服务未配置，请在 .env 中设置 OSS 配置"
+                result["error"] = "OSS 服务未配置，请在 .env 中设置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET"
                 return result
             
             # 检查文件是否存在
@@ -161,43 +326,170 @@ class OSSService:
             file_size = os.path.getsize(file_path)
             result["file_size"] = file_size
             
-            # 验证音频文件
-            is_valid, error_msg = self.validate_audio_file(file_path, file_size)
-            if not is_valid:
-                result["error"] = error_msg
+            # 检查文件大小
+            if file_size > self.MAX_FILE_SIZE:
+                size_gb = file_size / (1024 * 1024 * 1024)
+                result["error"] = f"文件过大: {size_gb:.2f}GB。最大支持 2GB"
                 return result
             
+            # 自动检测文件类别
+            if file_category is None:
+                file_category = self.get_file_category(filename)
+                result["file_category"] = file_category
+            
             # 生成 OSS 对象名称
-            object_name = self.generate_object_name(filename, username)
+            object_name = self.generate_object_name(filename, username, file_category)
             result["object_name"] = object_name
             
-            # 上传文件
-            info(f"开始上传音频文件到 OSS: {filename} -> {object_name}")
-            self.bucket.put_object_from_file(object_name, file_path)
+            # 自动检测 Content-Type
+            if not content_type:
+                content_type = self._get_content_type(filename)
             
-            # 生成签名 URL（临时访问，更安全，不需要 bucket 为公共读）
-            # 设置 48 小时有效期（足够长时间用于 ASR 识别）
-            expires = 3600 * 48  # 48 小时 = 172800 秒
-            signed_url = self.bucket.sign_url('GET', object_name, expires)
-            result["public_url"] = signed_url
+            # 设置 Content-Disposition（决定浏览器是预览还是下载）
+            # PDF 和图片：inline（浏览器内预览）
+            # 其他文件：attachment（下载）
+            file_ext = os.path.splitext(filename)[1].lower()
+            if file_ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
+                # 可预览文件：inline
+                content_disposition = 'inline'
+            else:
+                # 其他文件：attachment（下载）
+                # 对文件名进行 URL 编码以支持中文
+                from urllib.parse import quote
+                encoded_filename = quote(filename)
+                content_disposition = f'attachment; filename*=UTF-8\'\'{encoded_filename}'
             
-            # 方式2（备用）：使用 bucket 自己的域名（需要 bucket 设置为公共读）
-            # public_url = f"https://{self.bucket_name}.{self.endpoint}/{object_name}"
-            # result["public_url"] = public_url
+            # 上传到 OSS
+            info(f"开始上传文件到 OSS: {filename} -> {object_name} (category: {file_category}, disposition: {content_disposition.split(';')[0]})")
+            
+            with open(file_path, 'rb') as f:
+                self.bucket.put_object(
+                    object_name,
+                    f,
+                    headers={
+                        'Content-Type': content_type,
+                        'Content-Disposition': content_disposition
+                    }
+                )
+            
+            # 生成公网 URL
+            if self.custom_domain:
+                # 使用自定义域名（不会触发强制下载，可以预览）
+                # 注意：如果域名未配置 SSL 证书，使用 HTTP；否则使用 HTTPS
+                from urllib.parse import quote
+                encoded_object_name = quote(object_name, safe='/')
+                public_url = f"http://{self.custom_domain}/{encoded_object_name}"
+            else:
+                # 使用默认域名（会触发强制下载）
+                public_url = f"https://{self.bucket_name}.{self.endpoint}/{object_name}"
+            
+            result["public_url"] = public_url
+            
+            # 生成签名 URL（私有桶或需要鉴权访问）
+            # 对于公共桶，签名 URL 可选
+            signed_url = self.get_signed_url(object_name, expires)
+            result["signed_url"] = signed_url
             
             result["success"] = True
-            info(f"audio file uploaded successfully: {filename}, signed URL valid for 48 hours")
+            result["upload_time"] = datetime.now().isoformat()
+            
+            info(f"文件已上传到 OSS: {filename} (size: {file_size / 1024 / 1024:.2f}MB)")
             
         except oss2.exceptions.OssError as e:
-            error_msg = f"OSS upload failed: {e.message}"
+            error_msg = f"OSS 上传失败: {e.message}"
             error(error_msg)
             result["error"] = error_msg
         except Exception as e:
-            error_msg = f"upload audio file failed: {str(e)}"
+            error_msg = f"上传文件失败: {str(e)}"
             error(error_msg)
             result["error"] = error_msg
         
         return result
+    
+    def upload_audio_file(
+        self, 
+        file_path: str, 
+        filename: str,
+        username: str = "anonymous"
+    ) -> Dict[str, Any]:
+        """
+        上传音频文件到 OSS（兼容旧版接口，内部调用 upload_file）
+        
+        Args:
+            file_path: 本地文件路径
+            filename: 原始文件名
+            username: 用户名
+            
+        Returns:
+            Dict[str, Any]: 上传结果（与 upload_file 格式相同）
+        """
+        # 验证音频文件
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "error": f"文件不存在: {file_path}"
+            }
+        
+        file_size = os.path.getsize(file_path)
+        is_valid, error_msg = self.validate_audio_file(file_path, file_size)
+        if not is_valid:
+            return {
+                "success": False,
+                "error": error_msg
+            }
+        
+        # 使用通用上传方法，48 小时有效期（用于 ASR）
+        return self.upload_file(
+            file_path=file_path,
+            filename=filename,
+            username=username,
+            file_category='audio',
+            expires=3600 * 48  # 48 小时
+        )
+    
+    def get_signed_url(
+        self, 
+        object_name: str, 
+        expires: int = 3600,
+        force_inline: bool = None
+    ) -> Optional[str]:
+        """
+        获取签名 URL（临时访问链接）- 推荐用于私有桶
+        
+        Args:
+            object_name: OSS 对象名称
+            expires: 过期时间（秒），默认 1 小时
+            force_inline: 是否强制浏览器内预览（True: inline, False: attachment, None: 自动检测）
+            
+        Returns:
+            Optional[str]: 签名 URL，失败返回 None
+        """
+        try:
+            if not self.is_configured():
+                warning("OSS 未配置，无法生成签名 URL")
+                return None
+            
+            # 自动检测文件类型，决定是否使用 inline
+            if force_inline is None:
+                file_ext = os.path.splitext(object_name)[1].lower()
+                # PDF 和图片自动 inline，其他文件 attachment
+                force_inline = file_ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+            
+            # 如果需要强制 inline（浏览器预览），设置响应头
+            if force_inline:
+                # 注意：OSS 不允许覆盖 Content-Type，只能覆盖 Content-Disposition
+                # 设置响应参数（对抗 OSS 默认域名的强制下载）
+                params = {
+                    'response-content-disposition': 'inline'
+                }
+                url = self.bucket.sign_url('GET', object_name, expires, params=params)
+            else:
+                url = self.bucket.sign_url('GET', object_name, expires)
+            
+            return url
+        except Exception as e:
+            error(f"生成签名 URL 失败: {str(e)}")
+            return None
     
     def generate_signed_url(
         self, 
@@ -205,7 +497,7 @@ class OSSService:
         expires: int = 3600
     ) -> Optional[str]:
         """
-        生成签名 URL（临时访问链接）
+        生成签名 URL（兼容旧版方法名）
         
         Args:
             object_name: OSS 对象名称
@@ -214,19 +506,11 @@ class OSSService:
         Returns:
             Optional[str]: 签名 URL，失败返回 None
         """
-        try:
-            if not self.is_configured():
-                return None
-            
-            url = self.bucket.sign_url('GET', object_name, expires)
-            return url
-        except Exception as e:
-            error(f"generate signed URL failed: {str(e)}")
-            return None
+        return self.get_signed_url(object_name, expires)
     
-    def delete_audio_file(self, object_name: str) -> bool:
+    def delete_file(self, object_name: str) -> bool:
         """
-        删除 OSS 中的音频文件
+        删除 OSS 中的文件（通用方法）
         
         Args:
             object_name: OSS 对象名称
@@ -236,18 +520,31 @@ class OSSService:
         """
         try:
             if not self.is_configured():
+                warning("OSS 未配置，无法删除文件")
                 return False
             
             self.bucket.delete_object(object_name)
-            info(f"deleted OSS audio file: {object_name}")
+            info(f"已删除 OSS 文件: {object_name}")
             return True
         except Exception as e:
-            error(f"delete OSS audio file failed: {str(e)}")
+            error(f"删除 OSS 文件失败: {str(e)}")
             return False
     
-    def get_audio_info(self, object_name: str) -> Optional[Dict[str, Any]]:
+    def delete_audio_file(self, object_name: str) -> bool:
         """
-        获取音频文件信息
+        删除 OSS 中的音频文件（兼容旧版接口）
+        
+        Args:
+            object_name: OSS 对象名称
+            
+        Returns:
+            bool: 是否删除成功
+        """
+        return self.delete_file(object_name)
+    
+    def get_file_info(self, object_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取文件信息（通用方法）
         
         Args:
             object_name: OSS 对象名称
@@ -269,5 +566,43 @@ class OSSService:
                 "etag": metadata.headers.get('ETag', '')
             }
         except Exception as e:
-            error(f"get audio file info failed: {str(e)}")
+            error(f"获取文件信息失败: {str(e)}")
             return None
+    
+    def get_audio_info(self, object_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取音频文件信息（兼容旧版接口）
+        
+        Args:
+            object_name: OSS 对象名称
+            
+        Returns:
+            Optional[Dict[str, Any]]: 文件信息，失败返回 None
+        """
+        return self.get_file_info(object_name)
+    
+    def download_to_file(self, object_name: str, local_path: str) -> bool:
+        """
+        从 OSS 下载文件到本地（用于 LlamaParse 等需要本地文件的场景）
+        
+        Args:
+            object_name: OSS 对象名称
+            local_path: 本地保存路径
+            
+        Returns:
+            bool: 是否下载成功
+        """
+        try:
+            if not self.is_configured():
+                warning("OSS 未配置，无法下载文件")
+                return False
+            
+            # 确保目标目录存在
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            
+            self.bucket.get_object_to_file(object_name, local_path)
+            info(f"已从 OSS 下载文件: {object_name} -> {local_path}")
+            return True
+        except Exception as e:
+            error(f"从 OSS 下载文件失败: {str(e)}")
+            return False

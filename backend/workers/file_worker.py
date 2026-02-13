@@ -62,6 +62,21 @@ class FileProcessingWorker:
         """设置状态更新回调函数"""
         self.status_callback = callback
     
+    def _is_oss_object_key(self, file_path: str) -> bool:
+        """
+        判断是否为 OSS 对象键（云端路径）
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            bool: 是否为 OSS 对象键
+        """
+        if not file_path or os.path.isabs(file_path):
+            return False
+        # OSS 对象键格式：documents/admin/2026-02-12/xxx.docx 或 audio/admin/xxx.aac
+        return file_path.startswith("documents/") or file_path.startswith("audio/")
+    
     def stop(self):
         """停止处理"""
         self.should_stop = True
@@ -188,6 +203,8 @@ class FileProcessingWorker:
             # 处理文件
             successful_results = []
             failed_files = []
+            temp_files_to_cleanup = []  # 记录需要清理的临时文件
+            temp_to_original_mapping = {}  # 映射临时文件路径到原始 OSS 路径
             
             for i, file_path in enumerate(file_paths):
                 if self.should_stop:
@@ -203,6 +220,42 @@ class FileProcessingWorker:
                         progress=progress_ref[0],
                         log_message=f"正在处理文件: {file_name}"
                     )
+                    
+                    # 🔧 检查是否为 OSS 文件（object_name 格式：documents/admin/2026-02-12/xxx.docx）
+                    local_file_path = file_path
+                    temp_file_path = None
+                    
+                    if self._is_oss_object_key(file_path):
+                        # 文件存储在 OSS，需要先下载到本地临时目录
+                        self.update_status(log_message=f"检测到 OSS 文件，正在下载: {file_name}")
+                        
+                        from backend.services.oss_service import OSSService
+                        oss_service = OSSService()
+                        
+                        if not oss_service.is_configured():
+                            raise ValueError("OSS 服务未配置，但文件路径指向 OSS 对象")
+                        
+                        # 创建临时目录
+                        temp_dir = os.path.join(os.getcwd(), 'uploads', 'temp_oss_processing')
+                        os.makedirs(temp_dir, exist_ok=True)
+                        
+                        # 生成临时文件路径（保留原始文件扩展名）
+                        import uuid
+                        file_ext = os.path.splitext(file_name)[1]
+                        temp_file_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}{file_ext}")
+                        
+                        # 从 OSS 下载文件
+                        try:
+                            oss_service.download_to_file(file_path, temp_file_path)
+                            local_file_path = temp_file_path
+                            temp_files_to_cleanup.append(temp_file_path)
+                            temp_to_original_mapping[temp_file_path] = file_path  # 记录映射关系
+                            self.update_status(log_message=f"OSS 文件下载完成: {file_name}")
+                        except Exception as e:
+                            raise ValueError(f"从 OSS 下载文件失败: {str(e)}")
+                    elif not os.path.exists(file_path):
+                        # 如果不是 OSS 文件且本地文件不存在，报错
+                        raise ValueError(f"文件不存在: {file_path}")
                     
                     # 文档解析可能很久，启动进度 ticker，避免长时间停在 10%
                     ticker = asyncio.create_task(
@@ -224,8 +277,8 @@ class FileProcessingWorker:
                             "polling_interval": params.get('polling_interval', 10)
                         }
                         
-                        # 使用LlamaService处理文件
-                        result = await llama_service.process_file(file_path, successful_results, failed_files, llama_params)
+                        # 使用LlamaService处理文件（使用本地文件路径）
+                        result = await llama_service.process_file(local_file_path, successful_results, failed_files, llama_params)
                     finally:
                         ticker.cancel()
                         try:
@@ -260,6 +313,24 @@ class FileProcessingWorker:
                     failed_files.append({"file_path": file_path, "error": str(e)})
                     self.files_failed += 1
                     self.update_status(log_message=f"文件 {os.path.basename(file_path)} 处理出错: {str(e)}")
+            
+            # 🔧 修正：将 successful_results 中的 original_file 从 local_file_path 改回原始 file_path（OSS object_name）
+            # 因为数据库中需要保存 OSS 路径用于后续预览
+            for result_item in successful_results:
+                original_file = result_item.get('original_file', '')
+                # 使用映射表查找原始 OSS 路径
+                if original_file in temp_to_original_mapping:
+                    result_item['original_file'] = temp_to_original_mapping[original_file]
+            
+            # 🧹 清理所有临时下载的文件
+            if temp_files_to_cleanup:
+                self.update_status(log_message=f"正在清理 {len(temp_files_to_cleanup)} 个临时文件...")
+                for temp_path in temp_files_to_cleanup:
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except Exception as e:
+                        self.update_status(log_message=f"清理临时文件失败: {str(e)}")
             
             # 如果有成功的结果，进行AI分析
             final_report = None
@@ -564,13 +635,82 @@ class FileProcessingWorker:
             
             # 插入文件处理详情
             for result in successful_results:
-                file_info = self.file_processor.get_file_info(result['original_file'])
+                original_file_path = result['original_file']
+                
+                # 🔧 如果是 OSS 文件，需要特殊处理文件信息
+                storage_type = 'local'
+                oss_bucket = None
+                
+                if self._is_oss_object_key(original_file_path):
+                    storage_type = 'oss'
+                    
+                    # OSS 文件：从数据库查询已有的文件信息（必须查询，以保留原始文件名）
+                    cursor.execute("""
+                        SELECT file_type, file_size_mb, filename, oss_bucket
+                        FROM file_processing_details
+                        WHERE original_file_path = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, (original_file_path,))
+                    existing_file_info = cursor.fetchone()
+                    
+                    if existing_file_info:
+                        # 使用已有的文件信息（保留原始文件名）
+                        file_info = {
+                            'file_type': existing_file_info[0],
+                            'file_size_mb': existing_file_info[1],
+                            'file_name': existing_file_info[2]  # 原始文件名，不带时间戳前缀
+                        }
+                        oss_bucket = existing_file_info[3]
+                        self.update_status(log_message=f"使用原始文件名: {existing_file_info[2]}")
+                    else:
+                        # 如果找不到已有记录，从 OSS object_name 中提取原始文件名
+                        # OSS object_name 格式：documents/admin/2026-02-12/aff8da10_20260212_110425_原始文件名.pdf
+                        # 需要去掉前缀：aff8da10_20260212_110425_
+                        oss_file_name = os.path.basename(original_file_path)
+                        
+                        # 尝试提取原始文件名（去掉时间戳前缀）
+                        # 格式：{uuid}_{timestamp}_{原始文件名}
+                        import re
+                        # 匹配模式：8位hex_日期时间_文件名
+                        match = re.match(r'^[0-9a-f]{8}_\d{8}_\d{6}_(.+)$', oss_file_name)
+                        if match:
+                            file_name = match.group(1)  # 提取原始文件名
+                            self.update_status(log_message=f"从 OSS 路径提取原始文件名: {file_name}")
+                        else:
+                            # 如果不匹配模式，直接使用文件名
+                            file_name = oss_file_name
+                            self.update_status(log_message=f"⚠️ 无法提取原始文件名，使用: {file_name}")
+                        
+                        file_ext = os.path.splitext(file_name)[1].lower()
+                        
+                        # 根据扩展名推断文件类型
+                        ext_to_type = {
+                            '.pdf': 'pdf',
+                            '.docx': 'word', '.doc': 'word',
+                            '.xlsx': 'excel', '.xls': 'excel',
+                            '.csv': 'csv',
+                            '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image', '.bmp': 'image'
+                        }
+                        file_type = ext_to_type.get(file_ext, 'other')
+                        
+                        file_info = {
+                            'file_name': file_name,  # 原始文件名（已去掉前缀）
+                            'file_type': file_type,
+                            'file_size_mb': 0  # OSS 文件大小未知，使用 0
+                        }
+                        
+                        # 从环境变量获取默认的 OSS bucket
+                        oss_bucket = os.getenv('OSS_BUCKET_NAME')
+                else:
+                    # 本地文件：使用 file_processor 获取文件信息
+                    file_info = self.file_processor.get_file_info(original_file_path)
                 
                 # 查找对应的AI时间信息
                 ai_info = None
                 if file_ai_times:
                     ai_info = next(
-                        (ft for ft in file_ai_times if ft['file_path'] == result['original_file']),
+                        (ft for ft in file_ai_times if ft['file_path'] == original_file_path),
                         None
                     )
                 
@@ -578,8 +718,9 @@ class FileProcessingWorker:
                 INSERT INTO file_processing_details 
                 (processing_stats_id, filename, file_type, file_size_mb, 
                  processing_time, ai_time, content_length, status, 
-                 total_tokens, cost, content, created_at, task_id, original_file_path)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 total_tokens, cost, content, created_at, task_id, original_file_path,
+                 file_storage_type, oss_bucket)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """, (
                     processing_stats_id,
@@ -595,7 +736,9 @@ class FileProcessingWorker:
                     result.get('content', ''),
                     datetime.now(),
                     self.task_id,
-                    result['original_file']  # 保存原始文件路径
+                    result['original_file'],  # 保存原始文件路径（OSS object_name 或本地路径）
+                    storage_type,  # 新增：存储类型（'oss' 或 'local'）
+                    oss_bucket  # 新增：OSS bucket 名称
                 ))
                 
                 # 获取插入的文件ID

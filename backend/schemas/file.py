@@ -13,6 +13,7 @@ class FileType(str, Enum):
     """文件类型枚举"""
     PDF = "pdf"
     EXCEL = "excel"
+    CSV = "csv"  # CSV 单独分类（不同于 Excel）
     IMAGE = "image"
     DOC = "doc"
     OTHER = "other"

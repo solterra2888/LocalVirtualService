@@ -23,6 +23,14 @@ const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
 const { Panel } = Collapse;
 
+/**
+ * 系统自动填充的变量列表
+ * 这些变量不应该在UI中显示给用户配置，因为它们会由系统自动填充
+ */
+const AUTO_FILLED_VARIABLES = [
+  'file_content',  // 文件内容会自动从上传的文件中提取
+] as const;
+
 interface TemplateVariablesEditorProps {
   templateId: number;
   values?: Record<string, any>;
@@ -196,8 +204,8 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
   const optionalVars: [string, VariableDefinition][] = [];
 
   Object.entries(template.variables).forEach(([key, varDef]: [string, any]) => {
-    // 跳过file_content，这是自动填充的
-    if (key === 'file_content') return;
+    // 跳过系统自动填充的变量
+    if (AUTO_FILLED_VARIABLES.includes(key as any)) return;
 
     if (varDef.required) {
       requiredVars.push([key, varDef]);

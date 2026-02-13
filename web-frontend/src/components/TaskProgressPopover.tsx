@@ -14,11 +14,11 @@ interface TaskProgressPopoverProps {
   themeMode: 'light' | 'dark';
 }
 
-const getStatusIcon = (status: string) => {
+const getStatusIcon = (status: string, isDark?: boolean) => {
   switch (status) {
     case 'completed': return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
     case 'failed': return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
-    default: return <LoadingOutlined />;
+    default: return <LoadingOutlined style={isDark ? { color: '#1890ff' } : undefined} />;
   }
 };
 
@@ -118,7 +118,7 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
               }}>
                 {task.fileName}
               </span>
-              {getStatusIcon(task.status.status)}
+              {getStatusIcon(task.status.status, isDark)}
             </div>
 
             {/* Progress Bar */}
@@ -146,7 +146,7 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
               <div style={{ 
                 marginTop: 6,
                 fontSize: '11px',
-                color: isDark ? '#64748b' : '#999'
+                color: isDark ? '#94a3b8' : '#999'
               }}>
                 <Space size={4} split="|">
                   <span>✓ {task.status.files_processed}</span>

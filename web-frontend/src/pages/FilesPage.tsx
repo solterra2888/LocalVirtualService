@@ -43,8 +43,11 @@ import {
   EllipsisOutlined,
   EditOutlined,
   SoundOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
+  TagsOutlined,
+  CheckCircleOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -217,7 +220,7 @@ interface ProcessingResult {
 
 const FilesPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
-  const { addTask, updateTaskStatus: updateGlobalTaskStatus } = useFileProcessing();
+  const { addTask, updateTaskStatus: updateGlobalTaskStatus, registerSourceListRefresh } = useFileProcessing();
   const { modal } = App.useApp();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
@@ -712,6 +715,14 @@ const FilesPageInner: React.FC = () => {
   useEffect(() => {
     loadTaskExecutionsFuncRef.current = loadTaskExecutionsFunc;
   }, [loadTaskExecutionsFunc]);
+
+  // 注册 Source 列表刷新：Upload Files 弹窗点击 Start Processing 关闭后或任务完成时会触发
+  useEffect(() => {
+    const unregister = registerSourceListRefresh(() => {
+      loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
+    });
+    return unregister;
+  }, [registerSourceListRefresh]);
 
   useEffect(() => {
     const refreshInterval = setInterval(() => {
@@ -1367,6 +1378,8 @@ const FilesPageInner: React.FC = () => {
       okText: 'Confirm Delete',
       cancelText: 'Cancel',
       okType: 'danger',
+      centered: true,
+      styles: getModalStyles(isDark, themeColors),
       onOk: async () => {
         try {
           setDeletingExecutions(true);
@@ -1494,8 +1507,9 @@ const FilesPageInner: React.FC = () => {
     } catch (error: any) {
       console.error('failed to upload file:', error);
       const errorMessage = getErrorMessage(error, 'failed to upload file');
-      message.error(errorMessage);
       logger.logError(errorMessage, 'file-processing', error);
+      // 避免与 api 拦截器的 toast 重复：拦截器已对带 response 的请求展示过错误
+      if (!error.response) message.error(errorMessage);
     } finally {
       setUploadingFiles(false);
     }
@@ -2398,22 +2412,27 @@ const FilesPageInner: React.FC = () => {
                 </div>
               </>
             ) : (
-              <>
-                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-                <div style={{ marginTop: 16, fontSize: '16px' }}>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px',
+                textAlign: 'center',
+              }}>
+                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+                <div style={{ marginBottom: '20px', fontSize: '16px' }}>
                   No AI analysis report available for this execution.
                 </div>
                 {canAnalyzeAudioModal && aiAnalysisExecution && (
                   <Button
                     type="primary"
                     icon={<SoundOutlined />}
-                    size="large"
                     onClick={() => handleAnalyzeAudio(aiAnalysisExecution)}
-                    style={{ 
-                      marginTop: '20px',
-                      height: '44px',
-                      paddingInline: '28px',
-                      fontSize: '15px',
+                    style={{
+                      height: '40px',
+                      paddingInline: '24px',
+                      fontSize: '14px',
                       borderRadius: '8px',
                     }}
                   >
@@ -2421,8 +2440,8 @@ const FilesPageInner: React.FC = () => {
                   </Button>
                 )}
                 {canAnalyzeDocModal && aiAnalysisExecution && (
-                  <div style={{ maxWidth: '420px', margin: '20px auto 0', textAlign: 'left' }}>
-                    <div style={{ marginBottom: '12px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+                  <div style={{ maxWidth: '420px', marginTop: '20px', textAlign: 'center' }}>
+                    <div style={{ marginBottom: '12px', color: '#999', fontSize: '13px' }}>
                       Select a prompt template and click "Analyze" to start AI analysis
                     </div>
                     <TemplateSelector
@@ -2430,19 +2449,19 @@ const FilesPageInner: React.FC = () => {
                       value={modalSelectedTemplateId}
                       onChange={(value) => setModalSelectedTemplateId(value)}
                       placeholder="Select analysis template"
-                      style={{ marginBottom: '16px' }}
+                      style={{ marginBottom: '16px', textAlign: 'left' }}
+                      showConfigWhenSelected={false}
                     />
-                    <div style={{ textAlign: 'center', marginTop: '24px' }}>
+                    <div style={{ marginTop: '16px' }}>
                       <Button
                         type="primary"
                         icon={<RobotOutlined />}
-                        size="large"
                         disabled={!modalSelectedTemplateId}
                         onClick={() => modalSelectedTemplateId && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId)}
                         style={{
-                          height: '44px',
-                          paddingInline: '28px',
-                          fontSize: '15px',
+                          height: '40px',
+                          paddingInline: '24px',
+                          fontSize: '14px',
                           borderRadius: '8px',
                         }}
                       >
@@ -2451,7 +2470,7 @@ const FilesPageInner: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         );
@@ -2559,27 +2578,38 @@ const FilesPageInner: React.FC = () => {
                 } else {
                   // 其他文件类型提示下载
                   return (
-                    <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                      <FileTextOutlined style={{ fontSize: '48px', color: '#1890ff' }} />
-                      <div style={{ marginTop: 16, fontSize: '16px', color: '#666' }}>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '40px',
+                      textAlign: 'center',
+                    }}>
+                      <FileTextOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
+                      <div style={{ marginBottom: '20px', fontSize: '16px', color: '#666' }}>
                         This file type cannot be previewed online.
                       </div>
-                      <div style={{ marginTop: 8 }}>
-                        <Button 
-                          type="primary" 
-                          icon={<DownloadOutlined />}
-                          onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = selectedFileContent.originalFileInfo.file_url;
-                            link.download = selectedFileContent.originalFileInfo.filename;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                        >
-                          Download File
-                        </Button>
-                      </div>
+                      <Button
+                        type="primary"
+                        icon={<DownloadOutlined />}
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = selectedFileContent.originalFileInfo.file_url;
+                          link.download = selectedFileContent.originalFileInfo.filename;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        style={{
+                          height: '40px',
+                          paddingInline: '24px',
+                          fontSize: '14px',
+                          borderRadius: '8px',
+                        }}
+                      >
+                        Download File
+                      </Button>
                     </div>
                   );
                 }
@@ -2598,9 +2628,16 @@ const FilesPageInner: React.FC = () => {
                 {selectedFileContent.content}
               </pre>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-                <div style={{ marginTop: 16, fontSize: '16px', color: '#666' }}>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px',
+                textAlign: 'center',
+              }}>
+                <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+                <div style={{ fontSize: '16px', color: '#666' }}>
                   No content available for this file
                 </div>
               </div>
@@ -2608,9 +2645,16 @@ const FilesPageInner: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14' }} />
-          <div style={{ marginTop: 16, fontSize: '16px' }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px',
+          textAlign: 'center',
+        }}>
+          <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+          <div style={{ fontSize: '16px' }}>
             No file data available
           </div>
         </div>
@@ -2897,7 +2941,7 @@ const FilesPageInner: React.FC = () => {
                         className={`files-detail-tab ${viewMode === 'content' ? 'is-active' : ''}`}
                         onClick={() => setViewMode('content')}
                       >
-                        Content
+                        Markdown
                       </div>
                       <div style={{ flex: 1 }} />
                     </div>
@@ -2958,7 +3002,7 @@ const FilesPageInner: React.FC = () => {
                             tabIndex={0}
                             onKeyDown={(e) => e.key === 'Enter' && setRightPanelCollapsed(false)}
                           >
-                            <MenuUnfoldOutlined />
+                            <DoubleLeftOutlined />
                           </span>
                         </Tooltip>
                       </div>
@@ -2986,7 +3030,7 @@ const FilesPageInner: React.FC = () => {
                               tabIndex={0}
                               onKeyDown={(e) => e.key === 'Enter' && setRightPanelCollapsed(true)}
                             >
-                              <MenuFoldOutlined />
+                              <DoubleRightOutlined />
                             </span>
                           </Tooltip>
                         </div>
@@ -3021,6 +3065,12 @@ const FilesPageInner: React.FC = () => {
                               }}
                               onAnalyzeAudio={handleAnalyzeAudio}
                               onAnalyzeDocument={handleAnalyzeDocument}
+                              onAnalysisSaved={(newContent) => {
+                                setAiAnalysisData(prev => prev ? {
+                                  ...prev,
+                                  execution: { ...prev.execution, final_report: newContent }
+                                } : null);
+                              }}
                               audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
                               docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
                             />
@@ -3062,15 +3112,7 @@ const FilesPageInner: React.FC = () => {
           styles={modalStyles}
         >
           {executionToDelete && (
-            <div>
-              <p>Are you sure you want to delete the following execution record? This action cannot be undone.</p>
-              <div style={{ background: themeColors.codeBlockBg, padding: '12px', borderRadius: 8, margin: '12px 0', border: `1px solid ${themeColors.cardBorder}` }}>
-                <p><strong>Task Name:</strong> {getDisplayAgentName(executionToDelete.task_name)}</p>
-                <p><strong>User:</strong> {executionToDelete.username}</p>
-                <p><strong>Execution Time:</strong> {new Date(executionToDelete.created_at).toLocaleString()}</p>
-                <p><strong>Files Processed:</strong> {executionToDelete.files_processed} successful, {executionToDelete.files_failed} failed</p>
-              </div>
-            </div>
+            <p>Are you sure you want to delete the following execution record? This action cannot be undone.</p>
           )}
         </Modal>
 
@@ -3289,6 +3331,12 @@ const ExecutionDetailsPanel: React.FC<{
   themeColors: any;
   getDisplayAgentName: (name: string) => string;
 }> = ({ execution, themeColors, getDisplayAgentName }) => {
+  const [fileId, setFileId] = useState<number | null>(null);
+  const [fileTags, setFileTags] = useState<any>(null);
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [editTagsVisible, setEditTagsVisible] = useState(false);
+  const [tagForm] = Form.useForm();
+  
   const statusConfig: Record<string, { color: string; text: string }> = {
     success: { color: 'success', text: 'AI Analysis Complete' },
     failed: { color: 'error', text: 'Failed' },
@@ -3305,6 +3353,116 @@ const ExecutionDetailsPanel: React.FC<{
   const statusItem = execution.rc_agent_status
     ? (statusConfig[execution.rc_agent_status] || { color: 'default', text: execution.rc_agent_status })
     : { color: 'default', text: 'Unknown' };
+
+  // 加载文件ID和标签信息
+  useEffect(() => {
+    const loadFileAndTags = async () => {
+      try {
+        const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+        const files = details?.files || [];
+        if (files.length > 0) {
+          const firstFileId = files[0].id;
+          setFileId(firstFileId);
+          
+          // 加载标签
+          loadTags(firstFileId);
+        }
+      } catch (error) {
+        console.error('Failed to load file details:', error);
+      }
+    };
+    
+    loadFileAndTags();
+  }, [execution.id]);
+
+  const loadTags = async (fid: number) => {
+    setTagsLoading(true);
+    try {
+      const response = await fetch(`/api/file-tags/${fid}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setFileTags(data);
+      } else if (response.status === 404) {
+        setFileTags(null);
+      }
+    } catch (error) {
+      console.error('Failed to load tags:', error);
+    } finally {
+      setTagsLoading(false);
+    }
+  };
+
+  const handleEditTags = () => {
+    if (!fileTags) return;
+    
+    tagForm.setFieldsValue({
+      sector: fileTags.sector,
+      industry: fileTags.industry,
+      tickers: fileTags.tickers || [],
+      confidence: fileTags.confidence,
+      reasoning: fileTags.reasoning
+    });
+    setEditTagsVisible(true);
+  };
+
+  const handleSaveTags = async () => {
+    if (!fileId) return;
+    
+    try {
+      const values = await tagForm.validateFields();
+      const response = await fetch(`/api/file-tags/${fileId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify(values)
+      });
+      
+      if (response.ok) {
+        const updated = await response.json();
+        setFileTags(updated);
+        setEditTagsVisible(false);
+        message.success('Tags updated successfully');
+      } else {
+        message.error('Failed to update tags');
+      }
+    } catch (error) {
+      console.error('Failed to save tags:', error);
+      message.error('Failed to save tags');
+    }
+  };
+
+  const handleRetagFile = async () => {
+    if (!fileId) return;
+    
+    try {
+      const response = await fetch(`/api/file-tags/retag`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify({ file_id: fileId, force: true })
+      });
+      
+      if (response.ok) {
+        message.success('Tagging task submitted, please wait...');
+        // 5秒后重新加载标签
+        setTimeout(() => loadTags(fileId), 5000);
+      } else {
+        message.error('Failed to submit tagging task');
+      }
+    } catch (error) {
+      console.error('Failed to retag:', error);
+      message.error('Failed to retag file');
+    }
+  };
 
   return (
     <div style={{ color: themeColors.text }}>
@@ -3348,6 +3506,186 @@ const ExecutionDetailsPanel: React.FC<{
           )}
         </Descriptions>
       </Card>
+
+      {/* Tags Section */}
+      <Card 
+        size="small" 
+        title={
+          <Space>
+            <TagsOutlined />
+            <span>Tags</span>
+          </Space>
+        }
+        extra={
+          fileTags && (
+            <Space size="small">
+              <Button 
+                type="link" 
+                size="small" 
+                icon={<EditOutlined />}
+                onClick={handleEditTags}
+              >
+                Edit
+              </Button>
+              <Button 
+                type="link" 
+                size="small" 
+                icon={<ReloadOutlined />}
+                onClick={handleRetagFile}
+              >
+                Retag
+              </Button>
+            </Space>
+          )
+        }
+        loading={tagsLoading}
+        style={{ marginBottom: 16 }}
+      >
+        {!fileTags ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: themeColors.textSecondary }}>
+            <TagsOutlined style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }} />
+            <div>No tags available</div>
+            {fileId && (
+              <Button 
+                type="primary" 
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={handleRetagFile}
+                style={{ marginTop: 12 }}
+              >
+                Generate Tags
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Descriptions
+            column={1}
+            layout="horizontal"
+            size="small"
+            labelStyle={{ fontWeight: 600, color: themeColors.textSecondary, width: 160 }}
+            contentStyle={{ color: themeColors.text }}
+          >
+            <Descriptions.Item label="Sector">
+              <Tag color="blue" style={{ fontSize: 13 }}>{fileTags.sector}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="Industry">
+              <Tag color="cyan" style={{ fontSize: 13 }}>{fileTags.industry}</Tag>
+            </Descriptions.Item>
+            {fileTags.tickers && fileTags.tickers.length > 0 && (
+              <Descriptions.Item label="Stock Tickers">
+                <Space size={[4, 4]} wrap>
+                  {fileTags.tickers.map((ticker: string) => (
+                    <Tag key={ticker} color="green" style={{ fontSize: 12 }}>
+                      {ticker}
+                    </Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {fileTags.confidence != null && (
+              <Descriptions.Item label="Confidence">
+                <Space size={4}>
+                  <Tag 
+                    color={fileTags.confidence > 0.8 ? 'success' : fileTags.confidence > 0.5 ? 'warning' : 'error'}
+                    icon={fileTags.confidence > 0.8 ? <CheckCircleOutlined /> : undefined}
+                  >
+                    {(fileTags.confidence * 100).toFixed(0)}%
+                  </Tag>
+                </Space>
+              </Descriptions.Item>
+            )}
+            {fileTags.reasoning && (
+              <Descriptions.Item label="Reasoning">
+                <div style={{ 
+                  maxHeight: 120, 
+                  overflowY: 'auto',
+                  padding: 8,
+                  background: themeColors.background,
+                  borderRadius: 4,
+                  fontSize: 12,
+                  lineHeight: 1.6
+                }}>
+                  {fileTags.reasoning}
+                </div>
+              </Descriptions.Item>
+            )}
+            {fileTags.updated_at && (
+              <Descriptions.Item label="Last Updated">
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {new Date(fileTags.updated_at).toLocaleString()}
+                </Text>
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        )}
+      </Card>
+
+      {/* Edit Tags Modal */}
+      <Modal
+        title="Edit Tags"
+        open={editTagsVisible}
+        onOk={handleSaveTags}
+        onCancel={() => setEditTagsVisible(false)}
+        width={600}
+      >
+        <Form
+          form={tagForm}
+          layout="vertical"
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="sector"
+            label="Sector"
+            rules={[{ required: true, message: 'Please enter sector' }]}
+          >
+            <Input placeholder="e.g., Information Technology, Healthcare, Finance" />
+          </Form.Item>
+
+          <Form.Item
+            name="industry"
+            label="Industry"
+            rules={[{ required: true, message: 'Please enter industry' }]}
+          >
+            <Input placeholder="e.g., Semiconductors, Pharmaceuticals, Investment Banking" />
+          </Form.Item>
+
+          <Form.Item
+            name="tickers"
+            label="Stock Tickers"
+            tooltip="Enter stock codes, press Enter to add multiple"
+          >
+            <Select
+              mode="tags"
+              placeholder="e.g., AAPL, 600519.SS, MSFT"
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="confidence"
+            label="Confidence"
+            tooltip="Value between 0-1 indicating confidence level"
+          >
+            <InputNumber
+              min={0}
+              max={1}
+              step={0.1}
+              style={{ width: '100%' }}
+              placeholder="0.0 - 1.0"
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="reasoning"
+            label="Reasoning"
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder="Explain why these tags were assigned"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
@@ -3464,17 +3802,40 @@ const ContentMarkdownView: React.FC<{
 
   if (content == null || content === '') {
     return (
-      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.textMuted }}>
-        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
-        <div>No extracted content for {fileToShow.filename}</div>
-        <Button
-          type="primary"
-          icon={<EditOutlined />}
-          style={{ marginTop: 16 }}
-          onClick={handleStartEdit}
-        >
-          Add content
-        </Button>
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px',
+          textAlign: 'center',
+          color: themeColors.textMuted,
+        }}>
+          <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px' }} />
+          <div style={{ marginBottom: '20px', fontSize: '16px' }}>No extracted content for {fileToShow.filename}</div>
+          <Button
+            type="primary"
+            icon={<EditOutlined />}
+            onClick={handleStartEdit}
+            style={{
+              height: '40px',
+              paddingInline: '24px',
+              fontSize: '14px',
+              borderRadius: '8px',
+            }}
+          >
+            Edit Markdown
+          </Button>
+        </div>
       </div>
     );
   }
@@ -3554,24 +3915,42 @@ const OriginalContentView: React.FC<{
     loadAndShowFile();
   }, [execution.id, onFileSelect, onFileInfoLoaded]);
 
+  const emptyStateWrapperStyle: React.CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  };
+
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '40px', color: themeColors.text }}>
-        <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
-        <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading...</div>
+      <div style={emptyStateWrapperStyle}>
+        <div style={{ textAlign: 'center', padding: '40px', color: themeColors.text }}>
+          <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+          <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading...</div>
+        </div>
       </div>
     );
   }
 
   if (loadError || !fileContent) {
     return (
-      <div style={{ 
-        textAlign: 'center', 
-        padding: '40px',
-        color: themeColors.textMuted 
-      }}>
-        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
-        <div>{loadError || 'No original file'}</div>
+      <div style={emptyStateWrapperStyle}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px',
+          textAlign: 'center',
+          color: themeColors.textMuted,
+        }}>
+          <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
+          <div style={{ fontSize: '16px' }}>{loadError || 'No original file'}</div>
+        </div>
       </div>
     );
   }
@@ -3584,23 +3963,75 @@ const OriginalContentView: React.FC<{
         console.log('🔍 [DEBUG] File URL for iframe:', fileContent.file_url);
         
         if (fileType === 'pdf') {
-          return (
-            <div style={{ 
-              border: `1px solid ${themeColors.cardBorder}`,
-              borderRadius: '8px',
-              overflow: 'hidden',
-              flex: 1,
-              minHeight: 0
-            }}>
-              <iframe
-                src={fileContent.file_url}
-                style={{ width: '100%', height: '100%', border: 'none' }}
-                title={fileContent.filename}
-                onLoad={() => console.log('✅ [DEBUG] iframe loaded successfully')}
-                onError={(e) => console.error('❌ [DEBUG] iframe load error:', e)}
-              />
-            </div>
-          );
+          // PDF预览：检测是否使用 OSS 默认域名
+          const isOssDefaultDomain = fileContent.file_url && fileContent.file_url.includes('.oss-cn-');
+          
+          if (isOssDefaultDomain) {
+            // OSS 默认域名会强制下载，显示提示和下载按钮
+            return (
+              <div style={{ 
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px',
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                color: themeColors.text
+              }}>
+                <FilePdfOutlined style={{ fontSize: '48px', color: '#ff4d4f', marginBottom: '16px' }} />
+                <div style={{ marginBottom: '8px', fontSize: '16px', fontWeight: 500 }}>
+                  {fileContent.filename}
+                </div>
+                <div style={{ 
+                  marginBottom: '16px', 
+                  color: themeColors.textSecondary,
+                  textAlign: 'center',
+                  maxWidth: '500px'
+                }}>
+                  ⚠️ PDF 无法在浏览器内预览<br/>
+                  <small>（使用 OSS 默认域名会强制下载文件）</small><br/>
+                  <small style={{ color: '#999' }}>如需浏览器预览，请联系管理员配置自定义域名</small>
+                </div>
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = fileContent.file_url;
+                    link.download = fileContent.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  style={{ height: '40px', paddingInline: '24px', fontSize: '14px', borderRadius: '8px' }}
+                >
+                  Download PDF
+                </Button>
+              </div>
+            );
+          } else {
+            // 自定义域名或本地文件，可以使用 iframe 预览
+            return (
+              <div style={{ 
+                border: `1px solid ${themeColors.cardBorder}`,
+                borderRadius: '8px',
+                overflow: 'hidden',
+                flex: 1,
+                minHeight: 0
+              }}>
+                <iframe
+                  src={fileContent.file_url}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title={fileContent.filename}
+                  onLoad={() => console.log('✅ [DEBUG] iframe loaded successfully')}
+                  onError={(e) => console.error('❌ [DEBUG] iframe load error:', e)}
+                />
+              </div>
+            );
+          }
         } else if (['doc', 'docx', 'word'].includes(fileType)) {
           // Word文档预览：使用Microsoft Office Online Viewer
           // 需要文件URL是公网可访问的（生产环境有效）
@@ -3630,8 +4061,8 @@ const OriginalContentView: React.FC<{
                   Word document preview is available in production environment<br/>
                   Please download and view locally for development
                 </div>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<DownloadOutlined />}
                   onClick={() => {
                     const link = document.createElement('a');
@@ -3641,6 +4072,7 @@ const OriginalContentView: React.FC<{
                     link.click();
                     document.body.removeChild(link);
                   }}
+                  style={{ height: '40px', paddingInline: '24px', fontSize: '14px', borderRadius: '8px' }}
                 >
                   Download Word File
                 </Button>
@@ -3669,6 +4101,46 @@ const OriginalContentView: React.FC<{
               </div>
             );
           }
+        } else if (fileType === 'csv') {
+          // CSV 文件：直接下载（Office Online Viewer 不支持 CSV）
+          return (
+            <div style={{ 
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '40px',
+              border: `1px solid ${themeColors.cardBorder}`,
+              borderRadius: '8px',
+              color: themeColors.text
+            }}>
+              <FileExcelOutlined style={{ fontSize: '48px', color: '#52c41a', marginBottom: '16px' }} />
+              <div style={{ marginBottom: '8px', fontSize: '16px', fontWeight: 500 }}>
+                {fileContent.filename}
+              </div>
+              <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
+                CSV files cannot be previewed online<br/>
+                Please download and view in Excel or text editor
+              </div>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = fileContent.file_url;
+                  link.download = fileContent.filename;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                style={{ height: '40px', paddingInline: '24px', fontSize: '14px', borderRadius: '8px' }}
+              >
+                Download CSV File
+              </Button>
+            </div>
+          );
         } else if (['excel', 'xlsx', 'xls'].includes(fileType)) {
           // Excel文档预览：同样使用Microsoft Office Online Viewer
           const isLocalDev = fileContent.file_url.includes('localhost');
@@ -3695,8 +4167,8 @@ const OriginalContentView: React.FC<{
                   Excel document preview is available in production environment<br/>
                   Please download and view locally for development
                 </div>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<DownloadOutlined />}
                   onClick={() => {
                     const link = document.createElement('a');
@@ -3706,6 +4178,7 @@ const OriginalContentView: React.FC<{
                     link.click();
                     document.body.removeChild(link);
                   }}
+                  style={{ height: '40px', paddingInline: '24px', fontSize: '14px', borderRadius: '8px' }}
                 >
                   Download Excel File
                 </Button>
@@ -3770,8 +4243,8 @@ const OriginalContentView: React.FC<{
               <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
                 This file type cannot be previewed online
               </div>
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 icon={<DownloadOutlined />}
                 onClick={() => {
                   const link = document.createElement('a');
@@ -3781,6 +4254,7 @@ const OriginalContentView: React.FC<{
                   link.click();
                   document.body.removeChild(link);
                 }}
+                style={{ height: '40px', paddingInline: '24px', fontSize: '14px', borderRadius: '8px' }}
               >
                 Download File
               </Button>
@@ -4119,10 +4593,39 @@ const AIAnalysisView: React.FC<{
   pdfDownloading?: boolean;
   onAnalyzeAudio?: (record: TaskExecution) => void;
   onAnalyzeDocument?: (record: TaskExecution, templateId: number) => void;
+  onAnalysisSaved?: (newContent: string) => void;
   audioAnalyzing?: boolean;
   docAnalyzing?: boolean;
-}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, audioAnalyzing, docAnalyzing }) => {
+}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, onAnalysisSaved, audioAnalyzing, docAnalyzing }) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleStartEdit = () => {
+    setEditContent(aiAnalysisData?.execution?.final_report ?? '');
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent('');
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await tasksAPI.updateExecutionFinalReport(execution.id, editContent);
+      onAnalysisSaved?.(editContent);
+      setIsEditing(false);
+      setEditContent('');
+      message.success('AI analysis report saved');
+    } catch (error) {
+      message.error('Failed to save report');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!aiAnalysisData || aiAnalysisData.execution.id !== execution.id) {
@@ -4130,11 +4633,23 @@ const AIAnalysisView: React.FC<{
     }
   }, [execution.id, aiAnalysisData, onLoadAnalysis]);
 
+  const emptyStateWrapperStyle: React.CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  };
+
   if (aiAnalysisLoading) {
     return (
-      <div style={{ textAlign: 'center', padding: '40px' }}>
-        <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
-        <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading AI analysis report...</div>
+      <div style={emptyStateWrapperStyle}>
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+          <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading AI analysis report...</div>
+        </div>
       </div>
     );
   }
@@ -4143,15 +4658,17 @@ const AIAnalysisView: React.FC<{
   if (audioAnalyzing || docAnalyzing) {
     const isAudio = execution.first_file_type === 'audio';
     return (
-      <div style={{ textAlign: 'center', padding: '40px' }}>
-        <LoadingOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
-        <div style={{ color: themeColors.text, fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>
-          {isAudio ? 'AI Analyzing Audio...' : 'AI Analyzing Document...'}
-        </div>
-        <div style={{ color: themeColors.textSecondary, fontSize: '13px' }}>
-          {isAudio
-            ? 'The AI is analyzing your audio transcription. This may take a moment.'
-            : 'The AI is processing and analyzing your document. This may take a few minutes.'}
+      <div style={emptyStateWrapperStyle}>
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <LoadingOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
+          <div style={{ color: themeColors.text, fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>
+            {isAudio ? 'AI Analyzing Audio...' : 'AI Analyzing Document...'}
+          </div>
+          <div style={{ color: themeColors.textSecondary, fontSize: '13px' }}>
+            {isAudio
+              ? 'The AI is analyzing your audio transcription. This may take a moment.'
+              : 'The AI is processing and analyzing your document. This may take a few minutes.'}
+          </div>
         </div>
       </div>
     );
@@ -4174,66 +4691,72 @@ const AIAnalysisView: React.FC<{
     );
 
     return (
-      <div style={{ textAlign: 'center', padding: '40px' }}>
-        <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
-        <div style={{ color: themeColors.textSecondary, marginBottom: (canAnalyzeAudio || canAnalyzeDoc) ? '20px' : 0 }}>
-          This file has no AI analysis report
+      <div style={emptyStateWrapperStyle}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px',
+          textAlign: 'center',
+        }}>
+          <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+
+          {canAnalyzeAudio && (
+            <Button
+              type="primary"
+              icon={<SoundOutlined />}
+              onClick={() => onAnalyzeAudio(execution)}
+              style={{
+                height: '40px',
+                paddingInline: '24px',
+                fontSize: '14px',
+                borderRadius: '8px',
+              }}
+            >
+              Analyze Audio
+            </Button>
+          )}
+          {canAnalyzeDoc && (
+            <div style={{ maxWidth: '420px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'center' }}>
+              <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px' }}>
+                Select a prompt template and click "Analyze" to start AI analysis
+              </div>
+              <TemplateSelector
+                categoryCode="file_analysis"
+                value={selectedTemplateId}
+                onChange={(value) => setSelectedTemplateId(value)}
+                placeholder="Select analysis template"
+                style={{ marginBottom: '16px', textAlign: 'left' }}
+                showConfigWhenSelected={false}
+              />
+              <div style={{ marginTop: '16px' }}>
+                <Button
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  disabled={!selectedTemplateId}
+                  onClick={() => selectedTemplateId && onAnalyzeDocument(execution, selectedTemplateId)}
+                  style={{
+                    height: '40px',
+                    paddingInline: '24px',
+                    fontSize: '14px',
+                    borderRadius: '8px',
+                  }}
+                >
+                  Analyze Document
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
-        {canAnalyzeAudio && (
-          <Button
-            type="primary"
-            icon={<SoundOutlined />}
-            size="large"
-            onClick={() => onAnalyzeAudio(execution)}
-            style={{ 
-              marginTop: '8px',
-              height: '44px',
-              paddingInline: '28px',
-              fontSize: '15px',
-              borderRadius: '8px',
-            }}
-          >
-            Analyze Audio
-          </Button>
-        )}
-        {canAnalyzeDoc && (
-          <div style={{ maxWidth: '420px', margin: '0 auto', textAlign: 'left' }}>
-            <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px', textAlign: 'center' }}>
-              Select a prompt template and click "Analyze" to start AI analysis
-            </div>
-            <TemplateSelector
-              categoryCode="file_analysis"
-              value={selectedTemplateId}
-              onChange={(value) => setSelectedTemplateId(value)}
-              placeholder="Select analysis template"
-              style={{ marginBottom: '16px' }}
-            />
-            <div style={{ textAlign: 'center', marginTop: '24px' }}>
-              <Button
-                type="primary"
-                icon={<RobotOutlined />}
-                size="large"
-                disabled={!selectedTemplateId}
-                onClick={() => selectedTemplateId && onAnalyzeDocument(execution, selectedTemplateId)}
-                style={{
-                  height: '44px',
-                  paddingInline: '28px',
-                  fontSize: '15px',
-                  borderRadius: '8px',
-                }}
-              >
-                Analyze Document
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{ 
+        flexShrink: 0,
         marginBottom: '16px', 
         padding: '12px',
         backgroundColor: themeColors.boxMuted,
@@ -4245,7 +4768,18 @@ const AIAnalysisView: React.FC<{
           </Col>
           <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
             <Text strong>Token Usage:</Text> {aiAnalysisData.execution.total_tokens?.toLocaleString() || '-'}
-            {onDownloadPdf && (
+            {!isEditing && (
+              <Button
+                type="primary"
+                ghost
+                size="small"
+                icon={<EditOutlined />}
+                onClick={handleStartEdit}
+              >
+                Edit
+              </Button>
+            )}
+            {onDownloadPdf && !isEditing && (
               <Button
                 icon={<DownloadOutlined />}
                 onClick={onDownloadPdf}
@@ -4260,27 +4794,63 @@ const AIAnalysisView: React.FC<{
         </Row>
       </div>
       
-      <div 
-        id="ai-analysis-content"
-        className={isDark ? 'ai-analysis-content ai-analysis-content--dark' : 'ai-analysis-content'}
-        style={{ 
-          background: isDark ? '#151b26' : '#ffffff', 
-          padding: '24px', 
-          borderRadius: '12px', 
-          border: `1px solid ${themeColors.cardBorder}`,
-          boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.04)',
-        }}
-      >
-        <MarkdownRenderer 
-          content={aiAnalysisData.execution.final_report}
-          variant={isDark ? 'dark' : 'light'}
+      {isEditing ? (
+        <div
           style={{
-            fontSize: '14px',
-            lineHeight: '1.8',
-            color: themeColors.text
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            color: themeColors.text,
           }}
-        />
-      </div>
+        >
+          <Input.TextArea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            placeholder="AI analysis report content (Markdown)..."
+            style={{
+              flex: 1,
+              minHeight: 280,
+              fontFamily: 'monospace',
+              fontSize: 13,
+              background: themeColors.codeBlockBg,
+              borderColor: themeColors.cardBorder,
+              color: themeColors.text,
+            }}
+            className={isDark ? 'files-content-textarea-dark' : ''}
+          />
+          <Space style={{ marginTop: 12 }}>
+            <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
+              Save
+            </Button>
+            <Button onClick={handleCancelEdit} disabled={saving}>
+              Cancel
+            </Button>
+          </Space>
+        </div>
+      ) : (
+        <div 
+          id="ai-analysis-content"
+          className={isDark ? 'ai-analysis-content ai-analysis-content--dark' : 'ai-analysis-content'}
+          style={{ 
+            background: isDark ? '#151b26' : '#ffffff', 
+            padding: '24px', 
+            borderRadius: '12px', 
+            border: `1px solid ${themeColors.cardBorder}`,
+            boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.04)',
+          }}
+        >
+          <MarkdownRenderer 
+            content={aiAnalysisData.execution.final_report}
+            variant={isDark ? 'dark' : 'light'}
+            style={{
+              fontSize: '14px',
+              lineHeight: '1.8',
+              color: themeColors.text
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

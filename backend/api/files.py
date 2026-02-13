@@ -171,15 +171,23 @@ def safe_file_type_conversion(file_type_str: str) -> FileType:
         return FileType.OTHER
 
 
-@router.post("/upload", response_model=List[FileUploadResponse], summary="上传文件")
+@router.post("/upload", response_model=List[FileUploadResponse], summary="上传文件（支持 OSS）")
 async def upload_files(
     files: List[UploadFile] = File(...),
+    upload_to_oss: bool = True,  # 新增：是否上传到 OSS（默认开启）
     current_user=Depends(get_current_user)
 ):
     """
-    上传文件到服务器并创建数据库记录
+    上传文件到服务器（支持 OSS 或本地存储）
     
     - **files**: 要上传的文件列表（当前版本仅支持单个文件）
+    - **upload_to_oss**: 是否上传到 OSS（默认 True，推荐）
+        - True: 上传到阿里云 OSS（稳定预览，多实例部署友好）
+        - False: 上传到本地 uploads/ 目录（兼容模式）
+    
+    注意：
+    - OSS 上传需要在 .env 中配置 OSS_ACCESS_KEY_ID 等参数
+    - 如果 OSS 未配置，会自动回退到本地存储
     """
     if not files:
         raise HTTPException(
@@ -195,10 +203,24 @@ async def upload_files(
         )
     
     file_processor = FileProcessor()
+    oss_service = OSSService() if upload_to_oss else None
     uploaded_files = []
     failed_files = []
     
+    # 检查 OSS 是否配置（如果启用 OSS）
+    oss_enabled = False
+    if upload_to_oss and oss_service and oss_service.is_configured():
+        oss_enabled = True
+        info(f"OSS 已启用，文件将上传到 OSS", source="api", user=current_user.username)
+    elif upload_to_oss:
+        warning(f"OSS 未配置，文件将上传到本地存储", source="api", user=current_user.username)
+    
     for file in files:
+        temp_file_path = None
+        storage_type = 'local'
+        oss_bucket = None
+        oss_object_name = None
+        
         try:
             if not file.filename:
                 failed_files.append({"filename": "unknown file", "error": "file name is empty"})
@@ -212,35 +234,87 @@ async def upload_files(
                 })
                 continue
             
-            # 生成唯一文件名
-            file_id = str(uuid.uuid4())[:8]  # 只取前8位
-            # 分离文件名和扩展名
+            # 1. 先保存到临时文件
+            file_id = str(uuid.uuid4())[:8]
             name, ext = os.path.splitext(file.filename)
-            filename = f"{name}_{file_id}{ext}"
-            file_path = os.path.join(UPLOAD_DIR, filename)
+            temp_filename = f"temp_{file_id}_{name}{ext}"
+            temp_file_path = os.path.join(UPLOAD_DIR, temp_filename)
             
-            # 保存文件
             content = await file.read()
-            with open(file_path, "wb") as buffer:
+            file_size = len(content)
+            
+            with open(temp_file_path, "wb") as buffer:
                 buffer.write(content)
             
             # 获取文件信息
-            file_info = file_processor.get_file_info(file_path)
-            file_size = len(content)
+            file_info = file_processor.get_file_info(temp_file_path)
             file_type = safe_file_type_conversion(file_info["file_type"])
+            
+            # 2. 判断是否上传到 OSS
+            final_file_path = temp_file_path  # 默认使用临时文件路径
+            
+            if oss_enabled:
+                # 判断文件类别（用于 OSS 目录）
+                file_category = oss_service.get_file_category(file.filename)
+                
+                # 上传到 OSS
+                upload_result = oss_service.upload_file(
+                    file_path=temp_file_path,
+                    filename=file.filename,
+                    username=current_user.username,
+                    file_category=file_category,
+                    expires=3600  # 签名 URL 1 小时有效
+                )
+                
+                if upload_result["success"]:
+                    # OSS 上传成功
+                    storage_type = 'oss'
+                    oss_bucket = upload_result["bucket"]
+                    oss_object_name = upload_result["object_name"]
+                    final_file_path = oss_object_name  # 存储 object_name
+                    
+                    # 删除临时文件
+                    try:
+                        os.remove(temp_file_path)
+                        temp_file_path = None
+                    except Exception as del_err:
+                        warning(f"删除临时文件失败: {str(del_err)}")
+                    
+                    info(f"文件已上传到 OSS: {file.filename} -> {oss_object_name}", 
+                         source="api", user=current_user.username)
+                else:
+                    # OSS 上传失败，回退到本地
+                    warning(f"OSS 上传失败，使用本地存储: {upload_result.get('error', 'unknown error')}", 
+                           source="api", user=current_user.username)
+                    storage_type = 'local'
+                    final_file_path = temp_file_path
             
             uploaded_files.append(FileUploadResponse(
                 filename=file.filename,
-                file_path=file_path,
+                file_path=final_file_path,  # OSS: object_name, Local: /uploads/xxx
                 file_size=file_size,
                 file_type=file_type,
                 upload_time=datetime.now()
             ))
             
-            info(f"file uploaded successfully: {file.filename} -> {file_path}", source="api", user=current_user.username)
+            # 额外存储 storage_type 和 oss_bucket（用于数据库写入）
+            uploaded_files[-1]._storage_type = storage_type  # type: ignore
+            uploaded_files[-1]._oss_bucket = oss_bucket  # type: ignore
+            
+            info(f"文件上传成功: {file.filename} (storage: {storage_type})", 
+                 source="api", user=current_user.username)
             
         except Exception as e:
-            error(f"file upload failed: {file.filename}, error: {str(e)}", source="api", user=current_user.username)
+            error(f"文件上传失败: {file.filename}, error: {str(e)}", 
+                  source="api", user=current_user.username)
+            
+            # 清理临时文件
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception:
+                    pass
+            
             failed_files.append({
                 "filename": file.filename,
                 "error": str(e)
@@ -292,19 +366,29 @@ async def upload_files(
                 
                 # 为每个上传的文件创建file_processing_details记录
                 for uploaded_file in uploaded_files:
-                    file_info = file_processor.get_file_info(uploaded_file.file_path)
+                    # 获取文件大小（OSS 文件需要从 uploaded_file.file_size）
+                    storage_type = getattr(uploaded_file, '_storage_type', 'local')
+                    oss_bucket = getattr(uploaded_file, '_oss_bucket', None)
+                    
+                    if storage_type == 'local':
+                        file_info = file_processor.get_file_info(uploaded_file.file_path)
+                        file_size_mb = file_info['file_size_mb']
+                    else:
+                        # OSS 文件，从 uploaded_file.file_size 计算
+                        file_size_mb = uploaded_file.file_size / (1024 * 1024)
                     
                     cursor.execute("""
                     INSERT INTO file_processing_details 
                     (processing_stats_id, filename, file_type, file_size_mb, 
                      processing_time, ai_time, content_length, status, 
-                     total_tokens, cost, content, created_at, task_id, original_file_path)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     total_tokens, cost, content, created_at, task_id, original_file_path,
+                     file_storage_type, oss_bucket)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         processing_stats_id,
                         uploaded_file.filename,
                         uploaded_file.file_type.value,
-                        file_info['file_size_mb'],
+                        file_size_mb,
                         0,  # processing_time
                         0,  # ai_time
                         0,  # content_length
@@ -314,7 +398,9 @@ async def upload_files(
                         '',  # content
                         datetime.now(),
                         None,  # task_id (仅上传没有task_id)
-                        uploaded_file.file_path  # original_file_path
+                        uploaded_file.file_path,  # original_file_path (OSS: object_name, Local: /uploads/xxx)
+                        storage_type,  # 新增：存储类型
+                        oss_bucket  # 新增：OSS bucket 名称
                     ))
                 
                 conn.commit()
@@ -1052,15 +1138,19 @@ async def delete_uploaded_file(
         )
 
 
-@router.get("/original/{file_id}", summary="获取原始文件信息")
+@router.get("/original/{file_id}", summary="获取原始文件信息（支持 OSS）")
 async def get_original_file_info(
     file_id: str,
     current_user=Depends(get_current_user)
 ):
     """
-    获取原始文件信息
+    获取原始文件信息（支持 OSS 和本地存储）
     
     - **file_id**: 文件ID
+    
+    返回：
+    - OSS 文件：返回带签名的临时 URL（1小时有效）
+    - 本地文件：返回 /serve/{file_id} 端点
     """
     try:
         db_conn_params = get_database_config()
@@ -1075,10 +1165,10 @@ async def get_original_file_info(
         
         cursor = conn.cursor()
         
-        # 查询文件信息（包含ASR说话人分离数据）
+        # 查询文件信息（包含 storage_type 和 oss_bucket）
         cursor.execute("""
             SELECT filename, file_type, file_size_mb, original_file_path, created_at, 
-                   content, asr_with_diarization
+                   content, asr_with_diarization, file_storage_type, oss_bucket
             FROM file_processing_details 
             WHERE id = %s
         """, (file_id,))
@@ -1087,36 +1177,74 @@ async def get_original_file_info(
         conn.close()
         
         if result:
-            # 构造文件访问URL
-            # 本地开发环境需要使用后端端口，生产环境使用相对路径
-            import os
-            if os.getenv('ENV', 'development') == 'development':
-                # 本地开发：直接指向后端端口8000
-                file_url = f"http://localhost:8000/api/files/serve/{file_id}"
+            filename = result[0]
+            file_type = result[1]
+            file_size_mb = result[2]
+            original_file_path = result[3]
+            created_at = result[4]
+            content = result[5]
+            asr_with_diarization = result[6]
+            storage_type = result[7] or 'local'  # 兼容旧数据
+            oss_bucket = result[8]
+            
+            # 根据存储类型生成 file_url
+            if storage_type == 'oss':
+                # OSS 文件：根据配置生成 URL
+                oss_service = OSSService()
+                if oss_service.is_configured():
+                    # 如果配置了自定义域名，使用公共 URL（可以预览）
+                    if oss_service.custom_domain:
+                        from urllib.parse import quote
+                        encoded_object_name = quote(original_file_path, safe='/')
+                        # 注意：如果域名未配置 SSL 证书，使用 HTTP；否则使用 HTTPS
+                        file_url = f"http://{oss_service.custom_domain}/{encoded_object_name}"
+                        info(f"使用 OSS 自定义域名: {oss_service.custom_domain}", source="api")
+                    else:
+                        # 否则使用签名 URL（默认域名会强制下载）
+                        file_url = oss_service.get_signed_url(
+                            object_name=original_file_path,  # original_file_path 存的是 object_name
+                            expires=3600  # 1 小时
+                        )
+                        if not file_url:
+                            # 签名 URL 生成失败，回退到 serve 接口
+                            warning(f"OSS 签名 URL 生成失败，使用 serve 接口: file_id={file_id}")
+                            file_url = f"/api/files/serve/{file_id}"
+                else:
+                    # OSS 未配置，使用 serve 接口
+                    warning(f"OSS 未配置，使用 serve 接口: file_id={file_id}")
+                    file_url = f"/api/files/serve/{file_id}"
             else:
-                # 生产环境：使用相对路径
-                file_url = f"/api/files/serve/{file_id}"
+                # 本地文件：使用 serve 接口
+                import os
+                if os.getenv('ENV', 'development') == 'development':
+                    # 本地开发：直接指向后端端口8000
+                    file_url = f"http://localhost:8000/api/files/serve/{file_id}"
+                else:
+                    # 生产环境：使用相对路径
+                    file_url = f"/api/files/serve/{file_id}"
             
             # 解析 asr_with_diarization JSON 数据
             asr_data = None
-            if result[6]:  # asr_with_diarization 字段
+            if asr_with_diarization:
                 try:
-                    if isinstance(result[6], str):
-                        asr_data = json.loads(result[6])
+                    if isinstance(asr_with_diarization, str):
+                        asr_data = json.loads(asr_with_diarization)
                     else:
-                        asr_data = result[6]  # 已经是dict（JSONB类型）
+                        asr_data = asr_with_diarization  # 已经是dict（JSONB类型）
                 except Exception as e:
                     warning(f"解析 asr_with_diarization 数据失败: {str(e)}", source="api", file_id=file_id)
             
             return {
                 "file_id": file_id,
-                "filename": result[0],
-                "file_type": result[1],
-                "file_size_mb": result[2],
-                "original_file_path": result[3],
-                "file_url": file_url,  # 返回HTTP可访问的URL
-                "created_at": result[4],
-                "content": result[5],  # 转写文本内容
+                "filename": filename,
+                "file_type": file_type,
+                "file_size_mb": file_size_mb,
+                "original_file_path": original_file_path,
+                "file_url": file_url,  # 返回HTTP可访问的URL（OSS: 签名URL, Local: /serve）
+                "storage_type": storage_type,  # 新增：存储类型
+                "oss_bucket": oss_bucket,  # 新增：OSS bucket
+                "created_at": created_at,
+                "content": content,  # 转写文本内容
                 "asr_with_diarization": asr_data  # 结构化的ASR数据（说话人分离）
             }
         else:
@@ -1288,18 +1416,20 @@ async def update_speaker_label(
         )
 
 
-@router.get("/serve/{file_id}", summary="直接提供文件内容")
+@router.get("/serve/{file_id}", summary="提供文件访问（支持 OSS 重定向）")
 async def serve_file(
     file_id: str,
     token: str = None
 ):
     """
-    直接提供文件内容供浏览器访问
-    这个接口支持本地开发和云服务器部署
-    支持通过查询参数传递token（用于iframe等无法设置header的场景）
+    提供文件访问（支持 OSS 和本地文件）
     
     - **file_id**: 文件ID
     - **token**: 可选，认证token（query参数）
+    
+    行为：
+    - OSS 文件：重定向到 OSS 签名 URL
+    - 本地文件：直接返回文件流
     """
     # 验证token
     from backend.auth.jwt_utils import verify_token
@@ -1336,9 +1466,9 @@ async def serve_file(
         
         cursor = conn.cursor()
         
-        # 查询文件路径
+        # 查询文件路径和存储类型
         cursor.execute("""
-            SELECT filename, file_type, original_file_path
+            SELECT filename, file_type, original_file_path, file_storage_type, oss_bucket
             FROM file_processing_details 
             WHERE id = %s
         """, (file_id,))
@@ -1352,20 +1482,61 @@ async def serve_file(
                 detail="文件不存在"
             )
         
-        filename, file_type, file_path = result
+        filename, file_type, file_path, storage_type, oss_bucket = result
+        storage_type = storage_type or 'local'  # 兼容旧数据
         
-        # 检查文件是否存在
+        # 如果是 OSS 文件，重定向到 OSS URL
+        if storage_type == 'oss':
+            oss_service = OSSService()
+            if oss_service.is_configured():
+                # 如果配置了自定义域名，使用公共 URL
+                if oss_service.custom_domain:
+                    from urllib.parse import quote
+                    from fastapi.responses import RedirectResponse
+                    encoded_object_name = quote(file_path, safe='/')
+                    redirect_url = f"https://{oss_service.custom_domain}/{encoded_object_name}"
+                    info(f"重定向到 OSS 自定义域名: {oss_service.custom_domain}", source="api")
+                    return RedirectResponse(url=redirect_url)
+                else:
+                    # 否则使用签名 URL
+                    signed_url = oss_service.get_signed_url(
+                        object_name=file_path,  # file_path 存的是 object_name
+                        expires=3600  # 1 小时
+                    )
+                    if signed_url:
+                        # 重定向到 OSS 签名 URL
+                        from fastapi.responses import RedirectResponse
+                        return RedirectResponse(url=signed_url)
+                    else:
+                        error(f"OSS 签名 URL 生成失败: file_id={file_id}")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="OSS 文件访问失败"
+                        )
+            else:
+                error(f"OSS 未配置，但文件在 OSS: file_id={file_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="OSS 服务未配置"
+                )
+        
+        # 本地文件：检查文件是否存在
         if not file_path or not os.path.exists(file_path):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="文件未找到"
             )
         
-        # 根据文件类型设置MIME type
+        # 根据文件类型设置MIME type（支持非音频文件预览：pdf/doc/docx/excel/xlsx/xls/csv 等）
         mime_types = {
             'pdf': 'application/pdf',
             'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xls': 'application/vnd.ms-excel',
+            'csv': 'text/csv',  # CSV 使用 text/csv
             'doc': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'word': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'image': 'image/jpeg',
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
@@ -1667,7 +1838,7 @@ async def upload_audio(
             "file_size": file_size,
             "file_size_mb": round(file_size / (1024 * 1024), 2),
             "status": "processing",
-            "note": "请使用 task_id 查询处理进度（GET /api/files/task-status/{task_id}）"
+            "note": "请使用 task_id 查询处理进度（GET /api/files/tasks/{task_id}/status）"
         }
         
     except HTTPException:

@@ -474,6 +474,63 @@ class RenameExecutionRequest(BaseModel):
     filename: str
 
 
+class UpdateFinalReportRequest(BaseModel):
+    final_report: str
+
+
+@router.patch("/executions/{execution_id}/final-report", summary="更新任务执行的 AI 分析报告内容")
+async def update_execution_final_report(
+    execution_id: str,
+    body: UpdateFinalReportRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    更新 processing_stats 中的 final_report 字段（用于编辑 AI Analysis 报告内容）
+    """
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法连接到数据库"
+        )
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'SELECT id, "user" FROM processing_stats WHERE id = %s',
+            (execution_id,)
+        )
+        stat = cursor.fetchone()
+        if not stat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务执行不存在"
+            )
+        if not current_user.is_admin and stat[1] != current_user.username:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足"
+            )
+        content = body.final_report if body.final_report is not None else ''
+        cursor.execute(
+            "UPDATE processing_stats SET final_report = %s WHERE id = %s",
+            (content, execution_id)
+        )
+        conn.commit()
+        return {"success": True, "message": "Final report updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新失败: {str(e)}"
+        )
+    finally:
+        conn.close()
+
+
 @router.patch("/executions/{execution_id}/rename", summary="重命名执行记录的首个文件")
 async def rename_execution_file(
     execution_id: str,
