@@ -166,17 +166,6 @@ const Layout: React.FC = () => {
       onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
     },
     { type: 'divider' as const },
-    {
-      key: 'system-logs',
-      icon: <CodeOutlined />,
-      label: (
-        <Badge dot={hasErrorLogs} size="small">
-          <span>System Logs</span>
-        </Badge>
-      ),
-      onClick: () => globalLogger.actions.setShowFloating(true),
-    },
-    { type: 'divider' as const },
     { key: '/prompt-templates', icon: <BuildOutlined />, label: 'Prompt Templates', onClick: () => navigate('/prompt-templates') },
     { key: '/investment-themes', icon: <FundOutlined />, label: 'Themes Settings', onClick: () => navigate('/investment-themes') },
     { key: '/tasks', icon: <AppstoreOutlined />, label: 'AI Agent Settings', onClick: () => navigate('/tasks') },
@@ -184,6 +173,17 @@ const Layout: React.FC = () => {
     { type: 'divider' as const },
     { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
     { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
+    ...(user?.is_admin ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }] : []),
+    {
+      key: 'runtime-logs',
+      icon: <CodeOutlined />,
+      label: (
+        <Badge dot={hasErrorLogs} size="small">
+          <span>Runtime Logs</span>
+        </Badge>
+      ),
+      onClick: () => globalLogger.actions.setShowFloating(true),
+    },
     ...(user?.is_admin ? [{ key: '/users', icon: <TeamOutlined />, label: 'User Management', onClick: () => navigate('/users') }] : []),
     { type: 'divider' as const },
     { key: 'logout', icon: <LogoutOutlined />, label: 'Logout', onClick: handleLogout },

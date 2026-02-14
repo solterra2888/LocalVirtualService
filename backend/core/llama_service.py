@@ -154,7 +154,9 @@ class LlamaService:
             params (dict, optional): 自定义上传参数
             
         Returns:
-            tuple: (job_id, upload_params) 或 (None, None) 如果失败
+            tuple: (job_id, upload_params, error_message)
+                - 成功时: (job_id, upload_params, None)
+                - 失败时: (None, None, error_message)
         """
         url = 'https://api.cloud.llamaindex.ai/api/v1/parsing/upload'
         headers = {
@@ -164,13 +166,15 @@ class LlamaService:
         
         # 检查API密钥
         if not self.api_key:
+            error_msg = "LlamaIndex API key未配置，请在环境变量中设置 LLAMA_CLOUD_API_KEY"
             print(f"❌ 错误：未设置LLAMA_CLOUD_API_KEY")
-            return None, None
+            return None, None, error_msg
         
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            print(f"❌ 错误：文件不存在 {file_path}")
-            return None, None
+            error_msg = f"文件不存在: {file_path}"
+            print(f"❌ 错误：{error_msg}")
+            return None, None, error_msg
             
         # 获取文件大小
         file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
@@ -230,22 +234,36 @@ class LlamaService:
                         job_id = result.get('id')
                         if job_id:
                             print(f"✅ file upload success, job ID: {job_id}")
-                            return job_id, params
+                            return job_id, params, None
                         else:
+                            error_msg = "LlamaIndex API 响应中未找到 job ID"
                             print(f"❌ no job ID found in the upload response")
                             print(f"    response content: {response.text}")
-                            return None, None
+                            return None, None, error_msg
                     else:
                         print(f"❌ file upload failed, HTTP status code: {response.status_code}")
                         print(f"    response content: {response.text}")
                         
                         # 尝试解析错误信息
+                        error_message = f"HTTP {response.status_code}"
                         try:
                             error_data = response.json()
-                            error_message = error_data.get('error', error_data.get('message', 'Unknown error'))
+                            error_detail = error_data.get('detail', error_data.get('error', error_data.get('message', '')))
+                            if error_detail:
+                                error_message = error_detail
                             print(f"    error message: {error_message}")
                         except:
                             pass
+                        
+                        # 构建友好的错误信息
+                        if response.status_code == 401:
+                            error_msg = f"LlamaIndex API Key 无效或已过期。请检查您的 API Key 配置。错误详情: {error_message}"
+                        elif response.status_code == 403:
+                            error_msg = f"LlamaIndex API 访问被拒绝。请检查您的权限设置。错误详情: {error_message}"
+                        elif response.status_code >= 500:
+                            error_msg = f"LlamaIndex 服务器错误 (HTTP {response.status_code})。请稍后重试。"
+                        else:
+                            error_msg = f"LlamaIndex 文件上传失败 (HTTP {response.status_code}): {error_message}"
                         
                         # 如果是服务器错误，尝试重试
                         if response.status_code >= 500:
@@ -255,11 +273,12 @@ class LlamaService:
                                 time.sleep(retry_count * 2)
                                 continue
                         
-                        return None, None
+                        return None, None, error_msg
                     
             except FileNotFoundError:
+                error_msg = f"文件不存在: {file_path}"
                 print(f"❌ error: file not found {file_path}")
-                return None, None
+                return None, None, error_msg
             except requests.exceptions.Timeout:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -267,8 +286,9 @@ class LlamaService:
                     time.sleep(retry_count * 2)
                     continue
                 else:
+                    error_msg = f"LlamaIndex 上传超时，已重试 {max_retries} 次。请检查网络连接或稍后重试。"
                     print(f"❌ error: upload timeout, already retried {max_retries} times {file_path}")
-                    return None, None
+                    return None, None, error_msg
             except requests.exceptions.ConnectionError:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -276,8 +296,9 @@ class LlamaService:
                     time.sleep(retry_count * 2)
                     continue
                 else:
+                    error_msg = f"无法连接到 LlamaIndex 服务器，已重试 {max_retries} 次。请检查网络连接。"
                     print(f"❌ error: network connection failed, already retried {max_retries} times {file_path}")
-                    return None, None
+                    return None, None, error_msg
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -285,18 +306,20 @@ class LlamaService:
                     time.sleep(retry_count * 2)
                     continue
                 else:
+                    error_msg = f"LlamaIndex 上传请求失败: {str(e)}"
                     print(f"❌ error: upload file failed, already retried {max_retries} times {file_path}: {e}")
                     try:
                         if hasattr(e, 'response') and e.response:
                             print(f"    response content: {e.response.text}")
                     except:
                         pass
-                    return None, None
+                    return None, None, error_msg
             except Exception as e:
+                error_msg = f"上传文件时发生未知错误: {str(e)}"
                 print(f"❌ error: unknown error while processing file {file_path}: {e}")
-                return None, None
+                return None, None, error_msg
         
-        return None, None
+        return None, None, "上传文件失败（已重试所有尝试）"
     
     async def poll_job_status(self, job_id):
         """
@@ -515,20 +538,23 @@ class LlamaService:
         file_type = file_extension[1:] if file_extension else "unknown"
 
         # 步骤1: 上传文件
-        job_id, upload_params = self.upload_file(file_path, params)
+        job_id, upload_params, upload_error = self.upload_file(file_path, params)
 
         if not job_id:
+            # 使用详细的错误信息
+            error_msg = upload_error or 'File upload to LlamaIndex failed'
             self.log(f"file upload failed, skipping processing: {file_path}", "error")
+            self.log(f"error details: {error_msg}", "error")
             
             # 计算处理时间（即使失败）
             file_end_time = time.time()
             file_total_time = file_end_time - file_start_time
             self.log(f"file processing failed: {os.path.basename(file_path)}, time: {file_total_time:.2f} seconds", "error")
             
-            # 添加到失败文件列表（使用字典格式以保持一致性）
+            # 添加到失败文件列表（使用详细的错误信息）
             failed_files.append({
                 'file_path': file_path,
-                'error': 'File upload to LlamaIndex failed'
+                'error': error_msg
             })
             
             # 返回失败文件信息
@@ -540,7 +566,7 @@ class LlamaService:
                 'processing_time': file_total_time,
                 'content': None,
                 'is_success': False,
-                'error': 'File upload to LlamaIndex failed'
+                'error': error_msg
             }
             return file_info, file_total_time
 

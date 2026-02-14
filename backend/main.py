@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, logs
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -127,6 +127,9 @@ app.include_router(user_news_presets.router, prefix="/api", tags=["用户新闻�
 # 投资项目管理API
 from backend.api import projects
 app.include_router(projects.router, prefix="/api", tags=["投资项目管理"])
+
+# 系统日志API
+app.include_router(logs.router, tags=["系统日志"])
 
 # 静态文件服务
 # 为上传的文件提供静态文件访问

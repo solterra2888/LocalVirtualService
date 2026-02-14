@@ -396,7 +396,9 @@ class OSSService:
             info(f"文件已上传到 OSS: {filename} (size: {file_size / 1024 / 1024:.2f}MB)")
             
         except oss2.exceptions.OssError as e:
-            error_msg = f"OSS 上传失败: {e.message}"
+            # Python 3 使用 str(e)；e.message 已废弃且可能为空
+            detail = getattr(e, "message", None) or str(e) or getattr(e, "details", "") or "未知 OSS 错误"
+            error_msg = f"OSS 上传失败: {detail}"
             error(error_msg)
             result["error"] = error_msg
         except Exception as e:

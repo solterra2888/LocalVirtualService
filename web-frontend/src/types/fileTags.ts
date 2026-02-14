@@ -4,9 +4,12 @@ export interface FileTags {
   id: number;
   file_id: number;
   sector: string;
+  sector_en?: string;
   industry: string;
+  industry_en?: string;
   tickers: string[];
   ticker_raw?: string;
+  concepts?: string[];
   additional_tags?: Record<string, any>;
   confidence?: number;
   reasoning?: string;

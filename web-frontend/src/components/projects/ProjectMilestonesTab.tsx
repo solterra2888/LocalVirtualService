@@ -29,9 +29,7 @@ import {
   Spin,
   Switch,
   Alert,
-  Progress,
-  Cascader,
-  AutoComplete
+  Progress
 } from 'antd';
 import {
   PlusOutlined,
@@ -163,15 +161,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStatus, setAnalysisStatus] = useState<string>('');
 
-  // 文件标签相关状态（sector、industry、ticker）
-  const [sectors, setSectors] = useState<SectorOption[]>([]);
-  const [selectedSector, setSelectedSector] = useState<string>('');
-  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
-  const [tickerOptions, setTickerOptions] = useState<TickerOption[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const [tickerSearchValue, setTickerSearchValue] = useState<string>('');
-  const [loadingSectors, setLoadingSectors] = useState(false);
-  const [loadingTickers, setLoadingTickers] = useState(false);
+  // 文件标签功能已移除 - 改用自动打标签（content_tag_v1）
 
   // 加载记录列表
   const loadMilestones = async () => {
@@ -220,106 +210,19 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
     }
   };
 
-  // 加载行业分类数据
-  const loadSectors = async () => {
-    try {
-      setLoadingSectors(true);
-      const sectorsData = await filesAPI.getSectors();
-      setSectors(sectorsData);
-    } catch (error: any) {
-      console.error('加载行业分类失败:', error);
-      message.error('加载行业分类失败');
-    } finally {
-      setLoadingSectors(false);
-    }
-  };
-
-  // 处理 sector 和 industry 选择
-  const handleSectorIndustryChange = (value: any) => {
-    if (value && value.length === 2) {
-      setSelectedSector(value[0]);
-      setSelectedIndustry(value[1]);
-      setSelectedTicker('');
-      setTickerSearchValue('');
-    } else {
-      setSelectedSector('');
-      setSelectedIndustry('');
-      setSelectedTicker('');
-      setTickerSearchValue('');
-      setTickerOptions([]);
-    }
-  };
-
-  // 搜索 ticker
-  const handleTickerSearch = async (searchValue: string) => {
-    setTickerSearchValue(searchValue);
-    
-    if (!searchValue || searchValue.length < 1) {
-      setTickerOptions([]);
-      return;
-    }
-
-    try {
-      setLoadingTickers(true);
-      const tickers = await filesAPI.searchTickers({
-        sector: selectedSector,
-        industry: selectedIndustry,
-        search: searchValue
-      });
-      setTickerOptions(tickers);
-    } catch (error: any) {
-      console.error('搜索ticker失败:', error);
-    } finally {
-      setLoadingTickers(false);
-    }
-  };
-
-  // 选择 ticker
-  const handleTickerSelect = (value: string, option: any) => {
-    setSelectedTicker(value);
-    setTickerSearchValue(option.label || value);
-    
-    console.log('选择的 ticker option:', option);
-    
-    // 自动设置 sector 和 industry（从 option 中直接获取）
-    if (option && option.sector && option.industry) {
-      console.log('自动设置 sector 和 industry:', option.sector, option.industry);
-      setSelectedSector(option.sector);
-      setSelectedIndustry(option.industry);
-      message.success(`自动选择行业: ${option.sector} → ${option.industry}`);
-    } else {
-      // 如果 option 中没有，尝试从 tickerOptions 中查找
-      const selectedTickerInfo = tickerOptions.find(ticker => ticker.value === value);
-      console.log('从 tickerOptions 查找 ticker info:', selectedTickerInfo);
-      
-      if (selectedTickerInfo && selectedTickerInfo.sector && selectedTickerInfo.industry) {
-        console.log('设置 sector 和 industry:', selectedTickerInfo.sector, selectedTickerInfo.industry);
-        setSelectedSector(selectedTickerInfo.sector);
-        setSelectedIndustry(selectedTickerInfo.industry);
-        message.success(`自动选择行业: ${selectedTickerInfo.sector} → ${selectedTickerInfo.industry}`);
-      } else {
-        console.warn('未找到 ticker 的 sector/industry 信息:', value);
-      }
-    }
-  };
+  // 手动标签相关函数已移除 - 改用自动打标签（content_tag_v1）
 
   useEffect(() => {
     loadMilestones();
     loadProjectFiles();
     loadTemplates();
-    loadSectors();
+    // loadSectors() 已移除 - 不再需要手动选择标签
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // 上传文件处理
   const handleUploadFiles = async () => {
     if (uploadFileList.length === 0) {
-      return;
-    }
-
-    // 验证必填字段
-    if (!selectedSector || !selectedIndustry) {
-      message.error('请选择行业和产业（必填）');
       return;
     }
 
@@ -367,25 +270,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
         }
       }
 
-      // 步骤2.5: 为上传的文件设置标签（sector、industry、ticker）
-      if (rawFileIds.length > 0) {
-        try {
-          await filesAPI.batchCreateFileTags({
-            file_ids: rawFileIds,
-            sector: selectedSector,
-            industry: selectedIndustry,
-            ticker: selectedTicker || undefined
-          });
-          console.log(`已为 ${rawFileIds.length} 个文件设置标签:`, {
-            sector: selectedSector,
-            industry: selectedIndustry,
-            ticker: selectedTicker
-          });
-        } catch (tagError: any) {
-          console.error('设置文件标签失败:', tagError);
-          message.warning('文件上传成功，但标签设置失败');
-        }
-      }
+      // 手动设置标签功能已移除 - 文件上传后会自动触发 content_tag_v1 打标签
 
       setUploadedFileIds([...uploadedFileIds, ...newFileIds]);
       message.success(`成功上传 ${newFileIds.length} 个文件并设置标签`);
@@ -790,12 +675,6 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
           setUploadFileList([]);
           setUploadedFileIds([]);
           setSelectedExistingFileIds([]);
-          // 重置标签选择状态
-          setSelectedSector('');
-          setSelectedIndustry('');
-          setSelectedTicker('');
-          setTickerSearchValue('');
-          setTickerOptions([]);
           // 重置AI分析状态
           setEnableAIAnalysis(false);
           setSelectedTemplateId(undefined);
@@ -893,77 +772,13 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
           <Tabs activeKey={activeFileTab} onChange={setActiveFileTab}>
             <Tabs.TabPane tab="上传新文件" key="upload">
               <Space direction="vertical" style={{ width: '100%' }} size="large">
-                {/* 行业和股票选择（必填） */}
-                <Card size="small" title={<Space><TagOutlined /> 文件标签（必填）</Space>} style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        * 所有上传的文件必须设置行业和产业标签
-                      </Text>
-                    </div>
-                    
-                    <Form.Item label="Sector & Industry" required style={{ marginBottom: 8 }}>
-                      <Cascader
-                        options={sectors}
-                        value={selectedSector && selectedIndustry ? [selectedSector, selectedIndustry] : []}
-                        onChange={handleSectorIndustryChange}
-                        placeholder="选择 sector 和 industry"
-                        loading={loadingSectors}
-                        showSearch={{
-                          filter: (inputValue, path) => {
-                            return path.some(option => 
-                              option.label.toLowerCase().includes(inputValue.toLowerCase())
-                            );
-                          }
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-
-                    <Form.Item label="Ticker（可选）" style={{ marginBottom: 0 }}>
-                      <AutoComplete
-                        value={tickerSearchValue}
-                        options={tickerOptions.map(ticker => ({
-                          value: ticker.value,
-                          label: ticker.label,
-                          sector: ticker.sector,
-                          industry: ticker.industry
-                        }))}
-                        onSearch={handleTickerSearch}
-                        onSelect={handleTickerSelect}
-                        placeholder="搜索 ticker（可选）"
-                        style={{ width: '100%' }}
-                        filterOption={false}
-                        notFoundContent={loadingTickers ? 'Loading...' : 'No tickers found'}
-                      />
-                    </Form.Item>
-
-                    {(selectedSector && selectedIndustry) && (
-                      <Alert
-                        message={
-                          <span>
-                            <strong>已选择:</strong> {selectedSector} → {selectedIndustry}
-                            {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
-                          </span>
-                        }
-                        type="success"
-                        showIcon
-                        style={{ marginTop: 8 }}
-                      />
-                    )}
-                  </Space>
-                </Card>
+                {/* Industry & Ticker selection 已移除 - 改用自动打标签（content_tag_v1） */}
 
                 <Upload {...uploadProps}>
-                  <Button icon={<UploadOutlined />} disabled={!selectedSector || !selectedIndustry}>
+                  <Button icon={<UploadOutlined />}>
                     选择文件
                   </Button>
                 </Upload>
-                {(!selectedSector || !selectedIndustry) && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    请先选择 sector 和 industry 后才能上传文件
-                  </Text>
-                )}
 
                 {/* AI分析选项 */}
                 {uploadFileList.length > 0 && (
@@ -1103,12 +918,6 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
           setUploadFileList([]);
           setUploadedFileIds([]);
           setSelectedExistingFileIds([]);
-          // 重置标签选择状态
-          setSelectedSector('');
-          setSelectedIndustry('');
-          setSelectedTicker('');
-          setTickerSearchValue('');
-          setTickerOptions([]);
         }}
         width={800}
         okText="保存"
@@ -1186,77 +995,13 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
           <Tabs activeKey={activeFileTab} onChange={setActiveFileTab}>
             <Tabs.TabPane tab="上传新文件" key="upload">
               <Space direction="vertical" style={{ width: '100%' }} size="large">
-                {/* 行业和股票选择（必填） */}
-                <Card size="small" title={<Space><TagOutlined /> 文件标签（必填）</Space>} style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        * 所有上传的文件必须设置行业和产业标签
-                      </Text>
-                    </div>
-                    
-                    <Form.Item label="Sector & Industry" required style={{ marginBottom: 8 }}>
-                      <Cascader
-                        options={sectors}
-                        value={selectedSector && selectedIndustry ? [selectedSector, selectedIndustry] : []}
-                        onChange={handleSectorIndustryChange}
-                        placeholder="选择 sector 和 industry"
-                        loading={loadingSectors}
-                        showSearch={{
-                          filter: (inputValue, path) => {
-                            return path.some(option => 
-                              option.label.toLowerCase().includes(inputValue.toLowerCase())
-                            );
-                          }
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-
-                    <Form.Item label="Ticker（可选）" style={{ marginBottom: 0 }}>
-                      <AutoComplete
-                        value={tickerSearchValue}
-                        options={tickerOptions.map(ticker => ({
-                          value: ticker.value,
-                          label: ticker.label,
-                          sector: ticker.sector,
-                          industry: ticker.industry
-                        }))}
-                        onSearch={handleTickerSearch}
-                        onSelect={handleTickerSelect}
-                        placeholder="搜索 ticker（可选）"
-                        style={{ width: '100%' }}
-                        filterOption={false}
-                        notFoundContent={loadingTickers ? 'Loading...' : 'No tickers found'}
-                      />
-                    </Form.Item>
-
-                    {(selectedSector && selectedIndustry) && (
-                      <Alert
-                        message={
-                          <span>
-                            <strong>已选择:</strong> {selectedSector} → {selectedIndustry}
-                            {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
-                          </span>
-                        }
-                        type="success"
-                        showIcon
-                        style={{ marginTop: 8 }}
-                      />
-                    )}
-                  </Space>
-                </Card>
-
+                {/* Industry & Ticker selection UI 已移除 - 改用自动打标签（content_tag_v1） */}
+                
                 <Upload {...uploadProps}>
-                  <Button icon={<UploadOutlined />} disabled={!selectedSector || !selectedIndustry}>
+                  <Button icon={<UploadOutlined />}>
                     选择文件
                   </Button>
                 </Upload>
-                {(!selectedSector || !selectedIndustry) && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    请先选择 sector 和 industry 后才能上传文件
-                  </Text>
-                )}
 
                 {uploadFileList.length > 0 && (
                   <Button

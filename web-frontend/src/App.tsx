@@ -19,6 +19,7 @@ import UsersPage from './pages/UsersPage';
 import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
 import SchedulerLogsPage from './pages/SchedulerLogsPage';
+import SystemLogsPage from './pages/SystemLogsPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
@@ -142,6 +143,14 @@ const AppContent: React.FC = () => {
             element={
               <AdminRoute>
                 <LLMConfigPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="system-logs"
+            element={
+              <AdminRoute>
+                <SystemLogsPage />
               </AdminRoute>
             }
           />

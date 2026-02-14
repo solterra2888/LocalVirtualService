@@ -37,9 +37,12 @@ class FileTagsResponse(BaseModel):
     id: int
     file_id: int
     sector: str
+    sector_en: Optional[str] = Field(None, description="英文行业分类（GICS标准）")
     industry: str
+    industry_en: Optional[str] = Field(None, description="英文子行业分类（GICS标准）")
     tickers: List[str]  # 前端使用数组
     ticker_raw: Optional[str] = Field(None, description="原始ticker字段值（JSON字符串）")
+    concepts: List[str] = Field(default_factory=list, description="投资概念/主题列表")
     additional_tags: Dict[str, Any]
     confidence: Optional[float]
     reasoning: Optional[str]

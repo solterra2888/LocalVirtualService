@@ -47,7 +47,8 @@ def get_file_tags(
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, file_id, sector, industry, ticker, additional_tags,
+            SELECT id, file_id, sector, sector_en, industry, industry_en, 
+                   ticker, concepts, additional_tags,
                    confidence, reasoning, tagged_by, tagged_at, created_at, updated_at
             FROM file_tags
             WHERE file_id = %s
@@ -59,30 +60,46 @@ def get_file_tags(
         
         # 解析ticker JSON
         tickers = []
-        ticker_raw = row[4]
+        ticker_raw = row[6]
         if ticker_raw:
             try:
                 tickers = json.loads(ticker_raw)
             except:
                 tickers = [ticker_raw]
         
+        # 解析concepts JSON
+        concepts = []
+        if row[7]:
+            try:
+                if isinstance(row[7], list):
+                    concepts = row[7]
+                elif isinstance(row[7], str):
+                    concepts = json.loads(row[7])
+                else:
+                    concepts = row[7]
+            except:
+                concepts = []
+        
         # 解析additional_tags
-        additional_tags = row[5] if row[5] else {}
+        additional_tags = row[8] if row[8] else {}
         
         return {
             'id': row[0],
             'file_id': row[1],
             'sector': row[2],
-            'industry': row[3],
+            'sector_en': row[3] or '',
+            'industry': row[4],
+            'industry_en': row[5] or '',
             'tickers': tickers,
             'ticker_raw': ticker_raw,
+            'concepts': concepts,
             'additional_tags': additional_tags,
-            'confidence': row[6],
-            'reasoning': row[7],
-            'tagged_by': row[8],
-            'tagged_at': row[9],
-            'created_at': row[10],
-            'updated_at': row[11]
+            'confidence': row[9],
+            'reasoning': row[10],
+            'tagged_by': row[11],
+            'tagged_at': row[12],
+            'created_at': row[13],
+            'updated_at': row[14]
         }
     finally:
         conn.close()
@@ -132,8 +149,8 @@ def list_file_tags(
         
         sql = f"""
             SELECT 
-                ft.id, ft.file_id, ft.sector, ft.industry, ft.ticker, 
-                ft.additional_tags, ft.confidence, ft.reasoning,
+                ft.id, ft.file_id, ft.sector, ft.sector_en, ft.industry, ft.industry_en,
+                ft.ticker, ft.concepts, ft.additional_tags, ft.confidence, ft.reasoning,
                 ft.tagged_by, ft.tagged_at, ft.created_at, ft.updated_at,
                 fpd.filename, fpd.file_type, fpd.processing_stats_id
             FROM file_tags ft
@@ -150,32 +167,48 @@ def list_file_tags(
         for row in rows:
             # 解析ticker
             tickers = []
-            ticker_raw = row[4]
+            ticker_raw = row[6]
             if ticker_raw:
                 try:
                     tickers = json.loads(ticker_raw)
                 except:
                     tickers = [ticker_raw]
             
-            additional_tags = row[5] if row[5] else {}
+            # 解析concepts
+            concepts = []
+            if row[7]:
+                try:
+                    if isinstance(row[7], list):
+                        concepts = row[7]
+                    elif isinstance(row[7], str):
+                        concepts = json.loads(row[7])
+                    else:
+                        concepts = row[7]
+                except:
+                    concepts = []
+            
+            additional_tags = row[8] if row[8] else {}
             
             results.append({
                 'id': row[0],
                 'file_id': row[1],
                 'sector': row[2],
-                'industry': row[3],
+                'sector_en': row[3] or '',
+                'industry': row[4],
+                'industry_en': row[5] or '',
                 'tickers': tickers,
                 'ticker_raw': ticker_raw,
+                'concepts': concepts,
                 'additional_tags': additional_tags,
-                'confidence': row[6],
-                'reasoning': row[7],
-                'tagged_by': row[8],
-                'tagged_at': row[9],
-                'created_at': row[10],
-                'updated_at': row[11],
-                'filename': row[12],
-                'file_type': row[13],
-                'processing_stats_id': row[14]
+                'confidence': row[9],
+                'reasoning': row[10],
+                'tagged_by': row[11],
+                'tagged_at': row[12],
+                'created_at': row[13],
+                'updated_at': row[14],
+                'filename': row[15],
+                'file_type': row[16],
+                'processing_stats_id': row[17]
             })
         
         return results

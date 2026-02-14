@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, Upload, Button, Form, Select, message, Space, Tag, Divider, Cascader, AutoComplete, Input, Switch, InputNumber, Row, Col, Collapse, ConfigProvider, theme as antdTheme } from 'antd';
-import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, ExclamationCircleOutlined, ReloadOutlined, LoadingOutlined, FileTextOutlined, RobotOutlined, UploadOutlined } from '@ant-design/icons';
+
+
+import React, { useState } from 'react';
+import { Modal, Upload, Button, Form, Select, message, Space, Tag, Divider, Input, Switch, InputNumber, Row, Col, Collapse, ConfigProvider, theme as antdTheme } from 'antd';
+import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
-import { tasksAPI } from '../services/tasks';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
-import TemplateSelector from './TemplateSelector';
-import TemplateVariablesEditor from './TemplateVariablesEditor';
 
 const { Option } = Select;
 
@@ -34,37 +33,7 @@ interface ProcessingParams {
   ai_agent_server_url: string;
 }
 
-interface FileItem {
-  id: string;
-  name: string;
-  path: string;
-  size: number;
-  fileId?: number;
-  status?: 'ready' | 'pending' | 'processing' | 'completed' | 'failed';
-  error_message?: string;
-}
-
-interface TaskStatus {
-  status: string;
-  progress: number;
-  current_file?: string;
-  files_processed: number;
-  files_failed: number;
-  total_files: number;
-  logs: Array<{
-    timestamp: string;
-    level: string;
-    message: string;
-  }>;
-}
-
-interface ProcessingResult {
-  task_id: string;
-  files_processed: number;
-  files_failed: number;
-  total_files: number;
-  processing_time: number;
-}
+// 移除未使用的接口：FileItem, TaskStatus, ProcessingResult
 
 const INPUT_CONTROL_HEIGHT = 32;
 
@@ -117,38 +86,18 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
     ...(isDark && colors.inputBg ? { backgroundColor: colors.inputBg } : {}),
   };
   
-  // 文件相关状态
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [uploadingFiles, setUploadingFiles] = useState(false);
-  const tickerSearchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  // 文件相关状态：选中文件仅存本地，点击 Start Processing 时才上传
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // 行业和股票选择
-  const [sectors, setSectors] = useState<any[]>([]);
-  const [tickerOptions, setTickerOptions] = useState<any[]>([]);
-  const [selectedSector, setSelectedSector] = useState<string>('');
-  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const [tickerSearchValue, setTickerSearchValue] = useState<string>('');
-  const [loadingSectors, setLoadingSectors] = useState(false);
-  const [loadingTickers, setLoadingTickers] = useState(false);
+  // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
+  // AI分析功能已移除 - 改为在FilesPage右侧面板通过"Analyze Document"/"Analyze Audio"按钮触发
   
-  // 分析模式
-  const [analysisMode, setAnalysisMode] = useState<'remote_agent' | 'local_llm'>('local_llm');
-  const [taskTypes, setTaskTypes] = useState<any[]>([]);
-  const [selectedTaskType, setSelectedTaskType] = useState<string>('');
-  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
-  const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
-  const [taskTypesLoadAttempts, setTaskTypesLoadAttempts] = useState(0);
-  const [lastTaskTypesError, setLastTaskTypesError] = useState(0);
-  const maxTaskTypesRetries = 3;
-  
-  // 参数设置
+  // 参数设置 - 仅保留文档处理相关参数
   const [processingParams, setProcessingParams] = useState<ProcessingParams>({
     language: ['ch_sim', 'en'],
     fast_mode: false,
     disable_ocr: false,
-    max_pages: 10,
+    max_pages: 20,
     target_pages: '',
     skip_diagonal_text: false,
     skip_table_extraction: false,
@@ -156,319 +105,66 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
     use_vendor_multimodal_model: false,
     vendor_multimodal_api_key: '',
     polling_interval: 10,
-    use_ai_agent: true,
+    use_ai_agent: false, // 改为false，不使用AI分析
     llamaindex_api_key: '',
     ai_agent_server_url: ''
   });
-  
-  // AI Analysis 启用开关
-  const [enableAIAnalysis, setEnableAIAnalysis] = useState(false);
 
-  // 加载初始数据
-  useEffect(() => {
-    if (visible) {
-      loadSectorOptions();
-      loadTaskTypes();
-      loadTemplates();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadTaskTypes/loadTemplates stable; avoid re-running on their identity change
-  }, [visible]);
+  // 加载初始数据 - 不再需要加载任务类型和模板
+  // AI分析功能已移至FilesPage右侧面板
 
-  // 根据sector/industry加载tickers
-  useEffect(() => {
-    if (selectedSector && selectedIndustry) {
-      loadTickerOptions();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadTickerOptions depends on selectedSector/Industry, avoid loop
-  }, [selectedSector, selectedIndustry]);
-
-  // 卸载时清除 ticker 搜索防抖定时器
-  useEffect(() => {
-    return () => {
-      if (tickerSearchDebounceRef.current) {
-        clearTimeout(tickerSearchDebounceRef.current);
-      }
-    };
-  }, []);
-
-  const loadSectorOptions = async () => {
-    setLoadingSectors(true);
-    try {
-      const sectorsData = await filesAPI.getSectors();
-      setSectors(sectorsData);
-    } catch (error) {
-      console.error('Failed to load sectors:', error);
-    } finally {
-      setLoadingSectors(false);
-    }
-  };
-
-  const loadTickerOptions = async (searchValue?: string) => {
-    try {
-      setLoadingTickers(true);
-      const tickers = await filesAPI.searchTickers({
-        search: searchValue || '',
-        sector: selectedSector,
-        industry: selectedIndustry
-      });
-      // 后端返回 code/name/value/label，兼容旧字段 ticker/company_name
-      const formattedOptions = tickers.map((ticker: any) => {
-        const code = ticker.code ?? ticker.ticker ?? ticker.value;
-        const name = ticker.name ?? ticker.company_name ?? '';
-        const label = ticker.label ?? `${code} - ${name}`;
-        return {
-          value: code,
-          label,
-          sector: ticker.sector,
-          industry: ticker.industry,
-          company_name: name
-        };
-      });
-      setTickerOptions(formattedOptions);
-    } catch (error) {
-      console.error('Failed to load tickers:', error);
-    } finally {
-      setLoadingTickers(false);
-    }
-  };
-
-  const loadTaskTypes = async (forceRetry = false) => {
-    if (!forceRetry && taskTypesLoadAttempts >= maxTaskTypesRetries) {
-      return;
-    }
-
-    try {
-      const data = await tasksAPI.getTaskTypes();
-      setTaskTypes(data);
-      const defaultTask = data.find((t: any) => t.is_default);
-      if (defaultTask) {
-        setSelectedTaskType(defaultTask.id);
-      }
-      setTaskTypesLoadAttempts(0);
-      setLastTaskTypesError(0);
-    } catch (error) {
-      console.error('Failed to load task types:', error);
-      const now = Date.now();
-      if (now - lastTaskTypesError > 5000) {
-        setTaskTypesLoadAttempts(prev => prev + 1);
-        setLastTaskTypesError(now);
-        
-        if (taskTypesLoadAttempts < maxTaskTypesRetries - 1) {
-          setTimeout(() => loadTaskTypes(), 2000);
-        }
-      }
-    }
-  };
-
-  const loadTemplates = async () => {
-    try {
-      // Templates are loaded via TemplateSelector component
-      // No need to load manually
-    } catch (error) {
-      console.error('Failed to load templates:', error);
-    }
-  };
-
-  // 处理行业选择（Cascader）
-  const handleSectorIndustryChange = (value: any) => {
-    if (value && value.length === 2) {
-      setSelectedSector(value[0]);
-      setSelectedIndustry(value[1]);
-      setSelectedTicker('');
-      setTickerSearchValue('');
-    } else {
-      setSelectedSector('');
-      setSelectedIndustry('');
-      setSelectedTicker('');
-      setTickerSearchValue('');
-    }
-  };
-
-  // Ticker 模糊搜索防抖
-  const handleTickerSearch = useCallback((searchValue: string) => {
-    setTickerSearchValue(searchValue);
-    if (tickerSearchDebounceRef.current) {
-      clearTimeout(tickerSearchDebounceRef.current);
-      tickerSearchDebounceRef.current = null;
-    }
-    if (!searchValue.trim()) {
-      setTickerOptions([]);
-      return;
-    }
-    tickerSearchDebounceRef.current = setTimeout(() => {
-      tickerSearchDebounceRef.current = null;
-      loadTickerOptions(searchValue.trim());
-    }, 300);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadTickerOptions uses sector/industry from closure
-  }, [selectedSector, selectedIndustry]);
-
-  // Ticker 选择处理（选中后显示完整 label，如 "AAPL - Apple Inc"）
-  const handleTickerSelect = useCallback((value: string, option: any) => {
-    setSelectedTicker(value);
-    setTickerSearchValue(option?.label ?? value);
-    if (option?.sector && option?.industry) {
-      setSelectedSector(option.sector);
-      setSelectedIndustry(option.industry);
-    }
-  }, []);
-
-  // Task Type 变更处理
-  const handleTaskTypeChange = (taskId: string) => {
-    setSelectedTaskType(taskId);
-    const task = taskTypes.find(t => t.id === taskId);
-    if (task && task.input_fields) {
-      const newInputs: Record<string, string> = {};
-      task.input_fields.forEach((field: any) => {
-        newInputs[field.name] = customInputs[field.name] || '';
-      });
-      setCustomInputs(newInputs);
-    }
-  };
-
-  // 渲染自定义输入字段
-  const renderCustomInputs = () => {
-    const selectedTask = taskTypes.find(t => t.id === selectedTaskType);
-    if (!selectedTask || !selectedTask.input_fields || selectedTask.input_fields.length === 0) {
-      return null;
-    }
-
-    return (
-      <Form.Item label="Additional Inputs" style={{ marginTop: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }}>
-          {selectedTask.input_fields.map((field: any) => (
-            <Input.TextArea
-              key={field.name}
-              placeholder={`${field.name} (max ${field.max_length} characters)`}
-              value={customInputs[field.name] || ''}
-              onChange={(e) => {
-                const value = e.target.value.slice(0, field.max_length);
-                setCustomInputs(prev => ({ ...prev, [field.name]: value }));
-              }}
-              maxLength={field.max_length}
-              rows={3}
-              showCount
-            />
-          ))}
-        </Space>
-      </Form.Item>
-    );
-  };
-
-  const handleUpload = async (file: File) => {
-    if (files.length > 0) {
-      message.warning('Only one file can be uploaded at a time. Please delete the existing file first.');
+  /** 选中/拖入文件时仅加入列表，不发起上传；仅接受支持格式 */
+  const handleFileSelect = (file: File) => {
+    if (selectedFile) {
+      message.warning('Only one file at a time. Please remove the current file first.');
       return false;
     }
-
-    setUploadingFiles(true);
-    try {
-      const uploadedFiles = await filesAPI.uploadFiles([file]);
-      const newFile: FileItem = {
-        id: `${Date.now()}`,
-        name: uploadedFiles[0].filename,
-        path: uploadedFiles[0].file_path,
-        size: uploadedFiles[0].file_size,
-        fileId: (uploadedFiles[0] as any).id,
-      };
-      setFiles([newFile]);
-
-      // 如果已选择标签，自动设置
-      if (selectedSector && selectedIndustry && newFile.fileId) {
-        try {
-          await filesAPI.batchCreateFileTags({
-            file_ids: [newFile.fileId],
-            sector: selectedSector,
-            industry: selectedIndustry,
-            ticker: selectedTicker || undefined,
-          });
-          message.success('File uploaded and tagged successfully');
-        } catch (tagError) {
-          message.warning('File uploaded but tagging failed');
-        }
-      } else {
-        message.success('File uploaded successfully');
-      }
-    } catch (error: any) {
-      // 避免与 api 拦截器的 toast 重复：拦截器已对带 response 的请求展示过错误
-      if (!error.response) {
-        const errorMessage = getErrorMessage(error, 'Failed to upload file');
-        message.error(errorMessage);
-      }
-    } finally {
-      setUploadingFiles(false);
+    if (!filesAPI.validateFileType(file)) {
+      const exts = filesAPI.getSupportedFileExtensions().join(', ');
+      message.warning(`Unsupported file type. Supported: ${exts}`);
+      return false;
     }
-
-    return false;
+    setSelectedFile(file);
+    return false; // 阻止 Ant Design 默认上传
   };
 
-  const handleRemoveFile = async (fileId: string) => {
-    const file = files.find(f => f.id === fileId);
-    if (!file) return;
-
-    try {
-      const filename = file.path.split('/').pop() || file.name;
-      await filesAPI.deleteUploadedFile(filename);
-      setFiles([]);
-      message.success('File deleted successfully');
-    } catch (error: any) {
-      const errorMessage = getErrorMessage(error, 'Failed to delete file');
-      message.error(errorMessage);
-    }
+  /** 移除已选文件（未上传，无需调后端） */
+  const handleClearSelectedFile = () => {
+    setSelectedFile(null);
   };
 
   const handleStartProcessing = async () => {
-    if (files.length === 0) {
-      message.warning('Please upload a file first');
+    if (!selectedFile) {
+      message.warning('Please select a file first');
       return;
     }
 
-    // 禁用 AI Analysis 时：文件已在拖放时上传，仅关闭弹窗即可
-    if (!enableAIAnalysis) {
-      message.success('File uploaded. You can view it on the Files page.');
-      resetAndClose();
-      return;
-    }
+    // 先保存参数，再立即关闭窗口，上传与处理在 Celery 后台进行
+    const file = selectedFile;
+    const params = { ...processingParams };
 
-    if (analysisMode === 'remote_agent' && !selectedTaskType) {
-      message.warning('Please select an AI Agent');
-      return;
-    }
-
-    if (analysisMode === 'local_llm' && !selectedTemplateId) {
-      message.warning('Please select a Prompt Template');
-      return;
-    }
+    resetAndClose();
 
     try {
-      message.info('Starting file processing...');
-
-      const response = await filesAPI.processFiles({
-        file_paths: files.map(f => f.path),
-        task_type: analysisMode === 'local_llm' ? 'local_llm_template' : selectedTaskType,
-        custom_inputs: customInputs,
+      // 调用新的异步端点：立即返回，后台上传到 OSS + 文档解析（不含AI分析）
+      const response = await filesAPI.uploadAndProcessDocument(file, {
+        analysis_mode: 'local_llm', // 保留字段但不启用AI分析
+        task_type: 'document_upload', // 仅上传和解析
+        template_id: undefined, // 不使用模板
+        template_variables: {},
+        custom_inputs: {},
         params: {
-          ...processingParams,
-          sector: selectedSector,
-          industry: selectedIndustry,
-          ticker: selectedTicker,
+          ...params,
+          use_ai_agent: false, // 明确禁用AI分析
         },
-        analysis_mode: analysisMode,
-        template_id: analysisMode === 'local_llm' ? selectedTemplateId : undefined,
-        template_code: undefined,
-        template_variables: analysisMode === 'local_llm' ? templateVariables : {},
-        llm_provider: undefined,
-        llm_model: undefined,
       });
 
-      // 添加任务到全局进度显示
-      addTask(response.task_id, files[0].name, 'document');
-
-      // 立即关闭弹窗
-      resetAndClose();
+      addTask(response.task_id, file.name, 'document');
+      message.success('File upload and processing started. Use "Analyze Document" in the right panel for AI analysis.');
     } catch (error: any) {
-      const errorMessage = getErrorMessage(error, 'Failed to start processing');
+      const errorMessage = getErrorMessage(error, 'Failed to start upload and processing');
       message.error(errorMessage);
-      console.error('Failed to start processing:', error);
+      console.error('Failed to start upload and processing:', error);
     }
   };
 
@@ -477,18 +173,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
   };
 
   const resetAndClose = () => {
-    // 清理状态
-    setFiles([]);
-    setSelectedSector('');
-    setSelectedIndustry('');
-    setSelectedTicker('');
-    setAnalysisMode('local_llm');
-    setEnableAIAnalysis(false); // 重置AI Analysis开关，默认关闭
+    setSelectedFile(null);
     setProcessingParams({
       language: ['ch_sim', 'en'],
       fast_mode: false,
       disable_ocr: false,
-      max_pages: 10,
+      max_pages: 20,
       target_pages: '',
       skip_diagonal_text: false,
       skip_table_extraction: false,
@@ -496,7 +186,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
       use_vendor_multimodal_model: false,
       vendor_multimodal_api_key: '',
       polling_interval: 10,
-      use_ai_agent: true,
+      use_ai_agent: false, // 禁用AI分析
       llamaindex_api_key: '',
       ai_agent_server_url: ''
     });
@@ -579,12 +269,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         }}
       >
       <Form form={form} layout="vertical" style={{ padding: '12px 0' }}>
-        {/* 文件上传区域 */}
-        {files.length === 0 ? (
+        {/* 文件上传区域：选中不上传，点击 Start Processing 才上传 */}
+        {!selectedFile ? (
           <Upload.Dragger
-            beforeUpload={handleUpload}
+            accept={filesAPI.getAcceptFileTypes()}
+            beforeUpload={handleFileSelect}
             showUploadList={false}
-            disabled={uploadingFiles}
             style={{
               background: colors.codeBlockBg,
               border: `1px dashed ${colors.cardBorder}`,
@@ -598,7 +288,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
               Click or drag file to this area to upload
             </p>
             <p className="ant-upload-hint" style={{ color: colors.textSecondary }}>
-              Support PDF, Excel, Word, Image and more (for AI Analysis)
+              Supported: PDF, Excel (.xlsx, .xls), CSV, Word (.doc, .docx), Images (.jpg, .jpeg, .png, .gif, .bmp)
             </p>
           </Upload.Dragger>
         ) : (
@@ -611,241 +301,27 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
               marginBottom: '16px',
             }}
           >
-            {files.map((file) => (
-              <div key={file.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Tag color="blue">{file.name}</Tag>
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleRemoveFile(file.id)}
-                />
-              </div>
-            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Tag color="blue">
+                {selectedFile.name}
+                <span style={{ marginLeft: 8, opacity: 0.8 }}>
+                  ({(selectedFile.size / 1024).toFixed(1)} KB)
+                </span>
+              </Tag>
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                onClick={handleClearSelectedFile}
+              />
+            </div>
           </div>
         )}
 
         <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
 
-        {/* AI Analysis 启用开关 */}
-        <Form.Item 
-          label={
-            <span style={{ fontWeight: 600, fontSize: '14px' }}>
-              Enable AI Analysis & Document Processing
-            </span>
-          }
-          tooltip="Turn off to upload files only without AI analysis or document processing"
-          style={{ marginBottom: '16px' }}
-        >
-          <Switch
-            checked={enableAIAnalysis}
-            onChange={(checked) => {
-              setEnableAIAnalysis(checked);
-              if (!checked) {
-                // 当禁用AI Analysis时，清除相关选择
-                setSelectedTaskType('');
-                setSelectedTemplateId(undefined);
-                setTemplateVariables({});
-              }
-            }}
-            checkedChildren="Enabled"
-            unCheckedChildren="Disabled"
-          />
-        </Form.Item>
-
-        {/* AI Analysis */}
-        {enableAIAnalysis && (
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{
-            fontSize: '14px',
-            fontWeight: 600,
-            marginBottom: '12px',
-            color: colors.text,
-          }}>
-            AI Analysis
-          </div>
-          <Form.Item label="Analysis Mode" style={{ marginBottom: '12px' }}>
-            <Select
-              value={analysisMode}
-              onChange={(value) => {
-                setAnalysisMode(value);
-                if (value === 'local_llm') {
-                  setSelectedTaskType('');
-                } else {
-                  setSelectedTemplateId(undefined);
-                  setTemplateVariables({});
-                }
-              }}
-              style={inputStyle}
-            >
-              <Option value="local_llm">
-                <Space>
-                  <FileTextOutlined />
-                  <span>Local AI Agent</span>
-                </Space>
-              </Option>
-              <Option value="remote_agent">
-                <Space>
-                  <RobotOutlined />
-                  <span>Remote AI Agent (Dify)</span>
-                </Space>
-              </Option>
-            </Select>
-          </Form.Item>
-
-          {/* Agent/Template Selection */}
-          {analysisMode === 'remote_agent' ? (
-          <>
-            <Form.Item label="AI Agent Selection">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {taskTypes.map((task, index) => {
-                  const tagColors = ['blue', 'green', 'orange', 'red', 'purple', 'cyan', 'magenta', 'volcano', 'geekblue', 'gold'];
-                  const color = tagColors[index % tagColors.length];
-                  const isSelected = selectedTaskType === task.id;
-                  
-                  return (
-                    <Tag
-                      key={task.id}
-                      color={isSelected ? color : undefined}
-                      style={{
-                        cursor: 'pointer',
-                        border: isSelected ? `2px solid ${colors.selectedBorder}` : `1px solid ${colors.cardBorder}`,
-                        backgroundColor: isSelected ? undefined : colors.codeBlockBg,
-                        fontWeight: isSelected ? 'bold' : 'normal',
-                        padding: '4px 12px',
-                        borderRadius: 8,
-                      }}
-                      onClick={() => handleTaskTypeChange(task.id)}
-                    >
-                      {task.name} {task.is_default && '[Default]'}
-                    </Tag>
-                  );
-                })}
-              </div>
-              {taskTypes.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '20px' }}>
-                  {taskTypesLoadAttempts >= maxTaskTypesRetries ? (
-                    <div>
-                      <div style={{ color: '#ff4d4f', marginBottom: '10px' }}>
-                        <ExclamationCircleOutlined /> RC Agent加载失败
-                      </div>
-                      <Button 
-                        type="primary" 
-                        size="small" 
-                        onClick={() => {
-                          setTaskTypesLoadAttempts(0);
-                          setLastTaskTypesError(0);
-                          loadTaskTypes(true);
-                        }}
-                        icon={<ReloadOutlined />}
-                      >
-                        重新加载
-                      </Button>
-                    </div>
-                  ) : taskTypesLoadAttempts > 0 ? (
-                    <div style={{ color: '#faad14' }}>
-                      <LoadingOutlined /> 正在重试加载RC Agent... ({taskTypesLoadAttempts}/{maxTaskTypesRetries})
-                    </div>
-                  ) : (
-                    <div style={{ color: colors.textSecondary }}>
-                      No AI Agents available
-                    </div>
-                  )}
-                </div>
-              )}
-            </Form.Item>
-            {renderCustomInputs()}
-          </>
-        ) : (
-          <>
-            <Form.Item label="Select Prompt Template" required>
-              <TemplateSelector
-                categoryCode="file_analysis"
-                value={selectedTemplateId}
-                onChange={(templateId, template) => {
-                  setSelectedTemplateId(templateId);
-                  setTemplateVariables({});
-                }}
-                style={inputStyle}
-              />
-            </Form.Item>
-            {selectedTemplateId && (
-              <Form.Item label="Template Parameters Configuration">
-                <TemplateVariablesEditor
-                  templateId={selectedTemplateId}
-                  values={templateVariables}
-                  onChange={(values) => setTemplateVariables(values)}
-                />
-              </Form.Item>
-            )}
-          </>
-        )}
-        </div>
-        )}
-
-        {/* Industry & Ticker Selection (after AI Analysis) */}
-        {enableAIAnalysis && (
-        <Form.Item
-          label="Industry & Ticker Selection"
-          tooltip="Optional. Select sector and industry for analysis context and file tagging"
-          style={{ marginBottom: '12px' }}
-        >
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
-            <Cascader
-              options={sectors}
-              value={selectedSector && selectedIndustry ? [selectedSector, selectedIndustry] : []}
-              onChange={handleSectorIndustryChange}
-              placeholder="Select sector and industry (optional)"
-              loading={loadingSectors}
-              showSearch={{
-                filter: (inputValue, path) => {
-                  return path.some(option =>
-                    option.label.toLowerCase().includes(inputValue.toLowerCase())
-                  );
-                }
-              }}
-              style={inputStyle}
-              dropdownStyle={{ fontSize: '11px' }}
-            />
-
-            <AutoComplete
-              value={tickerSearchValue}
-              options={tickerOptions.map(ticker => ({
-                value: ticker.value,
-                label: ticker.label,
-                sector: ticker.sector,
-                industry: ticker.industry
-              }))}
-              onSearch={handleTickerSearch}
-              onSelect={handleTickerSelect}
-              placeholder="Search ticker by code or name (global search)"
-              style={inputStyle}
-              filterOption={false}
-              notFoundContent={loadingTickers ? 'Loading...' : 'No tickers found'}
-              dropdownStyle={{ fontSize: '11px' }}
-            />
-
-            {(selectedSector && selectedIndustry) && (
-              <div style={{
-                padding: '8px 12px',
-                backgroundColor: isDark ? 'rgba(82, 196, 26, 0.15)' : '#f6ffed',
-                border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.45)' : '#b7eb8f'}`,
-                borderRadius: 8,
-                fontSize: '12px',
-                color: '#52c41a',
-              }}>
-                <strong>Selected:</strong> {selectedSector} → {selectedIndustry}
-                {selectedTicker && <><br /><strong>Ticker:</strong> {selectedTicker}</>}
-                {!selectedTicker && <><br /><em>No ticker selected (optional)</em></>}
-              </div>
-            )}
-          </Space>
-        </Form.Item>
-        )}
-
-        {/* LlamaParse / Document Processing - only when AI Analysis is enabled */}
-        {enableAIAnalysis && (
+        {/* Document Processing */}
         <div style={{ marginTop: '8px', marginBottom: '8px' }}>
           <div style={{
             fontSize: '14px',
@@ -853,7 +329,17 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             marginBottom: '8px',
             color: colors.text,
           }}>
-            Document Processing (LlamaParse Server)
+            Document Processing
+          </div>
+          <div style={{ 
+            marginBottom: '12px',
+            padding: '8px 12px',
+            background: colors.codeBlockBg,
+            borderRadius: 8,
+            fontSize: '12px',
+            color: colors.textSecondary
+          }}>
+            By default only 20 pages are processed. You can change this and other options in Advanced Parameter Settings below.
           </div>
           <Collapse
             ghost
@@ -888,7 +374,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                       <Form.Item label="Max Pages" style={{ marginBottom: '12px' }}>
                         <InputNumber
                           value={processingParams.max_pages}
-                          onChange={(value) => setProcessingParams(prev => ({ ...prev, max_pages: value || 10 }))}
+                          onChange={(value) => setProcessingParams(prev => ({ ...prev, max_pages: value || 20 }))}
                           min={1}
                           max={100}
                           style={inputStyle}
@@ -921,23 +407,10 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                     </Col>
                   </Row>
 
-                  <Row gutter={[12, 12]}>
-                    <Col span={24}>
-                      <Form.Item label="RC Agent Server URL" style={{ marginBottom: '12px' }}>
-                        <Input
-                          value={processingParams.ai_agent_server_url}
-                          onChange={(e) => setProcessingParams(prev => ({ ...prev, ai_agent_server_url: e.target.value }))}
-                          placeholder="Enter RC Agent server URL"
-                          style={inputStyle}
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
                   <Divider style={{ margin: '12px 0', borderColor: colors.cardBorder }} />
 
                   <Row gutter={[12, 12]}>
-                    <Col span={8}>
+                    <Col span={12}>
                       <Form.Item label="Fast Mode" style={{ marginBottom: '8px' }}>
                         <Switch
                           size="small"
@@ -946,21 +419,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                         />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col span={12}>
                       <Form.Item label="Disable OCR" style={{ marginBottom: '8px' }}>
                         <Switch
                           size="small"
                           checked={processingParams.disable_ocr}
                           onChange={(checked) => setProcessingParams(prev => ({ ...prev, disable_ocr: checked }))}
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item label="Use RC Agent" style={{ marginBottom: '8px' }}>
-                        <Switch
-                          size="small"
-                          checked={processingParams.use_ai_agent}
-                          onChange={(checked) => setProcessingParams(prev => ({ ...prev, use_ai_agent: checked }))}
                         />
                       </Form.Item>
                     </Col>
@@ -1037,7 +501,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
           ]}
           />
         </div>
-        )}
 
         {/* 操作按钮 */}
         <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1051,17 +514,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             Close
           </Button>
           <Space>
-            {/* 有文件时始终显示 Start Processing；禁用 AI 时点击仅确认并关闭，启用 AI 时需选择模板/Agent 后才可点击 */}
-            {files.length > 0 && (
+            {/* 选中文件后显示 Start Processing；点击后上传并解析文档 */}
+            {selectedFile && (
               <Button
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 onClick={handleStartProcessing}
-                disabled={
-                  enableAIAnalysis &&
-                  ((analysisMode === 'remote_agent' && !selectedTaskType) ||
-                    (analysisMode === 'local_llm' && !selectedTemplateId))
-                }
                 style={{
                   borderRadius: 10,
                   fontWeight: 500,

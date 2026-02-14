@@ -185,6 +185,43 @@ export const filesAPI = {
     return api.upload('/files/upload-audio', formData);
   },
 
+  // 上传文档并异步处理（推荐，避免 OSS 慢连接阻塞）
+  uploadAndProcessDocument: async (
+    file: File,
+    options: {
+      analysis_mode?: 'remote_agent' | 'local_llm';
+      task_type?: string;
+      template_id?: number;
+      template_variables?: Record<string, any>;
+      custom_inputs?: Record<string, any>;
+      params?: Record<string, any>;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    task_id: string;
+    filename: string;
+    file_size: number;
+    file_size_mb: number;
+    status: string;
+    note?: string;
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('analysis_mode', options.analysis_mode || 'local_llm');
+    if (options.task_type) {
+      formData.append('task_type', options.task_type);
+    }
+    if (options.template_id) {
+      formData.append('template_id', options.template_id.toString());
+    }
+    formData.append('template_variables', JSON.stringify(options.template_variables || {}));
+    formData.append('custom_inputs', JSON.stringify(options.custom_inputs || {}));
+    formData.append('params', JSON.stringify(options.params || {}));
+    
+    return api.upload('/files/upload-and-process-document', formData);
+  },
+
   // 获取支持的音频格式
   getSupportedAudioFormats: async (): Promise<{
     supported_formats: string[];
@@ -428,14 +465,19 @@ export const filesAPI = {
     return api.patch<{ success: boolean; message: string }>(`/files/details/${fileId}/content`, { content });
   },
 
-  // 获取支持的文件类型扩展名
+  // 获取支持的文件类型扩展名（与 backend/core/llama_service.py get_supported_extensions 一致）
   getSupportedFileExtensions: (): string[] => {
     return [
       '.pdf',
-      '.xlsx', '.xls',
+      '.xlsx', '.xls', '.csv',
       '.doc', '.docx',
       '.jpg', '.jpeg', '.png', '.gif', '.bmp'
     ];
+  },
+
+  // 用于 <input accept> 的字符串，仅可选支持格式
+  getAcceptFileTypes: (): string => {
+    return filesAPI.getSupportedFileExtensions().join(',');
   },
 
   // 验证文件类型
@@ -627,5 +669,47 @@ export const filesAPI = {
     logs?: Array<{ timestamp: string; level: string; message: string }>;
   }> => {
     return api.get(`/files/document/analyze/${taskId}/status`);
+  },
+
+  // 文档重新解析（Re-parse）- 提交重新解析任务
+  reparseDocument: async (params: {
+    file_id: number;
+    params?: {
+      language?: string[];
+      fast_mode?: boolean;
+      disable_ocr?: boolean;
+      max_pages?: number;
+      target_pages?: string;
+      skip_diagonal_text?: boolean;
+      skip_table_extraction?: boolean;
+      extract_images?: boolean;
+      use_vendor_multimodal_model?: boolean;
+      vendor_multimodal_api_key?: string;
+      polling_interval?: number;
+      llamaindex_api_key?: string;
+    };
+  }): Promise<{
+    success: boolean;
+    task_id: string;
+    file_id: number;
+    filename: string;
+    message: string;
+    note?: string;
+  }> => {
+    return api.post('/files/document/reparse', params);
+  },
+
+  // 文档重新解析 - 查询任务状态
+  getReparseStatus: async (taskId: string): Promise<{
+    task_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    file_id?: number;
+    content_length?: number;
+    processing_time?: number;
+    logs?: Array<{ timestamp: string; level: string; message: string }>;
+  }> => {
+    return api.get(`/files/document/reparse/${taskId}/status`);
   }
 }; 

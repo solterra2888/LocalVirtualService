@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Body
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Body, Form
 from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.schemas.file import (
@@ -45,7 +45,8 @@ from backend.tasks.file_tasks import (
     process_files_task, 
     analyze_audio_task, 
     analyze_document_task,
-    upload_and_transcribe_audio_task
+    upload_and_transcribe_audio_task,
+    upload_and_process_document_task
 )
 
 # 统一的环境变量加载
@@ -661,7 +662,21 @@ async def get_task_status(
             }
             
     except Exception as e:
-        error(f"获取任务状态失败: {str(e)}", source="api", task_id=task_id)
+        err_msg = str(e)
+        # Celery 后端存储的失败任务若缺少 exc_type，解码会抛出此错误；返回 200 并标记为失败，避免前端一直 500
+        if "Exception information must include the exception type" in err_msg or (isinstance(e, ValueError) and "exception type" in err_msg.lower()):
+            error(f"任务结果无法解码（后端异常信息不完整）: {err_msg}", source="api", task_id=task_id)
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "progress": 0,
+                "message": "任务执行失败（可能是上传到 OSS 或 LlamaParse 处理时出错），无法获取详细错误。请重试或联系管理员。",
+                "files_processed": 0,
+                "files_failed": 0,
+                "total_files": 0,
+                "logs": []
+            }
+        error(f"获取任务状态失败: {err_msg}", source="api", task_id=task_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取任务状态失败"
@@ -1851,6 +1866,143 @@ async def upload_audio(
         )
 
 
+@router.post("/upload-and-process-document", summary="上传文档并异步处理（推荐，避免 OSS 慢连接阻塞）")
+async def upload_and_process_document(
+    file: UploadFile = File(...),
+    analysis_mode: str = Form('local_llm'),
+    task_type: str = Form(None),
+    template_id: Optional[int] = Form(None),
+    template_variables: str = Form('{}'),  # JSON string
+    custom_inputs: str = Form('{}'),  # JSON string
+    params: str = Form('{}'),  # JSON string (sector, industry, ticker, etc.)
+    current_user=Depends(get_current_user)
+):
+    """
+    上传文档文件到 OSS 并异步处理（LlamaParse + AI 分析）
+    
+    ⚠️ 推荐使用此端点：OSS 服务器在香港，直接上传会阻塞请求
+    - 使用 Celery 异步任务，立即返回 task_id
+    - 后台上传到 OSS + 可选 AI 分析
+    - 不阻塞主线程
+    
+    支持的文档格式：
+    - PDF, Word (doc/docx), Excel (xls/xlsx), PowerPoint (ppt/pptx)
+    - Text (txt, md), Images (jpg, png, gif, bmp, webp)
+    
+    参数：
+    - file: 文件（必需）
+    - analysis_mode: 'local_llm' 或 'remote_agent'（可选，默认 local_llm）
+    - task_type: remote_agent 时的任务类型
+    - template_id: local_llm 时的模板 ID
+    - template_variables: 模板变量（JSON 字符串）
+    - custom_inputs: 自定义输入（JSON 字符串）
+    - params: 处理参数，包含 sector/industry/ticker 等（JSON 字符串）
+    
+    返回：
+    - task_id: Celery 任务 ID（用于查询进度）
+    - filename: 文件名
+    - file_size: 文件大小（字节）
+    """
+    try:
+        # 检查文件名
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件名为空"
+            )
+        
+        # 检查 OSS 配置
+        oss_service = OSSService()
+        if not oss_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OSS 服务未配置。请在 .env 文件中配置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET"
+            )
+        
+        # 检查文件格式
+        file_processor = FileProcessor()
+        if not file_processor.is_supported_file(file.filename):
+            ext = os.path.splitext(file.filename)[1]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的文件类型: {ext}"
+            )
+        
+        # 解析 JSON 参数
+        try:
+            template_vars = json.loads(template_variables) if template_variables else {}
+            custom_inputs_dict = json.loads(custom_inputs) if custom_inputs else {}
+            params_dict = json.loads(params) if params else {}
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"JSON 参数解析失败: {str(e)}"
+            )
+        
+        # 流式写入临时文件
+        temp_file_id = str(uuid.uuid4())[:8]
+        name, ext = os.path.splitext(file.filename)
+        temp_filename = f"{name}_{temp_file_id}{ext}"
+        temp_file_path = os.path.join(UPLOAD_DIR, temp_filename)
+        
+        file_size = 0
+        chunk_size = 1024 * 1024  # 1MB chunks
+        
+        with open(temp_file_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+                file_size += len(chunk)
+        
+        info(f"文档文件已保存到临时目录: {file.filename} ({file_size / (1024 * 1024):.2f} MB)", 
+             source="api", user=current_user.username)
+        
+        # 组装任务信息
+        task_info = {
+            'analysis_mode': analysis_mode,
+            'task_type': task_type or 'local_llm_template',
+            'template_id': template_id,
+            'template_variables': template_vars
+        }
+        
+        # 提交异步任务到 Celery
+        task = upload_and_process_document_task.apply_async(
+            args=[temp_file_path, file.filename, current_user.username],
+            kwargs={
+                'task_info': task_info,
+                'custom_inputs': custom_inputs_dict,
+                'params': params_dict
+            },
+            queue='file_processing'
+        )
+        
+        info(f"文档上传和处理任务已提交: task_id={task.id}, file={file.filename}", 
+             source="api", user=current_user.username)
+        
+        # 立即返回任务 ID
+        return {
+            "success": True,
+            "message": "文档文件已接收，正在后台上传并处理",
+            "task_id": task.id,
+            "filename": file.filename,
+            "file_size": file_size,
+            "file_size_mb": round(file_size / (1024 * 1024), 2),
+            "status": "processing",
+            "note": "请使用 task_id 查询处理进度（GET /api/files/tasks/{task_id}/status）"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"上传文档文件失败: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"上传文档文件失败: {str(e)}"
+        )
+
+
 @router.get("/audio/supported-formats", summary="获取支持的音频格式")
 async def get_supported_audio_formats():
     """
@@ -2636,4 +2788,156 @@ async def get_document_analysis_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取文档分析状态失败"
+        )
+
+
+@router.post("/document/reparse", summary="重新解析文档 - Re-parse Document")
+async def reparse_document(
+    request: Dict[str, Any],
+    current_user=Depends(get_current_user)
+):
+    """
+    重新解析文档（Re-parse）
+    
+    用于文档解析失败或内容为空时，重新调用 LlamaParse 解析文档。
+    解析成功后自动触发打标签任务。
+    
+    请求参数:
+    - file_id: file_processing_details.id（必填）
+    - params: LlamaParse 配置参数（可选，包含 language、fast_mode、max_pages 等）
+    
+    返回:
+    - task_id: Celery 任务 ID
+    - file_id: 文件 ID
+    - message: 提示消息
+    """
+    from backend.tasks.file_tasks import reparse_document_task
+    
+    try:
+        file_id = request.get('file_id')
+        if not file_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少 file_id 参数"
+            )
+        
+        params = request.get('params', {})
+        username = current_user.username if current_user else None
+        
+        # 验证文件是否存在
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="数据库连接失败"
+            )
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, filename, status
+            FROM file_processing_details
+            WHERE id = %s
+        """, (file_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"文件不存在: file_id={file_id}"
+            )
+        
+        filename = row[1]
+        current_status = row[2]
+        
+        info(f"提交重新解析任务: file_id={file_id}, filename={filename}, user={username}", 
+             source="api")
+        
+        # 提交 Celery 任务
+        task = reparse_document_task.apply_async(
+            args=(file_id, params, username),
+            countdown=1
+        )
+        
+        info(f"重新解析任务已提交: task_id={task.id}, file_id={file_id}", source="api")
+        
+        return {
+            "success": True,
+            "task_id": task.id,
+            "file_id": file_id,
+            "filename": filename,
+            "message": f"已提交重新解析任务: {filename}",
+            "note": f"请使用 task_id 查询处理进度（GET /api/files/document/reparse/{task.id}/status）"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"提交重新解析任务失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交重新解析任务失败: {str(e)}"
+        )
+
+
+@router.get("/document/reparse/{task_id}/status", summary="查询文档重新解析任务状态")
+async def get_reparse_status(
+    task_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    查询文档重新解析的 Celery 任务状态
+    """
+    try:
+        task_result = AsyncResult(task_id, app=celery_app)
+        
+        if task_result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "status": "pending",
+                "progress": 0,
+                "message": "任务等待处理中..."
+            }
+        elif task_result.state == 'PROGRESS':
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": task_info.get("status", "processing"),
+                "progress": task_info.get("progress", 0),
+                "message": task_info.get("message", "正在重新解析..."),
+                "file_id": task_info.get("file_id"),
+                "logs": task_info.get("logs", [])
+            }
+        elif task_result.state == 'SUCCESS':
+            result = task_result.result or {}
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "progress": 100,
+                "message": "重新解析完成",
+                "file_id": result.get("file_id"),
+                "content_length": result.get("content_length", 0),
+                "processing_time": result.get("processing_time", 0),
+                "logs": result.get("logs", [])
+            }
+        else:
+            task_info = task_result.info or {}
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "progress": 0,
+                "message": str(task_info.get("error", "重新解析失败")),
+                "file_id": task_info.get("file_id"),
+                "logs": task_info.get("logs", [])
+            }
+    
+    except Exception as e:
+        error(f"获取重新解析状态失败: {str(e)}", source="api", task_id=task_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取重新解析状态失败"
         )

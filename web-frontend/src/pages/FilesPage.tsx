@@ -58,6 +58,7 @@ import { useFileProcessing } from '../contexts/FileProcessingContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import TemplateSelector from '../components/TemplateSelector';
+import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 
 const { Text } = Typography;
@@ -244,17 +245,7 @@ const FilesPageInner: React.FC = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingFiles, setUpdatingFiles] = useState(false);
   
-  // 行业和股票选择相关状态
-  const [, setSectors] = useState<SectorOption[]>([]);
-  const [selectedSector, setSelectedSector] = useState<string>('');
-  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
-  const [tickerOptions, setTickerOptions] = useState<TickerOption[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const [_tickerSearchValue, setTickerSearchValue] = useState<string>('');
-  const [, setLoadingSectors] = useState(false);
-  const [, setLoadingTickers] = useState(false);
-  const [showBatchTagModal, setShowBatchTagModal] = useState(false);
-  const [batchTagging, setBatchTagging] = useState(false);
+  // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
   
   // 初始化日志系统
   const logger = useGlobalLogger();
@@ -308,11 +299,14 @@ const FilesPageInner: React.FC = () => {
   const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
   const [aiAnalysisExecution, setAiAnalysisExecution] = useState<TaskExecution | null>(null);
   const [modalSelectedTemplateId, setModalSelectedTemplateId] = useState<number | undefined>(undefined);
+  const [modalTemplateVariables, setModalTemplateVariables] = useState<Record<string, any>>({});
+  const [audioTemplateId, setAudioTemplateId] = useState<number | undefined>(undefined);
+  const [modalAudioTemplateVars, setModalAudioTemplateVars] = useState<Record<string, any>>({});
   
   // 新布局相关状态
   const [selectedExecutionForView, setSelectedExecutionForView] = useState<TaskExecution | null>(null);
   const [viewMode, setViewMode] = useState<'original' | 'content'>('original');
-  const [rightPanelView, setRightPanelView] = useState<'info' | 'analysis'>('analysis');
+  const [rightPanelView, setRightPanelView] = useState<'info' | 'analysis'>('info');
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [selectedFileForView, setSelectedFileForView] = useState<any>(null);
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
@@ -363,6 +357,22 @@ const FilesPageInner: React.FC = () => {
     setContentDetailData(null);
   }, [selectedExecutionForView?.id]);
 
+  // 获取 audio_analysis_v1 模板ID（供音频分析的可选参数编辑器使用）
+  useEffect(() => {
+    const fetchAudioTemplateId = async () => {
+      try {
+        const templates = await promptTemplateService.listTemplates({ search: 'audio_analysis_v1' });
+        const audioTemplate = templates.find(t => t.template_code === 'audio_analysis_v1');
+        if (audioTemplate) {
+          setAudioTemplateId(audioTemplate.id);
+        }
+      } catch (error) {
+        console.error('Failed to fetch audio_analysis_v1 template:', error);
+      }
+    };
+    fetchAudioTemplateId();
+  }, []);
+
 
   // 加载任务执行历史的函数 - 将在状态声明后重新定义
 
@@ -408,13 +418,6 @@ const FilesPageInner: React.FC = () => {
     setAnalysisMode('local_llm');
     setSelectedTemplateId(undefined);
     setTemplateVariables({});
-    
-    // 重置行业和股票选择
-    setSelectedSector('');
-    setSelectedIndustry('');
-    setSelectedTicker('');
-    setTickerSearchValue('');
-    setTickerOptions([]);
     
     // 重置处理参数为默认值
     setProcessingParams({
@@ -529,6 +532,13 @@ const FilesPageInner: React.FC = () => {
       } else {
         setTaskExecutions(executions);
         setExecutionsPage(1);
+        // 刷新 Basic Information：若当前选中的 execution 在新列表中，用最新数据更新
+        if (selectedExecutionForView) {
+          const freshExecution = executions.find((e: TaskExecution) => e.id === selectedExecutionForView.id);
+          if (freshExecution) {
+            setSelectedExecutionForView(freshExecution);
+          }
+        }
       }
       setHasMoreExecutions(executions.length === EXECUTIONS_PAGE_SIZE);
       
@@ -576,7 +586,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, selectedExecutionForView]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -724,72 +734,25 @@ const FilesPageInner: React.FC = () => {
     return unregister;
   }, [registerSourceListRefresh]);
 
+  // 仅在有“进行中”任务时定期刷新执行历史，避免完成后无意义的轮询（含 details/file-tags）
+  const hasExecutionInProgress = processing ||
+    audioAnalyzingIds.size > 0 ||
+    docAnalyzingIds.size > 0 ||
+    taskExecutions.some((e) => ['processing', 'analyzing', 'initializing'].includes(e.rc_agent_status || ''));
   useEffect(() => {
+    if (!hasExecutionInProgress) return;
     const refreshInterval = setInterval(() => {
-      // 使用 ref 中的最新函数，避免依赖项变化
-      loadTaskExecutionsFuncRef.current(false, true).catch(() => {
-        // 静默处理错误，避免在自动刷新时显示错误消息
-      });
-    }, 30000); // 每30秒自动刷新一次执行历史列表
-    
-    return () => {
-      clearInterval(refreshInterval);
-    };
-  }, []); // 空依赖数组，定时器只创建一次
+      loadTaskExecutionsFuncRef.current(false, true).catch(() => {});
+    }, 30000);
+    return () => clearInterval(refreshInterval);
+  }, [hasExecutionInProgress]);
 
-  // 加载行业分类数据
-  useEffect(() => {
-    const loadSectors = async () => {
-      try {
-        setLoadingSectors(true);
-        const sectorsData = await filesAPI.getSectors();
-        setSectors(sectorsData);
-      } catch (error) {
-        console.error('failed to load sectors:', error);
-        message.error('failed to load sectors');
-      } finally {
-        setLoadingSectors(false);
-      }
-    };
-
-    loadSectors();
+  // 稳定的回调，避免 ExecutionDetailsPanel 因父组件重渲染而重复请求 details/file-tags
+  const onExecutionRefresh = useCallback(() => {
+    loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
   }, []);
 
-  // 当选择行业后加载股票代码
-  useEffect(() => {
-    const loadTickers = async () => {
-      if (!selectedSector || !selectedIndustry) {
-        setTickerOptions([]);
-        return;
-      }
-
-      try {
-        setLoadingTickers(true);
-        const tickers = await filesAPI.searchTickers({
-          sector: selectedSector,
-          industry: selectedIndustry
-        });
-        setTickerOptions(tickers);
-      } catch (error) {
-        console.error('failed to load tickers:', error);
-        message.error('failed to load tickers');
-      } finally {
-        setLoadingTickers(false);
-      }
-    };
-
-    loadTickers();
-  }, [selectedSector, selectedIndustry]);
-
-  // 更新处理参数中的行业和股票信息
-  useEffect(() => {
-    setProcessingParams(prev => ({
-      ...prev,
-      sector: selectedSector,
-      industry: selectedIndustry,
-      ticker: selectedTicker
-    }));
-  }, [selectedSector, selectedIndustry, selectedTicker]);
+  // 行业和股票选择相关的useEffect已移除 - 改用自动打标签
 
   // 自动更新文件状态的函数
   const updateFileStatuses = useCallback(async (taskId: string) => {
@@ -1021,7 +984,7 @@ const FilesPageInner: React.FC = () => {
 
 
   // 音频AI分析 - 触发分析
-  const handleAnalyzeAudio = async (record: TaskExecution) => {
+  const handleAnalyzeAudio = async (record: TaskExecution, templateVariables?: Record<string, any>) => {
     const executionId = Number(record.id);
     const fileName = record.first_filename || record.task_name || 'Audio file';
     
@@ -1029,7 +992,15 @@ const FilesPageInner: React.FC = () => {
       setAudioAnalyzingIds(prev => new Set(prev).add(record.id));
       message.loading({ content: 'Submitting audio analysis task...', key: 'audioAnalyze', duration: 0 });
 
-      const result = await filesAPI.analyzeAudio({ execution_id: executionId });
+      // 过滤空值的 template_variables
+      const filteredVars = templateVariables
+        ? Object.fromEntries(Object.entries(templateVariables).filter(([_, v]) => v !== undefined && v !== ''))
+        : undefined;
+
+      const result = await filesAPI.analyzeAudio({
+        execution_id: executionId,
+        ...(filteredVars && Object.keys(filteredVars).length > 0 ? { template_variables: filteredVars } : {}),
+      });
 
       if (result.success && result.task_id) {
         message.loading({ content: 'AI analyzing audio...', key: 'audioAnalyze', duration: 0 });
@@ -1108,8 +1079,8 @@ const FilesPageInner: React.FC = () => {
     }
   };
 
-  // 文档AI分析 - 触发分析（需要指定模板ID）
-  const handleAnalyzeDocument = async (record: TaskExecution, templateId: number) => {
+  // 文档AI分析 - 触发分析（需要指定模板ID，可选 template_variables）
+  const handleAnalyzeDocument = async (record: TaskExecution, templateId: number, templateVariables?: Record<string, any>) => {
     const executionId = Number(record.id);
     const fileName = record.first_filename || record.task_name || 'Document';
     
@@ -1120,10 +1091,11 @@ const FilesPageInner: React.FC = () => {
       const result = await filesAPI.analyzeDocument({
         execution_id: executionId,
         template_id: templateId,
+        template_variables: templateVariables ?? {},
       });
 
       if (result.success && result.task_id) {
-        message.loading({ content: 'AI analyzing document...', key: 'docAnalyze', duration: 0 });
+        message.destroy('docAnalyze'); // 关闭 "Submitting..."，进度由 NavBar Processing Tasks 展示
         logger.logInfo(`Document analysis task submitted: ${result.task_id}`, 'doc-analysis');
 
         // 添加任务到全局进度显示
@@ -1482,27 +1454,9 @@ const FilesPageInner: React.FC = () => {
       
       setFiles([newFile]); // 直接设置为单个文件
       
-      // 如果用户已选择标签，自动为新上传的文件设置标签
-      if (selectedSector && selectedIndustry && newFile.fileId) {
-        try {
-          await filesAPI.batchCreateFileTags({
-            file_ids: [newFile.fileId],
-            sector: selectedSector,
-            industry: selectedIndustry,
-            ticker: selectedTicker || undefined
-          });
-          message.success('files uploaded successfully and tags set');
-          logger.logInfo(`set tags for files: ${selectedSector} - ${selectedIndustry}${selectedTicker ? ` - ${selectedTicker}` : ''}`, 'file-processing');
-        } catch (tagError: any) {
-          console.error('failed to set file tags:', tagError);
-          const tagErrorMessage = getErrorMessage(tagError, 'failed to set file tags');
-          message.warning(`files uploaded successfully, but tags setting failed: ${tagErrorMessage}`);
-          logger.logWarning(`failed to set file tags: ${tagErrorMessage}`, 'file-processing', tagError);
-        }
-      } else {
-        message.success('files uploaded successfully');
-        logger.logInfo('file uploaded successfully', 'file-processing');
-      }
+      // 文件上传成功，自动打标签会在文件处理完成后自动触发
+      message.success('files uploaded successfully');
+      logger.logInfo('file uploaded successfully', 'file-processing');
       
     } catch (error: any) {
       console.error('failed to upload file:', error);
@@ -1695,114 +1649,7 @@ const FilesPageInner: React.FC = () => {
       }, 1000); // 延迟1秒后刷新，确保状态已更新
   };
 
-  // 行业选择处理函数
-  const _handleSectorIndustryChange = (value: string[]) => {
-    if (value && value.length >= 2) {
-      setSelectedSector(value[0]);
-      setSelectedIndustry(value[1]);
-      
-      // 如果当前选择的ticker不属于新选择的sector/industry，则清空ticker选择
-      if (selectedTicker) {
-        const currentTicker = tickerOptions.find(t => t.value === selectedTicker);
-        if (currentTicker && (currentTicker.sector !== value[0] || currentTicker.industry !== value[1])) {
-          setSelectedTicker('');
-          setTickerSearchValue('');
-        }
-      }
-    } else {
-      setSelectedSector('');
-      setSelectedIndustry('');
-      setSelectedTicker('');
-      setTickerSearchValue('');
-    }
-  };
-
-  // 股票代码搜索处理函数
-  const _handleTickerSearch = async (searchValue: string) => {
-    setTickerSearchValue(searchValue);
-    
-    if (!searchValue.trim()) {
-      setTickerOptions([]);
-      return;
-    }
-
-    try {
-      setLoadingTickers(true);
-      // 搜索时不受sector/industry限制，允许全局搜索
-      const tickers = await filesAPI.searchTickers({
-        search: searchValue
-      });
-      setTickerOptions(tickers);
-    } catch (error) {
-      console.error('failed to search tickers:', error);
-      message.error('failed to search tickers');
-    } finally {
-      setLoadingTickers(false);
-    }
-  };
-
-  // 股票代码选择处理函数
-  const _handleTickerSelect = (value: string, option: any) => {
-    setSelectedTicker(value);
-    setTickerSearchValue(option.label);
-    
-    // 从tickerOptions中查找对应的ticker信息
-    const selectedTickerInfo = tickerOptions.find(ticker => ticker.value === value);
-    console.log('Selected ticker info:', selectedTickerInfo);
-    
-    if (selectedTickerInfo && selectedTickerInfo.sector && selectedTickerInfo.industry) {
-      console.log('Setting sector and industry:', selectedTickerInfo.sector, selectedTickerInfo.industry);
-      setSelectedSector(selectedTickerInfo.sector);
-      setSelectedIndustry(selectedTickerInfo.industry);
-      message.success(`automatically selected industry: ${selectedTickerInfo.sector} → ${selectedTickerInfo.industry}`);
-    } else {
-      console.log('No sector/industry info found for ticker:', value);
-    }
-  };
-
-  // 批量标签处理函数
-  const handleBatchTag = async () => {
-    try {
-      setBatchTagging(true);
-      
-      // 获取所有已上传文件的ID
-      const fileIds = files
-        .filter(f => f.fileId)
-        .map(f => f.fileId!)
-        .filter(id => id);
-      
-      if (fileIds.length === 0) {
-        message.warning('no files to set tags');
-        return;
-      }
-      
-      await filesAPI.batchCreateFileTags({
-        file_ids: fileIds,
-        sector: selectedSector,
-        industry: selectedIndustry,
-        ticker: selectedTicker || undefined
-      });
-      
-      // 更新本地文件状态
-      setFiles(prev => prev.map(f => ({
-        ...f,
-        tag: f.fileId ? {
-          sector: selectedSector,
-          industry: selectedIndustry,
-          ticker: selectedTicker || undefined
-        } : f.tag
-      })));
-      
-      message.success(`successfully set tags for ${fileIds.length} files`);
-      setShowBatchTagModal(false);
-      
-    } catch (error: any) {
-      console.error('failed to batch set tags:', error);
-      message.error(`failed to batch set tags: ${error.message || 'unknown error'}`);
-    } finally {
-      setBatchTagging(false);
-    }
-  };
+  // 手动标签相关函数已移除 - 改用自动打标签（content_tag_v1）
 
   // 获取当前界面状态
   const _getUIState = () => {
@@ -2241,9 +2088,12 @@ const FilesPageInner: React.FC = () => {
         const isProcessingDoc = record.rc_agent_status === 'processing' || 
                                 record.rc_agent_status === 'initializing' ||
                                 (record.first_task_id != null && record.rc_agent_status === 'uploaded');
+        // 允许分析的状态：uploaded（仅上传）、failed（可重试）、skipped（已处理未做AI）、completed（如处理完成但无报告）
         const _canAnalyzeDoc = !isAudioFile && !hasAnalysis && !isDocAnalyzing && !isProcessingDoc && (
           record.rc_agent_status === 'uploaded' ||
-          record.rc_agent_status === 'failed'
+          record.rc_agent_status === 'failed' ||
+          record.rc_agent_status === 'skipped' ||
+          record.rc_agent_status === 'completed'
         );
         
         return (
@@ -2388,9 +2238,12 @@ const FilesPageInner: React.FC = () => {
         const isProcessingDocModal = aiAnalysisExecution?.rc_agent_status === 'processing' || 
                                       aiAnalysisExecution?.rc_agent_status === 'initializing' ||
                                       (aiAnalysisExecution?.first_task_id != null && aiAnalysisExecution?.rc_agent_status === 'uploaded');
+        // 与右侧面板一致：uploaded、failed、skipped、completed 均显示模板与可选参数
         const canAnalyzeDocModal = !isAudioModal && aiAnalysisExecution && !isProcessingDocModal && (
           aiAnalysisExecution?.rc_agent_status === 'uploaded' ||
-          aiAnalysisExecution?.rc_agent_status === 'failed'
+          aiAnalysisExecution?.rc_agent_status === 'failed' ||
+          aiAnalysisExecution?.rc_agent_status === 'skipped' ||
+          aiAnalysisExecution?.rc_agent_status === 'completed'
         );
         
         const isAudioAnalyzingModal = aiAnalysisExecution ? audioAnalyzingIds.has(aiAnalysisExecution.id) : false;
@@ -2425,19 +2278,30 @@ const FilesPageInner: React.FC = () => {
                   No AI analysis report available for this execution.
                 </div>
                 {canAnalyzeAudioModal && aiAnalysisExecution && (
-                  <Button
-                    type="primary"
-                    icon={<SoundOutlined />}
-                    onClick={() => handleAnalyzeAudio(aiAnalysisExecution)}
-                    style={{
-                      height: '40px',
-                      paddingInline: '24px',
-                      fontSize: '14px',
-                      borderRadius: '8px',
-                    }}
-                  >
-                    Analyze Audio
-                  </Button>
+                  <div style={{ maxWidth: '420px', textAlign: 'center' }}>
+                    {audioTemplateId != null && (
+                      <div style={{ marginBottom: '16px', textAlign: 'left' }}>
+                        <TemplateVariablesEditor
+                          templateId={audioTemplateId}
+                          values={modalAudioTemplateVars}
+                          onChange={(values) => setModalAudioTemplateVars(values ?? {})}
+                        />
+                      </div>
+                    )}
+                    <Button
+                      type="primary"
+                      icon={<SoundOutlined />}
+                      onClick={() => handleAnalyzeAudio(aiAnalysisExecution, modalAudioTemplateVars)}
+                      style={{
+                        height: '40px',
+                        paddingInline: '24px',
+                        fontSize: '14px',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      Analyze Audio
+                    </Button>
+                  </div>
                 )}
                 {canAnalyzeDocModal && aiAnalysisExecution && (
                   <div style={{ maxWidth: '420px', marginTop: '20px', textAlign: 'center' }}>
@@ -2447,17 +2311,29 @@ const FilesPageInner: React.FC = () => {
                     <TemplateSelector
                       categoryCode="file_analysis"
                       value={modalSelectedTemplateId}
-                      onChange={(value) => setModalSelectedTemplateId(value)}
+                      onChange={(value) => {
+                        setModalSelectedTemplateId(value);
+                        setModalTemplateVariables({});
+                      }}
                       placeholder="Select analysis template"
                       style={{ marginBottom: '16px', textAlign: 'left' }}
                       showConfigWhenSelected={false}
                     />
+                    {modalSelectedTemplateId != null && (
+                      <div style={{ marginBottom: '16px', textAlign: 'left' }}>
+                        <TemplateVariablesEditor
+                          templateId={modalSelectedTemplateId}
+                          values={modalTemplateVariables}
+                          onChange={(values) => setModalTemplateVariables(values ?? {})}
+                        />
+                      </div>
+                    )}
                     <div style={{ marginTop: '16px' }}>
                       <Button
                         type="primary"
                         icon={<RobotOutlined />}
                         disabled={!modalSelectedTemplateId}
-                        onClick={() => modalSelectedTemplateId && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId)}
+                        onClick={() => modalSelectedTemplateId != null && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId, modalTemplateVariables)}
                         style={{
                           height: '40px',
                           paddingInline: '24px',
@@ -2968,6 +2844,8 @@ const FilesPageInner: React.FC = () => {
                               setContentDetailLoading(true);
                               const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
                               setContentDetailData(details);
+                              // 刷新 execution 列表以更新 Basic Information（processing/AI 完成后）
+                              loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
                             } catch (error) {
                               message.error('Failed to load content');
                             } finally {
@@ -3041,6 +2919,7 @@ const FilesPageInner: React.FC = () => {
                                 execution={selectedExecutionForView}
                                 themeColors={themeColors}
                                 getDisplayAgentName={getDisplayAgentName}
+                                onExecutionRefresh={onExecutionRefresh}
                               />
                             )
                           ) : (
@@ -3073,6 +2952,7 @@ const FilesPageInner: React.FC = () => {
                               }}
                               audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
                               docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
+                              audioTemplateId={audioTemplateId}
                             />
                           )}
                         </div>
@@ -3246,48 +3126,7 @@ const FilesPageInner: React.FC = () => {
           />
         </Modal>
 
-        {/* 批量标签设置模态框 */}
-        <Modal
-          title="Batch Tag Files"
-          open={showBatchTagModal}
-          onOk={handleBatchTag}
-          onCancel={() => setShowBatchTagModal(false)}
-          confirmLoading={batchTagging}
-          centered
-          styles={modalStyles}
-        >
-          <div>
-            <p>Will set tags for the following files:</p>
-            <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: themeColors.successBg, border: `1px solid ${themeColors.successBorder}`, borderRadius: '6px' }}>
-              <Space direction="vertical" size="small">
-                <div>
-                  <Text strong>Sector:</Text> <Tag color="blue">{selectedSector}</Tag>
-                </div>
-                <div>
-                  <Text strong>Industry:</Text> <Tag color="green">{selectedIndustry}</Tag>
-                </div>
-                {selectedTicker && (
-                  <div>
-                    <Text strong>Ticker:</Text> <Tag color="orange">{selectedTicker}</Tag>
-                  </div>
-                )}
-              </Space>
-            </div>
-            <div style={{ maxHeight: '200px', overflow: 'auto', border: `1px solid ${themeColors.cardBorder}`, borderRadius: 8, padding: '8px', backgroundColor: themeColors.codeBlockBg }}>
-              {files.filter(f => f.fileId).map(file => (
-                <div key={file.id} style={{ padding: '4px 0', display: 'flex', alignItems: 'center' }}>
-                  {getFileTypeIcon(file.type)}
-                  <Text style={{ marginLeft: 8 }}>{file.name}</Text>
-                </div>
-              ))}
-            </div>
-            {files.filter(f => f.fileId).length === 0 && (
-              <div style={{ textAlign: 'center', color: themeColors.textMuted, padding: '20px' }}>
-                No files available to set tags
-              </div>
-            )}
-          </div>
-        </Modal>
+        {/* 批量标签设置模态框已移除 - 改用自动打标签（content_tag_v1） */}
       </div>
   );
 };
@@ -3330,8 +3169,11 @@ const ExecutionDetailsPanel: React.FC<{
   execution: TaskExecution;
   themeColors: any;
   getDisplayAgentName: (name: string) => string;
-}> = ({ execution, themeColors, getDisplayAgentName }) => {
+  onExecutionRefresh?: () => void;  // 当检测到 processing/AI 完成时，供父组件刷新 Basic Information
+}> = ({ execution, themeColors, getDisplayAgentName, onExecutionRefresh }) => {
   const [fileId, setFileId] = useState<number | null>(null);
+  const [fileStatus, setFileStatus] = useState<string | null>(null);
+  const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
   const [fileTags, setFileTags] = useState<any>(null);
   const [tagsLoading, setTagsLoading] = useState(false);
   const [editTagsVisible, setEditTagsVisible] = useState(false);
@@ -3347,33 +3189,148 @@ const ExecutionDetailsPanel: React.FC<{
     completed: { color: 'cyan', text: 'ASR Complete' },
   };
 
-  const successRate = execution.files_processed > 0
-    ? `${((execution.files_processed / (execution.files_processed + execution.files_failed)) * 100).toFixed(1)}%`
-    : '0%';
   const statusItem = execution.rc_agent_status
     ? (statusConfig[execution.rc_agent_status] || { color: 'default', text: execution.rc_agent_status })
     : { color: 'default', text: 'Unknown' };
 
-  // 加载文件ID和标签信息
+  // 加载文件ID、状态和标签信息
+  const fileStatusRef = useRef<string | null>(null);
   useEffect(() => {
+    // 🔥 关键修复：切换 execution 时立即清空旧数据，避免显示上一个文件的 tags
+    setFileId(null);
+    setFileStatus(null);
+    fileStatusRef.current = null;
+    setFileErrorMessage(null);
+    setFileTags(null);
+    setTagsLoading(false);
+    
+    let pollInterval: NodeJS.Timeout | null = null;
+    let pollCount = 0;
+    const MAX_POLL_COUNT = 48; // 最多轮询4分钟（5秒 * 48 = 240秒）
+    let isMounted = true;
+    
     const loadFileAndTags = async () => {
+      if (!isMounted) return;
+      
       try {
         const details = await tasksAPI.getTaskExecutionDetails(execution.id);
         const files = details?.files || [];
         if (files.length > 0) {
-          const firstFileId = files[0].id;
-          setFileId(firstFileId);
+          const firstFile = files[0];
+          const firstFileId = firstFile.id;
+          const firstFileStatus = firstFile.status;
+          const firstFileError = firstFile.error_message;
           
-          // 加载标签
-          loadTags(firstFileId);
+          if (!isMounted) return;
+          
+          // 当 file processing 或 AI 分析完成时，通知父组件刷新 Basic Information
+          const prevStatus = fileStatusRef.current;
+          if (prevStatus === 'processing' && (firstFileStatus === 'completed' || firstFileStatus === 'failed')) {
+            onExecutionRefresh?.();
+          }
+          fileStatusRef.current = firstFileStatus;
+          
+          setFileId(firstFileId);
+          setFileStatus(firstFileStatus);
+          setFileErrorMessage(firstFileError || null);
+          
+          // 当文件处理完成时，尝试加载标签
+          if (firstFileStatus === 'completed') {
+            const tagsResponse = await fetch(`/api/file-tags/${firstFileId}`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+              }
+            });
+            
+            if (!isMounted) return;
+            
+            if (tagsResponse.ok) {
+              const tagsData = await tagsResponse.json();
+              setFileTags(tagsData);
+              setTagsLoading(false);
+              
+              // 标签已生成，停止轮询
+              if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+              }
+            } else if (tagsResponse.status === 404) {
+              // 标签还没生成，但文件已处理完成
+              setFileTags(null);
+              setTagsLoading(false);
+              
+              // 继续轮询等待标签生成（如果还没开始轮询）
+              if (!pollInterval && pollCount < MAX_POLL_COUNT) {
+                pollCount++;
+                setTimeout(() => {
+                  if (isMounted) {
+                    loadFileAndTags();
+                  }
+                }, 5000);
+              }
+            }
+          } else if (firstFileStatus === 'failed') {
+            // 🔥 文件处理失败，清空 tags 并停止轮询
+            setFileTags(null);
+            setTagsLoading(false);
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              pollInterval = null;
+            }
+          } else if (firstFileStatus === 'processing') {
+            // 文件正在处理中，继续轮询
+            setTagsLoading(true);
+            if (pollCount < MAX_POLL_COUNT) {
+              pollCount++;
+              setTimeout(() => {
+                if (isMounted) {
+                  loadFileAndTags();
+                }
+              }, 5000);
+            }
+          }
         }
       } catch (error) {
         console.error('Failed to load file details:', error);
+        if (isMounted) {
+          setTagsLoading(false);
+        }
       }
     };
     
     loadFileAndTags();
-  }, [execution.id]);
+    
+    // 清理函数：组件卸载时停止轮询
+    return () => {
+      isMounted = false;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [execution.id, onExecutionRefresh]);
+
+  // 当 rc_agent_status 为 processing/analyzing 时，轮询以在 AI 分析完成后刷新 Basic Information
+  useEffect(() => {
+    const isAiProcessing = execution.rc_agent_status === 'processing' || execution.rc_agent_status === 'analyzing';
+    if (!isAiProcessing) return;
+    let isMounted = true;
+    const pollRcAgent = async () => {
+      if (!isMounted) return;
+      try {
+        const fresh = await tasksAPI.getTaskExecution(execution.id);
+        if (!isMounted) return;
+        if (fresh.rc_agent_status === 'success' || fresh.rc_agent_status === 'failed') {
+          onExecutionRefresh?.();
+          return;
+        }
+        setTimeout(pollRcAgent, 5000);
+      } catch {
+        if (isMounted) setTimeout(pollRcAgent, 5000);
+      }
+    };
+    const t = setTimeout(pollRcAgent, 5000);
+    return () => { isMounted = false; clearTimeout(t); };
+  }, [execution.id, execution.rc_agent_status, onExecutionRefresh]);
 
   const loadTags = async (fid: number) => {
     setTagsLoading(true);
@@ -3442,6 +3399,9 @@ const ExecutionDetailsPanel: React.FC<{
     if (!fileId) return;
     
     try {
+      // 记录当前的updated_at，用于判断标签是否已更新
+      const previousUpdatedAt = fileTags?.updated_at;
+      
       const response = await fetch(`/api/file-tags/retag`, {
         method: 'POST',
         headers: {
@@ -3453,8 +3413,49 @@ const ExecutionDetailsPanel: React.FC<{
       
       if (response.ok) {
         message.success('Tagging task submitted, please wait...');
-        // 5秒后重新加载标签
-        setTimeout(() => loadTags(fileId), 5000);
+        setTagsLoading(true);
+        
+        // 轮询检查标签是否已更新
+        let pollCount = 0;
+        const MAX_POLL = 30; // 最多轮询30次
+        const POLL_INTERVAL = 3000; // 每3秒检查一次
+        
+        const pollForUpdatedTags = async () => {
+          pollCount++;
+          try {
+            const tagsResponse = await fetch(`/api/file-tags/${fileId}`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+              }
+            });
+            
+            if (tagsResponse.ok) {
+              const tagsData = await tagsResponse.json();
+              // 检查标签是否已更新（updated_at 变化说明重新打标签完成）
+              if (!previousUpdatedAt || tagsData.updated_at !== previousUpdatedAt) {
+                setFileTags(tagsData);
+                setTagsLoading(false);
+                message.success('Tags updated successfully');
+                return; // 标签已更新，停止轮询
+              }
+            }
+          } catch (error) {
+            console.error('Failed to poll tags:', error);
+          }
+          
+          // 未更新，继续轮询
+          if (pollCount < MAX_POLL) {
+            setTimeout(pollForUpdatedTags, POLL_INTERVAL);
+          } else {
+            // 超时，尝试最后加载一次
+            setTagsLoading(false);
+            loadTags(fileId);
+            message.info('Tagging may still be in progress, tags will update when ready');
+          }
+        };
+        
+        // 延迟3秒后开始轮询（给后端一些处理时间）
+        setTimeout(pollForUpdatedTags, POLL_INTERVAL);
       } else {
         message.error('Failed to submit tagging task');
       }
@@ -3481,9 +3482,6 @@ const ExecutionDetailsPanel: React.FC<{
             {execution.first_file_type ? <Tag color="blue">{execution.first_file_type.toUpperCase()}</Tag> : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="Time">{new Date(execution.created_at).toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="Number of Files">{execution.files_processed}</Descriptions.Item>
-          <Descriptions.Item label="Number of Failed Files">{execution.files_failed}</Descriptions.Item>
-          <Descriptions.Item label="Success Rate">{successRate}</Descriptions.Item>
           <Descriptions.Item label="Processing Time">{execution.total_time.toFixed(2)}秒</Descriptions.Item>
           <Descriptions.Item label="File Processing Time">{execution.file_processing_time.toFixed(2)}秒</Descriptions.Item>
           <Descriptions.Item label="RC Agent Processing Time">{execution.ai_processing_time.toFixed(2)}秒</Descriptions.Item>
@@ -3544,17 +3542,41 @@ const ExecutionDetailsPanel: React.FC<{
         {!fileTags ? (
           <div style={{ textAlign: 'center', padding: '20px', color: themeColors.textSecondary }}>
             <TagsOutlined style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }} />
-            <div>No tags available</div>
-            {fileId && (
-              <Button 
-                type="primary" 
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={handleRetagFile}
-                style={{ marginTop: 12 }}
-              >
-                Generate Tags
-              </Button>
+            
+            {/* 根据文件状态显示不同的提示 */}
+            {fileStatus === 'processing' ? (
+              <>
+                <div style={{ marginBottom: 8 }}>Document is being processed...</div>
+                <div style={{ fontSize: 12, color: themeColors.textMuted }}>
+                  Tags will be generated automatically after processing completes
+                </div>
+                <LoadingOutlined style={{ fontSize: 20, marginTop: 12, color: '#1890ff' }} />
+              </>
+            ) : fileStatus === 'failed' ? (
+              <>
+                <div style={{ marginBottom: 8, color: '#ff4d4f', fontWeight: 'bold' }}>
+                  Document processing failed
+                </div>
+                {fileErrorMessage && (
+                  <div style={{ 
+                    marginBottom: 12, 
+                    fontSize: 12, 
+                    color: '#ff7875',
+                    padding: '8px 12px',
+                    background: 'rgba(255, 77, 79, 0.1)',
+                    borderRadius: 4,
+                    border: '1px solid rgba(255, 77, 79, 0.2)'
+                  }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: 4 }}>Error Details:</div>
+                    <div style={{ wordBreak: 'break-word' }}>{fileErrorMessage}</div>
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: themeColors.textMuted }}>
+                  Cannot generate tags for failed documents
+                </div>
+              </>
+            ) : (
+              <div>No tags available</div>
             )}
           </div>
         ) : (
@@ -3566,10 +3588,20 @@ const ExecutionDetailsPanel: React.FC<{
             contentStyle={{ color: themeColors.text }}
           >
             <Descriptions.Item label="Sector">
-              <Tag color="blue" style={{ fontSize: 13 }}>{fileTags.sector}</Tag>
+              <Space size={4} wrap>
+                <Tag color="blue" style={{ fontSize: 13 }}>{fileTags.sector}</Tag>
+                {fileTags.sector_en && (
+                  <Tag color="default" style={{ fontSize: 12 }}>{fileTags.sector_en}</Tag>
+                )}
+              </Space>
             </Descriptions.Item>
             <Descriptions.Item label="Industry">
-              <Tag color="cyan" style={{ fontSize: 13 }}>{fileTags.industry}</Tag>
+              <Space size={4} wrap>
+                <Tag color="cyan" style={{ fontSize: 13 }}>{fileTags.industry}</Tag>
+                {fileTags.industry_en && (
+                  <Tag color="default" style={{ fontSize: 12 }}>{fileTags.industry_en}</Tag>
+                )}
+              </Space>
             </Descriptions.Item>
             {fileTags.tickers && fileTags.tickers.length > 0 && (
               <Descriptions.Item label="Stock Tickers">
@@ -3577,6 +3609,17 @@ const ExecutionDetailsPanel: React.FC<{
                   {fileTags.tickers.map((ticker: string) => (
                     <Tag key={ticker} color="green" style={{ fontSize: 12 }}>
                       {ticker}
+                    </Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {fileTags.concepts && fileTags.concepts.length > 0 && (
+              <Descriptions.Item label="Concepts">
+                <Space size={[4, 4]} wrap>
+                  {fileTags.concepts.map((concept: string) => (
+                    <Tag key={concept} color="orange" style={{ fontSize: 12 }}>
+                      {concept}
                     </Tag>
                   ))}
                 </Space>
@@ -3701,15 +3744,89 @@ const ContentMarkdownView: React.FC<{
   onContentSaved?: (fileId: number, newContent: string) => void;
   selectedFileForView: any;
 }> = ({ execution, themeColors, isDark, contentDetailData, contentDetailLoading, onLoadContent, onContentSaved, selectedFileForView }) => {
+  const { addTask } = useFileProcessing();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [fileStatus, setFileStatus] = useState<string | null>(null);
+  
+  // Re-parse 相关状态
+  const [reparseModalVisible, setReparseModalVisible] = useState(false);
+  const [reparseParams, setReparseParams] = useState<ProcessingParams>({
+    language: ['ch_sim', 'en'],
+    fast_mode: false,
+    disable_ocr: false,
+    max_pages: 10,
+    target_pages: '',
+    skip_diagonal_text: false,
+    skip_table_extraction: false,
+    extract_images: false,
+    use_vendor_multimodal_model: false,
+    vendor_multimodal_api_key: '',
+    polling_interval: 10,
+    use_ai_agent: false,
+    llamaindex_api_key: '',
+    ai_agent_server_url: ''
+  });
+  const [reparsing, setReparsing] = useState(false);
 
+  // 初始加载内容
   useEffect(() => {
     if (!contentDetailData || contentDetailData.execution.id !== execution.id) {
       onLoadContent();
     }
   }, [execution.id, contentDetailData, onLoadContent]);
+
+  // 监控文件状态并自动刷新
+  useEffect(() => {
+    let pollCount = 0;
+    const MAX_POLL_COUNT = 120; // 最多轮询10分钟（5秒 * 120 = 600秒）
+    let isMounted = true;
+    let previousStatus: string | null = null;
+    
+    const checkStatusAndRefresh = async () => {
+      if (!isMounted) return;
+      
+      try {
+        const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+        const files = details?.files || [];
+        
+        if (!isMounted) return;
+        
+        if (files.length > 0) {
+          const firstFile = files[0];
+          const currentStatus = firstFile.status;
+          
+          // 如果状态从processing变为completed，刷新内容
+          if (previousStatus === 'processing' && currentStatus === 'completed') {
+            await onLoadContent(); // 刷新Markdown内容
+          }
+          
+          setFileStatus(currentStatus);
+          previousStatus = currentStatus;
+          
+          // 如果文件还在处理中，继续轮询
+          if (currentStatus === 'processing' && pollCount < MAX_POLL_COUNT) {
+            pollCount++;
+            setTimeout(() => {
+              if (isMounted) {
+                checkStatusAndRefresh();
+              }
+            }, 5000);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check file status:', error);
+      }
+    };
+    
+    checkStatusAndRefresh();
+    
+    // 清理函数
+    return () => {
+      isMounted = false;
+    };
+  }, [execution.id, onLoadContent]);
 
   if (contentDetailLoading) {
     return (
@@ -3761,18 +3878,229 @@ const ContentMarkdownView: React.FC<{
     }
   };
 
+  const handleReparse = async () => {
+    if (!fileToShow) {
+      message.error('No file selected');
+      return;
+    }
+
+    try {
+      setReparsing(true);
+      const response = await filesAPI.reparseDocument({
+        file_id: fileToShow.id,
+        params: reparseParams
+      });
+
+      message.success(`Re-parse task submitted: ${response.task_id}`);
+      setReparseModalVisible(false);
+
+      // 🔥 添加任务到全局进度显示（NavBar 的 Processing Tasks）
+      addTask(response.task_id, response.filename || fileToShow.filename, 'document');
+
+      // 开始轮询任务状态
+      const pollInterval = setInterval(async () => {
+        try {
+          const status = await filesAPI.getReparseStatus(response.task_id);
+          
+          if (status.status === 'completed') {
+            clearInterval(pollInterval);
+            message.success('Document re-parsed successfully!');
+            setReparsing(false);
+            // 刷新内容
+            await onLoadContent();
+          } else if (status.status === 'failed') {
+            clearInterval(pollInterval);
+            message.error(`Re-parse failed: ${status.message}`);
+            setReparsing(false);
+          }
+        } catch (error) {
+          console.error('Failed to check reparse status:', error);
+        }
+      }, 5000);
+
+      // 10分钟后停止轮询
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setReparsing(false);
+      }, 600000);
+
+    } catch (error: any) {
+      message.error(getErrorMessage(error, 'Failed to submit re-parse task'));
+      setReparsing(false);
+    }
+  };
+
+  // Re-parse Modal
+  const reparseModalContent = (
+    <Modal
+      title="Re-parse Document - Configure Parameters"
+      open={reparseModalVisible}
+      onCancel={() => setReparseModalVisible(false)}
+      onOk={handleReparse}
+      okText="Start Re-parsing"
+      cancelText="Cancel"
+      confirmLoading={reparsing}
+      width={700}
+      styles={{
+        body: { maxHeight: '70vh', overflowY: 'auto' }
+      }}
+    >
+      <Divider style={{ margin: '12px 0' }} />
+      <Form layout="vertical">
+        <Row gutter={[12, 12]}>
+          <Col span={12}>
+            <Form.Item label="Language Settings">
+              <Select
+                mode="multiple"
+                value={reparseParams.language}
+                onChange={(value) => setReparseParams(prev => ({ ...prev, language: value }))}
+                placeholder="Select languages"
+              >
+                <Option value="ch_sim">Simplified Chinese</Option>
+                <Option value="en">English</Option>
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="Max Pages">
+              <InputNumber
+                value={reparseParams.max_pages}
+                onChange={(value) => setReparseParams(prev => ({ ...prev, max_pages: value || 10 }))}
+                min={1}
+                max={100}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={[12, 12]}>
+          <Col span={12}>
+            <Form.Item label="Polling Interval (seconds)">
+              <InputNumber
+                value={reparseParams.polling_interval}
+                onChange={(value) => setReparseParams(prev => ({ ...prev, polling_interval: value || 10 }))}
+                min={5}
+                max={60}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="Target Pages">
+              <Input
+                value={reparseParams.target_pages}
+                onChange={(e) => setReparseParams(prev => ({ ...prev, target_pages: e.target.value }))}
+                placeholder="e.g., 1-5, 7, 10"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Divider style={{ margin: '12px 0' }} />
+
+        <Row gutter={[12, 12]}>
+          <Col span={12}>
+            <Form.Item label="Fast Mode">
+              <Switch
+                size="small"
+                checked={reparseParams.fast_mode}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, fast_mode: checked }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="Disable OCR">
+              <Switch
+                size="small"
+                checked={reparseParams.disable_ocr}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, disable_ocr: checked }))}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={[12, 12]}>
+          <Col span={8}>
+            <Form.Item label="Skip Diagonal Text">
+              <Switch
+                size="small"
+                checked={reparseParams.skip_diagonal_text}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_diagonal_text: checked }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="Skip Table Extraction">
+              <Switch
+                size="small"
+                checked={reparseParams.skip_table_extraction}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_table_extraction: checked }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="Extract Images">
+              <Switch
+                size="small"
+                checked={reparseParams.extract_images}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, extract_images: checked }))}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={[12, 12]}>
+          <Col span={12}>
+            <Form.Item label="Use Multimodal Model">
+              <Switch
+                size="small"
+                checked={reparseParams.use_vendor_multimodal_model}
+                onChange={(checked) => setReparseParams(prev => ({ ...prev, use_vendor_multimodal_model: checked }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="Multimodal API Key">
+              <Input
+                value={reparseParams.vendor_multimodal_api_key}
+                onChange={(e) => setReparseParams(prev => ({ ...prev, vendor_multimodal_api_key: e.target.value }))}
+                placeholder="Enter API key"
+                disabled={!reparseParams.use_vendor_multimodal_model}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={[12, 12]}>
+          <Col span={24}>
+            <Form.Item label="LlamaIndex API Key">
+              <Input.Password
+                value={reparseParams.llamaindex_api_key}
+                onChange={(e) => setReparseParams(prev => ({ ...prev, llamaindex_api_key: e.target.value }))}
+                placeholder="Enter LlamaIndex API key (optional if set in backend)"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Form>
+    </Modal>
+  );
+
   if (isEditing) {
     return (
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '16px 20px',
-          color: themeColors.text,
-        }}
-      >
+      <>
+        {reparseModalContent}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '16px 20px',
+            color: themeColors.text,
+          }}
+        >
         <Input.TextArea
           value={editContent}
           onChange={(e) => setEditContent(e.target.value)}
@@ -3797,12 +4125,15 @@ const ContentMarkdownView: React.FC<{
           </Button>
         </Space>
       </div>
+      </>
     );
   }
 
   if (content == null || content === '') {
     return (
-      <div style={{
+      <>
+        {reparseModalContent}
+        <div style={{
         flex: 1,
         minHeight: 0,
         display: 'flex',
@@ -3821,27 +4152,48 @@ const ContentMarkdownView: React.FC<{
           color: themeColors.textMuted,
         }}>
           <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px' }} />
-          <div style={{ marginBottom: '20px', fontSize: '16px' }}>No extracted content for {fileToShow.filename}</div>
-          <Button
-            type="primary"
-            icon={<EditOutlined />}
-            onClick={handleStartEdit}
-            style={{
-              height: '40px',
-              paddingInline: '24px',
-              fontSize: '14px',
-              borderRadius: '8px',
-            }}
-          >
-            Edit Markdown
-          </Button>
+          
+          {fileStatus === 'processing' ? (
+            <>
+              <div style={{ marginBottom: '12px', fontSize: '16px' }}>Document is being processed...</div>
+              <div style={{ fontSize: '13px', color: themeColors.textSecondary, marginBottom: '16px' }}>
+                Content will be available after document parsing completes
+              </div>
+              <LoadingOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+            </>
+          ) : (
+            <>
+              <div style={{ marginBottom: '20px', fontSize: '16px' }}>No extracted content for {fileToShow.filename}</div>
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                onClick={() => setReparseModalVisible(true)}
+                disabled={fileStatus === 'processing'}
+                style={{
+                  height: '40px',
+                  paddingInline: '24px',
+                  fontSize: '14px',
+                  borderRadius: '8px',
+                }}
+              >
+                Re-parse Document
+              </Button>
+            </>
+          )}
         </div>
       </div>
+      </>
     );
   }
 
+  // 检查是否可以编辑
+  const isProcessing = fileStatus === 'processing';
+  const canEdit = !isProcessing;
+
   return (
-    <div
+    <>
+      {reparseModalContent}
+      <div
       className="files-detail-content-markdown"
       style={{
         flex: 1,
@@ -3851,8 +4203,22 @@ const ContentMarkdownView: React.FC<{
         color: themeColors.text,
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, alignItems: 'center', gap: 8 }}>
+        {isProcessing && (
+          <div style={{ fontSize: '12px', color: themeColors.textSecondary, marginRight: 'auto' }}>
+            <LoadingOutlined style={{ marginRight: 6 }} />
+            Document processing... (Edit disabled)
+          </div>
+        )}
+        <Button 
+          type="primary" 
+          ghost 
+          size="small" 
+          icon={<EditOutlined />} 
+          onClick={handleStartEdit}
+          disabled={!canEdit}
+          title={!canEdit ? 'Cannot edit while document is being processed' : 'Edit markdown content'}
+        >
           Edit
         </Button>
       </div>
@@ -3861,6 +4227,7 @@ const ContentMarkdownView: React.FC<{
         variant={isDark ? 'dark' : 'light'}
       />
     </div>
+    </>
   );
 };
 
@@ -3992,8 +4359,8 @@ const OriginalContentView: React.FC<{
                   maxWidth: '500px'
                 }}>
                   ⚠️ PDF 无法在浏览器内预览<br/>
-                  <small>（使用 OSS 默认域名会强制下载文件）</small><br/>
-                  <small style={{ color: '#999' }}>如需浏览器预览，请联系管理员配置自定义域名</small>
+                  <small>（中国大陆 OSS 默认域名暂不支持在线预览，会强制下载）</small><br/>
+                  <small style={{ color: '#999' }}>如需预览，需配置已备案的自定义域名</small>
                 </div>
                 <Button
                   type="primary"
@@ -4591,16 +4958,24 @@ const AIAnalysisView: React.FC<{
   onLoadAnalysis: () => Promise<void>;
   onDownloadPdf?: () => void;
   pdfDownloading?: boolean;
-  onAnalyzeAudio?: (record: TaskExecution) => void;
-  onAnalyzeDocument?: (record: TaskExecution, templateId: number) => void;
+  onAnalyzeAudio?: (record: TaskExecution, templateVariables?: Record<string, any>) => void;
+  onAnalyzeDocument?: (record: TaskExecution, templateId: number, templateVariables?: Record<string, any>) => void;
   onAnalysisSaved?: (newContent: string) => void;
   audioAnalyzing?: boolean;
   docAnalyzing?: boolean;
-}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, onAnalysisSaved, audioAnalyzing, docAnalyzing }) => {
+  audioTemplateId?: number;
+}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, onAnalysisSaved, audioAnalyzing, docAnalyzing, audioTemplateId }) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
+  const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
+  const [audioTemplateVars, setAudioTemplateVars] = useState<Record<string, any>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // 切换模板时清空可选参数，避免沿用上一模板的值
+  useEffect(() => {
+    setTemplateVariables({});
+  }, [selectedTemplateId]);
 
   const handleStartEdit = () => {
     setEditContent(aiAnalysisData?.execution?.final_report ?? '');
@@ -4681,13 +5056,16 @@ const AIAnalysisView: React.FC<{
     // 文档分析：需要区分"仅上传"和"正在处理"
     // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
     // 2. 如果rc_agent_status为failed，允许重新分析
-    // 3. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
+    // 3. skipped/completed 表示已处理但未做AI或无报告，也应显示模板与可选参数
+    // 4. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
     const isProcessingDoc = execution.rc_agent_status === 'processing' || 
                             execution.rc_agent_status === 'initializing' ||
                             (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
     const canAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && (
       execution.rc_agent_status === 'uploaded' ||
-      execution.rc_agent_status === 'failed'
+      execution.rc_agent_status === 'failed' ||
+      execution.rc_agent_status === 'skipped' ||
+      execution.rc_agent_status === 'completed'
     );
 
     return (
@@ -4703,19 +5081,30 @@ const AIAnalysisView: React.FC<{
           <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
 
           {canAnalyzeAudio && (
-            <Button
-              type="primary"
-              icon={<SoundOutlined />}
-              onClick={() => onAnalyzeAudio(execution)}
-              style={{
-                height: '40px',
-                paddingInline: '24px',
-                fontSize: '14px',
-                borderRadius: '8px',
-              }}
-            >
-              Analyze Audio
-            </Button>
+            <div style={{ maxWidth: '420px', textAlign: 'center' }}>
+              {audioTemplateId != null && (
+                <div style={{ marginBottom: '16px', textAlign: 'left' }}>
+                  <TemplateVariablesEditor
+                    templateId={audioTemplateId}
+                    values={audioTemplateVars}
+                    onChange={(values) => setAudioTemplateVars(values ?? {})}
+                  />
+                </div>
+              )}
+              <Button
+                type="primary"
+                icon={<SoundOutlined />}
+                onClick={() => onAnalyzeAudio(execution, audioTemplateVars)}
+                style={{
+                  height: '40px',
+                  paddingInline: '24px',
+                  fontSize: '14px',
+                  borderRadius: '8px',
+                }}
+              >
+                Analyze Audio
+              </Button>
+            </div>
           )}
           {canAnalyzeDoc && (
             <div style={{ maxWidth: '420px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'center' }}>
@@ -4730,12 +5119,21 @@ const AIAnalysisView: React.FC<{
                 style={{ marginBottom: '16px', textAlign: 'left' }}
                 showConfigWhenSelected={false}
               />
+              {selectedTemplateId != null && (
+                <div style={{ marginBottom: '16px', textAlign: 'left' }}>
+                  <TemplateVariablesEditor
+                    templateId={selectedTemplateId}
+                    values={templateVariables}
+                    onChange={(values) => setTemplateVariables(values ?? {})}
+                  />
+                </div>
+              )}
               <div style={{ marginTop: '16px' }}>
                 <Button
                   type="primary"
                   icon={<RobotOutlined />}
                   disabled={!selectedTemplateId}
-                  onClick={() => selectedTemplateId && onAnalyzeDocument(execution, selectedTemplateId)}
+                  onClick={() => selectedTemplateId != null && onAnalyzeDocument(execution, selectedTemplateId, templateVariables)}
                   style={{
                     height: '40px',
                     paddingInline: '24px',

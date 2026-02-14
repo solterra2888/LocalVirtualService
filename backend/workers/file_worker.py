@@ -48,6 +48,10 @@ class FileProcessingWorker:
         
         # 是否停止标志
         self.should_stop = False
+        
+        # 已存在的数据库记录ID（用于上传完成后立即创建记录的场景）
+        self.existing_processing_stats_id: Optional[int] = None
+        self.existing_file_detail_id: Optional[int] = None
 
     async def _progress_ticker(self, progress_ref: List[float], max_pct: float, interval: float = 6, increment: float = 8):
         """在长时间等待（如文档解析）期间缓慢增加进度显示，避免长时间停在 10%。"""
@@ -346,14 +350,6 @@ class FileProcessingWorker:
                         # 准备模板变量
                         template_variables = params.get('template_variables', {})
                         
-                        # 如果有标签信息，添加到模板变量中
-                        if params.get('sector'):
-                            template_variables['sector'] = params.get('sector', '')
-                        if params.get('industry'):
-                            template_variables['industry'] = params.get('industry', '')
-                        if params.get('ticker'):
-                            template_variables['ticker'] = params.get('ticker', '')
-                        
                         # 调用本地LLM分析服务
                         final_report, file_ai_times = await llm_analysis_service.process_all_contents(
                             successful_results,
@@ -513,6 +509,8 @@ class FileProcessingWorker:
             )
             
             # 提取模型信息（从第一个文件的model_usage中）
+            # 只记录实际的 LLM 模型和提供商，不将 "Dify Agent" 等平台名作为 Analysis Model
+            # （Agent Name 已单独展示 RC Agent 名称，"Analysis Model" 应显示底层模型如 gpt-4、claude 等）
             llm_model = None
             llm_provider = None
             if file_ai_times:
@@ -520,14 +518,9 @@ class FileProcessingWorker:
                     model_usage_list = file_time.get('model_usage', [])
                     if model_usage_list and len(model_usage_list) > 0:
                         llm_model = model_usage_list[0].get('model_name')
-                        # 如果是本地LLM分析，provider信息在file_time中
+                        # 本地 LLM 时 provider 在 file_time 中；远程 Agent 时 Dify 可能通过 model_usage 返回
                         llm_provider = file_time.get('provider')
                         break
-            
-            # 如果是远程Agent模式，尝试从params中获取分析模式信息
-            analysis_mode = params.get('analysis_mode', 'remote_agent')
-            if analysis_mode == 'remote_agent':
-                llm_provider = 'Dify Agent'
             
             # 准备上传参数（转换为JSON字符串）
             upload_params = json.dumps({
@@ -536,10 +529,13 @@ class FileProcessingWorker:
                 "processing_params": params
             })
             
-            # 🔍 查找是否已存在 uploaded/processing 状态的记录（通过 original_file_path 匹配）
-            processing_stats_id = None
-            if successful_results:
-                # 获取第一个文件的路径来查找对应的 uploaded/processing 记录
+            # 🔍 优先使用预先创建的记录ID，否则查找已存在的记录
+            processing_stats_id = self.existing_processing_stats_id
+            
+            if processing_stats_id:
+                self.update_status(log_message=f"使用预创建的处理记录(ID: {processing_stats_id})，正在更新...")
+            elif successful_results:
+                # 如果没有预创建的ID，尝试通过 original_file_path 查找
                 first_file_path = successful_results[0].get('original_file')
                 if first_file_path:
                     cursor.execute("""
@@ -595,12 +591,6 @@ class FileProcessingWorker:
                     processing_stats_id
                 ))
                 
-                # 删除旧的 file_processing_details 记录（状态为 uploaded 或 processing 的）
-                cursor.execute("""
-                DELETE FROM file_processing_details
-                WHERE processing_stats_id = %s AND status IN ('uploaded', 'processing')
-                """, (processing_stats_id,))
-                
                 self.update_status(log_message="已更新现有处理记录")
             else:
                 # ➕ 如果没有找到已有记录，创建新记录
@@ -633,78 +623,9 @@ class FileProcessingWorker:
                 processing_stats_id = cursor.fetchone()[0]
                 self.update_status(log_message="已创建新的处理记录")
             
-            # 插入文件处理详情
+            # 保存或更新文件处理详情
             for result in successful_results:
                 original_file_path = result['original_file']
-                
-                # 🔧 如果是 OSS 文件，需要特殊处理文件信息
-                storage_type = 'local'
-                oss_bucket = None
-                
-                if self._is_oss_object_key(original_file_path):
-                    storage_type = 'oss'
-                    
-                    # OSS 文件：从数据库查询已有的文件信息（必须查询，以保留原始文件名）
-                    cursor.execute("""
-                        SELECT file_type, file_size_mb, filename, oss_bucket
-                        FROM file_processing_details
-                        WHERE original_file_path = %s
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    """, (original_file_path,))
-                    existing_file_info = cursor.fetchone()
-                    
-                    if existing_file_info:
-                        # 使用已有的文件信息（保留原始文件名）
-                        file_info = {
-                            'file_type': existing_file_info[0],
-                            'file_size_mb': existing_file_info[1],
-                            'file_name': existing_file_info[2]  # 原始文件名，不带时间戳前缀
-                        }
-                        oss_bucket = existing_file_info[3]
-                        self.update_status(log_message=f"使用原始文件名: {existing_file_info[2]}")
-                    else:
-                        # 如果找不到已有记录，从 OSS object_name 中提取原始文件名
-                        # OSS object_name 格式：documents/admin/2026-02-12/aff8da10_20260212_110425_原始文件名.pdf
-                        # 需要去掉前缀：aff8da10_20260212_110425_
-                        oss_file_name = os.path.basename(original_file_path)
-                        
-                        # 尝试提取原始文件名（去掉时间戳前缀）
-                        # 格式：{uuid}_{timestamp}_{原始文件名}
-                        import re
-                        # 匹配模式：8位hex_日期时间_文件名
-                        match = re.match(r'^[0-9a-f]{8}_\d{8}_\d{6}_(.+)$', oss_file_name)
-                        if match:
-                            file_name = match.group(1)  # 提取原始文件名
-                            self.update_status(log_message=f"从 OSS 路径提取原始文件名: {file_name}")
-                        else:
-                            # 如果不匹配模式，直接使用文件名
-                            file_name = oss_file_name
-                            self.update_status(log_message=f"⚠️ 无法提取原始文件名，使用: {file_name}")
-                        
-                        file_ext = os.path.splitext(file_name)[1].lower()
-                        
-                        # 根据扩展名推断文件类型
-                        ext_to_type = {
-                            '.pdf': 'pdf',
-                            '.docx': 'word', '.doc': 'word',
-                            '.xlsx': 'excel', '.xls': 'excel',
-                            '.csv': 'csv',
-                            '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image', '.bmp': 'image'
-                        }
-                        file_type = ext_to_type.get(file_ext, 'other')
-                        
-                        file_info = {
-                            'file_name': file_name,  # 原始文件名（已去掉前缀）
-                            'file_type': file_type,
-                            'file_size_mb': 0  # OSS 文件大小未知，使用 0
-                        }
-                        
-                        # 从环境变量获取默认的 OSS bucket
-                        oss_bucket = os.getenv('OSS_BUCKET_NAME')
-                else:
-                    # 本地文件：使用 file_processor 获取文件信息
-                    file_info = self.file_processor.get_file_info(original_file_path)
                 
                 # 查找对应的AI时间信息
                 ai_info = None
@@ -714,94 +635,194 @@ class FileProcessingWorker:
                         None
                     )
                 
-                cursor.execute("""
-                INSERT INTO file_processing_details 
-                (processing_stats_id, filename, file_type, file_size_mb, 
-                 processing_time, ai_time, content_length, status, 
-                 total_tokens, cost, content, created_at, task_id, original_file_path,
-                 file_storage_type, oss_bucket)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """, (
-                    processing_stats_id,
-                    file_info['file_name'],
-                    file_info['file_type'],
-                    file_info['file_size_mb'],
-                    result.get('processing_time', 0),
-                    ai_info.get('ai_time', 0) if ai_info else 0,
-                    len(result.get('content', '')),
-                    'completed',
-                    ai_info.get('total_tokens', 0) if ai_info else 0,
-                    ai_info.get('total_price', 0) if ai_info else 0,
-                    result.get('content', ''),
-                    datetime.now(),
-                    self.task_id,
-                    result['original_file'],  # 保存原始文件路径（OSS object_name 或本地路径）
-                    storage_type,  # 新增：存储类型（'oss' 或 'local'）
-                    oss_bucket  # 新增：OSS bucket 名称
-                ))
-                
-                # 获取插入的文件ID
-                file_processing_id = cursor.fetchone()[0]
-                
-                # 如果处理参数中包含标签信息，自动设置标签
-                if (hasattr(self, 'params') and self.params and 
-                    self.params.get('sector') and self.params.get('industry')):
-                    try:
+                # 🔥 如果有预创建的 file_detail_id，则更新该记录
+                if self.existing_file_detail_id:
+                    cursor.execute("""
+                    UPDATE file_processing_details
+                    SET processing_time = %s,
+                        ai_time = %s,
+                        content_length = %s,
+                        status = %s,
+                        total_tokens = %s,
+                        cost = %s,
+                        content = %s
+                    WHERE id = %s
+                    RETURNING id
+                    """, (
+                        result.get('processing_time', 0),
+                        ai_info.get('ai_time', 0) if ai_info else 0,
+                        len(result.get('content', '')),
+                        'completed',
+                        ai_info.get('total_tokens', 0) if ai_info else 0,
+                        ai_info.get('total_price', 0) if ai_info else 0,
+                        result.get('content', ''),
+                        self.existing_file_detail_id
+                    ))
+                    
+                    file_processing_id = cursor.fetchone()[0]
+                    self.update_status(log_message=f"已更新文件处理记录 (ID: {file_processing_id})")
+                else:
+                    # 否则，按原逻辑插入新记录
+                    # 🔧 如果是 OSS 文件，需要特殊处理文件信息
+                    storage_type = 'local'
+                    oss_bucket = None
+                    
+                    if self._is_oss_object_key(original_file_path):
+                        storage_type = 'oss'
+                        
+                        # OSS 文件：从数据库查询已有的文件信息（保留原始文件名）
                         cursor.execute("""
-                        INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """, (
-                            file_processing_id,
-                            self.params.get('sector'),
-                            self.params.get('industry'),
-                            self.params.get('ticker'),
-                            getattr(self, 'user_id', None)  # 如果有用户ID
-                        ))
-                        print(f"✅ 已为文件 {file_info['file_name']} 设置标签: {self.params.get('sector')} -> {self.params.get('industry')}")
-                    except Exception as tag_error:
-                        print(f"⚠️ 为文件 {file_info['file_name']} 设置标签失败: {str(tag_error)}")
-                        # 标签设置失败不应该影响文件处理
-            
-            # 插入失败文件的记录
-            for failed_file in failed_files:
-                try:
-                    file_info = self.file_processor.get_file_info(failed_file['file_path'])
+                            SELECT file_type, file_size_mb, filename, oss_bucket
+                            FROM file_processing_details
+                            WHERE original_file_path = %s
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, (original_file_path,))
+                        existing_file_info = cursor.fetchone()
+                        
+                        if existing_file_info:
+                            # 使用已有的文件信息（保留原始文件名）
+                            file_info = {
+                                'file_type': existing_file_info[0],
+                                'file_size_mb': existing_file_info[1],
+                                'file_name': existing_file_info[2]
+                            }
+                            oss_bucket = existing_file_info[3]
+                            self.update_status(log_message=f"使用原始文件名: {existing_file_info[2]}")
+                        else:
+                            # 从 OSS object_name 中提取原始文件名
+                            oss_file_name = os.path.basename(original_file_path)
+                            
+                            import re
+                            match = re.match(r'^[0-9a-f]{8}_\d{8}_\d{6}_(.+)$', oss_file_name)
+                            if match:
+                                file_name = match.group(1)
+                                self.update_status(log_message=f"从 OSS 路径提取原始文件名: {file_name}")
+                            else:
+                                file_name = oss_file_name
+                                self.update_status(log_message=f"⚠️ 无法提取原始文件名，使用: {file_name}")
+                            
+                            file_ext = os.path.splitext(file_name)[1].lower()
+                            
+                            ext_to_type = {
+                                '.pdf': 'pdf',
+                                '.docx': 'word', '.doc': 'word',
+                                '.xlsx': 'excel', '.xls': 'excel',
+                                '.csv': 'csv',
+                                '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image', '.bmp': 'image'
+                            }
+                            file_type = ext_to_type.get(file_ext, 'other')
+                            
+                            file_info = {
+                                'file_name': file_name,
+                                'file_type': file_type,
+                                'file_size_mb': 0
+                            }
+                            
+                            oss_bucket = os.getenv('OSS_BUCKET_NAME')
+                    else:
+                        # 本地文件：使用 file_processor 获取文件信息
+                        file_info = self.file_processor.get_file_info(original_file_path)
+                    
                     cursor.execute("""
                     INSERT INTO file_processing_details 
                     (processing_stats_id, filename, file_type, file_size_mb, 
                      processing_time, ai_time, content_length, status, 
-                     total_tokens, cost, error_message, created_at, task_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     total_tokens, cost, content, created_at, task_id, original_file_path,
+                     file_storage_type, oss_bucket)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                     """, (
                         processing_stats_id,
                         file_info['file_name'],
                         file_info['file_type'],
                         file_info['file_size_mb'],
-                        0,
-                        0,
-                        0,
-                        'failed',
-                        0,
-                        0,
-                        failed_file.get('error', ''),
+                        result.get('processing_time', 0),
+                        ai_info.get('ai_time', 0) if ai_info else 0,
+                        len(result.get('content', '')),
+                        'completed',
+                        ai_info.get('total_tokens', 0) if ai_info else 0,
+                        ai_info.get('total_price', 0) if ai_info else 0,
+                        result.get('content', ''),
                         datetime.now(),
-                        self.task_id
+                        self.task_id,
+                        result['original_file'],
+                        storage_type,
+                        oss_bucket
                     ))
+                    
+                    file_processing_id = cursor.fetchone()[0]
+                
+                # 标签功能已移除 - 改用自动打标签（content_tag_v1）在任务完成后处理
+            
+            # 保存或更新失败文件的记录
+            for failed_file in failed_files:
+                try:
+                    # 🔥 如果有预创建的 file_detail_id，则更新该记录为失败状态
+                    if self.existing_file_detail_id:
+                        cursor.execute("""
+                        UPDATE file_processing_details
+                        SET status = %s,
+                            error_message = %s
+                        WHERE id = %s
+                        """, (
+                            'failed',
+                            failed_file['error'],
+                            self.existing_file_detail_id
+                        ))
+                        self.update_status(log_message=f"已更新文件为失败状态 (ID: {self.existing_file_detail_id})")
+                    else:
+                        # 否则，插入新的失败记录
+                        file_info = self.file_processor.get_file_info(failed_file['file_path'])
+                        cursor.execute("""
+                        INSERT INTO file_processing_details 
+                        (processing_stats_id, filename, file_type, file_size_mb, 
+                         processing_time, ai_time, content_length, status, 
+                         total_tokens, cost, error_message, created_at, task_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            processing_stats_id,
+                            file_info['file_name'],
+                            file_info['file_type'],
+                            file_info['file_size_mb'],
+                            0,
+                            0,
+                            0,
+                            'failed',
+                            0,
+                            0,
+                            failed_file.get('error', ''),
+                            datetime.now(),
+                            self.task_id
+                        ))
                 except Exception as e:
                     # 如果获取文件信息失败，使用文件路径
-                    cursor.execute("""
-                    INSERT INTO file_processing_details 
-                    (processing_stats_id, filename, file_type, file_size_mb, 
-                     processing_time, ai_time, content_length, status, 
-                     total_tokens, cost, error_message, created_at, task_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        processing_stats_id,
-                        os.path.basename(failed_file['file_path']),
-                        'unknown',
-                        0,
-                        0,
+                    if self.existing_file_detail_id:
+                        # 如果有预创建的记录，更新为失败状态
+                        cursor.execute("""
+                        UPDATE file_processing_details
+                        SET status = %s,
+                            error_message = %s
+                        WHERE id = %s
+                        """, (
+                            'failed',
+                            failed_file.get('error', ''),
+                            self.existing_file_detail_id
+                        ))
+                    else:
+                        # 否则插入新的失败记录
+                        cursor.execute("""
+                        INSERT INTO file_processing_details 
+                        (processing_stats_id, filename, file_type, file_size_mb, 
+                         processing_time, ai_time, content_length, status, 
+                         total_tokens, cost, error_message, created_at, task_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            processing_stats_id,
+                            os.path.basename(failed_file['file_path']),
+                            'unknown',
+                            0,
+                            0,
                         0,
                         0,
                         'failed',

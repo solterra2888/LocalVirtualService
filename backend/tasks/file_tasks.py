@@ -219,8 +219,14 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
             meta=failure_meta
         )
         
-        # 重新抛出异常，但确保异常信息可以被序列化
-        raise Exception(error_msg)
+        # 返回失败结果而不是抛出异常（避免Celery序列化错误）
+        return {
+            'task_id': self.request.id,
+            'status': 'failed',
+            'error': error_msg,
+            'files_processed': 0,
+            'files_failed': len(file_paths) if 'file_paths' in locals() else 0
+        }
 
 
 @app.task(bind=True, name='analyze_audio_async', queue='file_processing')
@@ -829,6 +835,301 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         raise Exception(error_msg)
 
 
+@app.task(bind=True, name='reparse_document_async', queue='file_processing')
+def reparse_document_task(self, file_id, params, username):
+    """
+    异步重新解析文档任务（Re-parse）
+    
+    用于文档解析失败或内容为空时，重新调用 LlamaParse 解析文档。
+    解析成功后自动触发打标签任务。
+    
+    Args:
+        file_id: file_processing_details.id
+        params: LlamaParse 配置参数（language, fast_mode 等）
+        username: 用户名
+    """
+    _last_progress = [0.0]
+    _last_status = ['processing']
+    
+    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+        try:
+            if progress is not None:
+                _last_progress[0] = progress
+            if status is not None:
+                _last_status[0] = status
+            if not hasattr(update_progress, 'logs'):
+                update_progress.logs = []
+            if log_message:
+                update_progress.logs.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'level': 'info',
+                    'message': log_message,
+                    'source': 'celery_reparse'
+                })
+                if len(update_progress.logs) > 50:
+                    update_progress.logs = update_progress.logs[-50:]
+            current_task.update_state(
+                state='PROGRESS',
+                meta={
+                    'status': _last_status[0],
+                    'progress': _last_progress[0],
+                    'message': log_message or '',
+                    'file_id': file_id,
+                    'username': username,
+                    'logs': update_progress.logs
+                }
+            )
+            if log_message:
+                info(f"Reparse {self.request.id}: {log_message}", source="celery_reparse")
+        except Exception as e:
+            error(f"更新重新解析任务状态失败: {e}", source="celery_reparse")
+    
+    temp_file_path = None
+    
+    try:
+        info(f"开始文档重新解析任务 {self.request.id}, file_id={file_id}, user={username}", 
+             source="celery_reparse")
+        
+        update_progress(status="initializing", progress=5, log_message="正在初始化重新解析任务...")
+        
+        # 1. 从数据库读取文件信息
+        from backend.database.db_manager import DatabaseManager
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise ValueError("无法连接到数据库")
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT filename, original_file_path, file_type, file_storage_type, 
+                   oss_bucket, processing_stats_id
+            FROM file_processing_details
+            WHERE id = %s
+        """, (file_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise ValueError(f"找不到文件记录: file_id={file_id}")
+        
+        filename, original_file_path, file_type, file_storage_type, oss_bucket, processing_stats_id = row
+        
+        update_progress(progress=10, log_message=f"已读取文件信息: {filename}")
+        
+        if not original_file_path:
+            raise ValueError(f"文件路径为空，无法重新解析")
+        
+        # 2. 更新数据库状态为 processing
+        conn = db_manager.get_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE file_processing_details
+                SET status = 'processing', content = '', content_length = 0
+                WHERE id = %s
+            """, (file_id,))
+            cursor.execute("""
+                UPDATE processing_stats
+                SET rc_agent_status = 'processing'
+                WHERE id = %s
+            """, (processing_stats_id,))
+            conn.commit()
+            conn.close()
+        
+        update_progress(progress=15, log_message="已更新状态为处理中...")
+        
+        # 3. 获取文件本地路径
+        local_file_path = original_file_path
+        
+        if file_storage_type == 'oss':
+            # 文件存储在 OSS，需要先下载到本地临时目录
+            update_progress(progress=20, log_message=f"文件存储在 OSS，正在下载: {original_file_path}")
+            
+            from backend.services.oss_service import OSSService
+            oss_service = OSSService()
+            
+            # 创建临时目录
+            temp_dir = os.path.join(os.getcwd(), 'uploads', 'temp_reparse')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # 生成临时文件路径（保留原始文件扩展名）
+            import uuid
+            file_ext = os.path.splitext(filename)[1]
+            temp_file_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}{file_ext}")
+            
+            # 从 OSS 下载文件
+            try:
+                oss_service.download_to_file(original_file_path, temp_file_path)
+                local_file_path = temp_file_path
+                update_progress(progress=30, log_message=f"OSS 文件下载完成，临时路径: {os.path.basename(temp_file_path)}")
+            except Exception as e:
+                raise ValueError(f"从 OSS 下载文件失败: {str(e)}")
+        else:
+            # 文件存储在本地
+            if not os.path.exists(original_file_path):
+                raise ValueError(f"本地文件不存在: {original_file_path}")
+            update_progress(progress=30, log_message=f"使用本地文件: {original_file_path}")
+        
+        # 4. 调用 LlamaParse 解析文档
+        update_progress(status="parsing", progress=35, log_message="正在使用 LlamaParse 解析文档...")
+        
+        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+        if not api_key:
+            raise ValueError("LlamaIndex API 密钥未配置，无法解析文档")
+        
+        from backend.core.llama_service import LlamaService
+        
+        # 构建 LlamaParse 参数
+        llama_params = {
+            'language': params.get('language', ['ch_sim', 'en']),
+            'fast_mode': params.get('fast_mode', False),
+            'disable_ocr': params.get('disable_ocr', False),
+            'max_pages': params.get('max_pages', 10),
+            'target_pages': params.get('target_pages', ''),
+            'skip_diagonal_text': params.get('skip_diagonal_text', False),
+            'skip_table_extraction': params.get('skip_table_extraction', False),
+            'extract_images': params.get('extract_images', False),
+            'use_vendor_multimodal_model': params.get('use_vendor_multimodal_model', False),
+            'vendor_multimodal_api_key': params.get('vendor_multimodal_api_key', ''),
+            'polling_interval': params.get('polling_interval', 10)
+        }
+        
+        llama_service = LlamaService(
+            api_key=api_key,
+            polling_interval=llama_params['polling_interval']
+        )
+        
+        successful_results = []
+        failed_files = []
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                llama_service.process_file(local_file_path, successful_results, failed_files, None)
+            )
+        finally:
+            loop.close()
+            # 清理临时下载的文件
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    info(f"已清理临时文件: {temp_file_path}", source="celery_reparse")
+                except Exception as e:
+                    error(f"清理临时文件失败: {e}", source="celery_reparse")
+        
+        if not successful_results:
+            raise ValueError(f"LlamaParse 解析文档失败: {filename}")
+        
+        file_content = successful_results[0].get('content', '')
+        doc_processing_time = successful_results[0].get('processing_time', 0)
+        
+        if not file_content:
+            raise ValueError("解析结果为空，无法保存")
+        
+        update_progress(progress=85, log_message=f"文档解析完成，内容长度: {len(file_content)} 字符")
+        
+        # 5. 更新数据库
+        update_progress(progress=90, log_message="正在保存解析结果...")
+        
+        conn = db_manager.get_connection()
+        if not conn:
+            raise ValueError("无法连接到数据库保存结果")
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE file_processing_details
+            SET content = %s,
+                content_length = %s,
+                processing_time = %s,
+                status = 'completed'
+            WHERE id = %s
+        """, (file_content, len(file_content), doc_processing_time, file_id))
+        
+        cursor.execute("""
+            UPDATE processing_stats
+            SET rc_agent_status = 'completed',
+                total_file_processing_time = %s
+            WHERE id = %s
+        """, (doc_processing_time, processing_stats_id))
+        
+        conn.commit()
+        conn.close()
+        
+        update_progress(status="completed", progress=100, log_message="重新解析完成！")
+        
+        final_result = {
+            'status': 'completed',
+            'file_id': file_id,
+            'content_length': len(file_content),
+            'processing_time': doc_processing_time,
+            'logs': getattr(update_progress, 'logs', [])
+        }
+        
+        info(f"文档重新解析任务 {self.request.id} 完成: file_id={file_id}", source="celery_reparse")
+        
+        # 🏷️ 触发自动打标签任务
+        try:
+            trigger_auto_tagging(file_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_reparse")
+        
+        return final_result
+    
+    except Exception as e:
+        error_msg = f"文档重新解析任务失败: {str(e)}"
+        error(f"Reparse {self.request.id}: {error_msg}", source="celery_reparse")
+        
+        # 清理临时文件
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+        
+        # 更新数据库状态为失败
+        try:
+            db_conn_params = get_database_config()
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE file_processing_details
+                    SET status = 'failed', error_message = %s
+                    WHERE id = %s
+                """, (str(e), file_id))
+                cursor.execute("""
+                    UPDATE processing_stats
+                    SET rc_agent_status = 'failed'
+                    WHERE id = (SELECT processing_stats_id FROM file_processing_details WHERE id = %s)
+                """, (file_id,))
+                conn.commit()
+                conn.close()
+        except Exception:
+            pass
+        
+        current_task.update_state(
+            state='FAILURE',
+            meta={
+                'error': str(error_msg),
+                'status': 'failed',
+                'file_id': file_id
+            }
+        )
+        
+        # 返回失败结果而不是抛出异常（避免Celery序列化错误）
+        return {
+            'task_id': self.request.id,
+            'status': 'failed',
+            'error': error_msg,
+            'file_id': file_id
+        }
+
+
 @app.task(bind=True, name='upload_and_transcribe_audio', queue='file_processing')
 def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, model='fun-asr', 
                                       language_hints=None, diarization_enabled=True):
@@ -913,7 +1214,8 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         )
         
         if not upload_result["success"]:
-            raise ValueError(f"上传到 OSS 失败: {upload_result['error']}")
+            err = upload_result.get("error") or "未知错误"
+            raise Exception(f"上传到 OSS 失败: {str(err)}")
         
         audio_url = upload_result["public_url"]
         object_name = upload_result["object_name"]
@@ -1111,3 +1413,294 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             }
         )
         raise Exception(error_msg)
+
+
+@app.task(bind=True, name='upload_and_process_document_async', queue='file_processing')
+def upload_and_process_document_task(self, temp_file_path, filename, username, 
+                                      task_info=None, custom_inputs=None, params=None):
+    """
+    异步上传文档到 OSS 并处理（LlamaParse + AI 分析）
+    
+    避免阻塞主 API 线程，适合 OSS 服务器较远（如香港）的场景
+    
+    Args:
+        temp_file_path: 本地临时文件路径
+        filename: 原始文件名
+        username: 用户名
+        task_info: 任务信息（analysis_mode, task_type, template_id等）
+        custom_inputs: 自定义输入参数
+        params: 处理参数（sector, industry, ticker等）
+    """
+    _last_progress = [0.0]
+    _last_status = ['processing']
+    
+    task_info = task_info or {}
+    custom_inputs = custom_inputs or {}
+    params = params or {}
+    
+    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+        try:
+            if progress is not None:
+                _last_progress[0] = progress
+            if status is not None:
+                _last_status[0] = status
+            if not hasattr(update_progress, 'logs'):
+                update_progress.logs = []
+            if log_message:
+                update_progress.logs.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'level': 'info',
+                    'message': log_message,
+                    'source': 'celery_doc_upload'
+                })
+                if len(update_progress.logs) > 50:
+                    update_progress.logs = update_progress.logs[-50:]
+            current_task.update_state(
+                state='PROGRESS',
+                meta={
+                    'status': _last_status[0],
+                    'progress': _last_progress[0],
+                    'message': log_message or '',
+                    'filename': filename,
+                    'username': username,
+                    'logs': update_progress.logs
+                }
+            )
+            if log_message:
+                info(f"DocUpload {self.request.id}: {log_message}", source="celery_doc_upload")
+        except Exception as e:
+            error(f"更新文档上传任务状态失败: {e}", source="celery_doc_upload")
+    
+    try:
+        info(f"开始文档上传和处理任务 {self.request.id}, file={filename}, user={username}", 
+             source="celery_doc_upload")
+        
+        update_progress(status="uploading", progress=5, log_message=f"开始上传文档: {filename}")
+        
+        # 1. 上传到 OSS
+        from backend.services.oss_service import OSSService
+        oss_service = OSSService()
+        
+        if not oss_service.is_configured():
+            raise ValueError("OSS 服务未配置")
+        
+        if not os.path.exists(temp_file_path):
+            raise ValueError(f"临时文件不存在: {temp_file_path}")
+        
+        file_size = os.path.getsize(temp_file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        update_progress(progress=10, log_message=f"文件大小: {file_size_mb:.2f} MB")
+        
+        # 上传到 OSS
+        file_category = oss_service.get_file_category(filename)
+        upload_result = oss_service.upload_file(
+            file_path=temp_file_path,
+            filename=filename,
+            username=username,
+            file_category=file_category
+        )
+        
+        if not upload_result["success"]:
+            err = upload_result.get("error") or "未知错误"
+            raise Exception(f"上传到 OSS 失败: {str(err)}")
+        
+        oss_object_name = upload_result["object_name"]
+        oss_bucket = upload_result["bucket"]
+        
+        update_progress(status="uploaded", progress=30, 
+                       log_message=f"文件已上传到 OSS，正在创建数据库记录...")
+        
+        # 🔥 立即创建数据库记录，状态为 'uploaded'，这样前端可以立即看到新文件
+        from backend.database.db_manager import DatabaseManager
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        
+        if not conn:
+            raise ValueError("无法连接到数据库")
+        
+        cursor = conn.cursor()
+        
+        # 推断文件类型
+        from backend.processors.file_processor import FileProcessor
+        file_processor = FileProcessor()
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        ext_to_type = {
+            '.pdf': 'pdf',
+            '.docx': 'word', '.doc': 'word',
+            '.xlsx': 'excel', '.xls': 'excel',
+            '.csv': 'csv',
+            '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image', '.bmp': 'image'
+        }
+        file_type = ext_to_type.get(file_ext, 'other')
+        
+        # 创建 processing_stats 记录（状态为 processing）
+        cursor.execute("""
+        INSERT INTO processing_stats 
+        (timestamp, files_processed, files_failed, total_time, 
+         total_file_processing_time, total_ai_time, task_name, 
+         "user", total_tokens, total_price, upload_params, 
+         final_report, rc_agent_status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """, (
+            datetime.now(),
+            0,  # files_processed
+            0,  # files_failed
+            0,  # total_time
+            0,  # total_file_processing_time
+            0,  # total_ai_time
+            'Document Upload & Processing',  # task_name
+            username,
+            0,  # total_tokens
+            0,  # total_price
+            json.dumps(params),  # upload_params
+            '',  # final_report
+            'processing'  # rc_agent_status = 'processing'
+        ))
+        
+        processing_stats_id = cursor.fetchone()[0]
+        
+        # 创建 file_processing_details 记录（状态为 processing）
+        cursor.execute("""
+        INSERT INTO file_processing_details 
+        (processing_stats_id, filename, file_type, file_size_mb, 
+         processing_time, ai_time, content_length, status, 
+         total_tokens, cost, content, created_at, task_id, original_file_path,
+         file_storage_type, oss_bucket)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """, (
+            processing_stats_id,
+            filename,  # 原始文件名
+            file_type,
+            file_size_mb,
+            0,  # processing_time
+            0,  # ai_time
+            0,  # content_length
+            'processing',  # status = 'processing'
+            0,  # total_tokens
+            0,  # cost
+            '',  # content（尚未解析）
+            datetime.now(),
+            self.request.id,  # task_id
+            oss_object_name,  # original_file_path（OSS object_name）
+            'oss',  # file_storage_type
+            oss_bucket  # oss_bucket
+        ))
+        
+        file_detail_id = cursor.fetchone()[0]
+        
+        conn.commit()
+        conn.close()
+        
+        update_progress(progress=35, 
+                       log_message=f"数据库记录已创建 (ID: {file_detail_id})，开始解析文档...")
+        
+        # 2. 创建 Worker 并传递已有的 processing_stats_id
+        worker = FileProcessingWorker(self.request.id, username, db_conn_params)
+        worker.set_status_callback(update_progress)
+        worker.existing_processing_stats_id = processing_stats_id  # 传递已创建的记录ID
+        worker.existing_file_detail_id = file_detail_id  # 传递已创建的文件记录ID
+        
+        # 组装 file_paths（使用 OSS object_name）
+        file_paths = [oss_object_name]
+        
+        # 获取 API 密钥
+        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+        if not api_key:
+            raise ValueError("LlamaIndex API 密钥未配置")
+        
+        # 3. 异步执行文件处理
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                worker.process_files(
+                    file_paths, 
+                    task_info, 
+                    custom_inputs, 
+                    params, 
+                    api_key
+                )
+            )
+        finally:
+            loop.close()
+        
+        update_progress(status="completed", progress=100, 
+                       log_message="处理完成")
+        
+        # 4. 清理临时文件
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                info(f"已清理临时文件: {temp_file_path}", source="celery_doc_upload")
+        except Exception as del_err:
+            warning(f"清理临时文件失败: {del_err}", source="celery_doc_upload")
+        
+        # 5. 触发自动打标签
+        try:
+            # 查询该任务创建的所有 file_processing_details ID
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id FROM file_processing_details
+                    WHERE task_id = %s AND status = 'completed' AND content IS NOT NULL AND content != ''
+                """, (self.request.id,))
+                
+                file_ids = [row[0] for row in cursor.fetchall()]
+                conn.close()
+                
+                if file_ids:
+                    info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_doc_upload")
+                    trigger_auto_tagging(file_ids, username=username, delay=2)
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="celery_doc_upload")
+        
+        info(f"文档上传和处理任务完成 {self.request.id}, file={filename}", 
+             source="celery_doc_upload")
+        
+        return {
+            'task_id': self.request.id,
+            'status': 'completed',
+            'filename': filename,
+            'oss_object_name': oss_object_name,
+            'result': result
+        }
+        
+    except Exception as e:
+        error_msg = f"文档上传或处理失败: {str(e)}"
+        error(f"{error_msg}, task_id={self.request.id}", source="celery_doc_upload")
+        
+        # 清理临时文件
+        try:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        except Exception:
+            pass
+        
+        # 更新失败状态（确保所有值都可以 JSON 序列化）
+        failure_meta = {
+            'error': str(error_msg),
+            'status': 'failed',
+            'filename': filename
+        }
+        
+        current_task.update_state(
+            state='FAILURE',
+            meta=failure_meta
+        )
+        
+        # 返回失败结果而不是抛出异常（避免Celery序列化错误）
+        return {
+            'task_id': self.request.id,
+            'status': 'failed',
+            'error': error_msg,
+            'files_processed': 0,
+            'files_failed': len(file_paths) if 'file_paths' in locals() else 0
+        }

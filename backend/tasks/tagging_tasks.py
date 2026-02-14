@@ -224,19 +224,15 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
         error_msg = f"打标签任务失败: {str(e)}"
         error(f"Tagging {self.request.id}: {error_msg}", source="celery_tagging")
         
-        # 更新失败状态
-        current_task.update_state(
-            state='FAILURE',
-            meta={
-                'error': str(error_msg),
-                'status': 'failed',
-                'file_id': file_id,
-                'retry_count': self.request.retries
-            }
-        )
-        
-        # 重新抛出异常以触发重试机制
-        raise Exception(error_msg)
+        # 返回失败结果而不是抛出异常（避免Celery序列化错误）
+        return {
+            'status': 'failed',
+            'file_id': file_id,
+            'filename': None,
+            'error': error_msg,
+            'processing_time': 0,
+            'retry_count': self.request.retries
+        }
 
 
 @app.task(
