@@ -41,6 +41,7 @@ task_routes = {
     'backend.tasks.news_tasks.*': {'queue': 'ai_processing'},
     'backend.tasks.theme_tasks.*': {'queue': 'ai_processing'},
     'backend.tasks.data_tasks.*': {'queue': 'data_fetching'},  # 🔥 新增：数据获取任务
+    'backend.tasks.subscription_tasks.*': {'queue': 'data_fetching'},  # 🔥 新增：订阅任务（Twitter API获取）
     # 明确指定新闻分析任务（使用任务名称而不是模块路径）
     'analyze_news_batch': {'queue': 'ai_processing'},
     'analyze_unanalyzed_news': {'queue': 'ai_processing'},
@@ -57,6 +58,10 @@ task_routes = {
     'fetch_single_ticker_eod_history': {'queue': 'data_fetching'},  # 🔥 新增：单个ticker历史数据获取
     'fetch_earnings_calendar': {'queue': 'data_fetching'},  # 🔥 新增：财报日历数据获取（13000+条记录）
     'fetch_ipo_calendar': {'queue': 'data_fetching'},  # 🔥 新增：IPO日历数据获取
+    # 订阅相关任务（data_fetching队列）
+    'fetch_twitter_subscription': {'queue': 'data_fetching'},  # Twitter订阅内容获取
+    'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},  # 复用现有内容
+    'smart_wait_and_add_user': {'queue': 'data_fetching'},  # 智能等待
 }
 
 # Worker配置

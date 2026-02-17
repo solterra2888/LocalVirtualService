@@ -47,7 +47,9 @@ import {
   DoubleRightOutlined,
   TagsOutlined,
   CheckCircleOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  LinkOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -173,6 +175,7 @@ interface TaskExecution {
   llm_model?: string;  // LLM模型名称
   llm_provider?: string;  // LLM提供商
   first_task_id?: string;  // 第一个文件的task_id（用于判断是否正在处理）
+  upload_params?: any;  // 上传参数（包含 template_id, template_code, template_variables 等）
 }
 
 interface ProcessingParams {
@@ -312,7 +315,7 @@ const FilesPageInner: React.FC = () => {
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
   const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
   const [contentDetailLoading, setContentDetailLoading] = useState(false);
-  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio'>('all');
+  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube'>('all');
   const [searchType, setSearchType] = useState<'file_name' | 'content'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -1380,6 +1383,7 @@ const FilesPageInner: React.FC = () => {
           const idsToDelete = succeeded;
           setTaskExecutions(prev => prev.filter(exec => !idsToDelete.includes(exec.id)));
           setSelectedExecutionIds([]);
+          setBatchMode(false); // 恢复 batch 为原始状态，隐藏 All 和 Done
           if (selectedExecutionForView && idsToDelete.includes(selectedExecutionForView.id)) {
             setSelectedExecutionForView(null);
           }
@@ -2075,11 +2079,12 @@ const FilesPageInner: React.FC = () => {
       render: (_: any, record: TaskExecution) => {
         const isUploadOnly = record.rc_agent_status === 'uploaded';
         const isAudioFile = record.first_file_type === 'audio';
+        const isYouTubeFile = record.first_file_type === 'youtube';
         const isAudioAnalyzing = record.rc_agent_status === 'analyzing' || audioAnalyzingIds.has(record.id);
         const isDocAnalyzing = record.rc_agent_status === 'analyzing' || docAnalyzingIds.has(record.id);
         const _isAnalyzing = isAudioAnalyzing || isDocAnalyzing;
         const hasAnalysis = record.rc_agent_status === 'success';
-        // 音频文件且ASR已完成但未进行AI分析
+        // 音频文件且ASR已完成但未进行AI分析（YouTube 不需要 AI 分析）
         const canAnalyzeAudio = isAudioFile && !hasAnalysis && !isAudioAnalyzing && record.rc_agent_status === 'completed';
         // 文档分析：需要区分"仅上传"和"正在处理"
         // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
@@ -2557,15 +2562,17 @@ const FilesPageInner: React.FC = () => {
     { key: 'excel', label: 'Excel' },
     { key: 'image', label: 'Image' },
     { key: 'audio', label: 'Audio' },
+    { key: 'youtube', label: 'YouTube' },
   ];
 
-  // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple)
+  // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple, YouTube=red)
   const getFileTypeTagConfig = (firstFileType: string | undefined): { color: string; text: string } => {
     const t = (firstFileType || '').toLowerCase();
     if (['pdf'].includes(t)) return { color: 'red', text: 'PDF' };
     if (['doc', 'docx', 'word'].includes(t)) return { color: 'blue', text: 'Word' };
     if (['excel', 'xlsx', 'xls'].includes(t)) return { color: 'green', text: 'Excel' };
     if (['audio'].includes(t)) return { color: 'purple', text: 'Audio' };
+    if (['youtube'].includes(t)) return { color: 'red', text: 'YouTube' };
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
     return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
   };
@@ -2918,6 +2925,7 @@ const FilesPageInner: React.FC = () => {
                               <ExecutionDetailsPanel
                                 execution={selectedExecutionForView}
                                 themeColors={themeColors}
+                                isDark={isDark}
                                 getDisplayAgentName={getDisplayAgentName}
                                 onExecutionRefresh={onExecutionRefresh}
                               />
@@ -3168,9 +3176,10 @@ const FilesPage: React.FC = () => {
 const ExecutionDetailsPanel: React.FC<{
   execution: TaskExecution;
   themeColors: any;
+  isDark?: boolean;
   getDisplayAgentName: (name: string) => string;
   onExecutionRefresh?: () => void;  // 当检测到 processing/AI 完成时，供父组件刷新 Basic Information
-}> = ({ execution, themeColors, getDisplayAgentName, onExecutionRefresh }) => {
+}> = ({ execution, themeColors, isDark = false, getDisplayAgentName, onExecutionRefresh }) => {
   const [fileId, setFileId] = useState<number | null>(null);
   const [fileStatus, setFileStatus] = useState<string | null>(null);
   const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
@@ -3663,72 +3672,127 @@ const ExecutionDetailsPanel: React.FC<{
         )}
       </Card>
 
-      {/* Edit Tags Modal */}
-      <Modal
-        title="Edit Tags"
-        open={editTagsVisible}
-        onOk={handleSaveTags}
-        onCancel={() => setEditTagsVisible(false)}
-        width={600}
-      >
-        <Form
-          form={tagForm}
-          layout="vertical"
-          style={{ marginTop: 16 }}
+      {/* Edit Tags Modal - 自定义 overlay 风格（与 Upload Files / Re-analyze 一致） */}
+      {editTagsVisible && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.45)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+          }}
+          onClick={() => setEditTagsVisible(false)}
         >
-          <Form.Item
-            name="sector"
-            label="Sector"
-            rules={[{ required: true, message: 'Please enter sector' }]}
+          <div
+            className="edit-tags-modal-content upload-files-modal"
+            style={{
+              width: 600,
+              maxWidth: '90vw',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: themeColors.cardBg ?? (isDark ? '#1a2234' : '#fff'),
+              color: themeColors.text,
+              borderRadius: isDark ? CARD_STYLE_BEHANCE_DARK.borderRadius : CARD_STYLE_BEHANCE.borderRadius,
+              boxShadow: isDark ? CARD_STYLE_BEHANCE_DARK.boxShadow : CARD_STYLE_BEHANCE.boxShadow,
+              border: isDark ? CARD_STYLE_BEHANCE_DARK.border : `1px solid ${themeColors.cardBorder}`,
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <Input placeholder="e.g., Information Technology, Healthcare, Finance" />
-          </Form.Item>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: `1px solid ${themeColors.cardBorder}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <span style={{ fontWeight: 600, fontSize: 16 }}>Edit Tags</span>
+              <Button
+                type="text"
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => setEditTagsVisible(false)}
+              />
+            </div>
+            <div style={{ padding: '20px' }}>
+              <Form
+                form={tagForm}
+                layout="vertical"
+              >
+                <Form.Item
+                  name="sector"
+                  label="Sector"
+                  rules={[{ required: true, message: 'Please enter sector' }]}
+                >
+                  <Input placeholder="e.g., Information Technology, Healthcare, Finance" />
+                </Form.Item>
 
-          <Form.Item
-            name="industry"
-            label="Industry"
-            rules={[{ required: true, message: 'Please enter industry' }]}
-          >
-            <Input placeholder="e.g., Semiconductors, Pharmaceuticals, Investment Banking" />
-          </Form.Item>
+                <Form.Item
+                  name="industry"
+                  label="Industry"
+                  rules={[{ required: true, message: 'Please enter industry' }]}
+                >
+                  <Input placeholder="e.g., Semiconductors, Pharmaceuticals, Investment Banking" />
+                </Form.Item>
 
-          <Form.Item
-            name="tickers"
-            label="Stock Tickers"
-            tooltip="Enter stock codes, press Enter to add multiple"
-          >
-            <Select
-              mode="tags"
-              placeholder="e.g., AAPL, 600519.SS, MSFT"
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
+                <Form.Item
+                  name="tickers"
+                  label="Stock Tickers"
+                  tooltip="Enter stock codes, press Enter to add multiple"
+                >
+                  <Select
+                    mode="tags"
+                    placeholder="e.g., AAPL, 600519.SS, MSFT"
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
 
-          <Form.Item
-            name="confidence"
-            label="Confidence"
-            tooltip="Value between 0-1 indicating confidence level"
-          >
-            <InputNumber
-              min={0}
-              max={1}
-              step={0.1}
-              style={{ width: '100%' }}
-              placeholder="0.0 - 1.0"
-            />
-          </Form.Item>
+                <Form.Item
+                  name="confidence"
+                  label="Confidence"
+                  tooltip="Value between 0-1 indicating confidence level"
+                >
+                  <InputNumber
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    style={{ width: '100%' }}
+                    placeholder="0.0 - 1.0"
+                  />
+                </Form.Item>
 
-          <Form.Item
-            name="reasoning"
-            label="Reasoning"
-          >
-            <Input.TextArea
-              rows={3}
-              placeholder="Explain why these tags were assigned"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+                <Form.Item
+                  name="reasoning"
+                  label="Reasoning"
+                >
+                  <Input.TextArea
+                    rows={3}
+                    placeholder="Explain why these tags were assigned"
+                  />
+                </Form.Item>
+              </Form>
+            </div>
+            <div style={{
+              padding: '12px 20px',
+              borderTop: `1px solid ${themeColors.cardBorder}`,
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8,
+            }}>
+              <Button onClick={() => setEditTagsVisible(false)}>
+                Cancel
+              </Button>
+              <Button type="primary" onClick={handleSaveTags}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -4592,6 +4656,9 @@ const OriginalContentView: React.FC<{
         } else if (fileType === 'audio' && fileContent.asr_with_diarization) {
           // 音频文件：显示说话人分离可视化界面
           return <AudioDiarizationView fileContent={fileContent} themeColors={themeColors} isDark={isDark} />;
+        } else if (fileType === 'youtube' && fileContent.asr_with_diarization) {
+          // YouTube 文件：显示转录界面（复用 AudioDiarizationView 组件）
+          return <AudioDiarizationView fileContent={fileContent} themeColors={themeColors} isDark={isDark} />;
         } else {
           return (
             <div style={{ 
@@ -4633,7 +4700,7 @@ const OriginalContentView: React.FC<{
   );
 };
 
-// 音频说话人分离可视化组件
+// 音频说话人分离可视化组件（支持 Audio 和 YouTube）
 const AudioDiarizationView: React.FC<{
   fileContent: any;
   themeColors: any;
@@ -4647,7 +4714,26 @@ const AudioDiarizationView: React.FC<{
   
   const asrData = localAsrData;
   
-  if (!asrData || !asrData.sentences || asrData.sentences.length === 0) {
+  // 检测是 YouTube 还是 Audio 格式
+  const isYouTube = asrData && asrData.transcript && !asrData.sentences;
+  const isAudio = asrData && asrData.sentences;
+  
+  // 如果没有有效数据，显示空状态
+  if (!asrData || (!isYouTube && !isAudio)) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '40px',
+        color: themeColors.textMuted 
+      }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
+        <div>No transcript data available</div>
+      </div>
+    );
+  }
+  
+  // 检查数据是否为空
+  if (isAudio && (!asrData.sentences || asrData.sentences.length === 0)) {
     return (
       <div style={{ 
         textAlign: 'center', 
@@ -4660,7 +4746,20 @@ const AudioDiarizationView: React.FC<{
     );
   }
   
-  // 格式化时间（毫秒转为 MM:SS 格式）
+  if (isYouTube && (!asrData.transcript || asrData.transcript.length === 0)) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '40px',
+        color: themeColors.textMuted 
+      }}>
+        <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', color: themeColors.textMuted }} />
+        <div>No YouTube transcript data available</div>
+      </div>
+    );
+  }
+  
+  // 格式化时间（毫秒转为 MM:SS 格式）- 用于 Audio
   const formatTime = (milliseconds: number) => {
     const seconds = Math.floor(milliseconds / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -4668,13 +4767,20 @@ const AudioDiarizationView: React.FC<{
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
   
-  // 格式化时间（毫秒转为 MM:SS.mmm 格式，更精确）
+  // 格式化时间（毫秒转为 MM:SS.mmm 格式，更精确）- 用于 Audio
   const formatTimeDetailed = (milliseconds: number) => {
     const seconds = Math.floor(milliseconds / 1000);
     const ms = milliseconds % 1000;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}.${Math.floor(ms / 100)}`;
+  };
+  
+  // 格式化时间（秒转为 MM:SS 格式）- 用于 YouTube
+  const formatYouTubeTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
   
   // 说话人颜色映射
@@ -4694,17 +4800,33 @@ const AudioDiarizationView: React.FC<{
   };
 
   const handleDownloadDialogueTxt = () => {
-    const lines = asrData.sentences.map((s: any) => {
-      const speakerLabel = asrData.speakers.find((sp: any) => sp.speaker_id === s.speaker_id)?.label || `Speaker ${s.speaker_id}`;
-      const timeRange = `${formatTimeDetailed(s.begin_time)} - ${formatTimeDetailed(s.end_time)}`;
-      return `${speakerLabel} [${timeRange}]:\n${s.text || ''}`;
-    });
-    const content = lines.join('\n\n');
+    let content = '';
+    
+    if (isYouTube) {
+      // YouTube 格式
+      const lines = asrData.transcript.map((segment: any) => {
+        const timestamp = formatYouTubeTime(segment.start);
+        return `[${timestamp}] ${segment.text}`;
+      });
+      content = lines.join('\n');
+    } else {
+      // Audio 格式
+      const lines = asrData.sentences.map((s: any) => {
+        const speakerLabel = asrData.speakers.find((sp: any) => sp.speaker_id === s.speaker_id)?.label || `Speaker ${s.speaker_id}`;
+        const timeRange = `${formatTimeDetailed(s.begin_time)} - ${formatTimeDetailed(s.end_time)}`;
+        return `${speakerLabel} [${timeRange}]:\n${s.text || ''}`;
+      });
+      content = lines.join('\n\n');
+    }
+    
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${(fileContent.filename || 'dialogue').replace(/\.[^.]+$/, '')}_对话.txt`;
+    const filename = isYouTube ? 
+      `${(fileContent.filename || 'youtube_transcript').replace(/\.[^.]+$/, '')}_transcript.txt` :
+      `${(fileContent.filename || 'dialogue').replace(/\.[^.]+$/, '')}_对话.txt`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -4751,6 +4873,147 @@ const AudioDiarizationView: React.FC<{
     }
   };
   
+  // 渲染 YouTube 格式
+  if (isYouTube) {
+    const totalDuration = asrData.transcript.length > 0 
+      ? asrData.transcript[asrData.transcript.length - 1].start + asrData.transcript[asrData.transcript.length - 1].duration 
+      : 0;
+    
+    return (
+      <div style={{ 
+        flex: 1, 
+        minHeight: 0, 
+        overflow: 'auto',
+        padding: '20px',
+        border: `1px solid ${themeColors.cardBorder}`,
+        borderRadius: '8px',
+        backgroundColor: isDark ? '#1a1d2e' : '#fafafa'
+      }}>
+        {/* 头部信息 - YouTube */}
+        <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ 
+              fontSize: '16px', 
+              fontWeight: 600, 
+              color: themeColors.text,
+              marginBottom: '12px'
+            }}>
+              {fileContent.filename}
+            </div>
+            <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: themeColors.textSecondary, flexWrap: 'wrap' }}>
+              <span>video ID: {asrData.video_id}</span>
+              <span>language: {asrData.language}</span>
+              <span>segments: {asrData.transcript.length}</span>
+              <span>duration: ~{formatYouTubeTime(totalDuration)}</span>
+            </div>
+            {asrData.video_url && (
+              <div style={{ marginTop: '8px' }}>
+                <a 
+                  href={asrData.video_url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ fontSize: '12px', color: '#1890ff' }}
+                >
+                  <LinkOutlined style={{ marginRight: '4px' }} />
+                  Watch on YouTube
+                </a>
+              </div>
+            )}
+          </div>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            onClick={handleDownloadDialogueTxt}
+            size="small"
+          >
+            download
+          </Button>
+        </div>
+        
+        <Divider style={{ margin: '16px 0', borderColor: themeColors.cardBorder }} />
+        
+        {/* YouTube 转录内容 */}
+        <div style={{ 
+          fontSize: '11px', 
+          fontWeight: 500, 
+          color: themeColors.text,
+          marginBottom: '12px'
+        }}>
+          transcript
+        </div>
+        
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '12px' 
+        }}>
+          {asrData.transcript.map((segment: any, index: number) => (
+            <div
+              key={index}
+              style={{
+                display: 'flex',
+                gap: '12px',
+                padding: '12px',
+                backgroundColor: isDark ? '#252a3e' : '#ffffff',
+                borderLeft: '4px solid #1890ff',
+                borderRadius: '6px',
+                boxShadow: isDark 
+                  ? '0 1px 3px rgba(0,0,0,0.3)' 
+                  : '0 1px 2px rgba(0,0,0,0.06)',
+                transition: 'all 0.2s ease',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateX(4px)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 2px 8px rgba(0,0,0,0.4)'
+                  : '0 2px 8px rgba(0,0,0,0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(0)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 1px 3px rgba(0,0,0,0.3)'
+                  : '0 1px 2px rgba(0,0,0,0.06)';
+              }}
+            >
+              {/* 时间戳 */}
+              <div style={{ 
+                minWidth: '50px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                paddingTop: '2px'
+              }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: '#1890ff',
+                    fontWeight: 500,
+                    fontFamily: 'monospace'
+                  }}
+                >
+                  {formatYouTubeTime(segment.start)}
+                </span>
+              </div>
+              
+              {/* 文本 */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: themeColors.text,
+                  lineHeight: '1.6',
+                  wordBreak: 'break-word'
+                }}>
+                  {segment.text}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  
+  // 渲染 Audio 格式（原有逻辑）
   return (
     <div style={{ 
       flex: 1, 
@@ -4971,11 +5234,19 @@ const AIAnalysisView: React.FC<{
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [reAnalyzeModalVisible, setReAnalyzeModalVisible] = useState(false);
+  const [reAnalyzeTemplateId, setReAnalyzeTemplateId] = useState<number | undefined>(undefined);
+  const [reAnalyzeTemplateVars, setReAnalyzeTemplateVars] = useState<Record<string, any>>({});
+  const [reAnalyzeAudioVars, setReAnalyzeAudioVars] = useState<Record<string, any>>({});
 
   // 切换模板时清空可选参数，避免沿用上一模板的值
   useEffect(() => {
     setTemplateVariables({});
   }, [selectedTemplateId]);
+
+  useEffect(() => {
+    setReAnalyzeTemplateVars({});
+  }, [reAnalyzeTemplateId]);
 
   const handleStartEdit = () => {
     setEditContent(aiAnalysisData?.execution?.final_report ?? '');
@@ -5061,6 +5332,7 @@ const AIAnalysisView: React.FC<{
     const isProcessingDoc = execution.rc_agent_status === 'processing' || 
                             execution.rc_agent_status === 'initializing' ||
                             (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
+    // Document 与 YouTube 均使用 analyze_document
     const canAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && (
       execution.rc_agent_status === 'uploaded' ||
       execution.rc_agent_status === 'failed' ||
@@ -5151,6 +5423,13 @@ const AIAnalysisView: React.FC<{
     );
   }
 
+  const isAudioFile = execution.first_file_type === 'audio';
+  const isProcessingDoc = execution.rc_agent_status === 'processing' ||
+    execution.rc_agent_status === 'initializing' ||
+    (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
+  const canReAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && !docAnalyzing;
+  const canReAnalyzeAudio = isAudioFile && onAnalyzeAudio && !audioAnalyzing;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{ 
@@ -5164,8 +5443,17 @@ const AIAnalysisView: React.FC<{
           <Col span={12}>
             <Text strong>Analysis Time:</Text> {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
           </Col>
-          <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-            <Text strong>Token Usage:</Text> {aiAnalysisData.execution.total_tokens?.toLocaleString() || '-'}
+          <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+            {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
+              <Button
+                type="default"
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={() => setReAnalyzeModalVisible(true)}
+              >
+                Re-analyze
+              </Button>
+            )}
             {!isEditing && (
               <Button
                 type="primary"
@@ -5191,6 +5479,135 @@ const AIAnalysisView: React.FC<{
           </Col>
         </Row>
       </div>
+
+      {reAnalyzeModalVisible && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.45)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+          }}
+          onClick={() => {
+            setReAnalyzeModalVisible(false);
+            setReAnalyzeTemplateId(undefined);
+            setReAnalyzeTemplateVars({});
+            setReAnalyzeAudioVars({});
+          }}
+        >
+          <div
+            className="re-analyze-modal-content upload-files-modal"
+            style={{
+              width: 480,
+              maxWidth: '90vw',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: themeColors.cardBg ?? (isDark ? '#1a2234' : '#fff'),
+              color: themeColors.text,
+              borderRadius: isDark ? CARD_STYLE_BEHANCE_DARK.borderRadius : CARD_STYLE_BEHANCE.borderRadius,
+              boxShadow: isDark ? CARD_STYLE_BEHANCE_DARK.boxShadow : CARD_STYLE_BEHANCE.boxShadow,
+              border: isDark ? CARD_STYLE_BEHANCE_DARK.border : `1px solid ${themeColors.cardBorder}`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: `1px solid ${themeColors.cardBorder}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <Space>
+                <ReloadOutlined style={{ color: themeColors.selectedBorder }} />
+                <span style={{ fontWeight: 600, fontSize: 16 }}>Re-analyze with different template</span>
+              </Space>
+              <Button
+                type="text"
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => {
+                  setReAnalyzeModalVisible(false);
+                  setReAnalyzeTemplateId(undefined);
+                  setReAnalyzeTemplateVars({});
+                  setReAnalyzeAudioVars({});
+                }}
+              />
+            </div>
+            <div style={{ padding: '20px' }}>
+              {canReAnalyzeDoc && (
+                <div style={{ marginBottom: canReAnalyzeAudio ? 24 : 0 }}>
+                  <div style={{ marginBottom: 12, color: themeColors.textSecondary, fontSize: 13 }}>
+                    Select a prompt template and click "Re-analyze" to run a new analysis
+                  </div>
+                  <TemplateSelector
+                    categoryCode="file_analysis"
+                    value={reAnalyzeTemplateId}
+                    onChange={(value) => setReAnalyzeTemplateId(value)}
+                    placeholder="Select analysis template"
+                    style={{ marginBottom: 16, textAlign: 'left' }}
+                    showConfigWhenSelected={false}
+                  />
+                  {reAnalyzeTemplateId != null && (
+                    <div style={{ marginBottom: 16 }}>
+                      <TemplateVariablesEditor
+                        templateId={reAnalyzeTemplateId}
+                        values={reAnalyzeTemplateVars}
+                        onChange={(values) => setReAnalyzeTemplateVars(values ?? {})}
+                      />
+                    </div>
+                  )}
+                  <Button
+                    type="primary"
+                    icon={<RobotOutlined />}
+                    disabled={!reAnalyzeTemplateId}
+                    onClick={() => {
+                      if (reAnalyzeTemplateId != null && onAnalyzeDocument) {
+                        onAnalyzeDocument(execution, reAnalyzeTemplateId, reAnalyzeTemplateVars);
+                        setReAnalyzeModalVisible(false);
+                        setReAnalyzeTemplateId(undefined);
+                        setReAnalyzeTemplateVars({});
+                      }
+                    }}
+                  >
+                    Re-analyze Document
+                  </Button>
+                </div>
+              )}
+              {canReAnalyzeAudio && (
+                <div>
+                  {audioTemplateId != null && (
+                    <div style={{ marginBottom: 16 }}>
+                      <TemplateVariablesEditor
+                        templateId={audioTemplateId}
+                        values={reAnalyzeAudioVars}
+                        onChange={(values) => setReAnalyzeAudioVars(values ?? {})}
+                      />
+                    </div>
+                  )}
+                  <Button
+                    type="primary"
+                    icon={<SoundOutlined />}
+                    onClick={() => {
+                      if (onAnalyzeAudio) {
+                        onAnalyzeAudio(execution, reAnalyzeAudioVars);
+                        setReAnalyzeModalVisible(false);
+                        setReAnalyzeAudioVars({});
+                      }
+                    }}
+                  >
+                    Re-analyze Audio
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       
       {isEditing ? (
         <div

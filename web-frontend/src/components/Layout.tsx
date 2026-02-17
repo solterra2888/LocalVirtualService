@@ -25,6 +25,7 @@ import {
   SyncOutlined,
   SunOutlined,
   MoonOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -35,6 +36,7 @@ import { LogViewer } from '../components/LogViewer';
 import TimeDisplay from './TimeDisplay';
 import UploadFilesModal from './UploadFilesModal';
 import UploadAudioModal from './UploadAudioModal';
+import UploadYouTubeLinkModal from './UploadYouTubeLinkModal';
 import { TaskProgressPopover } from './TaskProgressPopover';
 
 // 导航栏主题（与 Dashboard dark 蓝灰一致）
@@ -76,6 +78,7 @@ const Layout: React.FC = () => {
   const [showUploadOptions, setShowUploadOptions] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
+  const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -121,6 +124,11 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
+      key: '/feeds',
+      icon: <ReadOutlined />,
+      label: 'Feeds',
+    },
+    {
       key: '/market-weekly',
       icon: <BarChartOutlined />,
       label: 'Market Weekly',
@@ -142,6 +150,8 @@ const Layout: React.FC = () => {
       label: 'Source',
     },
   ].filter(item => {
+    // 暂时屏蔽 Investment Tracking，该模块仍未开发
+    if (item.key === '/projects') return false;
     if (item.children) return item.children.length > 0;
     return true;
   });
@@ -228,7 +238,7 @@ const Layout: React.FC = () => {
               flexShrink: 0,
             }}
           >
-            Universal Glance
+            GuanHe Capital
           </Title>
           <Menu
             mode="horizontal"
@@ -497,7 +507,10 @@ const Layout: React.FC = () => {
             type="text"
             size="large"
             icon={<LinkOutlined style={{ fontSize: '18px' }} />}
-            disabled
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowUploadYouTubeModal(true);
+            }}
             style={{
               height: '52px',
               fontSize: '15px',
@@ -507,14 +520,19 @@ const Layout: React.FC = () => {
               justifyContent: 'flex-start',
               paddingLeft: '20px',
               background: themeMode === 'dark' ? '#212936' : '#fafafa',
-              color: themeMode === 'dark' ? '#64748b' : 'rgba(0, 0, 0, 0.25)',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
               border: 'none',
               borderRadius: '26px',
-              cursor: 'not-allowed',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
             }}
           >
             <span style={{ marginLeft: '12px' }}>YouTube Link</span>
-            <span style={{ marginLeft: 'auto', fontSize: '12px', color: themeMode === 'dark' ? '#64748b' : 'rgba(0, 0, 0, 0.25)' }}>Coming soon</span>
           </Button>
         </div>
       </Modal>
@@ -530,6 +548,13 @@ const Layout: React.FC = () => {
       <UploadAudioModal
         visible={showUploadAudioModal}
         onCancel={() => setShowUploadAudioModal(false)}
+        themeMode={themeMode}
+      />
+
+      {/* Upload YouTube Link Modal */}
+      <UploadYouTubeLinkModal
+        visible={showUploadYouTubeModal}
+        onCancel={() => setShowUploadYouTubeModal(false)}
         themeMode={themeMode}
       />
       

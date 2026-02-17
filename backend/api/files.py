@@ -2941,3 +2941,68 @@ async def get_reparse_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取重新解析状态失败"
         )
+
+
+@router.post("/upload-youtube", summary="上传YouTube链接")
+async def upload_youtube_link(
+    request: Dict[str, Any] = Body(...),
+    current_user = Depends(get_current_user)
+):
+    """
+    上传 YouTube 链接并异步处理
+    
+    请求参数:
+    - youtube_url: YouTube 视频链接（必填）
+    
+    返回:
+    - task_id: Celery 任务 ID
+    - video_id: YouTube 视频 ID
+    - message: 提示消息
+    """
+    from backend.services.youtube_service import YouTubeService
+    from backend.tasks.file_tasks import upload_and_process_youtube_task
+    
+    try:
+        youtube_url = request.get('youtube_url')
+        if not youtube_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少 youtube_url 参数"
+            )
+        
+        username = current_user.username if hasattr(current_user, 'username') else 'guest'
+        
+        # 验证 YouTube URL 格式
+        video_id = YouTubeService.extract_video_id(youtube_url)
+        if not video_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid YouTube URL. Please provide a valid YouTube video link."
+            )
+        
+        info(f"接收到 YouTube 链接: url={youtube_url}, video_id={video_id}, user={username}", 
+             source="api")
+        
+        # 启动异步任务
+        task = upload_and_process_youtube_task.apply_async(
+            args=(youtube_url, username),
+            queue='file_processing'
+        )
+        
+        info(f"YouTube 处理任务已启动: task_id={task.id}, video_id={video_id}", 
+             source="api")
+        
+        return {
+            "task_id": task.id,
+            "video_id": video_id,
+            "message": "YouTube processing started. You can track the progress in the task status."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"YouTube 上传失败: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process YouTube link: {str(e)}"
+        )

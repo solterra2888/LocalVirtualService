@@ -185,6 +185,21 @@ export const filesAPI = {
     return api.upload('/files/upload-audio', formData);
   },
 
+  // 上传 YouTube 链接并异步处理
+  uploadYouTubeLink: async (youtubeUrl: string): Promise<{
+    task_id: string;
+    video_id: string;
+    message: string;
+  }> => {
+    return api.post<{
+      task_id: string;
+      video_id: string;
+      message: string;
+    }>('/files/upload-youtube', {
+      youtube_url: youtubeUrl
+    });
+  },
+
   // 上传文档并异步处理（推荐，避免 OSS 慢连接阻塞）
   uploadAndProcessDocument: async (
     file: File,

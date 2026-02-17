@@ -8,7 +8,6 @@ import {
   Tag,
   Typography,
   Switch,
-  Statistic,
   Alert,
   Result,
   message,
@@ -115,7 +114,7 @@ const CARD_STYLE_BEHANCE_DARK = {
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'alpha_vantage' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -184,6 +183,24 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure Watchlist News Fetch',
           description: 'Set up Cron-based periodic news fetching for your watchlist stocks',
           endpoint: '/scheduler/tasks/watchlist-news',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'twitter_subscription',
+      name: 'Twitter Subscription Feed',
+      type: 'twitter_subscription',
+      description: 'Fetch tweets from subscribed Twitter authors (supports multi-user subscriptions)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_twitter_schedule',
+          name: 'Configure Twitter Fetch Schedule',
+          description: 'Set up periodic Twitter subscription fetching (default: every 30 minutes)',
+          endpoint: '/scheduler/tasks/twitter-subscription',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -348,23 +365,6 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/eodhd-fundamentals',
           params: {},
           icon: <CloudDownloadOutlined />
-        }
-      ]
-    },
-    {
-      id: 'alpha_vantage',
-      name: 'Alpha Vantage',
-      type: 'alpha_vantage',
-      description: 'Financial data API - stock prices, technical indicators, etc. (Coming soon)',
-      enabled: false,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'fetch_stock_data',
-          name: 'Configure Data Fetch Strategy',
-          description: 'Get real-time stock prices and historical data',
-          endpoint: '/alpha-vantage/stock-data',
-          icon: <GlobalOutlined />
         }
       ]
     },
@@ -744,6 +744,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
+          (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -860,7 +861,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1110,7 +1111,7 @@ const SchedulerPage: React.FC = () => {
             Scheduler Management
           </Title>
           <Text type="secondary" style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            Simplified data fetching scheduler - Manage EODHD, Alpha Vantage, Finviz and other data sources
+            Simplified data fetching scheduler - Manage EODHD, Finviz and other data sources
           </Text>
         </div>
         <Space>
@@ -1282,8 +1283,58 @@ const SchedulerPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                {/* Right: switch + primary action - Modern style */}
+                {/* Right: primary action buttons + switch - Modern style */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  {source.quickActions.map((action) => {
+                    const isConfigButton = action.id.includes('configure') || action.id === 'update_fundamentals_data';
+                    return (
+                      <Tooltip key={action.id} title={isConfigButton ? action.name : action.description} placement="topRight">
+                        <Button
+                          type="default"
+                          size="middle"
+                          icon={isConfigButton ? <SettingOutlined /> : action.icon}
+                          onClick={() => showQuickActionModal(action, source)}
+                          disabled={action.id.includes('configure') ? false : !source.enabled}
+                          loading={source.status === 'running'}
+                          style={{
+                            borderRadius: isConfigButton ? 8 : 20,
+                            fontWeight: 500,
+                            height: 36,
+                            width: isConfigButton ? 36 : undefined,
+                            paddingLeft: isConfigButton ? 0 : 16,
+                            paddingRight: isConfigButton ? 0 : 16,
+                            border: `1.5px solid ${isDark ? '#2196F3' : '#1890ff'}`,
+                            color: isDark ? '#2196F3' : '#1890ff',
+                            background: 'transparent',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: 'none',
+                          }}
+                          onMouseEnter={(e) => {
+                            const btn = e.currentTarget as HTMLButtonElement;
+                            if (!btn.disabled) {
+                              btn.style.background = isDark ? '#2196F3' : '#1890ff';
+                              btn.style.color = '#fff';
+                              btn.style.transform = 'translateY(-2px) scale(1.02)';
+                              btn.style.boxShadow = isDark 
+                                ? '0 6px 20px rgba(33, 150, 243, 0.4)' 
+                                : '0 6px 20px rgba(24, 144, 255, 0.3)';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            const btn = e.currentTarget as HTMLButtonElement;
+                            if (!btn.disabled) {
+                              btn.style.background = 'transparent';
+                              btn.style.color = isDark ? '#2196F3' : '#1890ff';
+                              btn.style.transform = 'translateY(0) scale(1)';
+                              btn.style.boxShadow = 'none';
+                            }
+                          }}
+                        >
+                          {isConfigButton ? null : action.name}
+                        </Button>
+                      </Tooltip>
+                    );
+                  })}
                   {source.id !== 'eodhd_fundamentals' && (
                     <Tooltip
                       title={
@@ -1296,6 +1347,7 @@ const SchedulerPage: React.FC = () => {
                                 (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
                                 (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
                                 (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
+                                (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
                                 (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                 (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                 (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1330,52 +1382,6 @@ const SchedulerPage: React.FC = () => {
                       </div>
                     </Tooltip>
                   )}
-                  {source.quickActions.map((action) => (
-                    <Tooltip key={action.id} title={action.description} placement="topRight">
-                      <Button
-                        type="default"
-                        size="middle"
-                        icon={action.icon}
-                        onClick={() => showQuickActionModal(action, source)}
-                        disabled={action.id.includes('configure') ? false : !source.enabled}
-                        loading={source.status === 'running'}
-                        style={{
-                          borderRadius: 20,
-                          fontWeight: 500,
-                          height: 36,
-                          paddingLeft: 16,
-                          paddingRight: 16,
-                          border: `1.5px solid ${isDark ? '#2196F3' : '#1890ff'}`,
-                          color: isDark ? '#2196F3' : '#1890ff',
-                          background: 'transparent',
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                          boxShadow: 'none',
-                        }}
-                        onMouseEnter={(e) => {
-                          const btn = e.currentTarget as HTMLButtonElement;
-                          if (!btn.disabled) {
-                            btn.style.background = isDark ? '#2196F3' : '#1890ff';
-                            btn.style.color = '#fff';
-                            btn.style.transform = 'translateY(-2px) scale(1.02)';
-                            btn.style.boxShadow = isDark 
-                              ? '0 6px 20px rgba(33, 150, 243, 0.4)' 
-                              : '0 6px 20px rgba(24, 144, 255, 0.3)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          const btn = e.currentTarget as HTMLButtonElement;
-                          if (!btn.disabled) {
-                            btn.style.background = 'transparent';
-                            btn.style.color = isDark ? '#2196F3' : '#1890ff';
-                            btn.style.transform = 'translateY(0) scale(1)';
-                            btn.style.boxShadow = 'none';
-                          }
-                        }}
-                      >
-                        {action.name}
-                      </Button>
-                    </Tooltip>
-                  ))}
                 </div>
               </div>
             );

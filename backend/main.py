@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, logs
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, logs, subscriptions
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         logging_config = config.get_logging_config()
         init_logging(**logging_config)
-        info("🚀 Universal Glance API 启动中...", source="startup")
+        info("🚀 GuanHe Capital API 启动中...", source="startup")
     except Exception as e:
         print(f"⚠️ 日志系统初始化失败: {str(e)}")
     
@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="Universal Glance API",
+    title="GuanHe Capital API",
     description="文件处理和任务管理API",
     version="2.0.0",
     docs_url="/api/docs",
@@ -92,6 +92,7 @@ app.include_router(markets.router, prefix="/api/markets", tags=["市场数据"])
 app.include_router(market_weekly.router, prefix="/api", tags=["Market Weekly"])
 # 使用调度器代理API，与独立调度器服务通信
 app.include_router(scheduler_proxy.router, prefix="/api", tags=["定时任务调度代理"])
+app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["订阅管理"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
@@ -142,7 +143,7 @@ if os.path.exists("web-frontend/dist"):
 @app.get("/")
 async def root():
     """根路径"""
-    return {"message": "Universal Glance API", "version": "2.0.0"}
+    return {"message": "GuanHe Capital API", "version": "2.0.0"}
 
 @app.get("/api/health")
 async def health_check():

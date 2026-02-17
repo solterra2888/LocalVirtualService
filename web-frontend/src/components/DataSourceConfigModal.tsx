@@ -29,7 +29,8 @@ import {
   DatabaseOutlined,
   LineChartOutlined,
   CalendarOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  TwitterOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -55,7 +56,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -107,6 +108,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 20 * * *',
       defaultName: 'CCTV News Auto Fetch',
       description: 'Scrape CCTV News (新闻联播) daily at 8 PM Beijing time (Asia/Shanghai timezone)'
+    },
+    twitter_subscription: {
+      icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
+      params: [],  // No parameters needed - auto-aggregates all subscriptions
+      defaultSchedule: '*/30 * * * *',
+      defaultName: 'Twitter Subscription Feed',
+      description: 'Automatically fetch tweets from all subscribed Twitter authors every 30 minutes'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
@@ -399,7 +407,8 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         } else {
           // 其他任务类型的创建逻辑
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
-                          dataSourceType === 'eodhd_macro' ? 'macro_indicators' : 
+                          dataSourceType === 'eodhd_macro' ? 'macro_indicators' :
+                          dataSourceType === 'twitter_subscription' ? 'twitter_subscription' :
                           dataSourceType;
           
           result = await schedulerAPI.createCronTask({
@@ -1009,6 +1018,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               />
             </>
           );
+          
+        case 'twitter_subscription':
+          return null;
           
         case 'eodhd_events':
           return (

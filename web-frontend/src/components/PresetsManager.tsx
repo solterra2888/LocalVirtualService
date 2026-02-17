@@ -11,7 +11,6 @@ import {
   Form,
   Input,
   Tabs,
-  Alert,
   Badge,
   Radio
 } from 'antd';

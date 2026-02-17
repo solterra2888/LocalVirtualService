@@ -112,7 +112,7 @@ class MacroIndicatorsService:
         # 设置默认请求参数
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Universal Glance/1.0'
+            'User-Agent': 'GuanHe Capital/1.0'
         })
         
         # 初始化数据库连接

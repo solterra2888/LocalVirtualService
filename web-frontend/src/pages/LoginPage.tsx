@@ -31,7 +31,7 @@ const LoginPage: React.FC = () => {
         <div className="login-logo">
           <img src="/ReverseCapital.ico" alt="Logo" style={{ width: 72, height: 72, marginBottom: 16 }} />
           <Title level={2} className="login-title">
-            Universal Glance
+            GuanHe Capital
           </Title>
           <Text className="login-subtitle">
             Everything at Your Fingertips

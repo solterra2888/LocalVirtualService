@@ -76,7 +76,7 @@ class EconomicEventsService:
         
         # 设置请求头
         session.headers.update({
-            'User-Agent': 'Universal Glance/1.0'
+            'User-Agent': 'GuanHe Capital/1.0'
         })
         
         return session

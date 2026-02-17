@@ -61,6 +61,7 @@ class TaskExecutionResponse(BaseModel):
     llm_model: Optional[str] = None  # LLM模型名称
     llm_provider: Optional[str] = None  # LLM提供商
     first_task_id: Optional[str] = None  # 第一个文件的task_id（用于判断是否正在处理）
+    upload_params: Optional[dict] = None  # 上传参数（包含template_id, template_code等）
     
     class Config:
         from_attributes = True

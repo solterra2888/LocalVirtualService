@@ -302,7 +302,8 @@ async def get_task_executions(
                ps.llm_model, ps.llm_provider,
                (SELECT task_id FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
-                ORDER BY id ASC LIMIT 1) as first_task_id
+                ORDER BY id ASC LIMIT 1) as first_task_id,
+               ps.upload_params
         FROM processing_stats ps
         {where_clause}
         ORDER BY ps.id DESC 
@@ -310,6 +311,8 @@ async def get_task_executions(
         """, params + [page_size, offset])
         
         stats = cursor.fetchall()
+        
+        import json
         
         return [
             TaskExecutionResponse(
@@ -329,7 +332,8 @@ async def get_task_executions(
                 first_file_type=stat[13] if len(stat) > 13 else None,
                 llm_model=stat[14] if len(stat) > 14 else None,
                 llm_provider=stat[15] if len(stat) > 15 else None,
-                first_task_id=stat[16] if len(stat) > 16 else None
+                first_task_id=stat[16] if len(stat) > 16 else None,
+                upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None
             )
             for stat in stats
         ]
@@ -370,7 +374,11 @@ async def get_task_execution(
                (SELECT file_type FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
                 ORDER BY id ASC LIMIT 1) as first_file_type,
-               ps.llm_model, ps.llm_provider
+               ps.llm_model, ps.llm_provider,
+               (SELECT task_id FROM file_processing_details 
+                WHERE processing_stats_id = ps.id 
+                ORDER BY id ASC LIMIT 1) as first_task_id,
+               ps.upload_params
         FROM processing_stats ps
         WHERE ps.id = %s
         """, (execution_id,))
@@ -389,6 +397,8 @@ async def get_task_execution(
                 detail="权限不足，只能查看自己的任务执行"
             )
         
+        import json
+        
         return TaskExecutionResponse(
             id=str(stat[0]),
             username=stat[8],
@@ -405,7 +415,9 @@ async def get_task_execution(
             first_filename=stat[12] if len(stat) > 12 else None,
             first_file_type=stat[13] if len(stat) > 13 else None,
             llm_model=stat[14] if len(stat) > 14 else None,
-            llm_provider=stat[15] if len(stat) > 15 else None
+            llm_provider=stat[15] if len(stat) > 15 else None,
+            first_task_id=stat[16] if len(stat) > 16 else None,
+            upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None
         )
         
     finally:

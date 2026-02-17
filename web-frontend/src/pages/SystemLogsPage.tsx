@@ -67,9 +67,9 @@ const SystemLogsPage: React.FC = () => {
         lines: response.lines,
         size_kb: response.size_kb,
       });
-      message.success(`已加载 ${response.lines} 行日志`);
+      message.success(`already loaded ${response.lines} lines of log`);
     } catch (error) {
-      message.error('加载日志内容失败');
+      message.error('failed to load log content');
       console.error(error);
     } finally {
       setLoading(false);
@@ -85,14 +85,14 @@ const SystemLogsPage: React.FC = () => {
     try {
       await clearLog(selectedLogType);
       message.success('Log has been cleared');
-      loadLogContent(); // 重新加载
+      loadLogContent(); // reload
     } catch (error) {
-      message.error('清空日志失败');
+      message.error('failed to clear log');
       console.error(error);
     }
   };
 
-  // 下载日志
+  // download log
   const handleDownloadLog = () => {
     const blob = new Blob([logContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);

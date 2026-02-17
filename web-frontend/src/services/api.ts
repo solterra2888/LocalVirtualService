@@ -73,6 +73,9 @@ apiClient.interceptors.response.use(
     } else if (error.response?.status === 409) {
       // 不在这里显示409错误，让组件自己处理（如watchlist重复添加）
       console.warn('409 Conflict:', error.response?.data);
+    } else if (error.response?.status === 400) {
+      // 不在这里显示400错误，让调用方根据 detail 自行展示（如创建订阅时 Twitter 用户不存在）
+      console.warn('400 Bad Request:', error.response?.data);
     } else if (error.response?.status && error.response.status >= 500) {
       const errorMessage = (error.response?.data as any)?.detail || 'server internal error';
       message.error(`server error: ${errorMessage}`);

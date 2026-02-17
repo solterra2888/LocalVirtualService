@@ -110,7 +110,7 @@ class EODHDNewsService:
         
         # 设置默认请求头
         session.headers.update({
-            'User-Agent': 'Universal Glance/1.0 (EODHD News Service)',
+            'User-Agent': 'GuanHe Capital/1.0 (EODHD News Service)',
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive'

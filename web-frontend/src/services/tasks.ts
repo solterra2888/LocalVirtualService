@@ -31,6 +31,10 @@ export interface TaskExecution {
   first_filename?: string;  // 第一个文件的名称
   first_file_type?: string;  // 第一个文件的类型（用于列表筛选）
   rc_agent_status?: string;  // RC Agent状态
+  llm_model?: string;  // LLM模型名称
+  llm_provider?: string;  // LLM提供商
+  first_task_id?: string;  // 第一个文件的task_id
+  upload_params?: any;  // 上传参数（包含 template_id, template_code, template_variables 等）
 }
 
 export interface TaskCreateRequest {

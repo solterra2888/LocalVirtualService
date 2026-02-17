@@ -1128,6 +1128,15 @@
   background: var(--files-content-bg, #f8fafc);
   display: flex;
   flex-direction: column;
+  font-size: 12px;
+}
+
+.files-page-layout .files-detail-right-content .ant-descriptions-item-label,
+.files-page-layout .files-detail-right-content .ant-descriptions-item-content,
+.files-page-layout .files-detail-right-content .ant-card-head-title,
+.files-page-layout .files-detail-right-content .ant-card-body,
+.files-page-layout .files-detail-right-content .ant-typography {
+  font-size: 12px;
 }
 
 .app-dark .files-page-layout .files-detail-right-content {
@@ -1277,6 +1286,69 @@
   color: #FFFFFF !important;
   border-color: #2196F3 !important;
   background: rgba(33, 150, 243, 0.15) !important;
+}
+
+/* ========== Feed Reader 页：与 Files Page 一致的 Behance 风格（参考 FILES_PAGE_STYLE_REFERENCE.md） ========== */
+.feed-page-layout {
+  height: calc(100vh - 72px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin-top: -24px;
+  margin-left: -16px;
+  margin-right: -16px;
+  margin-bottom: -16px;
+  width: calc(100% + 32px);
+  border-radius: 0;
+}
+
+.feed-page-layout .ant-layout {
+  min-height: 0;
+  flex: 1;
+}
+
+.feed-page-layout__sider,
+.feed-page-layout__content-list,
+.feed-page-layout__detail {
+  /* 与 files 页一致的滚动条样式 */
+}
+
+.feed-page-layout__sider::-webkit-scrollbar,
+.feed-page-layout__content-list::-webkit-scrollbar,
+.feed-page-layout__detail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.feed-page-layout__sider::-webkit-scrollbar-track,
+.feed-page-layout__content-list::-webkit-scrollbar-track,
+.feed-page-layout__detail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.feed-page-layout__sider::-webkit-scrollbar-thumb,
+.feed-page-layout__content-list::-webkit-scrollbar-thumb,
+.feed-page-layout__detail::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
+.feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
+.feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb,
+.app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb,
+.app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb {
+  background: #4a5568;
+}
+
+.app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
+.app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
+.app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
+  background: #5a6678;
 }
 
 /* ========== Watchlist 页：与 Files 一致的固定左右栏（仅内部滚动） ========== */

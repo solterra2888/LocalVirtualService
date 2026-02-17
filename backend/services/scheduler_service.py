@@ -18,6 +18,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.services.eodhd_news_service import EODHDNewsService
 from backend.services.watchlist_news_service import WatchlistNewsService
+from backend.services.twitter_subscription_service import TwitterSubscriptionService
 from backend.config.exchange_config import ExchangeConfig
 from config.settings import config
 
@@ -55,6 +56,7 @@ class SchedulerService:
         self.task_handlers = {
             'eodhd_news': self._execute_eodhd_news_task,
             'watchlist_news': self._execute_watchlist_news_task,
+            'twitter_subscription': self._execute_twitter_subscription_task,  # 🔥 新增：Twitter订阅推文获取任务
             'cctv_news': self._execute_cctv_news_task,  # CCTV新闻爬取任务
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
@@ -1237,6 +1239,82 @@ class SchedulerService:
                 'success': False,
                 'message': f"Watchlist新闻获取失败: {str(e)}",
                 'data': None
+            }
+    
+    async def _execute_twitter_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行Twitter订阅推文获取任务
+        
+        Args:
+            params: 任务参数
+                - subscription_id: 指定订阅ID（可选）
+                - user_id: 指定用户ID（可选）
+                - force_fetch: 是否强制获取（可选）
+        
+        Returns:
+            执行结果
+        """
+        try:
+            logger.info("执行Twitter订阅推文获取任务", params=params)
+            
+            subscription_id = params.get('subscription_id')
+            user_id = params.get('user_id')
+            force_fetch = params.get('force_fetch', False)
+            
+            # 创建Twitter订阅服务实例
+            twitter_service = TwitterSubscriptionService()
+            
+            # 在线程池中执行耗时的操作，避免阻塞事件循环
+            import asyncio
+            import concurrent.futures
+            
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await loop.run_in_executor(
+                    executor,
+                    twitter_service.fetch_and_store_tweets,
+                    subscription_id,
+                    user_id,
+                    force_fetch
+                )
+            
+            # 返回任务执行结果
+            if result.get('success'):
+                logger.info("Twitter订阅推文获取任务完成",
+                           subscriptions=result.get('subscriptions_count'),
+                           authors=result.get('authors_count'),
+                           tweets_fetched=result.get('tweets_fetched'),
+                           tweets_new=result.get('tweets_new'),
+                           execution_time_ms=result.get('execution_duration_ms'))
+                
+                # 构建成功消息
+                message = f"✅ 成功获取 {result.get('tweets_fetched', 0)} 条推文，" + \
+                         f"新增 {result.get('tweets_new', 0)} 条，" + \
+                         f"已存在 {result.get('tweets_existing', 0)} 条"
+                
+                return {
+                    'success': True,
+                    'message': message,
+                    'data': result
+                }
+            else:
+                logger.error("Twitter订阅推文获取任务失败",
+                            error=result.get('message'))
+                
+                return {
+                    'success': False,
+                    'message': f"❌ {result.get('message', 'Twitter订阅任务执行失败')}",
+                    'data': result
+                }
+            
+        except Exception as e:
+            error_msg = f"Twitter订阅任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'error': str(e)
             }
     
     async def _execute_cctv_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:

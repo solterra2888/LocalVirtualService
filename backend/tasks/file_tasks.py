@@ -1704,3 +1704,233 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
             'files_processed': 0,
             'files_failed': len(file_paths) if 'file_paths' in locals() else 0
         }
+
+
+@app.task(bind=True, name='upload_and_process_youtube_task', queue='file_processing')
+def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'guest'):
+    """
+    异步处理 YouTube 链接，获取转录并保存到数据库
+    
+    Args:
+        youtube_url: YouTube 视频链接
+        username: 用户名
+        
+    Returns:
+        处理结果字典
+    """
+    from backend.services.youtube_service import YouTubeService
+    from backend.database.db_manager import DatabaseManager
+    
+    task_id = self.request.id
+    
+    # 更新任务状态的辅助函数
+    def update_progress(status=None, progress=None, log_message=None):
+        try:
+            state_data = {
+                'status': status or 'processing',
+                'progress': progress if progress is not None else 0,
+                'current_file': youtube_url,
+                'files_processed': 0,
+                'files_failed': 0,
+                'total_files': 1,
+                'logs': []
+            }
+            
+            if log_message:
+                state_data['logs'].append({
+                    'timestamp': datetime.now().isoformat(),
+                    'level': 'info',
+                    'message': log_message
+                })
+            
+            current_task.update_state(
+                state='PROGRESS',
+                meta=state_data
+            )
+        except Exception as e:
+            error(f"更新进度失败: {str(e)}", source="youtube_task")
+    
+    try:
+        info(f"开始处理 YouTube 链接: url={youtube_url}, task_id={task_id}", 
+             source="youtube_task")
+        
+        # 更新进度：开始处理
+        update_progress(status='processing', progress=10, 
+                       log_message='Validating YouTube URL...')
+        
+        # 验证 URL 并提取 video_id
+        video_id = YouTubeService.extract_video_id(youtube_url)
+        if not video_id:
+            error_msg = "Invalid YouTube URL"
+            error(error_msg, source="youtube_task")
+            update_progress(status='failed', progress=0, 
+                           log_message=f'Error: {error_msg}')
+            return {
+                'task_id': task_id,
+                'status': 'failed',
+                'error': error_msg
+            }
+        
+        info(f"提取 video_id: {video_id}", source="youtube_task")
+        update_progress(progress=20, log_message=f'Video ID: {video_id}')
+        
+        # 获取转录
+        update_progress(progress=30, log_message='Fetching YouTube transcript...')
+        
+        try:
+            result = YouTubeService.fetch_transcript(youtube_url)
+        except ImportError as e:
+            error_msg = str(e)
+            error(error_msg, source="youtube_task")
+            update_progress(status='failed', progress=0, 
+                           log_message=f'Error: {error_msg}')
+            return {
+                'task_id': task_id,
+                'status': 'failed',
+                'error': error_msg
+            }
+        except Exception as e:
+            error_msg = f"Failed to fetch transcript: {str(e)}"
+            error(error_msg, source="youtube_task")
+            update_progress(status='failed', progress=0, 
+                           log_message=f'Error: {error_msg}')
+            return {
+                'task_id': task_id,
+                'status': 'failed',
+                'error': error_msg
+            }
+        
+        info(f"转录获取成功: {len(result['transcript'])} segments, language={result['language']}", 
+             source="youtube_task")
+        update_progress(progress=60, 
+                       log_message=f"Transcript fetched: {len(result['transcript'])} segments in {result['language']}")
+        
+        # 保存到数据库
+        update_progress(progress=70, log_message='Saving to database...')
+        
+        db_manager = DatabaseManager(get_database_config())
+        
+        try:
+            with db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                # 插入 processing_stats
+                cursor.execute("""
+                    INSERT INTO processing_stats (
+                        timestamp, files_processed, files_failed, 
+                        "user", task_name, total_time,
+                        total_file_processing_time, total_ai_time,
+                        total_tokens, total_price, upload_params,
+                        final_report, rc_agent_status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                """, (
+                    datetime.now().isoformat(),
+                    1,  # files_processed
+                    0,  # files_failed
+                    username,
+                    'YouTube Processing',
+                    0,  # total_time (YouTube 处理很快)
+                    0,  # total_file_processing_time
+                    0,  # total_ai_time
+                    0,  # total_tokens
+                    0,  # total_price
+                    json.dumps({
+                        "youtube_url": youtube_url,
+                        "video_id": video_id,
+                        "language": result.get('language'),
+                        "is_generated": result.get('is_generated', False)
+                    }),  # upload_params
+                    '',  # final_report
+                    'completed'  # rc_agent_status
+                ))
+                stats_id = cursor.fetchone()[0]
+                
+                # 拼接完整文本
+                full_text = YouTubeService.get_full_text(result)
+                
+                # 插入 file_processing_details
+                filename = f"YouTube_{video_id}"
+                cursor.execute("""
+                    INSERT INTO file_processing_details (
+                        processing_stats_id, filename, file_type, 
+                        file_size_mb, status, content, asr_with_diarization,
+                        created_at, task_id, original_file_path,
+                        processing_time, content_length
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    stats_id,
+                    filename,
+                    'youtube',  # file_type
+                    0,  # file_size_mb (YouTube 没有文件大小)
+                    'completed',
+                    full_text,  # content: 完整文本
+                    json.dumps(result),  # asr_with_diarization: 存储完整的 YouTube 数据
+                    datetime.now(),
+                    task_id,
+                    youtube_url,  # original_file_path: 存储 YouTube URL
+                    0,  # processing_time
+                    len(full_text)  # content_length
+                ))
+                file_id = cursor.fetchone()[0]
+                
+                info(f"数据保存成功: file_id={file_id}, filename={filename}", 
+                     source="youtube_task")
+                
+        except Exception as e:
+            error_msg = f"数据库保存失败: {str(e)}"
+            error(error_msg, source="youtube_task")
+            update_progress(status='failed', progress=0, 
+                           log_message=f'Error: {error_msg}')
+            return {
+                'task_id': task_id,
+                'status': 'failed',
+                'error': error_msg
+            }
+        
+        # 触发自动打标签
+        update_progress(progress=90, log_message='Triggering auto-tagging...')
+        try:
+            trigger_auto_tagging([file_id], username, delay=2)
+            info(f"已触发自动打标签: file_id={file_id}", source="youtube_task")
+        except Exception as e:
+            error(f"触发自动打标签失败: {str(e)}", source="youtube_task")
+        
+        # 更新进度：完成
+        update_progress(status='completed', progress=100,
+                       log_message='YouTube processing completed!')
+        
+        info(f"YouTube 处理任务完成: task_id={task_id}, video_id={video_id}", 
+             source="youtube_task")
+        
+        return {
+            'task_id': task_id,
+            'status': 'completed',
+            'video_id': video_id,
+            'file_id': file_id,
+            'filename': filename,
+            'segments_count': len(result['transcript']),
+            'language': result['language']
+        }
+        
+    except Exception as e:
+        error_msg = f"YouTube 处理失败: {str(e)}"
+        error(f"{error_msg}, task_id={task_id}", source="youtube_task")
+        
+        # 更新失败状态
+        failure_meta = {
+            'error': str(error_msg),
+            'status': 'failed',
+            'current_file': youtube_url
+        }
+        
+        current_task.update_state(
+            state='FAILURE',
+            meta=failure_meta
+        )
+        
+        return {
+            'task_id': task_id,
+            'status': 'failed',
+            'error': error_msg
+        }
