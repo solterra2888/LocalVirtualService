@@ -265,3 +265,63 @@ def smart_wait_and_add_user_task(
             'success': False,
             'message': str(exc),
         }
+
+
+@app.task(
+    name='fetch_youtube_subscription',
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,  # 失败后60秒重试
+    time_limit=300,  # 5分钟硬限制
+    soft_time_limit=240,  # 4分钟软限制
+)
+def fetch_youtube_subscription_task(
+    self,
+    subscription_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    force_fetch: bool = False
+) -> Dict[str, Any]:
+    """
+    异步获取YouTube订阅内容（Celery任务）
+    
+    Args:
+        subscription_id: 订阅ID
+        user_id: 用户ID
+        force_fetch: 是否强制获取
+    
+    Returns:
+        执行结果统计
+    """
+    try:
+        logger.info(f"[Celery Task] Starting YouTube fetch for subscription_id={subscription_id}, "
+                   f"user_id={user_id}, force_fetch={force_fetch}")
+        
+        from backend.services.youtube_subscription_service import YouTubeSubscriptionService
+        
+        youtube_service = YouTubeSubscriptionService()
+        result = youtube_service.fetch_and_store_videos(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch
+        )
+        
+        logger.info(f"[Celery Task] YouTube fetch completed: {result.get('videos_new', 0)} new videos, "
+                   f"{result.get('videos_existing', 0)} existing videos")
+        
+        return result
+        
+    except Exception as exc:
+        logger.error(f"[Celery Task] YouTube fetch failed: {str(exc)}", exc_info=True)
+        
+        # 如果不是最后一次重试，则继续重试
+        if self.request.retries < self.max_retries:
+            logger.warning(f"[Celery Task] Retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc)
+        else:
+            logger.error(f"[Celery Task] Max retries reached, task failed permanently")
+            return {
+                'success': False,
+                'message': f'Failed after {self.max_retries} retries: {str(exc)}',
+                'videos_new': 0,
+                'videos_existing': 0,
+            }

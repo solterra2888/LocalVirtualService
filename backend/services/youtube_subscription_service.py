@@ -1,0 +1,723 @@
+# -*- coding: utf-8 -*-
+"""
+YouTube 订阅服务
+通过 RSS Feed 获取 YouTube 频道视频（无需 YouTube Data API）
+"""
+
+import re
+import feedparser
+import requests
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+import time
+from backend.utils.logger import info, error, warning
+
+
+class YouTubeSubscriptionService:
+    """YouTube 订阅服务类 - 使用 RSS Feed"""
+    
+    # RSS Feed URL 模板
+    RSS_BY_USER = "https://www.youtube.com/feeds/videos.xml?user={username}"
+    RSS_BY_CHANNEL_ID = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    
+    # 频道页面 URL 模板（用于获取 channel_id）
+    CHANNEL_URL_TEMPLATES = [
+        "https://www.youtube.com/@{username}",
+        "https://www.youtube.com/c/{username}",
+        "https://www.youtube.com/user/{username}",
+    ]
+    
+    @staticmethod
+    def clean_username(username: str) -> str:
+        """
+        清理用户名：去除 @ 前缀和空格
+        
+        Args:
+            username: 原始用户名
+            
+        Returns:
+            清理后的用户名
+        """
+        return username.strip().lstrip('@')
+    
+    @staticmethod
+    def extract_channel_id_from_page(username: str) -> Optional[str]:
+        """
+        从频道页面 HTML 中提取 channel_id
+        
+        Args:
+            username: YouTube 用户名
+            
+        Returns:
+            channel_id 或 None
+        """
+        for url_template in YouTubeSubscriptionService.CHANNEL_URL_TEMPLATES:
+            try:
+                url = url_template.format(username=username)
+                info(f"尝试获取频道ID: url={url}", source="youtube_subscription")
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+                
+                response = requests.get(url, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    html = response.text
+                    
+                    # 尝试多种正则模式提取 channel_id
+                    patterns = [
+                        r'"channelId":"([^"]+)"',
+                        r'"browse_id":"([^"]+)"',
+                        r'<link rel="canonical" href="https://www\.youtube\.com/channel/([^"]+)"',
+                        r'content="https://www\.youtube\.com/channel/([^"]+)"',
+                    ]
+                    
+                    for pattern in patterns:
+                        match = re.search(pattern, html)
+                        if match:
+                            channel_id = match.group(1)
+                            # 验证 channel_id 格式（通常是 UC 开头的24字符）
+                            if len(channel_id) >= 20 and channel_id.startswith('UC'):
+                                info(f"成功提取 channel_id: {channel_id}", source="youtube_subscription")
+                                return channel_id
+                
+            except Exception as e:
+                warning(f"从 {url_template} 提取 channel_id 失败: {str(e)}", source="youtube_subscription")
+                continue
+        
+        return None
+    
+    @staticmethod
+    def validate_youtube_channel(channel_identifier: str) -> Dict[str, Any]:
+        """
+        验证 YouTube 频道是否存在
+        
+        Args:
+            channel_identifier: YouTube 用户名或频道ID
+            
+        Returns:
+            验证结果字典：
+            {
+                'exists': bool,
+                'channel_id': str,
+                'channel_name': str,
+                'channel_url': str,
+                'error': str (if exists=False)
+            }
+        """
+        username = YouTubeSubscriptionService.clean_username(channel_identifier)
+        
+        info(f"验证 YouTube 频道: identifier={username}", source="youtube_subscription")
+        
+        # 尝试1：如果看起来像 channel_id（UC开头），直接用 channel_id RSS
+        if len(username) >= 20 and username.startswith('UC'):
+            info(f"识别为 channel_id 格式", source="youtube_subscription")
+            rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=username)
+            result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
+            if result['exists']:
+                result['channel_id'] = username
+                return result
+        
+        # 尝试2：用用户名格式的 RSS
+        rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
+        result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
+        
+        if result['exists']:
+            # 尝试从 RSS 中获取 channel_id
+            channel_id = result.get('channel_id')
+            
+            # 如果 RSS 中没有 channel_id，尝试从页面提取
+            if not channel_id:
+                channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+                if channel_id:
+                    result['channel_id'] = channel_id
+            
+            return result
+        
+        # 尝试3：从页面提取 channel_id，然后用 channel_id RSS
+        channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+        if channel_id:
+            rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=channel_id)
+            result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
+            if result['exists']:
+                result['channel_id'] = channel_id
+                return result
+        
+        # 所有尝试都失败
+        error_msg = f"YouTube channel '{username}' not found or RSS feed unavailable"
+        error(error_msg, source="youtube_subscription")
+        return {
+            'exists': False,
+            'error': error_msg
+        }
+    
+    @staticmethod
+    def _parse_rss_feed(rss_url: str) -> Dict[str, Any]:
+        """
+        解析 RSS Feed 并提取频道信息
+        
+        Args:
+            rss_url: RSS Feed URL
+            
+        Returns:
+            解析结果
+        """
+        try:
+            info(f"解析 RSS Feed: url={rss_url}", source="youtube_subscription")
+            
+            # 使用 feedparser 解析
+            feed = feedparser.parse(rss_url)
+            
+            # 检查是否成功获取
+            if not feed or not hasattr(feed, 'entries') or len(feed.entries) == 0:
+                warning(f"RSS Feed 为空或无法访问", source="youtube_subscription")
+                return {'exists': False, 'error': 'RSS feed is empty or unavailable'}
+            
+            # 提取频道信息
+            channel_name = feed.feed.get('title', 'Unknown Channel')
+            
+            # 尝试从 feed 中提取 channel_id（在 yt:channelId 标签中）
+            channel_id = None
+            if hasattr(feed.feed, 'yt_channelid'):
+                channel_id = feed.feed.yt_channelid
+            
+            # 构建频道 URL
+            if channel_id:
+                channel_url = f"https://www.youtube.com/channel/{channel_id}"
+            else:
+                # 如果没有 channel_id，从第一个视频的 author_detail 中提取
+                if feed.entries and hasattr(feed.entries[0], 'author_detail'):
+                    author_detail = feed.entries[0].author_detail
+                    if 'href' in author_detail:
+                        channel_url = author_detail['href']
+                    else:
+                        channel_url = f"https://www.youtube.com/@{channel_name}"
+                else:
+                    channel_url = f"https://www.youtube.com/@{channel_name}"
+            
+            info(f"频道验证成功: name={channel_name}, channel_id={channel_id}", source="youtube_subscription")
+            
+            return {
+                'exists': True,
+                'channel_id': channel_id,
+                'channel_name': channel_name,
+                'channel_url': channel_url,
+                'video_count': len(feed.entries)
+            }
+            
+        except Exception as e:
+            error(f"解析 RSS Feed 失败: {str(e)}", source="youtube_subscription")
+            return {
+                'exists': False,
+                'error': f"Failed to parse RSS feed: {str(e)}"
+            }
+    
+    @staticmethod
+    def fetch_channel_videos(
+        channel_identifier: str,
+        max_items: int = 15
+    ) -> List[Dict[str, Any]]:
+        """
+        获取 YouTube 频道的最新视频
+        
+        Args:
+            channel_identifier: YouTube 用户名或频道ID
+            max_items: 最大获取数量（RSS 默认最多15个）
+            
+        Returns:
+            视频列表（原始格式，需要通过 YouTubeAdapter 标准化）
+        """
+        username = YouTubeSubscriptionService.clean_username(channel_identifier)
+        
+        info(f"获取 YouTube 频道视频: identifier={username}, max_items={max_items}", 
+             source="youtube_subscription")
+        
+        # 确定使用哪个 RSS URL
+        if len(username) >= 20 and username.startswith('UC'):
+            rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=username)
+        else:
+            rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
+        
+        try:
+            feed = feedparser.parse(rss_url)
+            
+            if not feed or not hasattr(feed, 'entries'):
+                error(f"无法获取 RSS Feed", source="youtube_subscription")
+                return []
+            
+            videos = []
+            
+            for entry in feed.entries[:max_items]:
+                try:
+                    # 提取视频 ID
+                    video_id = None
+                    if hasattr(entry, 'yt_videoid'):
+                        video_id = entry.yt_videoid
+                    elif 'link' in entry:
+                        # 从 URL 中提取
+                        match = re.search(r'watch\?v=([a-zA-Z0-9_-]{11})', entry.link)
+                        if match:
+                            video_id = match.group(1)
+                    
+                    if not video_id:
+                        warning(f"无法提取视频 ID: {entry.get('link', 'unknown')}", 
+                               source="youtube_subscription")
+                        continue
+                    
+                    # 提取缩略图
+                    thumbnail_url = None
+                    if hasattr(entry, 'media_thumbnail') and len(entry.media_thumbnail) > 0:
+                        thumbnail_url = entry.media_thumbnail[0].get('url')
+                    
+                    # 如果没有缩略图，用默认格式
+                    if not thumbnail_url:
+                        thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                    
+                    # 提取统计数据（如果有）
+                    view_count = 0
+                    like_count = 0
+                    if hasattr(entry, 'media_statistics'):
+                        view_count = int(entry.media_statistics.get('views', 0))
+                    if hasattr(entry, 'media_starrating'):
+                        # 某些 RSS 中有评分信息
+                        like_count = int(entry.media_starrating.get('count', 0))
+                    
+                    # 提取频道信息
+                    channel_id = None
+                    channel_name = entry.get('author', 'Unknown')
+                    
+                    if hasattr(entry, 'yt_channelid'):
+                        channel_id = entry.yt_channelid
+                    elif hasattr(entry, 'author_detail') and 'href' in entry.author_detail:
+                        # 从 author URL 中提取 channel_id
+                        author_url = entry.author_detail['href']
+                        match = re.search(r'/channel/([^/]+)', author_url)
+                        if match:
+                            channel_id = match.group(1)
+                    
+                    # 构建视频数据（YouTube API 兼容格式）
+                    video_data = {
+                        'id': video_id,
+                        'snippet': {
+                            'title': entry.get('title', 'Untitled'),
+                            'description': entry.get('summary', ''),
+                            'publishedAt': entry.get('published', ''),
+                            'channelId': channel_id or username,
+                            'channelTitle': channel_name,
+                            'thumbnails': {
+                                'high': {'url': thumbnail_url}
+                            }
+                        },
+                        'statistics': {
+                            'viewCount': str(view_count),
+                            'likeCount': str(like_count),
+                            'commentCount': '0'  # RSS 中没有评论数
+                        },
+                        'contentDetails': {
+                            'duration': ''  # RSS 中没有时长信息
+                        }
+                    }
+                    
+                    videos.append(video_data)
+                    
+                except Exception as e:
+                    warning(f"解析视频条目失败: {str(e)}", source="youtube_subscription")
+                    continue
+            
+            info(f"成功获取 {len(videos)} 个视频", source="youtube_subscription")
+            return videos
+            
+        except Exception as e:
+            error(f"获取 YouTube 视频失败: {str(e)}", source="youtube_subscription")
+            return []
+    
+    @staticmethod
+    def get_all_youtube_subscriptions(enabled_only: bool = True) -> List[Dict[str, Any]]:
+        """
+        获取所有 YouTube 订阅列表
+        
+        Args:
+            enabled_only: 是否只获取启用的订阅
+            
+        Returns:
+            订阅列表
+        """
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_conn_params=db_config)
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            query = """
+                SELECT 
+                    id, user_id, channel_type, channel_identifier,
+                    channel_name, max_items_per_fetch, enabled
+                FROM subscription_list
+                WHERE channel_type = 'youtube'
+            """
+            
+            if enabled_only:
+                query += " AND enabled = true"
+            
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            
+            subscriptions = []
+            for row in rows:
+                subscriptions.append({
+                    'id': row[0],
+                    'user_id': row[1],
+                    'channel_type': row[2],
+                    'channel_identifier': row[3],
+                    'channel_name': row[4],
+                    'max_items_per_fetch': row[5],
+                    'enabled': row[6]
+                })
+            
+            info(f"成功获取YouTube订阅: {len(subscriptions)} 个", source="youtube_subscription")
+            return subscriptions
+            
+        except Exception as e:
+            error(f"获取YouTube订阅失败: {str(e)}", source="youtube_subscription")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+    
+    @staticmethod
+    def fetch_and_store_videos(
+        subscription_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        force_fetch: bool = False
+    ) -> Dict[str, Any]:
+        """
+        获取并存储 YouTube 视频到数据库
+        
+        Args:
+            subscription_id: 订阅ID
+            user_id: 用户ID
+            force_fetch: 是否强制获取
+            
+        Returns:
+            执行结果统计
+        """
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        from backend.services.subscription_content_service import SubscriptionContentService
+        from backend.services.content_adapters import get_adapter
+        
+        start_time = time.time()
+        
+        try:
+            db_config = get_database_config()
+            db_manager = DatabaseManager(db_conn_params=db_config)
+            conn = db_manager.get_connection()
+            cursor = conn.cursor()
+            
+            # 获取订阅信息
+            if subscription_id:
+                cursor.execute("""
+                    SELECT 
+                        id, user_id, channel_type, channel_identifier,
+                        channel_name, max_items_per_fetch
+                    FROM subscription_list
+                    WHERE id = %s
+                """, (subscription_id,))
+                subscription = cursor.fetchone()
+                
+                if not subscription:
+                    error(f"订阅不存在: subscription_id={subscription_id}", source="youtube_subscription")
+                    return {
+                        'success': False,
+                        'message': 'Subscription not found',
+                        'videos_new': 0,
+                        'videos_existing': 0
+                    }
+                
+                sub_id, uid, channel_type, channel_identifier, channel_name, max_items = subscription
+                user_id = uid
+            else:
+                error("必须提供 subscription_id", source="youtube_subscription")
+                return {
+                    'success': False,
+                    'message': 'subscription_id is required',
+                    'videos_new': 0,
+                    'videos_existing': 0
+                }
+            
+            cursor.close()
+            conn.close()
+            
+            info(f"开始获取 YouTube 视频: subscription_id={subscription_id}, "
+                 f"channel={channel_identifier}, max_items={max_items}",
+                 source="youtube_subscription")
+            
+            # 获取视频列表
+            raw_videos = YouTubeSubscriptionService.fetch_channel_videos(
+                channel_identifier=channel_identifier,
+                max_items=max_items or 15
+            )
+            
+            if not raw_videos:
+                warning(f"未获取到任何视频", source="youtube_subscription")
+                return {
+                    'success': True,
+                    'message': 'No videos found',
+                    'videos_new': 0,
+                    'videos_existing': 0,
+                    'execution_duration_ms': int((time.time() - start_time) * 1000)
+                }
+            
+            # 保存到数据库（save_content 会内部调用 adapter 标准化）
+            content_service = SubscriptionContentService()
+            videos_new = 0
+            videos_existing = 0
+            videos_failed = 0
+            
+            for raw_video in raw_videos:
+                try:
+                    content_id, is_new = content_service.save_content(
+                        channel_type='youtube',
+                        raw_data=raw_video,  # 传原始数据，save_content 内部会标准化
+                        user_ids=[user_id]
+                    )
+                    
+                    if is_new:
+                        videos_new += 1
+                    else:
+                        videos_existing += 1
+                        
+                except Exception as e:
+                    video_id = raw_video.get('id', 'unknown')
+                    warning(f"保存视频失败: video_id={video_id}, error={str(e)}", 
+                           source="youtube_subscription")
+                    videos_failed += 1
+                    continue
+            
+            info(f"保存完成: new={videos_new}, existing={videos_existing}, failed={videos_failed}", 
+                 source="youtube_subscription")
+            
+            execution_time = int((time.time() - start_time) * 1000)
+            
+            info(f"YouTube 视频获取完成: subscription_id={subscription_id}, "
+                 f"new={videos_new}, existing={videos_existing}, failed={videos_failed}, "
+                 f"duration={execution_time}ms",
+                 source="youtube_subscription")
+            
+            # 更新订阅统计
+            try:
+                conn = db_manager.get_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE subscription_list
+                    SET 
+                        last_fetched_at = CURRENT_TIMESTAMP,
+                        total_items_fetched = total_items_fetched + %s,
+                        last_fetch_items_count = %s,
+                        consecutive_failures = 0
+                    WHERE id = %s
+                """, (videos_new, videos_new, subscription_id))
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+            except Exception as e:
+                error(f"更新订阅统计失败: {str(e)}", source="youtube_subscription")
+            
+            return {
+                'success': True,
+                'message': f"Successfully fetched {videos_new} new videos",
+                'videos_new': videos_new,
+                'videos_existing': videos_existing,
+                'videos_failed': videos_failed,
+                'execution_duration_ms': execution_time
+            }
+            
+        except Exception as e:
+            error(f"获取并存储 YouTube 视频失败: {str(e)}", source="youtube_subscription")
+            return {
+                'success': False,
+                'message': f'Failed to fetch videos: {str(e)}',
+                'videos_new': 0,
+                'videos_existing': 0,
+                'execution_duration_ms': int((time.time() - start_time) * 1000)
+            }
+    
+    @staticmethod
+    def fetch_all_subscriptions() -> Dict[str, Any]:
+        """
+        批量获取所有YouTube订阅的最新视频（供Scheduler调用）
+        
+        Returns:
+            执行结果统计
+        """
+        start_time = time.time()
+        
+        info("开始批量获取YouTube订阅视频", source="youtube_subscription")
+        
+        try:
+            # 获取所有启用的订阅
+            subscriptions = YouTubeSubscriptionService.get_all_youtube_subscriptions(enabled_only=True)
+            
+            if not subscriptions:
+                info("未找到启用的YouTube订阅", source="youtube_subscription")
+                return {
+                    'success': True,
+                    'message': '未找到启用的YouTube订阅',
+                    'subscriptions_count': 0,
+                    'channels_count': 0,
+                    'videos_fetched': 0,
+                    'videos_new': 0,
+                    'videos_existing': 0,
+                    'execution_duration_ms': int((time.time() - start_time) * 1000)
+                }
+            
+            # 按频道聚合订阅（多个用户可能订阅同一频道）
+            channels_map = {}  # {channel_id: {'subscription_ids': [...], 'user_ids': [...]}}
+            
+            for sub in subscriptions:
+                channel_id = sub['channel_identifier']
+                if channel_id not in channels_map:
+                    channels_map[channel_id] = {
+                        'channel_id': channel_id,
+                        'channel_name': sub.get('channel_name', 'Unknown'),
+                        'max_items': sub.get('max_items_per_fetch', 15),
+                        'subscription_ids': [],
+                        'user_ids': []
+                    }
+                
+                channels_map[channel_id]['subscription_ids'].append(sub['id'])
+                channels_map[channel_id]['user_ids'].append(sub['user_id'])
+            
+            info(f"找到 {len(subscriptions)} 个订阅，聚合为 {len(channels_map)} 个频道", 
+                 source="youtube_subscription")
+            
+            # 逐个频道获取视频
+            total_videos_fetched = 0
+            total_videos_new = 0
+            total_videos_existing = 0
+            channels_success = 0
+            channels_failed = 0
+            
+            from backend.services.subscription_content_service import SubscriptionContentService
+            content_service = SubscriptionContentService()
+            
+            for channel_id, channel_info in channels_map.items():
+                try:
+                    info(f"获取频道视频: {channel_info['channel_name']} ({channel_id})", 
+                         source="youtube_subscription")
+                    
+                    # 获取视频列表
+                    raw_videos = YouTubeSubscriptionService.fetch_channel_videos(
+                        channel_identifier=channel_id,
+                        max_items=channel_info['max_items']
+                    )
+                    
+                    if not raw_videos:
+                        warning(f"频道 {channel_id} 未获取到视频", source="youtube_subscription")
+                        continue
+                    
+                    # 保存视频
+                    videos_new = 0
+                    videos_existing = 0
+                    user_ids = channel_info['user_ids']
+                    
+                    for raw_video in raw_videos:
+                        try:
+                            content_id, is_new = content_service.save_content(
+                                channel_type='youtube',
+                                raw_data=raw_video,
+                                user_ids=user_ids
+                            )
+                            
+                            if is_new:
+                                videos_new += 1
+                            else:
+                                videos_existing += 1
+                                
+                        except Exception as e:
+                            video_id = raw_video.get('id', 'unknown')
+                            warning(f"保存视频失败: video_id={video_id}, error={str(e)}", 
+                                   source="youtube_subscription")
+                            continue
+                    
+                    total_videos_fetched += len(raw_videos)
+                    total_videos_new += videos_new
+                    total_videos_existing += videos_existing
+                    channels_success += 1
+                    
+                    info(f"频道 {channel_info['channel_name']} 完成: new={videos_new}, existing={videos_existing}", 
+                         source="youtube_subscription")
+                    
+                    # 更新订阅统计
+                    from backend.database.db_manager import DatabaseManager
+                    from backend.utils.database_config import get_database_config
+                    
+                    db_config = get_database_config()
+                    db_manager = DatabaseManager(db_conn_params=db_config)
+                    conn = db_manager.get_connection()
+                    cursor = conn.cursor()
+                    
+                    for sub_id in channel_info['subscription_ids']:
+                        try:
+                            cursor.execute("""
+                                UPDATE subscription_list
+                                SET 
+                                    last_fetched_at = CURRENT_TIMESTAMP,
+                                    total_items_fetched = total_items_fetched + %s,
+                                    last_fetch_items_count = %s,
+                                    consecutive_failures = 0
+                                WHERE id = %s
+                            """, (videos_new, videos_new, sub_id))
+                            
+                        except Exception as e:
+                            error(f"更新订阅统计失败: subscription_id={sub_id}, error={str(e)}", 
+                                 source="youtube_subscription")
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    
+                except Exception as e:
+                    error(f"获取频道 {channel_id} 视频失败: {str(e)}", source="youtube_subscription")
+                    channels_failed += 1
+                    continue
+            
+            execution_time = int((time.time() - start_time) * 1000)
+            
+            info(f"YouTube订阅批量获取完成: channels_success={channels_success}, "
+                 f"channels_failed={channels_failed}, videos_new={total_videos_new}, "
+                 f"videos_existing={total_videos_existing}, duration={execution_time}ms",
+                 source="youtube_subscription")
+            
+            return {
+                'success': True,
+                'message': f"成功获取 {channels_success} 个频道的视频",
+                'subscriptions_count': len(subscriptions),
+                'channels_count': len(channels_map),
+                'channels_success': channels_success,
+                'channels_failed': channels_failed,
+                'videos_fetched': total_videos_fetched,
+                'videos_new': total_videos_new,
+                'videos_existing': total_videos_existing,
+                'execution_duration_ms': execution_time
+            }
+            
+        except Exception as e:
+            error(f"批量获取YouTube订阅失败: {str(e)}", source="youtube_subscription")
+            return {
+                'success': False,
+                'message': f'Failed to fetch subscriptions: {str(e)}',
+                'subscriptions_count': 0,
+                'channels_count': 0,
+                'videos_fetched': 0,
+                'videos_new': 0,
+                'videos_existing': 0,
+                'execution_duration_ms': int((time.time() - start_time) * 1000)
+            }

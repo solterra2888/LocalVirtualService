@@ -30,7 +30,8 @@ import {
   LineChartOutlined,
   CalendarOutlined,
   GlobalOutlined,
-  TwitterOutlined
+  TwitterOutlined,
+  YoutubeOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -56,7 +57,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -115,6 +116,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '*/30 * * * *',
       defaultName: 'Twitter Subscription Feed',
       description: 'Automatically fetch tweets from all subscribed Twitter authors every 30 minutes'
+    },
+    youtube_subscription: {
+      icon: <YoutubeOutlined style={{ color: '#FF0000' }} />,
+      params: [],  // No parameters needed - auto-aggregates all subscriptions via RSS
+      defaultSchedule: '0 * * * *',
+      defaultName: 'YouTube Subscription Feed',
+      description: 'Automatically fetch videos from all subscribed YouTube channels every hour (via RSS)'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
@@ -409,6 +417,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           const taskType = dataSourceType === 'eodhd_events' ? 'economic_events' : 
                           dataSourceType === 'eodhd_macro' ? 'macro_indicators' :
                           dataSourceType === 'twitter_subscription' ? 'twitter_subscription' :
+                          dataSourceType === 'youtube_subscription' ? 'youtube_subscription' :
                           dataSourceType;
           
           result = await schedulerAPI.createCronTask({
@@ -1020,6 +1029,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
           
         case 'twitter_subscription':
+          return null;
+        
+        case 'youtube_subscription':
           return null;
           
         case 'eodhd_events':

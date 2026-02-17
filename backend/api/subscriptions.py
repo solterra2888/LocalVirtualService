@@ -279,6 +279,40 @@ async def create_subscription(
             
             logger.info(f"Twitter用户验证成功 | username={request.channel_identifier} | name={request.channel_name}")
         
+        # 🔥 如果是 YouTube 订阅，先验证频道是否存在
+        elif request.channel_type == 'youtube':
+            from backend.services.youtube_subscription_service import YouTubeSubscriptionService
+            
+            # 去除 @ 前缀
+            clean_identifier = request.channel_identifier.lstrip('@')
+            
+            logger.info(f"验证YouTube频道 | identifier={clean_identifier}")
+            youtube_service = YouTubeSubscriptionService()
+            validation_result = youtube_service.validate_youtube_channel(clean_identifier)
+            
+            if not validation_result['exists']:
+                error_msg = validation_result.get('error', 'Channel not found')
+                logger.warning(f"YouTube频道验证失败 | identifier={clean_identifier} | error={error_msg}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"YouTube channel '{clean_identifier}' not found or RSS feed unavailable. Please check the username or channel ID."
+                )
+            
+            # 如果验证成功，自动填充频道名称
+            if not request.channel_name and validation_result.get('channel_name'):
+                request.channel_name = validation_result['channel_name']
+            
+            # ⚠️ 重要：使用 channel_id 作为 channel_identifier（保持与 author_identifier 一致）
+            channel_id = validation_result.get('channel_id')
+            if channel_id:
+                request.channel_identifier = channel_id  # 使用 channel_id 而不是用户名
+                if not request.metadata:
+                    request.metadata = {}
+                request.metadata['original_username'] = clean_identifier  # 保存原始用户名
+                request.metadata['channel_url'] = validation_result.get('channel_url', '')
+            
+            logger.info(f"YouTube频道验证成功 | identifier={clean_identifier} | name={request.channel_name} | channel_id={channel_id}")
+        
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
@@ -407,6 +441,50 @@ async def create_subscription(
                     countdown=0
                 )
                 logger.info(f"Celery task scheduled: fetch_twitter_subscription (task_id={task.id})")
+        
+        # 🎯 YouTube 订阅：同样的智能决策逻辑
+        elif request.enabled and request.channel_type == 'youtube':
+            from backend.tasks.subscription_tasks import (
+                fetch_youtube_subscription_task,
+                add_user_to_existing_content_task,
+                smart_wait_and_add_user_task
+            )
+            
+            if has_existing_content:
+                # ✅ 情况1：已有内容，直接复用
+                logger.info(f"Reusing existing YouTube content for {request.channel_identifier}: "
+                           f"{existing_content_count} videos found. Adding user {user_id} to user_ids.")
+                
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier],
+                    countdown=0,
+                    queue='data_fetching'
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (task_id={task.id})")
+                
+            elif should_wait_for_other_fetch and not has_existing_content:
+                # ✅ 情况2：等待其他用户的获取完成
+                logger.info(f"Another user recently subscribed to YouTube channel {request.channel_identifier}. "
+                           f"Waiting for their fetch to complete...")
+                
+                task = smart_wait_and_add_user_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    kwargs={'max_wait_seconds': 60},
+                    countdown=0,
+                    queue='data_fetching'
+                )
+                logger.info(f"Celery task scheduled: smart_wait_and_add_user (task_id={task.id})")
+                
+            else:
+                # ✅ 情况3：没有内容，从 RSS 获取
+                logger.info(f"No existing content for YouTube channel {request.channel_identifier}. Triggering RSS fetch.")
+                
+                task = fetch_youtube_subscription_task.apply_async(
+                    args=[subscription_id, None, True],  # force_fetch=True
+                    countdown=0,
+                    queue='data_fetching'  # 使用 data_fetching 队列
+                )
+                logger.info(f"Celery task scheduled: fetch_youtube_subscription (task_id={task.id})")
         
         return SubscriptionResponse(
             id=subscription_id,

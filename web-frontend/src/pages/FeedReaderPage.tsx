@@ -125,7 +125,7 @@ const getModalStyles = (isDark: boolean, colors: typeof THEME_COLORS.light | typ
 // 频道类型配置
 const CHANNEL_TYPES = [
   { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
-  { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: true },
+  { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
   { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
 ];
 
@@ -1119,7 +1119,9 @@ const FeedReaderPageInner: React.FC = () => {
                             backgroundColor:
                               subscription.channel_type === 'twitter'
                                 ? '#1DA1F2'
-                                : '#ccc',
+                                : subscription.channel_type === 'youtube'
+                                  ? '#FF0000'
+                                  : '#ccc',
                           }}
                         />
                       }
@@ -1135,7 +1137,7 @@ const FeedReaderPageInner: React.FC = () => {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {subscription.channel_name || subscription.channel_identifier}
+                            {subscription.channel_name}
                           </Text>
                           {/* 🎨 禁用状态标签 */}
                           {!subscription.enabled && (
@@ -1153,14 +1155,7 @@ const FeedReaderPageInner: React.FC = () => {
                           )}
                         </Space>
                       }
-                      description={
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 12, color: themeColors.textSecondary }}
-                        >
-                          @{subscription.channel_identifier}
-                        </Text>
-                      }
+                      description={undefined}
                     />
                   </div>
                   
@@ -1361,54 +1356,70 @@ const FeedReaderPageInner: React.FC = () => {
                           }
                         }}
                       >
-                        <Space
-                          direction="vertical"
-                          size={8}
-                          style={{ width: '100%' }}
-                        >
-                          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                            <Space>
-                              <Text
-                                strong
-                                style={{ color: themeColors.text, fontSize: 14 }}
+                        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {/* title + 正文区域：严格限高，超出隐藏 */}
+                          <div style={{ maxHeight: 96, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {/* title行：最多2行截断 + 已读标记 */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                              <span
+                                style={{
+                                  fontWeight: 600,
+                                  color: themeColors.text,
+                                  fontSize: 14,
+                                  lineHeight: '1.4',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  wordBreak: 'break-word',
+                                  flex: 1,
+                                  minWidth: 0,
+                                } as React.CSSProperties}
                               >
-                                @{content.author_identifier}
-                              </Text>
-                              {content.is_retweet && (
-                                <Tooltip title="Retweet">
-                                  <RetweetOutlined style={{ color: '#00ba7c' }} />
-                                </Tooltip>
+                                {content.title || ''}
+                              </span>
+                              {content.is_read && (
+                                <CheckOutlined style={{ color: '#52c41a', flexShrink: 0, marginTop: 2 }} />
                               )}
-                              {content.is_quote && (
-                                <Tooltip title="Quote Tweet">
-                                  <MessageOutlined style={{ color: '#1DA1F2' }} />
-                                </Tooltip>
-                              )}
-                              {content.is_reply && (
-                                <Tooltip title={`reply to @${content.in_reply_to_username || 'someone'}`}>
-                                  <CommentOutlined style={{ color: '#657786' }} />
-                                </Tooltip>
-                              )}
-                            </Space>
-                            {content.is_read && (
-                              <CheckOutlined style={{ color: '#52c41a' }} />
+                            </div>
+
+                            {/* 正文：最多 2 行，超出省略号 */}
+                            <Text
+                              style={{
+                                color: themeColors.textSecondary,
+                                fontSize: 13,
+                                lineHeight: '1.4',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {content.content}
+                            </Text>
+                          </div>
+
+                          {/* 末行：类型图标 + 作者名 · 时间 · 热度，始终可见，在限高区域外 */}
+                          <Space size={6}>
+                            {content.is_retweet && (
+                              <Tooltip title="Retweet">
+                                <RetweetOutlined style={{ color: '#00ba7c', fontSize: 12 }} />
+                              </Tooltip>
                             )}
-                          </Space>
-
-                          <Text
-                            style={{
-                              color: themeColors.text,
-                              fontSize: 13,
-                              display: '-webkit-box',
-                              WebkitLineClamp: 3,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {content.content}
-                          </Text>
-
-                          <Space size={16}>
+                            {content.is_quote && (
+                              <Tooltip title="Quote Tweet">
+                                <MessageOutlined style={{ color: '#1DA1F2', fontSize: 12 }} />
+                              </Tooltip>
+                            )}
+                            {content.is_reply && (
+                              <Tooltip title={`reply to @${content.in_reply_to_username || 'someone'}`}>
+                                <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />
+                              </Tooltip>
+                            )}
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              {content.author_name || (content.author_identifier ? `@${content.author_identifier}` : '')}
+                            </Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
                             <Text type="secondary" style={{ fontSize: 12 }}>
                               {content.published_at
                                 ? dayjs(content.published_at).fromNow()
@@ -1416,16 +1427,16 @@ const FeedReaderPageInner: React.FC = () => {
                             </Text>
                             {content.heat_level && content.heat_level >= 1 && (
                               <Tooltip title={getHeatLevelConfig(content.heat_level).text}>
-                                <FireOutlined 
-                                  style={{ 
+                                <FireOutlined
+                                  style={{
                                     color: getHeatLevelConfig(content.heat_level).color,
-                                    fontSize: 14
-                                  }} 
+                                    fontSize: 13,
+                                  }}
                                 />
                               </Tooltip>
                             )}
                           </Space>
-                        </Space>
+                        </div>
                       </List.Item>
                     )}
                   />
@@ -1478,13 +1489,13 @@ const FeedReaderPageInner: React.FC = () => {
         >
           {selectedContent ? (
             <div style={{ maxWidth: 600, margin: '0 auto', paddingLeft: 24, paddingRight: 24 }}>
-              {/* 标题和元信息 */}
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                {/* 作者信息 */}
                 <div>
                   <Space>
                     <Avatar
-                      icon={<TwitterOutlined />}
-                      style={{ backgroundColor: '#1DA1F2' }}
+                      icon={selectedContent.channel_type === 'youtube' ? <YoutubeOutlined /> : <TwitterOutlined />}
+                      style={{ backgroundColor: selectedContent.channel_type === 'youtube' ? '#FF0000' : '#1DA1F2' }}
                     />
                     <div>
                       <div>
@@ -1493,7 +1504,6 @@ const FeedReaderPageInner: React.FC = () => {
                         </Text>
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        @{selectedContent.author_identifier} •{' '}
                         {selectedContent.published_at
                           ? dayjs(selectedContent.published_at).format('MMM D, YYYY')
                           : 'Unknown'}
@@ -1502,79 +1512,156 @@ const FeedReaderPageInner: React.FC = () => {
                   </Space>
                 </div>
 
-                {/* 内容 */}
-                <div style={{ marginTop: 16 }}>
-                  {renderTweetContent(selectedContent)}
+                {/* YouTube 嵌入播放器 */}
+                {selectedContent.channel_type === 'youtube' && selectedContent.content_id && (
+                  <div style={{
+                    position: 'relative',
+                    width: '100%',
+                    paddingTop: '56.25%', // 16:9
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                    backgroundColor: '#000',
+                  }}>
+                    <iframe
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
+                        borderRadius: 12,
+                      }}
+                      src={`https://www.youtube.com/embed/${selectedContent.content_id}`}
+                      title={selectedContent.title || 'YouTube Video'}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
+
+                {/* 标题（YouTube 展示大标题） */}
+                {selectedContent.channel_type === 'youtube' && selectedContent.title && (
+                  <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block' }}>
+                    {selectedContent.title}
+                  </Text>
+                )}
+
+                {/* 正文内容（非 YouTube 用 tweet 渲染，YouTube 显示描述文字） */}
+                <div style={{ marginTop: selectedContent.channel_type === 'youtube' ? 0 : 16 }}>
+                  {selectedContent.channel_type === 'youtube' ? (
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap' }}>
+                      {selectedContent.content}
+                    </Text>
+                  ) : (
+                    renderTweetContent(selectedContent)
+                  )}
                 </div>
 
-                {/* 媒体 */}
-                {selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
+                {/* 媒体图片（仅非 YouTube） */}
+                {selectedContent.channel_type !== 'youtube' &&
+                  selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
                   <div>
                     {selectedContent.media_urls.map((url, idx) => (
                       <img
                         key={idx}
                         src={url}
                         alt=""
-                        style={{
-                          width: '100%',
-                          borderRadius: 12,
-                          marginBottom: 12,
-                        }}
+                        style={{ width: '100%', borderRadius: 12, marginBottom: 12 }}
                       />
                     ))}
                   </div>
                 )}
 
-                {/* 互动数：点赞 / 转推 / 回复 / 引用（无卡片、无语言/来源） */}
-                <Space wrap size={16} style={{ marginTop: 16 }}>
-                  {selectedContent.metadata && (
-                    <>
-                      {typeof selectedContent.metadata.like_count === 'number' && (
-                        <Tooltip title="点赞">
-                          <Space size={4}>
-                            <LikeOutlined style={{ color: '#eb2f96' }} />
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              {selectedContent.metadata.like_count}
-                            </Text>
-                          </Space>
-                        </Tooltip>
-                      )}
-                      {typeof selectedContent.metadata.retweet_count === 'number' && (
-                        <Tooltip title="转发">
-                          <Space size={4}>
-                            <RetweetOutlined style={{ color: '#52c41a' }} />
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              {selectedContent.metadata.retweet_count}
-                            </Text>
-                          </Space>
-                        </Tooltip>
-                      )}
-                      {typeof selectedContent.metadata.reply_count === 'number' && (
-                        <Tooltip title="回复">
-                          <Space size={4}>
-                            <CommentOutlined style={{ color: '#1890ff' }} />
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              {selectedContent.metadata.reply_count}
-                            </Text>
-                          </Space>
-                        </Tooltip>
-                      )}
-                      {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
-                        <Tooltip title="引用">
-                          <Space size={4}>
-                            <MessageOutlined style={{ color: '#1890ff' }} />
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              {selectedContent.metadata.quote_count}
-                            </Text>
-                          </Space>
-                        </Tooltip>
-                      )}
-                    </>
-                  )}
-                </Space>
+                {/* YouTube 互动数：观看数 / 点赞数 */}
+                {selectedContent.channel_type === 'youtube' && selectedContent.metadata && (
+                  <Space wrap size={16}>
+                    {typeof selectedContent.metadata.view_count === 'number' && (
+                      <Tooltip title="观看数">
+                        <Space size={4}>
+                          <EyeOutlined style={{ color: themeColors.textSecondary }} />
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            {selectedContent.metadata.view_count.toLocaleString()}
+                          </Text>
+                        </Space>
+                      </Tooltip>
+                    )}
+                    {typeof selectedContent.metadata.like_count === 'number' && (
+                      <Tooltip title="点赞数">
+                        <Space size={4}>
+                          <LikeOutlined style={{ color: '#eb2f96' }} />
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            {selectedContent.metadata.like_count.toLocaleString()}
+                          </Text>
+                        </Space>
+                      </Tooltip>
+                    )}
+                    {typeof selectedContent.metadata.comment_count === 'number' && (
+                      <Tooltip title="评论数">
+                        <Space size={4}>
+                          <CommentOutlined style={{ color: '#1890ff' }} />
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            {selectedContent.metadata.comment_count.toLocaleString()}
+                          </Text>
+                        </Space>
+                      </Tooltip>
+                    )}
+                  </Space>
+                )}
 
+                {/* Twitter 互动数 */}
+                {selectedContent.channel_type !== 'youtube' && (
+                  <Space wrap size={16} style={{ marginTop: 16 }}>
+                    {selectedContent.metadata && (
+                      <>
+                        {typeof selectedContent.metadata.like_count === 'number' && (
+                          <Tooltip title="点赞">
+                            <Space size={4}>
+                              <LikeOutlined style={{ color: '#eb2f96' }} />
+                              <Text type="secondary" style={{ fontSize: 13 }}>
+                                {selectedContent.metadata.like_count}
+                              </Text>
+                            </Space>
+                          </Tooltip>
+                        )}
+                        {typeof selectedContent.metadata.retweet_count === 'number' && (
+                          <Tooltip title="转发">
+                            <Space size={4}>
+                              <RetweetOutlined style={{ color: '#52c41a' }} />
+                              <Text type="secondary" style={{ fontSize: 13 }}>
+                                {selectedContent.metadata.retweet_count}
+                              </Text>
+                            </Space>
+                          </Tooltip>
+                        )}
+                        {typeof selectedContent.metadata.reply_count === 'number' && (
+                          <Tooltip title="回复">
+                            <Space size={4}>
+                              <CommentOutlined style={{ color: '#1890ff' }} />
+                              <Text type="secondary" style={{ fontSize: 13 }}>
+                                {selectedContent.metadata.reply_count}
+                              </Text>
+                            </Space>
+                          </Tooltip>
+                        )}
+                        {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
+                          <Tooltip title="引用">
+                            <Space size={4}>
+                              <MessageOutlined style={{ color: '#1890ff' }} />
+                              <Text type="secondary" style={{ fontSize: 13 }}>
+                                {selectedContent.metadata.quote_count}
+                              </Text>
+                            </Space>
+                          </Tooltip>
+                        )}
+                      </>
+                    )}
+                  </Space>
+                )}
+
+                {/* 外链 */}
                 {selectedContent.url && (
-                  <div style={{ marginTop: 16 }}>
+                  <div style={{ marginTop: 8 }}>
                     <a
                       href={selectedContent.url}
                       target="_blank"
@@ -1583,7 +1670,7 @@ const FeedReaderPageInner: React.FC = () => {
                     >
                       <Space>
                         <LinkOutlined />
-                        View on Twitter
+                        {selectedContent.channel_type === 'youtube' ? 'Watch on YouTube' : 'View on Twitter'}
                       </Space>
                     </a>
                   </div>
@@ -1646,16 +1733,28 @@ const FeedReaderPageInner: React.FC = () => {
                     label={
                       channelType === 'twitter'
                         ? 'Twitter Username'
+                        : channelType === 'youtube'
+                        ? 'YouTube Channel'
                         : 'Channel Identifier'
                     }
                     rules={[{ required: true, message: 'Please input identifier' }]}
                     extra={
                       channelType === 'twitter'
                         ? 'Enter without @ symbol (e.g., elonmusk)'
+                        : channelType === 'youtube'
+                        ? 'YouTube channel username or handle (e.g., creativeplanning or @creativeplanning)'
                         : 'Channel ID or username'
                     }
                   >
-                    <Input placeholder="e.g., elonmusk" />
+                    <Input 
+                      placeholder={
+                        channelType === 'twitter' 
+                          ? 'e.g., elonmusk' 
+                          : channelType === 'youtube'
+                          ? 'e.g., creativeplanning'
+                          : 'Enter channel identifier'
+                      } 
+                    />
                   </Form.Item>
                 </>
               );

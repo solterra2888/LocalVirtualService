@@ -60,6 +60,7 @@ task_routes = {
     'fetch_ipo_calendar': {'queue': 'data_fetching'},  # 🔥 新增：IPO日历数据获取
     # 订阅相关任务（data_fetching队列）
     'fetch_twitter_subscription': {'queue': 'data_fetching'},  # Twitter订阅内容获取
+    'fetch_youtube_subscription': {'queue': 'data_fetching'},  # YouTube订阅内容获取
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},  # 复用现有内容
     'smart_wait_and_add_user': {'queue': 'data_fetching'},  # 智能等待
 }

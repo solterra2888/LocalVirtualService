@@ -25,6 +25,7 @@ class LogResponse(BaseModel):
 LOG_FILES = {
     "app": "logs/app.log",
     "celery_worker": "logs/celery_worker.log",
+    "celery_worker_data_fetching": "logs/celery_worker_data_fetching.log",
 }
 
 
@@ -75,14 +76,14 @@ async def list_logs(current_user: TokenData = Depends(get_current_admin_user)):
 
 @router.get("/api/logs/{log_type}", response_model=LogResponse, summary="读取日志内容")
 async def read_log(
-    log_type: Literal["app", "celery_worker"],
+    log_type: Literal["app", "celery_worker", "celery_worker_data_fetching"],
     lines: Optional[int] = Query(None, description="读取最后N行，不提供则读取全部"),
     current_user: TokenData = Depends(get_current_admin_user)
 ):
     """
     读取指定日志文件的内容（需要管理员权限）
     
-    - **log_type**: 日志类型 (app 或 celery_worker)
+    - **log_type**: 日志类型 (app, celery_worker 或 celery_worker_data_fetching)
     - **lines**: 可选，读取最后N行
     """
     log_path = get_log_file_path(log_type)
@@ -118,13 +119,13 @@ async def read_log(
 
 @router.delete("/api/logs/{log_type}/clear", summary="清空日志文件")
 async def clear_log(
-    log_type: Literal["app", "celery_worker"],
+    log_type: Literal["app", "celery_worker", "celery_worker_data_fetching"],
     current_user: TokenData = Depends(get_current_admin_user)
 ):
     """
     清空指定的日志文件（需要管理员权限）
     
-    - **log_type**: 日志类型 (app 或 celery_worker)
+    - **log_type**: 日志类型 (app, celery_worker 或 celery_worker_data_fetching)
     """
     log_path = get_log_file_path(log_type)
     
