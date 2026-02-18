@@ -145,10 +145,11 @@ async def scheduler_health_proxy():
         raise HTTPException(status_code=500, detail=f"failed to proxy scheduler service health check: {str(e)}")
 
 @router.get("/status", summary="调度器详细状态")
-async def scheduler_status_proxy(current_user=Depends(get_current_user)):
+async def scheduler_status_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理调度器详细状态"""
     try:
-        result = await scheduler_client.get("/status")
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.get("/status", headers=auth_headers)
         return result
     except HTTPException:
         raise
@@ -520,11 +521,12 @@ async def execute_fundamentals_update_proxy(request: Request, current_user=Depen
         raise HTTPException(status_code=500, detail=f"failed to proxy update eodhd fundamentals data manually: {str(e)}")
 
 @router.get("/tasks/{task_id}/logs", summary="get task execution logs")
-async def get_task_logs_proxy(task_id: str, limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
+async def get_task_logs_proxy(request: Request, task_id: str, limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
     """代理获取任务执行日志"""
     try:
+        auth_headers = get_auth_headers(request)
         params = {"limit": limit, "offset": offset}
-        result = await scheduler_client.get(f"/scheduler/tasks/{task_id}/logs", params=params)
+        result = await scheduler_client.get(f"/scheduler/tasks/{task_id}/logs", params=params, headers=auth_headers)
         return result
     except HTTPException:
         raise
@@ -533,6 +535,7 @@ async def get_task_logs_proxy(task_id: str, limit: int = 50, offset: int = 0, cu
 
 @router.get("/execution-logs", summary="get all task execution logs")
 async def get_all_execution_logs_proxy(
+    request: Request,
     limit: int = 50, 
     offset: int = 0, 
     task_types: Optional[str] = None,
@@ -540,10 +543,11 @@ async def get_all_execution_logs_proxy(
 ):
     """代理获取所有任务执行日志"""
     try:
+        auth_headers = get_auth_headers(request)
         params = {"limit": limit, "offset": offset}
         if task_types:
             params["task_types"] = task_types
-        result = await scheduler_client.get("/scheduler/execution-logs", params=params)
+        result = await scheduler_client.get("/scheduler/execution-logs", params=params, headers=auth_headers)
         return result
     except HTTPException:
         raise
@@ -552,14 +556,16 @@ async def get_all_execution_logs_proxy(
 
 @router.get("/execution-logs/summary", summary="get execution summary statistics")
 async def get_execution_summary_proxy(
+    request: Request,
     days: int = 7,
     timezone: str = "America/New_York",
     current_user=Depends(get_current_user)
 ):
     """代理获取任务执行统计摘要"""
     try:
+        auth_headers = get_auth_headers(request)
         params = {"days": days, "timezone": timezone}
-        result = await scheduler_client.get("/scheduler/execution-logs/summary", params=params)
+        result = await scheduler_client.get("/scheduler/execution-logs/summary", params=params, headers=auth_headers)
         return result
     except HTTPException:
         raise
@@ -568,6 +574,7 @@ async def get_execution_summary_proxy(
 
 @router.get("/execution-logs/download", summary="download execution logs csv")
 async def download_execution_logs_csv_proxy(
+    request: Request,
     task_id: Optional[str] = None, 
     limit: int = 1000, 
     offset: int = 0, 
@@ -581,9 +588,11 @@ async def download_execution_logs_csv_proxy(
         
         # 对于文件下载，需要特殊处理
         url = f"{SCHEDULER_BASE_URL}/scheduler/execution-logs/download"
+        auth_header = request.headers.get("authorization")
+        download_headers = {"authorization": auth_header} if auth_header else {}
         
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=download_headers)
             
             if response.status_code >= 400:
                 raise HTTPException(
@@ -652,10 +661,11 @@ async def get_database_tables_proxy(request: Request, table_name: str, limit: in
         raise HTTPException(status_code=500, detail=f"failed to proxy get database tables data: {str(e)}")
 
 @router.get("/debug/table-structure", summary="get table structure")
-async def get_table_structure_proxy(current_user=Depends(get_current_user)):
+async def get_table_structure_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理查看表结构"""
     try:
-        result = await scheduler_client.get("/scheduler/debug/table-structure")
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.get("/scheduler/debug/table-structure", headers=auth_headers)
         return result
     except HTTPException:
         raise
