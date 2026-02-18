@@ -1,8 +1,6 @@
 #!/bin/bash
 # RC Project 服务启动脚本
 
-set -e  # 遇到错误立即退出
-
 echo "🚀 RC Project 服务启动脚本"
 echo "================================"
 
@@ -75,8 +73,7 @@ systemctl start rc-frontend
 if wait_for_service rc-frontend 20; then
     echo "✅ 前端应用已启动"
 else
-    echo "❌ 前端应用启动失败，中止启动"
-    exit 1
+    echo "⚠️  前端应用启动失败（页面不可访问，但后端 API 仍正常）"
 fi
 
 # ── 5. Celery AI Worker (file_processing + ai_processing) ────

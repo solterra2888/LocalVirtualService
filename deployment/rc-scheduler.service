@@ -1,7 +1,7 @@
 [Unit]
 Description=RC Project Scheduler Service
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
@@ -9,19 +9,20 @@ User=root
 Group=root
 WorkingDirectory=/opt/rcproject
 
-# 从.env文件加载所有配置（包含敏感信息）
 EnvironmentFile=/opt/rcproject/.env
-
-# 仅覆盖路径相关的环境变量
 Environment=PATH=/home/kevin/miniconda3/envs/rc_project/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONPATH=/opt/rcproject
+
 ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python /opt/rcproject/scheduler_main.py
+
 Restart=always
-RestartSec=3
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# 性能优化
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
 LimitNOFILE=65536
 LimitNPROC=4096
 

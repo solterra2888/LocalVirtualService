@@ -8,17 +8,23 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/rcproject/web-frontend
+
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=BROWSER=none
-Environment=REACT_APP_API_BASE_URL=http://111.230.48.119/api
-Environment=REACT_APP_SCHEDULER_BASE_URL=http://111.230.48.119/scheduler
+# 使用相对路径，通过 Nginx 统一代理，避免 IP 变更时需要修改配置
+Environment=REACT_APP_API_BASE_URL=/api
+Environment=REACT_APP_SCHEDULER_BASE_URL=/scheduler
+
 ExecStart=/usr/bin/npm start
+
 Restart=always
-RestartSec=3
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# 性能优化
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
 LimitNOFILE=65536
 LimitNPROC=4096
 
