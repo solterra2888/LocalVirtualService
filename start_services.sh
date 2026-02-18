@@ -1,6 +1,7 @@
 #!/bin/bash
 # RC Project 服务启动脚本
-# 快速启动所有服务
+
+set -e  # 遇到错误立即退出
 
 echo "🚀 RC Project 服务启动脚本"
 echo "================================"
@@ -16,114 +17,120 @@ echo "   - PostgreSQL数据库"
 echo "   - Redis缓存"
 echo "   - Web应用"
 echo "   - 前端应用"
-echo "   - Celery Worker (AI处理)"
+echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
 echo "   - 调度器服务"
 echo "   - Nginx代理"
 echo ""
 
-# 启动PostgreSQL
-echo "🗄️ 启动PostgreSQL数据库..."
+# 等待服务就绪的辅助函数
+wait_for_service() {
+    local service=$1
+    local max_wait=${2:-15}
+    local count=0
+    while ! systemctl is-active --quiet "$service"; do
+        if [ $count -ge $max_wait ]; then
+            return 1
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    return 0
+}
+
+# ── 1. PostgreSQL ────────────────────────────────────────────
+echo "🗄️  启动PostgreSQL数据库..."
 systemctl start postgresql
-if systemctl is-active --quiet postgresql; then
+if wait_for_service postgresql 15; then
     echo "✅ PostgreSQL已启动"
 else
-    echo "❌ PostgreSQL启动失败"
+    echo "❌ PostgreSQL启动失败，中止启动"
     exit 1
 fi
 
-# 启动Redis
+# ── 2. Redis ─────────────────────────────────────────────────
 echo "🔴 启动Redis缓存..."
 systemctl start redis
-if systemctl is-active --quiet redis; then
+if wait_for_service redis 10; then
     echo "✅ Redis已启动"
 else
-    echo "⚠️ Redis启动失败，Celery任务将无法工作"
+    # Redis 失败则后续 Celery / Scheduler 必然失败，直接退出
+    echo "❌ Redis启动失败，Celery和调度器无法工作，中止启动"
+    exit 1
 fi
 
-# 等待数据库和缓存启动
-sleep 3
-
-# 启动Web应用
+# ── 3. Web应用 ───────────────────────────────────────────────
 echo "🌐 启动Web应用..."
 systemctl start rc-webapp
-if systemctl is-active --quiet rc-webapp; then
+if wait_for_service rc-webapp 20; then
     echo "✅ Web应用已启动"
 else
-    echo "❌ Web应用启动失败"
+    echo "❌ Web应用启动失败，中止启动"
     exit 1
 fi
 
-# 等待Web应用启动
-sleep 3
-
-# 启动前端应用
+# ── 4. 前端应用 ──────────────────────────────────────────────
 echo "🎨 启动前端应用..."
 systemctl start rc-frontend
-if systemctl is-active --quiet rc-frontend; then
+if wait_for_service rc-frontend 20; then
     echo "✅ 前端应用已启动"
 else
-    echo "❌ 前端应用启动失败"
+    echo "❌ 前端应用启动失败，中止启动"
     exit 1
 fi
 
-# 启动Celery AI Worker
+# ── 5. Celery AI Worker (file_processing + ai_processing) ────
 echo "🤖 启动Celery AI Worker..."
 systemctl start rc-celery-ai
-if systemctl is-active --quiet rc-celery-ai; then
+if wait_for_service rc-celery-ai 15; then
     echo "✅ Celery AI Worker已启动"
 else
-    echo "⚠️ Celery AI Worker启动失败，新闻分析任务将无法执行"
+    echo "⚠️  Celery AI Worker启动失败（文件上传和AI分析将无法执行）"
 fi
 
-# 启动Celery Data Worker
+# ── 6. Celery Data Worker (data_fetching) ────────────────────
 echo "📊 启动Celery Data Worker..."
 systemctl start rc-celery-data
-if systemctl is-active --quiet rc-celery-data; then
+if wait_for_service rc-celery-data 15; then
     echo "✅ Celery Data Worker已启动"
 else
-    echo "⚠️ Celery Data Worker启动失败，数据获取任务将无法执行"
+    echo "⚠️  Celery Data Worker启动失败（数据获取任务将无法执行）"
 fi
 
-# 启动调度器
+# ── 7. 调度器服务 ─────────────────────────────────────────────
 echo "🕒 启动调度器服务..."
 systemctl start rc-scheduler
-if systemctl is-active --quiet rc-scheduler; then
+if wait_for_service rc-scheduler 15; then
     echo "✅ 调度器服务已启动"
 else
-    echo "⚠️ 调度器服务启动失败，定时任务将无法执行"
+    echo "⚠️  调度器服务启动失败（定时任务将无法执行）"
 fi
 
-# 启动Nginx
+# ── 8. Nginx ──────────────────────────────────────────────────
 echo "🌐 启动Nginx代理..."
 systemctl start nginx
-if systemctl is-active --quiet nginx; then
+if wait_for_service nginx 10; then
     echo "✅ Nginx已启动"
 else
-    echo "❌ Nginx启动失败"
+    echo "❌ Nginx启动失败，中止启动"
     exit 1
 fi
 
 echo ""
 echo "🎉 所有服务启动完成!"
 echo "================================"
-echo "🌐 访问地址:"
-echo "   - 前端应用: http://111.230.48.119:3000"
-echo "   - Web应用: http://111.230.48.119:8000"
-echo "   - API文档: http://111.230.48.119:8000/api/docs"
-echo "   - 调度器API: http://111.230.48.119:8001"
+echo "🌐 访问地址 (通过Nginx):"
+echo "   - 前端应用: http://111.230.48.119"
+echo "   - API文档:  http://111.230.48.119/api/docs"
 echo ""
 echo "🔧 服务管理命令:"
 echo "   - 查看所有服务: systemctl status 'rc-*'"
 echo "   - 停止所有服务: sudo ./stop_services.sh"
 echo "   - 重启所有服务: sudo ./restart_services.sh"
+echo "   - 仅重启后端:   sudo ./restart_backend.sh"
 echo ""
 echo "📊 查看服务日志:"
-echo "   - Web应用: journalctl -u rc-webapp -f"
-echo "   - 调度器: journalctl -u rc-scheduler -f"
-echo "   - Celery AI: journalctl -u rc-celery-ai -f"
-echo "   - Celery Data: journalctl -u rc-celery-data -f"
-echo ""
-echo "🤖 Celery任务监控:"
-echo "   - AI Worker日志: tail -f logs/celery_ai_worker.log"
-echo "   - Data Worker日志: tail -f logs/celery_data_worker.log"
+echo "   - Web应用:    journalctl -u rc-webapp -f"
+echo "   - 调度器:     journalctl -u rc-scheduler -f"
+echo "   - Celery AI:  journalctl -u rc-celery-ai -f"
+echo "   - Celery Data:journalctl -u rc-celery-data -f"
