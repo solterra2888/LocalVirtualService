@@ -293,6 +293,16 @@ async def create_subscription(
             if not validation_result['exists']:
                 error_msg = validation_result.get('error', 'Channel not found')
                 logger.warning(f"YouTube频道验证失败 | identifier={clean_identifier} | error={error_msg}")
+                if validation_result.get('network_unreachable'):
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "服务器无法访问 YouTube（网络不可达）。"
+                            "请在服务器的 .env 文件中配置代理，例如：\n"
+                            "YOUTUBE_PROXY=http://127.0.0.1:7890\n"
+                            "然后重启后端服务（./restart_backend.sh）。"
+                        )
+                    )
                 raise HTTPException(
                     status_code=400,
                     detail=f"YouTube channel '{clean_identifier}' not found or RSS feed unavailable. Please check the username or channel ID."

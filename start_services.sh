@@ -1,18 +1,19 @@
 #!/bin/bash
 # RC Project 服务启动脚本
 
+set -euo pipefail
+
 echo "🚀 RC Project 服务启动脚本"
 echo "================================"
 
-# 检查是否以root权限运行
 if [ "$EUID" -ne 0 ]; then
     echo "❌ 请以root权限运行此脚本: sudo $0"
     exit 1
 fi
 
 echo "📋 启动服务列表:"
-echo "   - PostgreSQL数据库"
-echo "   - Redis缓存"
+echo "   - PostgreSQL数据库 (Docker)"
+echo "   - Redis缓存 (Docker)"
 echo "   - Web应用"
 echo "   - 前端应用"
 echo "   - Celery Worker (AI/文件处理)"
@@ -21,7 +22,9 @@ echo "   - 调度器服务"
 echo "   - Nginx代理"
 echo ""
 
-# 等待服务就绪的辅助函数
+# ── 辅助函数 ──────────────────────────────────────────────────
+
+# 等待 systemd 服务就绪
 wait_for_service() {
     local service=$1
     local max_wait=${2:-15}
@@ -36,24 +39,67 @@ wait_for_service() {
     return 0
 }
 
-# ── 1. PostgreSQL ────────────────────────────────────────────
-echo "🗄️  启动PostgreSQL数据库..."
-systemctl start postgresql
-if wait_for_service postgresql 15; then
-    echo "✅ PostgreSQL已启动"
-else
-    echo "❌ PostgreSQL启动失败，中止启动"
+# 检查 Docker 容器是否正在运行
+docker_running() {
+    local container=$1
+    docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q "^true$"
+}
+
+# 确保 Docker 容器已运行（不存在则报错，已停止则尝试启动）
+ensure_docker_container() {
+    local container=$1
+    local display_name=$2
+    local max_wait=${3:-15}
+
+    if docker_running "$container"; then
+        echo "✅ $display_name (Docker: $container) 已在运行"
+        return 0
+    fi
+
+    if ! docker inspect "$container" &>/dev/null; then
+        echo "❌ Docker容器 '$container' 不存在，请先创建该容器"
+        return 1
+    fi
+
+    echo "🔄 Docker容器 $container 未运行，尝试启动..."
+    docker start "$container"
+
+    local count=0
+    while ! docker_running "$container"; do
+        if [ $count -ge $max_wait ]; then
+            echo "❌ $display_name 启动超时"
+            return 1
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+
+    echo "✅ $display_name (Docker: $container) 已启动"
+    return 0
+}
+
+# 获取显示用的访问地址（优先读 .env 中的 SERVER_HOST，否则取第一块网卡 IP）
+get_server_ip() {
+    local env_file="/opt/rcproject/.env"
+    if [ -f "$env_file" ]; then
+        local host
+        host=$(grep -E '^SERVER_HOST=' "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
+        [ -n "$host" ] && echo "$host" && return
+    fi
+    hostname -I | awk '{print $1}'
+}
+
+# ── 1. PostgreSQL (Docker) ────────────────────────────────────
+echo "🗄️  检查PostgreSQL数据库..."
+if ! ensure_docker_container "postgresql" "PostgreSQL"; then
+    echo "❌ PostgreSQL不可用，中止启动"
     exit 1
 fi
 
-# ── 2. Redis ─────────────────────────────────────────────────
-echo "🔴 启动Redis缓存..."
-systemctl start redis
-if wait_for_service redis 10; then
-    echo "✅ Redis已启动"
-else
-    # Redis 失败则后续 Celery / Scheduler 必然失败，直接退出
-    echo "❌ Redis启动失败，Celery和调度器无法工作，中止启动"
+# ── 2. Redis (Docker) ─────────────────────────────────────────
+echo "🔴 检查Redis缓存..."
+if ! ensure_docker_container "redis" "Redis"; then
+    echo "❌ Redis不可用，Celery和调度器无法工作，中止启动"
     exit 1
 fi
 
@@ -109,16 +155,18 @@ systemctl start nginx
 if wait_for_service nginx 10; then
     echo "✅ Nginx已启动"
 else
-    echo "❌ Nginx启动失败，中止启动"
+    echo "❌ Nginx启动失败"
     exit 1
 fi
+
+SERVER_IP=$(get_server_ip)
 
 echo ""
 echo "🎉 所有服务启动完成!"
 echo "================================"
 echo "🌐 访问地址 (通过Nginx):"
-echo "   - 前端应用: http://111.230.48.119"
-echo "   - API文档:  http://111.230.48.119/api/docs"
+echo "   - 前端应用: http://${SERVER_IP}"
+echo "   - API文档:  http://${SERVER_IP}/api/docs"
 echo ""
 echo "🔧 服务管理命令:"
 echo "   - 查看所有服务: systemctl status 'rc-*'"

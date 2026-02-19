@@ -139,6 +139,33 @@ async def get_task_logs_proxy(request: Request, task_id: str, ...):
 
 ---
 
+---
+
+## 问题四：start_services.sh 因 Redis/PostgreSQL 非 systemd 服务而中止
+
+### 现象
+运行 `./start_services.sh` 时报错并退出：
+```
+Failed to start redis.service: Unit redis.service not found.
+❌ Redis启动失败，Celery和调度器无法工作，中止启动
+```
+
+### 根本原因
+服务器上 Redis 和 PostgreSQL 均以 **Docker 容器**方式运行（`restart=always`），而非 systemd 服务。原脚本使用 `systemctl start redis/postgresql` 无法找到对应 Unit，直接以非零退出码退出。
+
+**容器信息：**
+| 容器名 | 镜像 | 端口 | 重启策略 |
+|--------|------|------|---------|
+| `redis` | `redis:7.4.6-alpine` | `0.0.0.0:6379->6379` | `always` |
+| `postgresql` | `postgres:17.5` | `0.0.0.0:5432->5432` | `always` |
+
+### 修复方案
+- `start_services.sh`：改用 `docker inspect` 检查容器运行状态，容器已停止时执行 `docker start`
+- `stop_services.sh`：移除 `systemctl stop redis/postgresql`，Docker 容器由自身的 `restart=always` 管理
+- `restart_services.sh`：启动前先校验 Docker 容器健康状态，任一未运行则提示并中止
+
+---
+
 ## 服务器更新操作手册
 
 ### 首次部署后同步 service 文件
@@ -150,7 +177,19 @@ sudo cp /opt/rcproject/deployment/rc-webapp.service      /etc/systemd/system/
 sudo cp /opt/rcproject/deployment/rc-scheduler.service   /etc/systemd/system/
 sudo cp /opt/rcproject/deployment/rc-frontend.service    /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler
 ```
+
+> ⚠️ **队列配置说明**（`rc-celery-ai.service`）：
+> - `--queues=file_processing,ai_processing`
+> - `file_processing`：文件上传/解析任务（`backend.tasks.file_tasks.*`）
+> - `ai_processing`：AI 分析、新闻处理、主题任务
+> - 两个队列**缺一不可**，否则文件上传任务会永久挂起
+
+> ⚠️ **Redis/PostgreSQL 说明**：本项目使用 Docker 容器管理数据库服务，`start_services.sh` 只会检查容器状态，不会尝试 `systemctl start redis/postgresql`。如容器未运行需手动执行：
+> ```bash
+> docker start redis postgresql
+> ```
 
 ### 日常部署新代码
 

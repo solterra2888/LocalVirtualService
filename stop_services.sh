@@ -1,10 +1,10 @@
 #!/bin/bash
 # RC Project 服务停止脚本
+# 注意：PostgreSQL 和 Redis 由 Docker 管理（restart=always），本脚本不停止它们
 
 echo "🛑 RC Project 服务停止脚本"
 echo "================================"
 
-# 检查是否以root权限运行
 if [ "$EUID" -ne 0 ]; then
     echo "❌ 请以root权限运行此脚本: sudo $0"
     exit 1
@@ -17,8 +17,7 @@ echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
 echo "   - 前端应用"
 echo "   - Web应用"
-echo "   - Redis缓存"
-echo "   - PostgreSQL数据库"
+echo "   (PostgreSQL/Redis 由 Docker 管理，不在此处停止)"
 echo ""
 
 # 停止服务并验证状态的辅助函数
@@ -39,8 +38,6 @@ stop_service rc-celery-ai
 stop_service rc-celery-data
 stop_service rc-frontend
 stop_service rc-webapp
-stop_service redis
-stop_service postgresql
 
 # ── 清理残留进程 ──────────────────────────────────────────────
 echo ""
@@ -67,6 +64,8 @@ cleanup_port 8001   # 调度器
 cleanup_port 3000   # 前端应用
 
 echo ""
-echo "🎉 所有服务已停止!"
+echo "🎉 应用服务已全部停止!"
 echo "================================"
+echo "💡 PostgreSQL (Docker: postgresql) 和 Redis (Docker: redis) 仍在运行"
+echo "   如需停止 Docker 容器: docker stop redis postgresql"
 echo "💡 要重新启动服务，请运行: sudo ./start_services.sh"

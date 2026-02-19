@@ -4,6 +4,7 @@ YouTube 订阅服务
 通过 RSS Feed 获取 YouTube 频道视频（无需 YouTube Data API）
 """
 
+import os
 import re
 import feedparser
 import requests
@@ -13,9 +14,39 @@ import time
 from backend.utils.logger import info, error, warning
 
 
+def _get_proxies() -> Optional[Dict[str, str]]:
+    """
+    从环境变量读取代理配置。
+    优先级：YOUTUBE_PROXY > HTTPS_PROXY > HTTP_PROXY
+    在国内服务器访问 YouTube 时需要配置代理，例如在 .env 中设置：
+      YOUTUBE_PROXY=http://127.0.0.1:7890
+    """
+    proxy = (
+        os.getenv('YOUTUBE_PROXY')
+        or os.getenv('HTTPS_PROXY')
+        or os.getenv('HTTP_PROXY')
+    )
+    if proxy:
+        return {'http': proxy, 'https': proxy}
+    return None
+
+
+def _is_network_unreachable(exc: Exception) -> bool:
+    """判断异常是否属于"服务器无法访问外网"（需要配置代理）"""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in [
+        'network is unreachable',
+        'errno 101',
+        'failed to establish a new connection',
+        'newconnectionerror',
+    ])
+
+
 class YouTubeSubscriptionService:
     """YouTube 订阅服务类 - 使用 RSS Feed"""
-    
+
+    REQUEST_TIMEOUT = 5  # 单次请求超时（秒）
+
     # RSS Feed URL 模板
     RSS_BY_USER = "https://www.youtube.com/feeds/videos.xml?user={username}"
     RSS_BY_CHANNEL_ID = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
@@ -51,6 +82,7 @@ class YouTubeSubscriptionService:
         Returns:
             channel_id 或 None
         """
+        proxies = _get_proxies()
         for url_template in YouTubeSubscriptionService.CHANNEL_URL_TEMPLATES:
             try:
                 url = url_template.format(username=username)
@@ -60,7 +92,11 @@ class YouTubeSubscriptionService:
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                 }
                 
-                response = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(
+                    url, headers=headers,
+                    timeout=YouTubeSubscriptionService.REQUEST_TIMEOUT,
+                    proxies=proxies,
+                )
                 
                 if response.status_code == 200:
                     html = response.text
@@ -84,6 +120,8 @@ class YouTubeSubscriptionService:
                 
             except Exception as e:
                 warning(f"从 {url_template} 提取 channel_id 失败: {str(e)}", source="youtube_subscription")
+                if _is_network_unreachable(e):
+                    raise  # 网络不可达：立即终止，不再尝试后续 URL
                 continue
         
         return None
@@ -109,7 +147,19 @@ class YouTubeSubscriptionService:
         username = YouTubeSubscriptionService.clean_username(channel_identifier)
         
         info(f"验证 YouTube 频道: identifier={username}", source="youtube_subscription")
-        
+
+        PROXY_HINT = (
+            "服务器无法访问 YouTube，请在 .env 中配置 YOUTUBE_PROXY，"
+            "例如：YOUTUBE_PROXY=http://127.0.0.1:7890"
+        )
+
+        def _check_unreachable(result: Dict[str, Any]) -> bool:
+            """若网络不可达则记录日志并返回 True"""
+            if result.get('network_unreachable'):
+                warning(PROXY_HINT, source="youtube_subscription")
+                return True
+            return False
+
         # 尝试1：如果看起来像 channel_id（UC开头），直接用 channel_id RSS
         if len(username) >= 20 and username.startswith('UC'):
             info(f"识别为 channel_id 格式", source="youtube_subscription")
@@ -118,28 +168,41 @@ class YouTubeSubscriptionService:
             if result['exists']:
                 result['channel_id'] = username
                 return result
+            if _check_unreachable(result):
+                return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
         
         # 尝试2：用用户名格式的 RSS
         rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
         result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
-        
+
+        if _check_unreachable(result):
+            return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
+
         if result['exists']:
-            # 尝试从 RSS 中获取 channel_id
             channel_id = result.get('channel_id')
-            
-            # 如果 RSS 中没有 channel_id，尝试从页面提取
             if not channel_id:
-                channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+                try:
+                    channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+                except Exception:
+                    # 网络不可达在内层已记录，忽略
+                    pass
                 if channel_id:
                     result['channel_id'] = channel_id
-            
             return result
         
         # 尝试3：从页面提取 channel_id，然后用 channel_id RSS
-        channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+        try:
+            channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+        except Exception:
+            # extract_channel_id_from_page 在网络不可达时会 raise
+            warning(PROXY_HINT, source="youtube_subscription")
+            return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
+
         if channel_id:
             rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=channel_id)
             result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
+            if _check_unreachable(result):
+                return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
             if result['exists']:
                 result['channel_id'] = channel_id
                 return result
@@ -165,10 +228,25 @@ class YouTubeSubscriptionService:
         """
         try:
             info(f"解析 RSS Feed: url={rss_url}", source="youtube_subscription")
-            
-            # 使用 feedparser 解析
-            feed = feedparser.parse(rss_url)
-            
+
+            # 通过 requests 获取 RSS 内容（支持代理），再交由 feedparser 解析
+            proxies = _get_proxies()
+            try:
+                resp = requests.get(
+                    rss_url,
+                    headers={'User-Agent': 'feedparser/6.0'},
+                    timeout=YouTubeSubscriptionService.REQUEST_TIMEOUT,
+                    proxies=proxies,
+                )
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            except requests.exceptions.RequestException as req_err:
+                warning(f"RSS Feed 请求失败: {req_err}", source="youtube_subscription")
+                if _is_network_unreachable(req_err):
+                    return {'exists': False, 'network_unreachable': True,
+                            'error': 'network_unreachable'}
+                return {'exists': False, 'error': f'RSS feed request failed: {req_err}'}
+
             # 检查是否成功获取
             if not feed or not hasattr(feed, 'entries') or len(feed.entries) == 0:
                 warning(f"RSS Feed 为空或无法访问", source="youtube_subscription")
@@ -240,8 +318,20 @@ class YouTubeSubscriptionService:
             rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
         
         try:
-            feed = feedparser.parse(rss_url)
-            
+            proxies = _get_proxies()
+            try:
+                resp = requests.get(
+                    rss_url,
+                    headers={'User-Agent': 'feedparser/6.0'},
+                    timeout=YouTubeSubscriptionService.REQUEST_TIMEOUT,
+                    proxies=proxies,
+                )
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            except requests.exceptions.RequestException as req_err:
+                error(f"无法获取 RSS Feed: {req_err}", source="youtube_subscription")
+                return []
+
             if not feed or not hasattr(feed, 'entries'):
                 error(f"无法获取 RSS Feed", source="youtube_subscription")
                 return []

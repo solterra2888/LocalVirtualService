@@ -146,6 +146,7 @@ const FeedReaderPageInner: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [contentsLoading, setContentsLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
   
   // 🔥 分页状态
   const [contentOffset, setContentOffset] = useState(0);
@@ -433,6 +434,7 @@ const FeedReaderPageInner: React.FC = () => {
         enabled: values.enabled !== undefined ? values.enabled : true,
       };
 
+      setIsSubmittingSubscription(true);
       const response = await subscriptionsAPI.createSubscription(request);
       if (response.success && response.data) {
         const newSubscription = response.data;
@@ -545,8 +547,15 @@ const FeedReaderPageInner: React.FC = () => {
       } else {
         message.error(response.error || 'Failed to create subscription');
       }
-    } catch (error) {
-      console.error('Form validation failed:', error);
+    } catch (error: any) {
+      if (error?.errorFields) {
+        // Ant Design form validation error — no user message needed, fields are highlighted
+      } else {
+        message.error('Unexpected error, please try again');
+        console.error('handleCreateSubscription error:', error);
+      }
+    } finally {
+      setIsSubmittingSubscription(false);
     }
   };
 
@@ -1695,8 +1704,10 @@ const FeedReaderPageInner: React.FC = () => {
         title="Add New Feed"
         open={addModalVisible}
         onOk={handleCreateSubscription}
-        onCancel={() => setAddModalVisible(false)}
+        onCancel={() => { if (!isSubmittingSubscription) setAddModalVisible(false); }}
         okText="Add"
+        okButtonProps={{ loading: isSubmittingSubscription }}
+        cancelButtonProps={{ disabled: isSubmittingSubscription }}
         styles={getModalStyles(isDark, themeColors)}
       >
         <Form form={form} layout="vertical">
