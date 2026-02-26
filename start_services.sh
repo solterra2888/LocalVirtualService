@@ -151,6 +151,10 @@ fi
 
 # ── 8. Nginx ──────────────────────────────────────────────────
 echo "🌐 启动Nginx代理..."
+# 同步项目配置到系统路径
+if [ -f "/opt/rcproject/nginx.conf" ] && nginx -t -q 2>/dev/null; then
+    cp /opt/rcproject/nginx.conf /etc/nginx/nginx.conf
+fi
 systemctl start nginx
 if wait_for_service nginx 10; then
     echo "✅ Nginx已启动"

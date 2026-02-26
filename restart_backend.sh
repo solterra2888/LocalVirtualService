@@ -60,12 +60,17 @@ for service in "${BACKEND_SERVICES[@]}"; do
     fi
 done
 
+SERVER_IP=$(
+    host=$(grep -E '^SERVER_HOST=' /opt/rcproject/.env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
+    [ -n "$host" ] && echo "$host" || hostname -I | awk '{print $1}'
+)
+
 echo ""
 if [ "$all_running" = true ]; then
     echo "🎉 后端服务重启成功!"
     echo "================================"
-    echo "🌐 访问地址: http://111.230.48.119"
-    echo "📄 API文档:  http://111.230.48.119/api/docs"
+    echo "🌐 访问地址: http://${SERVER_IP}"
+    echo "📄 API文档:  http://${SERVER_IP}/api/docs"
 else
     echo "⚠️  部分服务重启失败，请查看日志排查原因"
 fi

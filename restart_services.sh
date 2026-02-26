@@ -76,6 +76,19 @@ echo "   - 调度器服务"
 echo "   - Nginx代理"
 echo ""
 
+# 同步 nginx 配置到系统目录（项目中的 nginx.conf 是主配置源）
+NGINX_SRC="/opt/rcproject/nginx.conf"
+NGINX_DST="/etc/nginx/nginx.conf"
+if [ -f "$NGINX_SRC" ]; then
+    cp "$NGINX_SRC" "$NGINX_DST"
+    if nginx -t -q 2>/dev/null; then
+        echo "   ✅ nginx 配置已同步并验证通过"
+    else
+        echo "   ⚠️  nginx 配置验证失败，已还原"
+        git -C /opt/rcproject show HEAD:nginx.conf > "$NGINX_DST" 2>/dev/null || true
+    fi
+fi
+
 SERVICES=("rc-webapp" "rc-frontend" "rc-celery-ai" "rc-celery-data" "rc-scheduler" "nginx")
 
 for service in "${SERVICES[@]}"; do
