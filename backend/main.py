@@ -72,10 +72,12 @@ app = FastAPI(
 )
 
 # 配置CORS
+# allow_credentials=True 与 allow_origins=["*"] 不能同时使用（CORS规范限制）
+# 生产环境中 nginx 统一代理（同源），CORS 头主要服务于本地开发跨端口场景
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
