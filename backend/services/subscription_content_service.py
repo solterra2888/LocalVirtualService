@@ -304,7 +304,9 @@ class SubscriptionContentService:
                     in_reply_to_id,
                     in_reply_to_username,
                     in_reply_to_user_id,
-                    heat_level
+                    heat_level,
+                    transcript,
+                    transcript_data
                 FROM subscription_content
                 WHERE {where_clause}
                 ORDER BY published_at DESC
@@ -355,6 +357,9 @@ class SubscriptionContentService:
                     'in_reply_to_user_id': row[31],
                     # 热度等级
                     'heat_level': row[32],
+                    # YouTube transcript
+                    'transcript': row[33],
+                    'transcript_data': row[34],
                 })
             
             return contents
@@ -366,6 +371,40 @@ class SubscriptionContentService:
             cursor.close()
             conn.close()
     
+    def update_transcript(
+        self,
+        content_db_id: int,
+        transcript: str,
+        transcript_data: Dict[str, Any]
+    ) -> None:
+        """
+        写入或更新某条 YouTube 内容的 transcript
+        
+        Args:
+            content_db_id: subscription_content 的主键 id
+            transcript: 拼接好的纯文本字幕
+            transcript_data: 带时间戳的分段结构 (YouTubeService.fetch_transcript 的返回值)
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE subscription_content
+                SET transcript = %s, transcript_data = %s
+                WHERE id = %s
+                """,
+                (transcript, Json(transcript_data), content_db_id)
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to update transcript for content id={content_db_id}: {str(e)}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
     def mark_as_read(
         self,
         content_id: int,

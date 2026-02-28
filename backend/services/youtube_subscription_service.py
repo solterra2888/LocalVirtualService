@@ -479,6 +479,41 @@ class YouTubeSubscriptionService:
             conn.close()
     
     @staticmethod
+    def _fetch_and_store_transcript(
+        content_db_id: int,
+        video_id: str,
+        video_url: str,
+        content_service
+    ) -> bool:
+        """
+        为一条已保存的 YouTube 内容拉取字幕并写回数据库。
+        
+        Returns:
+            True 表示成功，False 表示失败（失败不抛出，由调用方记录日志）
+        """
+        from backend.services.youtube_service import YouTubeService
+
+        try:
+            result = YouTubeService.fetch_transcript(video_url)
+            full_text = YouTubeService.get_full_text(result)
+            content_service.update_transcript(content_db_id, full_text, result)
+            info(
+                f"Transcript fetched: content_db_id={content_db_id}, video_id={video_id}, "
+                f"segments={len(result['transcript'])}, language={result['language']}",
+                source="youtube_subscription"
+            )
+            return True
+        except ImportError as e:
+            warning(f"youtube-transcript-api 未安装，跳过 transcript 拉取: {str(e)}", source="youtube_subscription")
+            return False
+        except Exception as e:
+            warning(
+                f"Transcript 拉取失败（不影响视频存储）: video_id={video_id}, error={str(e)}",
+                source="youtube_subscription"
+            )
+            return False
+
+    @staticmethod
     def fetch_and_store_videos(
         subscription_id: Optional[int] = None,
         user_id: Optional[int] = None,
@@ -570,25 +605,31 @@ class YouTubeSubscriptionService:
             
             for raw_video in raw_videos:
                 try:
-                    content_id, is_new = content_service.save_content(
+                    content_db_id, is_new = content_service.save_content(
                         channel_type='youtube',
-                        raw_data=raw_video,  # 传原始数据，save_content 内部会标准化
+                        raw_data=raw_video,
                         user_ids=[user_id]
                     )
-                    
+
                     if is_new:
                         videos_new += 1
+                        # 仅对新视频拉取 transcript
+                        video_id_str = raw_video.get('id', '')
+                        video_url = f"https://www.youtube.com/watch?v={video_id_str}"
+                        YouTubeSubscriptionService._fetch_and_store_transcript(
+                            content_db_id, video_id_str, video_url, content_service
+                        )
                     else:
                         videos_existing += 1
-                        
+
                 except Exception as e:
-                    video_id = raw_video.get('id', 'unknown')
-                    warning(f"保存视频失败: video_id={video_id}, error={str(e)}", 
+                    video_id_str = raw_video.get('id', 'unknown')
+                    warning(f"保存视频失败: video_id={video_id_str}, error={str(e)}",
                            source="youtube_subscription")
                     videos_failed += 1
                     continue
-            
-            info(f"保存完成: new={videos_new}, existing={videos_existing}, failed={videos_failed}", 
+
+            info(f"保存完成: new={videos_new}, existing={videos_existing}, failed={videos_failed}",
                  source="youtube_subscription")
             
             execution_time = int((time.time() - start_time) * 1000)
@@ -720,20 +761,26 @@ class YouTubeSubscriptionService:
                     
                     for raw_video in raw_videos:
                         try:
-                            content_id, is_new = content_service.save_content(
+                            content_db_id, is_new = content_service.save_content(
                                 channel_type='youtube',
                                 raw_data=raw_video,
                                 user_ids=user_ids
                             )
-                            
+
                             if is_new:
                                 videos_new += 1
+                                # 仅对新视频拉取 transcript
+                                video_id_str = raw_video.get('id', '')
+                                video_url = f"https://www.youtube.com/watch?v={video_id_str}"
+                                YouTubeSubscriptionService._fetch_and_store_transcript(
+                                    content_db_id, video_id_str, video_url, content_service
+                                )
                             else:
                                 videos_existing += 1
-                                
+
                         except Exception as e:
-                            video_id = raw_video.get('id', 'unknown')
-                            warning(f"保存视频失败: video_id={video_id}, error={str(e)}", 
+                            video_id_str = raw_video.get('id', 'unknown')
+                            warning(f"保存视频失败: video_id={video_id_str}, error={str(e)}",
                                    source="youtube_subscription")
                             continue
                     

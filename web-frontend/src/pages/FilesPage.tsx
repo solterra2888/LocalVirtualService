@@ -3368,10 +3368,11 @@ const ExecutionDetailsPanel: React.FC<{
     
     tagForm.setFieldsValue({
       sector: fileTags.sector,
+      sector_en: fileTags.sector_en || '',
       industry: fileTags.industry,
+      industry_en: fileTags.industry_en || '',
       tickers: fileTags.tickers || [],
-      confidence: fileTags.confidence,
-      reasoning: fileTags.reasoning
+      concepts: fileTags.concepts || [],
     });
     setEditTagsVisible(true);
   };
@@ -3381,13 +3382,18 @@ const ExecutionDetailsPanel: React.FC<{
     
     try {
       const values = await tagForm.validateFields();
+      const payload = {
+        ...values,
+        confidence: fileTags?.confidence,
+        reasoning: fileTags?.reasoning,
+      };
       const response = await fetch(`/api/file-tags/${fileId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
-        body: JSON.stringify(values)
+        body: JSON.stringify(payload)
       });
       
       if (response.ok) {
@@ -3723,21 +3729,41 @@ const ExecutionDetailsPanel: React.FC<{
                 form={tagForm}
                 layout="vertical"
               >
-                <Form.Item
-                  name="sector"
-                  label="Sector"
-                  rules={[{ required: true, message: 'Please enter sector' }]}
-                >
-                  <Input placeholder="e.g., Information Technology, Healthcare, Finance" />
-                </Form.Item>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Form.Item
+                    name="sector"
+                    label="Sector"
+                    style={{ flex: 1 }}
+                    rules={[{ required: true, message: 'Please enter sector' }]}
+                  >
+                    <Input placeholder="e.g., 信息技术, 医疗健康" />
+                  </Form.Item>
+                  <Form.Item
+                    name="sector_en"
+                    label="Sector (EN)"
+                    style={{ flex: 1 }}
+                  >
+                    <Input placeholder="e.g., Information Technology, Healthcare" />
+                  </Form.Item>
+                </div>
 
-                <Form.Item
-                  name="industry"
-                  label="Industry"
-                  rules={[{ required: true, message: 'Please enter industry' }]}
-                >
-                  <Input placeholder="e.g., Semiconductors, Pharmaceuticals, Investment Banking" />
-                </Form.Item>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Form.Item
+                    name="industry"
+                    label="Industry"
+                    style={{ flex: 1 }}
+                    rules={[{ required: true, message: 'Please enter industry' }]}
+                  >
+                    <Input placeholder="e.g., 半导体, 生物制药" />
+                  </Form.Item>
+                  <Form.Item
+                    name="industry_en"
+                    label="Industry (EN)"
+                    style={{ flex: 1 }}
+                  >
+                    <Input placeholder="e.g., Semiconductors, Pharmaceuticals" />
+                  </Form.Item>
+                </div>
 
                 <Form.Item
                   name="tickers"
@@ -3752,28 +3778,17 @@ const ExecutionDetailsPanel: React.FC<{
                 </Form.Item>
 
                 <Form.Item
-                  name="confidence"
-                  label="Confidence"
-                  tooltip="Value between 0-1 indicating confidence level"
+                  name="concepts"
+                  label="Concepts / Tags"
+                  tooltip="Enter concept tags, press Enter to add multiple"
                 >
-                  <InputNumber
-                    min={0}
-                    max={1}
-                    step={0.1}
+                  <Select
+                    mode="tags"
+                    placeholder="e.g., AI, 新能源, 芯片"
                     style={{ width: '100%' }}
-                    placeholder="0.0 - 1.0"
                   />
                 </Form.Item>
 
-                <Form.Item
-                  name="reasoning"
-                  label="Reasoning"
-                >
-                  <Input.TextArea
-                    rows={3}
-                    placeholder="Explain why these tags were assigned"
-                  />
-                </Form.Item>
               </Form>
             </div>
             <div style={{

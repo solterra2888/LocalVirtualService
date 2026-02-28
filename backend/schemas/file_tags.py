@@ -25,8 +25,11 @@ class FileTagsCreate(FileTagsBase):
 class FileTagsUpdate(BaseModel):
     """更新文件标签Schema（所有字段都是可选的）"""
     sector: Optional[str] = Field(None, description="行业分类")
+    sector_en: Optional[str] = Field(None, description="英文行业分类")
     industry: Optional[str] = Field(None, description="子行业分类")
+    industry_en: Optional[str] = Field(None, description="英文子行业分类")
     tickers: Optional[List[str]] = Field(None, description="股票代码列表")
+    concepts: Optional[List[str]] = Field(None, description="投资概念/主题列表")
     additional_tags: Optional[Dict[str, Any]] = Field(None, description="扩展标签")
     confidence: Optional[float] = Field(None, ge=0, le=1, description="置信度")
     reasoning: Optional[str] = Field(None, description="推理说明")

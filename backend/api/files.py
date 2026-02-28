@@ -9,6 +9,7 @@ import json
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Body, Form
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -2086,8 +2087,9 @@ async def transcribe_audio(
                 detail=f"语音识别失败: {result.get('error', 'Unknown error')}"
             )
         
-        # 格式化结果
+        # 格式化结果：API 返回用完整格式，写入 DB 用仅带时间戳的格式
         formatted_texts = []
+        content_for_db_parts = []
         if result.get("transcriptions"):
             for trans_data in result["transcriptions"]:
                 formatted = asr_service.format_transcription_result(
@@ -2097,9 +2099,18 @@ async def transcribe_audio(
                     include_speaker=diarization_enabled
                 )
                 formatted_texts.append(formatted)
+                part = asr_service.format_transcription_result(
+                    trans_data,
+                    include_timestamps=True,
+                    include_words=False,
+                    include_speaker=diarization_enabled,
+                    timestamped_only=True
+                )
+                if part:
+                    content_for_db_parts.append(part)
         
-        # 使用格式化的文本（包含说话人信息）或原始文本
         final_report_text = "\n\n".join(formatted_texts) if formatted_texts else result.get("text", "")
+        content_for_db = "\n".join(content_for_db_parts) if content_for_db_parts else result.get("text", "")
         
         # 构建结构化的 ASR 数据（用于前端可视化）
         asr_structured_data = None
@@ -2167,11 +2178,11 @@ async def transcribe_audio(
                     0,
                     0,
                     0,
-                    len(final_report_text),
+                    len(content_for_db),
                     'completed' if result["success"] else 'failed',
                     0,
                     0,
-                    final_report_text,  # 使用格式化的文本（包含说话人标签）
+                    content_for_db,  # 仅保存带时间戳的转写结果，每段一行
                     datetime.now(),
                     result.get("task_id"),
                     audio_url,
@@ -3006,3 +3017,67 @@ async def upload_youtube_link(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process YouTube link: {str(e)}"
         )
+
+class FileASRRequest(BaseModel):
+    max_duration_seconds: int = 0  # 0 = 完整视频；>0 = 只转写前 N 秒
+
+
+@router.post("/{file_id}/transcribe-asr", summary="对 YouTube 文件触发 Fun-ASR 转写")
+async def trigger_file_youtube_asr(
+    file_id: int,
+    body: FileASRRequest = FileASRRequest(),
+    current_user=Depends(get_current_user)
+):
+    """
+    对 Upload YouTube Links 保存的视频（无字幕），触发 Fun-ASR 转写任务。
+    - max_duration_seconds: 只转写前 N 秒（0 = 完整视频）
+    - 任务进度可通过 GET /api/files/tasks/{task_id}/status 查询。
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, file_type, original_file_path FROM file_processing_details WHERE id = %s",
+            (file_id,)
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        _, file_type, youtube_url = row
+        if file_type != 'youtube':
+            raise HTTPException(
+                status_code=400,
+                detail="Only YouTube files can be transcribed via ASR"
+            )
+
+        from backend.services.youtube_service import YouTubeService
+        video_id = YouTubeService.extract_video_id(youtube_url) or f"file{file_id}"
+
+        from backend.tasks.file_tasks import transcribe_youtube_file_asr_task
+        task = transcribe_youtube_file_asr_task.apply_async(
+            args=(file_id, youtube_url, video_id, max(0, body.max_duration_seconds)),
+            queue='file_processing'
+        )
+
+        info(f"YouTube File ASR task dispatched: file_id={file_id}, video_id={video_id}, task_id={task.id}",
+             source="api")
+
+        return {
+            "task_id": task.id,
+            "file_id": file_id,
+            "video_id": video_id,
+            "message": "ASR transcription started. Use task_id to poll progress."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"触发 YouTube File ASR 失败: {str(e)}", source="api")
+        raise HTTPException(status_code=500, detail=str(e))

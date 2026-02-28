@@ -108,6 +108,17 @@ export interface SubscriptionContent {
   in_reply_to_id?: string;
   in_reply_to_username?: string;
   in_reply_to_user_id?: string;
+  // YouTube transcript
+  transcript?: string;
+  transcript_data?: {
+    source?: 'asr' | 'youtube';
+    video_id?: string;
+    video_url?: string;
+    language?: string;
+    is_generated?: boolean;
+    transcript?: Array<{ text: string; start: number; duration: number }>;
+    asr_data?: Record<string, any>;
+  };
 }
 
 export interface SubscriptionContentsResponse {
@@ -322,6 +333,32 @@ export const subscriptionsAPI = {
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to retrieve contents',
+      };
+    }
+  },
+
+  /**
+   * 触发 YouTube 视频 Fun-ASR 转写（针对无字幕视频）
+   */
+  async triggerYouTubeASR(contentDbId: number): Promise<{
+    success: boolean;
+    task_id?: string;
+    video_id?: string;
+    message?: string;
+    error?: string;
+  }> {
+    try {
+      const data = await api.post<{
+        task_id: string;
+        video_id: string;
+        content_db_id: number;
+        message: string;
+      }>(`/subscriptions/contents/${contentDbId}/transcribe`, {});
+      return { success: true, ...data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to trigger ASR transcription',
       };
     }
   },

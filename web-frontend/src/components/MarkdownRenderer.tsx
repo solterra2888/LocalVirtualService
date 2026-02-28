@@ -62,8 +62,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         processedLines.push(currentLine);
       }
     }
-    
-    return processedLines.join('\n');
+    // 用 "  \n" 连接，使单个换行在 Markdown 中渲染为换行（GFM 硬换行）
+    return processedLines.join('  \n');
   };
   
   const processedContent = preprocessContent(content);

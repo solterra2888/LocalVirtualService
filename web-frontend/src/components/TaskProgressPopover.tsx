@@ -2,7 +2,8 @@ import React from 'react';
 import { Progress, Tag, Space } from 'antd';
 import { 
   FileTextOutlined, 
-  SoundOutlined, 
+  SoundOutlined,
+  YoutubeOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined 
@@ -22,26 +23,35 @@ const getStatusIcon = (status: string, isDark?: boolean) => {
   }
 };
 
-const getStatusText = (status: string, currentFile?: string) => {
+const getStatusText = (status: string, currentFile?: string, fileType?: string, progress?: number) => {
+  if (fileType === 'youtube') {
+    if (status === 'completed') return 'Completed';
+    if (status === 'failed') return 'Failed';
+    if (progress !== undefined && progress >= 37 && progress < 92) {
+      return 'Fun-ASR transcribing...';
+    }
+    return 'Fetching YouTube transcript...';
+  }
+
   const statusMap: Record<string, string> = {
     pending: 'Waiting...',
     initializing: 'Initializing...',
     processing: 'Processing document...',
     ai_processing: 'AI analyzing...',
     saving: 'Saving results...',
-    uploading: 'Uploading...',
+    uploading: 'Uploading audio...',
     transcribing: 'Transcribing audio...',
     completed: 'Completed',
     failed: 'Failed',
   };
-  
+
   if (currentFile && status === 'processing') {
-    const shortName = currentFile.length > 30 
-      ? currentFile.substring(0, 27) + '...' 
+    const shortName = currentFile.length > 30
+      ? currentFile.substring(0, 27) + '...'
       : currentFile;
     return `Processing: ${shortName}`;
   }
-  
+
   return statusMap[status] || status;
 };
 
@@ -104,6 +114,8 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
             }}>
               {task.fileType === 'audio' ? (
                 <SoundOutlined style={{ fontSize: 16, color: '#1890ff' }} />
+              ) : task.fileType === 'youtube' ? (
+                <YoutubeOutlined style={{ fontSize: 16, color: '#ff4444' }} />
               ) : (
                 <FileTextOutlined style={{ fontSize: 16, color: '#1890ff' }} />
               )}
@@ -138,7 +150,7 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
               alignItems: 'center',
               gap: 4
             }}>
-              {getStatusText(task.status.status, task.status.current_file)}
+              {getStatusText(task.status.status, task.status.current_file, task.fileType, task.status.progress)}
             </div>
 
             {/* Stats */}

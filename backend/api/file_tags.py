@@ -251,10 +251,16 @@ def update_file_tags(
         update_dict = {}
         if updates.sector is not None:
             update_dict['sector'] = updates.sector
+        if updates.sector_en is not None:
+            update_dict['sector_en'] = updates.sector_en
         if updates.industry is not None:
             update_dict['industry'] = updates.industry
+        if updates.industry_en is not None:
+            update_dict['industry_en'] = updates.industry_en
         if updates.tickers is not None:
             update_dict['tickers'] = updates.tickers
+        if updates.concepts is not None:
+            update_dict['concepts'] = updates.concepts
         if updates.confidence is not None:
             update_dict['confidence'] = updates.confidence
         if updates.reasoning is not None:

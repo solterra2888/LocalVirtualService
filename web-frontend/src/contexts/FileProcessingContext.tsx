@@ -33,18 +33,54 @@ const FileProcessingContext = createContext<FileProcessingContextType | undefine
 
 const POLL_INTERVAL_MS = 8000;
 const AUTO_REMOVE_DELAY_MS = 3000;
-
 const SOURCE_LIST_REFRESH_DELAY_MS = 1500;
 
+// ── localStorage 持久化 ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'rc_processing_tasks_v1';
+// 超过 4 小时的任务视为过期（即便服务端已完成也不再恢复）
+const MAX_TASK_AGE_MS = 4 * 60 * 60 * 1000;
+
+function loadPersistedTasks(): Map<string, TaskInfo> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return new Map();
+    const entries: [string, TaskInfo][] = JSON.parse(raw);
+    const now = Date.now();
+    const active = entries.filter(([, task]) => {
+      const notDone = task.status.status !== 'completed' && task.status.status !== 'failed';
+      const notExpired = now - task.startTime < MAX_TASK_AGE_MS;
+      return notDone && notExpired;
+    });
+    return new Map(active);
+  } catch {
+    return new Map();
+  }
+}
+
+function persistTasks(tasks: Map<string, TaskInfo>): void {
+  try {
+    // 只保存仍在进行中的任务
+    const active = Array.from(tasks.entries()).filter(
+      ([, task]) => task.status.status !== 'completed' && task.status.status !== 'failed'
+    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(active));
+  } catch {
+    // ignore QuotaExceededError etc.
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [tasks, setTasks] = useState<Map<string, TaskInfo>>(new Map());
+  const [tasks, setTasks] = useState<Map<string, TaskInfo>>(() => loadPersistedTasks());
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const tasksRef = useRef<Map<string, TaskInfo>>(new Map());
   const onSourceListRefreshRef = useRef<(() => void) | null>(null);
 
   // 同步 tasks 到 tasksRef（用于轮询，避免频繁重启 interval）
+  // 同时持久化到 localStorage，以便刷新后恢复
   useEffect(() => {
     tasksRef.current = tasks;
+    persistTasks(tasks);
   }, [tasks]);
 
   const registerSourceListRefresh = useCallback((fn: () => void) => {

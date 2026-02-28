@@ -5,8 +5,12 @@ YouTube 视频转录服务
 """
 
 import re
+import concurrent.futures
 from typing import Dict, List, Any, Optional
 from backend.utils.logger import info, error, warning
+
+# 单次 transcript 网络请求的最长等待时间（秒）
+_TRANSCRIPT_TIMEOUT_SEC = 30
 
 
 class YouTubeService:
@@ -86,15 +90,14 @@ class YouTubeService:
         if languages is None:
             languages = ['zh-Hans', 'zh-CN', 'zh', 'zh-Hant', 'zh-TW', 'en', 'en-US']
         
-        try:
-            # 获取可用的转录列表
+        def _do_fetch() -> Dict[str, Any]:
+            """在独立线程中执行实际的网络请求，以便外层能控制超时。"""
             api = YouTubeTranscriptApi()
             transcript_list = api.list(video_id)
-            
+
             transcript = None
             language_used = None
-            
-            # 尝试按优先语言获取
+
             for lang in languages:
                 try:
                     transcript = transcript_list.find_transcript([lang])
@@ -103,8 +106,7 @@ class YouTubeService:
                     break
                 except:
                     continue
-            
-            # 如果没有找到优先语言，尝试手动创建的字幕
+
             if transcript is None:
                 try:
                     transcript = transcript_list.find_manually_created_transcript(['zh', 'en'])
@@ -112,8 +114,7 @@ class YouTubeService:
                     info(f"Found manual transcript in: {language_used}", source="youtube_service")
                 except:
                     pass
-            
-            # 如果还没找到，尝试自动生成的字幕
+
             if transcript is None:
                 try:
                     transcript = transcript_list.find_generated_transcript(['zh', 'en'])
@@ -121,22 +122,18 @@ class YouTubeService:
                     warning(f"Using auto-generated transcript in: {language_used}", source="youtube_service")
                 except:
                     pass
-            
-            # 最后尝试获取任何可用的字幕
+
             if transcript is None:
                 for t in transcript_list:
                     transcript = t
                     language_used = t.language_code
                     info(f"Using available transcript in: {language_used}", source="youtube_service")
                     break
-            
+
             if transcript is None:
                 raise Exception("No transcript available for this video")
-            
-            # 获取转录数据
+
             transcript_data = transcript.fetch()
-            
-            # 转换为标准格式（注意：transcript_data 返回的是对象列表，需要用属性访问）
             transcript_list_dict = [
                 {
                     'text': entry.text,
@@ -145,20 +142,32 @@ class YouTubeService:
                 }
                 for entry in transcript_data
             ]
-            
-            result = {
+
+            return {
                 "video_id": video_id,
                 "video_url": video_url,
                 "language": language_used,
                 "is_generated": getattr(transcript, 'is_generated', False),
                 "transcript": transcript_list_dict,
             }
-            
-            info(f"Successfully fetched transcript: {len(transcript_list_dict)} segments", 
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_fetch)
+                try:
+                    result = future.result(timeout=_TRANSCRIPT_TIMEOUT_SEC)
+                except concurrent.futures.TimeoutError:
+                    error_msg = (
+                        f"Transcript fetch timed out after {_TRANSCRIPT_TIMEOUT_SEC}s "
+                        f"(video_id={video_id})"
+                    )
+                    error(error_msg, source="youtube_service")
+                    raise Exception(error_msg)
+
+            info(f"Successfully fetched transcript: {len(result['transcript'])} segments",
                  source="youtube_service")
-            
             return result
-            
+
         except Exception as e:
             error_msg = f"Failed to fetch transcript: {str(e)}"
             error(error_msg, source="youtube_service")

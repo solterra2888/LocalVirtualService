@@ -935,7 +935,9 @@ async def get_subscription_contents(
                 in_reply_to_id,
                 in_reply_to_username,
                 in_reply_to_user_id,
-                heat_level
+                heat_level,
+                transcript,
+                transcript_data
             FROM subscription_content
             WHERE {where_clause}
             ORDER BY published_at DESC
@@ -993,6 +995,9 @@ async def get_subscription_contents(
                 'in_reply_to_user_id': row[26],
                 # 热度等级
                 'heat_level': row[27],
+                # YouTube transcript
+                'transcript': row[28],
+                'transcript_data': row[29],
             })
         
         cursor.close()
@@ -1192,4 +1197,69 @@ async def get_tweet_by_id(
         
     except Exception as e:
         logger.error(f"Error retrieving tweet {tweet_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/contents/{content_db_id}/transcribe")
+async def trigger_youtube_asr_transcription(
+    content_db_id: int,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    对 Feed 中没有字幕的 YouTube 视频，触发 Fun-ASR 转写任务。
+    任务进度可通过 GET /api/files/tasks/{task_id}/status 查询。
+    """
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+
+        # 验证：内容存在、属于该用户、是 YouTube 类型
+        cursor.execute("""
+            SELECT id, channel_type, content_id, transcript
+            FROM subscription_content
+            WHERE id = %s AND %s = ANY(user_ids)
+        """, (content_db_id, user_id))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        _, channel_type, video_id, existing_transcript = row
+
+        if channel_type != 'youtube':
+            raise HTTPException(
+                status_code=400,
+                detail="Only YouTube content can be transcribed via ASR"
+            )
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        # 派发 Celery 任务
+        from backend.tasks.file_tasks import transcribe_youtube_feed_task
+        task = transcribe_youtube_feed_task.apply_async(
+            args=(content_db_id, video_url, video_id),
+            queue='file_processing'
+        )
+
+        logger.info(
+            f"YouTube ASR task dispatched: content_db_id={content_db_id}, "
+            f"video_id={video_id}, task_id={task.id}, user_id={user_id}"
+        )
+
+        return {
+            "task_id": task.id,
+            "video_id": video_id,
+            "content_db_id": content_db_id,
+            "message": "ASR transcription started. Use task_id to poll progress."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to trigger YouTube ASR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

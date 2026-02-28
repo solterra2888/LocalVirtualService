@@ -420,66 +420,76 @@ class ASRService:
         transcription_data: Dict[str, Any],
         include_timestamps: bool = True,
         include_words: bool = False,
-        include_speaker: bool = True
+        include_speaker: bool = True,
+        timestamped_only: bool = False
     ) -> str:
         """
         格式化转写结果为可读文本
-        
+
         Args:
             transcription_data: 转写结果数据
             include_timestamps: 是否包含时间戳
             include_words: 是否包含词级别详情
             include_speaker: 是否包含说话人信息（默认 True）
-            
+            timestamped_only: 若为 True，仅输出带时间戳的句子，每段一行，用于保存到 DB
+
         Returns:
             str: 格式化后的文本
         """
         output = []
-        
-        # 文件信息
+
+        if timestamped_only:
+            # 仅输出带时间戳的句子，每段一行，段与段之间换行
+            for transcript in transcription_data.get('transcripts', []):
+                if not include_timestamps:
+                    continue
+                for sentence in transcript.get('sentences', []):
+                    begin = sentence.get('begin_time', 0) / 1000
+                    end = sentence.get('end_time', 0) / 1000
+                    sent_text = sentence.get('text', '')
+                    speaker_label = ""
+                    if include_speaker and 'speaker' in sentence:
+                        speaker = sentence.get('speaker', '')
+                        speaker_label = f"[{speaker}] "
+                    output.append(f"{speaker_label}[{begin:.2f}s - {end:.2f}s] {sent_text}")
+            return "\n".join(output)
+
+        # 完整格式（保留原有逻辑，供 API 返回等使用）
         file_url = transcription_data.get('file_url', '')
         output.append(f"音频文件: {file_url}")
         output.append("")
-        
-        # 音频属性
+
         properties = transcription_data.get('properties', {})
         duration = properties.get('original_duration_in_milliseconds', 0) / 1000
         output.append(f"时长: {duration:.2f} 秒")
-        
-        # 说话人数量（如果启用了说话人分离）
+
         diarization = properties.get('diarization', {})
         if diarization and include_speaker:
             speaker_count = diarization.get('speaker_count', 0)
             if speaker_count > 0:
                 output.append(f"说话人数量: {speaker_count}")
-        
+
         output.append("")
-        
-        # 转写结果
         output.append("=" * 60)
         output.append("转写结果:")
         output.append("=" * 60)
-        
+
         for transcript in transcription_data.get('transcripts', []):
             text = transcript.get('text', '')
             output.append(text)
             output.append("")
-            
+
             if include_timestamps:
                 output.append("句子详情:")
                 for sentence in transcript.get('sentences', []):
                     begin = sentence.get('begin_time', 0) / 1000
                     end = sentence.get('end_time', 0) / 1000
                     sent_text = sentence.get('text', '')
-                    
-                    # 说话人信息
                     speaker_label = ""
                     if include_speaker and 'speaker' in sentence:
                         speaker = sentence.get('speaker', '')
                         speaker_label = f"[{speaker}] "
-                    
                     output.append(f"  {speaker_label}[{begin:.2f}s - {end:.2f}s] {sent_text}")
-                    
                     if include_words:
                         output.append("    词级别:")
                         for word in sentence.get('words', []):
@@ -489,5 +499,5 @@ class ASRService:
                             punct = word.get('punctuation', '')
                             output.append(f"      [{word_begin:.2f}s - {word_end:.2f}s] {word_text}{punct}")
                 output.append("")
-        
+
         return "\n".join(output)

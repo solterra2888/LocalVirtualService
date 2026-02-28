@@ -3,7 +3,8 @@
  * 参考 Feeder.co 的设计
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFileProcessing } from '../contexts/FileProcessingContext';
 import {
   Layout,
   List,
@@ -23,6 +24,8 @@ import {
   Card,
   Dropdown,
   Switch,
+  Divider,
+  Collapse,
 } from 'antd';
 import {
   PlusOutlined,
@@ -42,6 +45,7 @@ import {
   DeleteOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
+  AlignLeftOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -53,6 +57,7 @@ import {
   SubscriptionContent,
   getTweetById,
 } from '../services/subscriptions';
+import { filesAPI } from '../services/files';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
@@ -147,6 +152,14 @@ const FeedReaderPageInner: React.FC = () => {
   const [contentsLoading, setContentsLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
+
+  // ASR 转写状态（YouTube 无字幕视频手动触发）
+  const [asrTaskId, setAsrTaskId] = useState<string | null>(null);
+  const [asrProgress, setAsrProgress] = useState(0);
+  const [asrStatus, setAsrStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
+
+  // 接入 NavBar 进度条
+  const { addTask, tasks } = useFileProcessing();
   
   // 🔥 分页状态
   const [contentOffset, setContentOffset] = useState(0);
@@ -425,6 +438,56 @@ const FeedReaderPageInner: React.FC = () => {
     setAddModalVisible(true);
   };
 
+  // ── YouTube ASR 转写 ────────────────────────────────────────────────────────
+  const handleTriggerASR = async () => {
+    if (!selectedContent || asrStatus === 'processing') return;
+
+    setAsrStatus('processing');
+    setAsrProgress(5);
+
+    const result = await subscriptionsAPI.triggerYouTubeASR(selectedContent.id);
+    if (!result.success || !result.task_id) {
+      message.error(result.error || 'Failed to start ASR transcription');
+      setAsrStatus('failed');
+      return;
+    }
+
+    const taskId = result.task_id;
+    const videoTitle = selectedContent.title || `YouTube: ${selectedContent.content_id || 'video'}`;
+    setAsrTaskId(taskId);
+
+    // 注册到全局 FileProcessingContext → NavBar 进度条自动显示
+    addTask(taskId, videoTitle, 'youtube');
+    message.info('ASR transcription started — progress shown in the top bar');
+  };
+
+  // 监听 Context 中该任务的状态变化
+  useEffect(() => {
+    if (!asrTaskId || asrStatus !== 'processing') return;
+
+    const task = tasks.get(asrTaskId);
+    if (!task) return;
+
+    const s = task.status.status;
+    const resultStatus = (task.status as any).result?.status;
+    const isCompleted = s === 'completed' && resultStatus !== 'failed';
+    const isFailed = s === 'failed' || (s === 'completed' && resultStatus === 'failed');
+
+    if (isCompleted) {
+      setAsrStatus('completed');
+      setAsrProgress(100);
+      message.success('Transcription completed!');
+      if (selectedSubscription) loadContents(selectedSubscription.id);
+    } else if (isFailed) {
+      setAsrStatus('failed');
+      const errMsg = (task.status as any).result?.error || task.status.message || 'Transcription failed';
+      message.error(`ASR failed: ${errMsg}`);
+    } else {
+      setAsrProgress(task.status.progress || 0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, asrTaskId]);
+
   const handleCreateSubscription = async () => {
     try {
       const values = await form.validateFields();
@@ -564,6 +627,9 @@ const FeedReaderPageInner: React.FC = () => {
   };
 
   const handleSelectContent = (content: SubscriptionContent) => {
+    setAsrStatus('idle');
+    setAsrProgress(0);
+    setAsrTaskId(null);
     setSelectedContent(content);
     if (!content.is_read) {
       markAsRead(content.id);
@@ -1289,7 +1355,7 @@ const FeedReaderPageInner: React.FC = () => {
                                   This may take 30-60 seconds for the first time.
                                 </div>
                                 <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                                  Getting last 2 days of tweets from @{selectedSubscription.channel_identifier}
+                                  Getting last 2 days of contents from @{selectedSubscription.channel_identifier}
                                 </div>
                               </div>
                             );
@@ -1683,6 +1749,115 @@ const FeedReaderPageInner: React.FC = () => {
                       </Space>
                     </a>
                   </div>
+                )}
+
+                {/* YouTube Transcript */}
+                {selectedContent.channel_type === 'youtube' && (
+                  <>
+                    <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
+
+                    {selectedContent.transcript ? (
+                      /* ── 已有 Transcript：折叠展示 ── */
+                      <Collapse
+                        ghost
+                        size="small"
+                        items={[
+                          {
+                            key: 'transcript',
+                            label: (
+                              <Space>
+                                <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
+                                <Text style={{ color: themeColors.text, fontWeight: 500 }}>
+                                  Transcript
+                                </Text>
+                                {selectedContent.transcript_data?.source === 'asr' ? (
+                                  <Tag color="purple" style={{ fontSize: 11 }}>Fun-ASR</Tag>
+                                ) : (
+                                  <>
+                                    {selectedContent.transcript_data?.language && (
+                                      <Tag color="blue" style={{ fontSize: 11 }}>
+                                        {selectedContent.transcript_data.language}
+                                      </Tag>
+                                    )}
+                                    {selectedContent.transcript_data?.is_generated && (
+                                      <Tag color="default" style={{ fontSize: 11 }}>
+                                        auto-generated
+                                      </Tag>
+                                    )}
+                                  </>
+                                )}
+                              </Space>
+                            ),
+                            children: (
+                              <div
+                                style={{
+                                  maxHeight: 400,
+                                  overflowY: 'auto',
+                                  fontSize: 13,
+                                  lineHeight: '1.8',
+                                  color: themeColors.textSecondary,
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  padding: '4px 0',
+                                }}
+                              >
+                                {selectedContent.transcript}
+                              </div>
+                            ),
+                          },
+                        ]}
+                        style={{
+                          background: 'transparent',
+                          border: `1px solid ${themeColors.cardBorder}`,
+                          borderRadius: 8,
+                        }}
+                      />
+                    ) : (
+                      /* ── 无 Transcript：提示 + AI 转写按钮 ── */
+                      <div
+                        style={{
+                          border: `1px dashed ${themeColors.cardBorder}`,
+                          borderRadius: 8,
+                          padding: '12px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <Space>
+                          <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                            {asrStatus === 'processing'
+                              ? `Transcribing… ${asrProgress}%`
+                              : asrStatus === 'completed'
+                              ? 'Transcription complete — please refresh'
+                              : asrStatus === 'failed'
+                              ? 'Transcription failed'
+                              : 'No transcript available'}
+                          </Text>
+                          {asrStatus === 'failed' && (
+                            <Tag color="red" style={{ fontSize: 11 }}>Failed</Tag>
+                          )}
+                        </Space>
+                        {asrStatus !== 'completed' && (
+                          <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={asrStatus === 'processing'}
+                              disabled={asrStatus === 'processing'}
+                              onClick={handleTriggerASR}
+                              style={{ fontSize: 12, borderRadius: 6 }}
+                            >
+                              {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </Space>
             </div>

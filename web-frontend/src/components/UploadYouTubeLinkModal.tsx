@@ -73,7 +73,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
         logs: [],
       });
 
-      message.info('YouTube processing started. Fetching transcript...');
+      message.info('YouTube processing started. Fetching transcript (or falling back to Fun-ASR)...');
 
       // 轮询任务状态
       const pollInterval = setInterval(async () => {
@@ -203,7 +203,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
           {/* 说明信息 */}
           <Alert
             message="Paste a YouTube video link to extract its transcript"
-            description="Supports regular videos, shorts, and embedded links. The transcript will be automatically fetched and saved."
+            description="Supports regular videos, shorts, and embedded links. If no caption track is available, Fun-ASR will automatically transcribe the audio."
             type="info"
             showIcon
             style={{
