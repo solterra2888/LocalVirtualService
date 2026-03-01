@@ -189,8 +189,18 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：仅保留日常业务入口 + Add Content（文档/音频/链接等）
+  // 主导航：Source 首位，Feeds 第二，其余日常业务入口 + Add Content
   const menuItems = [
+    {
+      key: '/files',
+      icon: <FileTextOutlined />,
+      label: 'Source',
+    },
+    {
+      key: '/feeds',
+      icon: <ReadOutlined />,
+      label: 'Feeds',
+    },
     {
       key: '/dashboard',
       icon: <StockOutlined />,
@@ -207,11 +217,6 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
-      key: '/feeds',
-      icon: <ReadOutlined />,
-      label: 'Feeds',
-    },
-    {
       key: '/market-weekly',
       icon: <BarChartOutlined />,
       label: 'Market Weekly',
@@ -226,11 +231,6 @@ const Layout: React.FC = () => {
         { key: '/markets/macro-indicators', icon: <CodeOutlined />, label: 'Macro Indicators' },
         { key: '/eod-fetch', icon: <DatabaseOutlined />, label: 'EOD Fetch' },
       ],
-    },
-    {
-      key: '/files',
-      icon: <FileTextOutlined />,
-      label: 'Source',
     },
   ].filter(item => {
     // 暂时屏蔽 Investment Tracking，该模块仍未开发

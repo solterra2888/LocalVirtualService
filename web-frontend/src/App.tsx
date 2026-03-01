@@ -83,7 +83,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
   
   if (!adminUser?.is_admin) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/files" replace />;
   }
   
   return <>{children}</>;
@@ -110,7 +110,7 @@ const AppContent: React.FC = () => {
             </PrivateRoute>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to="/files" replace />} />
           <Route path="market-weekly" element={<MarketWeekly />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
@@ -159,7 +159,7 @@ const AppContent: React.FC = () => {
         </Route>
         
         {/* 404页面 */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/files" replace />} />
       </Routes>
     </div>
   );
