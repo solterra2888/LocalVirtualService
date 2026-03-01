@@ -56,12 +56,15 @@ class TaskExecutionResponse(BaseModel):
     total_tokens: Optional[int] = None
     total_cost: Optional[float] = None
     rc_agent_status: Optional[str] = None
-    first_filename: Optional[str] = None  # 第一个文件的名称
-    first_file_type: Optional[str] = None  # 第一个文件的类型（用于列表筛选）
-    llm_model: Optional[str] = None  # LLM模型名称
-    llm_provider: Optional[str] = None  # LLM提供商
-    first_task_id: Optional[str] = None  # 第一个文件的task_id（用于判断是否正在处理）
-    upload_params: Optional[dict] = None  # 上传参数（包含template_id, template_code等）
+    first_filename: Optional[str] = None
+    first_file_type: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    first_task_id: Optional[str] = None
+    upload_params: Optional[dict] = None
+    access_type: Optional[str] = None
+    shared_by: Optional[str] = None
+    share_info: Optional[dict] = None
     
     class Config:
         from_attributes = True

@@ -24,6 +24,7 @@ import {
   Checkbox,
   App,
   Descriptions,
+  Avatar,
   theme as antdTheme
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -49,7 +50,10 @@ import {
   CheckCircleOutlined,
   ReloadOutlined,
   LinkOutlined,
-  CloseOutlined
+  CloseOutlined,
+  ShareAltOutlined,
+  UsergroupAddOutlined,
+  UserOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -170,12 +174,18 @@ interface TaskExecution {
   total_tokens?: number;
   total_cost?: number;
   rc_agent_status?: string;
-  first_filename?: string;  // 第一个文件的名称
-  first_file_type?: string;  // 第一个文件的类型（用于列表筛选）
-  llm_model?: string;  // LLM模型名称
-  llm_provider?: string;  // LLM提供商
-  first_task_id?: string;  // 第一个文件的task_id（用于判断是否正在处理）
-  upload_params?: any;  // 上传参数（包含 template_id, template_code, template_variables 等）
+  first_filename?: string;
+  first_file_type?: string;
+  llm_model?: string;
+  llm_provider?: string;
+  first_task_id?: string;
+  upload_params?: any;
+  access_type?: string;
+  shared_by?: string;
+  share_info?: {
+    shared_by: { user_id: number; username: string; avatar_url?: string | null };
+    shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
+  } | null;
 }
 
 interface ProcessingParams {
@@ -247,6 +257,14 @@ const FilesPageInner: React.FC = () => {
   const [stoppingTask, setStoppingTask] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingFiles, setUpdatingFiles] = useState(false);
+  
+  // File sharing state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareTargetExecution, setShareTargetExecution] = useState<TaskExecution | null>(null);
+  const [shareableUsers, setShareableUsers] = useState<Array<{ id: number; username: string }>>([]);
+  const [selectedShareUserIds, setSelectedShareUserIds] = useState<number[]>([]);
+  const [sharingInProgress, setSharingInProgress] = useState(false);
+  const [currentShares, setCurrentShares] = useState<Array<{ id: number; shared_to_user_id: number; shared_to_username: string; shared_by_username: string; created_at: string }>>([]);
   
   // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
   
@@ -1264,6 +1282,63 @@ const FilesPageInner: React.FC = () => {
     logger.logInfo(`prepare to delete task execution: ${execution.task_name}`, 'file-processing');
   };
 
+  const handleOpenShareModal = async (execution: TaskExecution) => {
+    setShareTargetExecution(execution);
+    setSelectedShareUserIds([]);
+    setShareModalVisible(true);
+    try {
+      const [users, sharesData] = await Promise.all([
+        filesAPI.getShareableUsers(),
+        (async () => {
+          const detailResp = await tasksAPI.getTaskExecutionDetails(execution.id);
+          const fileId = detailResp?.files?.[0]?.id;
+          if (fileId) return filesAPI.getFileShares(fileId);
+          return { file_id: 0, shares: [] };
+        })()
+      ]);
+      setShareableUsers(users);
+      setCurrentShares(sharesData.shares as any);
+    } catch (err) {
+      console.error('Failed to load share data:', err);
+      setShareableUsers([]);
+      setCurrentShares([]);
+    }
+  };
+
+  const handleConfirmShare = async () => {
+    if (!shareTargetExecution || selectedShareUserIds.length === 0) return;
+    setSharingInProgress(true);
+    try {
+      const detailResp = await tasksAPI.getTaskExecutionDetails(shareTargetExecution.id);
+      const fileId = detailResp?.files?.[0]?.id;
+      if (!fileId) {
+        message.error('No file found for this execution');
+        return;
+      }
+      const result = await filesAPI.shareFile(fileId, selectedShareUserIds);
+      message.success(`Shared to ${result.shared_count} user(s)`);
+      if (result.skipped?.length > 0) {
+        result.skipped.forEach(s => message.warning(`Skipped user ${s.user_id}: ${s.reason}`));
+      }
+      setShareModalVisible(false);
+    } catch (err) {
+      message.error('Failed to share file');
+      console.error(err);
+    } finally {
+      setSharingInProgress(false);
+    }
+  };
+
+  const handleRemoveShare = async (fileId: number, userId: number) => {
+    try {
+      await filesAPI.unshareFile(fileId, [userId]);
+      setCurrentShares(prev => prev.filter(s => s.shared_to_user_id !== userId));
+      message.success('Share removed');
+    } catch (err) {
+      message.error('Failed to remove share');
+    }
+  };
+
   const handleOpenRename = (execution: TaskExecution) => {
     setExecutionToRename(execution);
     setRenameInputValue(execution.first_filename || `${execution.files_processed} file(s)`);
@@ -1983,10 +2058,10 @@ const FilesPageInner: React.FC = () => {
       width: 350,
       ellipsis: true,
       render: (_: any, record: TaskExecution) => {
-        // 如果有first_filename则显示，否则显示文件数量
+        const isShared = record.access_type === 'shared';
         if (record.first_filename) {
           return (
-            <Tooltip title={record.first_filename} placement="topLeft">
+            <Tooltip title={`${record.first_filename}${isShared && record.shared_by ? ` (shared by ${record.shared_by})` : ''}`} placement="topLeft">
               <div style={{ 
                 color: '#1890ff', 
                 cursor: 'pointer',
@@ -1994,10 +2069,14 @@ const FilesPageInner: React.FC = () => {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 maxWidth: '400px',
-                fontSize: '13px'
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
               }}>
-                <FileTextOutlined style={{ marginRight: 6, fontSize: '14px' }} />
-                {record.first_filename}
+                <FileTextOutlined style={{ marginRight: 6, fontSize: '14px', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{record.first_filename}</span>
+                {isShared && <Tag color="purple" style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px', flexShrink: 0 }}>Shared</Tag>}
               </div>
             </Tooltip>
           );
@@ -2137,6 +2216,16 @@ const FilesPageInner: React.FC = () => {
               size="small"
             />
           </Tooltip>
+          <Tooltip title="Share">
+            <Button
+              type="text"
+              icon={<ShareAltOutlined />}
+              onClick={() => handleOpenShareModal(record)}
+              size="small"
+              style={{ color: '#722ed1' }}
+            />
+          </Tooltip>
+          {record.access_type !== 'shared' && (
           <Tooltip title="Delete">
             <Button
               type="text"
@@ -2147,6 +2236,7 @@ const FilesPageInner: React.FC = () => {
               loading={deletingExecutions}
             />
           </Tooltip>
+          )}
         </Space>
         );
       }
@@ -2699,6 +2789,7 @@ const FilesPageInner: React.FC = () => {
                 const isDocAnalyzing = docAnalyzingIds.has(execution.id);
                 const isAudioAnalyzing = audioAnalyzingIds.has(execution.id);
                 const isItemAnalyzing = execution.rc_agent_status === 'analyzing' || isDocAnalyzing || isAudioAnalyzing;
+                const isSharedFile = execution.access_type === 'shared';
                 const cardMenuItems: MenuProps['items'] = [
                   // 文档文件：未分析时显示 Analyze 入口
                   ...(!isAudioFile && canAnalyze && !isItemAnalyzing ? [{
@@ -2711,6 +2802,15 @@ const FilesPageInner: React.FC = () => {
                     },
                   }] : []),
                   {
+                    key: 'share',
+                    icon: <ShareAltOutlined />,
+                    label: 'Share',
+                    onClick: (e: any) => {
+                      e.domEvent.stopPropagation();
+                      handleOpenShareModal(execution);
+                    },
+                  },
+                  {
                     key: 'rename',
                     icon: <EditOutlined />,
                     label: 'Rename',
@@ -2719,16 +2819,16 @@ const FilesPageInner: React.FC = () => {
                       handleOpenRename(execution);
                     },
                   },
-                  {
+                  ...(!isSharedFile ? [{
                     key: 'delete',
                     icon: <DeleteOutlined />,
                     label: 'Delete',
                     danger: true,
-                    onClick: (e) => {
+                    onClick: (e: any) => {
                       e.domEvent.stopPropagation();
                       handleDeleteExecution(execution);
                     },
-                  },
+                  }] : []),
                 ];
                 const isChecked = selectedExecutionIds.includes(execution.id);
                 return (
@@ -2777,16 +2877,45 @@ const FilesPageInner: React.FC = () => {
                     <div className="files-list-item-meta">
                       {new Date(execution.created_at).toLocaleString()}
                     </div>
-                    <div className="files-list-item-tags">
-                      <Tag color={fileTypeTag.color} style={{ margin: 0, fontSize: '11px' }}>
-                        {fileTypeTag.text}
-                      </Tag>
-                      <Tag
-                        color={isItemAnalyzing ? 'warning' : isUploadOnly ? 'blue' : (execution.rc_agent_status === 'success' ? 'success' : 'default')}
-                        style={{ margin: 0, fontSize: '11px' }}
-                      >
-                        {isItemAnalyzing ? 'Analyzing...' : isUploadOnly ? 'Uploaded' : (execution.rc_agent_status === 'success' ? 'Analyzed' : 'Not Analyzed')}
-                      </Tag>
+                    <div className="files-list-item-tags" style={{ justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <Tag color={fileTypeTag.color} style={{ margin: 0, fontSize: '11px' }}>
+                          {fileTypeTag.text}
+                        </Tag>
+                        <Tag
+                          color={isItemAnalyzing ? 'warning' : isUploadOnly ? 'blue' : (execution.rc_agent_status === 'success' ? 'success' : 'default')}
+                          style={{ margin: 0, fontSize: '11px' }}
+                        >
+                          {isItemAnalyzing ? 'Analyzing...' : isUploadOnly ? 'Uploaded' : (execution.rc_agent_status === 'success' ? 'Analyzed' : 'Not Analyzed')}
+                        </Tag>
+                      </div>
+                      {execution.share_info && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                          <Tooltip title={execution.share_info.shared_by.username}>
+                            {execution.share_info.shared_by.avatar_url ? (
+                              <Avatar size={20} src={execution.share_info.shared_by.avatar_url} />
+                            ) : (
+                              <Avatar size={20} style={{ backgroundColor: '#722ed1', fontSize: 10 }}>
+                                {execution.share_info.shared_by.username.charAt(0).toUpperCase()}
+                              </Avatar>
+                            )}
+                          </Tooltip>
+                          <span style={{ color: '#d9d9d9', fontSize: 14, lineHeight: '20px', userSelect: 'none' }}>|</span>
+                          <Avatar.Group size={20} max={{ count: 3, style: { backgroundColor: '#722ed1', fontSize: 10 } }}>
+                            {execution.share_info.shared_to.map(u => (
+                              <Tooltip key={u.user_id} title={u.username}>
+                                {u.avatar_url ? (
+                                  <Avatar size={20} src={u.avatar_url} />
+                                ) : (
+                                  <Avatar size={20} style={{ backgroundColor: '#1890ff', fontSize: 10 }}>
+                                    {u.username.charAt(0).toUpperCase()}
+                                  </Avatar>
+                                )}
+                              </Tooltip>
+                            ))}
+                          </Avatar.Group>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -3135,6 +3264,65 @@ const FilesPageInner: React.FC = () => {
         </Modal>
 
         {/* 批量标签设置模态框已移除 - 改用自动打标签（content_tag_v1） */}
+
+        {/* Share File Modal */}
+        <Modal
+          title={<><ShareAltOutlined /> Share File</>}
+          open={shareModalVisible}
+          onCancel={() => setShareModalVisible(false)}
+          onOk={handleConfirmShare}
+          okText="Share"
+          confirmLoading={sharingInProgress}
+          okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
+          width={520}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text strong>File: </Text>
+            <Text>{shareTargetExecution?.first_filename || 'Unknown'}</Text>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>Share to users:</Text>
+            <Select
+              mode="multiple"
+              placeholder="Select users to share with"
+              style={{ width: '100%' }}
+              value={selectedShareUserIds}
+              onChange={setSelectedShareUserIds}
+              optionFilterProp="label"
+              options={shareableUsers
+                .filter(u => !currentShares.some(s => s.shared_to_user_id === u.id))
+                .map(u => ({ value: u.id, label: u.username }))}
+            />
+          </div>
+
+          {currentShares.length > 0 && (
+            <div>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>Currently shared with:</Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {currentShares.map(share => (
+                  <Tag
+                    key={share.shared_to_user_id}
+                    closable={shareTargetExecution?.access_type !== 'shared'}
+                    onClose={(e) => {
+                      e.preventDefault();
+                      const detailFetch = async () => {
+                        const detail = await tasksAPI.getTaskExecutionDetails(shareTargetExecution!.id);
+                        const fid = detail?.files?.[0]?.id;
+                        if (fid) handleRemoveShare(fid, share.shared_to_user_id);
+                      };
+                      detailFetch();
+                    }}
+                    color="purple"
+                  >
+                    <UsergroupAddOutlined style={{ marginRight: 4 }} />
+                    {share.shared_to_username}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          )}
+        </Modal>
       </div>
   );
 };

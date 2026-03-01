@@ -28,13 +28,19 @@ export interface TaskExecution {
   ai_processing_time: number;
   total_tokens?: number;
   total_cost?: number;
-  first_filename?: string;  // 第一个文件的名称
-  first_file_type?: string;  // 第一个文件的类型（用于列表筛选）
-  rc_agent_status?: string;  // RC Agent状态
-  llm_model?: string;  // LLM模型名称
-  llm_provider?: string;  // LLM提供商
-  first_task_id?: string;  // 第一个文件的task_id
-  upload_params?: any;  // 上传参数（包含 template_id, template_code, template_variables 等）
+  first_filename?: string;
+  first_file_type?: string;
+  rc_agent_status?: string;
+  llm_model?: string;
+  llm_provider?: string;
+  first_task_id?: string;
+  upload_params?: any;
+  access_type?: string;
+  shared_by?: string;
+  share_info?: {
+    shared_by: { user_id: number; username: string; avatar_url?: string | null };
+    shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
+  } | null;
 }
 
 export interface TaskCreateRequest {

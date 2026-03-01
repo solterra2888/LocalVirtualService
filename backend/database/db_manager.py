@@ -134,6 +134,9 @@ class DatabaseManager:
             # 迁移：为file_processing_details表添加asr_with_diarization字段
             self._migrate_add_asr_with_diarization(cursor)
             
+            # 创建 file_shares 表（文件分享）
+            self._create_file_shares_table(cursor)
+            
             conn.commit()
             print("数据库表创建/验证完成")
         except Exception as e:
@@ -204,6 +207,28 @@ class DatabaseManager:
             print(f"迁移asr_with_diarization字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
+    def _create_file_shares_table(self, cursor):
+        """创建 file_shares 表（文件分享功能）"""
+        try:
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS file_shares (
+                id SERIAL PRIMARY KEY,
+                file_id INTEGER NOT NULL REFERENCES file_processing_details(id) ON DELETE CASCADE,
+                shared_by_user_id INTEGER NOT NULL REFERENCES users(id),
+                shared_to_user_id INTEGER NOT NULL REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(file_id, shared_to_user_id)
+            )
+            """)
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_file_shares_to_user ON file_shares(shared_to_user_id)
+            """)
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_file_shares_file ON file_shares(file_id)
+            """)
+        except Exception as e:
+            print(f"创建file_shares表时出错: {str(e)}")
+
     def _migrate_add_primaryticker_to_target_tracking_config(self, cursor):
         """迁移：为target_tracking_config表添加primaryticker字段"""
         try:

@@ -64,7 +64,8 @@ async def login(login_request: UserLoginRequest):
         username=user_info['username'],
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at', datetime.now()),
-        last_login=user_info.get('last_login')
+        last_login=user_info.get('last_login'),
+        avatar_url=user_info.get('avatar_url')
     )
     
     return LoginResponse(
@@ -94,7 +95,8 @@ async def get_current_user_info(current_user=Depends(get_current_user)):
         username=user_info['username'],
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at', datetime.now()),
-        last_login=user_info.get('last_login')
+        last_login=user_info.get('last_login'),
+        avatar_url=user_info.get('avatar_url')
     )
 
 

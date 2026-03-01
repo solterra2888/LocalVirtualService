@@ -7,6 +7,7 @@ interface User {
   is_admin: boolean;
   created_at: string;
   last_login?: string;
+  avatar_url?: string;
 }
 
 interface LoginRequest {
@@ -25,6 +26,7 @@ interface AuthState {
   logout: () => Promise<void>;
   initializeAuth: () => Promise<void>;
   setLoading: (loading: boolean) => void;
+  updateUser: (updates: Partial<User>) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -152,5 +154,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setLoading: (loading: boolean) => {
     set({ loading });
+  },
+
+  updateUser: (updates: Partial<User>) => {
+    const current = get().user;
+    if (current) {
+      const updated = { ...current, ...updates };
+      localStorage.setItem('user', JSON.stringify(updated));
+      set({ user: updated });
+    }
   }
 })); 

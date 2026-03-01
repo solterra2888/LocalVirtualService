@@ -88,6 +88,8 @@ class FileDetailResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
     original_file_path: Optional[str] = None
+    access_type: Optional[str] = None
+    shared_by: Optional[str] = None
     
     class Config:
         from_attributes = True

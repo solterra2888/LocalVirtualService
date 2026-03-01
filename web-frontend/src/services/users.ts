@@ -61,5 +61,19 @@ export const usersApi = {
       console.error('修改密码失败:', error);
       throw error;
     }
+  },
+
+  async getMyProfile(): Promise<User> {
+    return api.get<User>('/users/me/profile');
+  },
+
+  async updateMyProfile(data: { username?: string; avatar_url?: string }): Promise<User> {
+    return api.put<User>('/users/me/profile', data);
+  },
+
+  async uploadAvatar(file: File): Promise<{ avatar_url: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.upload<{ avatar_url: string }>('/users/me/avatar', formData);
   }
 }; 

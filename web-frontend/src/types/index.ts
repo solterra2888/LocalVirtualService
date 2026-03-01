@@ -5,6 +5,7 @@ export interface User {
   is_admin: boolean;
   created_at?: string;
   last_login?: string;
+  avatar_url?: string;
 }
 
 export interface LoginRequest {

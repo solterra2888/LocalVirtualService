@@ -61,6 +61,8 @@ export interface FileDetail {
   error_message?: string;
   created_at: string;
   original_file_path?: string;
+  access_type?: string;
+  shared_by?: string;
 }
 
 export interface FileValidationResponse {
@@ -726,5 +728,39 @@ export const filesAPI = {
     logs?: Array<{ timestamp: string; level: string; message: string }>;
   }> => {
     return api.get(`/files/document/reparse/${taskId}/status`);
-  }
+  },
+
+  // === File Sharing ===
+
+  shareFile: async (fileId: number, userIds: number[]): Promise<{
+    shared_count: number;
+    skipped: Array<{ user_id: number; reason: string }>;
+  }> => {
+    return api.post(`/files/${fileId}/share`, { user_ids: userIds });
+  },
+
+  unshareFile: async (fileId: number, userIds: number[]): Promise<{
+    removed_count: number;
+  }> => {
+    return api.delete(`/files/${fileId}/share`, { data: { user_ids: userIds } });
+  },
+
+  getFileShares: async (fileId: number): Promise<{
+    file_id: number;
+    shares: Array<{
+      id: number;
+      file_id: number;
+      shared_by_user_id: number;
+      shared_by_username: string;
+      shared_to_user_id: number;
+      shared_to_username: string;
+      created_at: string;
+    }>;
+  }> => {
+    return api.get(`/files/${fileId}/shares`);
+  },
+
+  getShareableUsers: async (): Promise<Array<{ id: number; username: string }>> => {
+    return api.get('/users/shareable');
+  },
 }; 

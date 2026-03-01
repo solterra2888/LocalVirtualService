@@ -3,8 +3,11 @@
 用户管理API路由
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+import os
+import tempfile
+from fastapi import APIRouter, HTTPException, status, Depends, Query, UploadFile, File
 from typing import List, Optional
+from pydantic import BaseModel, Field
 
 from backend.schemas.user import (
     UserCreateRequest,
@@ -15,6 +18,7 @@ from backend.auth.jwt_utils import get_current_user, get_current_admin_user, get
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.services.oss_service import OSSService
 
 router = APIRouter()
 
@@ -46,7 +50,8 @@ async def get_users(
             username=user['username'],
             is_admin=user.get('is_admin', False),
             created_at=user.get('created_at'),
-            last_login=user.get('last_login')
+            last_login=user.get('last_login'),
+            avatar_url=user.get('avatar_url')
         )
         for user in users
     ]
@@ -92,7 +97,8 @@ async def create_user(
             username=user_info['username'],
             is_admin=user_info.get('is_admin', False),
             created_at=user_info.get('created_at'),
-            last_login=user_info.get('last_login')
+            last_login=user_info.get('last_login'),
+            avatar_url=user_info.get('avatar_url')
         )
         
     except Exception as e:
@@ -100,6 +106,125 @@ async def create_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建用户失败: {str(e)}"
         )
+
+
+class ProfileUpdateRequest(BaseModel):
+    username: Optional[str] = Field(None, min_length=1, max_length=50)
+    avatar_url: Optional[str] = None
+
+
+@router.get("/me/profile", response_model=UserResponse, summary="获取当前用户信息")
+async def get_my_profile(current_user=Depends(get_current_user)):
+    db_conn_params = get_database_config()
+    user_auth = UserAuth(db_conn_params)
+    user_info = user_auth.get_user_by_id(current_user.user_id)
+    if not user_info:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return UserResponse(
+        id=user_info['id'],
+        username=user_info['username'],
+        is_admin=user_info.get('is_admin', False),
+        created_at=user_info.get('created_at'),
+        last_login=user_info.get('last_login'),
+        avatar_url=user_info.get('avatar_url')
+    )
+
+
+@router.put("/me/profile", response_model=UserResponse, summary="更新当前用户信息")
+async def update_my_profile(
+    request: ProfileUpdateRequest,
+    current_user=Depends(get_current_user)
+):
+    db_conn_params = get_database_config()
+    user_auth = UserAuth(db_conn_params)
+
+    update_data = {}
+    if request.username is not None:
+        existing = user_auth.get_user_info(request.username)
+        if existing and existing['id'] != current_user.user_id:
+            raise HTTPException(status_code=400, detail="用户名已被使用")
+        update_data['username'] = request.username
+    if request.avatar_url is not None:
+        update_data['avatar_url'] = request.avatar_url
+
+    if update_data:
+        success = user_auth.update_user(current_user.user_id, **update_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="更新失败")
+
+    user_info = user_auth.get_user_by_id(current_user.user_id)
+    return UserResponse(
+        id=user_info['id'],
+        username=user_info['username'],
+        is_admin=user_info.get('is_admin', False),
+        created_at=user_info.get('created_at'),
+        last_login=user_info.get('last_login'),
+        avatar_url=user_info.get('avatar_url')
+    )
+
+
+@router.post("/me/avatar", summary="上传用户头像")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    allowed_ext = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+    ext = os.path.splitext(file.filename or '')[1].lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            content = await file.read()
+            if len(content) > 5 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="头像文件不能超过5MB")
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        oss = OSSService()
+        if not oss.is_configured():
+            raise HTTPException(status_code=500, detail="OSS服务未配置")
+
+        result = oss.upload_file(
+            file_path=tmp_path,
+            filename=f"avatar_{current_user.user_id}{ext}",
+            username=current_user.username,
+            file_category='image'
+        )
+
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', '上传失败'))
+
+        avatar_url = result.get('signed_url') or result.get('public_url')
+
+        db_conn_params = get_database_config()
+        user_auth = UserAuth(db_conn_params)
+        user_auth.update_user(current_user.user_id, avatar_url=avatar_url)
+
+        return {"avatar_url": avatar_url}
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+@router.get("/shareable", summary="获取可分享的用户列表")
+async def get_shareable_users(
+    current_user=Depends(get_current_user)
+):
+    """
+    返回所有可分享的目标用户（排除自己），任何登录用户均可调用。
+    """
+    db_conn_params = get_database_config()
+    user_auth = UserAuth(db_conn_params)
+    
+    all_users = user_auth.get_users_list(limit=500, offset=0)
+    
+    return [
+        {"id": u["id"], "username": u["username"], "avatar_url": u.get("avatar_url")}
+        for u in all_users
+        if u["id"] != current_user.user_id
+    ]
 
 
 @router.get("/{user_id}", response_model=UserResponse, summary="获取用户详情")
@@ -127,7 +252,8 @@ async def get_user(
         username=user_info['username'],
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at'),
-        last_login=user_info.get('last_login')
+        last_login=user_info.get('last_login'),
+        avatar_url=user_info.get('avatar_url')
     )
 
 
@@ -205,7 +331,8 @@ async def update_user(
             username=updated_user_info['username'],
             is_admin=updated_user_info.get('is_admin', False),
             created_at=updated_user_info.get('created_at'),
-            last_login=updated_user_info.get('last_login')
+            last_login=updated_user_info.get('last_login'),
+            avatar_url=updated_user_info.get('avatar_url')
         )
         
     except Exception as e:

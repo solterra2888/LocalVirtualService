@@ -780,11 +780,10 @@ async def get_files(
     current_user=Depends(get_current_user)
 ):
     """
-    获取文件处理历史列表
+    获取文件处理历史列表（按用户权限过滤）
     
-    - **skip**: 跳过记录数
-    - **limit**: 限制返回记录数
-    - **file_type**: 文件类型过滤
+    - admin 可看全部
+    - 非 admin 只能看自己上传的 + 被分享的
     """
     try:
         db_conn_params = get_database_config()
@@ -799,27 +798,43 @@ async def get_files(
         
         cursor = conn.cursor()
         
-        # 构建查询条件
-        where_clause = "WHERE 1=1"
+        conditions = []
         params = []
         
         if file_type:
-            where_clause += " AND file_type = %s"
+            conditions.append("fpd.file_type = %s")
             params.append(file_type)
         
-        # 查询文件列表
+        conditions.append("""(
+            ps."user" = %s
+            OR EXISTS (SELECT 1 FROM file_shares fs WHERE fs.file_id = fpd.id AND fs.shared_to_user_id = %s)
+        )""")
+        params.extend([current_user.username, current_user.user_id])
+        access_type_expr = """CASE WHEN ps."user" = %s THEN 'owner' ELSE 'shared' END"""
+        shared_by_expr = """(
+            SELECT u.username FROM file_shares fs2
+            JOIN users u ON u.id = fs2.shared_by_user_id
+            WHERE fs2.file_id = fpd.id AND fs2.shared_to_user_id = %s
+            ORDER BY fs2.created_at DESC LIMIT 1
+        )"""
+        
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        select_params = [current_user.username, current_user.user_id]
+        
         query = f"""
-            SELECT id, filename, file_type, file_size_mb, processing_time, 
-                   ai_time, content_length, status, total_tokens, cost, 
-                   content, created_at, original_file_path
-            FROM file_processing_details 
+            SELECT fpd.id, fpd.filename, fpd.file_type, fpd.file_size_mb, fpd.processing_time, 
+                   fpd.ai_time, fpd.content_length, fpd.status, fpd.total_tokens, fpd.cost, 
+                   fpd.content, fpd.created_at, fpd.original_file_path,
+                   {access_type_expr} as access_type,
+                   {shared_by_expr} as shared_by
+            FROM file_processing_details fpd
+            JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY fpd.created_at DESC
             LIMIT %s OFFSET %s
         """
-        params.extend([limit, skip])
         
-        cursor.execute(query, params)
+        cursor.execute(query, select_params + params + [limit, skip])
         
         files = []
         for row in cursor.fetchall():
@@ -836,7 +851,9 @@ async def get_files(
                 cost=row[9],
                 content=row[10],
                 created_at=row[11],
-                original_file_path=row[12]
+                original_file_path=row[12],
+                access_type=row[13],
+                shared_by=row[14]
             ))
         
         conn.close()
@@ -1181,7 +1198,11 @@ async def get_original_file_info(
         
         cursor = conn.cursor()
         
-        # 查询文件信息（包含 storage_type 和 oss_bucket）
+        access = _check_file_access(cursor, int(file_id), current_user.user_id, current_user.username, current_user.is_admin)
+        if not access:
+            conn.close()
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this file")
+        
         cursor.execute("""
             SELECT filename, file_type, file_size_mb, original_file_path, created_at, 
                    content, asr_with_diarization, file_storage_type, oss_bucket
@@ -1320,7 +1341,7 @@ async def update_file_detail_content(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="任务执行记录不存在"
             )
-        if not current_user.is_admin and owner[0] != current_user.username:
+        if owner[0] != current_user.username:
             conn.close()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1457,7 +1478,6 @@ async def serve_file(
         )
     
     try:
-        # 验证token
         payload = verify_token(token)
         if not payload:
             raise HTTPException(
@@ -1482,7 +1502,14 @@ async def serve_file(
         
         cursor = conn.cursor()
         
-        # 查询文件路径和存储类型
+        access = _check_file_access(
+            cursor, int(file_id),
+            payload.user_id, payload.username, payload.is_admin
+        )
+        if not access:
+            conn.close()
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this file")
+        
         cursor.execute("""
             SELECT filename, file_type, original_file_path, file_storage_type, oss_bucket
             FROM file_processing_details 
@@ -2442,13 +2469,12 @@ async def analyze_audio(
                     detail=f"执行记录不存在: {execution_id}"
                 )
             
-            if not current_user.is_admin and ps_row[1] != current_user.username:
+            if ps_row[1] != current_user.username:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="权限不足，只能分析自己的记录"
                 )
             
-            # 检查是否已在分析中
             if ps_row[2] == 'analyzing':
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -2660,7 +2686,7 @@ async def analyze_document(
                     detail=f"执行记录不存在: {execution_id}"
                 )
             
-            if not current_user.is_admin and ps_row[1] != current_user.username:
+            if ps_row[1] != current_user.username:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="权限不足，只能分析自己的记录"
@@ -3081,3 +3107,199 @@ async def trigger_file_youtube_asr(
     except Exception as e:
         error(f"触发 YouTube File ASR 失败: {str(e)}", source="api")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===========================================
+# 文件分享 API
+# ===========================================
+
+def _check_file_access(cursor, file_id: int, user_id: int, username: str, is_admin: bool) -> str:
+    """
+    检查用户对文件的访问权限。
+    返回 'owner' | 'shared' | None
+    """
+    cursor.execute("""
+        SELECT ps."user"
+        FROM file_processing_details fpd
+        JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
+        WHERE fpd.id = %s
+    """, (file_id,))
+    row = cursor.fetchone()
+    if not row:
+        return None
+    if row[0] == username:
+        return 'owner'
+    cursor.execute(
+        "SELECT 1 FROM file_shares WHERE file_id = %s AND shared_to_user_id = %s",
+        (file_id, user_id)
+    )
+    if cursor.fetchone():
+        return 'shared'
+    return None
+
+
+@router.post("/{file_id}/share", summary="分享文件给指定用户")
+async def share_file(
+    file_id: int,
+    body: Dict[str, Any] = Body(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    分享文件给指定用户（支持再分享）
+
+    Body: { "user_ids": [2, 5] }
+    """
+    user_ids = body.get("user_ids", [])
+    if not user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_ids is required")
+
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    cursor = conn.cursor()
+    try:
+        access = _check_file_access(cursor, file_id, current_user.user_id, current_user.username, current_user.is_admin)
+        if not access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this file")
+
+        shared_count = 0
+        skipped = []
+        for uid in user_ids:
+            if uid == current_user.user_id:
+                skipped.append({"user_id": uid, "reason": "cannot share to yourself"})
+                continue
+            cursor.execute("SELECT id, username FROM users WHERE id = %s", (uid,))
+            target = cursor.fetchone()
+            if not target:
+                skipped.append({"user_id": uid, "reason": "user not found"})
+                continue
+            cursor.execute("""
+                INSERT INTO file_shares (file_id, shared_by_user_id, shared_to_user_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (file_id, shared_to_user_id) DO NOTHING
+            """, (file_id, current_user.user_id, uid))
+            if cursor.rowcount > 0:
+                shared_count += 1
+
+        conn.commit()
+        info(f"File {file_id} shared to {shared_count} users by {current_user.username}", source="api")
+        return {"shared_count": shared_count, "skipped": skipped}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        error(f"Share file failed: {str(e)}", source="api")
+        raise HTTPException(status_code=500, detail=f"Share failed: {str(e)}")
+    finally:
+        conn.close()
+
+
+@router.delete("/{file_id}/share", summary="取消文件分享")
+async def unshare_file(
+    file_id: int,
+    body: Dict[str, Any] = Body(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    取消文件分享（仅 owner 或 admin）
+
+    Body: { "user_ids": [5] }
+    """
+    user_ids = body.get("user_ids", [])
+    if not user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_ids is required")
+
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    cursor = conn.cursor()
+    try:
+        access = _check_file_access(cursor, file_id, current_user.user_id, current_user.username, current_user.is_admin)
+        if access != 'owner':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only file owner can revoke sharing"
+            )
+
+        removed = 0
+        for uid in user_ids:
+            cursor.execute(
+                "DELETE FROM file_shares WHERE file_id = %s AND shared_to_user_id = %s",
+                (file_id, uid)
+            )
+            removed += cursor.rowcount
+
+        conn.commit()
+        info(f"File {file_id}: removed {removed} shares by {current_user.username}", source="api")
+        return {"removed_count": removed}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        error(f"Unshare file failed: {str(e)}", source="api")
+        raise HTTPException(status_code=500, detail=f"Unshare failed: {str(e)}")
+    finally:
+        conn.close()
+
+
+@router.get("/{file_id}/shares", summary="查看文件的分享列表")
+async def get_file_shares(
+    file_id: int,
+    current_user=Depends(get_current_user)
+):
+    """
+    查看某文件当前的所有分享记录
+    """
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    cursor = conn.cursor()
+    try:
+        access = _check_file_access(cursor, file_id, current_user.user_id, current_user.username, current_user.is_admin)
+        if not access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this file")
+
+        cursor.execute("""
+            SELECT fs.id, fs.file_id,
+                   fs.shared_by_user_id, u_by.username as shared_by_username,
+                   fs.shared_to_user_id, u_to.username as shared_to_username,
+                   fs.created_at
+            FROM file_shares fs
+            JOIN users u_by ON u_by.id = fs.shared_by_user_id
+            JOIN users u_to ON u_to.id = fs.shared_to_user_id
+            WHERE fs.file_id = %s
+            ORDER BY fs.created_at DESC
+        """, (file_id,))
+
+        shares = []
+        for row in cursor.fetchall():
+            shares.append({
+                "id": row[0],
+                "file_id": row[1],
+                "shared_by_user_id": row[2],
+                "shared_by_username": row[3],
+                "shared_to_user_id": row[4],
+                "shared_to_username": row[5],
+                "created_at": row[6].isoformat() if row[6] else None
+            })
+
+        return {"file_id": file_id, "shares": shares}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"Get file shares failed: {str(e)}", source="api")
+        raise HTTPException(status_code=500, detail=f"Get shares failed: {str(e)}")
+    finally:
+        conn.close()

@@ -59,46 +59,41 @@ class UserAuth:
             """)
             has_last_login = cursor.fetchone() is not None
             
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'avatar_url'
+            """)
+            has_avatar = cursor.fetchone() is not None
+
+            cols = "id, username, password_hash, salt, is_admin, created_at"
             if has_last_login:
-                # 如果有last_login列
-                cursor.execute("""
-                SELECT id, username, password_hash, salt, is_admin, created_at, last_login
-                FROM users WHERE username = %s
-                """, (username,))
-                
-                result = cursor.fetchone()
-                if not result:
-                    return None
-                
-                return {
-                    'id': result[0],
-                    'username': result[1],
-                    'password_hash': result[2],
-                    'salt': result[3],
-                    'is_admin': bool(result[4]),
-                    'created_at': result[5],
-                    'last_login': result[6]
-                }
-            else:
-                # 如果没有last_login列
-                cursor.execute("""
-                SELECT id, username, password_hash, salt, is_admin, created_at
-                FROM users WHERE username = %s
-                """, (username,))
-                
-                result = cursor.fetchone()
-                if not result:
-                    return None
-                
-                return {
-                    'id': result[0],
-                    'username': result[1],
-                    'password_hash': result[2],
-                    'salt': result[3],
-                    'is_admin': bool(result[4]),
-                    'created_at': result[5],
-                    'last_login': None
-                }
+                cols += ", last_login"
+            if has_avatar:
+                cols += ", avatar_url"
+
+            cursor.execute(f"SELECT {cols} FROM users WHERE username = %s", (username,))
+            result = cursor.fetchone()
+            if not result:
+                return None
+            
+            idx = 6
+            last_login = None
+            avatar_url = None
+            if has_last_login:
+                last_login = result[idx]; idx += 1
+            if has_avatar:
+                avatar_url = result[idx]
+
+            return {
+                'id': result[0],
+                'username': result[1],
+                'password_hash': result[2],
+                'salt': result[3],
+                'is_admin': bool(result[4]),
+                'created_at': result[5],
+                'last_login': last_login,
+                'avatar_url': avatar_url
+            }
         except Exception as e:
             print(f"获取用户信息时出错: {e}")
             return None
@@ -197,6 +192,15 @@ class UserAuth:
             )
             """)
             
+            # Ensure avatar_url column exists
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'avatar_url'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+                print("已添加avatar_url列到users表")
+            
             # 检查是否有任何用户
             cursor.execute("SELECT COUNT(*) FROM users")
             user_count = cursor.fetchone()[0]
@@ -278,42 +282,44 @@ class UserAuth:
             """)
             has_last_login = cursor.fetchone() is not None
             
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'avatar_url'
+            """)
+            has_avatar = cursor.fetchone() is not None
+
+            cols = "id, username, is_admin, created_at"
             if has_last_login:
-                cursor.execute("""
-                SELECT id, username, is_admin, created_at, last_login
-                FROM users 
+                cols += ", last_login"
+            if has_avatar:
+                cols += ", avatar_url"
+
+            cursor.execute(f"""
+                SELECT {cols}
+                FROM users
                 ORDER BY id ASC
                 LIMIT %s OFFSET %s
-                """, (limit, offset))
-            else:
-                cursor.execute("""
-                SELECT id, username, is_admin, created_at
-                FROM users 
-                ORDER BY id ASC
-                LIMIT %s OFFSET %s
-                """, (limit, offset))
+            """, (limit, offset))
             
             results = cursor.fetchall()
             users = []
             
             for result in results:
+                idx = 4
+                last_login = None
+                avatar_url = None
                 if has_last_login:
-                    user = {
-                        'id': result[0],
-                        'username': result[1],
-                        'is_admin': bool(result[2]),
-                        'created_at': result[3],
-                        'last_login': result[4]
-                    }
-                else:
-                    user = {
-                        'id': result[0],
-                        'username': result[1],
-                        'is_admin': bool(result[2]),
-                        'created_at': result[3],
-                        'last_login': None
-                    }
-                users.append(user)
+                    last_login = result[idx]; idx += 1
+                if has_avatar:
+                    avatar_url = result[idx]
+                users.append({
+                    'id': result[0],
+                    'username': result[1],
+                    'is_admin': bool(result[2]),
+                    'created_at': result[3],
+                    'last_login': last_login,
+                    'avatar_url': avatar_url
+                })
             
             return users
         except Exception as e:
@@ -337,40 +343,39 @@ class UserAuth:
             """)
             has_last_login = cursor.fetchone() is not None
             
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'avatar_url'
+            """)
+            has_avatar = cursor.fetchone() is not None
+
+            cols = "id, username, is_admin, created_at"
             if has_last_login:
-                cursor.execute("""
-                SELECT id, username, is_admin, created_at, last_login
-                FROM users WHERE id = %s
-                """, (user_id,))
-                
-                result = cursor.fetchone()
-                if not result:
-                    return None
-                
-                return {
-                    'id': result[0],
-                    'username': result[1],
-                    'is_admin': bool(result[2]),
-                    'created_at': result[3],
-                    'last_login': result[4]
-                }
-            else:
-                cursor.execute("""
-                SELECT id, username, is_admin, created_at
-                FROM users WHERE id = %s
-                """, (user_id,))
-                
-                result = cursor.fetchone()
-                if not result:
-                    return None
-                
-                return {
-                    'id': result[0],
-                    'username': result[1],
-                    'is_admin': bool(result[2]),
-                    'created_at': result[3],
-                    'last_login': None
-                }
+                cols += ", last_login"
+            if has_avatar:
+                cols += ", avatar_url"
+
+            cursor.execute(f"SELECT {cols} FROM users WHERE id = %s", (user_id,))
+            result = cursor.fetchone()
+            if not result:
+                return None
+
+            idx = 4
+            last_login = None
+            avatar_url = None
+            if has_last_login:
+                last_login = result[idx]; idx += 1
+            if has_avatar:
+                avatar_url = result[idx]
+
+            return {
+                'id': result[0],
+                'username': result[1],
+                'is_admin': bool(result[2]),
+                'created_at': result[3],
+                'last_login': last_login,
+                'avatar_url': avatar_url
+            }
         except Exception as e:
             print(f"根据ID获取用户信息时出错: {e}")
             return None
@@ -437,6 +442,10 @@ class UserAuth:
             if 'is_admin' in kwargs:
                 update_fields.append("is_admin = %s")
                 update_values.append(kwargs['is_admin'])
+            
+            if 'avatar_url' in kwargs:
+                update_fields.append("avatar_url = %s")
+                update_values.append(kwargs['avatar_url'])
             
             if not update_fields:
                 return True  # 没有需要更新的字段

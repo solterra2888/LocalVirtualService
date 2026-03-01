@@ -26,6 +26,7 @@ class UserUpdateRequest(BaseModel):
     username: Optional[str] = Field(None, min_length=1, max_length=50, description="用户名")
     password: Optional[str] = Field(None, min_length=6, description="新密码")
     is_admin: Optional[bool] = Field(None, description="是否为管理员")
+    avatar_url: Optional[str] = Field(None, description="头像URL")
 
 
 class UserResponse(BaseModel):
@@ -35,6 +36,7 @@ class UserResponse(BaseModel):
     is_admin: bool
     created_at: datetime
     last_login: Optional[datetime] = None
+    avatar_url: Optional[str] = None
     
     class Config:
         from_attributes = True

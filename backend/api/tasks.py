@@ -265,29 +265,46 @@ async def get_task_executions(
     
     cursor = conn.cursor()
     try:
-        # 查询处理统计数据
-        where_clause = ""
+        import json
+        
         params = []
+        where_conditions = []
         
-        if not current_user.is_admin:
-            where_clause = 'WHERE "user" = %s'
-            params.append(current_user.username)
+        where_conditions.append("""(
+            ps."user" = %s
+            OR EXISTS (
+                SELECT 1 FROM file_processing_details fpd2
+                JOIN file_shares fs ON fpd2.id = fs.file_id
+                WHERE fpd2.processing_stats_id = ps.id
+                  AND fs.shared_to_user_id = %s
+            )
+        )""")
+        params.extend([current_user.username, current_user.user_id])
         
-        # 搜索条件：仅当 q 有值且 search_type 有效时生效
         if q and q.strip():
             q_pattern = f"%{q.strip()}%"
             if search_type == "file_name":
-                if where_clause:
-                    where_clause += " AND (SELECT filename FROM file_processing_details WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1) ILIKE %s"
-                else:
-                    where_clause = "WHERE (SELECT filename FROM file_processing_details WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1) ILIKE %s"
+                where_conditions.append(
+                    "(SELECT filename FROM file_processing_details WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1) ILIKE %s"
+                )
                 params.append(q_pattern)
             elif search_type == "content":
-                if where_clause:
-                    where_clause += " AND EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
-                else:
-                    where_clause = "WHERE EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
+                where_conditions.append(
+                    "EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
+                )
                 params.append(q_pattern)
+        
+        where_clause = ("WHERE " + " AND ".join(where_conditions)) if where_conditions else ""
+        
+        access_type_expr = """CASE WHEN ps."user" = %s THEN 'owner' ELSE 'shared' END"""
+        shared_by_expr = """(
+            SELECT u.username FROM file_shares fs
+            JOIN file_processing_details fpd3 ON fpd3.id = fs.file_id
+            JOIN users u ON u.id = fs.shared_by_user_id
+            WHERE fpd3.processing_stats_id = ps.id AND fs.shared_to_user_id = %s
+            ORDER BY fs.created_at DESC LIMIT 1
+        )"""
+        select_params = [current_user.username, current_user.user_id]
         
         cursor.execute(f"""
         SELECT ps.id, ps.timestamp, ps.files_processed, ps.files_failed, 
@@ -303,17 +320,43 @@ async def get_task_executions(
                (SELECT task_id FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
                 ORDER BY id ASC LIMIT 1) as first_task_id,
-               ps.upload_params
+               ps.upload_params,
+               {access_type_expr} as access_type,
+               {shared_by_expr} as shared_by
         FROM processing_stats ps
         {where_clause}
         ORDER BY ps.id DESC 
         LIMIT %s OFFSET %s
-        """, params + [page_size, offset])
+        """, select_params + params + [page_size, offset])
         
         stats = cursor.fetchall()
         
-        import json
-        
+        ps_ids = [stat[0] for stat in stats]
+        share_info_map = {}
+        if ps_ids:
+            cursor.execute("""
+                SELECT fpd.processing_stats_id,
+                       u_by.id, u_by.username, u_by.avatar_url,
+                       u_to.id, u_to.username, u_to.avatar_url
+                FROM file_shares fs
+                JOIN file_processing_details fpd ON fpd.id = fs.file_id
+                JOIN users u_by ON u_by.id = fs.shared_by_user_id
+                JOIN users u_to ON u_to.id = fs.shared_to_user_id
+                WHERE fpd.processing_stats_id = ANY(%s)
+                ORDER BY fs.created_at ASC
+            """, (ps_ids,))
+            for row in cursor.fetchall():
+                ps_id = row[0]
+                if ps_id not in share_info_map:
+                    share_info_map[ps_id] = {
+                        'shared_by': {'user_id': row[1], 'username': row[2], 'avatar_url': row[3]},
+                        'shared_to': []
+                    }
+                to_user = {'user_id': row[4], 'username': row[5], 'avatar_url': row[6]}
+                existing_ids = [u['user_id'] for u in share_info_map[ps_id]['shared_to']]
+                if to_user['user_id'] not in existing_ids:
+                    share_info_map[ps_id]['shared_to'].append(to_user)
+
         return [
             TaskExecutionResponse(
                 id=str(stat[0]),
@@ -333,7 +376,10 @@ async def get_task_executions(
                 llm_model=stat[14] if len(stat) > 14 else None,
                 llm_provider=stat[15] if len(stat) > 15 else None,
                 first_task_id=stat[16] if len(stat) > 16 else None,
-                upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None
+                upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None,
+                access_type=stat[18] if len(stat) > 18 else None,
+                shared_by=stat[19] if len(stat) > 19 else None,
+                share_info=share_info_map.get(stat[0]),
             )
             for stat in stats
         ]
@@ -390,14 +436,26 @@ async def get_task_execution(
                 detail=f"任务执行不存在: {execution_id}"
             )
         
-        # 检查权限
-        if not current_user.is_admin and stat[8] != current_user.username:
+        import json
+        
+        is_owner = stat[8] == current_user.username
+        has_shared_access = False
+        if not is_owner:
+            cursor.execute("""
+                SELECT 1 FROM file_processing_details fpd
+                JOIN file_shares fs ON fpd.id = fs.file_id
+                WHERE fpd.processing_stats_id = %s AND fs.shared_to_user_id = %s
+                LIMIT 1
+            """, (execution_id, current_user.user_id))
+            has_shared_access = cursor.fetchone() is not None
+        
+        if not is_owner and not has_shared_access:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足，只能查看自己的任务执行"
             )
         
-        import json
+        access_type = 'owner' if is_owner else 'shared'
         
         return TaskExecutionResponse(
             id=str(stat[0]),
@@ -417,7 +475,8 @@ async def get_task_execution(
             llm_model=stat[14] if len(stat) > 14 else None,
             llm_provider=stat[15] if len(stat) > 15 else None,
             first_task_id=stat[16] if len(stat) > 16 else None,
-            upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None
+            upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None,
+            access_type=access_type
         )
         
     finally:
@@ -459,8 +518,7 @@ async def delete_task_execution(
         
         record_id, record_user = record
         
-        # 权限检查：管理员可以删除所有记录，普通用户只能删除自己的记录
-        if not current_user.is_admin and record_user != current_user.username:
+        if record_user != current_user.username:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足，只能删除自己的任务执行记录"
@@ -519,7 +577,7 @@ async def update_execution_final_report(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="任务执行不存在"
             )
-        if not current_user.is_admin and stat[1] != current_user.username:
+        if stat[1] != current_user.username:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足"
@@ -580,7 +638,7 @@ async def rename_execution_file(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="任务执行不存在"
             )
-        if not current_user.is_admin and stat[1] != current_user.username:
+        if stat[1] != current_user.username:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足"
@@ -672,12 +730,19 @@ async def get_task_execution_details(
                 detail=f"任务执行不存在: {execution_id}"
             )
         
-        # 检查权限
-        if not current_user.is_admin and stat[8] != current_user.username:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="权限不足，只能查看自己的任务执行"
-            )
+        is_owner = stat[8] == current_user.username
+        if not is_owner:
+            cursor.execute("""
+                SELECT 1 FROM file_processing_details fpd
+                JOIN file_shares fs ON fpd.id = fs.file_id
+                WHERE fpd.processing_stats_id = %s AND fs.shared_to_user_id = %s
+                LIMIT 1
+            """, (execution_id, current_user.user_id))
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足，只能查看自己的任务执行"
+                )
         
         # 获取文件处理详情
         cursor.execute("""
