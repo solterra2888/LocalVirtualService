@@ -387,6 +387,44 @@ curl http://localhost:8000/api/health      # 绕过 Nginx 直接访问后端
 ls /opt/nginx/html/guanhe/index.html      # 确认前端构建产物存在
 ```
 
+### 音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN
+
+**症状**：音频文件已成功上传到 OSS，但语音识别（ASR）结果为空，日志出现：
+
+```
+ASR 子任务失败: {'code': 'FILE_403_FORBIDDEN', 'message': 'FILE_403_FORBIDDEN', 'subtask_status': 'FAILED'}
+```
+
+**原因**：ASR 服务（DashScope）需要通过公网 URL 拉取音频文件。当 OSS Bucket 为**私有**时，未签名的 `public_url`（如 `https://bucket.oss-cn-hongkong.aliyuncs.com/audio/...`）会被 OSS 拒绝访问（403）。
+
+**解决方案**（已在代码中修复）：提交 ASR 任务时使用带签名的 `signed_url`（48 小时有效期）而非 `public_url`。对应代码位于 `backend/tasks/file_tasks.py` 的 `upload_and_transcribe_audio_task`：
+
+```python
+# 优先使用签名 URL，否则 ASR 拉取私有桶会 403
+audio_url = upload_result.get("signed_url") or upload_result["public_url"]
+```
+
+> **注意**：此问题仅影响音频文件（ASR 需要外部拉取）。PDF/Word 等文档的处理流程不受影响，因为文档解析在本地服务器完成，不依赖公网 URL。
+
+### PDF/图片在右侧面板无法预览（自动下载或"未能加载 PDF 文档"）
+
+**症状**：文件已上传到 OSS 且处理成功，但在 File List 点击文件后，右侧面板的 Original 标签页无法在线预览 PDF，而是触发浏览器下载或显示"未能加载 PDF 文档"。
+
+**原因**：阿里云 OSS 默认域名（`bucket.oss-cn-xxx.aliyuncs.com`）有安全策略，会对特定地域和文件类型强制添加 `x-oss-force-download: true` 和 `Content-Disposition: attachment` 响应头，即使签名 URL 中指定了 `response-content-disposition=inline` 也无效。详见 [阿里云官方文档：如何配置访问OSS文件时的预览行为](https://help.aliyun.com/zh/oss/how-to-ensure-an-object-is-previewed-when-you-access-the-object)。
+
+**解决方案**（已在代码中修复）：不再让前端 iframe 直接请求 OSS 签名 URL，改为通过后端 `/api/files/serve/{file_id}` 代理。后端从 OSS 下载文件内容，再以正确的 `Content-Type` 和 `Content-Disposition: inline` 头返回给浏览器。对应代码位于 `backend/api/files.py`：
+
+- `get_original_file_info` 端点：无自定义域名时返回 `/api/files/serve/{file_id}`（而非 OSS 签名 URL）
+- `serve_file` 端点：通过 `oss_service.bucket.get_object()` 从 OSS 读取完整文件内容，用 `Response` 返回
+
+**备选方案**：如需绕过后端代理（避免大文件占用后端带宽），可绑定**已备案的自定义域名**到 OSS Bucket，然后在 `.env` 中配置：
+
+```ini
+OSS_CUSTOM_DOMAIN=your-domain.com
+```
+
+配置自定义域名后，文件 URL 会使用该域名，不受 OSS 默认域名的强制下载策略影响。
+
 ---
 
 ## 附录: 配置文件层级说明
