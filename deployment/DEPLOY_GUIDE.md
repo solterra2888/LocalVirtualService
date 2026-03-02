@@ -372,3 +372,57 @@ deployment/config.defaults.env ← 第 3 层：应用默认参数（通用，不
 ```bash
 sudo bash deployment/deploy.sh && sudo ./restart_services.sh
 ```
+
+---
+
+## 附录: Git 与 GitHub 推送配置
+
+### 1. 创建 GitHub 仓库
+
+前往 [https://github.com/new](https://github.com/new) 创建仓库：
+
+- **Repository name**: `guanhetech`
+- **Visibility**: Private
+- 不要勾选 README / .gitignore / License（本地已有）
+
+### 2. 生成 Personal Access Token
+
+1. 前往 GitHub → Settings → Developer settings → [Personal access tokens (classic)](https://github.com/settings/tokens/new)
+2. 点击 **Generate new token (classic)**
+3. 设置：
+   - **Note**: `guanhetech-server`（备注，随意填写）
+   - **Expiration**: 按需选择（推荐 No expiration）
+   - **Select scopes**: 勾选 **`repo`**（整个大类）
+4. 点击 **Generate token**，复制生成的 token（仅显示一次）
+
+### 3. 配置远程仓库并推送
+
+```bash
+cd /opt/guanhetech
+
+# 添加 GitHub 远程仓库（如已有 Gitee 的 origin，先重命名）
+git remote rename origin gitee
+git remote add origin https://github.com/<你的用户名>/guanhetech.git
+
+# 推送（首次需要输入用户名和 token 作为密码）
+git push -u origin master
+```
+
+### 4. 缓存凭证（避免每次输入 token）
+
+```bash
+git config --global credential.helper store
+```
+
+运行后，下次 `git push` 输入一次用户名和 token，之后会自动记住。
+
+### 5. 日常推送
+
+```bash
+cd /opt/guanhetech
+git add .
+git commit -m "描述你的变更"
+git push origin master
+```
+
+> **安全提示**: 不要把 token 硬编码在 remote URL 中。使用 `credential.helper store` 或环境变量管理凭证。
