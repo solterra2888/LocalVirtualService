@@ -8,19 +8,18 @@ passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
 python-multipart==0.0.6
 
+# 环境变量（.env）
+python-dotenv==1.2.1
+
 # 数据验证
-#pydantic==2.5.0
-pydantic
+pydantic==2.12.5
 pydantic-settings==2.1.0
 
 # 数据库
-#psycopg2-binary==2.9.9
-psycopg2-binary
-#sqlalchemy==2.0.23
-sqlalchemy
+psycopg2-binary==2.9.11
+sqlalchemy==2.0.47
 
-# 异步支持
-asyncio==3.4.3
+# 异步支持（asyncio 为 Python 标准库，无需单独安装）
 aiofiles==23.2.1
 
 # 任务调度
@@ -29,11 +28,10 @@ pytz==2023.3
 
 # 现有依赖保持
 requests==2.31.0
-pandas
+pandas==3.0.1
 numpy==1.26.2
 openpyxl==3.1.2
-#Pillow==10.1.0
-Pillow
+Pillow==12.1.1
 
 # 系统监控
 psutil==5.9.6
@@ -56,3 +54,6 @@ dashscope==1.20.11
 
 # RSS Feed 解析（用于 YouTube 订阅）
 feedparser==6.0.11
+
+# YouTube 音频下载（用于无字幕视频的 Fun-ASR 转录）
+yt-dlp==2026.2.21

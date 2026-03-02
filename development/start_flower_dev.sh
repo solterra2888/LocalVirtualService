@@ -1,135 +1,49 @@
 #!/bin/bash
-# RC Project Flower 监控开发启动脚本
-# 用于本地开发环境启动Flower监控
+# Flower 监控开发启动脚本
 
 set -e
 
-# 脚本目录和项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/common.sh"
 
-echo "🌸 RC Project - Flower 监控开发模式启动"
+echo -e "${BLUE}🌸 Flower 监控开发模式启动${NC}"
 echo "=============================================="
-echo "📂 项目根目录: $PROJECT_ROOT"
-echo ""
 
-# 加载环境变量（从项目根目录的 .env 文件）
-ENV_FILE="$PROJECT_ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
-    echo "📝 加载环境配置: $ENV_FILE"
-    set -a  # 自动导出变量
-    source "$ENV_FILE"
-    set +a  # 关闭自动导出
-    echo "✅ 环境变量加载完成"
-else
-    echo "⚠️  环境配置文件不存在: $ENV_FILE"
-    echo "   请确保项目根目录有 .env 文件"
-    echo "   可以从 example.env 复制: cp example.env .env"
-    exit 1
-fi
+dev_load_conf
+dev_load_env
+dev_detect_python
 
-# 检查Python环境
-echo ""
-echo "🔍 检查Python环境..."
-
-# 检查conda环境
-CONDA_ENV_PATH="/opt/anaconda3/envs/rcTool/bin/python"
-if [ -f "$CONDA_ENV_PATH" ]; then
-    PYTHON_CMD="$CONDA_ENV_PATH"
-    echo "✅ 使用conda环境rcTool: $PYTHON_CMD"
-else
-    # 回退到系统Python
-    if command -v python3 &> /dev/null; then
-        PYTHON_CMD="python3"
-        echo "⚠️  conda环境rcTool不存在，使用系统Python: $PYTHON_CMD"
-    else
-        echo "❌ Python未安装"
-        exit 1
-    fi
-fi
-
-echo "✅ Python版本: $($PYTHON_CMD --version)"
-
-# 检查项目根目录
 cd "$PROJECT_ROOT"
 
-# 设置Python路径
-export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+dev_check_redis || exit 1
 
-# 检查Redis服务
-echo ""
-echo "🔍 检查Redis服务..."
+# 检查 Flower 依赖
+echo -e "${BLUE}🔍 检查 Flower 依赖...${NC}"
+if ! $PYTHON_CMD -c "import flower" 2>/dev/null; then
+    echo -e "${RED}❌ Flower 未安装，请执行: pip install flower${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Flower 已安装${NC}"
+
 REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
-echo "   Redis地址: $REDIS_URL"
 
-# 测试Redis连接
-if $PYTHON_CMD -c "
-import redis
-try:
-    r = redis.from_url('$REDIS_URL')
-    result = r.ping()
-    if result:
-        print('✅ Redis连接成功')
-    else:
-        print('❌ Redis ping失败')
-        exit(1)
-except Exception as e:
-    print(f'❌ Redis连接失败: {e}')
-    exit(1)
-" 2>/dev/null; then
-    echo "✅ Redis服务正常"
-else
-    echo "❌ Redis服务不可用"
-    echo "请先启动Redis服务:"
-    echo "   brew services start redis"
-    echo "   或: redis-server"
-    exit 1
-fi
-
-# 检查Flower依赖
 echo ""
-echo "🔍 检查Flower依赖..."
-if $PYTHON_CMD -c "
-try:
-    import flower
-    print('✅ Flower已安装')
-except ImportError:
-    print('❌ Flower未安装')
-    print('安装命令: pip install flower==2.0.1')
-    exit(1)
-" 2>/dev/null; then
-    echo "✅ Flower依赖正常"
-else
-    echo "❌ Flower依赖缺失"
-    exit 1
-fi
-
-# 显示启动配置
-echo ""
-echo "🚀 Flower 监控启动配置:"
+echo -e "${CYAN}🚀 启动配置:${NC}"
 echo "   - 监控地址: http://localhost:${FLOWER_PORT:-5555}"
-echo "   - Redis地址: $REDIS_URL"
-if [ -n "$FLOWER_AUTH" ]; then
-    echo "   - 认证: 已启用 (${FLOWER_AUTH%:*}:****)"
-    echo "   ⚠️  注意: Flower 2.0.1的basic_auth存在已知bug，可能导致404页面"
-    echo "   建议: 开发环境建议不使用认证，或升级Flower到2.1+版本"
-else
-    echo "   - 认证: 无认证（开发模式）"
+echo "   - Redis: $REDIS_URL"
+if [ -n "${FLOWER_AUTH:-}" ]; then
+    echo "   - 认证: 已启用"
 fi
 echo ""
-
-# 启动Flower监控
-echo "🌸 启动Flower监控..."
 echo "   按 Ctrl+C 停止服务"
 echo ""
 
-# 使用celery命令启动Flower
-# 如果设置了认证信息，则添加认证参数
-if [ -n "$FLOWER_AUTH" ]; then
-    exec $PYTHON_CMD -m celery -A backend.celery_app --broker="$REDIS_URL" flower \
-        --port="${FLOWER_PORT:-5555}" \
-        --basic_auth="$FLOWER_AUTH"
-else
-    exec $PYTHON_CMD -m celery -A backend.celery_app --broker="$REDIS_URL" flower \
-        --port="${FLOWER_PORT:-5555}"
-fi
+FLOWER_ARGS=(
+    -A backend.celery_app
+    --broker="$REDIS_URL"
+    flower
+    --port="${FLOWER_PORT:-5555}"
+)
+[ -n "${FLOWER_AUTH:-}" ] && FLOWER_ARGS+=(--basic_auth="$FLOWER_AUTH")
+
+exec "$PYTHON_CMD" -m celery "${FLOWER_ARGS[@]}"

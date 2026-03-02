@@ -33,11 +33,9 @@ curl -fsSL https://get.docker.com | sh
 systemctl enable docker && systemctl start docker
 ```
 
-### 1.3 安装 Nginx
+### 1.3 安装 Nginx（Docker 版本）
 
-```bash
-apt install -y nginx
-```
+Nginx 通过 Docker 部署，无需 apt 安装。详见第 2.3 节。
 
 ### 1.4 安装 Miniconda（Python 环境管理）
 
@@ -101,11 +99,31 @@ docker run -d \
   redis:7.4.6-alpine redis-server /usr/local/etc/redis/conf/redis.conf
 ```
 
-### 2.3 验证容器运行
+### 2.3 Nginx（Docker）
+
+Nginx Docker 容器由运维独立脚本部署，会自动初始化完整的配置目录结构：
+
+```
+/opt/nginx/
+├── conf/
+│   ├── nginx.conf          ← 主配置（由运维脚本部署，含 include vhosts/*.conf）
+│   ├── mime.types           ← MIME 类型映射
+│   └── vhosts/
+│       └── web.conf         ← 项目站点配置（由 deploy.sh / start_services.sh 同步）
+├── html/
+│   └── guanhe/              ← 前端构建产物
+└── log/                     ← Nginx 日志
+```
+
+> **注意**：不要手动执行 `docker run` 来创建 Nginx 容器。主配置 `nginx.conf` 通过 `include vhosts/*.conf;` 引入站点配置，容器启动前必须确保 `/opt/nginx/conf/` 下有完整的配置文件集。
+>
+> 项目只需管理 `web.conf`（站点配置），启动/部署脚本会自动将项目根目录的 `web.conf` 同步到 `/opt/nginx/conf/vhosts/web.conf`。
+
+### 2.4 验证容器运行
 
 ```bash
 docker ps
-# 应看到 postgres 和 redis 两个容器状态为 Up
+# 应看到 postgres、redis、nginx 三个容器状态为 Up
 ```
 
 ---
@@ -132,13 +150,20 @@ pip install -r requirements.txt
 pip install python-dotenv llama-index
 ```
 
-### 3.3 安装前端依赖
+### 3.3 安装前端依赖并构建
 
 ```bash
 cd web-frontend
 npm install
+npm run build
 cd ..
+
+# 将构建产物部署到 Nginx 静态文件目录
+cp -r web-frontend/build/* /opt/nginx/html/guanhe/
 ```
+
+> 线上环境不再使用 `npm start`（端口 3000），前端由 Docker Nginx 直接以静态文件方式提供服务。
+> 如需本地前端开发调试，可手动执行 `cd web-frontend && npm start` 启动 3000 端口。
 
 ---
 
@@ -223,8 +248,9 @@ sudo bash deploy.sh
 
 脚本会自动完成：
 - 合并三层配置，生成 `.env`
-- 从模板渲染 5 个 systemd service 文件 + nginx.conf
-- 安装到 `/etc/systemd/system/` 和 `/etc/nginx/`
+- 从模板渲染 4 个 systemd service 文件（rc-webapp、rc-celery-ai、rc-celery-data、rc-scheduler）
+- 安装 service 文件到 `/etc/systemd/system/`
+- 同步 `web.conf` 到 Docker Nginx 配置卷 `/opt/nginx/conf/vhosts/`
 - 执行 `systemctl daemon-reload`
 
 ---
@@ -242,11 +268,10 @@ sudo ./start_services.sh
 ✅ PostgreSQL (Docker: postgres) 已在运行
 ✅ Redis (Docker: redis) 已在运行
 ✅ Web应用已启动
-✅ 前端应用已启动
 ✅ Celery AI Worker已启动
 ✅ Celery Data Worker已启动
 ✅ 调度器服务已启动
-✅ Nginx已启动
+✅ Nginx (Docker: nginx) 已启动
 ```
 
 ---
@@ -256,12 +281,19 @@ sudo ./start_services.sh
 ### 6.1 检查所有服务状态
 
 ```bash
-for svc in rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler nginx; do
+# systemd 服务
+for svc in rc-webapp rc-celery-ai rc-celery-data rc-scheduler; do
     printf "%-20s %s\n" "$svc" "$(systemctl is-active $svc)"
+done
+
+# Docker 容器
+for ctn in postgres redis nginx; do
+    status=$(docker inspect -f '{{.State.Status}}' $ctn 2>/dev/null || echo "not found")
+    printf "%-20s %s\n" "$ctn (Docker)" "$status"
 done
 ```
 
-全部应显示 `active`。
+systemd 服务应全部显示 `active`，Docker 容器应全部显示 `running`。
 
 ### 6.2 测试 API
 
@@ -288,7 +320,10 @@ curl http://你的公网IP/api/health
 ## 7. 设置开机自启（可选）
 
 ```bash
-systemctl enable rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler nginx
+# systemd 服务
+systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
+
+# Docker 容器已设置 --restart always，会随 Docker 自动启动
 ```
 
 ---
@@ -304,7 +339,7 @@ systemctl enable rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler 
 | 修改配置后重新部署 | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh` |
 | 查看某服务日志 | `journalctl -u rc-webapp -f` |
 | 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log` |
-| 查看 Nginx 日志 | `tail -f /var/log/nginx/rc_project_access.log` |
+| 查看 Nginx 日志 | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50` |
 
 ---
 
@@ -343,12 +378,13 @@ grep DB_ /opt/guanhetech/.env
 
 ### 前端页面空白或 API 404
 
-检查 Nginx 是否正确代理：
+检查 Docker Nginx 是否正常运行以及后端是否可达：
 
 ```bash
-nginx -t                           # 语法检查
-curl http://localhost:8000/api/health  # 绕过 Nginx 直接访问后端
-curl http://localhost:3000/            # 绕过 Nginx 直接访问前端
+docker ps | grep nginx                    # 确认 Nginx 容器在运行
+docker logs nginx --tail 20               # 查看 Nginx 近期日志
+curl http://localhost:8000/api/health      # 绕过 Nginx 直接访问后端
+ls /opt/nginx/html/guanhe/index.html      # 确认前端构建产物存在
 ```
 
 ---
@@ -362,9 +398,10 @@ deployment/config.defaults.env ← 第 3 层：应用默认参数（通用，不
          ↓
     deploy.sh 合并
          ↓
-    ┌────┼────┐
-    ↓    ↓    ↓
-  .env  *.service  nginx.conf    ← 自动生成，不要手动编辑
+    ┌────┼────────────────┐
+    ↓    ↓                ↓
+  .env  *.service     web.conf → /opt/nginx/conf/vhosts/
+        (4个)          (Docker Nginx 配置)
 ```
 
 修改任何配置后，都只需运行：

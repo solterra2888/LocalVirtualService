@@ -13,7 +13,9 @@ jikun/
 deployment/generated/
 deployment/deploy.conf
 deployment/.env.secrets
-development/
+development/dev.conf
+development/.dev_pids
+development/logs/
 market_data_test_output
 .idea/
 download/
@@ -43,8 +45,6 @@ weekly_report*/
 .settings/
 说明/
 docs/
-development/.dev_pids
-
 # Markdown files
 # *.md
 

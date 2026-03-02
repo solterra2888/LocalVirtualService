@@ -216,8 +216,8 @@ done
 echo ""
 echo "📦 安装到系统..."
 
-# systemd services
-for svc in rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler; do
+# systemd services (rc-frontend 已由 Docker Nginx 静态文件替代，不再安装)
+for svc in rc-webapp rc-celery-ai rc-celery-data rc-scheduler; do
     src="$GENERATED_DIR/${svc}.service"
     if [ -f "$src" ]; then
         cp "$src" "/etc/systemd/system/${svc}.service"
@@ -225,17 +225,15 @@ for svc in rc-webapp rc-frontend rc-celery-ai rc-celery-data rc-scheduler; do
     fi
 done
 
-# nginx
-NGINX_GEN="$GENERATED_DIR/nginx.conf"
-if [ -f "$NGINX_GEN" ]; then
-    cp "$NGINX_GEN" /etc/nginx/nginx.conf
-    if nginx -t -q 2>/dev/null; then
-        echo "   ✅ nginx.conf → /etc/nginx/ (语法验证通过)"
-    else
-        echo "   ⚠️  nginx.conf 语法验证失败，请检查"
-    fi
-    # 同时更新项目目录中的 nginx.conf
-    cp "$NGINX_GEN" "$PROJECT_DIR/nginx.conf"
+# Docker Nginx: 同步 web.conf 到 Docker 卷
+WEBCONF_SRC="$PROJECT_DIR/web.conf"
+WEBCONF_DST="/opt/nginx/conf/vhosts/web.conf"
+if [ -f "$WEBCONF_SRC" ]; then
+    mkdir -p "$(dirname "$WEBCONF_DST")"
+    cp "$WEBCONF_SRC" "$WEBCONF_DST"
+    echo "   ✅ web.conf → $WEBCONF_DST (Docker Nginx 配置)"
+else
+    echo "   ⚠️  未找到 $WEBCONF_SRC，跳过 Nginx 配置同步"
 fi
 
 # manifest.json（前端 PWA 配置）

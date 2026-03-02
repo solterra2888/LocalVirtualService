@@ -18,11 +18,10 @@ echo "📋 启动服务列表:"
 echo "   - PostgreSQL数据库 (Docker)"
 echo "   - Redis缓存 (Docker)"
 echo "   - Web应用"
-echo "   - 前端应用"
 echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
 echo "   - 调度器服务"
-echo "   - Nginx代理"
+echo "   - Nginx代理 (Docker)"
 echo ""
 
 # ── 辅助函数 ──────────────────────────────────────────────────
@@ -116,16 +115,7 @@ else
     exit 1
 fi
 
-# ── 4. 前端应用 ──────────────────────────────────────────────
-echo "🎨 启动前端应用..."
-systemctl start rc-frontend
-if wait_for_service rc-frontend 20; then
-    echo "✅ 前端应用已启动"
-else
-    echo "⚠️  前端应用启动失败（页面不可访问，但后端 API 仍正常）"
-fi
-
-# ── 5. Celery AI Worker (file_processing + ai_processing) ────
+# ── 4. Celery AI Worker (file_processing + ai_processing) ────
 echo "🤖 启动Celery AI Worker..."
 systemctl start rc-celery-ai
 if wait_for_service rc-celery-ai 15; then
@@ -134,7 +124,7 @@ else
     echo "⚠️  Celery AI Worker启动失败（文件上传和AI分析将无法执行）"
 fi
 
-# ── 6. Celery Data Worker (data_fetching) ────────────────────
+# ── 5. Celery Data Worker (data_fetching) ────────────────────
 echo "📊 启动Celery Data Worker..."
 systemctl start rc-celery-data
 if wait_for_service rc-celery-data 15; then
@@ -143,7 +133,7 @@ else
     echo "⚠️  Celery Data Worker启动失败（数据获取任务将无法执行）"
 fi
 
-# ── 7. 调度器服务 ─────────────────────────────────────────────
+# ── 6. 调度器服务 ─────────────────────────────────────────────
 echo "🕒 启动调度器服务..."
 systemctl start rc-scheduler
 if wait_for_service rc-scheduler 15; then
@@ -152,18 +142,14 @@ else
     echo "⚠️  调度器服务启动失败（定时任务将无法执行）"
 fi
 
-# ── 8. Nginx ──────────────────────────────────────────────────
-echo "🌐 启动Nginx代理..."
-# 同步项目配置到系统路径
+# ── 7. Nginx (Docker) ─────────────────────────────────────────
+echo "🌐 启动Nginx代理 (Docker)..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/nginx.conf" ] && nginx -t -q 2>/dev/null; then
-    cp "$SCRIPT_DIR/nginx.conf" /etc/nginx/nginx.conf
+if [ -f "$SCRIPT_DIR/web.conf" ]; then
+    cp "$SCRIPT_DIR/web.conf" /opt/nginx/conf/vhosts/web.conf
 fi
-systemctl start nginx
-if wait_for_service nginx 10; then
-    echo "✅ Nginx已启动"
-else
-    echo "❌ Nginx启动失败"
+if ! ensure_docker_container "nginx" "Nginx"; then
+    echo "❌ Nginx不可用"
     exit 1
 fi
 

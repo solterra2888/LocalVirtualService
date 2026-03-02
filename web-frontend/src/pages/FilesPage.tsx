@@ -4597,8 +4597,12 @@ const OriginalContentView: React.FC<{
         console.log('🔍 [DEBUG] File URL for iframe:', fileContent.file_url);
         
         if (fileType === 'pdf') {
-          // PDF预览：检测是否使用 OSS 默认域名
-          const isOssDefaultDomain = fileContent.file_url && fileContent.file_url.includes('.oss-cn-');
+          // PDF预览：仅当使用未签名的 OSS 默认域名时才无法预览（会被强制下载）
+          // 带签名的 URL（含 OSSAccessKeyId）已设置 response-content-disposition=inline，可正常预览
+          const isSignedOssUrl = fileContent.file_url && fileContent.file_url.includes('OSSAccessKeyId');
+          const isOssDefaultDomain = fileContent.file_url &&
+            fileContent.file_url.includes('.oss-cn-') &&
+            !isSignedOssUrl;
           
           if (isOssDefaultDomain) {
             // OSS 默认域名会强制下载，显示提示和下载按钮

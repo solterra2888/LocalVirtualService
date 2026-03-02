@@ -14,11 +14,10 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "📋 停止服务列表:"
-echo "   - Nginx代理"
+echo "   - Nginx代理 (Docker)"
 echo "   - 调度器服务"
 echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
-echo "   - 前端应用"
 echo "   - Web应用"
 echo "   (PostgreSQL/Redis 由 Docker 管理，不在此处停止)"
 echo ""
@@ -34,12 +33,19 @@ stop_service() {
     fi
 }
 
-# 按依赖顺序停止（先停外层，再停内层）
-stop_service nginx
+# 停止 Docker Nginx
+echo "   🔄 停止 Nginx (Docker)..."
+docker stop nginx 2>/dev/null || true
+if docker inspect -f '{{.State.Running}}' nginx 2>/dev/null | grep -q "^false$"; then
+    echo "   ✅ nginx (Docker) 已停止"
+else
+    echo "   ⚠️  nginx (Docker) 可能未完全停止"
+fi
+
+# 按依赖顺序停止 systemd 服务（先停外层，再停内层）
 stop_service rc-scheduler
 stop_service rc-celery-ai
 stop_service rc-celery-data
-stop_service rc-frontend
 stop_service rc-webapp
 
 # ── 清理残留进程 ──────────────────────────────────────────────
@@ -64,11 +70,10 @@ cleanup_port() {
 
 cleanup_port 8000   # Web应用
 cleanup_port 8001   # 调度器
-cleanup_port 3000   # 前端应用
 
 echo ""
 echo "🎉 应用服务已全部停止!"
 echo "================================"
-echo "💡 PostgreSQL (Docker: postgresql) 和 Redis (Docker: redis) 仍在运行"
-echo "   如需停止 Docker 容器: docker stop redis postgresql"
+echo "💡 PostgreSQL (Docker: postgres) 和 Redis (Docker: redis) 仍在运行"
+echo "   如需停止 Docker 容器: docker stop redis postgres"
 echo "💡 要重新启动服务，请运行: sudo ./start_services.sh"

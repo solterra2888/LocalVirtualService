@@ -1,0 +1,16 @@
+# ===========================================
+# 本地开发环境配置
+# 复制此文件为 dev.conf 并根据本地环境修改：
+#   cp development/dev.conf.example development/dev.conf
+# ===========================================
+
+# ===== Python 环境 =====
+# conda 环境根目录（不含 /bin/python）
+# macOS 示例: /Users/你的用户名/anaconda3/envs/rcTool
+# Linux 示例: /opt/anaconda3/envs/rcTool
+DEV_CONDA_ENV=/Users/你的用户名/anaconda3/envs/rcTool
+
+# ===== 远程调度器（可选）=====
+# 如果调度器运行在远程服务器，填写地址用于启动时健康检查
+# 留空或注释掉则跳过远程调度器检查
+# DEV_REMOTE_SCHEDULER_URL=http://你的服务器IP:8001

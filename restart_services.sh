@@ -48,10 +48,10 @@ echo "🔍 检查基础服务 (Docker 容器) 状态..."
 
 DOCKER_OK=true
 
-if docker_running "postgresql"; then
+if docker_running "postgres"; then
     echo "   ✅ PostgreSQL (Docker) 运行中"
 else
-    echo "   ❌ PostgreSQL (Docker) 未运行 — 请先执行: docker start postgresql"
+    echo "   ❌ PostgreSQL (Docker) 未运行 — 请先执行: docker start postgres"
     DOCKER_OK=false
 fi
 
@@ -65,34 +65,27 @@ fi
 if [ "$DOCKER_OK" = false ]; then
     echo ""
     echo "❌ 基础服务不可用，Celery/调度器无法正常工作，中止重启"
-    echo "   修复方法: docker start postgresql redis"
+    echo "   修复方法: docker start postgres redis"
     exit 1
 fi
 
 echo ""
 echo "📋 重启服务列表（保留 PostgreSQL/Redis Docker 容器不重启）:"
 echo "   - Web应用"
-echo "   - 前端应用"
 echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
 echo "   - 调度器服务"
-echo "   - Nginx代理"
+echo "   - Nginx代理 (Docker)"
 echo ""
 
-# 同步 nginx 配置到系统目录（项目中的 nginx.conf 是主配置源）
-NGINX_SRC="$(cd "$(dirname "$0")" && pwd)/nginx.conf"
-NGINX_DST="/etc/nginx/nginx.conf"
-if [ -f "$NGINX_SRC" ]; then
-    cp "$NGINX_SRC" "$NGINX_DST"
-    if nginx -t -q 2>/dev/null; then
-        echo "   ✅ nginx 配置已同步并验证通过"
-    else
-        echo "   ⚠️  nginx 配置验证失败，已还原"
-        git -C "$(cd "$(dirname "$0")" && pwd)" show HEAD:nginx.conf > "$NGINX_DST" 2>/dev/null || true
-    fi
+# 同步 web.conf 到 Docker Nginx 配置卷
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/web.conf" ]; then
+    cp "$SCRIPT_DIR/web.conf" /opt/nginx/conf/vhosts/web.conf
+    echo "   ✅ nginx 配置 (web.conf) 已同步到 Docker 卷"
 fi
 
-SERVICES=("rc-webapp" "rc-frontend" "rc-celery-ai" "rc-celery-data" "rc-scheduler" "nginx")
+SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-scheduler")
 
 for service in "${SERVICES[@]}"; do
     echo "🔄 重启 $service ..."
@@ -103,6 +96,16 @@ for service in "${SERVICES[@]}"; do
         echo "   ❌ $service 重启失败"
     fi
 done
+
+# 重启 Docker Nginx
+echo "🔄 重启 nginx (Docker) ..."
+docker restart nginx 2>/dev/null || docker start nginx 2>/dev/null
+sleep 2
+if docker_running "nginx"; then
+    echo "   ✅ nginx (Docker) 已就绪"
+else
+    echo "   ❌ nginx (Docker) 重启失败"
+fi
 
 echo ""
 echo "🔍 服务状态汇总:"
@@ -115,6 +118,12 @@ for service in "${SERVICES[@]}"; do
         all_running=false
     fi
 done
+if docker_running "nginx"; then
+    echo "   ✅ nginx (Docker): 运行中"
+else
+    echo "   ❌ nginx (Docker): 未运行"
+    all_running=false
+fi
 
 SERVER_IP=$(get_server_ip)
 
@@ -131,5 +140,5 @@ else
     echo "   journalctl -u rc-celery-ai -f"
     echo "   journalctl -u rc-celery-data -f"
     echo "   journalctl -u rc-scheduler -f"
-    echo "   journalctl -u nginx -f"
+    echo "   docker logs nginx --tail 50"
 fi
