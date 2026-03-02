@@ -1217,7 +1217,8 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             err = upload_result.get("error") or "未知错误"
             raise Exception(f"上传到 OSS 失败: {str(err)}")
         
-        audio_url = upload_result["public_url"]
+        # 优先使用签名 URL，否则 ASR 拉取私有桶会 403（FILE_403_FORBIDDEN）
+        audio_url = upload_result.get("signed_url") or upload_result["public_url"]
         object_name = upload_result["object_name"]
         
         update_progress(status="transcribing", progress=30, 
@@ -1230,7 +1231,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         if not asr_service.is_configured():
             raise ValueError("ASR 服务未配置")
         
-        # 提交 ASR 任务
+        # 提交 ASR 任务（使用 signed_url 以便私有桶可被 ASR 拉取）
         submit_result = asr_service.submit_transcription_task(
             audio_url=audio_url,
             model=model,

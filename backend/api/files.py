@@ -1233,19 +1233,13 @@ async def get_original_file_info(
                     if oss_service.custom_domain:
                         from urllib.parse import quote
                         encoded_object_name = quote(original_file_path, safe='/')
-                        # 注意：如果域名未配置 SSL 证书，使用 HTTP；否则使用 HTTPS
                         file_url = f"http://{oss_service.custom_domain}/{encoded_object_name}"
                         info(f"使用 OSS 自定义域名: {oss_service.custom_domain}", source="api")
                     else:
-                        # 否则使用签名 URL（默认域名会强制下载）
-                        file_url = oss_service.get_signed_url(
-                            object_name=original_file_path,  # original_file_path 存的是 object_name
-                            expires=3600  # 1 小时
-                        )
-                        if not file_url:
-                            # 签名 URL 生成失败，回退到 serve 接口
-                            warning(f"OSS 签名 URL 生成失败，使用 serve 接口: file_id={file_id}")
-                            file_url = f"/api/files/serve/{file_id}"
+                        # OSS 默认域名会强制 Content-Disposition: attachment（强制下载），
+                        # 即使签名 URL 带 response-content-disposition=inline 也无效。
+                        # 通过后端 serve 接口代理，由后端设置 inline 头实现预览。
+                        file_url = f"/api/files/serve/{file_id}"
                 else:
                     # OSS 未配置，使用 serve 接口
                     warning(f"OSS 未配置，使用 serve 接口: file_id={file_id}")
@@ -1528,11 +1522,11 @@ async def serve_file(
         filename, file_type, file_path, storage_type, oss_bucket = result
         storage_type = storage_type or 'local'  # 兼容旧数据
         
-        # 如果是 OSS 文件，重定向到 OSS URL
+        # 如果是 OSS 文件，提供访问
         if storage_type == 'oss':
             oss_service = OSSService()
             if oss_service.is_configured():
-                # 如果配置了自定义域名，使用公共 URL
+                # 如果配置了自定义域名，重定向到公共 URL
                 if oss_service.custom_domain:
                     from urllib.parse import quote
                     from fastapi.responses import RedirectResponse
@@ -1541,17 +1535,40 @@ async def serve_file(
                     info(f"重定向到 OSS 自定义域名: {oss_service.custom_domain}", source="api")
                     return RedirectResponse(url=redirect_url)
                 else:
-                    # 否则使用签名 URL
-                    signed_url = oss_service.get_signed_url(
-                        object_name=file_path,  # file_path 存的是 object_name
-                        expires=3600  # 1 小时
-                    )
-                    if signed_url:
-                        # 重定向到 OSS 签名 URL
-                        from fastapi.responses import RedirectResponse
-                        return RedirectResponse(url=signed_url)
-                    else:
-                        error(f"OSS 签名 URL 生成失败: file_id={file_id}")
+                    # OSS 默认域名会强制 attachment 下载，无法在 iframe 中预览。
+                    # 通过后端从 OSS 下载并返回，设置 inline 头实现预览。
+                    try:
+                        oss_result = oss_service.bucket.get_object(file_path)
+                        content = oss_result.read()
+                        
+                        oss_mime_types = {
+                            'pdf': 'application/pdf',
+                            'doc': 'application/msword',
+                            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            'xls': 'application/vnd.ms-excel',
+                            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            'csv': 'text/csv',
+                            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                            'png': 'image/png', 'gif': 'image/gif', 'bmp': 'image/bmp',
+                        }
+                        oss_media_type = oss_mime_types.get(file_type.lower(), 'application/octet-stream')
+                        
+                        from urllib.parse import quote
+                        encoded_fn = quote(filename)
+                        
+                        is_previewable = file_type.lower() in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image']
+                        disposition = 'inline' if is_previewable else 'attachment'
+                        
+                        from starlette.responses import Response as RawResponse
+                        return RawResponse(
+                            content=content,
+                            media_type=oss_media_type,
+                            headers={
+                                "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_fn}"
+                            }
+                        )
+                    except Exception as oss_err:
+                        error(f"OSS 文件读取失败: {str(oss_err)}", source="api", file_id=file_id)
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="OSS 文件访问失败"
