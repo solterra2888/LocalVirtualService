@@ -72,7 +72,7 @@ async def main():
                 
                 logger.info("\n📝 下一步操作:")
                 logger.info("  1. 重启 celery worker 服务")
-                logger.info("     cd /Users/kevinliu/rcproject")
+                logger.info("     cd /opt/guanhetech")
                 logger.info("     ./development/start_celery_worker_dev.sh")
                 logger.info("  2. 触发新闻分析任务")
                 logger.info("  3. 观察主题匹配效果")

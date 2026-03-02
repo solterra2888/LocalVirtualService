@@ -25,6 +25,44 @@ class AppConfig:
         else:
             print(f"Project .env file not found at: {project_env_path}")
             print("Warning: No .env file found. Please create one with required configurations.")
+
+    # ── 集中管理的项目标识和常量 ──
+    
+    @property
+    def APP_NAME(self):
+        return os.getenv("APP_NAME", "GuanHe Capital")
+    
+    @property
+    def APP_VERSION(self):
+        return os.getenv("APP_VERSION", "2.0.0")
+    
+    @property
+    def USER_AGENT(self):
+        return f"{self.APP_NAME}/{self.APP_VERSION}"
+    
+    @property
+    def REDIS_URL(self):
+        return os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    
+    @property
+    def RC_AGENT_BASE_URL(self):
+        return os.getenv("RC_AGENT_BASE_URL", "http://localhost:81/v1/chat-messages")
+    
+    @property
+    def WEBAPP_PORT(self):
+        return int(os.getenv("WEBAPP_PORT", "8000"))
+    
+    @property
+    def SCHEDULER_PORT(self):
+        return int(os.getenv("SCHEDULER_PORT", "8001"))
+    
+    @property
+    def FRONTEND_PORT(self):
+        return int(os.getenv("FRONTEND_PORT", "3000"))
+    
+    @property
+    def SERVER_HOST(self):
+        return os.getenv("SERVER_HOST", "localhost")
     
     
     def get(self, key, default=None):

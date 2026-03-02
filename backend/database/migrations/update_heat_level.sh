@@ -4,11 +4,11 @@
 set -e  # 遇到错误立即退出
 
 # 数据库连接参数
-DB_HOST="111.230.48.119"
+DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="5432"
 DB_USER="postgres"
 DB_PASSWORD="1q23l,Sc45+@!"
-DB_NAME="rc_database"
+DB_NAME="${DB_NAME:-rc_database}"
 
 echo "=========================================="
 echo "更新 subscription_content 表的 heat_level"

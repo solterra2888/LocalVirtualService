@@ -1255,7 +1255,7 @@ async def get_original_file_info(
                 import os
                 if os.getenv('ENV', 'development') == 'development':
                     # 本地开发：直接指向后端端口8000
-                    file_url = f"http://localhost:8000/api/files/serve/{file_id}"
+                    file_url = f"http://localhost:{os.getenv('WEBAPP_PORT', '8000')}/api/files/serve/{file_id}"
                 else:
                     # 生产环境：使用相对路径
                     file_url = f"/api/files/serve/{file_id}"

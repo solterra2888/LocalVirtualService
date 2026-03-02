@@ -9,12 +9,15 @@ bcrypt==3.2.2
 python-multipart==0.0.6
 
 # 数据验证
-pydantic==2.5.0
+#pydantic==2.5.0
+pydantic
 pydantic-settings==2.1.0
 
 # 数据库
-psycopg2-binary==2.9.9
-sqlalchemy==2.0.23
+#psycopg2-binary==2.9.9
+psycopg2-binary
+#sqlalchemy==2.0.23
+sqlalchemy
 
 # 异步支持
 asyncio==3.4.3
@@ -26,10 +29,11 @@ pytz==2023.3
 
 # 现有依赖保持
 requests==2.31.0
-pandas==2.1.4
+pandas
 numpy==1.26.2
 openpyxl==3.1.2
-Pillow==10.1.0
+#Pillow==10.1.0
+Pillow
 
 # 系统监控
 psutil==5.9.6

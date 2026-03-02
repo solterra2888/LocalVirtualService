@@ -17,6 +17,7 @@ from backend.utils.env_loader import load_project_env
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
+from config.settings import config
 
 # 获取日志实例
 logger = get_logger("eodhd_service")
@@ -110,7 +111,7 @@ class EODHDNewsService:
         
         # 设置默认请求头
         session.headers.update({
-            'User-Agent': 'GuanHe Capital/1.0 (EODHD News Service)',
+            'User-Agent': f'{config.USER_AGENT} (EODHD News Service)',
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive'

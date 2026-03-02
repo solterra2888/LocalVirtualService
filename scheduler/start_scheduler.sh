@@ -1,8 +1,11 @@
 #!/bin/bash
-# RC Project 调度器启动脚本
+# GuanHe Project 调度器启动脚本
 # 独立启动调度器服务
 
-echo "🕒 RC Project 调度器启动脚本"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")/.." && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🕒 $APP_NAME 调度器启动脚本"
 echo "================================"
 
 # 检查是否以root权限运行
@@ -51,12 +54,17 @@ if systemctl is-active --quiet rc-scheduler; then
     echo "📊 调度器服务状态:"
     systemctl status rc-scheduler --no-pager -l
     
+    SERVER_IP=$(grep -E '^SERVER_HOST=' "$(cd "$(dirname "$(dirname "$0")")" && pwd)/.env" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | head -1)
+    SCHED_PORT=$(grep -E '^SCHEDULER_PORT=' "$(cd "$(dirname "$(dirname "$0")")" && pwd)/deployment/deploy.conf" 2>/dev/null | cut -d'=' -f2 | head -1)
+    SERVER_IP="${SERVER_IP:-localhost}"
+    SCHED_PORT="${SCHED_PORT:-8001}"
+
     echo ""
     echo "🌐 调度器访问信息:"
-    echo "   - 服务地址: http://111.230.48.119:8001"
-    echo "   - API文档: http://111.230.48.119:8001/scheduler-docs"
-    echo "   - 健康检查: http://111.230.48.119:8001/api/health"
-    echo "   - 详细状态: http://111.230.48.119:8001/api/status"
+    echo "   - 服务地址: http://$SERVER_IP:$SCHED_PORT"
+    echo "   - API文档: http://$SERVER_IP:$SCHED_PORT/scheduler-docs"
+    echo "   - 健康检查: http://$SERVER_IP:$SCHED_PORT/api/health"
+    echo "   - 详细状态: http://$SERVER_IP:$SCHED_PORT/api/status"
     
     echo ""
     echo "🔧 管理命令:"

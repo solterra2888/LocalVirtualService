@@ -1,5 +1,5 @@
 [Unit]
-Description=RC Project Scheduler Service
+Description=GuanHe Project Scheduler Service
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
@@ -10,10 +10,10 @@ Group=root
 WorkingDirectory=/opt/rcproject
 
 EnvironmentFile=/opt/rcproject/.env
-Environment=PATH=/home/kevin/miniconda3/envs/rc_project/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/root/miniconda3/envs/guanhe/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONPATH=/opt/rcproject
 
-ExecStart=/home/kevin/miniconda3/envs/rc_project/bin/python /opt/rcproject/scheduler_main.py
+ExecStart=/root/miniconda3/envs/guanhe/bin/python /opt/rcproject/scheduler_main.py
 
 Restart=always
 RestartSec=5

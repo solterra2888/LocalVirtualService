@@ -1,5 +1,5 @@
 [Unit]
-Description=RC Project Frontend Application
+Description=GuanHe Project Frontend Application
 After=network.target rc-webapp.service
 Wants=rc-webapp.service
 
@@ -9,13 +9,13 @@ User=root
 Group=root
 WorkingDirectory=/opt/rcproject/web-frontend
 
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/root/.volta/bin:/usr/local/bin:/usr/bin:/bin
 Environment=BROWSER=none
 # 使用相对路径，通过 Nginx 统一代理，避免 IP 变更时需要修改配置
 Environment=REACT_APP_API_BASE_URL=/api
 Environment=REACT_APP_SCHEDULER_BASE_URL=/scheduler
 
-ExecStart=/usr/bin/npm start
+ExecStart=/root/.volta/bin/npm start
 
 Restart=always
 RestartSec=5

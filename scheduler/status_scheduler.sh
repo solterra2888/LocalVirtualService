@@ -1,8 +1,11 @@
 #!/bin/bash
-# RC Project 调度器状态检查脚本
+# GuanHe Project 调度器状态检查脚本
 # 检查调度器服务状态
 
-echo "📊 RC Project 调度器状态检查"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")/.." && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "📊 $APP_NAME 调度器状态检查"
 echo "================================"
 
 # 检查是否以root权限运行

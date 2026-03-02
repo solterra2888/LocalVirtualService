@@ -18,6 +18,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.services.economic_events_service import EconomicEventsService
+from config.settings import config
 
 logger = get_logger("market_weekly_service")
 
@@ -1124,8 +1125,8 @@ class MarketWeeklyService:
         """从缓存获取数据（优先使用Redis，否则使用内存缓存）"""
         try:
             # 尝试使用Redis
-            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-            if redis_url and redis_url != 'redis://localhost:6379/0':
+            redis_url = config.REDIS_URL
+            if redis_url:
                 import redis
                 redis_client = redis.from_url(redis_url, decode_responses=True)
                 cached = redis_client.get(cache_key)
@@ -1153,8 +1154,8 @@ class MarketWeeklyService:
         """保存数据到缓存（优先使用Redis，否则使用内存缓存）"""
         try:
             # 尝试使用Redis
-            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-            if redis_url and redis_url != 'redis://localhost:6379/0':
+            redis_url = config.REDIS_URL
+            if redis_url:
                 import redis
                 redis_client = redis.from_url(redis_url, decode_responses=True)
                 redis_client.setex(cache_key, ttl, json.dumps(data))
@@ -1174,8 +1175,8 @@ class MarketWeeklyService:
         """清除缓存"""
         try:
             # 尝试清除Redis缓存
-            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-            if redis_url and redis_url != 'redis://localhost:6379/0':
+            redis_url = config.REDIS_URL
+            if redis_url:
                 import redis
                 redis_client = redis.from_url(redis_url, decode_responses=True)
                 redis_client.delete(cache_key)

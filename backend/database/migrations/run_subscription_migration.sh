@@ -11,9 +11,9 @@ echo "=========================================="
 echo ""
 
 # 数据库连接配置
-DB_HOST="111.230.48.119"
+DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="5432"
-DB_NAME="rc_database"
+DB_NAME="${DB_NAME:-rc_database}"
 DB_USER="postgres"
 DB_PASSWORD="1q23l,Sc45+@!"
 

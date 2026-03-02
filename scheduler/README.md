@@ -1,6 +1,6 @@
-# RC Project 调度器管理
+# GuanHe Project 调度器管理
 
-这个文件夹包含了RC Project调度器服务的独立管理脚本。
+这个文件夹包含了GuanHe Project调度器服务的独立管理脚本。
 
 ## 📁 文件说明
 
@@ -50,10 +50,12 @@ sudo ./scheduler/logs_scheduler.sh -s "1 hour ago"
 
 ## 🌐 服务信息
 
-- **服务地址**: http://111.230.48.119:8001
-- **API文档**: http://111.230.48.119:8001/scheduler-docs
-- **健康检查**: http://111.230.48.119:8001/api/health
-- **详细状态**: http://111.230.48.119:8001/api/status
+- **服务地址**: http://<SERVER_HOST>:8001
+- **API文档**: http://<SERVER_HOST>:8001/scheduler-docs
+- **健康检查**: http://<SERVER_HOST>:8001/api/health
+- **详细状态**: http://<SERVER_HOST>:8001/api/status
+
+> `SERVER_HOST` 的实际值见 `deployment/deploy.conf` 中的配置。
 
 ## 🔧 系统服务管理
 

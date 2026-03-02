@@ -1,8 +1,11 @@
 #!/bin/bash
-# RC Project 服务停止脚本
+# GuanHe Project 服务停止脚本
 # 注意：PostgreSQL 和 Redis 由 Docker 管理（restart=always），本脚本不停止它们
 
-echo "🛑 RC Project 服务停止脚本"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🛑 $APP_NAME 服务停止脚本"
 echo "================================"
 
 if [ "$EUID" -ne 0 ]; then

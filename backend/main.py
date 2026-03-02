@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         logging_config = config.get_logging_config()
         init_logging(**logging_config)
-        info("🚀 GuanHe Capital API 启动中...", source="startup")
+        info(f"🚀 {config.APP_NAME} API 启动中...", source="startup")
     except Exception as e:
         print(f"⚠️ 日志系统初始化失败: {str(e)}")
     
@@ -63,9 +63,9 @@ async def lifespan(app: FastAPI):
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="GuanHe Capital API",
+    title=f"{config.APP_NAME} API",
     description="文件处理和任务管理API",
-    version="2.0.0",
+    version=config.APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan
@@ -145,7 +145,7 @@ if os.path.exists("web-frontend/dist"):
 @app.get("/")
 async def root():
     """根路径"""
-    return {"message": "GuanHe Capital API", "version": "2.0.0"}
+    return {"message": f"{config.APP_NAME} API", "version": config.APP_VERSION}
 
 @app.get("/api/health")
 async def health_check():
@@ -156,7 +156,7 @@ async def health_check():
             "status": "healthy",
             "message": "API运行正常",
             "timestamp": str(datetime.now()),
-            "version": "2.0.0"
+            "version": config.APP_VERSION
         }
         
         # 数据库连接检查

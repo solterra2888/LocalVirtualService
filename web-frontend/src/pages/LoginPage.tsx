@@ -31,7 +31,7 @@ const LoginPage: React.FC = () => {
         <div className="login-logo">
           <img src="/ReverseCapital.ico" alt="Logo" style={{ width: 72, height: 72, marginBottom: 16 }} />
           <Title level={2} className="login-title">
-            GuanHe Capital
+            {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
           </Title>
           <Text className="login-subtitle">
             Everything at Your Fingertips
@@ -86,7 +86,7 @@ const LoginPage: React.FC = () => {
 
         <div style={{ textAlign: 'center', marginTop: 16 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            System Version: v1.0.0
+            System Version: v{process.env.REACT_APP_APP_VERSION || '2.0.0'}
           </Text>
         </div>
       </Card>

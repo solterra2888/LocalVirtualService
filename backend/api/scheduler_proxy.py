@@ -3,6 +3,7 @@
 调度器代理API - 主Web应用与独立调度器服务的通信桥梁
 """
 
+import os
 import httpx
 import requests
 import asyncio
@@ -17,8 +18,8 @@ logger = get_logger("scheduler_proxy")
 router = APIRouter(prefix="/scheduler", tags=["Scheduler Proxy"])
 
 # 调度器服务配置
-SCHEDULER_SERVICE_HOST = '127.0.0.1'  # 调度器服务在本地运行，使用IP地址避免DNS问题
-SCHEDULER_SERVICE_PORT = 8001
+SCHEDULER_SERVICE_HOST = '127.0.0.1'
+SCHEDULER_SERVICE_PORT = int(os.getenv('SCHEDULER_PORT', '8001'))
 SCHEDULER_BASE_URL = f"http://{SCHEDULER_SERVICE_HOST}:{SCHEDULER_SERVICE_PORT}/api"
 
 class SchedulerServiceClient:

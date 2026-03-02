@@ -3,6 +3,7 @@
 统一主题系统初始化脚本
 快速部署和测试统一主题系统
 """
+import os
 import sys
 from pathlib import Path
 
@@ -167,7 +168,7 @@ def main():
         
         if not tables_ok:
             logger.error("\n❌ 数据库表不存在，请先执行迁移SQL:")
-            logger.error("   psql -U postgres -d rc_database -h 111.230.48.119")
+            logger.error(f"   psql -U {os.getenv('DB_USER', 'postgres')} -d {os.getenv('DB_NAME', 'mydb')} -h {os.getenv('DB_HOST', 'localhost')}")
             logger.error("   \\i backend/database/migrations/create_unified_theme_system.sql")
             return
         

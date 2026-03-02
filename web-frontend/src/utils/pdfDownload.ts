@@ -20,7 +20,7 @@ export const downloadElementAsPDF = async (
   const {
     filename = 'ai-analysis-report.pdf',
     title = 'AI Analysis Report',
-    author = 'Reverse Capital',
+    author = process.env.REACT_APP_APP_NAME || 'Reverse Capital',
     subject = 'AI Analysis Report'
   } = options;
 
@@ -174,7 +174,7 @@ export const downloadElementAsPDF = async (
       title,
       author,
       subject,
-      creator: 'Reverse Capital AI Analysis Tool'
+      creator: `${process.env.REACT_APP_APP_NAME || 'Reverse Capital'} AI Analysis Tool`
     });
 
     let heightLeft = imgHeight;
@@ -213,7 +213,7 @@ export const downloadMarkdownAsPDF = async (
   const {
     filename = 'ai-analysis-report.pdf',
     title = 'AI Analysis Report',
-    author = 'Reverse Capital',
+    author = process.env.REACT_APP_APP_NAME || 'Reverse Capital',
     subject = 'AI Analysis Report'
   } = options;
 

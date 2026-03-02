@@ -1,8 +1,11 @@
 #!/bin/bash
-# RC Project 调度器停止脚本
+# GuanHe Project 调度器停止脚本
 # 独立停止调度器服务
 
-echo "🛑 RC Project 调度器停止脚本"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")/.." && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🛑 $APP_NAME 调度器停止脚本"
 echo "================================"
 
 # 检查是否以root权限运行

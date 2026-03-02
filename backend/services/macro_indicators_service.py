@@ -21,6 +21,7 @@ from backend.utils.database_config import get_database_config
 
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
+from config.settings import config
 
 
 class MacroIndicatorsService:
@@ -112,7 +113,7 @@ class MacroIndicatorsService:
         # 设置默认请求参数
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'GuanHe Capital/1.0'
+            'User-Agent': config.USER_AGENT
         })
         
         # 初始化数据库连接

@@ -1,7 +1,10 @@
 #!/bin/bash
-# RC Project 全量重启脚本（不重启 PostgreSQL / Redis Docker 容器）
+# GuanHe Project 全量重启脚本（不重启 PostgreSQL / Redis Docker 容器）
 
-echo "🔄 RC Project 服务重启脚本"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🔄 $APP_NAME 服务重启脚本"
 echo "================================"
 
 if [ "$EUID" -ne 0 ]; then
@@ -31,7 +34,7 @@ docker_running() {
 }
 
 get_server_ip() {
-    local env_file="/opt/rcproject/.env"
+    local env_file="$(cd "$(dirname "$0")" && pwd)/.env"
     if [ -f "$env_file" ]; then
         local host
         host=$(grep -E '^SERVER_HOST=' "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
@@ -77,7 +80,7 @@ echo "   - Nginx代理"
 echo ""
 
 # 同步 nginx 配置到系统目录（项目中的 nginx.conf 是主配置源）
-NGINX_SRC="/opt/rcproject/nginx.conf"
+NGINX_SRC="$(cd "$(dirname "$0")" && pwd)/nginx.conf"
 NGINX_DST="/etc/nginx/nginx.conf"
 if [ -f "$NGINX_SRC" ]; then
     cp "$NGINX_SRC" "$NGINX_DST"
@@ -85,7 +88,7 @@ if [ -f "$NGINX_SRC" ]; then
         echo "   ✅ nginx 配置已同步并验证通过"
     else
         echo "   ⚠️  nginx 配置验证失败，已还原"
-        git -C /opt/rcproject show HEAD:nginx.conf > "$NGINX_DST" 2>/dev/null || true
+        git -C "$(cd "$(dirname "$0")" && pwd)" show HEAD:nginx.conf > "$NGINX_DST" 2>/dev/null || true
     fi
 fi
 

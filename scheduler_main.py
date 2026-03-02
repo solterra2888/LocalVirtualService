@@ -42,8 +42,8 @@ async def scheduler_lifespan(app: FastAPI):
         db_conn_params = {
             'db_host': config.get('DB_HOST', 'localhost'),
             'db_port': config.get('DB_PORT', '5432'),
-            'db_name': config.get('DB_NAME', 'rc_database'),
-            'db_user': config.get('DB_USER', 'postgres'),
+            'db_name': config.get('DB_NAME', ''),
+            'db_user': config.get('DB_USER', ''),
             'db_password': config.get('DB_PASSWORD', '')
         }
         
@@ -76,9 +76,9 @@ async def scheduler_lifespan(app: FastAPI):
 
 # 创建独立的调度器FastAPI应用
 scheduler_app = FastAPI(
-    title="RC Project - Scheduler Service",
+    title=f"{config.APP_NAME} - Scheduler Service",
     description="独立的定时任务调度器服务",
-    version="1.0.0",
+    version=config.APP_VERSION,
     lifespan=scheduler_lifespan,
     docs_url="/scheduler-docs",
     redoc_url="/scheduler-redoc"
@@ -88,13 +88,11 @@ scheduler_app = FastAPI(
 scheduler_app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",  # React开发服务器
-        "http://localhost:8000",  # 主Web应用
-        "http://111.230.48.119:3000",  # 前端应用
-        "http://111.230.48.119:8000",  # 主Web应用
-        "http://111.230.48.119",  # nginx代理
-        f"http://{config.get('DB_HOST', 'localhost')}:8000",  # 远程主应用
-        f"http://{config.get('DB_HOST', 'localhost')}:3000",  # 远程前端
+        f"http://localhost:{config.FRONTEND_PORT}",
+        f"http://localhost:{config.WEBAPP_PORT}",
+        f"http://{config.SERVER_HOST}:{config.FRONTEND_PORT}",
+        f"http://{config.SERVER_HOST}:{config.WEBAPP_PORT}",
+        f"http://{config.SERVER_HOST}",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -111,8 +109,8 @@ scheduler_app.include_router(scheduler_router, prefix="/api")
 async def scheduler_root():
     """调度器服务根路径"""
     return {
-        "service": "RC Project Scheduler Service",
-        "version": "1.0.0",
+        "service": f"{config.APP_NAME} Scheduler Service",
+        "version": config.APP_VERSION,
         "status": "running",
         "description": "独立的定时任务调度器服务",
         "docs": "/scheduler-docs"
@@ -184,7 +182,7 @@ async def scheduler_detailed_status():
 def main():
     """调度器服务主函数"""
     print("=" * 70)
-    print("🕒 RC Project - 独立调度器服务")
+    print(f"🕒 {config.APP_NAME} - 独立调度器服务")
     print("=" * 70)
     print("📌 这是专门的定时任务调度器服务:")
     print("   - 负责所有定时任务的调度和执行")
@@ -194,7 +192,7 @@ def main():
     
     # 获取配置
     host = "0.0.0.0"
-    port = 8001  # 使用不同的端口避免冲突
+    port = config.SCHEDULER_PORT
     
     print(f"🚀 调度器服务启动配置:")
     print(f"   - 服务地址: http://{host}:{port}")

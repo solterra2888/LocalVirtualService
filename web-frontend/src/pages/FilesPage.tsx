@@ -361,7 +361,7 @@ const FilesPageInner: React.FC = () => {
     polling_interval: 8, // 调整为与实际轮询间隔一致（秒）
     use_ai_agent: true,
     llamaindex_api_key: '', // 将通过API加载默认值
-    ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://111.230.48.119:81/v1/chat-messages'
+    ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     const [form] = Form.useForm();
 
@@ -455,7 +455,7 @@ const FilesPageInner: React.FC = () => {
       polling_interval: 8,
       use_ai_agent: true,
       llamaindex_api_key: '',
-      ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://111.230.48.119:81/v1/chat-messages'
+      ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     
     // 重新加载默认配置（包括API密钥等）
@@ -988,7 +988,7 @@ const FilesPageInner: React.FC = () => {
       await downloadElementAsPDF('ai-analysis-content', {
         filename,
         title: `AI Analysis Report - ${aiAnalysisData.execution.task_name}`,
-        author: 'Reverse Capital',
+        author: process.env.REACT_APP_APP_NAME || 'Reverse Capital',
         subject: 'AI Analysis Report'
       });
       

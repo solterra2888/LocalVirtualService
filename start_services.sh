@@ -1,9 +1,12 @@
 #!/bin/bash
-# RC Project 服务启动脚本
+# GuanHe Project 服务启动脚本
 
 set -euo pipefail
 
-echo "🚀 RC Project 服务启动脚本"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🚀 $APP_NAME 服务启动脚本"
 echo "================================"
 
 if [ "$EUID" -ne 0 ]; then
@@ -80,7 +83,7 @@ ensure_docker_container() {
 
 # 获取显示用的访问地址（优先读 .env 中的 SERVER_HOST，否则取第一块网卡 IP）
 get_server_ip() {
-    local env_file="/opt/rcproject/.env"
+    local env_file="$(cd "$(dirname "$0")" && pwd)/.env"
     if [ -f "$env_file" ]; then
         local host
         host=$(grep -E '^SERVER_HOST=' "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
@@ -91,7 +94,7 @@ get_server_ip() {
 
 # ── 1. PostgreSQL (Docker) ────────────────────────────────────
 echo "🗄️  检查PostgreSQL数据库..."
-if ! ensure_docker_container "postgresql" "PostgreSQL"; then
+if ! ensure_docker_container "postgres" "PostgreSQL"; then
     echo "❌ PostgreSQL不可用，中止启动"
     exit 1
 fi
@@ -152,8 +155,9 @@ fi
 # ── 8. Nginx ──────────────────────────────────────────────────
 echo "🌐 启动Nginx代理..."
 # 同步项目配置到系统路径
-if [ -f "/opt/rcproject/nginx.conf" ] && nginx -t -q 2>/dev/null; then
-    cp /opt/rcproject/nginx.conf /etc/nginx/nginx.conf
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/nginx.conf" ] && nginx -t -q 2>/dev/null; then
+    cp "$SCRIPT_DIR/nginx.conf" /etc/nginx/nginx.conf
 fi
 systemctl start nginx
 if wait_for_service nginx 10; then

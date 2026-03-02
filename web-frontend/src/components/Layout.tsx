@@ -322,7 +322,7 @@ const Layout: React.FC = () => {
               flexShrink: 0,
             }}
           >
-            GuanHe Capital
+            {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
           </Title>
           <Menu
             mode="horizontal"

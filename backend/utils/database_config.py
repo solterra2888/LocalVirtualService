@@ -18,8 +18,8 @@ def get_database_config():
     return {
         'db_host': os.getenv('DB_HOST', 'localhost'),
         'db_port': os.getenv('DB_PORT', '5432'),
-        'db_name': os.getenv('DB_NAME', 'rc_database'),  # 统一使用 rc_database
-        'db_user': os.getenv('DB_USER', 'postgres'),
+        'db_name': os.getenv('DB_NAME', ''),
+        'db_user': os.getenv('DB_USER', ''),
         'db_password': os.getenv('DB_PASSWORD', '')
     }
 
@@ -35,7 +35,7 @@ def get_psycopg2_config():
     return {
         'host': os.getenv('DB_HOST', 'localhost'),
         'port': os.getenv('DB_PORT', '5432'),
-        'database': os.getenv('DB_NAME', 'rc_database'),
-        'user': os.getenv('DB_USER', 'postgres'),
+        'database': os.getenv('DB_NAME', ''),
+        'user': os.getenv('DB_USER', ''),
         'password': os.getenv('DB_PASSWORD', '')
     }

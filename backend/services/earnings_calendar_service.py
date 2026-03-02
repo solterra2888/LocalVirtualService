@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.utils.database_config import get_database_config
+from config.settings import config
 
 logger = get_logger("earnings_calendar_service")
 
@@ -77,7 +78,7 @@ class EarningsCalendarService:
         
         # 设置请求头
         session.headers.update({
-            'User-Agent': 'GuanHe Capital/1.0',
+            'User-Agent': config.USER_AGENT,
             'Accept': 'application/json'
         })
         

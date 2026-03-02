@@ -1,9 +1,12 @@
 #!/bin/bash
-# RC Project 后端快速重启脚本
+# GuanHe Project 后端快速重启脚本
 # 仅重启后端相关服务（不重启前端、数据库、Redis）
 # 适用场景：部署了新代码后快速生效
 
-echo "🔄 RC Project 后端快速重启"
+APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="${APP_NAME:-GuanHe Project}"
+
+echo "🔄 $APP_NAME 后端快速重启"
 echo "================================"
 
 # 检查是否以root权限运行
@@ -61,7 +64,7 @@ for service in "${BACKEND_SERVICES[@]}"; do
 done
 
 SERVER_IP=$(
-    host=$(grep -E '^SERVER_HOST=' /opt/rcproject/.env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
+    host=$(grep -E '^SERVER_HOST=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | head -1)
     [ -n "$host" ] && echo "$host" || hostname -I | awk '{print $1}'
 )
 

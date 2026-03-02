@@ -151,7 +151,7 @@ const MobileLayout: React.FC = () => {
         }}
       >
         <Title level={5} style={{ margin: 0, fontSize: '18px' }}>
-          GuanHe Capital
+          {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
         </Title>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

@@ -155,7 +155,7 @@ class FileProcessingWorker:
                 else:
                     # 使用远程Dify Agent方式（现有逻辑）
                     if task_info.get('token'):
-                        base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://111.230.48.119:81/v1/chat-messages'))
+                        base_url = params.get('ai_agent_server_url', os.getenv('RC_AGENT_BASE_URL', 'http://localhost:81/v1/chat-messages'))
                         rc_agent_service = RCAgentService(rc_agent_token=task_info.get('token'), base_url=base_url, log_callback=self.update_status)
             
             self.update_status("processing", 5.0, log_message="开始处理文件...")
