@@ -142,7 +142,7 @@ export const subscriptionsAPI = {
       if (channelType) params.channel_type = channelType;
       if (enabled !== undefined) params.enabled = enabled;
 
-      const data = await api.get<Subscription[]>('/subscriptions', params);
+      const data = await api.get<Subscription[]>('/subscriptions/', params);
 
       return {
         success: true,

@@ -4672,11 +4672,11 @@ const OriginalContentView: React.FC<{
           }
         } else if (['doc', 'docx', 'word'].includes(fileType)) {
           // Word文档预览：使用Microsoft Office Online Viewer
-          // 需要文件URL是公网可访问的（生产环境有效）
-          // 对于本地开发，提供替代方案
-          const isLocalDev = fileContent.file_url.includes('localhost');
+          // 需要文件URL是公网可访问的绝对 HTTPS URL（Microsoft服务器需要能拉取该文件）
+          // 相对路径、localhost、或 /api/serve/ 代理路径均无法被 Office Online Viewer 访问
+          const canUseOfficeViewer = fileContent.file_url.startsWith('https://');
           
-          if (isLocalDev) {
+          if (!canUseOfficeViewer) {
             // 本地开发环境：显示提示和下载按钮
             return (
               <div style={{ 
@@ -4696,8 +4696,8 @@ const OriginalContentView: React.FC<{
                   {fileContent.filename}
                 </div>
                 <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
-                  Word document preview is available in production environment<br/>
-                  Please download and view locally for development
+                  Word document preview requires a public HTTPS file URL<br/>
+                  Please download to view
                 </div>
                 <Button
                   type="primary"
@@ -4717,7 +4717,7 @@ const OriginalContentView: React.FC<{
               </div>
             );
           } else {
-            // 生产环境：使用Microsoft Office Online Viewer
+            // URL 是公网可访问的 HTTPS 地址，使用 Microsoft Office Online Viewer
             const encodedUrl = encodeURIComponent(fileContent.file_url);
             const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
             
@@ -4781,9 +4781,10 @@ const OriginalContentView: React.FC<{
           );
         } else if (['excel', 'xlsx', 'xls'].includes(fileType)) {
           // Excel文档预览：同样使用Microsoft Office Online Viewer
-          const isLocalDev = fileContent.file_url.includes('localhost');
+          // 需要公网可访问的绝对 HTTPS URL
+          const canUseOfficeViewer = fileContent.file_url.startsWith('https://');
           
-          if (isLocalDev) {
+          if (!canUseOfficeViewer) {
             return (
               <div style={{ 
                 flex: 1,
@@ -4802,8 +4803,8 @@ const OriginalContentView: React.FC<{
                   {fileContent.filename}
                 </div>
                 <div style={{ marginBottom: '16px', color: themeColors.textSecondary }}>
-                  Excel document preview is available in production environment<br/>
-                  Please download and view locally for development
+                  Excel document preview requires a public HTTPS file URL<br/>
+                  Please download to view
                 </div>
                 <Button
                   type="primary"
@@ -4823,6 +4824,7 @@ const OriginalContentView: React.FC<{
               </div>
             );
           } else {
+            // URL 是公网可访问的 HTTPS 地址，使用 Microsoft Office Online Viewer
             const encodedUrl = encodeURIComponent(fileContent.file_url);
             const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
             

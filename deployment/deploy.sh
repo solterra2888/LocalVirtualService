@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-APP_NAME="$(grep -s '^APP_NAME=' "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2)"
+APP_NAME="$(grep -s '^APP_NAME=' "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2 || true)"
 APP_NAME="${APP_NAME:-GuanHe Project}"
 
 echo "🚀 $APP_NAME 部署脚本"

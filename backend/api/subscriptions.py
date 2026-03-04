@@ -97,6 +97,7 @@ def get_db_manager():
     return DatabaseManager(db_params)
 
 
+@router.get("", response_model=List[SubscriptionResponse])
 @router.get("/", response_model=List[SubscriptionResponse])
 async def get_user_subscriptions(
     channel_type: Optional[str] = Query(None, description="筛选频道类型"),

@@ -1236,10 +1236,16 @@ async def get_original_file_info(
                         file_url = f"http://{oss_service.custom_domain}/{encoded_object_name}"
                         info(f"使用 OSS 自定义域名: {oss_service.custom_domain}", source="api")
                     else:
-                        # OSS 默认域名会强制 Content-Disposition: attachment（强制下载），
-                        # 即使签名 URL 带 response-content-disposition=inline 也无效。
-                        # 通过后端 serve 接口代理，由后端设置 inline 头实现预览。
-                        file_url = f"/api/files/serve/{file_id}"
+                        # 生成签名 URL（2小时有效），可被 Microsoft Office Online Viewer
+                        # 等外部服务直接访问，解决 /serve/ 接口因需要 JWT 鉴权而无法被
+                        # 第三方预览服务访问的问题。
+                        signed_url = oss_service.get_signed_url(original_file_path, expires=7200)
+                        if signed_url:
+                            # 强制使用 HTTPS（Microsoft Office Online Viewer 要求）
+                            file_url = signed_url.replace('http://', 'https://', 1) if signed_url.startswith('http://') else signed_url
+                            info(f"使用 OSS 签名 URL (2h): file_id={file_id}", source="api")
+                        else:
+                            file_url = f"/api/files/serve/{file_id}"
                 else:
                     # OSS 未配置，使用 serve 接口
                     warning(f"OSS 未配置，使用 serve 接口: file_id={file_id}")

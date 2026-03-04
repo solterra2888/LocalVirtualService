@@ -169,7 +169,7 @@ cp -r web-frontend/build/* /opt/nginx/html/guanhe/
 
 ## 4. 配置部署参数
 
-这是最关键的一步。整个项目的配置集中在 `deployment/` 目录下的两个文件中。
+这是最关键的一步。整个项目的配置集中在 `deployment/` 目录下的两个文件中。确保根目录有`.env`文件。
 
 ### 4.1 编辑部署配置
 
@@ -343,7 +343,21 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 
 ---
 
-## 9. 故障排查
+## 9. 服务器配置
+
+
+
+### 服务器端口
+
+实例 > 点击实例ID > 安全组 > 管理规则 > 入方向 > 增加规则：
+
+- 访问来源选择任意位置
+- 访问目的（端口）：
+  - Redis: 6379
+  - Postgres: 5432
+
+
+##10. 故障排查
 
 ### 服务启动失败 (exit code 203)
 
@@ -424,6 +438,25 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 ```
 
 配置自定义域名后，文件 URL 会使用该域名，不受 OSS 默认域名的强制下载策略影响。
+
+### Word/Excel 在右侧 Original 面板无法预览（显示 "An error occurred"）
+
+**症状**：本地开发时 Word/Excel 可预览，部署到远程服务器后，点击文件卡片，右侧 Original 标签页显示 "An error occurred - We're sorry, but for some reason we can't open this for you."
+
+**原因**：与 **URL 可访问性** 有关，与代理、OSS、后端 serve 接口均相关：
+
+1. **后端返回的 file_url**：未配置 `OSS_CUSTOM_DOMAIN` 时，OSS 文件会返回相对路径 `/api/files/serve/{file_id}`。
+2. **前端判断**：原先用 `file_url.includes('localhost')` 区分本地/生产；远程环境下该 URL 不含 localhost，被误判为“生产环境”，从而走 Microsoft Office Online Viewer。
+3. **Office Online Viewer 限制**：预览服务需要从 **公网可访问的绝对 HTTPS URL** 拉取文件。相对路径无法被 Microsoft 服务器解析；即使用绝对地址，`/api/files/serve/` 需要 JWT 鉴权，第三方服务无法带 token 访问，因此仍会失败。
+
+**解决方案**（已在代码中修复）：
+
+| 位置 | 修改要点 |
+|------|----------|
+| **后端** `backend/api/files.py` | OSS 文件（无自定义域名时）改为生成 **OSS 签名 URL**（2 小时有效、公网可访问、强制 HTTPS），不再返回 `/api/files/serve/{file_id}`。Microsoft 可直接从 OSS 拉取文件进行预览。 |
+| **前端** `web-frontend/src/pages/FilesPage.tsx` | 将“是否使用 Office Online Viewer”的判断从 `includes('localhost')` 改为 `file_url.startsWith('https://')`，只有公网 HTTPS URL 才送入 Office 预览；否则显示下载按钮。 |
+
+**要点**：Word/Excel 在线预览依赖 **公网可访问的 HTTPS 文件地址**。若使用 OSS 且未配置自定义域名，必须依赖后端生成的**签名 URL**；配置了 `OSS_CUSTOM_DOMAIN` 时，会直接使用该域名的公共 URL，同样满足 Office 预览要求。
 
 ---
 
