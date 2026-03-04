@@ -202,6 +202,17 @@ class AppConfig:
                     if task_info.get('input_fields'):
                         os.environ[f'RC_AGENT_FIELDS_{task_id}'] = json.dumps(task_info['input_fields'])
     
+    def get_youtube_download_config(self):
+        """获取 YouTube 下载（yt-dlp）相关配置"""
+        return {
+            'proxy': (os.getenv('YOUTUBE_PROXY') or
+                      os.getenv('HTTPS_PROXY') or
+                      os.getenv('HTTP_PROXY')),
+            'cookies_file': os.getenv('YOUTUBE_COOKIES_FILE'),
+            'po_token': os.getenv('YOUTUBE_PO_TOKEN'),
+            'visitor_data': os.getenv('YOUTUBE_VISITOR_DATA'),
+        }
+
     def get_logging_config(self):
         """获取日志配置"""
         return {

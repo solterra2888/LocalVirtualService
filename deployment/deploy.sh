@@ -150,6 +150,13 @@ ENVEOF
     grep -E '^(HTTP_PROXY|HTTPS_PROXY|YOUTUBE_PROXY)=' "$DEPLOY_CONF" 2>/dev/null || true
 } >> "$ENV_FILE"
 
+# 追加 YouTube 认证配置（如果有）
+{
+    echo ""
+    echo "# ===== YouTube 认证 ====="
+    grep -E '^(YOUTUBE_COOKIES_FILE|YOUTUBE_PO_TOKEN|YOUTUBE_VISITOR_DATA)=' "$DEPLOY_CONF" 2>/dev/null || true
+} >> "$ENV_FILE"
+
 # 追加前端环境变量
 cat >> "$ENV_FILE" << ENVEOF
 

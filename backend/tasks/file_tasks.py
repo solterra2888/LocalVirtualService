@@ -1709,6 +1709,94 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         }
 
 
+def _find_node_binary() -> str:
+    """查找系统中的 Node.js 可执行文件路径"""
+    import shutil
+    for candidate in [
+        os.getenv('NODE_BINARY'),
+        '/usr/local/bin/node',
+        '/usr/bin/node',
+    ]:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    found = shutil.which('node')
+    return found or 'node'
+
+
+def _find_ffmpeg_binary() -> str | None:
+    """查找系统中的 ffmpeg 可执行文件路径"""
+    import shutil
+    conda_prefix = os.getenv('CONDA_PREFIX')
+    for candidate in [
+        os.getenv('FFMPEG_BINARY'),
+        os.path.join(conda_prefix, 'bin', 'ffmpeg') if conda_prefix else None,
+        '/root/miniconda3/envs/guanhe/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+    ]:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return shutil.which('ffmpeg')
+
+
+def _build_ydl_opts(out_template: str) -> dict:
+    """
+    构建 yt-dlp 配置字典，统一处理代理、Cookie 认证等选项。
+
+    支持以下环境变量：
+      YOUTUBE_COOKIES_FILE  Netscape 格式 cookies.txt 的绝对路径（首选认证方式，
+                            可绕过 YouTube 反机器人检测）
+      YOUTUBE_PO_TOKEN      YouTube PO Token（yt-dlp 2024.11+ 支持，
+                            配合 YOUTUBE_VISITOR_DATA 使用）
+      YOUTUBE_VISITOR_DATA  与 YOUTUBE_PO_TOKEN 配套的 Visitor Data 字符串
+      YOUTUBE_PROXY / HTTPS_PROXY / HTTP_PROXY  代理地址
+    """
+    opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '128',
+        }],
+        'outtmpl': out_template,
+        'quiet': True,
+        'no_warnings': True,
+        'socket_timeout': 30,
+        'retries': 5,
+        'fragment_retries': 5,
+        'retry_sleep_functions': {'http': lambda n: 2 ** n},
+        # 启用 Node.js 作为 EJS（外部 JS 挑战求解器）运行时，
+        # 解决 YouTube n-challenge / signature solving 失败问题
+        'js_runtimes': {'node': {'path': _find_node_binary()}},
+    }
+
+    ffmpeg_path = _find_ffmpeg_binary()
+    if ffmpeg_path:
+        opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
+
+    proxy = (os.getenv('YOUTUBE_PROXY') or
+             os.getenv('HTTPS_PROXY') or
+             os.getenv('HTTP_PROXY'))
+    if proxy:
+        opts['proxy'] = proxy
+
+    cookies_file = os.getenv('YOUTUBE_COOKIES_FILE')
+    if cookies_file and os.path.isfile(cookies_file):
+        opts['cookiefile'] = cookies_file
+
+    po_token = os.getenv('YOUTUBE_PO_TOKEN')
+    visitor_data = os.getenv('YOUTUBE_VISITOR_DATA')
+    if po_token and visitor_data:
+        opts['extractor_args'] = {
+            'youtube': {
+                'po_token': [f'web+{po_token}'],
+                'visitor_data': [visitor_data],
+            }
+        }
+
+    return opts
+
+
 @app.task(bind=True, name='upload_and_process_youtube_task', queue='file_processing')
 def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'guest'):
     """
@@ -1879,18 +1967,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 update_progress(progress=42, log_message='Downloading YouTube audio via yt-dlp...')
                 temp_dir = tempfile.mkdtemp(prefix='yt_upload_asr_')
                 out_template = os.path.join(temp_dir, f'youtube_{video_id}.%(ext)s')
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'postprocessors': [{'key': 'FFmpegExtractAudio',
-                                        'preferredcodec': 'mp3', 'preferredquality': '128'}],
-                    'outtmpl': out_template,
-                    'quiet': True, 'no_warnings': True,
-                    'socket_timeout': 30, 'retries': 5, 'fragment_retries': 5,
-                    'retry_sleep_functions': {'http': lambda n: 2 ** n},
-                }
-                proxy = (os.getenv('YOUTUBE_PROXY') or os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY'))
-                if proxy:
-                    ydl_opts['proxy'] = proxy
+                ydl_opts = _build_ydl_opts(out_template)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([youtube_url])
 
@@ -1915,7 +1992,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 )
                 if not upload_res['success']:
                     raise Exception(f"OSS upload failed: {upload_res.get('error')}")
-                audio_url = upload_res['public_url']
+                audio_url = upload_res.get('signed_url') or upload_res['public_url']
                 update_progress(progress=65, log_message='Uploaded to OSS, submitting to Fun-ASR...')
 
                 # 提交 Fun-ASR
@@ -2099,28 +2176,7 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         temp_dir = tempfile.mkdtemp(prefix='yt_feed_asr_')
         out_template = os.path.join(temp_dir, f'youtube_{video_id}.%(ext)s')
 
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '128',
-            }],
-            'outtmpl': out_template,
-            'quiet': True,
-            'no_warnings': True,
-            # 网络超时与重试：避免 SSL handshake timeout 直接失败
-            'socket_timeout': 30,
-            'retries': 5,
-            'fragment_retries': 5,
-            'retry_sleep_functions': {'http': lambda n: 2 ** n},  # 指数退避
-        }
-        proxy = (os.getenv('YOUTUBE_PROXY') or
-                 os.getenv('HTTPS_PROXY') or
-                 os.getenv('HTTP_PROXY'))
-        if proxy:
-            ydl_opts['proxy'] = proxy
-
+        ydl_opts = _build_ydl_opts(out_template)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
@@ -2153,7 +2209,7 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         if not upload_result['success']:
             raise Exception(f"OSS 上传失败: {upload_result.get('error')}")
 
-        audio_url = upload_result['public_url']
+        audio_url = upload_result.get('signed_url') or upload_result['public_url']
         update_progress(progress=50, log_message=f'Uploaded to OSS, submitting to Fun-ASR...')
 
         # ── 4. 提交 Fun-ASR ────────────────────────────────────────
@@ -2325,18 +2381,7 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         update_progress(progress=15, log_message='Downloading YouTube audio via yt-dlp...')
         temp_dir = tempfile.mkdtemp(prefix='yt_file_asr_')
         out_template = os.path.join(temp_dir, f'youtube_{video_id}.%(ext)s')
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{'key': 'FFmpegExtractAudio',
-                                 'preferredcodec': 'mp3', 'preferredquality': '128'}],
-            'outtmpl': out_template,
-            'quiet': True, 'no_warnings': True,
-            'socket_timeout': 30, 'retries': 5, 'fragment_retries': 5,
-            'retry_sleep_functions': {'http': lambda n: 2 ** n},
-        }
-        proxy = (os.getenv('YOUTUBE_PROXY') or os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY'))
-        if proxy:
-            ydl_opts['proxy'] = proxy
+        ydl_opts = _build_ydl_opts(out_template)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([youtube_url])
 
@@ -2361,7 +2406,7 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         )
         if not upload_res['success']:
             raise Exception(f"OSS upload failed: {upload_res.get('error')}")
-        audio_url = upload_res['public_url']
+        audio_url = upload_res.get('signed_url') or upload_res['public_url']
         update_progress(progress=58, log_message='Uploaded to OSS, submitting to Fun-ASR...')
 
         # ── 提交 Fun-ASR ──────────────────────────────────────────────────

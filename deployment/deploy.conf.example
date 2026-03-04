@@ -37,6 +37,22 @@ RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
 # HTTPS_PROXY=http://127.0.0.1:7890
 # YOUTUBE_PROXY=http://127.0.0.1:7890
 
+# ===== YouTube 认证（解决反机器人检测，二选一）=====
+#
+# 方案一（推荐）：浏览器导出的 Netscape 格式 cookies.txt
+#   操作步骤：
+#     1. 在本地 Chrome/Firefox 登录 YouTube
+#     2. 安装 "Get cookies.txt LOCALLY" 浏览器扩展
+#     3. 在 youtube.com 上点击扩展，导出 cookies.txt
+#     4. 将文件上传到服务器，如 /opt/guanhetech/config/youtube-cookies.txt
+#     5. 取消下方注释并填入实际路径
+# YOUTUBE_COOKIES_FILE=/opt/guanhetech/config/youtube-cookies.txt
+#
+# 方案二：PO Token（yt-dlp 2024.11+ 支持，需配合 bgutil-ytdlp-pot-provider 工具获取）
+#   参考：https://github.com/coletdjnz/yt-dlp-youtube-oauth2
+# YOUTUBE_PO_TOKEN=
+# YOUTUBE_VISITOR_DATA=
+
 # ===== 性能调优（根据服务器配置调整）=====
 CELERY_AI_CONCURRENCY=4
 CELERY_DATA_CONCURRENCY=2

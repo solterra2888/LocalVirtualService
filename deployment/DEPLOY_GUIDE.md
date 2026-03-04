@@ -6,13 +6,15 @@
 
 ## 0. 环境要求
 
-| 项目 | 最低要求 | 推荐 |
-|------|----------|------|
+
+| 项目   | 最低要求          | 推荐               |
+| ---- | ------------- | ---------------- |
 | 操作系统 | Ubuntu 20.04+ | Ubuntu 22.04 LTS |
-| CPU | 2 核 | 4 核 |
-| 内存 | 4 GB | 8 GB |
-| 磁盘 | 20 GB | 50 GB |
-| 网络 | 开放 80 端口 | 80 + 443 |
+| CPU  | 2 核           | 4 核              |
+| 内存   | 4 GB          | 8 GB             |
+| 磁盘   | 20 GB         | 50 GB            |
+| 网络   | 开放 80 端口      | 80 + 443         |
+
 
 ---
 
@@ -212,7 +214,11 @@ RC_AGENT_BASE_URL=http://localhost:81/v1/chat-messages
 
 ### 4.2 编辑密钥配置
 
+密钥文件**仅放在 `deployment/` 目录**（部署脚本只读取此处），请勿在项目根目录创建 `.env.secrets`。
+
 ```bash
+# 确保当前在 deployment 目录（若在 4.1 已 cd deployment 则无需再执行）
+cd deployment
 cp .env.secrets.example .env.secrets
 vim .env.secrets
 ```
@@ -247,6 +253,7 @@ sudo bash deploy.sh
 ```
 
 脚本会自动完成：
+
 - 合并三层配置，生成 `.env`
 - 从模板渲染 4 个 systemd service 文件（rc-webapp、rc-celery-ai、rc-celery-data、rc-scheduler）
 - 安装 service 文件到 `/etc/systemd/system/`
@@ -330,22 +337,22 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 
 ## 8. 常用运维命令
 
-| 操作 | 命令 |
-|------|------|
-| 启动所有服务 | `sudo ./start_services.sh` |
-| 停止所有服务 | `sudo ./stop_services.sh` |
-| 重启所有服务 | `sudo ./restart_services.sh` |
-| 仅重启后端 | `sudo ./restart_backend.sh` |
-| 修改配置后重新部署 | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh` |
-| 查看某服务日志 | `journalctl -u rc-webapp -f` |
-| 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log` |
-| 查看 Nginx 日志 | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50` |
+
+| 操作           | 命令                                                                             |
+| ------------ | ------------------------------------------------------------------------------ |
+| 启动所有服务       | `sudo ./start_services.sh`                                                     |
+| 停止所有服务       | `sudo ./stop_services.sh`                                                      |
+| 重启所有服务       | `sudo ./restart_services.sh`                                                   |
+| 仅重启后端        | `sudo ./restart_backend.sh`                                                    |
+| 修改配置后重新部署    | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh`                 |
+| 查看某服务日志      | `journalctl -u rc-webapp -f`                                                   |
+| 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log`                                            |
+| 查看 Nginx 日志  | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50` |
+
 
 ---
 
 ## 9. 服务器配置
-
-
 
 ### 服务器端口
 
@@ -356,8 +363,7 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
   - Redis: 6379
   - Postgres: 5432
 
-
-##10. 故障排查
+## 10. 故障排查
 
 ### 服务启动失败 (exit code 203)
 
@@ -420,6 +426,43 @@ audio_url = upload_result.get("signed_url") or upload_result["public_url"]
 
 > **注意**：此问题仅影响音频文件（ASR 需要外部拉取）。PDF/Word 等文档的处理流程不受影响，因为文档解析在本地服务器完成，不依赖公网 URL。
 
+### YouTube Feed ASR（AI 转写）故障排查
+
+Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下载音频 → OSS 上传 → DashScope Fun-ASR 转写 → 结果写回 `subscription_content`。以下为已实施修复与常见问题汇总。
+
+#### 已实施的修复汇总
+
+
+| 层次                        | 现象 / 报错                                                                                         | 处理方式                                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. 反机器人检测**             | `Sign in to confirm you're not a bot`                                                           | 使用 Netscape 格式 `youtube-cookies.txt`，通过环境变量 `YOUTUBE_COOKIES_FILE` 指定路径（见 `deploy.conf.example`）。需在浏览器登录 YouTube 后用扩展导出，上传到服务器如 `config/youtube-cookies.txt`。 |
+| **2. n-challenge / 签名求解** | `Signature solving failed` / `n challenge solving failed` / `Requested format is not available` | 安装 `yt-dlp[default]`（含 `yt-dlp-ejs`）并在代码中启用 Node.js 运行时（`js_runtimes`），使 yt-dlp 能解开 YouTube 的 JS 挑战。                                                          |
+| **3. PO Token（GVS）**      | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                      |
+| **4. ffmpeg 缺失**          | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                        |
+| **5. OSS 私有桶 403**        | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                              |
+
+
+#### 常见错误速查
+
+- **Sign in to confirm you're not a bot** → Cookie 失效或未配置。重新导出 `youtube-cookies.txt` 并更新服务器上 `config/youtube-cookies.txt`，必要时重启 Celery。
+- **Invalid js_runtimes format** → yt-dlp Python API 要求 `js_runtimes` 为 `{'node': {'path': '...'}}` 的 dict 格式，已修复。
+- **transcript 为空且 transcript_data.asr_data 为 null** → 多为 OSS 403（见上表第 5 项），或 DashScope 子任务失败，检查日志中的 `FILE_403_FORBIDDEN` 并确认使用 `signed_url`。
+
+#### Cookie 过期与长期维护
+
+YouTube 的 session cookie 会过期（通常 1–2 周），且机房 IP 易触发风控，因此「Sign in to confirm you're not a bot」可能反复出现。可选方案：
+
+
+| 方案                      | 说明                                                                                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. 定期检测 + 告警 + 上传接口** | 定时任务用当前 cookies 测一次 yt-dlp；若失败则告警。提供仅管理员可用的 API（如 `POST /api/admin/youtube-cookies`）接收新 cookies 文件并写回 `config/youtube-cookies.txt`，管理员在浏览器导出后通过接口或本地脚本上传，无需 SSH 改文件。 |
+| **B. 内网 Cookie 代理机**    | 在可长期登录 YouTube 的机器上跑服务（如 Playwright 导出 cookies），HK 服务器定时拉取并更新 `youtube-cookies.txt`。实现成本较高，需维护浏览器环境与接口安全。                                                            |
+| **C. 第三方转写/下载服务**       | 使用不依赖本方 cookies 的 SaaS（仅提供视频 URL），由对方处理 YouTube 访问与合规。                                                                                                               |
+| **D. 仅需字幕时**            | 若视频自带字幕，可考虑 YouTube 官方 API 或第三方字幕 API 拉取字幕，避免 yt-dlp 下载与 cookie 维护。                                                                                                  |
+
+
+当前推荐先做 **方案 A**：检测 + 告警 + 管理员上传接口，将「发现失效 → 更新 cookies」半自动化，减少手动 SSH 与改文件的频率。
+
 ### PDF/图片在右侧面板无法预览（自动下载或"未能加载 PDF 文档"）
 
 **症状**：文件已上传到 OSS 且处理成功，但在 File List 点击文件后，右侧面板的 Original 标签页无法在线预览 PDF，而是触发浏览器下载或显示"未能加载 PDF 文档"。
@@ -451,10 +494,12 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 
 **解决方案**（已在代码中修复）：
 
-| 位置 | 修改要点 |
-|------|----------|
-| **后端** `backend/api/files.py` | OSS 文件（无自定义域名时）改为生成 **OSS 签名 URL**（2 小时有效、公网可访问、强制 HTTPS），不再返回 `/api/files/serve/{file_id}`。Microsoft 可直接从 OSS 拉取文件进行预览。 |
+
+| 位置                                            | 修改要点                                                                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **后端** `backend/api/files.py`                 | OSS 文件（无自定义域名时）改为生成 **OSS 签名 URL**（2 小时有效、公网可访问、强制 HTTPS），不再返回 `/api/files/serve/{file_id}`。Microsoft 可直接从 OSS 拉取文件进行预览。             |
 | **前端** `web-frontend/src/pages/FilesPage.tsx` | 将“是否使用 Office Online Viewer”的判断从 `includes('localhost')` 改为 `file_url.startsWith('https://')`，只有公网 HTTPS URL 才送入 Office 预览；否则显示下载按钮。 |
+
 
 **要点**：Word/Excel 在线预览依赖 **公网可访问的 HTTPS 文件地址**。若使用 OSS 且未配置自定义域名，必须依赖后端生成的**签名 URL**；配置了 `OSS_CUSTOM_DOMAIN` 时，会直接使用该域名的公共 URL，同样满足 Office 预览要求。
 
@@ -485,6 +530,22 @@ sudo bash deployment/deploy.sh && sudo ./restart_services.sh
 
 ## 附录: Git 与 GitHub 推送配置
 
+### 0. 配置 Git 用户信息（首次提交前必做）
+
+提交代码前，必须配置 `user.name` 和 `user.email`，否则会提示无法提交：
+
+```bash
+# 全局配置（推荐，所有仓库生效）
+git config --global user.name "你的名字"
+git config --global user.email "your-email@example.com"
+
+# 仅当前项目生效（去掉 --global）
+git config user.name "你的名字"
+git config user.email "your-email@example.com"
+```
+
+邮箱建议与 GitHub/GitLab 账号一致，便于识别提交者。
+
 ### 1. 创建 GitHub 仓库
 
 前往 [https://github.com/new](https://github.com/new) 创建仓库：
@@ -498,9 +559,9 @@ sudo bash deployment/deploy.sh && sudo ./restart_services.sh
 1. 前往 GitHub → Settings → Developer settings → [Personal access tokens (classic)](https://github.com/settings/tokens/new)
 2. 点击 **Generate new token (classic)**
 3. 设置：
-   - **Note**: `guanhetech-server`（备注，随意填写）
-   - **Expiration**: 按需选择（推荐 No expiration）
-   - **Select scopes**: 勾选 **`repo`**（整个大类）
+  - **Note**: `guanhetech-server`（备注，随意填写）
+  - **Expiration**: 按需选择（推荐 No expiration）
+  - **Select scopes**: 勾选 `**repo`**（整个大类）
 4. 点击 **Generate token**，复制生成的 token（仅显示一次）
 
 ### 3. 配置远程仓库并推送
@@ -534,3 +595,4 @@ git push origin master
 ```
 
 > **安全提示**: 不要把 token 硬编码在 remote URL 中。使用 `credential.helper store` 或环境变量管理凭证。
+
