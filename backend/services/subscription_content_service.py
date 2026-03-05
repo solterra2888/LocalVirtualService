@@ -305,8 +305,7 @@ class SubscriptionContentService:
                     in_reply_to_username,
                     in_reply_to_user_id,
                     heat_level,
-                    transcript,
-                    transcript_data
+                    ((transcript IS NOT NULL AND transcript != '') OR transcript_data IS NOT NULL) AS has_transcript
                 FROM subscription_content
                 WHERE {where_clause}
                 ORDER BY published_at DESC
@@ -357,9 +356,8 @@ class SubscriptionContentService:
                     'in_reply_to_user_id': row[31],
                     # 热度等级
                     'heat_level': row[32],
-                    # YouTube transcript
-                    'transcript': row[33],
-                    'transcript_data': row[34],
+                    # YouTube: 仅返回是否有 transcript（不返回正文）
+                    'has_transcript': bool(row[33]) if row[33] is not None else False,
                 })
             
             return contents

@@ -2209,7 +2209,16 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         if not upload_result['success']:
             raise Exception(f"OSS 上传失败: {upload_result.get('error')}")
 
-        audio_url = upload_result.get('signed_url') or upload_result['public_url']
+        # Fun-ASR 需通过公网可下载的 URL 拉取；私有桶时签名 URL 可能不被支持导致 FILE_DOWNLOAD_FAILED，可设置 OSS_ASR_PUBLIC_READ=true 使上传对象临时公网可读并用 public_url
+        use_asr_public = os.getenv('OSS_ASR_PUBLIC_READ', '').strip().lower() in ('1', 'true', 'yes')
+        if use_asr_public and upload_result.get('public_url'):
+            audio_url = upload_result['public_url']
+        else:
+            audio_url = upload_result.get('signed_url') or upload_result.get('public_url')
+        if not audio_url:
+            raise ValueError(
+                "OSS 未返回可访问 URL。若桶为私有，请设置 OSS_ASR_PUBLIC_READ=true 以便 Fun-ASR 通过公网 URL 下载。"
+            )
         update_progress(progress=50, log_message=f'Uploaded to OSS, submitting to Fun-ASR...')
 
         # ── 4. 提交 Fun-ASR ────────────────────────────────────────
@@ -2234,6 +2243,10 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         transcription_result = asr_service.get_transcription_results(asr_task_id)
         if not transcription_result['success']:
             raise ValueError(f"Fun-ASR 识别失败: {transcription_result['error']}")
+        if not transcription_result.get('transcriptions'):
+            raise ValueError(
+                "Fun-ASR 未返回有效转写结果（可能因文件下载失败等）。请重试或检查 OSS/网络。"
+            )
 
         update_progress(progress=80, log_message='ASR complete, processing results...')
 
@@ -2406,7 +2419,15 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         )
         if not upload_res['success']:
             raise Exception(f"OSS upload failed: {upload_res.get('error')}")
-        audio_url = upload_res.get('signed_url') or upload_res['public_url']
+        use_asr_public = os.getenv('OSS_ASR_PUBLIC_READ', '').strip().lower() in ('1', 'true', 'yes')
+        if use_asr_public and upload_res.get('public_url'):
+            audio_url = upload_res['public_url']
+        else:
+            audio_url = upload_res.get('signed_url') or upload_res.get('public_url')
+        if not audio_url:
+            raise ValueError(
+                "OSS 未返回可访问 URL。若桶为私有，请设置 OSS_ASR_PUBLIC_READ=true 以便 Fun-ASR 通过公网 URL 下载。"
+            )
         update_progress(progress=58, log_message='Uploaded to OSS, submitting to Fun-ASR...')
 
         # ── 提交 Fun-ASR ──────────────────────────────────────────────────
@@ -2427,6 +2448,10 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         transcription_result = asr_service.get_transcription_results(asr_task_id)
         if not transcription_result['success']:
             raise ValueError(f"Fun-ASR failed: {transcription_result['error']}")
+        if not transcription_result.get('transcriptions'):
+            raise ValueError(
+                "Fun-ASR 未返回有效转写结果（可能因文件下载失败等）。请重试或检查 OSS/网络。"
+            )
         update_progress(progress=83, log_message='ASR complete, processing results...')
 
         # ── 格式化 ────────────────────────────────────────────────────────

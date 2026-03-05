@@ -272,7 +272,8 @@ class OSSService:
         username: str = "anonymous",
         file_category: str = None,
         content_type: str = None,
-        expires: int = 3600
+        expires: int = 3600,
+        asr_public_read: bool = False
     ) -> Dict[str, Any]:
         """
         通用文件上传到 OSS（支持文档、图片、音频等）
@@ -284,6 +285,7 @@ class OSSService:
             file_category: 文件类别（'document', 'image', 'audio', 'other'），不指定则自动检测
             content_type: MIME 类型（可选，自动检测）
             expires: 签名 URL 过期时间（秒），默认 1 小时
+            asr_public_read: 若为 True，上传后将对象 ACL 设为 public-read，便于 Fun-ASR 等通过公网 URL 下载（仅建议用于私有桶+ASR 场景）
             
         Returns:
             Dict[str, Any]: 上传结果
@@ -372,6 +374,14 @@ class OSSService:
                     }
                 )
             
+            # 若为 ASR 场景且希望 Fun-ASR 通过公网 URL 拉取（私有桶时签名 URL 可能不被支持）
+            if asr_public_read:
+                try:
+                    self.bucket.put_object_acl(object_name, oss2.OBJECT_ACL_PUBLIC_READ)
+                    info(f"已设置对象 ACL 为 public-read（供 Fun-ASR 拉取）: {object_name}")
+                except Exception as e:
+                    warning(f"设置对象 public-read 失败: {e}，ASR 可能无法下载该文件")
+            
             # 生成公网 URL
             if self.custom_domain:
                 # 使用自定义域名（不会触发强制下载，可以预览）
@@ -441,12 +451,15 @@ class OSSService:
             }
         
         # 使用通用上传方法，48 小时有效期（用于 ASR）
+        # 若 OSS 为私有桶且 Fun-ASR 报 FILE_DOWNLOAD_FAILED，可设置 OSS_ASR_PUBLIC_READ=true 使上传的音频对象临时公网可读
+        asr_public_read = os.getenv('OSS_ASR_PUBLIC_READ', '').strip().lower() in ('1', 'true', 'yes')
         return self.upload_file(
             file_path=file_path,
             filename=filename,
             username=username,
             file_category='audio',
-            expires=3600 * 48  # 48 小时
+            expires=3600 * 48,  # 48 小时
+            asr_public_read=asr_public_read
         )
     
     def get_signed_url(

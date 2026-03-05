@@ -937,8 +937,7 @@ async def get_subscription_contents(
                 in_reply_to_username,
                 in_reply_to_user_id,
                 heat_level,
-                transcript,
-                transcript_data
+                ((transcript IS NOT NULL AND transcript != '') OR transcript_data IS NOT NULL) AS has_transcript
             FROM subscription_content
             WHERE {where_clause}
             ORDER BY published_at DESC
@@ -996,9 +995,8 @@ async def get_subscription_contents(
                 'in_reply_to_user_id': row[26],
                 # 热度等级
                 'heat_level': row[27],
-                # YouTube transcript
-                'transcript': row[28],
-                'transcript_data': row[29],
+                # YouTube: 仅返回是否有 transcript（不返回正文，减轻加载）
+                'has_transcript': bool(row[28]) if row[28] is not None else False,
             })
         
         cursor.close()

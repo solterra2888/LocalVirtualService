@@ -25,7 +25,6 @@ import {
   Dropdown,
   Switch,
   Divider,
-  Collapse,
 } from 'antd';
 import {
   PlusOutlined,
@@ -477,7 +476,13 @@ const FeedReaderPageInner: React.FC = () => {
       setAsrStatus('completed');
       setAsrProgress(100);
       message.success('Transcription completed!');
-      if (selectedSubscription) loadContents(selectedSubscription.id);
+      // Update current content's has_transcript immediately so the UI reflects the change
+      if (selectedContent) {
+        setSelectedContent(prev => prev ? { ...prev, has_transcript: true } : null);
+        setContents(prev =>
+          prev.map(c => (c.id === selectedContent.id ? { ...c, has_transcript: true } : c))
+        );
+      }
     } else if (isFailed) {
       setAsrStatus('failed');
       const errMsg = (task.status as any).result?.error || task.status.message || 'Transcription failed';
@@ -1751,69 +1756,30 @@ const FeedReaderPageInner: React.FC = () => {
                   </div>
                 )}
 
-                {/* YouTube Transcript */}
+                {/* YouTube Transcript 状态区域 */}
                 {selectedContent.channel_type === 'youtube' && (
                   <>
                     <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
-
-                    {selectedContent.transcript ? (
-                      /* ── 已有 Transcript：折叠展示 ── */
-                      <Collapse
-                        ghost
-                        size="small"
-                        items={[
-                          {
-                            key: 'transcript',
-                            label: (
-                              <Space>
-                                <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
-                                <Text style={{ color: themeColors.text, fontWeight: 500 }}>
-                                  Transcript
-                                </Text>
-                                {selectedContent.transcript_data?.source === 'asr' ? (
-                                  <Tag color="purple" style={{ fontSize: 11 }}>Fun-ASR</Tag>
-                                ) : (
-                                  <>
-                                    {selectedContent.transcript_data?.language && (
-                                      <Tag color="blue" style={{ fontSize: 11 }}>
-                                        {selectedContent.transcript_data.language}
-                                      </Tag>
-                                    )}
-                                    {selectedContent.transcript_data?.is_generated && (
-                                      <Tag color="default" style={{ fontSize: 11 }}>
-                                        auto-generated
-                                      </Tag>
-                                    )}
-                                  </>
-                                )}
-                              </Space>
-                            ),
-                            children: (
-                              <div
-                                style={{
-                                  maxHeight: 400,
-                                  overflowY: 'auto',
-                                  fontSize: 13,
-                                  lineHeight: '1.8',
-                                  color: themeColors.textSecondary,
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  padding: '4px 0',
-                                }}
-                              >
-                                {selectedContent.transcript}
-                              </div>
-                            ),
-                          },
-                        ]}
+                    {selectedContent.has_transcript ? (
+                      <div
                         style={{
-                          background: 'transparent',
-                          border: `1px solid ${themeColors.cardBorder}`,
                           borderRadius: 8,
+                          padding: '10px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          backgroundColor: isDark
+                            ? 'rgba(82, 196, 26, 0.08)'
+                            : '#f6ffed',
+                          border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.25)' : '#b7eb8f'}`,
                         }}
-                      />
+                      >
+                        <CheckOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+                        <Text style={{ color: themeColors.text, fontSize: 13 }}>
+                          Transcript available
+                        </Text>
+                      </div>
                     ) : (
-                      /* ── 无 Transcript：提示 + AI 转写按钮 ── */
                       <div
                         style={{
                           border: `1px dashed ${themeColors.cardBorder}`,

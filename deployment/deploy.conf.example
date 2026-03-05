@@ -14,6 +14,7 @@ VOLTA_DIR=/root/.volta/bin
 LOG_DIR=/opt/guanhetech/logs
 
 # ===== 网络/端口 =====
+# 公网 IP 或域名；保留占位符时 deploy.sh 会尝试自动检测公网 IP 并写回此文件
 SERVER_HOST=你的服务器公网IP
 WEBAPP_PORT=8000
 SCHEDULER_PORT=8001
@@ -57,3 +58,7 @@ RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
 CELERY_AI_CONCURRENCY=4
 CELERY_DATA_CONCURRENCY=2
 UVICORN_WORKERS=2
+
+# ===== 其他可选变量 =====
+# 更多可选配置在 deployment/.env.secrets 中设置（合并进 .env）。
+# 例如：OSS 私有桶且 YouTube AI 转写报 FILE_DOWNLOAD_FAILED 时，在 .env.secrets 中增加 OSS_ASR_PUBLIC_READ=true

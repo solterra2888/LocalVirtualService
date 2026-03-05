@@ -47,6 +47,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "deploy": "CI=false react-scripts build && docker exec nginx nginx -s reload",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

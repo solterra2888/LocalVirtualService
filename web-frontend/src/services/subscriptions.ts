@@ -108,17 +108,8 @@ export interface SubscriptionContent {
   in_reply_to_id?: string;
   in_reply_to_username?: string;
   in_reply_to_user_id?: string;
-  // YouTube transcript
-  transcript?: string;
-  transcript_data?: {
-    source?: 'asr' | 'youtube';
-    video_id?: string;
-    video_url?: string;
-    language?: string;
-    is_generated?: boolean;
-    transcript?: Array<{ text: string; start: number; duration: number }>;
-    asr_data?: Record<string, any>;
-  };
+  // YouTube: 仅是否有 transcript（正文不返回，减轻加载）
+  has_transcript?: boolean;
 }
 
 export interface SubscriptionContentsResponse {

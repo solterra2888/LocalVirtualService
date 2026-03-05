@@ -53,6 +53,31 @@ load_conf() {
 
 load_conf "$DEPLOY_CONF"
 
+# ── 处理服务器地址（占位或为空时尝试自动检测公网 IP）────────────────
+SERVER_HOST_PLACEHOLDER="你的服务器公网IP"
+if [ -z "${SERVER_HOST:-}" ] || [ "$SERVER_HOST" = "$SERVER_HOST_PLACEHOLDER" ]; then
+    DETECTED_IP=""
+    for url in "https://ifconfig.me/ip" "https://icanhazip.com" "http://ifconfig.me/ip"; do
+        DETECTED_IP=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | tr -d '\r\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') && break
+    done
+    if [ -n "$DETECTED_IP" ]; then
+        SERVER_HOST="$DETECTED_IP"
+        export SERVER_HOST
+        echo "   🌐 SERVER_HOST 未配置或为占位符，已自动检测公网 IP: $SERVER_HOST"
+        # 写回 deploy.conf，下次无需再检测
+        if [ -f "$DEPLOY_CONF" ] && grep -q "^SERVER_HOST=$SERVER_HOST_PLACEHOLDER" "$DEPLOY_CONF" 2>/dev/null; then
+            sed -i "s|^SERVER_HOST=.*|SERVER_HOST=$SERVER_HOST|" "$DEPLOY_CONF"
+            echo "   ✅ 已更新 deploy.conf 中的 SERVER_HOST"
+        fi
+    else
+        echo "   ⚠️  SERVER_HOST 未配置且无法自动检测公网 IP（请检查网络或代理）"
+        echo "      请在 deployment/deploy.conf 中设置 SERVER_HOST=你的服务器公网IP或域名"
+        SERVER_HOST="127.0.0.1"
+        export SERVER_HOST
+        echo "      当前临时使用 SERVER_HOST=127.0.0.1，部署后请尽快修改 deploy.conf 并重新运行 deploy.sh"
+    fi
+fi
+
 echo "   ✅ APP_NAME=$APP_NAME"
 echo "   ✅ PROJECT_DIR=$PROJECT_DIR"
 echo "   ✅ SERVER_HOST=$SERVER_HOST"
@@ -241,6 +266,16 @@ if [ -f "$WEBCONF_SRC" ]; then
     echo "   ✅ web.conf → $WEBCONF_DST (Docker Nginx 配置)"
 else
     echo "   ⚠️  未找到 $WEBCONF_SRC，跳过 Nginx 配置同步"
+fi
+
+# 前端构建产物通过 Docker volume mount 直接挂载到 Nginx 容器
+# （-v /opt/guanhetech/web-frontend/build:/usr/share/nginx/html/guanhe:ro）
+# npm run build 后自动生效，无需复制或符号链接
+FRONTEND_BUILD="$PROJECT_DIR/web-frontend/build"
+if [ -d "$FRONTEND_BUILD" ]; then
+    echo "   ✅ 前端构建目录存在: $FRONTEND_BUILD (通过 Docker mount 提供给 Nginx)"
+else
+    echo "   ⚠️  前端构建目录不存在: $FRONTEND_BUILD，请先执行 cd web-frontend && npm run build"
 fi
 
 # manifest.json（前端 PWA 配置）

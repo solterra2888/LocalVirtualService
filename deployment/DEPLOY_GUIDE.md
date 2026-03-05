@@ -1,4 +1,4 @@
-# GuanHe Project 新服务器部署手册
+# GuanHe Project 新服务器部署及故障排查手册
 
 > 本文档覆盖从一台全新 Ubuntu 服务器到项目完全运行的每一步操作。
 
@@ -37,7 +37,7 @@ systemctl enable docker && systemctl start docker
 
 ### 1.3 安装 Nginx（Docker 版本）
 
-Nginx 通过 Docker 部署，无需 apt 安装。详见第 2.3 节。
+Nginx 通过 Docker 部署，无需 apt 安装。配置目录准备见第 2.3 节，容器创建见第 3.4 节。
 
 ### 1.4 安装 Miniconda（Python 环境管理）
 
@@ -101,31 +101,33 @@ docker run -d \
   redis:7.4.6-alpine redis-server /usr/local/etc/redis/conf/redis.conf
 ```
 
-### 2.3 Nginx（Docker）
+### 2.3 Nginx 配置目录准备
 
-Nginx Docker 容器由运维独立脚本部署，会自动初始化完整的配置目录结构：
+Nginx 通过 Docker 部署。容器创建前，需先在宿主机准备好配置目录：
 
 ```
 /opt/nginx/
 ├── conf/
-│   ├── nginx.conf          ← 主配置（由运维脚本部署，含 include vhosts/*.conf）
+│   ├── nginx.conf          ← 主配置（含 include vhosts/*.conf）
 │   ├── mime.types           ← MIME 类型映射
 │   └── vhosts/
 │       └── web.conf         ← 项目站点配置（由 deploy.sh / start_services.sh 同步）
-├── html/
-│   └── guanhe/              ← 前端构建产物
 └── log/                     ← Nginx 日志
 ```
 
-> **注意**：不要手动执行 `docker run` 来创建 Nginx 容器。主配置 `nginx.conf` 通过 `include vhosts/*.conf;` 引入站点配置，容器启动前必须确保 `/opt/nginx/conf/` 下有完整的配置文件集。
+```bash
+mkdir -p /opt/nginx/conf/vhosts /opt/nginx/html /opt/nginx/log
+```
+
+> 主配置 `nginx.conf`、`mime.types` 等文件由技术团队初始化（不在项目仓库中）。项目只需管理 `web.conf`（站点配置），部署脚本会自动同步到 `/opt/nginx/conf/vhosts/web.conf`。
 >
-> 项目只需管理 `web.conf`（站点配置），启动/部署脚本会自动将项目根目录的 `web.conf` 同步到 `/opt/nginx/conf/vhosts/web.conf`。
+> Nginx 容器将在第 3.4 节（项目代码克隆和前端构建完成后）创建。
 
 ### 2.4 验证容器运行
 
 ```bash
 docker ps
-# 应看到 postgres、redis、nginx 三个容器状态为 Up
+# 应看到 postgres、redis 两个容器状态为 Up
 ```
 
 ---
@@ -159,13 +161,50 @@ cd web-frontend
 npm install
 npm run build
 cd ..
-
-# 将构建产物部署到 Nginx 静态文件目录
-cp -r web-frontend/build/* /opt/nginx/html/guanhe/
 ```
 
-> 线上环境不再使用 `npm start`（端口 3000），前端由 Docker Nginx 直接以静态文件方式提供服务。
-> 如需本地前端开发调试，可手动执行 `cd web-frontend && npm start` 启动 3000 端口。
+> **本地开发**：执行 `cd web-frontend && npm start` 启动开发服务器（端口 3000，支持热更新），无需 Nginx。
+>
+> **线上部署**：前端由 Docker Nginx 以静态文件方式提供服务，不使用 `npm start`。
+
+### 3.4 创建 Nginx 容器
+
+前端构建完成后，即可创建 Nginx 容器。容器通过 Docker volume mount 将 `web-frontend/build/` 直接挂载为站点目录，无需手动复制文件。
+
+```bash
+docker run -d --name nginx \
+  --network host \
+  --restart always \
+  -v /opt/nginx/conf:/etc/nginx \
+  -v /opt/nginx/html:/usr/share/nginx/html \
+  -v /opt/guanhetech/web-frontend/build:/usr/share/nginx/html/guanhe:ro \
+  -v /opt/nginx/log:/var/log/nginx \
+  -v /etc/localtime:/etc/localtime:ro \
+  nginx:alpine
+```
+
+> **关键挂载**：`-v .../web-frontend/build:/usr/share/nginx/html/guanhe:ro` 将构建产物直接挂载为 Nginx 站点根目录。每次 `npm run build` 后 Nginx 自动读取最新文件，无需额外复制。如果项目目录不在 `/opt/guanhetech`，请将路径替换为实际的 `PROJECT_DIR`。
+
+验证容器运行：
+
+```bash
+docker ps
+# 应看到 postgres、redis、nginx 三个容器状态为 Up
+```
+
+日常前端更新可使用一键部署命令（包含构建 + 通知 Nginx 重载）：
+
+```bash
+cd web-frontend
+npm run deploy
+```
+
+**deploy 脚本说明**：该命令对应 `web-frontend/package.json` 中的 `scripts.deploy`，实际执行：
+
+1. `CI=false react-scripts build` — 构建前端（`CI=false` 避免 ESLint 警告导致构建失败）；
+2. `docker exec nginx nginx -s reload` — 通知 Nginx 重载，使新构建产物生效。
+
+因 Nginx 容器已将 `web-frontend/build/` 挂载为站点目录，构建会直接更新该目录，执行上述命令后用户访问到的即为最新前端。
 
 ---
 
@@ -344,6 +383,7 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 | 停止所有服务       | `sudo ./stop_services.sh`                                                      |
 | 重启所有服务       | `sudo ./restart_services.sh`                                                   |
 | 仅重启后端        | `sudo ./restart_backend.sh`                                                    |
+| 前端构建并部署      | `cd web-frontend && npm run deploy`                                            |
 | 修改配置后重新部署    | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh`                 |
 | 查看某服务日志      | `journalctl -u rc-webapp -f`                                                   |
 | 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log`                                            |
@@ -401,10 +441,11 @@ grep DB_ /opt/guanhetech/.env
 检查 Docker Nginx 是否正常运行以及后端是否可达：
 
 ```bash
-docker ps | grep nginx                    # 确认 Nginx 容器在运行
-docker logs nginx --tail 20               # 查看 Nginx 近期日志
-curl http://localhost:8000/api/health      # 绕过 Nginx 直接访问后端
-ls /opt/nginx/html/guanhe/index.html      # 确认前端构建产物存在
+docker ps | grep nginx                                        # 确认 Nginx 容器在运行
+docker logs nginx --tail 20                                   # 查看 Nginx 近期日志
+curl http://localhost:8000/api/health                         # 绕过 Nginx 直接访问后端
+docker exec nginx ls /usr/share/nginx/html/guanhe/index.html  # 确认容器内能读到前端构建产物
+ls /opt/guanhetech/web-frontend/build/index.html              # 确认宿主机 build 产物存在
 ```
 
 ### 音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN
@@ -433,13 +474,14 @@ Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下�
 #### 已实施的修复汇总
 
 
-| 层次                        | 现象 / 报错                                                                                         | 处理方式                                                                                                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. 反机器人检测**             | `Sign in to confirm you're not a bot`                                                           | 使用 Netscape 格式 `youtube-cookies.txt`，通过环境变量 `YOUTUBE_COOKIES_FILE` 指定路径（见 `deploy.conf.example`）。需在浏览器登录 YouTube 后用扩展导出，上传到服务器如 `config/youtube-cookies.txt`。 |
-| **2. n-challenge / 签名求解** | `Signature solving failed` / `n challenge solving failed` / `Requested format is not available` | 安装 `yt-dlp[default]`（含 `yt-dlp-ejs`）并在代码中启用 Node.js 运行时（`js_runtimes`），使 yt-dlp 能解开 YouTube 的 JS 挑战。                                                          |
-| **3. PO Token（GVS）**      | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                      |
-| **4. ffmpeg 缺失**          | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                        |
-| **5. OSS 私有桶 403**        | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                              |
+| 层次                                  | 现象 / 报错                                                                                         | 处理方式                                                                                                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. 反机器人检测**                       | `Sign in to confirm you're not a bot`                                                           | 使用 Netscape 格式 `youtube-cookies.txt`，通过环境变量 `YOUTUBE_COOKIES_FILE` 指定路径（见 `deploy.conf.example`）。需在浏览器登录 YouTube 后用扩展导出，上传到服务器如 `config/youtube-cookies.txt`。                                                         |
+| **2. n-challenge / 签名求解**           | `Signature solving failed` / `n challenge solving failed` / `Requested format is not available` | 安装 `yt-dlp[default]`（含 `yt-dlp-ejs`）并在代码中启用 Node.js 运行时（`js_runtimes`），使 yt-dlp 能解开 YouTube 的 JS 挑战。                                                                                                                  |
+| **3. PO Token（GVS）**                | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                                                                              |
+| **4. ffmpeg 缺失**                    | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                                                                                |
+| **5. OSS 私有桶 403**                  | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                                                                                      |
+| **6. OSS 私有桶 FILE_DOWNLOAD_FAILED** | 已使用签名 URL 仍报 `FILE_DOWNLOAD_FAILED`、ASR 未返回有效转写                                                 | Fun-ASR 可能无法通过 OSS 签名 URL 拉取。在 **deployment/.env.secrets** 中增加一行 `OSS_ASR_PUBLIC_READ=true`，然后重新运行 `sudo bash deployment/deploy.sh` 生成 `.env`。上传用于 ASR 的音频时会将该对象 ACL 设为 public-read，并改用公网 URL 提交 ASR。仅该次上传的音频对象会公网可读。 |
 
 
 #### 常见错误速查
@@ -447,6 +489,7 @@ Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下�
 - **Sign in to confirm you're not a bot** → Cookie 失效或未配置。重新导出 `youtube-cookies.txt` 并更新服务器上 `config/youtube-cookies.txt`，必要时重启 Celery。
 - **Invalid js_runtimes format** → yt-dlp Python API 要求 `js_runtimes` 为 `{'node': {'path': '...'}}` 的 dict 格式，已修复。
 - **transcript 为空且 transcript_data.asr_data 为 null** → 多为 OSS 403（见上表第 5 项），或 DashScope 子任务失败，检查日志中的 `FILE_403_FORBIDDEN` 并确认使用 `signed_url`。
+- **FILE_DOWNLOAD_FAILED（与 OSS 私有桶有关）** → 若已使用签名 URL 仍报此错，说明 Fun-ASR 可能不支持通过签名 URL 拉取。在 **deployment/.env.secrets** 中增加 `OSS_ASR_PUBLIC_READ=true`，重新执行 `deploy.sh` 后重启服务（见上表第 6 项）。
 
 #### Cookie 过期与长期维护
 
