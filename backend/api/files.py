@@ -1236,16 +1236,22 @@ async def get_original_file_info(
                         file_url = f"http://{oss_service.custom_domain}/{encoded_object_name}"
                         info(f"使用 OSS 自定义域名: {oss_service.custom_domain}", source="api")
                     else:
-                        # 生成签名 URL（2小时有效），可被 Microsoft Office Online Viewer
-                        # 等外部服务直接访问，解决 /serve/ 接口因需要 JWT 鉴权而无法被
-                        # 第三方预览服务访问的问题。
-                        signed_url = oss_service.get_signed_url(original_file_path, expires=7200)
-                        if signed_url:
-                            # 强制使用 HTTPS（Microsoft Office Online Viewer 要求）
-                            file_url = signed_url.replace('http://', 'https://', 1) if signed_url.startswith('http://') else signed_url
-                            info(f"使用 OSS 签名 URL (2h): file_id={file_id}", source="api")
-                        else:
+                        # 无自定义域名时，OSS 默认域名会对 PDF 等强制 Content-Disposition: attachment，
+                        # 导致 iframe 内无法预览、只能下载。PDF/图片改为走后端 serve 代理（返回 inline）。
+                        # Word/Excel 需公网 HTTPS URL 供 Microsoft Office Online Viewer 拉取，故仍用签名 URL。
+                        preview_via_serve = (file_type or '').lower() in (
+                            'pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image'
+                        )
+                        if preview_via_serve:
                             file_url = f"/api/files/serve/{file_id}"
+                            info(f"OSS 无自定义域名，PDF/图片走 serve 代理以支持预览: file_id={file_id}", source="api")
+                        else:
+                            signed_url = oss_service.get_signed_url(original_file_path, expires=7200)
+                            if signed_url:
+                                file_url = signed_url.replace('http://', 'https://', 1) if signed_url.startswith('http://') else signed_url
+                                info(f"使用 OSS 签名 URL (2h): file_id={file_id}", source="api")
+                            else:
+                                file_url = f"/api/files/serve/{file_id}"
                 else:
                     # OSS 未配置，使用 serve 接口
                     warning(f"OSS 未配置，使用 serve 接口: file_id={file_id}")

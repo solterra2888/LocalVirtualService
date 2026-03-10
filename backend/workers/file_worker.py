@@ -78,8 +78,12 @@ class FileProcessingWorker:
         """
         if not file_path or os.path.isabs(file_path):
             return False
-        # OSS 对象键格式：documents/admin/2026-02-12/xxx.docx 或 audio/admin/xxx.aac
-        return file_path.startswith("documents/") or file_path.startswith("audio/")
+        # OSS 对象键格式：documents/...、audio/...、images/...（图片上传后也存 OSS，需先下载再解析）
+        return (
+            file_path.startswith("documents/")
+            or file_path.startswith("audio/")
+            or file_path.startswith("images/")
+        )
     
     def stop(self):
         """停止处理"""

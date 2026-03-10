@@ -216,7 +216,7 @@ class LlamaService:
                     files = {
                         'file': (os.path.basename(file_path), f, mime_type)
                     }
-                    
+
                     print(f"🔄 正在上传文件到 LlamaIndex... (尝试 {retry_count + 1}/{max_retries})")
                     
                     # 使用session进行请求，设置超时
@@ -445,7 +445,7 @@ class LlamaService:
                 if response.status_code == 200:
                     result_json = response.json()
                     markdown_content = result_json.get('markdown', '')
-                    
+
                     if markdown_content:
                         content_length = len(markdown_content.split())
                         print(f"✅ job {job_id} ({os.path.basename(original_file_path)}) markdown content retrieved ({content_length} words)")
@@ -579,7 +579,7 @@ class LlamaService:
         if final_status == 'SUCCESS':
             self.log(f"job {job_id} processing success, getting result...")
             content = self.get_markdown_result(job_id, file_path)
-            
+
             if content is not None:
                 # 计算内容长度（简单的token估算）
                 content_length = len(content.split())
