@@ -41,8 +41,8 @@ fi
 echo -e "${GREEN}🚀 启动新 worker...${NC}"
 "$PYTHON_CMD" -m celery -A backend.celery_app worker \
     -Q data_fetching \
-    --concurrency=2 \
-    --max-tasks-per-child=50 \
+    --concurrency=1 \
+    --max-tasks-per-child=10 \
     --loglevel=INFO \
     --logfile="$LOG_FILE" \
     --pidfile="$PID_FILE" \
@@ -67,7 +67,7 @@ fi
 echo ""
 echo -e "${CYAN}📊 Worker 信息:${NC}"
 echo "   队列: data_fetching"
-echo "   并发: 2"
+echo "   并发: 1"
 echo "   日志: $LOG_FILE"
 echo ""
 echo -e "${CYAN}💡 提示:${NC}"

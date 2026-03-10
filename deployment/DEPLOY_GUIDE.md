@@ -142,6 +142,18 @@ git clone <你的仓库地址> guanhetech
 cd guanhetech
 ```
 
+> **Git 配置（首次部署建议）**  
+> 若还没配置过用户名和邮箱，建议先设置（提交时会用到）：
+>
+> ```bash
+> # 全局配置（对所有仓库生效）
+> git config --global user.name "你的名字"
+> git config --global user.email "你的邮箱@example.com"
+>
+> # 查看当前配置
+> git config --list
+> ```
+
 ### 3.2 创建 Python 环境
 
 ```bash
@@ -208,11 +220,23 @@ npm run deploy
 
 ---
 
-## 4. 配置部署参数
+## 4. 配置部署参数（两种场景）
 
-这是最关键的一步。整个项目的配置集中在 `deployment/` 目录下的两个文件中。确保根目录有`.env`文件。
+这是最关键的一步。整个项目的配置集中在 `deployment/` 目录下的几个文件中，最终都会汇总到项目根目录的 `.env` 中。  
+典型有两种使用场景：
 
-### 4.1 编辑部署配置
+- **场景 A：正式服务器部署（推荐本节 4.1–4.3 + 第 5–7 章）**
+- **场景 B：本地单机开发（只需生成 `.env` + 使用 `development` 脚本）**
+
+> ✅ 二者共享同一套 `deployment/deploy.conf` 与 `deployment/.env.secrets` 配置，只是生成 `.env` 的方式不同。
+
+---
+
+### 4.A 正式服务器部署：使用 `deployment/deploy.sh`（需要 root）
+
+服务器上推荐的流程是：编辑 `deploy.conf` / `.env.secrets` → 运行 `sudo bash deployment/deploy.sh`，由脚本自动生成 `.env`、systemd 服务与 Nginx 配置。确保根目录有 `.env` 文件。
+
+### 4.1 编辑部署配置（通用于服务器 & 本地）
 
 ```bash
 cd deployment
@@ -251,7 +275,7 @@ RC_AGENT_BASE_URL=http://localhost:81/v1/chat-messages
 # HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
-### 4.2 编辑密钥配置
+### 4.2 编辑密钥配置（通用于服务器 & 本地）
 
 密钥文件**仅放在 `deployment/` 目录**（部署脚本只读取此处），请勿在项目根目录创建 `.env.secrets`。
 
@@ -285,7 +309,7 @@ JWT_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 echo $JWT_SECRET_KEY
 ```
 
-### 4.3 运行部署脚本
+### 4.3 运行部署脚本（仅正式服务器需要）
 
 ```bash
 sudo bash deploy.sh
@@ -298,6 +322,64 @@ sudo bash deploy.sh
 - 安装 service 文件到 `/etc/systemd/system/`
 - 同步 `web.conf` 到 Docker Nginx 配置卷 `/opt/nginx/conf/vhosts/`
 - 执行 `systemctl daemon-reload`
+
+---
+
+### 4.B 本地开发：只生成 `.env`，不改 systemd / Nginx
+
+在**本地开发机**上，一般不需要安装 systemd 服务和 Nginx，只需让根目录有一份完整的 `.env`，然后用 `development` 目录下的脚本启动即可。推荐步骤如下：
+
+1. **准备开发机专用配置**
+
+```bash
+cd /opt/guanhetech
+
+# 1) 本地 Python 环境等（development/dev.conf）
+cp development/dev.conf.example development/dev.conf
+vim development/dev.conf
+# 设置 DEV_CONDA_ENV=/你的/conda/路径，例如:
+#   DEV_CONDA_ENV=/opt/miniconda3/envs/guanhe
+
+# 2) 复用 deployment 的示例配置（与服务器同一结构）
+cp deployment/deploy.conf.example deployment/deploy.conf
+cp deployment/.env.secrets.example deployment/.env.secrets
+vim deployment/deploy.conf
+# 建议本地修改：
+#   PROJECT_DIR=/opt/guanhetech（或你的实际工程路径）
+#   DB_HOST=127.0.0.1
+#   REDIS_HOST=127.0.0.1
+#   SERVER_HOST=127.0.0.1
+
+vim deployment/.env.secrets
+# 按需填写本地使用的 DB 密码、Redis 密码、各类 API Key（可与服务器不同）
+```
+
+2. **使用本地脚本生成 `.env`（无需 root）**
+
+```bash
+# 仍在项目根目录 /opt/guanhetech
+bash development/generate_env_from_deploy.sh
+```
+
+该脚本会：
+
+- 读取：`deployment/deploy.conf`、`deployment/.env.secrets`、`deployment/config.defaults.env`
+- 生成：项目根目录 `.env`（结构与服务器上 `deploy.sh` 生成的基本一致）
+- 不进行任何 systemd / Nginx 操作，适合本地开发环境
+
+3. **启动本地开发环境**
+
+```bash
+cd /opt/guanhetech
+./development/start_local_dev.sh
+```
+
+该脚本会：
+
+- 加载 `development/dev.conf`（Python 环境）
+- 加载项目根目录 `.env`
+- 检查数据库、Redis、Celery 配置
+- 启动本地 Web 后端（默认 `http://localhost:8000`）与前端（默认 `http://localhost:3000`）
 
 ---
 

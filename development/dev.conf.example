@@ -3,6 +3,15 @@
 # 复制此文件为 dev.conf 并根据本地环境修改：
 #   cp development/dev.conf.example development/dev.conf
 # ===========================================
+#
+# 本地启动还需项目根目录的 .env（DB、Redis、API 密钥等）。
+# 可复用 deployment 的配置模板，无需 root：
+#   cp deployment/deploy.conf.example deployment/deploy.conf
+#   cp deployment/.env.secrets.example deployment/.env.secrets
+#   按本地修改 deploy.conf（如 DB_HOST=127.0.0.1, SERVER_HOST=127.0.0.1）
+#   bash development/generate_env_from_deploy.sh
+# 然后执行: ./development/start_local_dev.sh
+# ===========================================
 
 # ===== Python 环境 =====
 # conda 环境根目录（不含 /bin/python）
