@@ -131,9 +131,9 @@ cat > "$ENV_FILE" << ENVEOF
 # 然后重新运行: sudo bash deployment/deploy.sh
 # ============================================================
 
-# ===== 项目标识 =====
-APP_NAME=$APP_NAME
-APP_VERSION=$APP_VERSION
+# ===== 项目标识（含空格的值加引号，避免 source 时被 shell 拆成命令）=====
+APP_NAME="$APP_NAME"
+APP_VERSION="$APP_VERSION"
 
 # ===== 数据库 =====
 DB_HOST=$DB_HOST
@@ -188,8 +188,8 @@ cat >> "$ENV_FILE" << ENVEOF
 # ===== 前端 =====
 REACT_APP_API_BASE_URL=/api
 REACT_APP_SCHEDULER_BASE_URL=/scheduler
-REACT_APP_APP_NAME=$APP_NAME
-REACT_APP_APP_VERSION=$APP_VERSION
+REACT_APP_APP_NAME="$APP_NAME"
+REACT_APP_APP_VERSION="$APP_VERSION"
 REACT_APP_RC_AGENT_BASE_URL=$RC_AGENT_BASE_URL
 ENVEOF
 

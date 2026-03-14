@@ -1,36 +1,46 @@
 # ===========================================
 # GuanHe Project 部署配置（每台服务器不同）
 # 复制为 deploy.conf 并根据实际环境修改
+# 路径/端口与 DEPLOY_GUIDE.md、config/settings.py 一致
 # ===========================================
 
-# ===== 项目标识 =====
+# ===== 项目标识（与 web-frontend/package.json、config/settings.py 一致）=====
+# 注：APP_NAME 含空格时，deploy.sh / generate_env_from_deploy.sh 写入 .env 会自动加双引号，避免 source 报错
 APP_NAME=GuanHe Capital
 APP_VERSION=2.0.0
 
-# ===== 服务器路径 =====
+# ===== 服务器路径（与 DEPLOY_GUIDE 第 3 节克隆目录、conda 环境名一致）=====
+# 项目克隆目录，需与「git clone ... guanhetech」所在路径一致
 PROJECT_DIR=/opt/guanhetech
+# conda 环境路径，需与「conda create -n guanhe」对应（DEPLOY_GUIDE 1.4/3.2）
 CONDA_ENV=/root/miniconda3/envs/guanhe
+# Volta 安装路径（DEPLOY_GUIDE 1.5：curl get.volta.sh 默认 ~/.volta）
 VOLTA_DIR=/root/.volta/bin
+# 应用日志目录，建议放在项目下便于备份
 LOG_DIR=/opt/guanhetech/logs
 
-# ===== 网络/端口 =====
-# 公网 IP 或域名；保留占位符时 deploy.sh 会尝试自动检测公网 IP 并写回此文件
+# ===== 网络/端口（与 config/settings.py 默认值、scheduler/README、前端 proxy 一致）=====
+# 公网 IP 或域名。保留「你的服务器公网IP」时，首次运行 deploy.sh 会尝试自动检测并写回
 SERVER_HOST=你的服务器公网IP
+# 后端 FastAPI（web-frontend proxy 指向 8000）
 WEBAPP_PORT=8000
+# 调度服务（scheduler_main.py、scheduler/README 默认 8001）
 SCHEDULER_PORT=8001
+# 前端开发/构建端口（config/settings.py 默认 3000）
 FRONTEND_PORT=3000
 
-# ===== 数据库 =====
-DB_HOST=127.0.0.1
+# ===== 数据库（项目数据库在 43.99.37.76 服务器上；本机部署 PostgreSQL 时改为 127.0.0.1）=====
+DB_HOST=43.99.37.76
 DB_PORT=5432
+# 需与目标服务器上「CREATE DATABASE 你的数据库名」中的库名一致
 DB_NAME=guanhe_database
 DB_USER=postgres
 
-# ===== Redis =====
+# ===== Redis（与 DEPLOY_GUIDE 2.2 容器映射端口一致）=====
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 
-# ===== RC Agent (Dify 等外部 AI 服务) =====
+# ===== RC Agent (Dify 等外部 AI 服务，与 config/settings.py RC_AGENT_BASE_URL 一致) =====
 RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
 
 # ===== 代理（境外服务访问，可选）=====
@@ -46,7 +56,7 @@ RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
 #     2. 安装 "Get cookies.txt LOCALLY" 浏览器扩展
 #     3. 在 youtube.com 上点击扩展，导出 cookies.txt
 #     4. 将文件上传到服务器，如 /opt/guanhetech/config/youtube-cookies.txt
-#     5. 取消下方注释并填入实际路径
+#     5. 取消下方注释并填入实际路径（路径随 PROJECT_DIR 调整）
 # YOUTUBE_COOKIES_FILE=/opt/guanhetech/config/youtube-cookies.txt
 #
 # 方案二：PO Token（yt-dlp 2024.11+ 支持，需配合 bgutil-ytdlp-pot-provider 工具获取）

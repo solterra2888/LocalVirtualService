@@ -3687,7 +3687,7 @@ const ExecutionDetailsPanel: React.FC<{
           <Descriptions.Item label="Time">{new Date(execution.created_at).toLocaleString()}</Descriptions.Item>
           <Descriptions.Item label="Processing Time">{execution.total_time.toFixed(2)}秒</Descriptions.Item>
           <Descriptions.Item label="File Processing Time">{execution.file_processing_time.toFixed(2)}秒</Descriptions.Item>
-          <Descriptions.Item label="RC Agent Processing Time">{execution.ai_processing_time.toFixed(2)}秒</Descriptions.Item>
+          <Descriptions.Item label="AI Processing Time">{execution.ai_processing_time.toFixed(2)}秒</Descriptions.Item>
           <Descriptions.Item label="Token Consumption">
             {execution.total_tokens ? execution.total_tokens.toLocaleString() : '-'}
           </Descriptions.Item>

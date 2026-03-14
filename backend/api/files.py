@@ -1258,13 +1258,19 @@ async def get_original_file_info(
                     file_url = f"/api/files/serve/{file_id}"
             else:
                 # 本地文件：使用 serve 接口
-                import os
                 if os.getenv('ENV', 'development') == 'development':
                     # 本地开发：直接指向后端端口8000
                     file_url = f"http://localhost:{os.getenv('WEBAPP_PORT', '8000')}/api/files/serve/{file_id}"
                 else:
                     # 生产环境：使用相对路径
                     file_url = f"/api/files/serve/{file_id}"
+            
+            # 本地开发时，若 file_url 为相对路径 /api/files/serve/，iframe 会请求到前端 dev server (3000)，
+            # 可能被 SPA fallback 返回 index.html，导致右侧 Original 显示主页而非文件。改为绝对 URL 直连后端。
+            if os.getenv('ENV', 'development') == 'development' and file_url.startswith('/api/files/serve/'):
+                _port = os.getenv('WEBAPP_PORT', '8000')
+                file_url = f"http://localhost:{_port}{file_url}"
+                info(f"本地开发：file_url 改为直连后端以支持 iframe 预览: {file_url}", source="api")
             
             # 解析 asr_with_diarization JSON 数据
             asr_data = None

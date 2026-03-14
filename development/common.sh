@@ -18,6 +18,7 @@ _COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$_COMMON_DIR")"
 DEV_DIR="$_COMMON_DIR"
 LOGS_DIR="$PROJECT_ROOT/logs"
+DEV_REDIS_PID_FILE="$DEV_DIR/.dev_redis_pid"
 
 # ── 加载 dev.conf（本地开发机配置）────────────────────────────
 dev_load_conf() {
@@ -32,12 +33,14 @@ dev_load_conf() {
 }
 
 # ── 加载 .env（运行时环境变量）────────────────────────────────
+# 若存在 .env.redis.local（由 start_local_dev 自动启动 Redis 时生成），会覆盖 REDIS_URL 为无密码本地连接
 dev_load_env() {
     local env_file="$PROJECT_ROOT/.env"
     if [ -f "$env_file" ]; then
         echo -e "${CYAN}📝 加载环境配置: $env_file${NC}"
         set -a
         source "$env_file"
+        [ -f "$DEV_DIR/.env.redis.local" ] && source "$DEV_DIR/.env.redis.local"
         set +a
     else
         echo -e "${RED}❌ 环境配置文件不存在: $env_file${NC}"
@@ -86,6 +89,39 @@ except Exception as e:
         echo -e "${RED}❌ Redis 服务不可用，请先启动 Redis${NC}"
         return 1
     fi
+}
+
+# ── 若 Redis 未运行则自动启动（本地无密码实例，并写入 .dev_redis_pid）──
+dev_start_redis_if_needed() {
+    if dev_check_redis; then
+        return 0
+    fi
+    if lsof -Pi :6379 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo -e "${YELLOW}ℹ️  端口 6379 已被占用，但连接失败（请检查 .env 中 REDIS_URL 是否与本地 Redis 密码一致）${NC}"
+        return 1
+    fi
+    if ! command -v redis-server &>/dev/null; then
+        echo -e "${RED}❌ 未找到 redis-server，请安装 Redis 或手动启动后重试${NC}"
+        return 1
+    fi
+    echo -e "${BLUE}🔄 正在启动本地 Redis (无密码)...${NC}"
+    local redis_log="${DEV_DIR}/logs/redis.log"
+    mkdir -p "$(dirname "$redis_log")"
+    nohup redis-server > "$redis_log" 2>&1 &
+    local pid=$!
+    echo $pid > "$DEV_REDIS_PID_FILE"
+    sleep 2
+    local url="redis://127.0.0.1:6379/0"
+    if REDIS_URL="$url" dev_check_redis; then
+        export REDIS_URL="$url"
+        echo "REDIS_URL=$url" > "$DEV_DIR/.env.redis.local"
+        echo -e "${GREEN}✅ 已启动本地 Redis (PID: $pid)，并使用无密码连接${NC}"
+        return 0
+    fi
+    dev_stop_process "$pid" "Redis"
+    rm -f "$DEV_REDIS_PID_FILE"
+    echo -e "${RED}❌ 启动 Redis 失败，请查看 $redis_log${NC}"
+    return 1
 }
 
 # ── 检查 Celery 配置 ─────────────────────────────────────────

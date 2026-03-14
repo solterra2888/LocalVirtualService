@@ -13,13 +13,14 @@
 # 然后执行: ./development/start_local_dev.sh
 # ===========================================
 
-# ===== Python 环境 =====
-# conda 环境根目录（不含 /bin/python）
-# macOS 示例: /Users/你的用户名/anaconda3/envs/rcTool
-# Linux 示例: /opt/anaconda3/envs/rcTool
-DEV_CONDA_ENV=/Users/你的用户名/anaconda3/envs/rcTool
+# ===== Python 环境（与 deployment 环境名 guanhe 一致，路径按本机 conda 安装位置修改）=====
+# conda 环境根目录（不含 /bin/python），common.sh 会使用 $DEV_CONDA_ENV/bin/python
+# macOS 示例（Miniconda）:
+DEV_CONDA_ENV=/Users/kevinliu/miniconda3/envs/rcTool
+# macOS 备选（Anaconda）: /Users/你的用户名/anaconda3/envs/guanhe
+# Linux 示例: /opt/miniconda3/envs/guanhe 或 $HOME/miniconda3/envs/guanhe
 
 # ===== 远程调度器（可选）=====
-# 如果调度器运行在远程服务器，填写地址用于启动时健康检查
-# 留空或注释掉则跳过远程调度器检查
+# 若调度器在远程服务器，填写地址用于启动时健康检查；留空或注释则跳过
+# 端口 8001 与 deployment/deploy.conf 中 SCHEDULER_PORT 一致
 # DEV_REMOTE_SCHEDULER_URL=http://你的服务器IP:8001

@@ -17,10 +17,19 @@ if [ -f "$PID_FILE" ]; then
     source "$PID_FILE"
     dev_stop_process "${FRONTEND_PID:-}" "前端应用"
     dev_stop_process "${WEBAPP_PID:-}" "Web 应用"
+    dev_stop_process "${CELERY_PID:-}" "Celery file/ai Worker"
+    dev_stop_process "${DATA_CELERY_PID:-}" "Celery data Worker"
     rm -f "$PID_FILE"
     echo -e "${GREEN}✅ PID 文件已清理${NC}"
 else
     echo -e "${YELLOW}⚠️  PID 文件不存在，将通过端口/进程模式查找${NC}"
+fi
+
+# ── 停止由 start_local_dev 启动的 Redis（若有）─────────────────
+if [ -f "$DEV_REDIS_PID_FILE" ]; then
+    REDIS_PID=$(cat "$DEV_REDIS_PID_FILE")
+    dev_stop_process "$REDIS_PID" "Redis (本地)"
+    rm -f "$DEV_REDIS_PID_FILE" "$DEV_DIR/.env.redis.local"
 fi
 
 # ── 按端口停止 ────────────────────────────────────────────────

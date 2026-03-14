@@ -15,6 +15,8 @@ deployment/deploy.conf
 deployment/.env.secrets
 development/dev.conf
 development/.dev_pids
+development/.dev_redis_pid
+development/.env.redis.local
 development/logs/
 market_data_test_output
 .idea/

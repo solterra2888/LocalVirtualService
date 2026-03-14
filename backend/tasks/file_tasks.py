@@ -1186,6 +1186,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             error(f"更新音频上传任务状态失败: {e}", source="celery_audio_upload")
     
     try:
+        task_start_time = time.time()
         info(f"开始音频上传和转写任务 {self.request.id}, file={filename}, user={username}", 
              source="celery_audio_upload")
         
@@ -1289,6 +1290,9 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         
         update_progress(progress=90, log_message="正在保存到数据库...")
         
+        # 记录 ASR 处理耗时（上传+转写），用于 Basic Information 展示
+        elapsed_seconds = round(time.time() - task_start_time, 2)
+        
         # 6. 保存到数据库
         db_conn_params = get_database_config()
         from backend.database.db_manager import DatabaseManager
@@ -1300,7 +1304,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         
         cursor = conn.cursor()
         
-        # 创建 processing_stats 记录
+        # 创建 processing_stats 记录（单文件时 total_time = total_file_processing_time）
         cursor.execute("""
         INSERT INTO processing_stats 
         (timestamp, files_processed, files_failed, total_time, 
@@ -1313,8 +1317,8 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             datetime.now(),
             1,
             0,
-            0,
-            0,
+            elapsed_seconds,
+            elapsed_seconds,
             0,
             'ASR Transcription',
             username,
@@ -1346,7 +1350,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             filename,
             'audio',
             file_size_mb,
-            0,
+            elapsed_seconds,
             0,
             len(final_report_text),
             'completed',
@@ -1842,6 +1846,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
             error(f"更新进度失败: {str(e)}", source="youtube_task")
     
     try:
+        task_start_time = time.time()
         info(f"开始处理 YouTube 链接: url={youtube_url}, task_id={task_id}", 
              source="youtube_task")
         
@@ -1897,6 +1902,9 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
         update_progress(progress=70 if transcript_result else 37,
                        log_message='Saving to database...')
 
+        # 有字幕时记录当前耗时；走 Fun-ASR 时在 Step 3 完成后再更新
+        elapsed_seconds = round(time.time() - task_start_time, 2) if transcript_result else 0
+
         db_manager = DatabaseManager(get_database_config())
         filename = f"YouTube_{video_id}"
 
@@ -1918,7 +1926,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """, (
                     datetime.now().isoformat(), 1, 0, username,
-                    'YouTube Processing', 0, 0, 0, 0, 0,
+                    'YouTube Processing', elapsed_seconds, elapsed_seconds, 0, 0, 0,
                     json.dumps({
                         "youtube_url": youtube_url,
                         "video_id": video_id,
@@ -1942,7 +1950,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     stats_id, filename, 'youtube', 0, db_status,
                     full_text, asr_json,
                     datetime.now(), task_id, youtube_url,
-                    0, len(full_text)
+                    elapsed_seconds, len(full_text)
                 ))
                 file_id = cursor.fetchone()[0]
                 info(f"数据保存成功: file_id={file_id}, filename={filename}", source="youtube_task")
@@ -2027,18 +2035,25 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 full_text = '\n'.join(text_parts)
                 asr_structured = _build_asr_structured_data(transcription_result['transcriptions'])
 
-                # 更新数据库记录
+                # 更新数据库记录（含处理耗时，用于 Basic Information 展示）
                 update_progress(progress=87, log_message='Saving ASR transcript to database...')
+                asr_elapsed_seconds = round(time.time() - task_start_time, 2)
                 with db_manager.get_connection_context() as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
                         UPDATE file_processing_details
                         SET content = %s, asr_with_diarization = %s,
-                            content_length = %s, status = 'completed'
+                            content_length = %s, status = 'completed',
+                            processing_time = %s
                         WHERE id = %s
                     """, (full_text,
                           json.dumps(asr_structured) if asr_structured else None,
-                          len(full_text), file_id))
+                          len(full_text), asr_elapsed_seconds, file_id))
+                    cursor.execute("""
+                        UPDATE processing_stats
+                        SET total_time = %s, total_file_processing_time = %s
+                        WHERE id = %s
+                    """, (asr_elapsed_seconds, asr_elapsed_seconds, stats_id))
                 info(f"Fun-ASR 转写完成并保存: file_id={file_id}", source="youtube_task")
 
             except Exception as asr_err:

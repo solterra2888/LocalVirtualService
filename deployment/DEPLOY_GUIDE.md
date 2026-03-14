@@ -518,6 +518,31 @@ docker exec -it postgres psql -U postgres -c "SELECT 1;"
 grep DB_ /opt/guanhetech/.env
 ```
 
+### 上传文件/音频报错：AUTH &lt;password&gt; called without any password configured
+
+**症状**：上传音频或文档时接口返回 500，日志中出现：
+
+```
+上传音频文件失败: AUTH <password> called without any password configured for the default user. Are you sure your configuration is correct?
+```
+
+或「上传文档文件失败」并带有相同 AUTH 相关错误。
+
+**原因**：Celery 提交任务时使用 Redis 作为 broker。`.env` 中的 `REDIS_URL` 含有密码（由 `deployment/.env.secrets` 的 `REDIS_PASSWORD` 生成），但**本地 Redis 未设置密码**（例如用 `redis-server` 直接启动或由 `start_local_dev.sh` 启动的无密码实例）。Redis 服务端收到 AUTH 请求却未配置密码，因而报错。
+
+**解决方案**（任选其一）：
+
+1. **推荐（本地开发）**：若本地 Redis 无密码，在 `deployment/.env.secrets` 中将 `REDIS_PASSWORD` **留空或删除**，然后重新生成 `.env`：
+   ```bash
+   # 编辑 deployment/.env.secrets，将 REDIS_PASSWORD=xxx 改为空或注释掉
+   bash development/generate_env_from_deploy.sh
+   ```
+   生成的 `REDIS_URL` 将变为 `redis://127.0.0.1:6379/0`，即可连接无密码 Redis。
+
+2. **使用 start_local_dev.sh 启动**：脚本会先检查 Redis；若不可用会启动本地无密码 Redis，并写入 `development/.env.redis.local`（`REDIS_URL=redis://127.0.0.1:6379/0`）。之后启动的 Web 与 Celery 会先加载 `.env` 再加载该文件，从而覆盖为无密码连接。若你未通过该脚本启动（例如直接用 IDE 跑 uvicorn），则不会加载 `.env.redis.local`，需采用方案 1。
+
+3. **生产/服务器**：若 Redis 已配置密码，请确保 `deployment/.env.secrets` 中 `REDIS_PASSWORD` 与 Redis 的 `requirepass` 一致，并重新运行 `deploy.sh` 或 `generate_env_from_deploy.sh` 以更新 `.env`。
+
 ### 前端页面空白或 API 404
 
 检查 Docker Nginx 是否正常运行以及后端是否可达：
@@ -606,6 +631,16 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 ```
 
 配置自定义域名后，文件 URL 会使用该域名，不受 OSS 默认域名的强制下载策略影响。
+
+### 本地开发时 PDF/图片在 Original 面板显示主页而非文件内容
+
+**症状**：在中国境内或本地运行前后端分离开发（前端 3000、后端 8000）时，点击 PDF/图片后，右侧 Original 标签页显示的是 localhost:3000 的主页内容，而不是文件预览。
+
+**原因**：后端返回的 `file_url` 为相对路径 `/api/files/serve/{file_id}`。iframe 使用该相对路径时，浏览器会请求当前页面的 origin（即前端 dev server 的 3000 端口）。Create React App 的 proxy 在某些情况下未对该 iframe 请求生效，dev server 将请求当作 SPA 路由返回 `index.html`，导致 iframe 内显示的是前端主页。
+
+**解决方案**（已在代码中修复）：在 `get_original_file_info` 中，当 `ENV=development` 且 `file_url` 为相对路径 `/api/files/serve/...` 时，将其改写为指向后端的绝对 URL（如 `http://localhost:8000/api/files/serve/{file_id}`），使 iframe 直接请求后端，避免经过前端 dev server。对应代码位于 `backend/api/files.py`，在返回 `file_url` 前统一做开发环境改写。
+
+**要点**：本地开发时需确保后端 `ENV=development`（或未设置，默认 development），且前端 iframe 会加载 `http://localhost:8000/api/files/serve/...?token=...`，因此后端 8000 必须已启动。
 
 ### Word/Excel 在右侧 Original 面板无法预览（显示 "An error occurred"）
 
