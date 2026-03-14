@@ -3,6 +3,8 @@
 # 仅重启后端相关服务（不重启前端、数据库、Redis）
 # 适用场景：部署了新代码后快速生效
 
+set -euo pipefail
+
 APP_NAME="$(grep -s '^APP_NAME=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2)"
 APP_NAME="${APP_NAME:-GuanHe Project}"
 

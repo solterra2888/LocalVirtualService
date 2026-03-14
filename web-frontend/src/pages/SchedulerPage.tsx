@@ -490,6 +490,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
           (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
+          (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
+          (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -550,6 +552,8 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
+        (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
+        (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -1366,6 +1370,7 @@ const SchedulerPage: React.FC = () => {
                                 (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
                                 (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
                                 (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
+                                (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
                                 (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                 (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                 (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||

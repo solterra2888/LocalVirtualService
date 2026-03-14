@@ -101,7 +101,7 @@ done < "$SECRETS_FILE"
 
 # 构造 REDIS_URL
 if [ -n "$REDIS_PASSWORD" ]; then
-    ENCODED_REDIS_PW=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$REDIS_PASSWORD', safe=''))")
+    ENCODED_REDIS_PW=$(printf '%s' "$REDIS_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))")
     REDIS_URL="redis://:${ENCODED_REDIS_PW}@${REDIS_HOST}:${REDIS_PORT}/0"
 else
     REDIS_URL="redis://${REDIS_HOST}:${REDIS_PORT}/0"
@@ -165,7 +165,7 @@ FRONTEND_URL=$FRONTEND_URL
 SERVER_HOST=$SERVER_HOST
 LOG_DIR=$LOG_DIR
 RC_AGENT_BASE_URL=$RC_AGENT_BASE_URL
-RC_AGENT_TOKEN_default=$(grep '^RC_AGENT_TOKEN=' "$SECRETS_FILE" | cut -d= -f2)
+RC_AGENT_TOKEN_default=$(grep '^RC_AGENT_TOKEN=' "$SECRETS_FILE" | sed 's/^RC_AGENT_TOKEN=//')
 ENVEOF
 
 # 追加代理配置（如果有）
@@ -234,7 +234,7 @@ render_template() {
     content="${content//\{\{UVICORN_WORKERS\}\}/$UVICORN_WORKERS}"
     content="${content//\{\{RC_AGENT_BASE_URL\}\}/$RC_AGENT_BASE_URL}"
 
-    echo "$content" > "$output"
+    printf '%s\n' "$content" > "$output"
 }
 
 for tpl in "$TEMPLATES_DIR"/*.tpl; do
