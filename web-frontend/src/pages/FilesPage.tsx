@@ -25,6 +25,7 @@ import {
   App,
   Descriptions,
   Avatar,
+  Segmented,
   theme as antdTheme
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -53,7 +54,9 @@ import {
   CloseOutlined,
   ShareAltOutlined,
   UsergroupAddOutlined,
-  UserOutlined
+  UserOutlined,
+  ThunderboltOutlined,
+  CloudUploadOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -189,6 +192,7 @@ interface TaskExecution {
 }
 
 interface ProcessingParams {
+  processing_mode?: 'quick' | 'llamaparse';
   language: string[];
   fast_mode: boolean;
   disable_ocr: boolean;
@@ -4020,6 +4024,7 @@ const ContentMarkdownView: React.FC<{
   // Re-parse 相关状态
   const [reparseModalVisible, setReparseModalVisible] = useState(false);
   const [reparseParams, setReparseParams] = useState<ProcessingParams>({
+    processing_mode: 'quick',
     language: ['ch_sim', 'en'],
     fast_mode: false,
     disable_ocr: false,
@@ -4145,6 +4150,15 @@ const ContentMarkdownView: React.FC<{
     }
   };
 
+  const isCurrentFileImage = !!(fileToShow && filesAPI.isImageFile(fileToShow.filename));
+
+  const handleOpenReparseModal = () => {
+    if (isCurrentFileImage) {
+      setReparseParams(prev => ({ ...prev, processing_mode: 'llamaparse' }));
+    }
+    setReparseModalVisible(true);
+  };
+
   const handleReparse = async () => {
     if (!fileToShow) {
       message.error('No file selected');
@@ -4212,145 +4226,191 @@ const ContentMarkdownView: React.FC<{
         body: { maxHeight: '70vh', overflowY: 'auto' }
       }}
     >
-      <Divider style={{ margin: '12px 0' }} />
-      <Form layout="vertical">
-        <Row gutter={[12, 12]}>
-          <Col span={12}>
-            <Form.Item label="Language Settings">
-              <Select
-                mode="multiple"
-                value={reparseParams.language}
-                onChange={(value) => setReparseParams(prev => ({ ...prev, language: value }))}
-                placeholder="Select languages"
-              >
-                <Option value="ch_sim">Simplified Chinese</Option>
-                <Option value="en">English</Option>
-              </Select>
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item label="Max Pages">
-              <InputNumber
-                value={reparseParams.max_pages}
-                onChange={(value) => setReparseParams(prev => ({ ...prev, max_pages: value || 10 }))}
-                min={1}
-                max={100}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+      <Segmented
+        block
+        value={reparseParams.processing_mode || 'llamaparse'}
+        onChange={(value) => {
+          if (value === 'quick' && isCurrentFileImage) {
+            message.warning('Image files require LlamaParse for OCR processing.');
+            return;
+          }
+          setReparseParams(prev => ({ ...prev, processing_mode: value as 'quick' | 'llamaparse' }));
+        }}
+        options={[
+          {
+            label: (
+              <div style={{ padding: '4px 0' }}>
+                <Space><ThunderboltOutlined /><span style={{ fontWeight: 500 }}>Quick Process</span></Space>
+                <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>Fast local parsing for simple documents</div>
+              </div>
+            ),
+            value: 'quick',
+            disabled: isCurrentFileImage,
+          },
+          {
+            label: (
+              <div style={{ padding: '4px 0' }}>
+                <Space><CloudUploadOutlined /><span style={{ fontWeight: 500 }}>LlamaParse</span></Space>
+                <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>Cloud parsing with OCR for complex docs</div>
+              </div>
+            ),
+            value: 'llamaparse',
+          },
+        ]}
+        style={{ marginBottom: '12px', marginTop: '8px' }}
+      />
 
-        <Row gutter={[12, 12]}>
-          <Col span={12}>
-            <Form.Item label="Polling Interval (seconds)">
-              <InputNumber
-                value={reparseParams.polling_interval}
-                onChange={(value) => setReparseParams(prev => ({ ...prev, polling_interval: value || 10 }))}
-                min={5}
-                max={60}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item label="Target Pages">
-              <Input
-                value={reparseParams.target_pages}
-                onChange={(e) => setReparseParams(prev => ({ ...prev, target_pages: e.target.value }))}
-                placeholder="e.g., 1-5, 7, 10"
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+      {reparseParams.processing_mode === 'quick' ? (
+        <div style={{
+          padding: '8px 12px',
+          background: isDark ? '#1E202B' : '#f5f5f5',
+          borderRadius: 8,
+          fontSize: '12px',
+          opacity: 0.65,
+        }}>
+          Uses lightweight local libraries to convert documents to Markdown. Best for text-based PDFs, Word, and Excel files. Does not support OCR or scanned documents.
+        </div>
+      ) : (
+        <Form layout="vertical">
+          <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={[12, 12]}>
+            <Col span={12}>
+              <Form.Item label="Language Settings">
+                <Select
+                  mode="multiple"
+                  value={reparseParams.language}
+                  onChange={(value) => setReparseParams(prev => ({ ...prev, language: value }))}
+                  placeholder="Select languages"
+                >
+                  <Option value="ch_sim">Simplified Chinese</Option>
+                  <Option value="en">English</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Max Pages">
+                <InputNumber
+                  value={reparseParams.max_pages}
+                  onChange={(value) => setReparseParams(prev => ({ ...prev, max_pages: value || 10 }))}
+                  min={1}
+                  max={100}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-        <Divider style={{ margin: '12px 0' }} />
+          <Row gutter={[12, 12]}>
+            <Col span={12}>
+              <Form.Item label="Polling Interval (seconds)">
+                <InputNumber
+                  value={reparseParams.polling_interval}
+                  onChange={(value) => setReparseParams(prev => ({ ...prev, polling_interval: value || 10 }))}
+                  min={5}
+                  max={60}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Target Pages">
+                <Input
+                  value={reparseParams.target_pages}
+                  onChange={(e) => setReparseParams(prev => ({ ...prev, target_pages: e.target.value }))}
+                  placeholder="e.g., 1-5, 7, 10"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-        <Row gutter={[12, 12]}>
-          <Col span={12}>
-            <Form.Item label="Fast Mode">
-              <Switch
-                size="small"
-                checked={reparseParams.fast_mode}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, fast_mode: checked }))}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item label="Disable OCR">
-              <Switch
-                size="small"
-                checked={reparseParams.disable_ocr}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, disable_ocr: checked }))}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+          <Divider style={{ margin: '12px 0' }} />
 
-        <Row gutter={[12, 12]}>
-          <Col span={8}>
-            <Form.Item label="Skip Diagonal Text">
-              <Switch
-                size="small"
-                checked={reparseParams.skip_diagonal_text}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_diagonal_text: checked }))}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item label="Skip Table Extraction">
-              <Switch
-                size="small"
-                checked={reparseParams.skip_table_extraction}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_table_extraction: checked }))}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item label="Extract Images">
-              <Switch
-                size="small"
-                checked={reparseParams.extract_images}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, extract_images: checked }))}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+          <Row gutter={[12, 12]}>
+            <Col span={12}>
+              <Form.Item label="Fast Mode">
+                <Switch
+                  size="small"
+                  checked={reparseParams.fast_mode}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, fast_mode: checked }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Disable OCR">
+                <Switch
+                  size="small"
+                  checked={reparseParams.disable_ocr}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, disable_ocr: checked }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-        <Row gutter={[12, 12]}>
-          <Col span={12}>
-            <Form.Item label="Use Multimodal Model">
-              <Switch
-                size="small"
-                checked={reparseParams.use_vendor_multimodal_model}
-                onChange={(checked) => setReparseParams(prev => ({ ...prev, use_vendor_multimodal_model: checked }))}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item label="Multimodal API Key">
-              <Input
-                value={reparseParams.vendor_multimodal_api_key}
-                onChange={(e) => setReparseParams(prev => ({ ...prev, vendor_multimodal_api_key: e.target.value }))}
-                placeholder="Enter API key"
-                disabled={!reparseParams.use_vendor_multimodal_model}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+          <Row gutter={[12, 12]}>
+            <Col span={8}>
+              <Form.Item label="Skip Diagonal Text">
+                <Switch
+                  size="small"
+                  checked={reparseParams.skip_diagonal_text}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_diagonal_text: checked }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Skip Table Extraction">
+                <Switch
+                  size="small"
+                  checked={reparseParams.skip_table_extraction}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, skip_table_extraction: checked }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Extract Images">
+                <Switch
+                  size="small"
+                  checked={reparseParams.extract_images}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, extract_images: checked }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-        <Row gutter={[12, 12]}>
-          <Col span={24}>
-            <Form.Item label="LlamaIndex API Key">
-              <Input.Password
-                value={reparseParams.llamaindex_api_key}
-                onChange={(e) => setReparseParams(prev => ({ ...prev, llamaindex_api_key: e.target.value }))}
-                placeholder="Enter LlamaIndex API key (optional if set in backend)"
-              />
-            </Form.Item>
-          </Col>
-        </Row>
-      </Form>
+          <Row gutter={[12, 12]}>
+            <Col span={12}>
+              <Form.Item label="Use Multimodal Model">
+                <Switch
+                  size="small"
+                  checked={reparseParams.use_vendor_multimodal_model}
+                  onChange={(checked) => setReparseParams(prev => ({ ...prev, use_vendor_multimodal_model: checked }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Multimodal API Key">
+                <Input
+                  value={reparseParams.vendor_multimodal_api_key}
+                  onChange={(e) => setReparseParams(prev => ({ ...prev, vendor_multimodal_api_key: e.target.value }))}
+                  placeholder="Enter API key"
+                  disabled={!reparseParams.use_vendor_multimodal_model}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[12, 12]}>
+            <Col span={24}>
+              <Form.Item label="LlamaIndex API Key">
+                <Input.Password
+                  value={reparseParams.llamaindex_api_key}
+                  onChange={(e) => setReparseParams(prev => ({ ...prev, llamaindex_api_key: e.target.value }))}
+                  placeholder="Enter LlamaIndex API key (optional if set in backend)"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      )}
     </Modal>
   );
 
@@ -4434,7 +4494,7 @@ const ContentMarkdownView: React.FC<{
               <Button
                 type="primary"
                 icon={<ReloadOutlined />}
-                onClick={() => setReparseModalVisible(true)}
+                onClick={handleOpenReparseModal}
                 disabled={fileStatus === 'processing'}
                 style={{
                   height: '40px',

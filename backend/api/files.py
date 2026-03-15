@@ -625,6 +625,18 @@ async def get_task_status(
             }
         elif task_result.state == 'SUCCESS':
             result = task_result.result or {}
+            # 部分任务（如 YouTube）在逻辑失败时仍 return 字典而非抛异常，Celery 会标为 SUCCESS，需按 result.status 区分
+            if isinstance(result, dict) and result.get("status") == "failed":
+                return {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "progress": 0,
+                    "message": str(result.get("error", "处理失败")),
+                    "files_processed": result.get("files_processed", 0),
+                    "files_failed": result.get("files_failed", 1),
+                    "total_files": result.get("total_files", 1),
+                    "logs": result.get("logs", [])
+                }
             return {
                 "task_id": task_id,
                 "status": "completed",

@@ -128,11 +128,18 @@ class FileProcessingWorker:
         try:
             self.update_status("initializing", 0.0, log_message="正在初始化处理服务...")
             
-            # 初始化服务
-            llama_service = LlamaService(
-                api_key=api_key,
-                polling_interval=params.get('polling_interval', 10)
-            )
+            # 根据 processing_mode 选择解析服务
+            processing_mode = params.get('processing_mode', 'llamaparse')
+            
+            if processing_mode == 'quick':
+                from backend.core.quick_parse_service import QuickParseService
+                parse_service = QuickParseService()
+                self.update_status(log_message="✅ 使用 Quick Process（本地轻量化解析）")
+            else:
+                parse_service = LlamaService(
+                    api_key=api_key,
+                    polling_interval=params.get('polling_interval', 10)
+                )
             
             use_ai_agent = params.get('use_ai_agent', True)
             analysis_mode = params.get('analysis_mode', 'remote_agent')  # 'remote_agent' 或 'local_llm'
@@ -285,8 +292,8 @@ class FileProcessingWorker:
                             "polling_interval": params.get('polling_interval', 10)
                         }
                         
-                        # 使用LlamaService处理文件（使用本地文件路径）
-                        result = await llama_service.process_file(local_file_path, successful_results, failed_files, llama_params)
+                        # 使用解析服务处理文件（使用本地文件路径）
+                        result = await parse_service.process_file(local_file_path, successful_results, failed_files, llama_params)
                     finally:
                         ticker.cancel()
                         try:

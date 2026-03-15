@@ -972,17 +972,10 @@ def reparse_document_task(self, file_id, params, username):
                 raise ValueError(f"本地文件不存在: {original_file_path}")
             update_progress(progress=30, log_message=f"使用本地文件: {original_file_path}")
         
-        # 4. 调用 LlamaParse 解析文档
-        update_progress(status="parsing", progress=35, log_message="正在使用 LlamaParse 解析文档...")
+        # 4. 根据 processing_mode 选择解析服务
+        processing_mode = params.get('processing_mode', 'llamaparse')
         
-        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
-        if not api_key:
-            raise ValueError("LlamaIndex API 密钥未配置，无法解析文档")
-        
-        from backend.core.llama_service import LlamaService
-        
-        # 构建 LlamaParse 参数
-        llama_params = {
+        parse_params = {
             'language': params.get('language', ['ch_sim', 'en']),
             'fast_mode': params.get('fast_mode', False),
             'disable_ocr': params.get('disable_ocr', False),
@@ -996,10 +989,20 @@ def reparse_document_task(self, file_id, params, username):
             'polling_interval': params.get('polling_interval', 10)
         }
         
-        llama_service = LlamaService(
-            api_key=api_key,
-            polling_interval=llama_params['polling_interval']
-        )
+        if processing_mode == 'quick':
+            update_progress(status="parsing", progress=35, log_message="正在使用 Quick Process 解析文档...")
+            from backend.core.quick_parse_service import QuickParseService
+            parse_service = QuickParseService()
+        else:
+            update_progress(status="parsing", progress=35, log_message="正在使用 LlamaParse 解析文档...")
+            api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+            if not api_key:
+                raise ValueError("LlamaIndex API 密钥未配置，无法解析文档")
+            from backend.core.llama_service import LlamaService
+            parse_service = LlamaService(
+                api_key=api_key,
+                polling_interval=parse_params['polling_interval']
+            )
         
         successful_results = []
         failed_files = []
@@ -1008,7 +1011,7 @@ def reparse_document_task(self, file_id, params, username):
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(
-                llama_service.process_file(local_file_path, successful_results, failed_files, None)
+                parse_service.process_file(local_file_path, successful_results, failed_files, parse_params)
             )
         finally:
             loop.close()
@@ -1021,7 +1024,8 @@ def reparse_document_task(self, file_id, params, username):
                     error(f"清理临时文件失败: {e}", source="celery_reparse")
         
         if not successful_results:
-            raise ValueError(f"LlamaParse 解析文档失败: {filename}")
+            mode_label = "Quick Process" if processing_mode == "quick" else "LlamaParse"
+            raise ValueError(f"{mode_label} 解析文档失败: {filename}")
         
         file_content = successful_results[0].get('content', '')
         doc_processing_time = successful_results[0].get('processing_time', 0)
@@ -1614,10 +1618,14 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         # 组装 file_paths（使用 OSS object_name）
         file_paths = [oss_object_name]
         
-        # 获取 API 密钥
-        api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
-        if not api_key:
-            raise ValueError("LlamaIndex API 密钥未配置")
+        # 获取 API 密钥（Quick Process 模式不需要 LlamaIndex API 密钥）
+        processing_mode = params.get('processing_mode', 'llamaparse')
+        if processing_mode == 'quick':
+            api_key = None
+        else:
+            api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+            if not api_key:
+                raise ValueError("LlamaIndex API 密钥未配置")
         
         # 3. 异步执行文件处理
         loop = asyncio.new_event_loop()
@@ -1826,18 +1834,18 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 'progress': progress if progress is not None else 0,
                 'current_file': youtube_url,
                 'files_processed': 0,
-                'files_failed': 0,
+                'files_failed': 1 if (status == 'failed') else 0,
                 'total_files': 1,
                 'logs': []
             }
-            
+            if status == 'failed' and log_message:
+                state_data['message'] = log_message
             if log_message:
                 state_data['logs'].append({
                     'timestamp': datetime.now().isoformat(),
-                    'level': 'info',
+                    'level': 'error' if status == 'failed' else 'info',
                     'message': log_message
                 })
-            
             current_task.update_state(
                 state='PROGRESS',
                 meta=state_data

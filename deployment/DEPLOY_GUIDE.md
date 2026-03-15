@@ -613,6 +613,38 @@ YouTube 的 session cookie 会过期（通常 1–2 周），且机房 IP 易触
 
 当前推荐先做 **方案 A**：检测 + 告警 + 管理员上传接口，将「发现失效 → 更新 cookies」半自动化，减少手动 SSH 与改文件的频率。
 
+### YouTube 订阅视频获取：RSS 失败自动回退 YouTube Data API v3
+
+YouTube 已逐步弃用频道 RSS（`/feeds/videos.xml?channel_id=...`），大量频道返回 404。代码已实现 **自动回退（fallback）**：RSS 失败时，若配置了 `YOUTUBE_DATA_API_KEY`，会改用 YouTube Data API v3 拉取视频列表。
+
+#### 配置步骤
+
+1. 在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 创建 **Public data** 类型的 API Key，并在 Library 中启用 **YouTube Data API v3**。
+2. 将 API Key 写入 `deployment/.env.secrets`：
+   ```ini
+   YOUTUBE_DATA_API_KEY=AIzaSy...你的密钥...
+   ```
+3. 重新生成 `.env` 并重启服务：
+   ```bash
+   sudo bash deployment/deploy.sh && sudo ./restart_services.sh
+   ```
+
+#### 工作原理
+
+`fetch_channel_videos()` 先尝试 RSS；若 RSS 返回 404 或空结果，且当前频道标识为 `UC...` 格式的 channel_id，则自动调用 API v3：
+
+1. `channels.list(part=contentDetails)` → 获取 uploads 播放列表 ID（1 quota unit）
+2. `playlistItems.list(part=snippet)` → 获取视频列表（1 quota unit）
+3. `videos.list(part=snippet,statistics,contentDetails)` → 获取完整视频信息（1 quota unit）
+
+返回的数据格式与 RSS 路径完全一致，下游 `YouTubeAdapter` 和 `SubscriptionContentService` 无需任何修改。
+
+#### 配额说明
+
+- 免费额度：**10,000 units/天**，仅对 RSS 失败的频道消耗配额（每频道 3 units）。
+- 14 个频道全部 RSS 失败 ≈ 42 units/次，一天多次运行也远低于上限。
+- 若未配置 `YOUTUBE_DATA_API_KEY`，行为与之前完全一致（RSS 失败则跳过该频道）。
+
 ### PDF/图片在右侧面板无法预览（自动下载或"未能加载 PDF 文档"）
 
 **症状**：文件已上传到 OSS 且处理成功，但在 File List 点击文件后，右侧面板的 Original 标签页无法在线预览 PDF，而是触发浏览器下载或显示"未能加载 PDF 文档"。

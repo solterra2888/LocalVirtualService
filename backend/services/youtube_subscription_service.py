@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 YouTube 订阅服务
-通过 RSS Feed 获取 YouTube 频道视频（无需 YouTube Data API）
+通过 RSS Feed 获取 YouTube 频道视频，RSS 失败时自动回退到 YouTube Data API v3
 """
 
 import os
@@ -40,6 +40,12 @@ def _is_network_unreachable(exc: Exception) -> bool:
         'failed to establish a new connection',
         'newconnectionerror',
     ])
+
+
+def _get_youtube_api_key() -> Optional[str]:
+    """从环境变量读取 YouTube Data API v3 密钥，未配置时返回 None（fallback 不启用）。"""
+    key = os.getenv('YOUTUBE_DATA_API_KEY', '').strip()
+    return key or None
 
 
 class YouTubeSubscriptionService:
@@ -291,6 +297,128 @@ class YouTubeSubscriptionService:
                 'error': f"Failed to parse RSS feed: {str(e)}"
             }
     
+    YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
+    YOUTUBE_API_TIMEOUT = 10
+
+    @staticmethod
+    def _fetch_channel_videos_via_api(
+        channel_id: str,
+        max_items: int,
+        api_key: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        通过 YouTube Data API v3 获取频道最新视频（RSS fallback）。
+
+        调用链：channels.list → playlistItems.list → videos.list
+        共消耗 3 quota units。
+        """
+        base = YouTubeSubscriptionService.YOUTUBE_API_BASE
+        timeout = YouTubeSubscriptionService.YOUTUBE_API_TIMEOUT
+        proxies = _get_proxies()
+        headers = {'Accept': 'application/json'}
+
+        try:
+            # Step 1: channels.list → uploads playlist ID
+            resp = requests.get(
+                f"{base}/channels",
+                params={'part': 'contentDetails', 'id': channel_id, 'key': api_key},
+                headers=headers, timeout=timeout, proxies=proxies,
+            )
+            if resp.status_code == 403:
+                warning("YouTube Data API 配额已用尽或 key 无权限", source="youtube_subscription")
+                return []
+            resp.raise_for_status()
+            channels_data = resp.json()
+            items = channels_data.get('items', [])
+            if not items:
+                warning(f"API v3: 频道 {channel_id} 未找到", source="youtube_subscription")
+                return []
+            uploads_playlist_id = (
+                items[0].get('contentDetails', {})
+                .get('relatedPlaylists', {})
+                .get('uploads')
+            )
+            if not uploads_playlist_id:
+                warning(f"API v3: 频道 {channel_id} 无 uploads 播放列表", source="youtube_subscription")
+                return []
+
+            # Step 2: playlistItems.list → video IDs + basic snippet
+            resp = requests.get(
+                f"{base}/playlistItems",
+                params={
+                    'part': 'snippet',
+                    'playlistId': uploads_playlist_id,
+                    'maxResults': min(max_items, 50),
+                    'key': api_key,
+                },
+                headers=headers, timeout=timeout, proxies=proxies,
+            )
+            resp.raise_for_status()
+            playlist_data = resp.json()
+            playlist_items = playlist_data.get('items', [])
+            if not playlist_items:
+                warning(f"API v3: 播放列表 {uploads_playlist_id} 无视频", source="youtube_subscription")
+                return []
+
+            video_ids = [
+                item['snippet']['resourceId']['videoId']
+                for item in playlist_items
+                if item.get('snippet', {}).get('resourceId', {}).get('videoId')
+            ]
+            if not video_ids:
+                return []
+
+            # Step 3: videos.list → full snippet + statistics + contentDetails
+            resp = requests.get(
+                f"{base}/videos",
+                params={
+                    'part': 'snippet,statistics,contentDetails',
+                    'id': ','.join(video_ids),
+                    'key': api_key,
+                },
+                headers=headers, timeout=timeout, proxies=proxies,
+            )
+            resp.raise_for_status()
+            videos_data = resp.json()
+
+            videos: List[Dict[str, Any]] = []
+            for item in videos_data.get('items', []):
+                snippet = item.get('snippet', {})
+                statistics = item.get('statistics', {})
+                content_details = item.get('contentDetails', {})
+                video_id = item.get('id', '')
+
+                videos.append({
+                    'id': video_id,
+                    'snippet': {
+                        'title': snippet.get('title', ''),
+                        'description': snippet.get('description', ''),
+                        'publishedAt': snippet.get('publishedAt', ''),
+                        'channelId': snippet.get('channelId', channel_id),
+                        'channelTitle': snippet.get('channelTitle', ''),
+                        'thumbnails': snippet.get('thumbnails', {}),
+                    },
+                    'statistics': {
+                        'viewCount': statistics.get('viewCount', '0'),
+                        'likeCount': statistics.get('likeCount', '0'),
+                        'commentCount': statistics.get('commentCount', '0'),
+                    },
+                    'contentDetails': {
+                        'duration': content_details.get('duration', ''),
+                    },
+                })
+
+            info(f"API v3 fallback 成功获取 {len(videos)} 个视频 (channel={channel_id})",
+                 source="youtube_subscription")
+            return videos
+
+        except requests.exceptions.RequestException as e:
+            error(f"API v3 fallback 请求失败: {e}", source="youtube_subscription")
+            return []
+        except (KeyError, IndexError, ValueError) as e:
+            error(f"API v3 fallback 解析响应失败: {e}", source="youtube_subscription")
+            return []
+
     @staticmethod
     def fetch_channel_videos(
         channel_identifier: str,
@@ -307,16 +435,45 @@ class YouTubeSubscriptionService:
             视频列表（原始格式，需要通过 YouTubeAdapter 标准化）
         """
         username = YouTubeSubscriptionService.clean_username(channel_identifier)
-        
-        info(f"获取 YouTube 频道视频: identifier={username}, max_items={max_items}", 
+        is_channel_id = len(username) >= 20 and username.startswith('UC')
+
+        info(f"获取 YouTube 频道视频: identifier={username}, max_items={max_items}",
              source="youtube_subscription")
-        
-        # 确定使用哪个 RSS URL
-        if len(username) >= 20 and username.startswith('UC'):
+
+        # ── 1. 尝试 RSS Feed ─────────────────────────────────────
+        videos = YouTubeSubscriptionService._fetch_channel_videos_via_rss(
+            username, max_items, is_channel_id,
+        )
+
+        if videos:
+            return videos
+
+        # ── 2. RSS 失败 / 空，尝试 YouTube Data API v3 fallback ──
+        if is_channel_id:
+            api_key = _get_youtube_api_key()
+            if api_key:
+                info(f"RSS 未获取到视频，尝试 YouTube Data API v3 fallback (channel={username})",
+                     source="youtube_subscription")
+                videos = YouTubeSubscriptionService._fetch_channel_videos_via_api(
+                    channel_id=username, max_items=max_items, api_key=api_key,
+                )
+                if videos:
+                    return videos
+
+        return []
+
+    @staticmethod
+    def _fetch_channel_videos_via_rss(
+        username: str,
+        max_items: int,
+        is_channel_id: bool,
+    ) -> List[Dict[str, Any]]:
+        """通过 RSS Feed 获取频道视频，失败时返回空列表。"""
+        if is_channel_id:
             rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=username)
         else:
             rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
-        
+
         try:
             proxies = _get_proxies()
             try:
@@ -335,58 +492,48 @@ class YouTubeSubscriptionService:
             if not feed or not hasattr(feed, 'entries'):
                 error(f"无法获取 RSS Feed", source="youtube_subscription")
                 return []
-            
+
             videos = []
-            
+
             for entry in feed.entries[:max_items]:
                 try:
-                    # 提取视频 ID
                     video_id = None
                     if hasattr(entry, 'yt_videoid'):
                         video_id = entry.yt_videoid
                     elif 'link' in entry:
-                        # 从 URL 中提取
                         match = re.search(r'watch\?v=([a-zA-Z0-9_-]{11})', entry.link)
                         if match:
                             video_id = match.group(1)
-                    
+
                     if not video_id:
-                        warning(f"无法提取视频 ID: {entry.get('link', 'unknown')}", 
+                        warning(f"无法提取视频 ID: {entry.get('link', 'unknown')}",
                                source="youtube_subscription")
                         continue
-                    
-                    # 提取缩略图
+
                     thumbnail_url = None
                     if hasattr(entry, 'media_thumbnail') and len(entry.media_thumbnail) > 0:
                         thumbnail_url = entry.media_thumbnail[0].get('url')
-                    
-                    # 如果没有缩略图，用默认格式
                     if not thumbnail_url:
                         thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-                    
-                    # 提取统计数据（如果有）
+
                     view_count = 0
                     like_count = 0
                     if hasattr(entry, 'media_statistics'):
                         view_count = int(entry.media_statistics.get('views', 0))
                     if hasattr(entry, 'media_starrating'):
-                        # 某些 RSS 中有评分信息
                         like_count = int(entry.media_starrating.get('count', 0))
-                    
-                    # 提取频道信息
+
                     channel_id = None
                     channel_name = entry.get('author', 'Unknown')
-                    
+
                     if hasattr(entry, 'yt_channelid'):
                         channel_id = entry.yt_channelid
                     elif hasattr(entry, 'author_detail') and 'href' in entry.author_detail:
-                        # 从 author URL 中提取 channel_id
                         author_url = entry.author_detail['href']
                         match = re.search(r'/channel/([^/]+)', author_url)
                         if match:
                             channel_id = match.group(1)
-                    
-                    # 构建视频数据（YouTube API 兼容格式）
+
                     video_data = {
                         'id': video_id,
                         'snippet': {
@@ -402,22 +549,23 @@ class YouTubeSubscriptionService:
                         'statistics': {
                             'viewCount': str(view_count),
                             'likeCount': str(like_count),
-                            'commentCount': '0'  # RSS 中没有评论数
+                            'commentCount': '0'
                         },
                         'contentDetails': {
-                            'duration': ''  # RSS 中没有时长信息
+                            'duration': ''
                         }
                     }
-                    
+
                     videos.append(video_data)
-                    
+
                 except Exception as e:
                     warning(f"解析视频条目失败: {str(e)}", source="youtube_subscription")
                     continue
-            
-            info(f"成功获取 {len(videos)} 个视频", source="youtube_subscription")
+
+            if videos:
+                info(f"RSS 成功获取 {len(videos)} 个视频", source="youtube_subscription")
             return videos
-            
+
         except Exception as e:
             error(f"获取 YouTube 视频失败: {str(e)}", source="youtube_subscription")
             return []
