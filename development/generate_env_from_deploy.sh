@@ -1,13 +1,13 @@
 #!/bin/bash
 # ===========================================
-# 本地开发：根据 deployment 配置生成项目根目录 .env（无需 root）
-# 与 deploy.sh 使用同一套 deploy.conf / .env.secrets / config.defaults.env
+# 本地开发：根据 development 配置生成项目根目录 .env（无需 root）
+# 读取 development/deploy.conf + development/.env.secrets + deployment/config.defaults.env
 # ===========================================
 # 使用步骤：
-#   1. cp deployment/deploy.conf.example deployment/deploy.conf
-#   2. cp deployment/.env.secrets.example deployment/.env.secrets
-#   3. 按本地环境修改 deploy.conf（如 DB_HOST=127.0.0.1, SERVER_HOST=127.0.0.1）
-#   4. 按需修改 .env.secrets 中的密钥
+#   1. cp development/deploy.conf.example development/deploy.conf
+#   2. cp development/.env.secrets.example development/.env.secrets
+#   3. 按本地环境修改 development/deploy.conf
+#   4. 按需修改 development/.env.secrets 中的密钥
 #   5. 运行本脚本: bash development/generate_env_from_deploy.sh
 #   6. 运行: ./development/start_local_dev.sh
 # ===========================================
@@ -16,24 +16,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DEV_DIR="$SCRIPT_DIR"
 DEPLOY_DIR="$PROJECT_DIR/deployment"
 
-DEPLOY_CONF="$DEPLOY_DIR/deploy.conf"
-SECRETS_FILE="$DEPLOY_DIR/.env.secrets"
+DEPLOY_CONF="$DEV_DIR/deploy.conf"
+SECRETS_FILE="$DEV_DIR/.env.secrets"
 DEFAULTS_FILE="$DEPLOY_DIR/config.defaults.env"
 ENV_FILE="$PROJECT_DIR/.env"
 
 for f in "$DEPLOY_CONF" "$SECRETS_FILE" "$DEFAULTS_FILE"; do
     if [ ! -f "$f" ]; then
         echo "❌ 缺少配置文件: $f"
-        echo "   请从 deployment 下的 .example 复制并填写，例如："
-        echo "   cp deployment/deploy.conf.example deployment/deploy.conf"
-        echo "   cp deployment/.env.secrets.example deployment/.env.secrets"
+        echo "   请从 .example 复制并填写，例如："
+        echo "   cp development/deploy.conf.example development/deploy.conf"
+        echo "   cp development/.env.secrets.example development/.env.secrets"
         exit 1
     fi
 done
 
-echo "📂 加载 deployment 配置（仅生成 .env，无需 root）..."
+echo "📂 加载本地开发配置（仅生成 .env，无需 root）..."
 
 load_conf() {
     local file="$1"
@@ -88,8 +89,8 @@ echo "📝 生成 .env -> $ENV_FILE"
 cat > "$ENV_FILE" << ENVEOF
 # ============================================================
 # 此文件由 development/generate_env_from_deploy.sh 生成（本地开发）
-# 修改请编辑: deployment/deploy.conf
-#              deployment/.env.secrets
+# 修改请编辑: development/deploy.conf
+#              development/.env.secrets
 #              deployment/config.defaults.env
 # 然后重新运行: bash development/generate_env_from_deploy.sh
 # ============================================================
@@ -161,4 +162,4 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$DEFAULTS_FILE"
 
 echo "✅ .env 已生成，可运行: ./development/start_local_dev.sh"
-echo "   请确保 development/dev.conf 已配置（conda 路径等）： cp development/dev.conf.example development/dev.conf"
+echo "   请确保 development/dev.conf 已配置（conda 路径等）：cp development/dev.conf.example development/dev.conf"

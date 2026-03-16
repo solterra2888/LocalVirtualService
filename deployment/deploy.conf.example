@@ -74,5 +74,5 @@ CELERY_DATA_CONCURRENCY=2
 UVICORN_WORKERS=2
 
 # ===== 其他可选变量 =====
-# 更多可选配置在 deployment/.env.secrets 中设置（合并进 .env）。
+# 更多可选配置在同目录的 .env.secrets 中设置（合并进 .env）。
 # 例如：OSS 私有桶且 YouTube AI 转写报 FILE_DOWNLOAD_FAILED 时，在 .env.secrets 中增加 OSS_ASR_PUBLIC_READ=true

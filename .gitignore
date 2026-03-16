@@ -14,6 +14,8 @@ deployment/generated/
 deployment/deploy.conf
 deployment/.env.secrets
 development/dev.conf
+development/deploy.conf
+development/.env.secrets
 development/.dev_pids
 development/.dev_redis_pid
 development/.env.redis.local

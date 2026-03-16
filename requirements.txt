@@ -33,6 +33,10 @@ numpy==1.26.2
 openpyxl==3.1.2
 Pillow==12.1.1
 
+# Quick Process 本地文档解析（PDF / Word，需 Python >=3.10）
+pymupdf4llm>=1.27
+mammoth>=1.8.0
+
 # 系统监控
 psutil==5.9.6
 

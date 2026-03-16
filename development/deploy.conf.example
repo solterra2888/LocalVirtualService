@@ -1,0 +1,54 @@
+# ===========================================
+# 本地开发 部署配置（每台开发机不同）
+# 复制为 deploy.conf 并根据本地环境修改：
+#   cp development/deploy.conf.example development/deploy.conf
+# ===========================================
+# 此文件仅用于本地开发环境。
+# 正式服务器部署请使用 deployment/deploy.conf。
+
+# ===== 项目标识 =====
+APP_NAME=GuanHe Capital
+APP_VERSION=2.0.0
+
+# ===== 本地路径 =====
+# 当前开发机项目目录（与 workspace 一致）
+PROJECT_DIR=/Users/kevinliu/Documents/GuanHeProjects/guanhetech
+LOG_DIR=/Users/kevinliu/Documents/GuanHeProjects/guanhetech/logs
+
+# ===== 网络/端口 =====
+SERVER_HOST=127.0.0.1
+WEBAPP_PORT=8000
+SCHEDULER_PORT=8001
+FRONTEND_PORT=3000
+
+# ===== 数据库（密码在 development/.env.secrets 的 DB_PASSWORD）=====
+
+# 本地 PostgreSQL: 127.0.0.1
+# 远程共享数据库: 填写远程 IP
+# DB_HOST=127.0.0.1
+
+# 当前连接远程共享数据库
+DB_HOST=43.99.37.76
+DB_PORT=5432
+DB_NAME=guanhe_database
+DB_USER=postgres
+
+# ===== Redis =====
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+# ===== RC Agent (Dify 等外部 AI 服务) =====
+RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
+
+# ===== 代理（可选，本地一般不需要）=====
+# HTTP_PROXY=http://127.0.0.1:7890
+# HTTPS_PROXY=http://127.0.0.1:7890
+# YOUTUBE_PROXY=http://127.0.0.1:7890
+
+# ===== YouTube 认证（可选）=====
+# YOUTUBE_COOKIES_FILE=/path/to/youtube-cookies.txt
+
+# ===== 性能调优（本地可降低并发数）=====
+CELERY_AI_CONCURRENCY=2
+CELERY_DATA_CONCURRENCY=1
+UVICORN_WORKERS=1

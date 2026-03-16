@@ -1116,22 +1116,8 @@ def reparse_document_task(self, file_id, params, username):
         except Exception:
             pass
         
-        current_task.update_state(
-            state='FAILURE',
-            meta={
-                'error': str(error_msg),
-                'status': 'failed',
-                'file_id': file_id
-            }
-        )
-        
-        # 返回失败结果而不是抛出异常（避免Celery序列化错误）
-        return {
-            'task_id': self.request.id,
-            'status': 'failed',
-            'error': error_msg,
-            'file_id': file_id
-        }
+        # 重新抛出异常，使 Celery 正确标记为 FAILURE 并序列化异常信息（避免 exc_type KeyError）
+        raise RuntimeError(error_msg)
 
 
 @app.task(bind=True, name='upload_and_transcribe_audio', queue='file_processing')

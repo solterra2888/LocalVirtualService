@@ -220,23 +220,58 @@ npm run deploy
 
 ---
 
-## 4. 配置部署参数（两种场景）
+## 4. 配置部署参数
 
-这是最关键的一步。整个项目的配置集中在 `deployment/` 目录下的几个文件中，最终都会汇总到项目根目录的 `.env` 中。  
-典型有两种使用场景：
+这是最关键的一步。项目最终需要根目录下的 `.env` 文件来运行。根据使用场景不同，配置文件的位置和生成方式完全独立：
 
-- **场景 A：正式服务器部署（推荐本节 4.1–4.3 + 第 5–7 章）**
-- **场景 B：本地单机开发（只需生成 `.env` + 使用 `development` 脚本）**
+| | 正式服务器部署（4.A） | 本地开发（4.B） |
+| --- | --- | --- |
+| 基础配置 | `deployment/deploy.conf` | `development/deploy.conf` |
+| 密钥配置 | `deployment/.env.secrets` | `development/.env.secrets` |
+| 默认参数 | `deployment/config.defaults.env`（共用） | `deployment/config.defaults.env`（共用） |
+| 生成脚本 | `sudo bash deployment/deploy.sh` | `bash development/generate_env_from_deploy.sh` |
+| 生成产物 | `.env` + systemd services + Nginx 配置 | 仅 `.env` |
 
-> ✅ 二者共享同一套 `deployment/deploy.conf` 与 `deployment/.env.secrets` 配置，只是生成 `.env` 的方式不同。
+> 两套配置完全独立，互不影响。正式服务器和本地开发机各自维护自己的 `deploy.conf` 和 `.env.secrets`。
+
+#### 配置文件层级说明
+
+正式服务器和本地开发使用各自独立的配置文件，仅共享 `config.defaults.env`（应用默认参数）。
+
+**正式服务器：**
+
+```
+deployment/deploy.conf         ← 第 1 层：服务器基础设施（路径、IP、端口）
+deployment/.env.secrets         ← 第 2 层：敏感密钥（密码、API Key）
+deployment/config.defaults.env  ← 第 3 层：应用默认参数（通用，不需要改）
+         ↓
+    deploy.sh 合并
+         ↓
+    ┌────┼────────────────┐
+    ↓    ↓                ↓
+  .env  *.service     web.conf → /opt/nginx/conf/vhosts/
+        (4个)          (Docker Nginx 配置)
+```
+
+**本地开发：**
+
+```
+development/deploy.conf         ← 第 1 层：本地环境参数（路径、IP、端口）
+development/.env.secrets         ← 第 2 层：本地密钥（密码、API Key）
+deployment/config.defaults.env   ← 第 3 层：应用默认参数（共用，不需要改）
+         ↓
+    generate_env_from_deploy.sh 合并
+         ↓
+       .env（仅此一个文件，无 systemd / Nginx）
+```
 
 ---
 
-### 4.A 正式服务器部署：使用 `deployment/deploy.sh`（需要 root）
+### 4.A 正式服务器部署
 
-服务器上推荐的流程是：编辑 `deploy.conf` / `.env.secrets` → 运行 `sudo bash deployment/deploy.sh`，由脚本自动生成 `.env`、systemd 服务与 Nginx 配置。确保根目录有 `.env` 文件。
+服务器上的配置文件位于 `deployment/` 目录。编辑后运行 `deploy.sh`，由脚本自动生成 `.env`、systemd 服务与 Nginx 配置。
 
-### 4.1 编辑部署配置（通用于服务器 & 本地）
+#### 4.A.1 编辑部署配置
 
 ```bash
 cd deployment
@@ -275,12 +310,9 @@ RC_AGENT_BASE_URL=http://localhost:81/v1/chat-messages
 # HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
-### 4.2 编辑密钥配置（通用于服务器 & 本地）
-
-密钥文件**仅放在 `deployment/` 目录**（部署脚本只读取此处），请勿在项目根目录创建 `.env.secrets`。
+#### 4.A.2 编辑密钥配置
 
 ```bash
-# 确保当前在 deployment 目录（若在 4.1 已 cd deployment 则无需再执行）
 cd deployment
 cp .env.secrets.example .env.secrets
 vim .env.secrets
@@ -309,15 +341,15 @@ JWT_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 echo $JWT_SECRET_KEY
 ```
 
-### 4.3 运行部署脚本（仅正式服务器需要）
+#### 4.A.3 运行部署脚本
 
 ```bash
-sudo bash deploy.sh
+sudo bash deployment/deploy.sh
 ```
 
 脚本会自动完成：
 
-- 合并三层配置，生成 `.env`
+- 合并 `deployment/deploy.conf` + `deployment/.env.secrets` + `deployment/config.defaults.env`，生成 `.env`
 - 从模板渲染 4 个 systemd service 文件（rc-webapp、rc-celery-ai、rc-celery-data、rc-scheduler）
 - 安装 service 文件到 `/etc/systemd/system/`
 - 同步 `web.conf` 到 Docker Nginx 配置卷 `/opt/nginx/conf/vhosts/`
@@ -325,52 +357,53 @@ sudo bash deploy.sh
 
 ---
 
-### 4.B 本地开发：只生成 `.env`，不改 systemd / Nginx
+### 4.B 本地开发
 
-在**本地开发机**上，一般不需要安装 systemd 服务和 Nginx，只需让根目录有一份完整的 `.env`，然后用 `development` 目录下的脚本启动即可。推荐步骤如下：
+本地开发的配置文件位于 `development/` 目录（与服务器的 `deployment/` 互不干扰）。只需生成 `.env`，不涉及 systemd / Nginx。
 
-1. **准备开发机专用配置**
+#### 4.B.1 准备本地配置文件
 
 ```bash
-cd /opt/guanhetech
+cd /path/to/guanhetech
 
-# 1) 本地 Python 环境等（development/dev.conf）
+# 1) Python 环境配置
 cp development/dev.conf.example development/dev.conf
 vim development/dev.conf
 # 设置 DEV_CONDA_ENV=/你的/conda/路径，例如:
-#   DEV_CONDA_ENV=/opt/miniconda3/envs/guanhe
+#   DEV_CONDA_ENV=/Users/你的用户名/miniconda3/envs/guanhe
 
-# 2) 复用 deployment 的示例配置（与服务器同一结构）
-cp deployment/deploy.conf.example deployment/deploy.conf
-cp deployment/.env.secrets.example deployment/.env.secrets
-vim deployment/deploy.conf
-# 建议本地修改：
-#   PROJECT_DIR=/opt/guanhetech（或你的实际工程路径）
-#   DB_HOST=127.0.0.1
+# 2) 本地部署参数（development 目录下的独立配置）
+cp development/deploy.conf.example development/deploy.conf
+vim development/deploy.conf
+# 按本地环境修改，例如:
+#   PROJECT_DIR=/Users/你的用户名/Documents/guanhetech
+#   DB_HOST=127.0.0.1（本地 PostgreSQL）或远程 IP（共享数据库）
 #   REDIS_HOST=127.0.0.1
 #   SERVER_HOST=127.0.0.1
 
-vim deployment/.env.secrets
-# 按需填写本地使用的 DB 密码、Redis 密码、各类 API Key（可与服务器不同）
+# 3) 本地密钥配置（development 目录下的独立配置）
+cp development/.env.secrets.example development/.env.secrets
+vim development/.env.secrets
+# 填写本地使用的 DB 密码、Redis 密码、各类 API Key
+# 注意：本地无密码 Redis 需将 REDIS_PASSWORD 留空或注释掉
 ```
 
-2. **使用本地脚本生成 `.env`（无需 root）**
+#### 4.B.2 生成 `.env`（无需 root）
 
 ```bash
-# 仍在项目根目录 /opt/guanhetech
 bash development/generate_env_from_deploy.sh
 ```
 
 该脚本会：
 
-- 读取：`deployment/deploy.conf`、`deployment/.env.secrets`、`deployment/config.defaults.env`
+- 读取：`development/deploy.conf`、`development/.env.secrets`、`deployment/config.defaults.env`
 - 生成：项目根目录 `.env`（结构与服务器上 `deploy.sh` 生成的基本一致）
 - 不进行任何 systemd / Nginx 操作，适合本地开发环境
 
-3. **启动本地开发环境**
+#### 4.B.3 启动本地开发环境
 
 ```bash
-cd /opt/guanhetech
+cd /path/to/guanhetech
 ./development/start_local_dev.sh
 ```
 
@@ -528,20 +561,20 @@ grep DB_ /opt/guanhetech/.env
 
 或「上传文档文件失败」并带有相同 AUTH 相关错误。
 
-**原因**：Celery 提交任务时使用 Redis 作为 broker。`.env` 中的 `REDIS_URL` 含有密码（由 `deployment/.env.secrets` 的 `REDIS_PASSWORD` 生成），但**本地 Redis 未设置密码**（例如用 `redis-server` 直接启动或由 `start_local_dev.sh` 启动的无密码实例）。Redis 服务端收到 AUTH 请求却未配置密码，因而报错。
+**原因**：Celery 提交任务时使用 Redis 作为 broker。`.env` 中的 `REDIS_URL` 含有密码（由 `.env.secrets` 的 `REDIS_PASSWORD` 生成），但**本地 Redis 未设置密码**（例如用 `redis-server` 直接启动或由 `start_local_dev.sh` 启动的无密码实例）。Redis 服务端收到 AUTH 请求却未配置密码，因而报错。
 
 **解决方案**（任选其一）：
 
-1. **推荐（本地开发）**：若本地 Redis 无密码，在 `deployment/.env.secrets` 中将 `REDIS_PASSWORD` **留空或删除**，然后重新生成 `.env`：
+1. **推荐（本地开发）**：若本地 Redis 无密码，在 `development/.env.secrets` 中将 `REDIS_PASSWORD` **留空或注释掉**，然后重新生成 `.env`：
    ```bash
-   # 编辑 deployment/.env.secrets，将 REDIS_PASSWORD=xxx 改为空或注释掉
+   # 编辑 development/.env.secrets，将 REDIS_PASSWORD=xxx 改为空或注释掉
    bash development/generate_env_from_deploy.sh
    ```
    生成的 `REDIS_URL` 将变为 `redis://127.0.0.1:6379/0`，即可连接无密码 Redis。
 
 2. **使用 start_local_dev.sh 启动**：脚本会先检查 Redis；若不可用会启动本地无密码 Redis，并写入 `development/.env.redis.local`（`REDIS_URL=redis://127.0.0.1:6379/0`）。之后启动的 Web 与 Celery 会先加载 `.env` 再加载该文件，从而覆盖为无密码连接。若你未通过该脚本启动（例如直接用 IDE 跑 uvicorn），则不会加载 `.env.redis.local`，需采用方案 1。
 
-3. **生产/服务器**：若 Redis 已配置密码，请确保 `deployment/.env.secrets` 中 `REDIS_PASSWORD` 与 Redis 的 `requirepass` 一致，并重新运行 `deploy.sh` 或 `generate_env_from_deploy.sh` 以更新 `.env`。
+3. **生产/服务器**：若 Redis 已配置密码，请确保 `deployment/.env.secrets` 中 `REDIS_PASSWORD` 与 Redis 的 `requirepass` 一致，并重新运行 `sudo bash deployment/deploy.sh` 以更新 `.env`。
 
 ### 前端页面空白或 API 404
 
@@ -588,7 +621,7 @@ Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下�
 | **3. PO Token（GVS）**                | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                                                                              |
 | **4. ffmpeg 缺失**                    | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                                                                                |
 | **5. OSS 私有桶 403**                  | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                                                                                      |
-| **6. OSS 私有桶 FILE_DOWNLOAD_FAILED** | 已使用签名 URL 仍报 `FILE_DOWNLOAD_FAILED`、ASR 未返回有效转写                                                 | Fun-ASR 可能无法通过 OSS 签名 URL 拉取。在 **deployment/.env.secrets** 中增加一行 `OSS_ASR_PUBLIC_READ=true`，然后重新运行 `sudo bash deployment/deploy.sh` 生成 `.env`。上传用于 ASR 的音频时会将该对象 ACL 设为 public-read，并改用公网 URL 提交 ASR。仅该次上传的音频对象会公网可读。 |
+| **6. OSS 私有桶 FILE_DOWNLOAD_FAILED** | 已使用签名 URL 仍报 `FILE_DOWNLOAD_FAILED`、ASR 未返回有效转写                                                 | Fun-ASR 可能无法通过 OSS 签名 URL 拉取。在对应环境的 `.env.secrets`（服务器：`deployment/.env.secrets`；本地：`development/.env.secrets`）中增加一行 `OSS_ASR_PUBLIC_READ=true`，然后重新生成 `.env`。上传用于 ASR 的音频时会将该对象 ACL 设为 public-read，并改用公网 URL 提交 ASR。仅该次上传的音频对象会公网可读。 |
 
 
 #### 常见错误速查
@@ -596,7 +629,7 @@ Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下�
 - **Sign in to confirm you're not a bot** → Cookie 失效或未配置。重新导出 `youtube-cookies.txt` 并更新服务器上 `config/youtube-cookies.txt`，必要时重启 Celery。
 - **Invalid js_runtimes format** → yt-dlp Python API 要求 `js_runtimes` 为 `{'node': {'path': '...'}}` 的 dict 格式，已修复。
 - **transcript 为空且 transcript_data.asr_data 为 null** → 多为 OSS 403（见上表第 5 项），或 DashScope 子任务失败，检查日志中的 `FILE_403_FORBIDDEN` 并确认使用 `signed_url`。
-- **FILE_DOWNLOAD_FAILED（与 OSS 私有桶有关）** → 若已使用签名 URL 仍报此错，说明 Fun-ASR 可能不支持通过签名 URL 拉取。在 **deployment/.env.secrets** 中增加 `OSS_ASR_PUBLIC_READ=true`，重新执行 `deploy.sh` 后重启服务（见上表第 6 项）。
+- **FILE_DOWNLOAD_FAILED（与 OSS 私有桶有关）** → 若已使用签名 URL 仍报此错，说明 Fun-ASR 可能不支持通过签名 URL 拉取。在对应环境的 `.env.secrets` 中增加 `OSS_ASR_PUBLIC_READ=true`，重新生成 `.env` 后重启服务（见上表第 6 项）。
 
 #### Cookie 过期与长期维护
 
@@ -620,13 +653,18 @@ YouTube 已逐步弃用频道 RSS（`/feeds/videos.xml?channel_id=...`），大�
 #### 配置步骤
 
 1. 在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 创建 **Public data** 类型的 API Key，并在 Library 中启用 **YouTube Data API v3**。
-2. 将 API Key 写入 `deployment/.env.secrets`：
+2. 将 API Key 写入对应环境的 `.env.secrets`：
+   - 服务器：`deployment/.env.secrets`
+   - 本地：`development/.env.secrets`
    ```ini
    YOUTUBE_DATA_API_KEY=AIzaSy...你的密钥...
    ```
 3. 重新生成 `.env` 并重启服务：
    ```bash
+   # 服务器
    sudo bash deployment/deploy.sh && sudo ./restart_services.sh
+   # 本地
+   bash development/generate_env_from_deploy.sh
    ```
 
 #### 工作原理
@@ -694,29 +732,6 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 
 
 **要点**：Word/Excel 在线预览依赖 **公网可访问的 HTTPS 文件地址**。若使用 OSS 且未配置自定义域名，必须依赖后端生成的**签名 URL**；配置了 `OSS_CUSTOM_DOMAIN` 时，会直接使用该域名的公共 URL，同样满足 Office 预览要求。
-
----
-
-## 附录: 配置文件层级说明
-
-```
-deployment/deploy.conf        ← 第 1 层：服务器基础设施（路径、IP、端口）
-deployment/.env.secrets        ← 第 2 层：敏感密钥（密码、API Key）
-deployment/config.defaults.env ← 第 3 层：应用默认参数（通用，不需要改）
-         ↓
-    deploy.sh 合并
-         ↓
-    ┌────┼────────────────┐
-    ↓    ↓                ↓
-  .env  *.service     web.conf → /opt/nginx/conf/vhosts/
-        (4个)          (Docker Nginx 配置)
-```
-
-修改任何配置后，都只需运行：
-
-```bash
-sudo bash deployment/deploy.sh && sudo ./restart_services.sh
-```
 
 ---
 

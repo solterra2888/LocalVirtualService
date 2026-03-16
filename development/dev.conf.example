@@ -5,19 +5,20 @@
 # ===========================================
 #
 # 本地启动还需项目根目录的 .env（DB、Redis、API 密钥等）。
-# 可复用 deployment 的配置模板，无需 root：
-#   cp deployment/deploy.conf.example deployment/deploy.conf
-#   cp deployment/.env.secrets.example deployment/.env.secrets
-#   按本地修改 deploy.conf（如 DB_HOST=127.0.0.1, SERVER_HOST=127.0.0.1）
+# 请使用 development 目录下的独立配置：
+#   cp development/deploy.conf.example development/deploy.conf
+#   cp development/.env.secrets.example development/.env.secrets
+#   按本地环境修改 development/deploy.conf 和 development/.env.secrets
 #   bash development/generate_env_from_deploy.sh
 # 然后执行: ./development/start_local_dev.sh
 # ===========================================
 
 # ===== Python 环境（与 deployment 环境名 guanhe 一致，路径按本机 conda 安装位置修改）=====
 # conda 环境根目录（不含 /bin/python），common.sh 会使用 $DEV_CONDA_ENV/bin/python
-# macOS 示例（Miniconda）:
-DEV_CONDA_ENV=/Users/kevinliu/miniconda3/envs/rcTool
-# macOS 备选（Anaconda）: /Users/你的用户名/anaconda3/envs/guanhe
+# 可用 which python 在激活环境后查看实际路径，去掉末尾的 /bin/python 即为 DEV_CONDA_ENV
+# macOS Anaconda 示例:
+DEV_CONDA_ENV=/opt/anaconda3/envs/rcTool
+# macOS Miniconda 备选: /Users/你的用户名/miniconda3/envs/rcTool
 # Linux 示例: /opt/miniconda3/envs/guanhe 或 $HOME/miniconda3/envs/guanhe
 
 # ===== 远程调度器（可选）=====
