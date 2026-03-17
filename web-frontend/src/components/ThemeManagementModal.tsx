@@ -33,6 +33,8 @@ import type { ColumnsType } from 'antd/es/table';
 
 import { newsAPI } from '../services/news';
 import type { NewsTheme, CreateThemeParams, UpdateThemeParams } from '../types/news';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -53,6 +55,7 @@ interface ThemeManagementState {
 }
 
 const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCancel, onSuccess }) => {
+  const { themeMode } = useDashboardSettings();
   const [form] = Form.useForm();
   const [keywordForm] = Form.useForm();
   const [state, setState] = useState<ThemeManagementState>({
@@ -589,7 +592,10 @@ const ThemeManagementModal: React.FC<ThemeManagementModalProps> = ({ open, onCan
         ]}
         width={1000}
         style={{ top: 20 }}
-        bodyStyle={{ maxHeight: '80vh', overflow: 'auto' }}
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, maxHeight: '80vh', overflow: 'auto' },
+        }}
       >
         <div style={{ marginBottom: 16 }}>
           <Space wrap>

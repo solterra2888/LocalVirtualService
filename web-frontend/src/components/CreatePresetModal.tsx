@@ -14,6 +14,8 @@ import { SaveOutlined, GlobalOutlined, StockOutlined } from '@ant-design/icons';
 import { NewsFilterPreset, FilterConfig } from '../types/newsPresets';
 import { ThemeFilterState } from '../types/themes';
 import FilterConfigEditor from './FilterConfigEditor';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { TextArea } = Input;
 const { TabPane } = Tabs;
@@ -41,6 +43,7 @@ const CreatePresetModal: React.FC<CreatePresetModalProps> = ({
   initialFilters,
   editingPreset
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [filterConfig, setFilterConfig] = useState<FilterConfig>({});
@@ -179,6 +182,7 @@ const CreatePresetModal: React.FC<CreatePresetModalProps> = ({
       width={800}
       okText={isEditing ? 'Update' : 'Save'}
       cancelText="Cancel"
+      styles={getModalStyles(themeMode)}
     >
       <Tabs defaultActiveKey="basic">
         <TabPane tab="Basic Info" key="basic">

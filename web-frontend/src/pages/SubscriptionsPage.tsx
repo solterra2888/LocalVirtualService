@@ -52,6 +52,7 @@ import {
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import {
   subscriptionsAPI,
   Subscription,
@@ -648,6 +649,7 @@ const SubscriptionsPage: React.FC = () => {
         onCancel={handleModalCancel}
         width={600}
         okText={editingSubscription ? 'Update' : 'Create'}
+        styles={getModalStyles(themeMode)}
       >
         <Form form={form} layout="vertical">
           <Form.Item

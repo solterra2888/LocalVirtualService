@@ -61,6 +61,7 @@ import {
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
@@ -119,23 +120,6 @@ const CARD_STYLE_BEHANCE_DARK = {
 };
 
 // Modal Behance 样式（Dark 模式与 CARD_STYLE_BEHANCE 一致）
-const getModalStyles = (isDark: boolean, colors: typeof THEME_COLORS.light | typeof THEME_COLORS.dark) => {
-  if (!isDark) return {};
-  const cardStyle = CARD_STYLE_BEHANCE_DARK;
-  return {
-    content: {
-      ...cardStyle,
-      backgroundColor: colors.cardBg,
-    },
-    header: {
-      color: colors.text,
-      borderBottomColor: colors.cardBorder,
-    },
-    body: {
-      color: colors.text,
-    },
-  };
-};
 
 interface FileItem {
   id: string;
@@ -1433,7 +1417,7 @@ const FilesPageInner: React.FC = () => {
       cancelText: 'Cancel',
       okType: 'danger',
       centered: true,
-      styles: getModalStyles(isDark, themeColors),
+      styles: getModalStyles(themeMode),
       onOk: async () => {
         try {
           setDeletingExecutions(true);
@@ -2261,7 +2245,7 @@ const FilesPageInner: React.FC = () => {
           setAiAnalysisVisible(false);
           setAiAnalysisData(null);
         }}
-        styles={modalStyles}
+        styles={getModalStyles(themeMode)}
         footer={[
           <Button key="cancel" onClick={() => {
             setAiAnalysisVisible(false);
@@ -2481,7 +2465,7 @@ const FilesPageInner: React.FC = () => {
       width={1000}
       centered
       style={{ top: 20 }}
-      styles={modalStyles}
+      styles={getModalStyles(themeMode)}
     >
       {selectedFileContent ? (
         <div>
@@ -2670,8 +2654,6 @@ const FilesPageInner: React.FC = () => {
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
     return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
   };
-
-  const modalStyles = getModalStyles(isDark, themeColors);
 
   return (
       <div className="files-page-layout" style={{ backgroundColor: themeColors.pageBg }}>
@@ -3130,7 +3112,7 @@ const FilesPageInner: React.FC = () => {
           okType="danger"
           confirmLoading={deletingExecutions}
           centered
-          styles={modalStyles}
+          styles={getModalStyles(themeMode)}
         >
           {executionToDelete && (
             <p>Are you sure you want to delete the following execution record? This action cannot be undone.</p>
@@ -3153,7 +3135,7 @@ const FilesPageInner: React.FC = () => {
           confirmLoading={renameLoading}
           centered
           destroyOnClose
-          styles={modalStyles}
+          styles={getModalStyles(themeMode)}
         >
           {executionToRename && (
             <div>
@@ -3187,7 +3169,7 @@ const FilesPageInner: React.FC = () => {
             setAvailableFiles([]);
             setSelectedExecutionForFiles(null);
           }}
-          styles={modalStyles}
+          styles={getModalStyles(themeMode)}
           footer={[
             <Button key="close" onClick={() => {
               setFileSelectionVisible(false);
@@ -3279,6 +3261,8 @@ const FilesPageInner: React.FC = () => {
           confirmLoading={sharingInProgress}
           okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
           width={520}
+          centered
+          styles={getModalStyles(themeMode)}
         >
           <div style={{ marginBottom: 16 }}>
             <Text strong>File: </Text>
@@ -4015,6 +3999,7 @@ const ContentMarkdownView: React.FC<{
   onContentSaved?: (fileId: number, newContent: string) => void;
   selectedFileForView: any;
 }> = ({ execution, themeColors, isDark, contentDetailData, contentDetailLoading, onLoadContent, onContentSaved, selectedFileForView }) => {
+  const themeMode = isDark ? 'dark' : 'light';
   const { addTask } = useFileProcessing();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -4222,8 +4207,10 @@ const ContentMarkdownView: React.FC<{
       cancelText="Cancel"
       confirmLoading={reparsing}
       width={700}
+      centered
       styles={{
-        body: { maxHeight: '70vh', overflowY: 'auto' }
+        ...getModalStyles(themeMode),
+        body: { ...getModalStyles(themeMode).body, maxHeight: '70vh', overflowY: 'auto' },
       }}
     >
       <Segmented
@@ -4976,6 +4963,7 @@ const AudioDiarizationView: React.FC<{
   isDark: boolean;
   onSpeakerUpdated?: () => void;
 }> = ({ fileContent, themeColors, isDark, onSpeakerUpdated }) => {
+  const themeMode = isDark ? 'dark' : 'light';
   const [localAsrData, setLocalAsrData] = useState(fileContent.asr_with_diarization);
   const [editingSpeaker, setEditingSpeaker] = useState<{ id: number; currentLabel: string } | null>(null);
   const [newSpeakerLabel, setNewSpeakerLabel] = useState('');
@@ -5461,7 +5449,8 @@ const AudioDiarizationView: React.FC<{
         okText="save"
         cancelText="cancel"
         confirmLoading={savingLabel}
-        styles={getModalStyles(isDark, themeColors)}
+        centered
+        styles={getModalStyles(themeMode)}
       >
         <div style={{ marginTop: '16px' }}>
           <div style={{ marginBottom: '8px', fontSize: '14px', color: themeColors.textSecondary }}>

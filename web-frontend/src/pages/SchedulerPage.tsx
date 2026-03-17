@@ -49,6 +49,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
+import { getModalStyles } from '../utils/modalStyles';
 import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
 import { useAuthStore } from '../store/authStore';
@@ -1448,21 +1449,7 @@ const SchedulerPage: React.FC = () => {
         cancelText="Cancel"
         width={800}
         destroyOnClose
-        styles={{
-          content: {
-            borderRadius: 12,
-            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.12)',
-            border: `1px solid ${colors.cardBorder}`,
-            backgroundColor: colors.cardBg,
-          },
-          header: {
-            borderBottomColor: colors.cardBorder,
-            color: colors.text,
-          },
-          body: {
-            color: colors.text,
-          },
-        }}
+        styles={getModalStyles(themeMode)}
         okButtonProps={{
           style: {
             borderRadius: 10,
@@ -1807,21 +1794,7 @@ const SchedulerPage: React.FC = () => {
         }}
         okText="Save"
         cancelText="Cancel"
-        styles={{
-          content: {
-            borderRadius: 12,
-            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.12)',
-            border: `1px solid ${colors.cardBorder}`,
-            backgroundColor: colors.cardBg,
-          },
-          header: {
-            borderBottomColor: colors.cardBorder,
-            color: colors.text,
-          },
-          body: {
-            color: colors.text,
-          },
-        }}
+        styles={getModalStyles(themeMode)}
         okButtonProps={{
           style: {
             borderRadius: 10,

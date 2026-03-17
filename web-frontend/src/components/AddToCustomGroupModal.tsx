@@ -3,6 +3,7 @@ import { Modal, Form, Input, Select, Button, Space, message, Divider, Tag, Color
 import { PlusOutlined, FolderOutlined } from '@ant-design/icons';
 import type { Color } from 'antd/es/color-picker';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import { dashboardAPI, CustomGroup } from '../services/dashboard';
 
 const { Option } = Select;
@@ -140,21 +141,7 @@ const AddToCustomGroupModal: React.FC<AddToCustomGroupModalProps> = ({
     setNewGroupColor(color.toHexString());
   };
 
-  const modalStyles = isDark
-    ? {
-        content: {
-          borderRadius: 12,
-          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-          border: CARD_STYLE_BEHANCE_DARK.border,
-          backgroundColor: colors.cardBg,
-        },
-        header: {
-          color: colors.text,
-          borderBottomColor: colors.cardBorder,
-        },
-        body: { color: colors.text },
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   return (
     <Modal

@@ -6,6 +6,7 @@ import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, Upl
 import { filesAPI } from '../services/files';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 
 const { Option } = Select;
@@ -202,33 +203,10 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
     onCancel();
   };
 
-  const modalStyles = isDark
-    ? {
-        header: {
-          background: colors.cardBg,
-          color: colors.text,
-          borderBottom: `1px solid ${colors.cardBorder}`,
-        } as React.CSSProperties,
-        content: {
-          background: colors.cardBg,
-          borderRadius: CARD_STYLE_BEHANCE_DARK.borderRadius,
-          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-          border: CARD_STYLE_BEHANCE_DARK.border,
-        } as React.CSSProperties,
-        body: {
-          background: colors.cardBg,
-          color: colors.text,
-          maxHeight: '85vh',
-          overflowY: 'auto' as const,
-        } as React.CSSProperties,
-      }
-    : {
-        content: {
-          borderRadius: CARD_STYLE_BEHANCE.borderRadius,
-          boxShadow: CARD_STYLE_BEHANCE.boxShadow,
-          border: `1px solid ${colors.cardBorder}`,
-        } as React.CSSProperties,
-      };
+  const modalStyles = {
+    ...getModalStyles(themeMode),
+    body: { ...getModalStyles(themeMode).body, maxHeight: '85vh', overflowY: 'auto' as const },
+  };
 
   return (
     <ConfigProvider
@@ -271,10 +249,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
           WebkitBackdropFilter: 'blur(6px)',
         }}
         styles={modalStyles}
-        bodyStyle={{
-          maxHeight: '85vh',
-          overflowY: 'auto',
-        }}
       >
       <Form form={form} layout="vertical" style={{ padding: '12px 0' }}>
         {/* 文件上传区域：选中不上传，点击 Start Processing 才上传 */}

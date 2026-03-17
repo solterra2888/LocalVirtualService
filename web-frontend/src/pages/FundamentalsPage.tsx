@@ -53,6 +53,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { fundamentalsAPI, fundamentalsUtils, CompanyFundamentalsResponse, CompanyOfficer, OutstandingShares, InsiderTransaction, CompanyFundamentalsUpdateResponse, FinancialStatementsExportRequest } from '../services/fundamentals';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Text, Paragraph } = Typography;
@@ -3306,6 +3307,7 @@ const FundamentalsPage: React.FC = () => {
         onCancel={() => setExportDialogVisible(false)}
         confirmLoading={exportLoading}
         width={600}
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={form}

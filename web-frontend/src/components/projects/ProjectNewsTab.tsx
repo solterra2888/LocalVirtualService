@@ -31,6 +31,8 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { ProjectNewsTracking, NewsTrackingCreateRequest, NewsTrackingUpdateRequest } from '../../types/project';
 import { api } from '../../services/api';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../../utils/modalStyles';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -69,6 +71,7 @@ const removeProjectNews = async (
 };
 
 const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions }) => {
+  const { themeMode } = useDashboardSettings();
   const [newsList, setNewsList] = useState<ProjectNewsTracking[]>([]);
   const [loading, setLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -310,6 +313,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
         width={700}
         okText="Add"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={addForm}
@@ -395,6 +399,7 @@ const ProjectNewsTab: React.FC<ProjectNewsTabProps> = ({ projectId, permissions 
         width={600}
         okText="Save"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={editForm}

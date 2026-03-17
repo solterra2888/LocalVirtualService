@@ -23,6 +23,8 @@ import {
   BarChartOutlined,
   DatabaseOutlined
 } from '@ant-design/icons';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Title, Text } = Typography;
 const { Panel } = Collapse;
@@ -61,6 +63,7 @@ const TaskStatusModal: React.FC<TaskStatusModalProps> = ({
   onCancel,
   taskData
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -240,8 +243,12 @@ const TaskStatusModal: React.FC<TaskStatusModalProps> = ({
       width={900}
       footer={null}
       destroyOnClose
+      styles={{
+        ...getModalStyles(themeMode),
+        body: { ...getModalStyles(themeMode).body, maxHeight: '70vh', overflow: 'auto' },
+      }}
     >
-      <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+      <div>
         {/* 任务基本信息 */}
         <Card size="small" style={{ marginBottom: 16 }}>
           <Descriptions 

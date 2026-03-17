@@ -29,6 +29,11 @@ echo ""
 echo "   按 Ctrl+C 停止服务"
 echo ""
 
+# macOS fork safety fix: psycopg2 (libpq/OpenSSL) causes SIGSEGV in forked
+# child processes due to macOS ObjC runtime restrictions. This env var disables
+# the check and is harmless on Linux.
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+
 exec "$PYTHON_CMD" -m celery -A backend.celery_app worker \
     --loglevel="${CELERY_LOG_LEVEL:-info}" \
     --concurrency="${CELERY_CONCURRENCY:-2}" \

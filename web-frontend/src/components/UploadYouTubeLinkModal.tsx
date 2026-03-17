@@ -3,6 +3,7 @@ import { Modal, Input, Button, message, Space, ConfigProvider, theme as antdThem
 import { LinkOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 
 interface UploadYouTubeLinkModalProps {
@@ -144,23 +145,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
     onCancel();
   };
 
-  const modalStyles = isDark
-    ? {
-        header: {
-          background: '#1a2234',
-          color: '#e0e6f1',
-          borderBottom: '1px solid #364152',
-        } as React.CSSProperties,
-        content: {
-          background: '#1a2234',
-          boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
-        } as React.CSSProperties,
-        body: {
-          background: '#1a2234',
-          color: '#e0e6f1',
-        } as React.CSSProperties,
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   return (
     <ConfigProvider

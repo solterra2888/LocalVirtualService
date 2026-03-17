@@ -57,6 +57,7 @@ import MarkdownRenderer from '../components/MarkdownRenderer';
 import DeleteNewsByDateModal from '../components/DeleteNewsByDateModal';
 import { useAuthStore } from '../store/authStore';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles, MODAL_DARK_BG } from '../utils/modalStyles';
 import { getAnalysisContent, getAllAnalysisResults, getPreferredAnalysisContent, getPreferredSummaryTemplate } from '../utils/newsAnalysisHelper';
 import { 
   getClassificationFromAnalysis, 
@@ -1760,33 +1761,27 @@ const NewsPage: React.FC = () => {
           width={800}
           className="analysis-details-modal"
           styles={{
+            ...getModalStyles(themeMode),
             body: {
+              ...getModalStyles(themeMode).body,
               height: ANALYSIS_MODAL_BODY_HEIGHT,
               minHeight: '480px',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              backgroundColor: colors.cardBg,
-              color: colors.text,
             },
-            content: {
-              borderRadius: 12,
-              ...(isDark
-                ? {
-                    backgroundColor: colors.cardBg,
-                    border: `1px solid ${colors.cardBorder}`,
-                    boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-                  }
-                : {
-                    boxShadow: CARD_STYLE_BEHANCE.boxShadow,
-                    border: `1px solid ${colors.cardBorder}`,
-                  }),
-            },
-            header: {
-              color: colors.text,
-              borderBottomColor: colors.cardBorder,
-              backgroundColor: colors.cardBg,
-            },
+            ...(isDark ? {
+              wrapper: { backdropFilter: 'brightness(0.7)' },
+              content: {
+                backgroundColor: MODAL_DARK_BG,
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
+              },
+              header: {
+                backgroundColor: MODAL_DARK_BG,
+                borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+              },
+            } : {}),
           }}
         >
           {!state.selectedNews ? (
@@ -2060,6 +2055,7 @@ const NewsPage: React.FC = () => {
         footer={null}
         width={600}
         destroyOnClose
+        styles={getModalStyles(themeMode)}
       >
         <ThemeFilterPanel
           onFilterChange={handleThemeFilterChange}

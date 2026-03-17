@@ -46,6 +46,8 @@ import {
   updateMember,
   removeMember
 } from '../../services/projects';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../../utils/modalStyles';
 
 const { Option } = Select;
 
@@ -62,6 +64,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
   permissions,
   onUpdate
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
@@ -345,6 +348,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
         width={600}
         okText="Send Invite"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={inviteForm}
@@ -428,6 +432,7 @@ const ProjectMembersTab: React.FC<ProjectMembersTabProps> = ({
         width={500}
         okText="Save"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={editForm}

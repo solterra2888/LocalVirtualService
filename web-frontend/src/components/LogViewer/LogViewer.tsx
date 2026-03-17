@@ -14,6 +14,8 @@ import {
   EyeOutlined
 } from '@ant-design/icons';
 import { LogEntry, LogLevel } from '../../types/logger';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../../utils/modalStyles';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -107,6 +109,7 @@ const LogViewer: React.FC<LogViewerProps> = ({
   onFilterSourceChange,
   onFilterLevelChange,
 }) => {
+  const { themeMode } = useDashboardSettings();
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // 过滤日志并限制显示数量
@@ -326,6 +329,7 @@ const LogViewer: React.FC<LogViewerProps> = ({
         </Button>
       ]}
       width={1000}
+      styles={getModalStyles(themeMode)}
     >
       {(onFilterSourceChange || onFilterLevelChange) && renderFilters()}
       <div style={{ maxHeight: 600, overflowY: 'auto' }} ref={logContainerRef}>

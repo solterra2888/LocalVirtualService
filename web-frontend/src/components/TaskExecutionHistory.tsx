@@ -46,6 +46,8 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { schedulerAPI, ExecutionLog, ExecutionSummaryData } from '../services/scheduler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 dayjs.extend(relativeTime);
 
@@ -81,6 +83,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   height = 600,
   refreshTrigger
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [dateRange] = useState<[Dayjs, Dayjs]>([
@@ -876,6 +879,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         onCancel={() => setDetailVisible(false)}
         footer={null}
         width={700}
+        styles={getModalStyles(themeMode)}
       >
         {selectedLog && (
           <Descriptions column={1} bordered size="small">

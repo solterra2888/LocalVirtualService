@@ -65,6 +65,7 @@ import {
   FileCategory
 } from '../../types/project';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../../utils/modalStyles';
 
 const { TextArea } = Input;
 
@@ -683,6 +684,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
         width={800}
         okText="创建"
         cancelText="取消"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={createForm}
@@ -922,6 +924,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
         width={800}
         okText="保存"
         cancelText="取消"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={editForm}
@@ -1070,6 +1073,7 @@ const ProjectMilestonesTab: React.FC<ProjectMilestonesTabProps> = ({
           setCurrentMilestone(null);
         }}
         width={800}
+        styles={getModalStyles(themeMode)}
         footer={[
           <Button key="close" onClick={() => setViewModalVisible(false)}>
             关闭

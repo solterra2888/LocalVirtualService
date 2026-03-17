@@ -30,6 +30,7 @@ import {
   CameraOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { getModalStyles } from '../utils/modalStyles';
 import { useAuthStore } from '../store/authStore';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -500,33 +501,10 @@ const Layout: React.FC = () => {
           backdropFilter: 'blur(6px)',
           WebkitBackdropFilter: 'blur(6px)',
         }}
-        styles={
-          themeMode === 'dark'
-            ? {
-                content: {
-                  background: '#1a2234',
-                  border: '1px solid #364152',
-                  borderRadius: '12px',
-                  boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
-                },
-                body: {
-                  padding: '24px 16px',
-                  background: '#1a2234',
-                  color: '#e0e6f1',
-                  borderRadius: '12px',
-                },
-              }
-            : undefined
-        }
-        bodyStyle={
-          themeMode === 'dark'
-            ? undefined
-            : {
-                padding: '24px 16px',
-                background: '#fff',
-                borderRadius: '12px',
-              }
-        }
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, padding: '24px 16px' },
+        }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <Button
@@ -656,16 +634,7 @@ const Layout: React.FC = () => {
         confirmLoading={profileSaving}
         width={400}
         centered
-        styles={
-          themeMode === 'dark'
-            ? {
-                content: { background: '#1a2234', border: '1px solid #364152' },
-                header: { background: '#1a2234', color: '#e0e6f1' },
-                body: { background: '#1a2234', color: '#e0e6f1' },
-                footer: { background: '#1a2234', borderTop: '1px solid #364152' },
-              }
-            : undefined
-        }
+        styles={getModalStyles(themeMode)}
       >
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: '16px 0' }}>
           <div

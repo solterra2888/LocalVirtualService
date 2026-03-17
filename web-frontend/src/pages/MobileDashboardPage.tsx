@@ -14,6 +14,8 @@ import {
   resolveBaseSymbol,
   type ExchangeFilterValue
 } from '../utils/watchlistExchange';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Option } = Select;
 
@@ -37,6 +39,7 @@ interface StockWithPrice extends WatchlistItem {
  * 管理股票列表和详情页的显示
  */
 const MobileDashboardPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
   const [watchlistGroups, setWatchlistGroups] = useState<WatchlistGroup[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [pricesLoading, setPricesLoading] = useState<boolean>(false);
@@ -348,6 +351,7 @@ const MobileDashboardPage: React.FC = () => {
         onCancel={handleCloseActionsModal}
         footer={null}
         destroyOnClose
+        styles={getModalStyles(themeMode)}
       >
         <Button
           block

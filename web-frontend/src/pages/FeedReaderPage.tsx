@@ -15,7 +15,6 @@ import {
   Modal,
   Form,
   Input,
-  Select,
   message,
   Typography,
   Tooltip,
@@ -49,6 +48,7 @@ import {
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import {
   subscriptionsAPI,
   Subscription,
@@ -61,9 +61,29 @@ import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
 
+/** 播放新消息提示音（Web Audio API，无需音频文件） */
+function playNewItemsNotificationSound() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 800;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.15);
+  } catch {
+    // 静默失败，不影响消息提示
+  }
+}
+
 const { Sider, Content } = Layout;
 const { Text, Paragraph } = Typography;
-const { Option } = Select;
 
 // 与 Files Page 一致：语义化色板 + Behance 风格（参考 FILES_PAGE_STYLE_REFERENCE.md）
 const THEME_COLORS = {
@@ -108,30 +128,55 @@ const CARD_STYLE_BEHANCE_DARK = {
   border: '1px solid rgba(255, 255, 255, 0.06)',
 };
 
-const getModalStyles = (isDark: boolean, colors: typeof THEME_COLORS.light | typeof THEME_COLORS.dark) => {
-  if (!isDark) return {};
-  const cardStyle = CARD_STYLE_BEHANCE_DARK;
-  return {
-    content: {
-      ...cardStyle,
-      backgroundColor: colors.cardBg,
-    },
-    header: {
-      color: colors.text,
-      borderBottomColor: colors.cardBorder,
-    },
-    body: {
-      color: colors.text,
-    },
-  };
-};
 
-// 频道类型配置
+// 频道类型配置（Add Feed 弹窗中按图标选择）
 const CHANNEL_TYPES = [
   { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
   { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
   { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
 ];
+
+/** Add Feed 弹窗：Feed 源图标选择器（替代下拉） */
+const FeedSourceIconPicker: React.FC<{
+  value?: string;
+  onChange?: (v: string) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled }) => (
+  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+    {CHANNEL_TYPES.map((type) => {
+      const selected = value === type.value;
+      const isDisabled = type.disabled || disabled;
+      return (
+        <Tooltip key={type.value} title={type.disabled ? 'Coming Soon' : type.label}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => !isDisabled && onChange?.(type.value)}
+            onKeyDown={(e) => !isDisabled && (e.key === 'Enter' || e.key === ' ') && onChange?.(type.value)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 80,
+              height: 72,
+              borderRadius: 12,
+              border: `2px solid ${selected ? type.color : 'transparent'}`,
+              backgroundColor: selected ? `${type.color}14` : undefined,
+              color: type.color,
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+              opacity: isDisabled ? 0.5 : 1,
+              transition: 'border-color .2s, background-color .2s',
+            }}
+          >
+            <span style={{ fontSize: 28, marginBottom: 4 }}>{type.icon}</span>
+            <span style={{ fontSize: 12, color: 'inherit', opacity: 0.9 }}>{type.label}</span>
+          </div>
+        </Tooltip>
+      );
+    })}
+  </div>
+);
 
 const FeedReaderPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
@@ -209,8 +254,9 @@ const FeedReaderPageInner: React.FC = () => {
           // 更新订阅列表
           setSubscriptions(newSubscriptions);
           
-          // 如果有新内容，显示提示
+          // 如果有新内容，显示提示并播放提示音
           if (newUnreadCount > 0) {
+            playNewItemsNotificationSound();
             message.info({
               content: `🔔 ${newUnreadCount} new item${newUnreadCount > 1 ? 's' : ''} available`,
               duration: 5,
@@ -1849,25 +1895,15 @@ const FeedReaderPageInner: React.FC = () => {
         okText="Add"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        styles={getModalStyles(isDark, themeColors)}
+        styles={getModalStyles(themeMode)}
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="channel_type"
-            label="Feed Type"
-            rules={[{ required: true, message: 'Please select feed type' }]}
+            label="Feed Source"
+            rules={[{ required: true, message: 'Please select a feed source' }]}
           >
-            <Select placeholder="Select feed type">
-              {CHANNEL_TYPES.map((type) => (
-                <Option key={type.value} value={type.value} disabled={type.disabled}>
-                  <Space>
-                    {type.icon}
-                    <span>{type.label}</span>
-                    {type.disabled && <Tag color="orange">Coming Soon</Tag>}
-                  </Space>
-                </Option>
-              ))}
-            </Select>
+            <FeedSourceIconPicker />
           </Form.Item>
 
           <Form.Item
@@ -1925,7 +1961,7 @@ const FeedReaderPageInner: React.FC = () => {
           editForm.resetFields();
         }}
         okText="Save"
-        styles={getModalStyles(isDark, themeColors)}
+        styles={getModalStyles(themeMode)}
       >
         <Form form={editForm} layout="vertical">
           <Form.Item

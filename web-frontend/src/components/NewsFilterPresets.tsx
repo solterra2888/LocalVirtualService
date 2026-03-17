@@ -38,6 +38,8 @@ import {
   FilterConfig,
   CreatePresetRequest
 } from '../types/newsPresets';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -53,6 +55,7 @@ const NewsFilterPresets: React.FC<NewsFilterPresetsProps> = ({
   onApplyFilter,
   currentFilter
 }) => {
+  const { themeMode } = useDashboardSettings();
   // State
   const [presets, setPresets] = useState<NewsFilterPreset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -381,6 +384,7 @@ const NewsFilterPresets: React.FC<NewsFilterPresetsProps> = ({
         okText="保存"
         cancelText="取消"
         width={500}
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={form}

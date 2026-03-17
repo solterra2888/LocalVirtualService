@@ -29,6 +29,8 @@ import {
   getAllAnalysisResults,
   getAnalysisContent
 } from '../utils/newsAnalysisHelper';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import {
   getClassificationFromAnalysis,
   getClassificationTags,
@@ -63,6 +65,7 @@ const NewsFeedTimeline: React.FC<NewsFeedTimelineProps> = ({
   loadingMore = false,
   fusedThemesMap = new Map()
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
   const [expandedNewsItems, setExpandedNewsItems] = useState<Set<number>>(new Set());
@@ -381,6 +384,7 @@ const NewsFeedTimeline: React.FC<NewsFeedTimelineProps> = ({
           )
         ]}
         width={800}
+        styles={getModalStyles(themeMode)}
       >
         {selectedNews && (
           <>

@@ -48,6 +48,7 @@ import promptTemplateService, {
 import VariableHelper from '../components/VariableHelper';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -688,16 +689,7 @@ const PromptTemplatesPage: React.FC = () => {
         onCancel={() => setIsEditorVisible(false)}
         width={1200}
         footer={null}
-        styles={isDark ? {
-          content: {
-            borderRadius: 12,
-            boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-            border: CARD_STYLE_BEHANCE_DARK.border,
-            backgroundColor: colors.cardBg,
-          },
-          header: { color: colors.text, borderBottomColor: colors.cardBorder },
-          body: { color: colors.text },
-        } : {}}
+        styles={getModalStyles(themeMode)}
       >
         <Row gutter={16}>
           <Col span={16}>
@@ -1322,6 +1314,7 @@ const PromptTemplatesPage: React.FC = () => {
         cancelText="Cancel"
         width={600}
         destroyOnClose
+        styles={getModalStyles(themeMode)}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <Alert

@@ -26,6 +26,8 @@ import {
   PlayCircleOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, CronPreset, TimezoneOption } from '../services/scheduler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -46,6 +48,7 @@ const CronScheduleModal: React.FC<CronScheduleModalProps> = ({
   taskType = 'eodhd_news',
   defaultParams = {}
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [cronPresets, setCronPresets] = useState<CronPreset[]>([]);
@@ -241,6 +244,7 @@ const CronScheduleModal: React.FC<CronScheduleModalProps> = ({
         </Button>
       ]}
       destroyOnClose
+      styles={getModalStyles(themeMode)}
     >
       <div style={{ marginBottom: 16 }}>
         <Alert

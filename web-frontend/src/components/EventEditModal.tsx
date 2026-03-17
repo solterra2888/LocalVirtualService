@@ -14,6 +14,7 @@ import {
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import { 
   ChartEvent, 
   EventType, 
@@ -172,21 +173,7 @@ const EventEditModal: React.FC<EventEditModalProps> = ({
     }
   };
 
-  const modalStyles = isDark
-    ? {
-        content: {
-          borderRadius: 12,
-          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-          border: CARD_STYLE_BEHANCE_DARK.border,
-          backgroundColor: colors.cardBg,
-        },
-        header: {
-          color: colors.text,
-          borderBottomColor: colors.cardBorder,
-        },
-        body: { color: colors.text },
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   return (
     <Modal

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Modal, Form, Input, Switch, message, ConfigProvider, theme as antdTheme } from 'antd';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 interface UserModalProps {
   visible: boolean;
@@ -96,23 +97,7 @@ const UserModal: React.FC<UserModalProps> = ({
     onCancel();
   };
 
-  const modalStyles = isDark
-    ? {
-        content: {
-          borderRadius: 12,
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-          border: '1px solid rgba(255, 255, 255, 0.06)',
-          backgroundColor: colors.cardBg,
-        },
-        header: {
-          color: colors.text,
-          borderBottomColor: colors.cardBorder,
-        },
-        body: {
-          color: colors.text,
-        },
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   const inputStyle = isDark && colors.inputBg
     ? { backgroundColor: colors.inputBg }

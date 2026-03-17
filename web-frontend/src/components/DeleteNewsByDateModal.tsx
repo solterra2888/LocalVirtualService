@@ -20,6 +20,8 @@ import {
 } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import { newsAPI } from '../services/news';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -45,6 +47,7 @@ const DeleteNewsByDateModal: React.FC<DeleteNewsByDateModalProps> = ({
   onClose,
   onSuccess
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [previewStats, setPreviewStats] = useState<DeleteStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -140,6 +143,7 @@ const DeleteNewsByDateModal: React.FC<DeleteNewsByDateModalProps> = ({
       onCancel={handleClose}
       width={700}
       footer={null}
+      styles={getModalStyles(themeMode)}
     >
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
         {/* 警告信息 */}

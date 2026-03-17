@@ -45,6 +45,7 @@ import { theme as antdTheme } from 'antd';
 import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
+import { MODAL_DARK_BG, MODAL_DARK_BORDER } from '../utils/modalStyles';
 import { 
   getClassificationFromAnalysis, 
   getClassificationTags, 
@@ -3338,18 +3339,18 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            ...(themeMode === 'dark' ? { backgroundColor: '#252d3d' } : {}),
+            ...(themeMode === 'dark' ? { backgroundColor: MODAL_DARK_BG } : {}),
           },
           ...(themeMode === 'dark' ? {
             wrapper: { backdropFilter: 'brightness(0.7)' },
             content: {
-              backgroundColor: '#252d3d',
-              border: `1px solid ${colors.cardBorder}`,
+              backgroundColor: MODAL_DARK_BG,
+              border: `1px solid ${MODAL_DARK_BORDER}`,
               boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
             },
             header: {
-              backgroundColor: '#252d3d',
-              borderBottomColor: colors.headerBorder,
+              backgroundColor: MODAL_DARK_BG,
+              borderBottomColor: MODAL_DARK_BORDER,
             },
           } : {}),
         }}

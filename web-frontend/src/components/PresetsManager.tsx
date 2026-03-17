@@ -28,6 +28,8 @@ import { newsPresetsAPI } from '../services/newsPresets';
 import { NewsFilterPreset, CreatePresetRequest, UpdatePresetRequest, FilterConfig } from '../types/newsPresets';
 import { useAuthStore } from '../store/authStore';
 import type { ColumnsType } from 'antd/es/table';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { TextArea } = Input;
 const { TabPane } = Tabs;
@@ -41,6 +43,7 @@ const PresetsManager: React.FC<PresetsManagerProps> = ({
   visible,
   onClose
 }) => {
+  const { themeMode } = useDashboardSettings();
   const { user } = useAuthStore();
   const [presets, setPresets] = useState<NewsFilterPreset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -339,6 +342,7 @@ const PresetsManager: React.FC<PresetsManagerProps> = ({
         footer={null}
         width={1200}
         style={{ top: 20 }}
+        styles={getModalStyles(themeMode)}
       >
         <div style={{ marginBottom: 16 }}>
           <Space>
@@ -379,6 +383,7 @@ const PresetsManager: React.FC<PresetsManagerProps> = ({
         onOk={handleCreatePreset}
         width={800}
         okText="Create"
+        styles={getModalStyles(themeMode)}
       >
         <Tabs defaultActiveKey="basic">
           <TabPane tab="Basic Info" key="basic">
@@ -440,6 +445,7 @@ const PresetsManager: React.FC<PresetsManagerProps> = ({
         onOk={handleUpdatePreset}
         okText="Update"
         width={800}
+        styles={getModalStyles(themeMode)}
       >
         <Tabs defaultActiveKey="basic">
           <TabPane tab="Basic Info" key="basic">

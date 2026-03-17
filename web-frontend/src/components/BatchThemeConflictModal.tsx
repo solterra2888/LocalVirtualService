@@ -8,6 +8,8 @@ import React from 'react';
 import { Modal, Button, Table, Typography, Space, Alert, Checkbox, Tag, Collapse, Statistic, Row, Col, Progress, message } from 'antd';
 import { ExclamationCircleOutlined, CheckCircleOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -56,6 +58,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
   onClose,
   onResolve
 }) => {
+  const { themeMode } = useDashboardSettings();
   // 为每个冲突主题维护选中的 tickers
   const [selectedTickersMap, setSelectedTickersMap] = React.useState<Record<string, string[]>>({});
   const [resolving, setResolving] = React.useState(false);
@@ -408,6 +411,7 @@ const BatchThemeConflictModal: React.FC<BatchThemeConflictModalProps> = ({
       width={1200}
       footer={null}
       style={{ top: 20 }}
+      styles={getModalStyles(themeMode)}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="large">
         {/* 全局统计 */}

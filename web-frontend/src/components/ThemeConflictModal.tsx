@@ -8,6 +8,8 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Checkbox, Table, Alert, Space, Typography, Tag, Divider, Button } from 'antd';
 import { CheckCircleOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Text, Title } = Typography;
 
@@ -43,6 +45,7 @@ const ThemeConflictModal: React.FC<ThemeConflictModalProps> = ({
   newTickers,
   loading = false
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   
   // 计算ticker分类
@@ -209,6 +212,7 @@ const ThemeConflictModal: React.FC<ThemeConflictModalProps> = ({
       width={800}
       confirmLoading={loading}
       okButtonProps={{ disabled: selectedTickers.length === 0 }}
+      styles={getModalStyles(themeMode)}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="large">
         {/* 冲突信息 */}

@@ -55,6 +55,7 @@ import ProjectFilesTab from '../components/projects/ProjectFilesTab';
 import ProjectMembersTab from '../components/projects/ProjectMembersTab';
 import ProjectSettingsTab from '../components/projects/ProjectSettingsTab';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 
 const { Title, Text } = Typography;
 
@@ -542,6 +543,7 @@ const ProjectsPage: React.FC = () => {
         width={700}
         okText="Create"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={form}

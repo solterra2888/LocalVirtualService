@@ -29,6 +29,8 @@ import dayjs from 'dayjs';
 import { api } from '../../services/api';
 
 import { ProjectFile, ProjectFileCreateRequest } from '../../types/project';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../../utils/modalStyles';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -63,6 +65,7 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
   projectId,
   permissions
 }) => {
+  const { themeMode } = useDashboardSettings();
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -302,6 +305,7 @@ const ProjectFilesTab: React.FC<ProjectFilesTabProps> = ({
         width={600}
         okText="Add"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <Form
           form={form}

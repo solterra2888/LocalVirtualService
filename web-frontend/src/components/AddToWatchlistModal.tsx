@@ -20,6 +20,7 @@ import {
   StarOutlined
 } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import { dashboardAPI, type StockSearchResult } from '../services/dashboard';
 
 const { Text } = Typography;
@@ -164,21 +165,7 @@ const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
   };
 
 
-  const modalStyles = isDark
-    ? {
-        content: {
-          borderRadius: 12,
-          boxShadow: CARD_STYLE_BEHANCE_DARK.boxShadow,
-          border: CARD_STYLE_BEHANCE_DARK.border,
-          backgroundColor: colors.cardBg,
-        },
-        header: {
-          color: colors.text,
-          borderBottomColor: colors.cardBorder,
-        },
-        body: { color: colors.text },
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   return (
     <Modal

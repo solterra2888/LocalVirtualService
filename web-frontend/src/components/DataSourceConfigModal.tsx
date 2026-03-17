@@ -35,6 +35,7 @@ import {
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import CronExpressionGuide from './CronExpressionGuide';
 
 const { Title, Text } = Typography;
@@ -2363,6 +2364,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       open={open}
       onCancel={handleCancel}
       width={800}
+      styles={getModalStyles(themeMode)}
       footer={
         <div style={{ textAlign: 'right' }}>
           <Space>

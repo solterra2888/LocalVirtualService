@@ -85,6 +85,7 @@ import {
   getDescriptionSourceLabel
 } from '../types/investmentThemes';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import ThemeConflictModal from '../components/ThemeConflictModal';
@@ -214,18 +215,7 @@ const InvestmentThemesPageInner: React.FC = () => {
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
   const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
-  const modalStyles = isDark
-    ? {
-        content: {
-          borderRadius: 12,
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-          border: '1px solid rgba(255, 255, 255, 0.06)',
-          backgroundColor: colors.cardBg,
-        },
-        header: { color: colors.text, borderBottomColor: colors.cardBorder },
-        body: { color: colors.text },
-      }
-    : undefined;
+  const modalStyles = getModalStyles(themeMode);
 
   const [state, setState] = useState<PageState>({
     loading: false,

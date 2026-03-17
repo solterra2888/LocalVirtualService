@@ -32,6 +32,7 @@ import {
 } from '@ant-design/icons';
 import { tasksAPI } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
+import { getModalStyles } from '../utils/modalStyles';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
@@ -346,17 +347,7 @@ const TasksPage: React.FC = () => {
 
 
 
-  const modalContentStyle = {
-    borderRadius: 12,
-    boxShadow: isDark ? CARD_STYLE_BEHANCE_DARK.boxShadow : CARD_STYLE_BEHANCE.boxShadow,
-    border: isDark ? CARD_STYLE_BEHANCE_DARK.border : CARD_STYLE_BEHANCE.border,
-    backgroundColor: colors.cardBg,
-  };
-  const modalStyles = {
-    content: modalContentStyle,
-    header: { color: colors.text, borderBottomColor: colors.cardBorder },
-    body: { color: colors.text },
-  };
+  const modalStyles = getModalStyles(themeMode);
 
   const renderTaskForm = () => (
     <Modal

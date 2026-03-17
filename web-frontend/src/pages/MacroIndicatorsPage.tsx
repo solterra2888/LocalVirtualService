@@ -26,6 +26,7 @@ import dayjs from 'dayjs';
 import { marketsAPI, MacroIndicator, CountryInfo, IndicatorInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { getModalStyles } from '../utils/modalStyles';
 import CountryFlag from '../components/CountryFlag';
 
 const { Title, Text } = Typography;
@@ -395,6 +396,7 @@ const MacroIndicatorsPage: React.FC = () => {
         width={600}
         okText="Export"
         cancelText="Cancel"
+        styles={getModalStyles(themeMode)}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">
