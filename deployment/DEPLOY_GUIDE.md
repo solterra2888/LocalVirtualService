@@ -712,6 +712,14 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 
 **要点**：本地开发时需确保后端 `ENV=development`（或未设置，默认 development），且前端 iframe 会加载 `http://localhost:8000/api/files/serve/...?token=...`，因此后端 8000 必须已启动。
 
+### 远程部署后 PDF 预览显示 "localhost refused to connect"（Word/Excel 正常）
+
+**症状**：按本指南在远程服务器部署后，Upload files 模块中 Word、Excel 可预览，但 PDF 无法预览，浏览器提示 "localhost refused to connect"。
+
+**原因**：后端根据 `ENV` 判断是否为开发环境。未设置 `ENV=production` 时默认为 `development`，会将 PDF/图片的预览地址从相对路径 `/api/files/serve/{file_id}` 改写为 `http://localhost:8000/api/files/serve/...`，以便本地开发时 iframe 直连后端。在远程部署下，该 URL 被返回给用户浏览器，浏览器会请求**用户本机**的 localhost，导致连接被拒绝。Word/Excel 使用 OSS 签名 URL（公网地址），不受此影响。
+
+**解决方案**：部署时需设置 `ENV=production`。已在 `deployment/config.defaults.env` 中默认加入 `ENV=production`，重新执行 `sudo bash deployment/deploy.sh` 后生成的 `.env` 会包含该变量。若已部署且未重新执行 deploy，可手动在项目根目录 `.env` 中增加一行 `ENV=production`，然后重启后端服务（如 `systemctl restart rc-webapp`）。确保 Nginx 已将 `/api` 代理到后端，PDF 预览即可正常。
+
 ### Word/Excel 在右侧 Original 面板无法预览（显示 "An error occurred"）
 
 **症状**：本地开发时 Word/Excel 可预览，部署到远程服务器后，点击文件卡片，右侧 Original 标签页显示 "An error occurred - We're sorry, but for some reason we can't open this for you."

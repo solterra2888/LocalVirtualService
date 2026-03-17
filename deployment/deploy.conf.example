@@ -49,6 +49,8 @@ RC_AGENT_BASE_URL=http://123.207.51.162/v1/chat-messages
 # YOUTUBE_PROXY=http://127.0.0.1:7890
 
 # ===== YouTube 认证（解决反机器人检测，二选一）=====
+
+# YOUTUBE_COOKIES_FILE=/opt/guanhetech/config/youtube-cookies.txt
 #
 # 方案一（推荐）：浏览器导出的 Netscape 格式 cookies.txt
 #   操作步骤：

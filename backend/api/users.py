@@ -18,6 +18,7 @@ from backend.auth.jwt_utils import get_current_user, get_current_admin_user, get
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.avatar import resolve_avatar_url
 from backend.services.oss_service import OSSService
 
 router = APIRouter()
@@ -51,7 +52,7 @@ async def get_users(
             is_admin=user.get('is_admin', False),
             created_at=user.get('created_at'),
             last_login=user.get('last_login'),
-            avatar_url=user.get('avatar_url')
+            avatar_url=resolve_avatar_url(user.get('avatar_url'))
         )
         for user in users
     ]
@@ -98,7 +99,7 @@ async def create_user(
             is_admin=user_info.get('is_admin', False),
             created_at=user_info.get('created_at'),
             last_login=user_info.get('last_login'),
-            avatar_url=user_info.get('avatar_url')
+            avatar_url=resolve_avatar_url(user_info.get('avatar_url'))
         )
         
     except Exception as e:
@@ -159,7 +160,7 @@ async def update_my_profile(
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at'),
         last_login=user_info.get('last_login'),
-        avatar_url=user_info.get('avatar_url')
+        avatar_url=resolve_avatar_url(user_info.get('avatar_url'))
     )
 
 
@@ -196,13 +197,15 @@ async def upload_avatar(
         if not result.get('success'):
             raise HTTPException(status_code=500, detail=result.get('error', '上传失败'))
 
-        avatar_url = result.get('signed_url') or result.get('public_url')
-
+        # 私有 Bucket：数据库存 object_name，返回给前端时再生成签名 URL，避免链接过期
+        object_name = result.get('object_name')
         db_conn_params = get_database_config()
         user_auth = UserAuth(db_conn_params)
-        user_auth.update_user(current_user.user_id, avatar_url=avatar_url)
+        user_auth.update_user(current_user.user_id, avatar_url=object_name)
 
-        return {"avatar_url": avatar_url}
+        # 响应中返回当前可用的签名 URL（7 天内有效）
+        avatar_url = resolve_avatar_url(object_name)
+        return {"avatar_url": avatar_url or result.get('signed_url') or result.get('public_url')}
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -221,7 +224,7 @@ async def get_shareable_users(
     all_users = user_auth.get_users_list(limit=500, offset=0)
     
     return [
-        {"id": u["id"], "username": u["username"], "avatar_url": u.get("avatar_url")}
+        {"id": u["id"], "username": u["username"], "avatar_url": resolve_avatar_url(u.get("avatar_url"))}
         for u in all_users
         if u["id"] != current_user.user_id
     ]
@@ -253,7 +256,7 @@ async def get_user(
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at'),
         last_login=user_info.get('last_login'),
-        avatar_url=user_info.get('avatar_url')
+        avatar_url=resolve_avatar_url(user_info.get('avatar_url'))
     )
 
 
@@ -332,7 +335,7 @@ async def update_user(
             is_admin=updated_user_info.get('is_admin', False),
             created_at=updated_user_info.get('created_at'),
             last_login=updated_user_info.get('last_login'),
-            avatar_url=updated_user_info.get('avatar_url')
+            avatar_url=resolve_avatar_url(updated_user_info.get('avatar_url'))
         )
         
     except Exception as e:

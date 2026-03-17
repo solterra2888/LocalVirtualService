@@ -18,6 +18,7 @@ from backend.auth.jwt_utils import get_current_user, get_current_admin_user
 from backend.processors.task_manager import TaskManager
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.avatar import resolve_avatar_url
 
 router = APIRouter()
 
@@ -349,10 +350,10 @@ async def get_task_executions(
                 ps_id = row[0]
                 if ps_id not in share_info_map:
                     share_info_map[ps_id] = {
-                        'shared_by': {'user_id': row[1], 'username': row[2], 'avatar_url': row[3]},
+                        'shared_by': {'user_id': row[1], 'username': row[2], 'avatar_url': resolve_avatar_url(row[3])},
                         'shared_to': []
                     }
-                to_user = {'user_id': row[4], 'username': row[5], 'avatar_url': row[6]}
+                to_user = {'user_id': row[4], 'username': row[5], 'avatar_url': resolve_avatar_url(row[6])}
                 existing_ids = [u['user_id'] for u in share_info_map[ps_id]['shared_to']]
                 if to_user['user_id'] not in existing_ids:
                     share_info_map[ps_id]['shared_to'].append(to_user)
