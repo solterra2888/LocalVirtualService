@@ -99,6 +99,9 @@ cat > "$ENV_FILE" << ENVEOF
 APP_NAME="$APP_NAME"
 APP_VERSION="$APP_VERSION"
 
+# ===== 部署模式（本地开发固定为 development，不采用 config.defaults.env 的 production）=====
+ENV=development
+
 # ===== 数据库 =====
 DB_HOST=$DB_HOST
 DB_PORT=$DB_PORT

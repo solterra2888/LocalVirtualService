@@ -15,6 +15,7 @@ echo ""
 dev_load_conf
 dev_load_env
 dev_detect_python
+dev_verify_backend_python_deps || exit 1
 
 # ── 检查端口占用 ─────────────────────────────────────────────
 echo ""

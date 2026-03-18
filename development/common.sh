@@ -70,6 +70,31 @@ dev_detect_python() {
     export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 }
 
+# ── 校验后端核心依赖是否已安装 ───────────────────────────────
+dev_verify_backend_python_deps() {
+    echo -e "${BLUE}🔍 检查后端 Python 依赖...${NC}"
+    local err
+    err="$($PYTHON_CMD -c "
+import sys
+mods = ('fastapi', 'celery', 'redis', 'uvicorn', 'sqlalchemy')
+missing = []
+for m in mods:
+    try:
+        __import__(m)
+    except ImportError:
+        missing.append(m)
+if missing:
+    print(' '.join(missing))
+    sys.exit(1)
+" 2>&1)" || {
+        echo -e "${RED}❌ 缺少 Python 包: ${err}${NC}"
+        echo -e "${YELLOW}   请安装: pip install -r requirements.txt${NC}"
+        return 1
+    }
+    echo -e "${GREEN}✅ 后端 Python 依赖检查通过${NC}"
+    return 0
+}
+
 # ── 检查 Redis ────────────────────────────────────────────────
 dev_check_redis() {
     local redis_url="${REDIS_URL:-redis://localhost:6379/0}"

@@ -19,6 +19,13 @@ from backend.utils.env_loader import load_project_env
 from backend.utils.logger import get_logger
 
 
+LLAMA_REGION_URLS = {
+    'us': 'https://api.cloud.llamaindex.ai',
+    'eu': 'https://api.cloud.eu.llamaindex.ai',
+}
+LLAMA_DEFAULT_BASE_URL = LLAMA_REGION_URLS['us']
+
+
 class LlamaService:
     """LlamaIndex 服务管理类 - 完全独立实现"""
     
@@ -32,12 +39,27 @@ class LlamaService:
             db_path (str, optional): 数据库路径
             polling_interval (int, optional): 轮询间隔（秒）
             log_callback (callable, optional): 日志回调函数
+        
+        Env vars:
+            LLAMA_CLOUD_API_KEY: API 密钥
+            LLAMA_CLOUD_BASE_URL: 完整 base URL（优先级最高）
+            LLAMA_CLOUD_REGION: 区域简写 us / eu（自动映射为对应 base URL）
         """
         # 配置已经在应用启动时从项目 .env 文件加载，这里直接使用环境变量
         
         # 设置API密钥
         self.api_key = api_key or os.environ.get('LLAMA_CLOUD_API_KEY', '')
         self.polling_interval = polling_interval
+        
+        # 解析 API base URL：LLAMA_CLOUD_BASE_URL > LLAMA_CLOUD_REGION > 默认 US
+        explicit_url = os.environ.get('LLAMA_CLOUD_BASE_URL', '').rstrip('/')
+        region = os.environ.get('LLAMA_CLOUD_REGION', '').lower().strip()
+        if explicit_url:
+            self.base_url = explicit_url
+        elif region and region in LLAMA_REGION_URLS:
+            self.base_url = LLAMA_REGION_URLS[region]
+        else:
+            self.base_url = LLAMA_DEFAULT_BASE_URL
         
         # 创建配置了重试和超时的会话
         self.session = self._create_session()
@@ -72,6 +94,22 @@ class LlamaService:
         self.log_callback = log_callback
         # 使用统一日志系统
         self.logger = get_logger("llama_service")
+        
+        # 初始化诊断日志
+        self.logger.log_llama_service(
+            f"LlamaService initialized: base_url={self.base_url}, "
+            f"api_key={self._mask_key(self.api_key)}",
+            "info"
+        )
+    
+    @staticmethod
+    def _mask_key(key: str) -> str:
+        """返回脱敏后的 key 用于日志（保留前 4 位和后 4 位）"""
+        if not key:
+            return "<empty>"
+        if len(key) <= 12:
+            return key[:4] + "****"
+        return key[:4] + "****" + key[-4:]
     
     def _create_session(self):
         """创建配置了重试和超时的请求会话"""
@@ -158,7 +196,7 @@ class LlamaService:
                 - 成功时: (job_id, upload_params, None)
                 - 失败时: (None, None, error_message)
         """
-        url = 'https://api.cloud.llamaindex.ai/api/v1/parsing/upload'
+        url = f'{self.base_url}/api/parsing/upload'
         headers = {
             'accept': 'application/json',
             'Authorization': f'Bearer {self.api_key}'
@@ -167,7 +205,7 @@ class LlamaService:
         # 检查API密钥
         if not self.api_key:
             error_msg = "LlamaIndex API key未配置，请在环境变量中设置 LLAMA_CLOUD_API_KEY"
-            print(f"❌ 错误：未设置LLAMA_CLOUD_API_KEY")
+            self.log(f"API key 未设置，无法上传文件", "error")
             return None, None, error_msg
         
         # 检查文件是否存在
@@ -217,7 +255,10 @@ class LlamaService:
                         'file': (os.path.basename(file_path), f, mime_type)
                     }
 
-                    print(f"🔄 正在上传文件到 LlamaIndex... (尝试 {retry_count + 1}/{max_retries})")
+                    self.log(
+                        f"uploading to {url} with key={self._mask_key(self.api_key)} "
+                        f"(attempt {retry_count + 1}/{max_retries})"
+                    )
                     
                     # 使用session进行请求，设置超时
                     response = self.session.post(
@@ -257,6 +298,12 @@ class LlamaService:
                         
                         # 构建友好的错误信息
                         if response.status_code == 401:
+                            self.log(
+                                f"HTTP 401 - base_url={self.base_url}, "
+                                f"key={self._mask_key(self.api_key)}, "
+                                f"response={error_message}",
+                                "error"
+                            )
                             error_msg = f"LlamaIndex API Key 无效或已过期。请检查您的 API Key 配置。错误详情: {error_message}"
                         elif response.status_code == 403:
                             error_msg = f"LlamaIndex API 访问被拒绝。请检查您的权限设置。错误详情: {error_message}"
@@ -331,7 +378,7 @@ class LlamaService:
         Returns:
             tuple: (response_data, poll_count) 包含状态的响应数据和轮询次数，失败时返回 (None, 0)
         """
-        url = f'https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}'
+        url = f'{self.base_url}/api/parsing/job/{job_id}'
         headers = {
             'accept': 'application/json',
             'Authorization': f'Bearer {self.api_key}'
@@ -423,7 +470,7 @@ class LlamaService:
         Returns:
             str: Markdown内容，失败时返回None
         """
-        url = f'https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}/result/markdown'
+        url = f'{self.base_url}/api/parsing/job/{job_id}/result/markdown'
         headers = {
             'accept': 'application/json',
             'Authorization': f'Bearer {self.api_key}'
