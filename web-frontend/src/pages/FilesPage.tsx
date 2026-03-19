@@ -5631,25 +5631,6 @@ const AudioDiarizationView: React.FC<{
             <span>sentence count: {asrData.total_sentences}</span>
           </div>
         </div>
-        <Space size="small" wrap>
-          <Button
-            type="primary"
-            icon={<DownloadOutlined />}
-            onClick={handleDownloadDialogueTxt}
-            size="small"
-          >
-            download
-          </Button>
-          <Button
-            type="default"
-            icon={<SoundOutlined />}
-            onClick={handlePlayAudio}
-            size="small"
-            disabled={!fileContent.file_url}
-          >
-            Play audio
-          </Button>
-        </Space>
       </div>
       
       {/* 说话人列表 */}
@@ -5732,15 +5713,35 @@ const AudioDiarizationView: React.FC<{
           style={{ width: 100, fontSize: 10 }}
           allowClear
         />
-        <Button
-          type="default"
-          size="small"
-          onClick={handleReplaceAll}
-          loading={replacing}
-          style={{ fontSize: 10 }}
-        >
-          Replace all
-        </Button>
+        <Tooltip title="Replace all">
+          <Button
+            type="default"
+            size="small"
+            icon={<ReloadOutlined style={{ fontSize: 10 }} />}
+            onClick={handleReplaceAll}
+            loading={replacing}
+            style={{ fontSize: 10 }}
+          />
+        </Tooltip>
+        <Tooltip title="download transcript">
+          <Button
+            type="primary"
+            icon={<DownloadOutlined style={{ fontSize: 10 }} />}
+            onClick={handleDownloadDialogueTxt}
+            size="small"
+            style={{ fontSize: 10 }}
+          />
+        </Tooltip>
+        <Tooltip title="Play audio">
+          <Button
+            type="default"
+            icon={<SoundOutlined style={{ fontSize: 10 }} />}
+            onClick={handlePlayAudio}
+            size="small"
+            disabled={!fileContent.file_url}
+            style={{ fontSize: 10 }}
+          />
+        </Tooltip>
       </div>
       
       {/* 时间轴 */}
