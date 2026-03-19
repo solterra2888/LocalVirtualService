@@ -150,7 +150,16 @@ const MobileLayout: React.FC = () => {
           lineHeight: '56px',
         }}
       >
-        <Title level={5} style={{ margin: 0, fontSize: '18px' }}>
+        <Title
+          level={5}
+          style={{
+            margin: 0,
+            fontSize: '20px',
+            fontWeight: 500,
+            fontFamily: "'Aladin', cursive",
+            letterSpacing: '0.02em',
+          }}
+        >
           {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
         </Title>
 

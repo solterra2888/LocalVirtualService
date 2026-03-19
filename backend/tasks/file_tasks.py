@@ -145,7 +145,7 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
         asyncio.set_event_loop(loop)
         try:
             # 获取API密钥
-            api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+            api_key = os.getenv('LLAMA_CLOUD_API_KEY')
             if not api_key:
                 raise ValueError("LlamaIndex API密钥未配置")
             
@@ -995,7 +995,7 @@ def reparse_document_task(self, file_id, params, username):
             parse_service = QuickParseService()
         else:
             update_progress(status="parsing", progress=35, log_message="正在使用 LlamaParse 解析文档...")
-            api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+            api_key = os.getenv('LLAMA_CLOUD_API_KEY')
             if not api_key:
                 raise ValueError("LlamaIndex API 密钥未配置，无法解析文档")
             from backend.core.llama_service import LlamaService
@@ -1328,12 +1328,16 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         processing_stats_id = cursor.fetchone()[0]
         
         # 创建 file_processing_details 记录
+        # original_file_path 必须为 OSS object key（供 /api/files/serve 拉取），不可存签名 URL；
+        # file_storage_type / oss_bucket 必须与文档上传流程一致，否则会被当作本地路径导致 404。
+        oss_bucket_name = upload_result.get("bucket")
         cursor.execute("""
         INSERT INTO file_processing_details 
         (processing_stats_id, filename, file_type, file_size_mb, 
          processing_time, ai_time, content_length, status, 
-         total_tokens, cost, content, created_at, task_id, original_file_path, asr_with_diarization)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         total_tokens, cost, content, created_at, task_id, original_file_path, asr_with_diarization,
+         file_storage_type, oss_bucket)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """, (
             processing_stats_id,
@@ -1349,8 +1353,10 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             final_report_text,
             datetime.now(),
             task_id,
-            audio_url,
-            json.dumps(asr_structured_data) if asr_structured_data else None
+            object_name,
+            json.dumps(asr_structured_data) if asr_structured_data else None,
+            'oss',
+            oss_bucket_name,
         ))
         
         file_detail_id = cursor.fetchone()[0]
@@ -1609,7 +1615,7 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         if processing_mode == 'quick':
             api_key = None
         else:
-            api_key = params.get('llamaindex_api_key') or os.getenv('LLAMA_CLOUD_API_KEY')
+            api_key = os.getenv('LLAMA_CLOUD_API_KEY')
             if not api_key:
                 raise ValueError("LlamaIndex API 密钥未配置")
         

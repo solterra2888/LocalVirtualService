@@ -109,7 +109,6 @@ class ProcessingParamsRequest(BaseModel):
     vendor_multimodal_api_key: Optional[str] = Field(None, description="供应商多模态API密钥")
     polling_interval: int = Field(default=10, ge=1, le=60, description="轮询间隔（秒）")
     use_ai_agent: bool = Field(default=True, description="使用AI Agent处理")
-    llamaindex_api_key: Optional[str] = Field(None, description="LlamaIndex API密钥")
 
 
 class TaskLogResponse(BaseModel):

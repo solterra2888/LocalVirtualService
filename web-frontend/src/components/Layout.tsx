@@ -316,8 +316,10 @@ const Layout: React.FC = () => {
             level={5}
             style={{
               margin: 0,
-              fontSize: '18px',
-              fontWeight: 600,
+              fontSize: '20px',
+              fontWeight: 500,
+              fontFamily: "'Aladin', cursive",
+              letterSpacing: '0.02em',
               color: navTheme.headerText,
               whiteSpace: 'nowrap',
               flexShrink: 0,

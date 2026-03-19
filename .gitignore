@@ -44,6 +44,7 @@ env.example
 __pycache__/
 logs/
 venv/
+.venv/
 dump.rdb
 weekly_report*/
 # Other files and folders

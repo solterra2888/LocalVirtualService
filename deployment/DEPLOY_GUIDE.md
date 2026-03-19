@@ -224,13 +224,15 @@ npm run deploy
 
 这是最关键的一步。项目最终需要根目录下的 `.env` 文件来运行。根据使用场景不同，配置文件的位置和生成方式完全独立：
 
-| | 正式服务器部署（4.A） | 本地开发（4.B） |
-| --- | --- | --- |
-| 基础配置 | `deployment/deploy.conf` | `development/deploy.conf` |
-| 密钥配置 | `deployment/.env.secrets` | `development/.env.secrets` |
-| 默认参数 | `deployment/config.defaults.env`（共用） | `deployment/config.defaults.env`（共用） |
-| 生成脚本 | `sudo bash deployment/deploy.sh` | `bash development/generate_env_from_deploy.sh` |
-| 生成产物 | `.env` + systemd services + Nginx 配置 | 仅 `.env` |
+
+|      | 正式服务器部署（4.A）                         | 本地开发（4.B）                                      |
+| ---- | ------------------------------------ | ---------------------------------------------- |
+| 基础配置 | `deployment/deploy.conf`             | `development/deploy.conf`                      |
+| 密钥配置 | `deployment/.env.secrets`            | `development/.env.secrets`                     |
+| 默认参数 | `deployment/config.defaults.env`（共用） | `deployment/config.defaults.env`（共用）           |
+| 生成脚本 | `sudo bash deployment/deploy.sh`     | `bash development/generate_env_from_deploy.sh` |
+| 生成产物 | `.env` + systemd services + Nginx 配置 | 仅 `.env`                                       |
+
 
 > 两套配置完全独立，互不影响。正式服务器和本地开发机各自维护自己的 `deploy.conf` 和 `.env.secrets`。
 
@@ -551,7 +553,7 @@ docker exec -it postgres psql -U postgres -c "SELECT 1;"
 grep DB_ /opt/guanhetech/.env
 ```
 
-### 上传文件/音频报错：AUTH &lt;password&gt; called without any password configured
+### 上传文件/音频报错：AUTH  called without any password configured
 
 **症状**：上传音频或文档时接口返回 500，日志中出现：
 
@@ -566,14 +568,12 @@ grep DB_ /opt/guanhetech/.env
 **解决方案**（任选其一）：
 
 1. **推荐（本地开发）**：若本地 Redis 无密码，在 `development/.env.secrets` 中将 `REDIS_PASSWORD` **留空或注释掉**，然后重新生成 `.env`：
-   ```bash
+  ```bash
    # 编辑 development/.env.secrets，将 REDIS_PASSWORD=xxx 改为空或注释掉
    bash development/generate_env_from_deploy.sh
-   ```
+  ```
    生成的 `REDIS_URL` 将变为 `redis://127.0.0.1:6379/0`，即可连接无密码 Redis。
-
 2. **使用 start_local_dev.sh 启动**：脚本会先检查 Redis；若不可用会启动本地无密码 Redis，并写入 `development/.env.redis.local`（`REDIS_URL=redis://127.0.0.1:6379/0`）。之后启动的 Web 与 Celery 会先加载 `.env` 再加载该文件，从而覆盖为无密码连接。若你未通过该脚本启动（例如直接用 IDE 跑 uvicorn），则不会加载 `.env.redis.local`，需采用方案 1。
-
 3. **生产/服务器**：若 Redis 已配置密码，请确保 `deployment/.env.secrets` 中 `REDIS_PASSWORD` 与 Redis 的 `requirepass` 一致，并重新运行 `sudo bash deployment/deploy.sh` 以更新 `.env`。
 
 ### 前端页面空白或 API 404
@@ -614,13 +614,13 @@ Feeds 模块中「YouTube Feeds → 点击 AI Transcribe」依赖：yt-dlp 下�
 #### 已实施的修复汇总
 
 
-| 层次                                  | 现象 / 报错                                                                                         | 处理方式                                                                                                                                                                                                                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. 反机器人检测**                       | `Sign in to confirm you're not a bot`                                                           | 使用 Netscape 格式 `youtube-cookies.txt`，通过环境变量 `YOUTUBE_COOKIES_FILE` 指定路径（见 `deploy.conf.example`）。需在浏览器登录 YouTube 后用扩展导出，上传到服务器如 `config/youtube-cookies.txt`。                                                         |
-| **2. n-challenge / 签名求解**           | `Signature solving failed` / `n challenge solving failed` / `Requested format is not available` | 安装 `yt-dlp[default]`（含 `yt-dlp-ejs`）并在代码中启用 Node.js 运行时（`js_runtimes`），使 yt-dlp 能解开 YouTube 的 JS 挑战。                                                                                                                  |
-| **3. PO Token（GVS）**                | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                                                                              |
-| **4. ffmpeg 缺失**                    | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                                                                                |
-| **5. OSS 私有桶 403**                  | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                                                                                      |
+| 层次                                  | 现象 / 报错                                                                                         | 处理方式                                                                                                                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. 反机器人检测**                       | `Sign in to confirm you're not a bot`                                                           | 使用 Netscape 格式 `youtube-cookies.txt`，通过环境变量 `YOUTUBE_COOKIES_FILE` 指定路径（见 `deploy.conf.example`）。需在浏览器登录 YouTube 后用扩展导出，上传到服务器如 `config/youtube-cookies.txt`。                                                                         |
+| **2. n-challenge / 签名求解**           | `Signature solving failed` / `n challenge solving failed` / `Requested format is not available` | 安装 `yt-dlp[default]`（含 `yt-dlp-ejs`）并在代码中启用 Node.js 运行时（`js_runtimes`），使 yt-dlp 能解开 YouTube 的 JS 挑战。                                                                                                                                  |
+| **3. PO Token（GVS）**                | 仅剩 storyboard 等缩略图、无音频格式                                                                        | 部署 `bgutil-ytdlp-pot-provider`：clone 至 `/opt/bgutil-ytdlp-pot-provider`，编译 server，安装 Python 插件，并以 systemd 服务 `bgutil-pot` 运行（默认端口 4416）。                                                                                              |
+| **4. ffmpeg 缺失**                    | `ffprobe and ffmpeg not found`                                                                  | 在 conda 环境中安装：`conda install -y -c conda-forge ffmpeg`。代码中通过 `ffmpeg_location` 指定路径兜底。                                                                                                                                                |
+| **5. OSS 私有桶 403**                  | ASR 子任务 `FILE_403_FORBIDDEN`、转写完成但 `transcript` 为空                                              | 提交 ASR 时使用 OSS **签名 URL**（`signed_url`）而非 `public_url`，见上文「音频上传后 ASR 语音识别返回 FILE_403_FORBIDDEN」。                                                                                                                                      |
 | **6. OSS 私有桶 FILE_DOWNLOAD_FAILED** | 已使用签名 URL 仍报 `FILE_DOWNLOAD_FAILED`、ASR 未返回有效转写                                                 | Fun-ASR 可能无法通过 OSS 签名 URL 拉取。在对应环境的 `.env.secrets`（服务器：`deployment/.env.secrets`；本地：`development/.env.secrets`）中增加一行 `OSS_ASR_PUBLIC_READ=true`，然后重新生成 `.env`。上传用于 ASR 的音频时会将该对象 ACL 设为 public-read，并改用公网 URL 提交 ASR。仅该次上传的音频对象会公网可读。 |
 
 
@@ -654,18 +654,15 @@ YouTube 已逐步弃用频道 RSS（`/feeds/videos.xml?channel_id=...`），大�
 
 1. 在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 创建 **Public data** 类型的 API Key，并在 Library 中启用 **YouTube Data API v3**。
 2. 将 API Key 写入对应环境的 `.env.secrets`：
-   - 服务器：`deployment/.env.secrets`
-   - 本地：`development/.env.secrets`
-   ```ini
-   YOUTUBE_DATA_API_KEY=AIzaSy...你的密钥...
-   ```
+  - 服务器：`deployment/.env.secrets`
+  - 本地：`development/.env.secrets`
 3. 重新生成 `.env` 并重启服务：
-   ```bash
+  ```bash
    # 服务器
    sudo bash deployment/deploy.sh && sudo ./restart_services.sh
    # 本地
    bash development/generate_env_from_deploy.sh
-   ```
+  ```
 
 #### 工作原理
 

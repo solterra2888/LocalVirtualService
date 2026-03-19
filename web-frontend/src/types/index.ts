@@ -84,7 +84,6 @@ export interface ProcessingParams {
   vendor_multimodal_api_key?: string;
   polling_interval: number;
   use_ai_agent: boolean;
-  llamaindex_api_key: string;
   ai_agent_server_url: string;
 }
 

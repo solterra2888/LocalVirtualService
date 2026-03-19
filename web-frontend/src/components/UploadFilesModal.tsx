@@ -31,7 +31,6 @@ interface ProcessingParams {
   vendor_multimodal_api_key: string;
   polling_interval: number;
   use_ai_agent: boolean;
-  llamaindex_api_key: string;
   ai_agent_server_url: string;
 }
 
@@ -109,7 +108,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
     vendor_multimodal_api_key: '',
     polling_interval: 10,
     use_ai_agent: false,
-    llamaindex_api_key: '',
     ai_agent_server_url: ''
   });
 
@@ -196,7 +194,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
       vendor_multimodal_api_key: '',
       polling_interval: 10,
       use_ai_agent: false,
-      llamaindex_api_key: '',
       ai_agent_server_url: ''
     });
     form.resetFields();
@@ -522,18 +519,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                         </Col>
                       </Row>
 
-                      <Row gutter={[12, 12]}>
-                        <Col span={24}>
-                          <Form.Item label="LlamaIndex API Key" style={{ marginBottom: '8px' }}>
-                            <Input.Password
-                              value={processingParams.llamaindex_api_key}
-                              onChange={(e) => setProcessingParams(prev => ({ ...prev, llamaindex_api_key: e.target.value }))}
-                              placeholder="Enter LlamaIndex API key"
-                              style={inputStyle}
-                            />
-                          </Form.Item>
-                        </Col>
-                      </Row>
                     </div>
                   ),
                 },

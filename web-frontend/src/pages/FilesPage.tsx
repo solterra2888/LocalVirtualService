@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card,
   Button,
@@ -44,6 +44,7 @@ import {
   LoadingOutlined,
   EllipsisOutlined,
   EditOutlined,
+  SearchOutlined,
   SoundOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
@@ -73,6 +74,36 @@ import promptTemplateService, { PromptTemplate } from '../services/promptTemplat
 
 const { Text } = Typography;
 const { Option } = Select;
+const { TextArea } = Input;
+
+/** 转写搜索高亮（Original 面板） */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightTranscriptText(text: string, query: string, markStyle: React.CSSProperties): React.ReactNode {
+  const q = query.trim();
+  if (!q) return text;
+  const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, 'gi'));
+  return parts.map((part, i) =>
+    part.toLowerCase() === q.toLowerCase() ? (
+      <mark key={i} style={markStyle}>
+        {part}
+      </mark>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    )
+  );
+}
+
+/** 仅对后端 `/api/files/serve/{id}` 追加 token；OSS 等签名 URL 上追加 query 会破坏签名 */
+function appendServeAuthToken(fileUrl: string, token: string | null): string {
+  if (!token || !fileUrl) return fileUrl;
+  const pathOnly = fileUrl.split('?')[0];
+  if (!pathOnly.includes('/api/files/serve/')) return fileUrl;
+  const separator = fileUrl.includes('?') ? '&' : '?';
+  return `${fileUrl}${separator}token=${encodeURIComponent(token)}`;
+}
 
 // 与 FRONTEND_STYLE_GUIDE 一致：语义化色板 + Behance 风格
 const THEME_COLORS = {
@@ -189,7 +220,6 @@ interface ProcessingParams {
   vendor_multimodal_api_key: string;
   polling_interval: number;
   use_ai_agent: boolean;
-  llamaindex_api_key: string;
   ai_agent_server_url: string;
   sector?: string;
   industry?: string;
@@ -348,7 +378,6 @@ const FilesPageInner: React.FC = () => {
     vendor_multimodal_api_key: '',
     polling_interval: 8, // 调整为与实际轮询间隔一致（秒）
     use_ai_agent: true,
-    llamaindex_api_key: '', // 将通过API加载默认值
     ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     const [form] = Form.useForm();
@@ -389,11 +418,11 @@ const FilesPageInner: React.FC = () => {
   const loadDefaultConfig = useCallback(async () => {
     try {
       const response = await filesAPI.getProcessingParams();
-      if (response.defaults) {
+      const defaultAgentUrl = response.defaults?.ai_agent_server_url;
+      if (defaultAgentUrl) {
         setProcessingParams(prev => ({
           ...prev,
-          llamaindex_api_key: response.defaults?.llamaindex_api_key || '',
-          ai_agent_server_url: response.defaults?.ai_agent_server_url || prev.ai_agent_server_url
+          ai_agent_server_url: defaultAgentUrl || prev.ai_agent_server_url
         }));
       }
     } catch (error: any) {
@@ -442,7 +471,6 @@ const FilesPageInner: React.FC = () => {
       vendor_multimodal_api_key: '',
       polling_interval: 8,
       use_ai_agent: true,
-      llamaindex_api_key: '',
       ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     
@@ -1938,20 +1966,6 @@ const FilesPageInner: React.FC = () => {
           </Form.Item>
         </Col>
       </Row>
-      <Row gutter={16}>
-        <Col span={24}>
-          <Form.Item label="LlamaIndex API Key">
-            <Input.Password
-              value={processingParams.llamaindex_api_key}
-              onChange={(e) => setProcessingParams(prev => ({
-                ...prev,
-                llamaindex_api_key: e.target.value
-              }))}
-              placeholder="Enter LlamaIndex API key"
-            />
-          </Form.Item>
-        </Col>
-      </Row>
     </Form>
   );
 
@@ -2952,6 +2966,15 @@ const FilesPageInner: React.FC = () => {
                           onFileSelect={setSelectedFileForView}
                           selectedFile={selectedFileForView}
                           onFileInfoLoaded={setOriginalFileInfoForTabs}
+                          onTranscriptPersisted={async () => {
+                            if (!selectedExecutionForView) return;
+                            try {
+                              const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                              setContentDetailData(details);
+                            } catch {
+                              message.error('Failed to refresh Markdown content');
+                            }
+                          }}
                         />
                       ) : (
                         <ContentMarkdownView
@@ -4022,7 +4045,6 @@ const ContentMarkdownView: React.FC<{
     vendor_multimodal_api_key: '',
     polling_interval: 10,
     use_ai_agent: false,
-    llamaindex_api_key: '',
     ai_agent_server_url: ''
   });
   const [reparsing, setReparsing] = useState(false);
@@ -4385,17 +4407,6 @@ const ContentMarkdownView: React.FC<{
             </Col>
           </Row>
 
-          <Row gutter={[12, 12]}>
-            <Col span={24}>
-              <Form.Item label="LlamaIndex API Key">
-                <Input.Password
-                  value={reparseParams.llamaindex_api_key}
-                  onChange={(e) => setReparseParams(prev => ({ ...prev, llamaindex_api_key: e.target.value }))}
-                  placeholder="Enter LlamaIndex API key (optional if set in backend)"
-                />
-              </Form.Item>
-            </Col>
-          </Row>
         </Form>
       )}
     </Modal>
@@ -4553,10 +4564,30 @@ const OriginalContentView: React.FC<{
   onFileSelect: (file: any) => void;
   selectedFile: any;
   onFileInfoLoaded?: (info: { filename?: string; file_type?: string }) => void;
-}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded }) => {
+  /** 转写保存后刷新 Markdown 等（Original 会在内部自行重新拉取 getOriginalFileInfo） */
+  onTranscriptPersisted?: () => void | Promise<void>;
+}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded, onTranscriptPersisted }) => {
   const [loading, setLoading] = useState(true);
   const [fileContent, setFileContent] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const handleTranscriptPersisted = useCallback(async () => {
+    try {
+      const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+      const file = details.files?.[0];
+      if (file) {
+        const originalFileInfo = await filesAPI.getOriginalFileInfo(file.id);
+        const token = localStorage.getItem('access_token');
+        if (originalFileInfo.file_url) {
+          originalFileInfo.file_url = appendServeAuthToken(originalFileInfo.file_url, token);
+        }
+        setFileContent(originalFileInfo);
+      }
+    } catch (e) {
+      console.error('Failed to refresh original file after transcript edit:', e);
+    }
+    await onTranscriptPersisted?.();
+  }, [execution.id, onTranscriptPersisted]);
 
   useEffect(() => {
     const loadAndShowFile = async () => {
@@ -4572,14 +4603,13 @@ const OriginalContentView: React.FC<{
         const file = files[0];
         onFileSelect(file);
         const originalFileInfo = await filesAPI.getOriginalFileInfo(file.id);
-        
-        // 在URL中添加token参数（用于iframe认证）
+
+        // 仅 serve 代理 URL 需要 token；OSS 签名 URL 不可追加额外 query
         const token = localStorage.getItem('access_token');
-        if (token && originalFileInfo.file_url) {
-          const separator = originalFileInfo.file_url.includes('?') ? '&' : '?';
-          originalFileInfo.file_url = `${originalFileInfo.file_url}${separator}token=${token}`;
+        if (originalFileInfo.file_url) {
+          originalFileInfo.file_url = appendServeAuthToken(originalFileInfo.file_url, token);
         }
-        
+
         console.log('🔍 [DEBUG] Original File Info:', originalFileInfo);
         console.log('🔍 [DEBUG] File URL with token:', originalFileInfo.file_url);
         setFileContent(originalFileInfo);
@@ -4911,10 +4941,24 @@ const OriginalContentView: React.FC<{
           );
         } else if (fileType === 'audio' && fileContent.asr_with_diarization) {
           // 音频文件：显示说话人分离可视化界面
-          return <AudioDiarizationView fileContent={fileContent} themeColors={themeColors} isDark={isDark} />;
+          return (
+            <AudioDiarizationView
+              fileContent={fileContent}
+              themeColors={themeColors}
+              isDark={isDark}
+              onTranscriptPersisted={handleTranscriptPersisted}
+            />
+          );
         } else if (fileType === 'youtube' && fileContent.asr_with_diarization) {
           // YouTube 文件：显示转录界面（复用 AudioDiarizationView 组件）
-          return <AudioDiarizationView fileContent={fileContent} themeColors={themeColors} isDark={isDark} />;
+          return (
+            <AudioDiarizationView
+              fileContent={fileContent}
+              themeColors={themeColors}
+              isDark={isDark}
+              onTranscriptPersisted={handleTranscriptPersisted}
+            />
+          );
         } else {
           return (
             <div style={{ 
@@ -4962,13 +5006,71 @@ const AudioDiarizationView: React.FC<{
   themeColors: any;
   isDark: boolean;
   onSpeakerUpdated?: () => void;
-}> = ({ fileContent, themeColors, isDark, onSpeakerUpdated }) => {
+  /** 转写保存成功后：刷新 Original 数据与 Markdown 列表 */
+  onTranscriptPersisted?: () => void | Promise<void>;
+}> = ({ fileContent, themeColors, isDark, onSpeakerUpdated, onTranscriptPersisted }) => {
   const themeMode = isDark ? 'dark' : 'light';
   const [localAsrData, setLocalAsrData] = useState(fileContent.asr_with_diarization);
+  const [audioPlayerVisible, setAudioPlayerVisible] = useState(false);
+  const [audioPlaybackFailed, setAudioPlaybackFailed] = useState(false);
   const [editingSpeaker, setEditingSpeaker] = useState<{ id: number; currentLabel: string } | null>(null);
   const [newSpeakerLabel, setNewSpeakerLabel] = useState('');
   const [savingLabel, setSavingLabel] = useState(false);
-  
+  const [transcriptSearch, setTranscriptSearch] = useState('');
+  const [editingTranscript, setEditingTranscript] = useState<{
+    kind: 'audio' | 'youtube';
+    index: number;
+    initialText: string;
+  } | null>(null);
+  const [editTranscriptDraft, setEditTranscriptDraft] = useState('');
+  const [savingTranscript, setSavingTranscript] = useState(false);
+  const [deletingSegment, setDeletingSegment] = useState<{ kind: 'audio' | 'youtube'; index: number } | null>(null);
+  const [replaceFind, setReplaceFind] = useState('');
+  const [replaceWith, setReplaceWith] = useState('');
+  const [replacing, setReplacing] = useState(false);
+
+  useEffect(() => {
+    setLocalAsrData(fileContent.asr_with_diarization);
+  }, [fileContent.asr_with_diarization]);
+
+  const orderedAudioSentences = useMemo(() => {
+    const sents = localAsrData?.sentences;
+    if (!Array.isArray(sents) || sents.length === 0) return [];
+    return [...sents].sort(
+      (a: any, b: any) =>
+        (a.begin_time || 0) - (b.begin_time || 0) ||
+        (a.sentence_id ?? 0) - (b.sentence_id ?? 0)
+    );
+  }, [localAsrData]);
+
+  const highlightMarkStyle: React.CSSProperties = useMemo(
+    () => ({
+      backgroundColor: isDark ? 'rgba(250, 173, 20, 0.4)' : '#fff566',
+      color: 'inherit',
+      padding: '0 2px',
+      borderRadius: 2,
+    }),
+    [isDark]
+  );
+
+  /** 转写行内 Edit / 关闭：更小、低对比，避免抢眼 */
+  const compactTranscriptActionBtn: React.CSSProperties = useMemo(
+    () => ({
+      flexShrink: 0,
+      padding: 0,
+      width: 18,
+      height: 18,
+      minWidth: 18,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: themeColors.textSecondary,
+    }),
+    [themeColors.textSecondary]
+  );
+  const compactTranscriptIconSize = 10;
+  const compactCloseIconSize = 9;
+
   const asrData = localAsrData;
   
   // 检测是 YouTube 还是 Audio 格式
@@ -5088,6 +5190,37 @@ const AudioDiarizationView: React.FC<{
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadAudioFile = () => {
+    const url = fileContent.file_url;
+    if (!url) {
+      message.warning('Audio download URL is not available');
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileContent.filename || 'audio';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    message.success(`Downloading: ${fileContent.filename || 'audio'}`);
+  };
+
+  const handlePlayAudio = () => {
+    if (!fileContent.file_url) {
+      message.warning('Audio URL is not available, starting download instead');
+      handleDownloadAudioFile();
+      return;
+    }
+    setAudioPlaybackFailed(false);
+    setAudioPlayerVisible(true);
+  };
+
+  const handleAudioPlaybackError = () => {
+    setAudioPlaybackFailed(true);
+    message.warning('Cannot play audio in browser, downloading instead');
+    handleDownloadAudioFile();
+  };
+
   const handleEditSpeaker = (speaker: any) => {
     setEditingSpeaker({ id: speaker.speaker_id, currentLabel: speaker.label });
     setNewSpeakerLabel(speaker.label);
@@ -5129,7 +5262,111 @@ const AudioDiarizationView: React.FC<{
       setSavingLabel(false);
     }
   };
-  
+
+  const openEditTranscript = (kind: 'audio' | 'youtube', index: number, initialText: string) => {
+    setEditingTranscript({ kind, index, initialText });
+    setEditTranscriptDraft(initialText);
+  };
+
+  const handleCancelTranscriptEdit = () => {
+    setEditingTranscript(null);
+    setEditTranscriptDraft('');
+  };
+
+  const handleSaveTranscriptEdit = async () => {
+    if (!editingTranscript || fileContent.file_id == null) {
+      message.error('Missing file id');
+      return;
+    }
+    setSavingTranscript(true);
+    try {
+      await filesAPI.updateAsrSegmentText(fileContent.file_id, {
+        text: editTranscriptDraft,
+        segment_kind: editingTranscript.kind,
+        index: editingTranscript.index,
+      });
+      message.success('Transcript updated');
+      handleCancelTranscriptEdit();
+      await onTranscriptPersisted?.();
+    } catch (error: any) {
+      message.error(`Save failed: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setSavingTranscript(false);
+    }
+  };
+
+  const handleReplaceAll = async () => {
+    const findTrim = replaceFind.trim();
+    if (!findTrim) {
+      message.warning('Please enter text to find');
+      return;
+    }
+    if (fileContent.file_id == null) return;
+    setReplacing(true);
+    try {
+      const res = await filesAPI.replaceAsrText(fileContent.file_id, {
+        find: findTrim,
+        replace: replaceWith,
+      });
+      const r = res as any;
+      let count: number | null = null;
+      const rawCount = r?.replace_count ?? r?.replaceCount;
+      if (rawCount !== undefined && rawCount !== null) {
+        const n = Number(rawCount);
+        if (Number.isInteger(n) && n >= 0) count = n;
+      }
+      if (count === null && typeof r?.message === 'string') {
+        const match = r.message.match(/Replaced\s+(\d+)\s+occurrence/);
+        if (match) count = parseInt(match[1], 10);
+      }
+      if (count !== null) {
+        message.success(count > 0 ? `Replaced ${count} occurrence(s)` : 'No matches found');
+      } else {
+        message.success('Replace completed');
+      }
+      await onTranscriptPersisted?.();
+    } catch (error: any) {
+      const detail = error.response?.data?.detail ?? error.message ?? 'Unknown error';
+      message.error(`Replace failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+    } finally {
+      setReplacing(false);
+    }
+  };
+
+  const handleDeleteSegment = async (kind: 'audio' | 'youtube', index: number) => {
+    if (fileContent.file_id == null) return;
+    setDeletingSegment({ kind, index });
+    try {
+      await filesAPI.deleteAsrSegment(fileContent.file_id, { segment_kind: kind, index });
+      message.success('Segment deleted');
+      await onTranscriptPersisted?.();
+    } catch (error: any) {
+      message.error(`Delete failed: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setDeletingSegment(null);
+    }
+  };
+
+  const normSearch = transcriptSearch.trim().toLowerCase();
+  const ytFiltered =
+    isYouTube && asrData?.transcript
+      ? asrData.transcript
+          .map((segment: any, index: number) => ({ segment, index }))
+          .filter(
+            ({ segment }: { segment: any }) =>
+              !normSearch || (segment.text || '').toLowerCase().includes(normSearch)
+          )
+      : [];
+  const audioFiltered =
+    isAudio && orderedAudioSentences.length
+      ? orderedAudioSentences
+          .map((sentence: any, index: number) => ({ sentence, index }))
+          .filter(
+            ({ sentence }: { sentence: any }) =>
+              !normSearch || (sentence.text || '').toLowerCase().includes(normSearch)
+          )
+      : [];
+
   // 渲染 YouTube 格式
   if (isYouTube) {
     const totalDuration = asrData.transcript.length > 0 
@@ -5188,6 +5425,55 @@ const AudioDiarizationView: React.FC<{
         </div>
         
         <Divider style={{ margin: '16px 0', borderColor: themeColors.cardBorder }} />
+
+        <div
+          style={{
+            marginBottom: '12px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px',
+            alignItems: 'center',
+            fontSize: 10,
+          }}
+        >
+          <Input
+            allowClear
+            prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
+            placeholder="Search transcript..."
+            value={transcriptSearch}
+            onChange={(e) => setTranscriptSearch(e.target.value)}
+            style={{ width: 140, fontSize: 10 }}
+          />
+          {normSearch ? (
+            <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
+              {ytFiltered.length} match{ytFiltered.length === 1 ? '' : 'es'}
+            </span>
+          ) : null}
+          <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap', marginLeft: 4 }}>Replace:</span>
+          <Input
+            placeholder="Find"
+            value={replaceFind}
+            onChange={(e) => setReplaceFind(e.target.value)}
+            style={{ width: 100, fontSize: 10 }}
+            allowClear
+          />
+          <Input
+            placeholder="Replace with"
+            value={replaceWith}
+            onChange={(e) => setReplaceWith(e.target.value)}
+            style={{ width: 100, fontSize: 10 }}
+            allowClear
+          />
+          <Button
+            type="default"
+            size="small"
+            onClick={handleReplaceAll}
+            loading={replacing}
+            style={{ fontSize: 10 }}
+          >
+            Replace all
+          </Button>
+        </div>
         
         {/* YouTube 转录内容 */}
         <div style={{ 
@@ -5204,7 +5490,7 @@ const AudioDiarizationView: React.FC<{
           flexDirection: 'column', 
           gap: '12px' 
         }}>
-          {asrData.transcript.map((segment: any, index: number) => (
+          {ytFiltered.map(({ segment, index }: { segment: any; index: number }) => (
             <div
               key={index}
               style={{
@@ -5218,7 +5504,6 @@ const AudioDiarizationView: React.FC<{
                   ? '0 1px 3px rgba(0,0,0,0.3)' 
                   : '0 1px 2px rgba(0,0,0,0.06)',
                 transition: 'all 0.2s ease',
-                cursor: 'pointer'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = 'translateX(4px)';
@@ -5252,20 +5537,68 @@ const AudioDiarizationView: React.FC<{
                 </span>
               </div>
               
-              {/* 文本 */}
-              <div style={{ flex: 1, minWidth: 0 }}>
+              {/* 文本 + 编辑 */}
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 <div style={{ 
                   fontSize: '12px', 
                   color: themeColors.text,
                   lineHeight: '1.6',
-                  wordBreak: 'break-word'
+                  wordBreak: 'break-word',
+                  flex: 1,
                 }}>
-                  {segment.text}
+                  {highlightTranscriptText(segment.text || '', transcriptSearch, highlightMarkStyle)}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, flexShrink: 0 }}>
+                <Tooltip title="Edit this segment">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<EditOutlined style={{ fontSize: compactTranscriptIconSize }} />}
+                    onClick={() => openEditTranscript('youtube', index, segment.text || '')}
+                    style={compactTranscriptActionBtn}
+                  />
+                </Tooltip>
+                <Tooltip title="Delete this segment">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseOutlined style={{ fontSize: compactCloseIconSize }} />}
+                    loading={deletingSegment?.kind === 'youtube' && deletingSegment?.index === index}
+                    style={compactTranscriptActionBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSegment('youtube', index);
+                    }}
+                  />
+                </Tooltip>
                 </div>
               </div>
             </div>
           ))}
         </div>
+
+        <Modal
+          title="Edit transcript"
+          open={!!editingTranscript}
+          onOk={handleSaveTranscriptEdit}
+          onCancel={handleCancelTranscriptEdit}
+          okText="Save"
+          cancelText="Cancel"
+          confirmLoading={savingTranscript}
+          centered
+          width={560}
+          styles={getModalStyles(themeMode)}
+        >
+          <div style={{ marginTop: 12 }}>
+            <TextArea
+              rows={6}
+              value={editTranscriptDraft}
+              onChange={(e) => setEditTranscriptDraft(e.target.value)}
+              placeholder="Transcript text..."
+              style={{ fontSize: 13 }}
+            />
+          </div>
+        </Modal>
       </div>
     );
   }
@@ -5298,14 +5631,25 @@ const AudioDiarizationView: React.FC<{
             <span>sentence count: {asrData.total_sentences}</span>
           </div>
         </div>
-        <Button
-          type="primary"
-          icon={<DownloadOutlined />}
-          onClick={handleDownloadDialogueTxt}
-          size="small"
-        >
-          download
-        </Button>
+        <Space size="small" wrap>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            onClick={handleDownloadDialogueTxt}
+            size="small"
+          >
+            download
+          </Button>
+          <Button
+            type="default"
+            icon={<SoundOutlined />}
+            onClick={handlePlayAudio}
+            size="small"
+            disabled={!fileContent.file_url}
+          >
+            Play audio
+          </Button>
+        </Space>
       </div>
       
       {/* 说话人列表 */}
@@ -5349,6 +5693,55 @@ const AudioDiarizationView: React.FC<{
       </div>
       
       <Divider style={{ margin: '16px 0', borderColor: themeColors.cardBorder }} />
+
+      <div
+        style={{
+          marginBottom: '12px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          alignItems: 'center',
+          fontSize: 10,
+        }}
+      >
+        <Input
+          allowClear
+          prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
+          placeholder="Search transcript..."
+          value={transcriptSearch}
+          onChange={(e) => setTranscriptSearch(e.target.value)}
+          style={{ width: 140, fontSize: 10 }}
+        />
+        {normSearch ? (
+          <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
+            {audioFiltered.length} match{audioFiltered.length === 1 ? '' : 'es'}
+          </span>
+        ) : null}
+        <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap', marginLeft: 4 }}>Replace:</span>
+        <Input
+          placeholder="Find"
+          value={replaceFind}
+          onChange={(e) => setReplaceFind(e.target.value)}
+          style={{ width: 100, fontSize: 10 }}
+          allowClear
+        />
+        <Input
+          placeholder="Replace with"
+          value={replaceWith}
+          onChange={(e) => setReplaceWith(e.target.value)}
+          style={{ width: 100, fontSize: 10 }}
+          allowClear
+        />
+        <Button
+          type="default"
+          size="small"
+          onClick={handleReplaceAll}
+          loading={replacing}
+          style={{ fontSize: 10 }}
+        >
+          Replace all
+        </Button>
+      </div>
       
       {/* 时间轴 */}
       <div style={{ 
@@ -5365,13 +5758,13 @@ const AudioDiarizationView: React.FC<{
         flexDirection: 'column', 
         gap: '12px' 
       }}>
-        {asrData.sentences.map((sentence: any, index: number) => {
+        {audioFiltered.map(({ sentence, index }: { sentence: any; index: number }) => {
           const speakerColor = getSpeakerColor(sentence.speaker_id);
           const timeRange = `${formatTimeDetailed(sentence.begin_time)} - ${formatTimeDetailed(sentence.end_time)}`;
           
           return (
             <div
-              key={sentence.sentence_id || index}
+              key={sentence.sentence_id ?? index}
               style={{
                 display: 'flex',
                 gap: '12px',
@@ -5383,7 +5776,6 @@ const AudioDiarizationView: React.FC<{
                   ? '0 1px 3px rgba(0,0,0,0.3)' 
                   : '0 1px 2px rgba(0,0,0,0.06)',
                 transition: 'all 0.2s ease',
-                cursor: 'pointer'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = 'translateX(4px)';
@@ -5426,13 +5818,40 @@ const AudioDiarizationView: React.FC<{
                 }}>
                   {timeRange}
                 </div>
-                <div style={{ 
-                  fontSize: '12px', 
-                  color: themeColors.text,
-                  lineHeight: '1.6',
-                  wordBreak: 'break-word'
-                }}>
-                  {sentence.text}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                  <div style={{ 
+                    fontSize: '12px', 
+                    color: themeColors.text,
+                    lineHeight: '1.6',
+                    wordBreak: 'break-word',
+                    flex: 1,
+                  }}>
+                    {highlightTranscriptText(sentence.text || '', transcriptSearch, highlightMarkStyle)}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, flexShrink: 0 }}>
+                  <Tooltip title="Edit this sentence">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined style={{ fontSize: compactTranscriptIconSize }} />}
+                      onClick={() => openEditTranscript('audio', index, sentence.text || '')}
+                      style={compactTranscriptActionBtn}
+                    />
+                  </Tooltip>
+                  <Tooltip title="Delete this sentence">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CloseOutlined style={{ fontSize: compactCloseIconSize }} />}
+                      loading={deletingSegment?.kind === 'audio' && deletingSegment?.index === index}
+                      style={compactTranscriptActionBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSegment('audio', index);
+                      }}
+                    />
+                  </Tooltip>
+                  </div>
                 </div>
               </div>
             </div>
@@ -5464,6 +5883,61 @@ const AudioDiarizationView: React.FC<{
             autoFocus
           />
         </div>
+      </Modal>
+
+      <Modal
+        title="Edit transcript"
+        open={!!editingTranscript}
+        onOk={handleSaveTranscriptEdit}
+        onCancel={handleCancelTranscriptEdit}
+        okText="Save"
+        cancelText="Cancel"
+        confirmLoading={savingTranscript}
+        centered
+        width={560}
+        styles={getModalStyles(themeMode)}
+      >
+        <div style={{ marginTop: 12 }}>
+          <TextArea
+            rows={6}
+            value={editTranscriptDraft}
+            onChange={(e) => setEditTranscriptDraft(e.target.value)}
+            placeholder="Transcript text..."
+            style={{ fontSize: 13 }}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title="Play audio"
+        open={audioPlayerVisible}
+        onCancel={() => setAudioPlayerVisible(false)}
+        footer={[
+          <Button key="download" icon={<DownloadOutlined />} onClick={handleDownloadAudioFile}>
+            Download audio
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setAudioPlayerVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        centered
+        width={640}
+        styles={getModalStyles(themeMode)}
+      >
+        {!audioPlaybackFailed ? (
+          <audio
+            src={fileContent.file_url}
+            controls
+            autoPlay
+            preload="metadata"
+            onError={handleAudioPlaybackError}
+            style={{ width: '100%' }}
+          />
+        ) : (
+          <div style={{ color: themeColors.textSecondary }}>
+            Browser playback is not supported for this audio. The file download has been started.
+          </div>
+        )}
       </Modal>
     </div>
   );

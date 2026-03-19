@@ -103,7 +103,6 @@ export interface ProcessingParamsOptions {
     default?: string;
   }>;
   defaults?: {
-    llamaindex_api_key: string;
     ai_agent_server_url: string;
   };
 }
@@ -624,8 +623,43 @@ export const filesAPI = {
 
   // 更新说话人标签
   updateSpeakerLabel: async (fileId: string, speakerId: number, newLabel: string): Promise<{ success: boolean; message: string }> => {
-    const response = await api.patch(`/files/${fileId}/speaker/${speakerId}?new_label=${encodeURIComponent(newLabel)}`);
-    return response.data;
+    // api.patch 已通过 extractData 返回 response.data，勿再 .data
+    return api.patch(`/files/${fileId}/speaker/${speakerId}?new_label=${encodeURIComponent(newLabel)}`);
+  },
+
+  /** 更新 Original 面板中单条转写（同步 asr_with_diarization + content） */
+  updateAsrSegmentText: async (
+    fileId: number | string,
+    body: { text: string; segment_kind: 'audio' | 'youtube'; index: number }
+  ): Promise<{ success: boolean; message: string; content_length?: number }> => {
+    return api.patch(`/files/details/${fileId}/asr-segment`, body);
+  },
+
+  /** 删除 Original 面板中单条转写（同步 asr_with_diarization + content） */
+  deleteAsrSegment: async (
+    fileId: number | string,
+    body: { segment_kind: 'audio' | 'youtube'; index: number }
+  ): Promise<{ success: boolean; message: string; content_length?: number }> => {
+    return api.delete(`/files/details/${fileId}/asr-segment`, { data: body });
+  },
+
+  /** 批量替换转写文本（全部句子/分段中 find -> replace，同步 content） */
+  replaceAsrText: async (
+    fileId: number | string,
+    body: { find: string; replace: string }
+  ): Promise<{ success: boolean; message: string; replace_count?: number; content_length?: number }> => {
+    let data = await api.patch(`/files/details/${String(fileId)}/asr-replace`, body);
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        return { success: false, message: '', replace_count: 0 };
+      }
+    }
+    if (data != null && typeof data === 'object') {
+      return data as { success: boolean; message: string; replace_count?: number; content_length?: number };
+    }
+    return { success: false, message: '', replace_count: 0 };
   },
 
   // 音频AI分析 - 提交分析任务
@@ -703,7 +737,6 @@ export const filesAPI = {
       use_vendor_multimodal_model?: boolean;
       vendor_multimodal_api_key?: string;
       polling_interval?: number;
-      llamaindex_api_key?: string;
     };
   }): Promise<{
     success: boolean;
