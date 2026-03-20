@@ -29,7 +29,8 @@ pytz==2023.3
 # 现有依赖保持
 requests==2.31.0
 pandas==3.0.1
-numpy==1.26.2
+# NumPy 2.x：与 pandas 3.0 一致，且在 Python 3.13 上有官方 wheel（避免从源码编译需 g++）
+numpy>=2.0,<3
 openpyxl==3.1.2
 Pillow==12.1.1
 

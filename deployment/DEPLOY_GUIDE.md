@@ -257,6 +257,10 @@ cd guanhetech
 ### 3.2 创建 Python 环境
 
 ```bash
+# 新版 Miniconda 使用 defaults 源时，需先接受 Anaconda 仓库服务条款（否则 conda create 会报 CondaToSNonInteractiveError）
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
 # 创建 conda 环境（环境名称自定义，需与后续 deploy.conf 一致）
 conda create -n guanhe python=3.13 -y
 conda activate guanhe
@@ -710,6 +714,34 @@ dial tcp ... registry-1.docker.io:443: i/o timeout
 3. **离线**：在能访问 Docker Hub 的机器上 `docker pull` + `docker save`，再 `scp` 到目标机 `docker load`。
 
 镜像拉取成功后再继续第 2 节创建 PostgreSQL / Redis 等容器。
+
+### `pip install -r requirements.txt` 时 numpy 报错（缺少 g++ / metadata-generation-failed）
+
+**症状**：安装 `numpy` 时出现 `Unknown compiler(s)`、`No such file or directory: 'g++'`，或 `Preparing metadata ... error`。
+
+**原因**：
+
+1. **Python 3.13**：旧版 `numpy==1.26.x` 没有对应平台的预编译 wheel 时，pip 会尝试从源码编译，需要系统已安装 **C/C++ 编译器**（`build-essential`）。
+2. **版本搭配**：`pandas 3.0.x` 需要 **NumPy 2.x**；仓库已使用 `numpy>=2.0,<3`，在 Python 3.12 / 3.13 上一般会直接下载 wheel，无需本地编译。
+
+**解决方案**（任选其一或组合）：
+
+1. **推荐**：拉取最新代码后重新安装依赖（已使用 NumPy 2.x）：
+   ```bash
+   conda activate guanhe
+   pip install -U pip
+   pip install -r requirements.txt
+   ```
+2. **仍从源码编译时**：安装编译工具后再 `pip install`：
+   ```bash
+   sudo apt update && sudo apt install -y build-essential
+   ```
+3. **备选环境**：若个别包仍与 Python 3.13 不兼容，可使用 **Python 3.12** 创建环境：
+   ```bash
+   conda create -n guanhe python=3.12 -y
+   conda activate guanhe
+   pip install -r requirements.txt
+   ```
 
 ### 服务启动失败 (exit code 203)
 
