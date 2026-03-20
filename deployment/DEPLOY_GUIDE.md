@@ -16,6 +16,17 @@
 | 网络   | 开放 80 端口      | 80 + 443         |
 
 
+> **部署场景说明**：
+>
+>
+> | 场景        | 条件           | 使用的站点配置                   | 端口要求     |
+> | --------- | ------------ | ------------------------- | -------- |
+> | **A（推荐）** | 有域名 + SSL 证书 | `web.conf`（HTTP→HTTPS 跳转） | 80 + 443 |
+> | **B**     | 纯 IP / 无 SSL | `web.conf.http`（纯 HTTP）   | 仅 80     |
+>
+>
+> 本手册默认按**场景 A** 说明；场景 B 的差异处会标注「**纯 HTTP 部署**」。
+
 ---
 
 ## 1. 基础软件安装
@@ -35,6 +46,50 @@ curl -fsSL https://get.docker.com | sh
 systemctl enable docker && systemctl start docker
 ```
 
+### 1.2.1 配置 Docker 镜像加速（国内 / 访问 Docker Hub 较慢时）
+
+首次执行 `docker run` 时会从 Docker Hub 拉取镜像。若服务器访问 `registry-1.docker.io` **超时**（见第 10 章「Docker 拉取镜像失败」），可配置**镜像加速**（`registry-mirrors`），让拉取走国内或就近节点。
+
+1. 编辑 Docker 守护进程配置（若文件不存在则新建）：
+
+```bash
+sudo mkdir -p /etc/docker
+sudo nano /etc/docker/daemon.json
+```
+
+2. 写入或合并如下内容（**保留 JSON 合法**：最后一项后不要有逗号）：
+
+```json
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me"
+  ]
+}
+```
+
+> **说明**：公开镜像站地址可能变更，若失效请搜索「Docker 镜像加速 2025」等关键词替换为当前可用地址；云厂商（阿里云、腾讯云等）控制台通常也提供**专属加速地址**，优先使用。
+
+3. 保存并退出 **nano**：
+
+- `Ctrl + O` → 回车（保存）
+- `Ctrl + X`（退出）
+
+4. 重载并重启 Docker 使配置生效：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+5. 验证：
+
+```bash
+docker info | grep -A5 "Registry Mirrors"
+```
+
+配置完成后再执行本手册中的 `docker run` / `docker pull`（如 `postgres:17`、`redis:7.4.6-alpine`、`nginx:alpine`）。
+
 ### 1.3 安装 Nginx（Docker 版本）
 
 Nginx 通过 Docker 部署，无需 apt 安装。配置目录准备见第 2.3 节，容器创建见第 3.4 节。
@@ -44,8 +99,13 @@ Nginx 通过 Docker 部署，无需 apt 安装。配置目录准备见第 2.3 �
 ```bash
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 bash Miniconda3-latest-Linux-x86_64.sh -b -p /root/miniconda3
-eval "$(/root/miniconda3/bin/conda init bash)"
+
+# 将 conda 写入 ~/.bashrc（不要对 conda init 使用 eval，否则会误执行输出里的「no change」等提示）
+/root/miniconda3/bin/conda init bash
+
+# 当前终端立即启用 conda（二选一）
 source ~/.bashrc
+# 或: eval "$(/root/miniconda3/bin/conda shell.bash hook)"
 ```
 
 ### 1.5 安装 Volta（Node.js 版本管理）
@@ -68,7 +128,7 @@ mkdir -p /opt/postgres/data
 docker run -d \
   --name postgres \
   --restart always \
-  -e POSTGRES_PASSWORD=你的数据库密码 \
+  -e POSTGRES_PASSWORD='你的数据库密码' \
   -v /opt/postgres/data:/var/lib/postgresql/data \
   -p 5432:5432 \
   postgres:17
@@ -85,10 +145,15 @@ docker exec -it postgres psql -U postgres -c "CREATE DATABASE 你的数据库名
 ```bash
 mkdir -p /opt/redis/conf /opt/redis/data
 
-# 创建 Redis 配置文件（设置密码）
+# 创建 Redis 配置文件
 cat > /opt/redis/conf/redis.conf << 'EOF'
+bind 0.0.0.0
+protected-mode yes
+port 6379
+daemonize no
 requirepass 你的Redis密码
 appendonly yes
+dir ./
 EOF
 
 docker run -d \
@@ -101,26 +166,61 @@ docker run -d \
   redis:7.4.6-alpine redis-server /usr/local/etc/redis/conf/redis.conf
 ```
 
+> **配置要点**：`bind 0.0.0.0` 允许容器内监听所有网卡（Docker 内必需）；`protected-mode yes` 配合 `requirepass` 确保密码保护；`daemonize no` 保持前台运行（Docker 要求）。
+>
+> **安全提示**：Redis 通过 `-p 6379:6379` 映射到宿主机。应通过服务器防火墙 / 安全组**限制 6379 端口的访问来源**，仅允许本机或可信 IP，切勿对公网完全开放。
+
 ### 2.3 Nginx 配置目录准备
 
-Nginx 通过 Docker 部署。容器创建前，需先在宿主机准备好配置目录：
+Nginx 通过 Docker 部署。容器创建前，需先在宿主机准备好配置目录和核心文件。
+
+#### 2.3.1 创建目录结构
 
 ```
 /opt/nginx/
 ├── conf/
 │   ├── nginx.conf          ← 主配置（含 include vhosts/*.conf）
 │   ├── mime.types           ← MIME 类型映射
+│   ├── cert/                ← SSL 证书（场景 A 需要）
+│   │   ├── cert.pem
+│   │   └── key.pem
 │   └── vhosts/
 │       └── web.conf         ← 项目站点配置（由 deploy.sh / start_services.sh 同步）
+├── html/                    ← Nginx 默认站点目录
 └── log/                     ← Nginx 日志
 ```
 
 ```bash
-mkdir -p /opt/nginx/conf/vhosts /opt/nginx/html /opt/nginx/log
+mkdir -p /opt/nginx/conf/vhosts /opt/nginx/conf/cert /opt/nginx/html /opt/nginx/log
 ```
 
-> 主配置 `nginx.conf`、`mime.types` 等文件由技术团队初始化（不在项目仓库中）。项目只需管理 `web.conf`（站点配置），部署脚本会自动同步到 `/opt/nginx/conf/vhosts/web.conf`。
+#### 2.3.2 初始化 nginx.conf 和 mime.types
+
+项目仓库中提供了参考主配置 `deployment/nginx/nginx.conf`，克隆代码后直接复制即可（见第 3.1 节）。如需提前初始化，可从 Docker 镜像提取默认配置再手动编辑：
+
+```bash
+# 提取 Nginx 默认配置（后续会被仓库中的参考配置覆盖）
+docker run --rm nginx:alpine cat /etc/nginx/nginx.conf > /opt/nginx/conf/nginx.conf
+docker run --rm nginx:alpine cat /etc/nginx/mime.types > /opt/nginx/conf/mime.types
+```
+
+> **说明**：仓库中 `deployment/nginx/nginx.conf` 已包含 gzip 压缩、epoll 优化、`include vhosts/*.conf` 等生产配置。`mime.types` 使用 Nginx 官方默认文件即可。
+
+#### 2.3.3 准备 SSL 证书（场景 A）
+
+使用 HTTPS 部署时，需将 SSL 证书放入 `/opt/nginx/conf/cert/`：
+
+```bash
+# 将证书文件上传到服务器后
+cp /path/to/your/cert.pem  /opt/nginx/conf/cert/cert.pem
+cp /path/to/your/key.pem   /opt/nginx/conf/cert/key.pem
+chmod 600 /opt/nginx/conf/cert/key.pem
+```
+
+> **免费证书获取**：可通过 [Let's Encrypt](https://letsencrypt.org/) 免费申请，或从域名注册商 / 云服务商处获取。
 >
+> **纯 HTTP 部署**（场景 B）：跳过此步，无需证书。
+
 > Nginx 容器将在第 3.4 节（项目代码克隆和前端构建完成后）创建。
 
 ### 2.4 验证容器运行
@@ -163,7 +263,7 @@ conda activate guanhe
 
 # 安装 Python 依赖
 pip install -r requirements.txt
-pip install python-dotenv llama-index
+pip install llama-index          # 文件解析（LlamaParse），未包含在 requirements.txt 中
 ```
 
 ### 3.3 安装前端依赖并构建
@@ -179,9 +279,48 @@ cd ..
 >
 > **线上部署**：前端由 Docker Nginx 以静态文件方式提供服务，不使用 `npm start`。
 
-### 3.4 创建 Nginx 容器
+### 3.4 配置 Nginx 站点并创建容器
 
-前端构建完成后，即可创建 Nginx 容器。容器通过 Docker volume mount 将 `web-frontend/build/` 直接挂载为站点目录，无需手动复制文件。
+#### 3.4.1 选择并定制站点配置（web.conf）
+
+项目根目录提供了两份 Nginx 站点配置，根据部署场景选择：
+
+
+| 文件              | 场景             | 说明                                                        |
+| --------------- | -------------- | --------------------------------------------------------- |
+| `web.conf`      | A：有域名 + HTTPS  | HTTP→HTTPS 跳转，SSL 加密，`server_name` 默认为 `guanhecapital.hk` |
+| `web.conf.http` | B：纯 IP / 无 SSL | 仅 HTTP，`server_name _`（匹配任意），无需证书                         |
+
+
+**场景 A（HTTPS）** — 编辑 `web.conf`，将域名替换为你的实际域名：
+
+```bash
+cd /opt/guanhetech
+# 将 guanhecapital.hk 替换为你的域名（注意同时替换 www 和裸域）
+sed -i 's/www\.guanhecapital\.hk/www.你的域名/g; s/guanhecapital\.hk/你的域名/g' web.conf
+```
+
+**纯 HTTP 部署（场景 B）** — 用 HTTP 版本覆盖默认配置：
+
+```bash
+cd /opt/guanhetech
+cp web.conf.http web.conf
+```
+
+#### 3.4.2 复制 nginx.conf 到宿主机
+
+如果在第 2.3.2 节尚未复制（当时代码未克隆），现在执行：
+
+```bash
+cp /opt/guanhetech/deployment/nginx/nginx.conf /opt/nginx/conf/nginx.conf
+
+# 提取 mime.types（若尚未执行）
+docker run --rm nginx:alpine cat /etc/nginx/mime.types > /opt/nginx/conf/mime.types
+```
+
+#### 3.4.3 创建 Nginx 容器
+
+前端构建完成、配置文件就位后，即可创建 Nginx 容器。容器通过 Docker volume mount 将 `web-frontend/build/` 直接挂载为站点目录，无需手动复制文件。
 
 ```bash
 docker run -d --name nginx \
@@ -203,6 +342,8 @@ docker run -d --name nginx \
 docker ps
 # 应看到 postgres、redis、nginx 三个容器状态为 Up
 ```
+
+> **排查**：若 Nginx 启动后立即退出，通常是配置文件缺失或语法错误。运行 `docker logs nginx` 查看错误信息，常见原因包括：`nginx.conf` 或 `mime.types` 不存在、`cert/cert.pem` 找不到（场景 A 忘记上传证书）、`web.conf` 中 `log_format acc` 未在 `nginx.conf` 中定义等。
 
 日常前端更新可使用一键部署命令（包含构建 + 通知 Nginx 重载）：
 
@@ -461,22 +602,31 @@ systemd 服务应全部显示 `active`，Docker 容器应全部显示 `running`�
 ### 6.2 测试 API
 
 ```bash
-# 后端 API
+# 后端 API（直连，绕过 Nginx）
 curl http://localhost:8000/
 # 预期: {"message":"你的项目名 API","version":"2.0.0"}
 
-# 调度器
+# 调度器（直连）
 curl http://localhost:8001/api/health
 # 预期: {"status":"healthy",...}
 
-# Nginx 代理
+# 通过 Nginx 代理 — 场景 A（HTTPS）
+curl -k https://你的域名/api/health
+# 预期: 同上（-k 跳过自签名证书验证；正式证书无需 -k）
+
+# 通过 Nginx 代理 — 场景 B（纯 HTTP）
 curl http://你的公网IP/api/health
 # 预期: 同上
 ```
 
+> **注意**：场景 A 的 `web.conf` 会将 HTTP 80 → HTTPS 301 重定向。如果用 `curl http://...` 测试会返回 301，需加 `-L` 跟随重定向或直接用 `https://`。
+
 ### 6.3 访问前端
 
-浏览器打开 `http://你的公网IP`，应看到登录页面。使用配置的管理员账号密码登录。
+- **场景 A（HTTPS）**：浏览器打开 `https://你的域名`
+- **场景 B（纯 HTTP）**：浏览器打开 `http://你的公网IP`
+
+应看到登录页面。使用配置的管理员账号密码登录。
 
 ---
 
@@ -511,16 +661,55 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 
 ## 9. 服务器配置
 
-### 服务器端口
+### 服务器端口（安全组 / 防火墙）
+
+> **安全原则**：仅开放业务必需的最小端口集合。数据库和缓存端口**切勿对公网完全开放**。
 
 实例 > 点击实例ID > 安全组 > 管理规则 > 入方向 > 增加规则：
 
-- 访问来源选择任意位置
-- 访问目的（端口）：
-  - Redis: 6379
-  - Postgres: 5432
+**必须开放（访问来源：`0.0.0.0/0` 任意位置）**：
+
+
+| 端口  | 用途                                |
+| --- | --------------------------------- |
+| 80  | HTTP（场景 B 直接提供服务；场景 A 用于跳转 HTTPS） |
+| 443 | HTTPS（场景 A 必需；场景 B 可不开放）          |
+
+
+**按需开放（访问来源：仅指定 IP）**：
+
+
+| 端口   | 用途         | 安全建议                         |
+| ---- | ---------- | ---------------------------- |
+| 5432 | PostgreSQL | 仅在需要远程访问数据库时开放，来源限制为指定服务器 IP |
+| 6379 | Redis      | 仅在需要远程访问时开放，来源限制为指定服务器 IP    |
+
+
+> **警告**：将 Redis 6379 或 PostgreSQL 5432 对 `0.0.0.0/0`（任意位置）开放会带来严重安全风险。即使设置了密码，仍可能遭受暴力破解或漏洞利用。如无跨服务器访问需求，**不要开放**这两个端口。
 
 ## 10. 故障排查
+
+### Docker 拉取镜像失败（Unable to find image locally / registry i/o timeout）
+
+**症状**：执行 `docker run ... postgres:17`（或其它镜像）时出现类似错误：
+
+```text
+Unable to find image 'postgres:17' locally
+failed to resolve reference "docker.io/library/postgres:17": ...
+dial tcp ... registry-1.docker.io:443: i/o timeout
+```
+
+**原因**：本机无法稳定访问 **Docker Hub**（`registry-1.docker.io`），常见于国内网络或防火墙策略，**不是**因为少执行了一步 `docker pull`。
+
+> 单独执行 `docker pull postgres:17` 仍会访问同一仓库，若网络问题未解决，**同样会超时**。
+
+**解决方案**：
+
+1. **推荐**：按第 **1.2.1 节**配置 `registry-mirrors` 镜像加速，重启 Docker 后再拉取/运行容器。
+2. **备选**：为服务器配置 HTTP/HTTPS **代理**（企业出口、Clash 等），使 Docker 能访问外网注册表（需在 Docker 或系统层配置代理，此处不展开）。
+3. **离线**：在能访问 Docker Hub 的机器上 `docker pull` + `docker save`，再 `scp` 到目标机 `docker load`。
+
+镜像拉取成功后再继续第 2 节创建 PostgreSQL / Redis 等容器。
 
 ### 服务启动失败 (exit code 203)
 
