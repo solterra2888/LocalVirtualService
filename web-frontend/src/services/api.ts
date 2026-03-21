@@ -1,5 +1,10 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 import { message } from 'antd';
+import {
+  get401UserMessage,
+  isSessionReplaced401Detail,
+  showSessionReplacedModal,
+} from '../utils/authSession';
 
 // API基础配置
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
@@ -60,11 +65,20 @@ apiClient.interceptors.response.use(
     });
 
     if (error.response?.status === 401) {
-      // Token过期或无效，跳转到登录页
+      // Token 过期、无效，或账号已在其它设备登录（后者用英文 Modal 提示）
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
-      message.error('login expired, please login again');
+      const detail = (error.response?.data as any)?.detail;
+      const msg = get401UserMessage(detail);
+      const goLogin = () => {
+        window.location.href = '/login';
+      };
+      if (isSessionReplaced401Detail(detail)) {
+        showSessionReplacedModal(msg, goLogin);
+      } else {
+        message.error(msg);
+        goLogin();
+      }
     } else if (error.response?.status === 403) {
       message.error('permission denied');
     } else if (error.response?.status === 404) {

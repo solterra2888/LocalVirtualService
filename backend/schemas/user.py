@@ -53,4 +53,5 @@ class TokenData(BaseModel):
     """Token数据模型"""
     username: Optional[str] = None
     user_id: Optional[int] = None
-    is_admin: Optional[bool] = None 
+    is_admin: Optional[bool] = None
+    token_version: Optional[int] = None 

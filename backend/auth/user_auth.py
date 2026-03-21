@@ -126,6 +126,64 @@ class UserAuth:
             print(f"更新最后登录时间时出错: {e}")
         finally:
             conn.close()
+
+    def get_token_version(self, username: str):
+        """读取用户当前会话版本（用于校验 JWT 是否仍为最新登录会话）"""
+        conn = self.get_connection()
+        if not conn:
+            return None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'token_version'
+            """)
+            if cursor.fetchone() is None:
+                return None
+            cursor.execute(
+                "SELECT token_version FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return -1
+            return int(row[0])
+        except Exception as e:
+            print(f"读取token_version时出错: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def increment_token_version(self, username: str):
+        """新登录时递增会话版本，使其它设备上的旧 JWT 失效"""
+        conn = self.get_connection()
+        if not conn:
+            return None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'token_version'
+            """)
+            if cursor.fetchone() is None:
+                return None
+            cursor.execute(
+                """
+                UPDATE users SET token_version = token_version + 1
+                WHERE username = %s
+                RETURNING token_version
+                """,
+                (username,),
+            )
+            row = cursor.fetchone()
+            conn.commit()
+            return int(row[0]) if row else None
+        except Exception as e:
+            print(f"递增token_version时出错: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
     
     @staticmethod
     def hash_password(password, salt=None):
@@ -200,6 +258,17 @@ class UserAuth:
             if cursor.fetchone() is None:
                 cursor.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
                 print("已添加avatar_url列到users表")
+
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'token_version'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1"
+                )
+                cursor.execute("UPDATE users SET token_version = 1")
+                print("已添加token_version列到users表")
             
             # 检查是否有任何用户
             cursor.execute("SELECT COUNT(*) FROM users")

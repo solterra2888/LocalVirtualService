@@ -13,6 +13,7 @@ from passlib.context import CryptContext
 
 from backend.schemas.user import TokenData
 from backend.auth.user_auth import UserAuth
+from backend.utils.database_config import get_database_config
 from config.settings import config
 
 # 密码加密上下文
@@ -49,13 +50,27 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
+# 前端根据 code === SESSION_REPLACED 显示英文 Modal；message 为用户可见文案
+SESSION_REPLACED_CODE = "SESSION_REPLACED"
+SESSION_REPLACED_DETAIL = {
+    "code": SESSION_REPLACED_CODE,
+    "message": (
+        "This account was signed in on another device. "
+        "Your session here has ended. Please sign in again to continue."
+    ),
+}
+
+
 def verify_token(token: str) -> TokenData:
-    """验证令牌"""
+    """验证 JWT 并与数据库中的会话版本比对（新设备登录会使旧 token 失效）"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         is_admin: bool = payload.get("is_admin", False)
+        tv_claim = payload.get("tv")
+        if tv_claim is None:
+            tv_claim = 0
         
         if username is None:
             raise HTTPException(
@@ -63,8 +78,31 @@ def verify_token(token: str) -> TokenData:
                 detail="无效的认证凭据",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        return TokenData(username=username, user_id=user_id, is_admin=is_admin)
+
+        db_conn_params = get_database_config()
+        user_auth = UserAuth(db_conn_params)
+        db_tv = user_auth.get_token_version(username)
+        if db_tv == -1:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的认证凭据",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if db_tv is not None and int(tv_claim) != int(db_tv):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=SESSION_REPLACED_DETAIL,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return TokenData(
+            username=username,
+            user_id=user_id,
+            is_admin=is_admin,
+            token_version=int(tv_claim),
+        )
+    except HTTPException:
+        raise
     except jwt.JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

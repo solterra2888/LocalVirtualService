@@ -13,7 +13,7 @@ from backend.auth.jwt_utils import (
     authenticate_user,
     create_access_token,
     get_current_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES
+    ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
@@ -47,6 +47,12 @@ async def login(login_request: UserLoginRequest):
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # 新登录递增会话版本，使其它设备上的旧 JWT 失效
+    user_auth = UserAuth(db_conn_params)
+    new_tv = user_auth.increment_token_version(login_request.username)
+    if new_tv is None:
+        new_tv = 1
     
     # 创建访问令牌
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -54,7 +60,8 @@ async def login(login_request: UserLoginRequest):
         data={
             "sub": user_info['username'],
             "user_id": user_info['id'],
-            "is_admin": user_info.get('is_admin', False)
+            "is_admin": user_info.get('is_admin', False),
+            "tv": new_tv,
         },
         expires_delta=access_token_expires
     )

@@ -1,5 +1,10 @@
 // 认证状态管理
 import { create } from 'zustand';
+import {
+  get401UserMessage,
+  isSessionReplaced401Detail,
+  showSessionReplacedModal,
+} from '../utils/authSession';
 
 interface User {
   id: number;
@@ -119,8 +124,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             isInitialized: true
           });
         } else {
-          const errorData = await verifyResponse.text();
-          console.log('Token验证失败，清除认证信息. 状态:', verifyResponse.status, '错误:', errorData);
+          const text = await verifyResponse.text();
+          let detail: unknown;
+          try {
+            detail = JSON.parse(text).detail;
+          } catch {
+            console.log('Token验证失败，清除认证信息. 状态:', verifyResponse.status, 'body:', text);
+          }
+          console.log('Token验证失败，清除认证信息. 状态:', verifyResponse.status, 'detail:', detail);
           localStorage.removeItem('access_token');
           localStorage.removeItem('user');
           set({
@@ -129,6 +140,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             isAuthenticated: false,
             isInitialized: true
           });
+          if (isSessionReplaced401Detail(detail)) {
+            showSessionReplacedModal(get401UserMessage(detail), () => {
+              window.location.href = '/login';
+            });
+          }
         }
       } catch (error) {
         console.error('Token验证或解析用户信息失败:', error);
