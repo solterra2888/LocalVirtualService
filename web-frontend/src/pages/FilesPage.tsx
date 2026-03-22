@@ -76,6 +76,7 @@ import {
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import ReportTickerTags, { parseReportTickers, PC_INFO_TAGS_TAG_STYLE } from '../components/ReportTickerTags';
@@ -2802,7 +2803,7 @@ const FilesPageInner: React.FC = () => {
               ))}
             </div>
             <div
-              className="files-list-search-bar"
+              className={`files-list-search-bar${isDark ? ' files-list-search-bar--dark' : ''}`}
               style={
                 {
                   '--files-sources-search-border': themeColors.cardBorder,
@@ -3021,16 +3022,18 @@ const FilesPageInner: React.FC = () => {
                             {fileTypeDisplay.icon}
                           </span>
                         </Tooltip>
-                        <Tooltip title={statusTooltip}>
-                          <span
-                            className="files-list-item-status-text"
-                            style={{ color: themeColors.textSecondary }}
-                            aria-label={statusLabel}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            {statusLabel}
-                          </span>
-                        </Tooltip>
+                        <div className="files-list-item-status-wrap">
+                          <Tooltip title={statusTooltip}>
+                            <span
+                              className="files-list-item-status-text"
+                              style={{ color: themeColors.textSecondary }}
+                              aria-label={statusLabel}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {statusLabel}
+                            </span>
+                          </Tooltip>
+                        </div>
                       </div>
                       {execution.share_info && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
@@ -4715,6 +4718,7 @@ export const OriginalContentView: React.FC<{
   /** 转写保存后刷新 Markdown 等（Original 会在内部自行重新拉取 getOriginalFileInfo） */
   onTranscriptPersisted?: () => void | Promise<void>;
 }> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded, onTranscriptPersisted }) => {
+  const { isMobile } = useDeviceDetection();
   const [loading, setLoading] = useState(true);
   const [fileContent, setFileContent] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -4758,8 +4762,6 @@ export const OriginalContentView: React.FC<{
           originalFileInfo.file_url = appendServeAuthToken(originalFileInfo.file_url, token);
         }
 
-        console.log('🔍 [DEBUG] Original File Info:', originalFileInfo);
-        console.log('🔍 [DEBUG] File URL with token:', originalFileInfo.file_url);
         setFileContent(originalFileInfo);
         onFileInfoLoaded?.({ filename: originalFileInfo.filename, file_type: originalFileInfo.file_type });
       } catch (error) {
@@ -4818,9 +4820,7 @@ export const OriginalContentView: React.FC<{
     <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', color: themeColors.text }}>
       {(() => {
         const fileType = fileContent.file_type.toLowerCase();
-        console.log('🔍 [DEBUG] Rendering file type:', fileType);
-        console.log('🔍 [DEBUG] File URL for iframe:', fileContent.file_url);
-        
+
         if (fileType === 'pdf') {
           // PDF预览：仅当使用未签名的 OSS 默认域名时才无法预览（会被强制下载）
           // 带签名的 URL（含 OSSAccessKeyId）已设置 response-content-disposition=inline，可正常预览
@@ -4876,22 +4876,50 @@ export const OriginalContentView: React.FC<{
               </div>
             );
           } else {
-            // 自定义域名或本地文件，可以使用 iframe 预览
+            // 桌面端：普通 iframe 即可。移动端 WebKit（尤其 iOS）在嵌套 flex 里对 height:100% 的 iframe 常算不出高度，
+            // 只显示缩略图标 +「Open」；用绝对定位填满 + 明确 min-height，并提供新窗口打开走系统全屏预览。
+            const openPdfFullscreen = () => {
+              window.open(fileContent.file_url, '_blank', 'noopener,noreferrer');
+            };
             return (
-              <div style={{ 
-                border: `1px solid ${themeColors.cardBorder}`,
-                borderRadius: '8px',
-                overflow: 'hidden',
-                flex: 1,
-                minHeight: 0
-              }}>
-                <iframe
-                  src={fileContent.file_url}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title={fileContent.filename}
-                  onLoad={() => console.log('✅ [DEBUG] iframe loaded successfully')}
-                  onError={(e) => console.error('❌ [DEBUG] iframe load error:', e)}
-                />
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: isMobile ? 8 : 0,
+                }}
+              >
+                {isMobile && (
+                  <div style={{ padding: '0 8px', flexShrink: 0 }}>
+                    <Button type="primary" icon={<LinkOutlined />} block onClick={openPdfFullscreen}>
+                      Open PDF (full screen)
+                    </Button>
+                  </div>
+                )}
+                <div
+                  style={{
+                    position: 'relative',
+                    flex: 1,
+                    minHeight: isMobile ? 'min(78dvh, 900px)' : 0,
+                    border: `1px solid ${themeColors.cardBorder}`,
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <iframe
+                    src={fileContent.file_url}
+                    title={fileContent.filename}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      border: 'none',
+                    }}
+                  />
+                </div>
               </div>
             );
           }

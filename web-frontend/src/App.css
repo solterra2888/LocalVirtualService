@@ -451,6 +451,13 @@
     0 2px 8px rgba(0, 0, 0, 0.35) !important;
 }
 
+.upload-files-modal--dark .ant-segmented .ant-segmented-item-selected {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
 .upload-files-modal--dark .ant-segmented .ant-segmented-item-selected .ant-segmented-item-label {
   color: #f0f8ff !important;
   font-weight: 600;
@@ -788,6 +795,34 @@
   max-width: 72px;
 }
 
+/* Dark：Sources 搜索条 Title / Content / Ticker（与 upload-files-modal--dark 一致）
+ * 动画结束后 rc-segmented 会卸载 thumb，须给 .ant-segmented-item-selected 同样背景，否则停住后高亮像消失 */
+.files-page-layout .files-list-search-bar--dark .files-list-search-segmented.ant-segmented .ant-segmented-thumb {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.files-page-layout
+  .files-list-search-bar--dark
+  .files-list-search-segmented.ant-segmented
+  .ant-segmented-item-selected {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.files-page-layout
+  .files-list-search-bar--dark
+  .files-list-search-segmented.ant-segmented
+  .ant-segmented-item-selected
+  .ant-segmented-item-label {
+  color: #f0f8ff !important;
+  font-weight: 600;
+}
+
 .files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete {
   flex: 1;
   min-width: 0;
@@ -1000,13 +1035,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 /* 与移动端 Sources 一致：类型图标 + 纯文案状态（非 Tag） */
 .files-page-layout .files-list-item-type-status {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   min-width: 0;
   flex: 1;
@@ -1026,16 +1061,23 @@
   display: block;
 }
 
-.files-page-layout .files-list-item-status-text {
-  font-size: 11px;
-  line-height: 1.45;
+/* 占位换行，整块不接收点击，避免 Tooltip 触发区挡卡片点击 */
+.files-page-layout .files-list-item-status-wrap {
   flex: 1;
   min-width: 0;
   display: block;
+  pointer-events: none;
+}
+
+.files-page-layout .files-list-item-status-text {
+  font-size: 11px;
+  line-height: 1.45;
+  display: inline;
   overflow: visible;
   white-space: normal;
   word-break: break-word;
   cursor: default;
+  pointer-events: auto;
 }
 
 /* Ticker 行：与移动端 Sources / Watchlist 卡片一致 */

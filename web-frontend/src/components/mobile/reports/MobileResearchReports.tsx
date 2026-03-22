@@ -200,16 +200,18 @@ const MobileResearchReportsInner: React.FC<MobileResearchReportsProps> = ({ repo
                       {fileTypeDisplay.icon}
                     </span>
                   </Tooltip>
-                  <Tooltip title={statusDisplay.tooltip}>
-                    <span
-                      className="mobile-sources-status-text"
-                      style={{ color: themeColors.textSecondary }}
-                      aria-label={statusDisplay.label}
-                      onClick={e => e.stopPropagation()}
-                    >
-                      {statusDisplay.label}
-                    </span>
-                  </Tooltip>
+                  <div className="mobile-sources-status-wrap">
+                    <Tooltip title={statusDisplay.tooltip}>
+                      <span
+                        className="mobile-sources-status-text"
+                        style={{ color: themeColors.textSecondary }}
+                        aria-label={statusDisplay.label}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {statusDisplay.label}
+                      </span>
+                    </Tooltip>
+                  </div>
                 </div>
                 {report.share_info && (
                   <div className="mobile-sources-card-footer-share">

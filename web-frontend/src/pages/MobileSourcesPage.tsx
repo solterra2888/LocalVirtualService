@@ -479,7 +479,10 @@ const MobileSourcesInner: React.FC = () => {
   } as React.CSSProperties;
 
   return (
-    <div className="mobile-sources-page" style={pageSurfaceStyle}>
+    <div
+      className={`mobile-sources-page${isDark ? ' mobile-sources-page--dark' : ''}`}
+      style={pageSurfaceStyle}
+    >
       <div
         className="mobile-sources-toolbar"
         style={{
@@ -696,16 +699,18 @@ const MobileSourcesInner: React.FC = () => {
                           {fileTypeDisplay.icon}
                         </span>
                       </Tooltip>
-                      <Tooltip title={statusDisplay.tooltip}>
-                        <span
-                          className="mobile-sources-status-text"
-                          style={{ color: themeColors.textSecondary }}
-                          aria-label={statusDisplay.label}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {statusDisplay.label}
-                        </span>
-                      </Tooltip>
+                      <div className="mobile-sources-status-wrap">
+                        <Tooltip title={statusDisplay.tooltip}>
+                          <span
+                            className="mobile-sources-status-text"
+                            style={{ color: themeColors.textSecondary }}
+                            aria-label={statusDisplay.label}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {statusDisplay.label}
+                          </span>
+                        </Tooltip>
+                      </div>
                     </div>
                     {execution.share_info && (
                       <div className="mobile-sources-card-footer-share">

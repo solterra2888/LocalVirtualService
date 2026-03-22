@@ -127,6 +127,33 @@
   max-width: 72px;
 }
 
+/* Dark：Title / Content / Ticker（与 upload-files-modal--dark Segmented 一致）
+ * rc-segmented 动画结束后会卸载 thumb，仅靠 item-selected 显示选中态；暗色 token 下 track 与 itemSelectedBg 过近，
+ * 若只改 thumb 会出现「滑一下有高光、停住后像没了」——须同步加强 .ant-segmented-item-selected 本体。 */
+.mobile-sources-page--dark .mobile-sources-segmented-in-search.ant-segmented .ant-segmented-thumb {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.mobile-sources-page--dark
+  .mobile-sources-segmented-in-search.ant-segmented
+  .ant-segmented-item-selected {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.mobile-sources-page--dark
+  .mobile-sources-segmented-in-search.ant-segmented
+  .ant-segmented-item-selected
+  .ant-segmented-item-label {
+  color: #f0f8ff !important;
+  font-weight: 600;
+}
+
 /* Ticker：AutoComplete 与右侧 Input 同缝、同字号（Select 非 affix-wrapper） */
 .mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete {
   flex: 1;
@@ -230,7 +257,7 @@
 
 .mobile-sources-card-footer {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-height: 22px;
@@ -239,7 +266,7 @@
 
 .mobile-sources-card-footer-left {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   min-width: 0;
   flex: 1;
@@ -272,17 +299,24 @@
   opacity: 0.45;
 }
 
+/* 状态区占位：占满行宽以便长文案换行，但不接收点击（避免整块触发 Tooltip 挡卡片） */
+.mobile-sources-status-wrap {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  pointer-events: none;
+}
+
 /* 文件处理状态：纯文案（无图标、无语义色），与标题区次要文字色一致由行内 style 注入 */
 .mobile-sources-status-text {
   font-size: 11px;
   line-height: 1.45;
-  flex: 1;
-  min-width: 0;
-  display: block;
+  display: inline;
   overflow: visible;
   white-space: normal;
   word-break: break-word;
   cursor: default;
+  pointer-events: auto;
 }
 
 .mobile-sources-fab {
