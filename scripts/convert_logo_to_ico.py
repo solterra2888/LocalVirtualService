@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-临时脚本：将 GuanHeCapital_logo.jpg 转为 ICO 格式，并输出到 web-frontend/public。
-依赖: pip install Pillow（或使用项目 .venv: .venv/bin/python scripts/convert_logo_to_ico.py）
-使用完毕后可删除此脚本。
+将 GuanHeCapital_logo.jpg 转为 ICO / PWA 用 PNG，输出到 web-frontend/public。
+
+- ICO：浏览器标签、favicon 备用
+- 192/512 PNG：Web App Manifest（Chrome「添加到主屏幕」）
+- 180 PNG：iOS Safari apple-touch-icon
+
+依赖: pip install Pillow
 """
-import os
+import shutil
 from pathlib import Path
 
 from PIL import Image
@@ -16,6 +20,12 @@ OUT_DIR = PROJECT_ROOT / "web-frontend" / "public"
 OUT_ICO = OUT_DIR / "GuanHeCapital.ico"
 # 常见 favicon/logo 尺寸
 ICO_SIZES = [(16, 16), (32, 32), (48, 48), (256, 256)]
+# Chrome PWA / manifest 推荐 PNG；ICO 在 manifest 中支持不一致
+PWA_ICONS = (
+    (192, "GuanHeCapital_pwa_192.png"),
+    (512, "GuanHeCapital_pwa_512.png"),
+    (180, "apple-touch-icon.png"),
+)
 
 
 def main():
@@ -30,9 +40,19 @@ def main():
         img = img.convert("RGBA")
     # 缩放到最大尺寸，Pillow 会按 sizes 生成多尺寸 ICO
     size_max = max(ICO_SIZES, key=lambda s: s[0])
-    img = img.resize(size_max, Image.Resampling.LANCZOS)
-    img.save(OUT_ICO, format="ICO", sizes=ICO_SIZES)
+    img_ico = img.resize(size_max, Image.Resampling.LANCZOS)
+    img_ico.save(OUT_ICO, format="ICO", sizes=ICO_SIZES)
     print(f"已生成: {OUT_ICO}")
+    # 多数浏览器会默认请求 /favicon.ico；与 GuanHeCapital.ico 保持一致，避免残留旧品牌
+    shutil.copyfile(OUT_ICO, OUT_DIR / "favicon.ico")
+    print(f"已生成: {OUT_DIR / 'favicon.ico'}")
+
+    for px, name in PWA_ICONS:
+        out = OUT_DIR / name
+        scaled = img.resize((px, px), Image.Resampling.LANCZOS)
+        scaled.save(out, format="PNG", optimize=True)
+        print(f"已生成: {out}")
+
     return 0
 
 
