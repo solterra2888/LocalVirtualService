@@ -180,3 +180,80 @@
   }
 }
 
+/* Dark mode */
+.app-dark .mobile-overview-section {
+  background: #1a2234;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.app-dark .mobile-overview-section-title,
+.app-dark .mobile-overview-section-title .ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-overview-item,
+.app-dark .mobile-overview-stat-card {
+  background: #252d3d;
+}
+
+.app-dark .mobile-overview-label,
+.app-dark .mobile-overview-stat-label {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-overview-value,
+.app-dark .mobile-overview-stat-value {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-overview-description {
+  color: #c4c9d4;
+}
+
+.app-dark .mobile-overview-contact-item {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-overview-contact-item:hover {
+  color: #69b1ff;
+}
+
+.app-dark .mobile-overview-rating-card {
+  border-color: #364152;
+  background: #252d3d;
+}
+
+.app-dark .mobile-overview-rating-analyst,
+.app-dark .mobile-overview-rating-analyst.ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-overview-rating-brokerage,
+.app-dark .mobile-overview-rating-brokerage.ant-typography,
+.app-dark .mobile-overview-rating-brokerage.ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-overview-hint,
+.app-dark .mobile-overview-hint.ant-typography,
+.app-dark .mobile-overview-hint.ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-overview-rating-meta {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-overview-rating-card .ant-typography:not(.ant-typography-secondary) {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-overview-rating-card .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-overview-loading,
+.app-dark .mobile-overview-empty {
+  background: #1a2234;
+}
+

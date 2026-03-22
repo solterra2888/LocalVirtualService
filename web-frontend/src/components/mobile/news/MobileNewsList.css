@@ -125,3 +125,107 @@
   overflow-y: auto;
 }
 
+/* Dark mode（股票详情 Tab 内嵌新闻列表） */
+.app-dark .mobile-news-list {
+  background: #1a202c;
+}
+
+.app-dark .news-card {
+  background: #1a2234;
+  border: 1px solid #364152;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.app-dark .news-card:active {
+  background-color: #252d3d;
+}
+
+.app-dark .news-summary-fade {
+  background: linear-gradient(transparent, #1a2234);
+}
+
+.app-dark .mobile-news-list .ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-news-list .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-news-detail {
+  color: #e0e6f1;
+}
+
+.app-dark .mobile-news-detail .mobile-news-detail-original {
+  color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.app-dark .news-detail-meta {
+  border-bottom-color: #364152;
+}
+
+.app-dark .news-detail-divider {
+  background-color: #364152;
+}
+
+.app-dark .mobile-news-modal .ant-modal-content {
+  background: #1a2234;
+}
+
+.app-dark .mobile-news-modal .ant-modal-header {
+  background: #1a2234;
+  border-bottom-color: #364152;
+}
+
+/* Modal 挂在 body 上，不一定在 .app-dark 内，用独立 class 保证深色底（配合 variant=dark 的 Markdown） */
+.mobile-news-modal--dark .ant-modal-content {
+  background: #1a2234 !important;
+}
+
+.mobile-news-modal--dark .ant-modal-header {
+  background: #1a2234 !important;
+  border-bottom: 1px solid #364152 !important;
+}
+
+.mobile-news-modal--dark .ant-modal-close {
+  color: #a0a3ad;
+}
+
+/* 详情区内文字（弹窗内，themeMode=dark） */
+.mobile-news-detail--theme-dark {
+  color: #e0e6f1;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.mobile-news-detail--theme-dark .news-detail-header .ant-typography {
+  color: #e0e6f1 !important;
+}
+
+/* 区块小标题：Ant Typography strong 默认深色，在 portaled 弹窗内需单独提亮 */
+.mobile-news-detail--theme-dark .news-detail-section-heading,
+.mobile-news-detail--theme-dark .news-detail-section-heading.ant-typography,
+.mobile-news-detail--theme-dark .news-detail-section-heading.ant-typography-strong {
+  color: #ffffff !important;
+}
+
+/* Original Content 正文：原先仅写在 .app-dark 下，Modal 在 body 上时不生效 */
+.mobile-news-detail--theme-dark .mobile-news-detail-original,
+.mobile-news-detail--theme-dark .mobile-news-detail-original.ant-typography {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.mobile-news-detail--theme-dark .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-news-detail .news-detail-section-heading,
+.app-dark .mobile-news-detail .news-detail-section-heading.ant-typography-strong {
+  color: #ffffff !important;
+}
+
+.app-dark .mobile-news-detail .mobile-news-detail-original,
+.app-dark .mobile-news-detail .mobile-news-detail-original.ant-typography {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+

@@ -1,0 +1,168 @@
+.mobile-add-watchlist-drawer .mobile-add-watchlist-result-item {
+  cursor: pointer;
+  padding: 8px 0 !important;
+}
+
+.mobile-add-watchlist-drawer .mobile-add-watchlist-result-item.is-selected {
+  background-color: #f0f8ff;
+  border-radius: 8px;
+}
+
+/* Dark：与 `.app-dark` 并列，便于 Drawer 挂载在非 .App 下时仍生效 */
+.app-dark .mobile-add-watchlist-drawer .ant-drawer-header,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-drawer-header {
+  border-bottom-color: #364152;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-drawer-title,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-drawer-title {
+  color: #e0e6f1;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-drawer-close,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-drawer-close {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-drawer-body,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-drawer-body {
+  color: #e0e6f1;
+  background: #1a2234 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-input,
+.app-dark .mobile-add-watchlist-drawer .ant-input-affix-wrapper,
+.app-dark .mobile-add-watchlist-drawer .ant-input-outlined,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input-affix-wrapper,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input-outlined {
+  background: #252d3d !important;
+  border-color: #364152 !important;
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-input::placeholder,
+.app-dark .mobile-add-watchlist-drawer .ant-input-affix-wrapper input::placeholder,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input::placeholder,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input-affix-wrapper input::placeholder {
+  color: #6b7280 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-input-affix-wrapper .anticon,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input-affix-wrapper .anticon {
+  color: #a0a3ad;
+}
+
+/* Notes 多行 */
+.app-dark .mobile-add-watchlist-drawer textarea.ant-input,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark textarea.ant-input {
+  background: #252d3d !important;
+  border-color: #364152 !important;
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-input-data-count,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-input-data-count {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-form-item-label > label,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-form-item-label > label {
+  color: #c4c9d4 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-radio-wrapper,
+.app-dark .mobile-add-watchlist-drawer .ant-typography,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-radio-wrapper,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-typography-secondary,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-radio-inner,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-radio-inner {
+  background-color: transparent !important;
+  border-color: #5c6573 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-radio-checked .ant-radio-inner,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-radio-checked .ant-radio-inner {
+  border-color: #2196f3 !important;
+  background-color: #1a2234 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-radio-checked .ant-radio-inner::after,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-radio-checked .ant-radio-inner::after {
+  background-color: #2196f3;
+}
+
+.app-dark .mobile-add-watchlist-drawer .mobile-add-watchlist-result-item.is-selected,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .mobile-add-watchlist-result-item.is-selected {
+  background-color: rgba(105, 177, 255, 0.12);
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-list-split .ant-list-item,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-list-split .ant-list-item {
+  border-block-color: #364152;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-list-item-meta-title,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-list-item-meta-title {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-empty-description,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-empty-description {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-empty-image svg path[fill='#d9d9d9'],
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-empty-image svg path[fill='#d9d9d9'] {
+  fill: #5c6573;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-spin-dot-item,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-spin-dot-item {
+  background-color: #2196f3;
+}
+
+/* 列表内 Tag：暗色底 */
+.app-dark .mobile-add-watchlist-drawer .ant-tag,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-tag {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: #364152 !important;
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-tag-blue,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-tag-blue {
+  background: rgba(33, 150, 243, 0.2) !important;
+  border-color: rgba(33, 150, 243, 0.45) !important;
+  color: #90caf9 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-tag-green,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-tag-green {
+  background: rgba(82, 196, 26, 0.18) !important;
+  border-color: rgba(82, 196, 26, 0.4) !important;
+  color: #95de64 !important;
+}
+
+/* Cancel 默认按钮 */
+.app-dark .mobile-add-watchlist-drawer .ant-btn-default,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-btn-default {
+  background: #252d3d !important;
+  border-color: #364152 !important;
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-add-watchlist-drawer .ant-btn-default:hover,
+.mobile-add-watchlist-drawer.mobile-add-watchlist-drawer--dark .ant-btn-default:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: #5c6573 !important;
+  color: #fff !important;
+}

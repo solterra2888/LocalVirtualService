@@ -1,8 +1,8 @@
 
 
 import React, { useState } from 'react';
-import { Modal, Upload, Button, Form, Select, message, Space, Tag, Divider, Input, Switch, InputNumber, Row, Col, Collapse, ConfigProvider, Segmented, theme as antdTheme } from 'antd';
-import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, UploadOutlined, ThunderboltOutlined, CloudUploadOutlined } from '@ant-design/icons';
+import { Modal, Upload, Button, Form, Select, message, Space, Divider, Input, Switch, InputNumber, Row, Col, Collapse, ConfigProvider, Segmented, theme as antdTheme, Typography, Tooltip } from 'antd';
+import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, UploadOutlined, ThunderboltOutlined, CloudUploadOutlined, FilePdfOutlined, FileWordOutlined, FileExcelOutlined, FileImageOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -15,6 +15,8 @@ interface UploadFilesModalProps {
   visible: boolean;
   onCancel: () => void;
   themeMode: 'light' | 'dark';
+  /** 手机端：Document Processing 下不展示 Quick/LlamaParse 副标题与说明段落 */
+  compactDocumentProcessing?: boolean;
 }
 
 interface ProcessingParams {
@@ -74,7 +76,12 @@ const CARD_STYLE_BEHANCE_DARK = {
   border: '1px solid rgba(255, 255, 255, 0.06)',
 };
 
-const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, themeMode }) => {
+const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
+  visible,
+  onCancel,
+  themeMode,
+  compactDocumentProcessing = false,
+}) => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const isDark = themeMode === 'dark';
@@ -222,11 +229,24 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             borderRadius: 8,
             borderRadiusLG: 12,
           },
+          /** Quick / LlamaParse：轨道与选中块对比度（默认 track≈elevated，暗色下几乎分不清） */
+          components: {
+            Segmented: {
+              trackBg: 'rgba(255, 255, 255, 0.06)',
+              itemColor: 'rgba(255, 255, 255, 0.55)',
+              itemHoverColor: 'rgba(255, 255, 255, 0.92)',
+              itemHoverBg: 'rgba(255, 255, 255, 0.1)',
+              itemSelectedBg: 'rgba(33, 150, 243, 0.42)',
+              itemSelectedColor: '#f0f8ff',
+              itemActiveBg: 'rgba(255, 255, 255, 0.12)',
+              boxShadowTertiary: '0 0 0 1px rgba(120, 190, 255, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35)',
+            },
+          },
         }),
       }}
     >
       <Modal
-        classNames={{ content: 'upload-files-modal' }}
+        classNames={{ content: isDark ? 'upload-files-modal upload-files-modal--dark' : 'upload-files-modal' }}
         title={
           <Space>
             <UploadOutlined />
@@ -236,7 +256,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
         open={visible}
         onCancel={handleClose}
         footer={null}
-        width={800}
+        width={compactDocumentProcessing ? 'calc(100vw - 32px)' : 800}
         centered
         closable={true}
         maskClosable={true}
@@ -266,9 +286,39 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             <p className="ant-upload-text" style={{ color: colors.text }}>
               Click or drag file to this area to upload
             </p>
-            <p className="ant-upload-hint" style={{ color: colors.textSecondary }}>
-              Supported: PDF, Excel (.xlsx, .xls), CSV, Word (.doc, .docx), Images (.jpg, .jpeg, .png, .gif, .bmp)
-            </p>
+            <div
+              className="upload-files-modal-supported-icons"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                gap: 10,
+                marginTop: 8,
+              }}
+            >
+              <span style={{ fontSize: 12, color: colors.textSecondary, marginRight: 4 }}>Supported:</span>
+              <Tooltip title="PDF">
+                <span style={{ color: '#f5222d', fontSize: 18, lineHeight: 1, cursor: 'default' }} aria-label="PDF">
+                  <FilePdfOutlined />
+                </span>
+              </Tooltip>
+              <Tooltip title="Excel (.xlsx, .xls), CSV">
+                <span style={{ color: '#52c41a', fontSize: 18, lineHeight: 1, cursor: 'default' }} aria-label="Excel and CSV">
+                  <FileExcelOutlined />
+                </span>
+              </Tooltip>
+              <Tooltip title="Word (.doc, .docx)">
+                <span style={{ color: '#1890ff', fontSize: 18, lineHeight: 1, cursor: 'default' }} aria-label="Word">
+                  <FileWordOutlined />
+                </span>
+              </Tooltip>
+              <Tooltip title="Images (.jpg, .jpeg, .png, .gif, .bmp)">
+                <span style={{ color: '#fa8c16', fontSize: 18, lineHeight: 1, cursor: 'default' }} aria-label="Images">
+                  <FileImageOutlined />
+                </span>
+              </Tooltip>
+            </div>
           </Upload.Dragger>
         ) : (
           <div
@@ -278,21 +328,43 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
               border: `1px solid ${colors.cardBorder}`,
               borderRadius: 8,
               marginBottom: '16px',
+              maxWidth: '100%',
+              boxSizing: 'border-box',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Tag color="blue">
-                {selectedFile.name}
-                <span style={{ marginLeft: 8, opacity: 0.8 }}>
-                  ({(selectedFile.size / 1024).toFixed(1)} KB)
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 8,
+                width: '100%',
+                minWidth: 0,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                <Typography.Text
+                  ellipsis={{ tooltip: selectedFile.name }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    color: isDark ? '#69b7ff' : '#1677ff',
+                    fontWeight: 500,
+                  }}
+                >
+                  {selectedFile.name}
+                </Typography.Text>
+                <span style={{ fontSize: 12, opacity: 0.75, color: colors.textSecondary }}>
+                  {(selectedFile.size / 1024).toFixed(1)} KB
                 </span>
-              </Tag>
+              </div>
               <Button
                 type="text"
                 danger
                 size="small"
                 icon={<DeleteOutlined />}
                 onClick={handleClearSelectedFile}
+                style={{ flexShrink: 0 }}
               />
             </div>
           </div>
@@ -322,7 +394,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
             }}
             options={[
               {
-                label: (
+                label: compactDocumentProcessing ? (
+                  <Space style={{ padding: '4px 0' }}>
+                    <ThunderboltOutlined />
+                    <span style={{ fontWeight: 500 }}>Quick Process</span>
+                  </Space>
+                ) : (
                   <div style={{ padding: '4px 0' }}>
                     <Space>
                       <ThunderboltOutlined />
@@ -337,7 +414,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                 disabled: !!(selectedFile && filesAPI.isImageFile(selectedFile.name)),
               },
               {
-                label: (
+                label: compactDocumentProcessing ? (
+                  <Space style={{ padding: '4px 0' }}>
+                    <CloudUploadOutlined />
+                    <span style={{ fontWeight: 500 }}>LlamaParse</span>
+                  </Space>
+                ) : (
                   <div style={{ padding: '4px 0' }}>
                     <Space>
                       <CloudUploadOutlined />
@@ -355,18 +437,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
           />
 
           {processingParams.processing_mode === 'quick' ? (
-            <div style={{
-              marginBottom: '12px',
-              padding: '8px 12px',
-              background: colors.codeBlockBg,
-              borderRadius: 8,
-              fontSize: '12px',
-              color: colors.textSecondary,
-            }}>
-              Uses lightweight local libraries to convert documents to Markdown. Best for text-based PDFs, Word, and Excel files. Does not support OCR or scanned documents.
-            </div>
-          ) : (
-            <>
+            !compactDocumentProcessing ? (
               <div style={{
                 marginBottom: '12px',
                 padding: '8px 12px',
@@ -375,8 +446,23 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
                 fontSize: '12px',
                 color: colors.textSecondary,
               }}>
-                By default only 20 pages are processed. You can change this and other options in Advanced Parameter Settings below.
+                Uses lightweight local libraries to convert documents to Markdown. Best for text-based PDFs, Word, and Excel files. Does not support OCR or scanned documents.
               </div>
+            ) : null
+          ) : (
+            <>
+              {!compactDocumentProcessing && (
+                <div style={{
+                  marginBottom: '12px',
+                  padding: '8px 12px',
+                  background: colors.codeBlockBg,
+                  borderRadius: 8,
+                  fontSize: '12px',
+                  color: colors.textSecondary,
+                }}>
+                  By default only 20 pages are processed. You can change this and other options in Advanced Parameter Settings below.
+                </div>
+              )}
               <Collapse
                 ghost
                 style={{ marginBottom: '16px' }}
@@ -528,18 +614,29 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ visible, onCancel, 
           )}
         </div>
 
-        {/* 操作按钮 */}
-        <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button
-            onClick={handleClose}
-            style={{
-              borderRadius: 8,
-              ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
-            }}
-          >
-            Close
-          </Button>
-          <Space>
+        {/* 操作按钮（手机端 compact：不展示 Close，与右上角关闭重复） */}
+        <div
+          style={{
+            marginTop: '20px',
+            display: 'flex',
+            justifyContent: compactDocumentProcessing ? 'flex-start' : 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
+          {!compactDocumentProcessing && (
+            <Button
+              onClick={handleClose}
+              style={{
+                borderRadius: 8,
+                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+              }}
+            >
+              Close
+            </Button>
+          )}
+          <Space wrap>
             {/* 选中文件后显示 Start Processing；点击后上传并解析文档 */}
             {selectedFile && (
               <Button

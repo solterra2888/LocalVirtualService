@@ -4,7 +4,8 @@
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query, Body
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+import json
 from pydantic import BaseModel
 import os
 
@@ -23,6 +24,52 @@ from backend.utils.avatar import resolve_avatar_url
 router = APIRouter()
 
 
+def _fetch_ticker_tags_for_processing_stats_ids(cursor, ps_ids: List) -> Dict[Any, List[str]]:
+    """按 processing_stats_id 聚合 file_tags.ticker（jsonb 数组），去重并保持顺序。"""
+    if not ps_ids:
+        return {}
+    cursor.execute(
+        """
+        SELECT fpd.processing_stats_id, ft.ticker
+        FROM file_processing_details fpd
+        INNER JOIN file_tags ft ON ft.file_id = fpd.id
+        WHERE fpd.processing_stats_id = ANY(%s)
+        ORDER BY fpd.id ASC
+        """,
+        (ps_ids,),
+    )
+    out: Dict[Any, List[str]] = {}
+    for row in cursor.fetchall() or []:
+        ps_id = row[0]
+        tval = row[1]
+        items: List[str] = []
+        if tval is None:
+            continue
+        if isinstance(tval, list):
+            items = [str(x).strip() for x in tval if x is not None and str(x).strip()]
+        elif isinstance(tval, str):
+            s = tval.strip()
+            if not s:
+                continue
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        items = [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    items = [s]
+            else:
+                items = [s]
+        if not items:
+            continue
+        if ps_id not in out:
+            out[ps_id] = []
+        seen = set(out[ps_id])
+        for t in items:
+            if t not in seen:
+                out[ps_id].append(t)
+                seen.add(t)
+    return out
 
 
 @router.get("/types", response_model=List[TaskTypeResponse], summary="获取RC Agent列表")
@@ -240,7 +287,8 @@ async def get_task_executions(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     search_type: Optional[str] = Query(None, description="搜索类型: file_name 或 content"),
-    q: Optional[str] = Query(None, description="搜索关键词")
+    q: Optional[str] = Query(None, description="搜索关键词"),
+    ticker: Optional[str] = Query(None, description="按ticker筛选（精确匹配file_tags中的ticker数组元素）")
 ):
     """
     获取任务执行历史
@@ -249,6 +297,7 @@ async def get_task_executions(
     - **page_size**: 每页大小
     - **search_type**: 搜索类型（file_name 按文件名，content 按文件内容）
     - **q**: 搜索关键词，与 search_type 配合使用
+    - **ticker**: 按股票代码筛选，匹配file_tags中包含该ticker的执行记录
     """
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
@@ -266,8 +315,6 @@ async def get_task_executions(
     
     cursor = conn.cursor()
     try:
-        import json
-        
         params = []
         where_conditions = []
         
@@ -294,6 +341,12 @@ async def get_task_executions(
                     "EXISTS (SELECT 1 FROM file_processing_details fpd WHERE fpd.processing_stats_id = ps.id AND fpd.content IS NOT NULL AND fpd.content::text ILIKE %s)"
                 )
                 params.append(q_pattern)
+        
+        if ticker and ticker.strip():
+            where_conditions.append(
+                "EXISTS (SELECT 1 FROM file_processing_details fpd_t JOIN file_tags ft ON fpd_t.id = ft.file_id WHERE fpd_t.processing_stats_id = ps.id AND ft.ticker @> %s::jsonb)"
+            )
+            params.append(json.dumps([ticker.strip()]))
         
         where_clause = ("WHERE " + " AND ".join(where_conditions)) if where_conditions else ""
         
@@ -358,6 +411,8 @@ async def get_task_executions(
                 if to_user['user_id'] not in existing_ids:
                     share_info_map[ps_id]['shared_to'].append(to_user)
 
+        ticker_tags_map = _fetch_ticker_tags_for_processing_stats_ids(cursor, ps_ids)
+
         return [
             TaskExecutionResponse(
                 id=str(stat[0]),
@@ -381,6 +436,7 @@ async def get_task_executions(
                 access_type=stat[18] if len(stat) > 18 else None,
                 shared_by=stat[19] if len(stat) > 19 else None,
                 share_info=share_info_map.get(stat[0]),
+                ticker_tags=ticker_tags_map.get(stat[0]),
             )
             for stat in stats
         ]
@@ -437,8 +493,6 @@ async def get_task_execution(
                 detail=f"任务执行不存在: {execution_id}"
             )
         
-        import json
-        
         is_owner = stat[8] == current_user.username
         has_shared_access = False
         if not is_owner:
@@ -457,6 +511,8 @@ async def get_task_execution(
             )
         
         access_type = 'owner' if is_owner else 'shared'
+
+        ticker_tags_map = _fetch_ticker_tags_for_processing_stats_ids(cursor, [stat[0]])
         
         return TaskExecutionResponse(
             id=str(stat[0]),
@@ -477,7 +533,8 @@ async def get_task_execution(
             llm_provider=stat[15] if len(stat) > 15 else None,
             first_task_id=stat[16] if len(stat) > 16 else None,
             upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None,
-            access_type=access_type
+            access_type=access_type,
+            ticker_tags=ticker_tags_map.get(stat[0]),
         )
         
     finally:

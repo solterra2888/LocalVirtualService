@@ -13,6 +13,8 @@ import type { TaskInfo } from '../contexts/FileProcessingContext';
 interface TaskProgressPopoverProps {
   tasks: Map<string, TaskInfo>;
   themeMode: 'light' | 'dark';
+  /** 手机 Drawer 内：全宽、略紧凑 */
+  mobileLayout?: boolean;
 }
 
 const getStatusIcon = (status: string, isDark?: boolean) => {
@@ -55,16 +57,16 @@ const getStatusText = (status: string, currentFile?: string, fileType?: string, 
   return statusMap[status] || status;
 };
 
-export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks, themeMode }) => {
+export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks, themeMode, mobileLayout }) => {
   const isDark = themeMode === 'dark';
   const taskArray = Array.from(tasks.values()).sort((a, b) => b.startTime - a.startTime);
 
   if (taskArray.length === 0) {
     return (
       <div style={{ 
-        padding: '12px 16px',
+        padding: mobileLayout ? '10px 12px' : '12px 16px',
         color: isDark ? '#94a3b8' : '#666',
-        fontSize: '13px'
+        fontSize: mobileLayout ? '12px' : '13px'
       }}>
         No tasks in progress
       </div>
@@ -73,17 +75,18 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
 
   return (
     <div style={{ 
-      width: 380, 
-      maxHeight: 400, 
+      width: mobileLayout ? '100%' : 380, 
+      maxWidth: '100%',
+      maxHeight: mobileLayout ? 'min(420px, 55vh)' : 400, 
       overflowY: 'auto',
       background: isDark ? '#1a2234' : '#fff'
     }}>
       {/* Header */}
       <div style={{ 
-        padding: '12px 16px',
+        padding: mobileLayout ? '10px 12px' : '12px 16px',
         borderBottom: `1px solid ${isDark ? '#364152' : '#f0f0f0'}`,
         fontWeight: 600,
-        fontSize: '14px',
+        fontSize: mobileLayout ? '13px' : '14px',
         color: isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.85)',
         display: 'flex',
         alignItems: 'center',
@@ -94,12 +97,12 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
       </div>
 
       {/* Task List */}
-      <div style={{ padding: '8px 0' }}>
+      <div style={{ padding: mobileLayout ? '6px 0' : '8px 0' }}>
         {taskArray.map((task, index) => (
           <div
             key={task.taskId}
             style={{
-              padding: '12px 16px',
+              padding: mobileLayout ? '10px 12px' : '12px 16px',
               borderBottom: index < taskArray.length - 1 
                 ? `1px solid ${isDark ? '#364152' : '#f0f0f0'}` 
                 : 'none'

@@ -3,8 +3,7 @@
  * 参考 Feeder.co 的设计
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useFileProcessing } from '../contexts/FileProcessingContext';
+import React, { useState, useEffect } from 'react';
 import {
   Layout,
   List,
@@ -20,22 +19,15 @@ import {
   Tooltip,
   Empty,
   Spin,
-  Card,
   Dropdown,
   Switch,
-  Divider,
 } from 'antd';
 import {
   PlusOutlined,
-  TwitterOutlined,
-  YoutubeOutlined,
-  GlobalOutlined,
   ReloadOutlined,
   RetweetOutlined,
   MessageOutlined,
-  LinkOutlined,
   CheckOutlined,
-  LikeOutlined,
   CommentOutlined,
   FireOutlined,
   MoreOutlined,
@@ -43,7 +35,6 @@ import {
   DeleteOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  AlignLeftOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -54,156 +45,39 @@ import {
   Subscription,
   CreateSubscriptionRequest,
   SubscriptionContent,
-  getTweetById,
 } from '../services/subscriptions';
-import { filesAPI } from '../services/files';
+import { FEED_THEME_COLORS as THEME_COLORS } from '../components/feed/feedTheme';
+import {
+  getFeedListHeadline,
+  getHeatLevelConfig,
+  playNewItemsNotificationSound,
+  showFeedListSecondaryExcerpt,
+} from '../components/feed/feedUtils';
+import { getChannelIcon } from '../components/feed/feedChannelConfig';
+import FeedArticleBody from '../components/feed/FeedArticleBody';
+import FeedSourceIconPicker from '../components/feed/FeedSourceIconPicker';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
 
-/** 播放新消息提示音（Web Audio API，无需音频文件） */
-function playNewItemsNotificationSound() {
-  try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 800;
-    osc.type = 'sine';
-    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.15);
-  } catch {
-    // 静默失败，不影响消息提示
-  }
-}
-
 const { Sider, Content } = Layout;
-const { Text, Paragraph } = Typography;
-
-// 与 Files Page 一致：语义化色板 + Behance 风格（参考 FILES_PAGE_STYLE_REFERENCE.md）
-const THEME_COLORS = {
-  light: {
-    pageBg: '#f5f5f5',
-    cardBg: '#fff',
-    cardBorder: '#f0f0f0',
-    text: 'rgba(0, 0, 0, 0.88)',
-    textSecondary: 'rgba(0, 0, 0, 0.45)',
-    textMuted: '#999',
-    codeBlockBg: '#f5f5f5',
-    selectedBorder: '#1890ff',
-    inputBg: undefined as string | undefined,
-    successBg: '#f6ffed',
-    successBorder: '#b7eb8f',
-    boxMuted: '#f5f5f5',
-    hoverBg: '#f5f5f5',
-    selectedItemBg: '#e8f4ff',
-  },
-  dark: {
-    pageBg: '#1E202B',
-    cardBg: '#1a2234',
-    cardBorder: 'rgba(255, 255, 255, 0.06)',
-    text: '#FFFFFF',
-    textSecondary: '#A0A3AD',
-    textMuted: '#A0A3AD',
-    codeBlockBg: '#1E202B',
-    selectedBorder: '#2196F3',
-    inputBg: '#1E202B',
-    hoverBg: 'rgba(255, 255, 255, 0.06)',
-    successBg: 'rgba(82, 196, 26, 0.15)',
-    successBorder: 'rgba(82, 196, 26, 0.45)',
-    boxMuted: '#1E202B',
-    selectedItemBg: 'rgba(33, 150, 243, 0.12)',
-  },
-} as const;
-
-// Behance 风格：圆角 12px、柔和阴影、细边框（dark 用于 modal）
-const CARD_STYLE_BEHANCE_DARK = {
-  borderRadius: 12,
-  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-  border: '1px solid rgba(255, 255, 255, 0.06)',
-};
-
-
-// 频道类型配置（Add Feed 弹窗中按图标选择）
-const CHANNEL_TYPES = [
-  { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
-  { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
-  { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
-];
-
-/** Add Feed 弹窗：Feed 源图标选择器（替代下拉） */
-const FeedSourceIconPicker: React.FC<{
-  value?: string;
-  onChange?: (v: string) => void;
-  disabled?: boolean;
-}> = ({ value, onChange, disabled }) => (
-  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-    {CHANNEL_TYPES.map((type) => {
-      const selected = value === type.value;
-      const isDisabled = type.disabled || disabled;
-      return (
-        <Tooltip key={type.value} title={type.disabled ? 'Coming Soon' : type.label}>
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => !isDisabled && onChange?.(type.value)}
-            onKeyDown={(e) => !isDisabled && (e.key === 'Enter' || e.key === ' ') && onChange?.(type.value)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 80,
-              height: 72,
-              borderRadius: 12,
-              border: `2px solid ${selected ? type.color : 'transparent'}`,
-              backgroundColor: selected ? `${type.color}14` : undefined,
-              color: type.color,
-              cursor: isDisabled ? 'not-allowed' : 'pointer',
-              opacity: isDisabled ? 0.5 : 1,
-              transition: 'border-color .2s, background-color .2s',
-            }}
-          >
-            <span style={{ fontSize: 28, marginBottom: 4 }}>{type.icon}</span>
-            <span style={{ fontSize: 12, color: 'inherit', opacity: 0.9 }}>{type.label}</span>
-          </div>
-        </Tooltip>
-      );
-    })}
-  </div>
-);
+const { Text } = Typography;
 
 const FeedReaderPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
-  const tweetContainerRef = useRef<HTMLDivElement>(null);
 
   // 状态管理
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [contents, setContents] = useState<SubscriptionContent[]>([]);
   const [selectedContent, setSelectedContent] = useState<SubscriptionContent | null>(null);
-  const [originalTweet, setOriginalTweet] = useState<SubscriptionContent | null>(null);
-  const [originalTweetLoading, setOriginalTweetLoading] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [contentsLoading, setContentsLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
-
-  // ASR 转写状态（YouTube 无字幕视频手动触发）
-  const [asrTaskId, setAsrTaskId] = useState<string | null>(null);
-  const [asrProgress, setAsrProgress] = useState(0);
-  const [asrStatus, setAsrStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
-
-  // 接入 NavBar 进度条
-  const { addTask, tasks } = useFileProcessing();
   
   // 🔥 分页状态
   const [contentOffset, setContentOffset] = useState(0);
@@ -289,80 +163,6 @@ const FeedReaderPageInner: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSubscriptionId]);
-
-  // 加载原推文（当选中 Reply 推文时）
-  useEffect(() => {
-    const loadOriginalTweet = async () => {
-      if (selectedContent?.is_reply && selectedContent?.in_reply_to_id) {
-        console.log('🔍 Loading original tweet:', {
-          is_reply: selectedContent.is_reply,
-          in_reply_to_id: selectedContent.in_reply_to_id,
-          in_reply_to_username: selectedContent.in_reply_to_username
-        });
-        
-        setOriginalTweetLoading(true);
-        try {
-          const tweet = await getTweetById(selectedContent.in_reply_to_id, 1); // TODO: 使用实际 user_id
-          console.log('✅ Original tweet loaded:', tweet);
-          setOriginalTweet(tweet);
-        } catch (error) {
-          console.error('❌ Failed to load original tweet:', error);
-          setOriginalTweet(null);
-        } finally {
-          setOriginalTweetLoading(false);
-        }
-      } else {
-        setOriginalTweet(null);
-      }
-    };
-    
-    loadOriginalTweet();
-  }, [selectedContent]);
-
-  // 加载 Twitter widgets.js 并渲染嵌入推文
-  useEffect(() => {
-    if (!originalTweetLoading && !originalTweet && selectedContent?.is_reply && selectedContent?.in_reply_to_id && tweetContainerRef.current) {
-      // 清空容器
-      tweetContainerRef.current.innerHTML = '';
-      
-      // 加载 Twitter widgets script
-      const loadTwitterWidget = () => {
-        if ((window as any).twttr?.widgets) {
-          // 如果已经加载，直接创建推文
-          (window as any).twttr.widgets.createTweet(
-            selectedContent.in_reply_to_id,
-            tweetContainerRef.current,
-            {
-              theme: themeMode === 'dark' ? 'dark' : 'light',
-              conversation: 'none',
-              cards: 'visible',
-            }
-          );
-        } else {
-          // 加载 Twitter widgets script
-          const script = document.createElement('script');
-          script.src = 'https://platform.twitter.com/widgets.js';
-          script.async = true;
-          script.onload = () => {
-            if ((window as any).twttr?.widgets) {
-              (window as any).twttr.widgets.createTweet(
-                selectedContent.in_reply_to_id,
-                tweetContainerRef.current,
-                {
-                  theme: themeMode === 'dark' ? 'dark' : 'light',
-                  conversation: 'none',
-                  cards: 'visible',
-                }
-              );
-            }
-          };
-          document.body.appendChild(script);
-        }
-      };
-
-      loadTwitterWidget();
-    }
-  }, [selectedContent, originalTweet, originalTweetLoading, themeMode]);
 
   const loadSubscriptions = async () => {
     setLoading(true);
@@ -482,62 +282,6 @@ const FeedReaderPageInner: React.FC = () => {
     form.setFieldsValue({ enabled: true });
     setAddModalVisible(true);
   };
-
-  // ── YouTube ASR 转写 ────────────────────────────────────────────────────────
-  const handleTriggerASR = async () => {
-    if (!selectedContent || asrStatus === 'processing') return;
-
-    setAsrStatus('processing');
-    setAsrProgress(5);
-
-    const result = await subscriptionsAPI.triggerYouTubeASR(selectedContent.id);
-    if (!result.success || !result.task_id) {
-      message.error(result.error || 'Failed to start ASR transcription');
-      setAsrStatus('failed');
-      return;
-    }
-
-    const taskId = result.task_id;
-    const videoTitle = selectedContent.title || `YouTube: ${selectedContent.content_id || 'video'}`;
-    setAsrTaskId(taskId);
-
-    // 注册到全局 FileProcessingContext → NavBar 进度条自动显示
-    addTask(taskId, videoTitle, 'youtube');
-    message.info('ASR transcription started — progress shown in the top bar');
-  };
-
-  // 监听 Context 中该任务的状态变化
-  useEffect(() => {
-    if (!asrTaskId || asrStatus !== 'processing') return;
-
-    const task = tasks.get(asrTaskId);
-    if (!task) return;
-
-    const s = task.status.status;
-    const resultStatus = (task.status as any).result?.status;
-    const isCompleted = s === 'completed' && resultStatus !== 'failed';
-    const isFailed = s === 'failed' || (s === 'completed' && resultStatus === 'failed');
-
-    if (isCompleted) {
-      setAsrStatus('completed');
-      setAsrProgress(100);
-      message.success('Transcription completed!');
-      // Update current content's has_transcript immediately so the UI reflects the change
-      if (selectedContent) {
-        setSelectedContent(prev => prev ? { ...prev, has_transcript: true } : null);
-        setContents(prev =>
-          prev.map(c => (c.id === selectedContent.id ? { ...c, has_transcript: true } : c))
-        );
-      }
-    } else if (isFailed) {
-      setAsrStatus('failed');
-      const errMsg = (task.status as any).result?.error || task.status.message || 'Transcription failed';
-      message.error(`ASR failed: ${errMsg}`);
-    } else {
-      setAsrProgress(task.status.progress || 0);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, asrTaskId]);
 
   const handleCreateSubscription = async () => {
     try {
@@ -678,9 +422,6 @@ const FeedReaderPageInner: React.FC = () => {
   };
 
   const handleSelectContent = (content: SubscriptionContent) => {
-    setAsrStatus('idle');
-    setAsrProgress(0);
-    setAsrTaskId(null);
     setSelectedContent(content);
     if (!content.is_read) {
       markAsRead(content.id);
@@ -798,253 +539,6 @@ const FeedReaderPageInner: React.FC = () => {
       console.error('Failed to toggle subscription:', error);
       message.error('Failed to update subscription');
     }
-  };
-
-  const getChannelIcon = (channelType: string) => {
-    const config = CHANNEL_TYPES.find((c) => c.value === channelType);
-    return config?.icon || <GlobalOutlined />;
-  };
-
-  // 获取热度等级的颜色和文本
-  const getHeatLevelConfig = (heatLevel?: number) => {
-    switch (heatLevel) {
-      case 1:
-        return { color: '#8c8c8c', text: 'Low heat', bgColor: 'rgba(140, 140, 140, 0.1)' };
-      case 2:
-        return { color: '#1890ff', text: 'Medium heat', bgColor: 'rgba(24, 144, 255, 0.1)' };
-      case 3:
-        return { color: '#fa8c16', text: 'High heat', bgColor: 'rgba(250, 140, 22, 0.1)' };
-      case 4:
-        return { color: '#f5222d', text: 'Very high heat', bgColor: 'rgba(245, 34, 45, 0.1)' };
-      default:
-        return { color: '#8c8c8c', text: 'Low heat', bgColor: 'rgba(140, 140, 140, 0.1)' };
-    }
-  };
-
-  const renderTweetContent = (content: SubscriptionContent) => {
-    console.log('🎨 Rendering tweet content:', {
-      is_reply: content.is_reply,
-      in_reply_to_username: content.in_reply_to_username,
-      originalTweetLoading,
-      originalTweet: originalTweet ? 'exists' : 'null'
-    });
-    
-    return (
-      <div>
-        {/* Reply（回复）- 显示顺序：当前回复 → Replying to → 原推文 */}
-        {content.is_reply && content.in_reply_to_username && (
-          <div style={{ marginBottom: 16 }}>
-            {/* 1. 当前回复内容（最上方）*/}
-            <Paragraph style={{ color: themeColors.text, marginBottom: 12 }}>
-              {content.content}
-            </Paragraph>
-
-            {/* 2. Replying to 标记（包含原推文）*/}
-            <Card
-              size="small"
-              style={{
-                marginBottom: 12,
-                backgroundColor: themeColors.hoverBg,
-                borderColor: themeColors.cardBorder,
-                borderLeft: `3px solid #657786`,
-                borderRadius: 12,
-                border: `1px solid ${themeColors.cardBorder}`,
-                boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.06)',
-              }}
-              bodyStyle={{ padding: 12 }}
-            >
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {/* 标题行 */}
-                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                  <Space>
-                    <CommentOutlined style={{ color: '#657786' }} />
-                    <Text type="secondary">
-                      Replying to @{content.in_reply_to_username}
-                    </Text>
-                  </Space>
-                  
-                  {/* 加载状态显示在右侧 */}
-                  {originalTweetLoading && (
-                    <Space size={4}>
-                      <Spin size="small" />
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Loading...
-                      </Text>
-                    </Space>
-                  )}
-                </Space>
-
-                {/* 原推文内容（嵌入在卡片内）*/}
-                {content.in_reply_to_id && content.in_reply_to_username && !originalTweetLoading && (
-                  <div>
-                    {originalTweet ? (
-                      // 如果数据库中有原推文，显示完整内容
-                      <div
-                        style={{
-                          backgroundColor: themeColors.cardBg,
-                          border: `1px solid ${themeColors.cardBorder}`,
-                          borderRadius: 8,
-                          padding: 12,
-                        }}
-                      >
-                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                          {/* 原推文作者 */}
-                          <Space>
-                            <Avatar size="small" style={{ backgroundColor: '#1DA1F2' }}>
-                              {originalTweet.author_name?.[0] || 'T'}
-                            </Avatar>
-                            <Text strong style={{ color: themeColors.text }}>
-                              {originalTweet.author_name}
-                            </Text>
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              @{originalTweet.author_identifier}
-                            </Text>
-                          </Space>
-                          
-                          {/* 原推文内容 */}
-                          <Text style={{ color: themeColors.text }}>
-                            {originalTweet.content}
-                          </Text>
-                          
-                          {/* 原推文媒体 */}
-                          {originalTweet.media_urls && originalTweet.media_urls.length > 0 && (
-                            <div style={{ marginTop: 8 }}>
-                              {originalTweet.media_urls.map((url, index) => (
-                                <img
-                                  key={index}
-                                  src={url}
-                                  alt="media"
-                                  style={{
-                                    maxWidth: '100%',
-                                    borderRadius: 8,
-                                    marginBottom: index < originalTweet.media_urls!.length - 1 ? 8 : 0,
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          )}
-                          
-                          {/* 原推文链接 */}
-                          <a
-                            href={originalTweet.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: 12 }}
-                          >
-                            <LinkOutlined /> View on Twitter
-                          </a>
-                        </Space>
-                      </div>
-                    ) : (
-                      // 如果数据库中没有原推文，使用 Twitter widgets.js 嵌入
-                      <div
-                        ref={tweetContainerRef}
-                        style={{
-                          backgroundColor: themeColors.cardBg,
-                          border: `1px solid ${themeColors.cardBorder}`,
-                          borderRadius: 8,
-                          padding: 12,
-                          minHeight: '200px',
-                        }}
-                      >
-                        {/* Twitter widget 将在这里渲染，自动适配高度 */}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Space>
-            </Card>
-          </div>
-        )}
-
-        {/* Retweet（转推）内容 */}
-        {content.is_retweet && content.retweeted_content && (
-          <Card
-            size="small"
-            style={{
-              marginBottom: 12,
-              backgroundColor: themeColors.hoverBg,
-              border: `1px solid ${themeColors.cardBorder}`,
-              borderRadius: 12,
-              boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.06)',
-            }}
-          >
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Space>
-                <RetweetOutlined style={{ color: '#00ba7c' }} />
-                <Text type="secondary">Retweeted from @{content.retweeted_author}</Text>
-              </Space>
-              <Text style={{ color: themeColors.text }}>{content.retweeted_content}</Text>
-              {content.retweeted_url && (
-                <a href={content.retweeted_url} target="_blank" rel="noopener noreferrer">
-                  <LinkOutlined /> View original tweet
-                </a>
-              )}
-            </Space>
-          </Card>
-        )}
-
-        {/* Quote（引用）- 显示顺序：当前引用内容 → Quoted from → 被引用推文 */}
-        {content.is_quote && content.quoted_content && (
-          <div style={{ marginBottom: 16 }}>
-            {/* 1. 当前引用内容（最上方）*/}
-            <Paragraph style={{ color: themeColors.text, marginBottom: 12 }}>
-              {content.content}
-            </Paragraph>
-
-            {/* 2. Quoted from 标记 + 被引用推文 */}
-            <Card
-              size="small"
-              style={{
-                marginBottom: 12,
-                backgroundColor: themeColors.hoverBg,
-                border: `1px solid ${themeColors.cardBorder}`,
-                borderLeft: '3px solid #1DA1F2',
-                borderRadius: 12,
-                boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.06)',
-              }}
-            >
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {/* 标题 */}
-                <Space>
-                  <MessageOutlined style={{ color: '#1DA1F2' }} />
-                  <Text type="secondary">Quoted from @{content.quoted_author}</Text>
-                </Space>
-                
-                {/* 被引用的推文内容 */}
-                <div
-                  style={{
-                    backgroundColor: themeColors.cardBg,
-                    border: `1px solid ${themeColors.cardBorder}`,
-                    borderRadius: 8,
-                    padding: 12,
-                  }}
-                >
-                  <Text style={{ color: themeColors.text }}>{content.quoted_content}</Text>
-                </div>
-                
-                {/* 链接 */}
-                {content.quoted_url && (
-                  <a 
-                    href={content.quoted_url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 12 }}
-                  >
-                    <LinkOutlined /> View quoted tweet
-                  </a>
-                )}
-              </Space>
-            </Card>
-          </div>
-        )}
-
-        {/* 主要内容（非 Reply、非 Retweet、非 Quote 时显示）*/}
-        {!content.is_retweet && !content.is_reply && !content.is_quote && (
-          <Paragraph style={{ color: themeColors.text }}>{content.content}</Paragraph>
-        )}
-      </div>
-    );
   };
 
   return (
@@ -1502,27 +996,29 @@ const FeedReaderPageInner: React.FC = () => {
                                   minWidth: 0,
                                 } as React.CSSProperties}
                               >
-                                {content.title || ''}
+                                {getFeedListHeadline(content)}
                               </span>
                               {content.is_read && (
                                 <CheckOutlined style={{ color: '#52c41a', flexShrink: 0, marginTop: 2 }} />
                               )}
                             </div>
 
-                            {/* 正文：最多 2 行，超出省略号 */}
-                            <Text
-                              style={{
-                                color: themeColors.textSecondary,
-                                fontSize: 13,
-                                lineHeight: '1.4',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                              }}
-                            >
-                              {content.content}
-                            </Text>
+                            {/* 正文：YouTube 描述等；Twitter 无 title 时主行已是推文，不再重复 */}
+                            {showFeedListSecondaryExcerpt(content) && (
+                              <Text
+                                style={{
+                                  color: themeColors.textSecondary,
+                                  fontSize: 13,
+                                  lineHeight: '1.4',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {content.content}
+                              </Text>
+                            )}
                           </div>
 
                           {/* 末行：类型图标 + 作者名 · 时间 · 热度，始终可见，在限高区域外 */}
@@ -1615,263 +1111,20 @@ const FeedReaderPageInner: React.FC = () => {
         >
           {selectedContent ? (
             <div style={{ maxWidth: 600, margin: '0 auto', paddingLeft: 24, paddingRight: 24 }}>
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                {/* 作者信息 */}
-                <div>
-                  <Space>
-                    <Avatar
-                      icon={selectedContent.channel_type === 'youtube' ? <YoutubeOutlined /> : <TwitterOutlined />}
-                      style={{ backgroundColor: selectedContent.channel_type === 'youtube' ? '#FF0000' : '#1DA1F2' }}
-                    />
-                    <div>
-                      <div>
-                        <Text strong style={{ color: themeColors.text }}>
-                          {selectedContent.author_name || selectedContent.author_identifier}
-                        </Text>
-                      </div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {selectedContent.published_at
-                          ? dayjs(selectedContent.published_at).format('MMM D, YYYY')
-                          : 'Unknown'}
-                      </Text>
-                    </div>
-                  </Space>
-                </div>
-
-                {/* YouTube 嵌入播放器 */}
-                {selectedContent.channel_type === 'youtube' && selectedContent.content_id && (
-                  <div style={{
-                    position: 'relative',
-                    width: '100%',
-                    paddingTop: '56.25%', // 16:9
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    backgroundColor: '#000',
-                  }}>
-                    <iframe
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        border: 'none',
-                        borderRadius: 12,
-                      }}
-                      src={`https://www.youtube.com/embed/${selectedContent.content_id}`}
-                      title={selectedContent.title || 'YouTube Video'}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                    />
-                  </div>
-                )}
-
-                {/* 标题（YouTube 展示大标题） */}
-                {selectedContent.channel_type === 'youtube' && selectedContent.title && (
-                  <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block' }}>
-                    {selectedContent.title}
-                  </Text>
-                )}
-
-                {/* 正文内容（非 YouTube 用 tweet 渲染，YouTube 显示描述文字） */}
-                <div style={{ marginTop: selectedContent.channel_type === 'youtube' ? 0 : 16 }}>
-                  {selectedContent.channel_type === 'youtube' ? (
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap' }}>
-                      {selectedContent.content}
-                    </Text>
-                  ) : (
-                    renderTweetContent(selectedContent)
-                  )}
-                </div>
-
-                {/* 媒体图片（仅非 YouTube） */}
-                {selectedContent.channel_type !== 'youtube' &&
-                  selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
-                  <div>
-                    {selectedContent.media_urls.map((url, idx) => (
-                      <img
-                        key={idx}
-                        src={url}
-                        alt=""
-                        style={{ width: '100%', borderRadius: 12, marginBottom: 12 }}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* YouTube 互动数：观看数 / 点赞数 */}
-                {selectedContent.channel_type === 'youtube' && selectedContent.metadata && (
-                  <Space wrap size={16}>
-                    {typeof selectedContent.metadata.view_count === 'number' && (
-                      <Tooltip title="观看数">
-                        <Space size={4}>
-                          <EyeOutlined style={{ color: themeColors.textSecondary }} />
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            {selectedContent.metadata.view_count.toLocaleString()}
-                          </Text>
-                        </Space>
-                      </Tooltip>
-                    )}
-                    {typeof selectedContent.metadata.like_count === 'number' && (
-                      <Tooltip title="点赞数">
-                        <Space size={4}>
-                          <LikeOutlined style={{ color: '#eb2f96' }} />
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            {selectedContent.metadata.like_count.toLocaleString()}
-                          </Text>
-                        </Space>
-                      </Tooltip>
-                    )}
-                    {typeof selectedContent.metadata.comment_count === 'number' && (
-                      <Tooltip title="评论数">
-                        <Space size={4}>
-                          <CommentOutlined style={{ color: '#1890ff' }} />
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            {selectedContent.metadata.comment_count.toLocaleString()}
-                          </Text>
-                        </Space>
-                      </Tooltip>
-                    )}
-                  </Space>
-                )}
-
-                {/* Twitter 互动数 */}
-                {selectedContent.channel_type !== 'youtube' && (
-                  <Space wrap size={16} style={{ marginTop: 16 }}>
-                    {selectedContent.metadata && (
-                      <>
-                        {typeof selectedContent.metadata.like_count === 'number' && (
-                          <Tooltip title="点赞">
-                            <Space size={4}>
-                              <LikeOutlined style={{ color: '#eb2f96' }} />
-                              <Text type="secondary" style={{ fontSize: 13 }}>
-                                {selectedContent.metadata.like_count}
-                              </Text>
-                            </Space>
-                          </Tooltip>
-                        )}
-                        {typeof selectedContent.metadata.retweet_count === 'number' && (
-                          <Tooltip title="转发">
-                            <Space size={4}>
-                              <RetweetOutlined style={{ color: '#52c41a' }} />
-                              <Text type="secondary" style={{ fontSize: 13 }}>
-                                {selectedContent.metadata.retweet_count}
-                              </Text>
-                            </Space>
-                          </Tooltip>
-                        )}
-                        {typeof selectedContent.metadata.reply_count === 'number' && (
-                          <Tooltip title="回复">
-                            <Space size={4}>
-                              <CommentOutlined style={{ color: '#1890ff' }} />
-                              <Text type="secondary" style={{ fontSize: 13 }}>
-                                {selectedContent.metadata.reply_count}
-                              </Text>
-                            </Space>
-                          </Tooltip>
-                        )}
-                        {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
-                          <Tooltip title="引用">
-                            <Space size={4}>
-                              <MessageOutlined style={{ color: '#1890ff' }} />
-                              <Text type="secondary" style={{ fontSize: 13 }}>
-                                {selectedContent.metadata.quote_count}
-                              </Text>
-                            </Space>
-                          </Tooltip>
-                        )}
-                      </>
-                    )}
-                  </Space>
-                )}
-
-                {/* 外链 */}
-                {selectedContent.url && (
-                  <div style={{ marginTop: 8 }}>
-                    <a
-                      href={selectedContent.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: themeColors.selectedBorder }}
-                    >
-                      <Space>
-                        <LinkOutlined />
-                        {selectedContent.channel_type === 'youtube' ? 'Watch on YouTube' : 'View on Twitter'}
-                      </Space>
-                    </a>
-                  </div>
-                )}
-
-                {/* YouTube Transcript 状态区域 */}
-                {selectedContent.channel_type === 'youtube' && (
-                  <>
-                    <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
-                    {selectedContent.has_transcript ? (
-                      <div
-                        style={{
-                          borderRadius: 8,
-                          padding: '10px 16px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          backgroundColor: isDark
-                            ? 'rgba(82, 196, 26, 0.08)'
-                            : '#f6ffed',
-                          border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.25)' : '#b7eb8f'}`,
-                        }}
-                      >
-                        <CheckOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-                        <Text style={{ color: themeColors.text, fontSize: 13 }}>
-                          Transcript available
-                        </Text>
-                      </div>
-                    ) : (
-                      <div
-                        style={{
-                          border: `1px dashed ${themeColors.cardBorder}`,
-                          borderRadius: 8,
-                          padding: '12px 16px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <Space>
-                          <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
-                          <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                            {asrStatus === 'processing'
-                              ? `Transcribing… ${asrProgress}%`
-                              : asrStatus === 'completed'
-                              ? 'Transcription complete — please refresh'
-                              : asrStatus === 'failed'
-                              ? 'Transcription failed'
-                              : 'No transcript available'}
-                          </Text>
-                          {asrStatus === 'failed' && (
-                            <Tag color="red" style={{ fontSize: 11 }}>Failed</Tag>
-                          )}
-                        </Space>
-                        {asrStatus !== 'completed' && (
-                          <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
-                            <Button
-                              size="small"
-                              type="primary"
-                              loading={asrStatus === 'processing'}
-                              disabled={asrStatus === 'processing'}
-                              onClick={handleTriggerASR}
-                              style={{ fontSize: 12, borderRadius: 6 }}
-                            >
-                              {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
-                            </Button>
-                          </Tooltip>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </Space>
+              <FeedArticleBody
+                selectedContent={selectedContent}
+                themeColors={themeColors}
+                isDark={isDark}
+                themeMode={themeMode}
+                onTranscriptReady={(contentId) => {
+                  setSelectedContent((prev) =>
+                    prev && prev.id === contentId ? { ...prev, has_transcript: true } : prev
+                  );
+                  setContents((prev) =>
+                    prev.map((c) => (c.id === contentId ? { ...c, has_transcript: true } : c))
+                  );
+                }}
+              />
             </div>
           ) : (
             <div style={{ 

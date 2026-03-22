@@ -59,3 +59,24 @@
   }
 }
 
+/* Dark mode */
+.app-dark .mobile-bottom-nav {
+  background: #1a2234;
+  border-top-color: #364152;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+}
+
+.app-dark .mobile-bottom-nav .nav-item:active {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.app-dark .mobile-bottom-nav .nav-icon,
+.app-dark .mobile-bottom-nav .nav-label {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-bottom-nav .nav-item.active .nav-icon,
+.app-dark .mobile-bottom-nav .nav-item.active .nav-label {
+  color: #69b1ff;
+}
+

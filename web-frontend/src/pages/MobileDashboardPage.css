@@ -51,3 +51,72 @@
   height: 44px;
 }
 
+/* Dark mode（与 MobileLayout shell 一致） */
+.app-dark .mobile-loading-container {
+  background-color: #1a202c;
+}
+
+.app-dark .mobile-dashboard-page {
+  background-color: #1a202c;
+}
+
+.app-dark .mobile-dashboard-filters {
+  background: #1a2234;
+  border-bottom-color: #364152;
+}
+
+.app-dark .mobile-dashboard-exchange-tabs .ant-tabs-nav::before {
+  border-bottom-color: #364152;
+}
+
+.app-dark .mobile-dashboard-exchange-tabs .ant-tabs-tab {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-dashboard-exchange-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #69b1ff;
+}
+
+.app-dark .mobile-dashboard-exchange-tabs .ant-tabs-ink-bar {
+  background: #69b1ff;
+}
+
+.app-dark .mobile-dashboard-priority-select.ant-select:not(.ant-select-disabled):hover .ant-select-selector,
+.app-dark .mobile-dashboard-priority-select.ant-select-focused .ant-select-selector {
+  border-color: #4a6fa5 !important;
+}
+
+.app-dark .mobile-dashboard-priority-select .ant-select-selector {
+  background: #252d3d !important;
+  border-color: #364152 !important;
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-dashboard-priority-select .ant-select-arrow {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-dashboard-page .ant-empty-description {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-dashboard-page .ant-empty .anticon {
+  color: #5c6370;
+}
+
+.app-dark .mobile-dashboard-priority-dropdown.ant-select-dropdown {
+  background: #252d3d !important;
+}
+
+.app-dark .mobile-dashboard-priority-dropdown .ant-select-item {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-dashboard-priority-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: rgba(105, 177, 255, 0.15) !important;
+}
+
+.app-dark .mobile-dashboard-priority-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+

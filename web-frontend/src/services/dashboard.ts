@@ -102,8 +102,18 @@ export interface ResearchReport {
   status: string;
   sector: string;
   industry: string;
-  ticker: string;
+  /** File tags: one symbol, comma-separated string, or array from API JSON */
+  ticker: string | string[];
   tagged_at: string;
+  /** Present when this report is linked to a task execution (open detail view). */
+  execution_id?: string | null;
+  /** Same field as Sources list — drives status label next to file-type icon. */
+  rc_agent_status?: string | null;
+  /** Same shape as TaskExecution.share_info — shared-by avatar + shared-to group. */
+  share_info?: {
+    shared_by: { user_id: number; username: string; avatar_url?: string | null };
+    shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
+  } | null;
 }
 
 export interface StockPriceData {

@@ -6,6 +6,7 @@ FastAPI 主应用入口
 
 import os
 import sys
+import time
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,9 @@ from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
 from backend.utils.database_config import get_database_config
 from config.settings import config
+
+# API 进程启动时间（Unix 秒），供前端判断「整站重启」后清理 localStorage 中的 Celery 任务条
+APP_BOOT_UNIX = time.time()
 
 # 安全认证
 security = HTTPBearer()
@@ -156,7 +160,8 @@ async def health_check():
             "status": "healthy",
             "message": "API运行正常",
             "timestamp": str(datetime.now()),
-            "version": config.APP_VERSION
+            "version": config.APP_VERSION,
+            "app_boot_unix": APP_BOOT_UNIX,
         }
         
         # 数据库连接检查

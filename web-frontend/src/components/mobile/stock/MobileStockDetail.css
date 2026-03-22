@@ -112,3 +112,82 @@
   border-radius: 8px;
 }
 
+/* Dark mode */
+.app-dark .mobile-stock-detail {
+  background: #1a202c;
+}
+
+.app-dark .mobile-stock-header {
+  background: #1a2234;
+  border-bottom-color: #364152;
+}
+
+.app-dark .mobile-stock-header .header-title {
+  color: #e0e6f1;
+}
+
+/* Ant Design Typography 子节点自带深色，统一压成浅色 */
+.app-dark .mobile-stock-header .header-title,
+.app-dark .mobile-stock-header .header-title * {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-stock-header .back-button {
+  color: #e0e6f1;
+}
+
+.app-dark .mobile-stock-header .back-button.ant-btn {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-stock-info {
+  background: #1a2234;
+  border-bottom: 1px solid #364152;
+}
+
+.app-dark .mobile-stock-info .ant-typography,
+.app-dark .mobile-stock-info .ant-typography strong,
+.app-dark .mobile-stock-info h4.ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-stock-info .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+
+.app-dark .stock-info-metrics {
+  border-top-color: #364152;
+}
+
+.app-dark .mobile-stock-tabs {
+  background: #1a2234;
+}
+
+.app-dark .mobile-stock-tabs .ant-tabs-nav::before {
+  border-bottom-color: #364152;
+}
+
+.app-dark .mobile-stock-tabs .ant-tabs-tab {
+  color: #a0a3ad;
+}
+
+.app-dark .mobile-stock-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #69b1ff;
+}
+
+.app-dark .mobile-stock-tabs .ant-tabs-ink-bar {
+  background: #69b1ff;
+}
+
+.app-dark .mobile-tab-content {
+  background: #1a202c;
+}
+
+.app-dark .mobile-loading {
+  background: #252d3d;
+}
+
+.app-dark .mobile-loading .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+

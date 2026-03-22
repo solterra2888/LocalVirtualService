@@ -41,6 +41,8 @@ export interface TaskExecution {
     shared_by: { user_id: number; username: string; avatar_url?: string | null };
     shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
   } | null;
+  /** Aggregated from file_tags.ticker for all files in this execution (list + detail). */
+  ticker_tags?: string[] | null;
 }
 
 export interface TaskCreateRequest {
@@ -104,6 +106,7 @@ export interface PaginationParams {
   page_size?: number;
   search_type?: 'file_name' | 'content';
   q?: string;
+  ticker?: string;
 }
 
 export const tasksAPI = {

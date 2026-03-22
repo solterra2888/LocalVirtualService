@@ -65,6 +65,10 @@ class TaskExecutionResponse(BaseModel):
     access_type: Optional[str] = None
     shared_by: Optional[str] = None
     share_info: Optional[dict] = None
+    ticker_tags: Optional[List[str]] = Field(
+        None,
+        description="该 execution 下所有文件 file_tags.ticker 合并去重后的代码列表（与移动端卡片一致）",
+    )
     
     class Config:
         from_attributes = True

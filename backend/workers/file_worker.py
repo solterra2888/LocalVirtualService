@@ -409,10 +409,11 @@ class FileProcessingWorker:
             if not self.should_stop:
                 self.update_status("saving", 95.0, log_message="正在保存处理结果...")
                 
-                # 确定AI分析状态
-                if not successful_results or (not rc_agent_service and not llm_analysis_service):
-                    # 没有成功的文件或没有AI分析服务，跳过AI分析
-                    rc_status = 'skipped'
+                # 确定AI分析状态（不再使用 skipped：无解析结果记 failed；有解析但未配 AI 记 completed）
+                if not successful_results:
+                    rc_status = 'failed'
+                elif not rc_agent_service and not llm_analysis_service:
+                    rc_status = 'completed'
                 elif ai_analysis_success and final_report:
                     # AI分析处理成功且有报告
                     rc_status = 'success'

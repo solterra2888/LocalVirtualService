@@ -83,3 +83,30 @@
   min-height: 200px;
 }
 
+/* Dark mode */
+.app-dark .mobile-stock-list {
+  background: #1a202c;
+}
+
+.app-dark .stock-list-item {
+  background: #1a2234;
+  border-bottom-color: #364152;
+}
+
+.app-dark .stock-list-item:active {
+  background-color: #252d3d;
+}
+
+.app-dark .stock-exchange-code {
+  color: #a0a3ad;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-dark .mobile-stock-list .ant-typography {
+  color: #e0e6f1 !important;
+}
+
+.app-dark .mobile-stock-list .ant-typography-secondary {
+  color: #a0a3ad !important;
+}
+

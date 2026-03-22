@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { List, Typography, Tag, Space, Modal } from 'antd';
 import { CalendarOutlined, CloseOutlined } from '@ant-design/icons';
 import type { DashboardNewsItem } from '../../../services/dashboard';
@@ -8,6 +8,7 @@ import {
   hasAnalysisForTemplate,
   getAnalysisContent
 } from '../../../utils/newsAnalysisHelper';
+import { useDashboardSettings } from '../../../contexts/DashboardSettingsContext';
 import './MobileNewsList.css';
 
 const { Text, Paragraph } = Typography;
@@ -21,7 +22,29 @@ interface MobileNewsListProps {
  * 显示新闻卡片，点击可查看详情
  */
 const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
+  const { themeMode } = useDashboardSettings();
+  /** 列表卡片在 app-dark 下为深色底，弹窗 portaled 到 body 需单独套色，否则 dark markdown 会白字叠白底 */
+  const markdownVariant = themeMode === 'dark' ? 'dark' : 'light';
   const [selectedNews, setSelectedNews] = useState<DashboardNewsItem | null>(null);
+
+  const newsDetailModalStyles = useMemo(() => {
+    const bodyBase = {
+      padding: 0,
+      maxHeight: '75vh' as const,
+      overflowY: 'auto' as const,
+    };
+    if (themeMode === 'dark') {
+      return {
+        content: { background: '#1a2234' },
+        header: {
+          background: '#1a2234',
+          borderBottom: '1px solid #364152',
+        },
+        body: { ...bodyBase, background: '#1a2234' },
+      };
+    }
+    return { body: bodyBase };
+  }, [themeMode]);
   const [detailVisible, setDetailVisible] = useState<boolean>(false);
 
   const formatDate = (dateStr?: string) => {
@@ -111,7 +134,8 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
                     <MarkdownRenderer
                       content={summaryContent || ''}
                       className="news-summary-markdown"
-                      style={{ fontSize: '13px', color: '#4a4a4a' }}
+                      variant={markdownVariant}
+                      style={{ fontSize: '13px' }}
                     />
                     <div className="news-summary-fade" />
                   </div>
@@ -129,20 +153,21 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
         onCancel={handleClose}
         footer={null}
         width="100%"
-        rootClassName="mobile-news-modal"
+        rootClassName={`mobile-news-modal${themeMode === 'dark' ? ' mobile-news-modal--dark' : ''}`}
         style={{ 
           top: '4vh', 
           paddingBottom: 0,
           maxWidth: '100vw'
         }}
-        styles={{
-          body: { 
-            padding: 0,
-            maxHeight: '75vh',
-            overflowY: 'auto'
-          }
-        }}
-        closeIcon={<CloseOutlined style={{ fontSize: '20px' }} />}
+        styles={newsDetailModalStyles}
+        closeIcon={
+          <CloseOutlined
+            style={{
+              fontSize: '20px',
+              color: themeMode === 'dark' ? '#a0a3ad' : undefined,
+            }}
+          />
+        }
       >
         {selectedNews &&
           (() => {
@@ -154,7 +179,9 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
             const hasOriginalContent = Boolean(selectedNews.content);
 
             return (
-              <div className="mobile-news-detail">
+              <div
+                className={`mobile-news-detail${themeMode === 'dark' ? ' mobile-news-detail--theme-dark' : ''}`}
+              >
                 <div className="news-detail-header">
                   <Text style={{ fontSize: '18px', fontWeight: 600, lineHeight: 1.4 }}>
                     {selectedNews.title}
@@ -190,10 +217,14 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
 
                 {hasSummaryContent && (
                   <div className="news-detail-section">
-                    <Text strong style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}>
+                    <Text
+                      strong
+                      className="news-detail-section-heading"
+                      style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}
+                    >
                       AI Analysis
                     </Text>
-                    <MarkdownRenderer content={summaryContent || ''} />
+                    <MarkdownRenderer content={summaryContent || ''} variant={markdownVariant} />
                   </div>
                 )}
 
@@ -201,10 +232,17 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
 
                 {hasOriginalContent && (
                   <div className="news-detail-section">
-                    <Text strong style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}>
+                    <Text
+                      strong
+                      className="news-detail-section-heading"
+                      style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}
+                    >
                       Original Content
                     </Text>
-                    <Paragraph style={{ fontSize: '15px', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                    <Paragraph
+                      className="mobile-news-detail-original"
+                      style={{ fontSize: '15px', lineHeight: 1.6, whiteSpace: 'pre-line' }}
+                    >
                       {selectedNews.content}
                     </Paragraph>
                   </div>
@@ -212,11 +250,16 @@ const MobileNewsList: React.FC<MobileNewsListProps> = ({ news }) => {
 
                 {hasAnalysisForTemplate(selectedNews.analysis_result, 'news_analysis') && !hasSummaryContent && (
                   <div className="news-detail-section">
-                    <Text strong style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}>
+                    <Text
+                      strong
+                      className="news-detail-section-heading"
+                      style={{ fontSize: '16px', marginBottom: 12, display: 'block' }}
+                    >
                       AI Analysis
                     </Text>
                     <MarkdownRenderer
                       content={getPreferredAnalysisContent(selectedNews.analysis_result, 'news_analysis') || ''}
+                      variant={markdownVariant}
                     />
                   </div>
                 )}

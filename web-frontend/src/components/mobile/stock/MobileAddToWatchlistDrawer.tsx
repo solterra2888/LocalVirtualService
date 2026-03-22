@@ -15,6 +15,8 @@ import {
 } from 'antd';
 import { SearchOutlined, PlusOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { dashboardAPI, type StockSearchResult } from '../../../services/dashboard';
+import { useDashboardSettings } from '../../../contexts/DashboardSettingsContext';
+import './MobileAddToWatchlistDrawer.css';
 
 const { Text } = Typography;
 
@@ -26,15 +28,16 @@ interface MobileAddToWatchlistDrawerProps {
 
 const DEBOUNCE_DELAY = 300;
 
-const renderStars = (count: number) => {
+const renderStars = (count: number, isDark: boolean) => {
   const stars = [];
+  const emptyColor = isDark ? '#5c6573' : '#d9d9d9';
   for (let i = 0; i < 3; i++) {
     const filled = i < count;
     stars.push(
       filled ? (
         <StarFilled key={i} style={{ color: '#faad14', fontSize: '14px' }} />
       ) : (
-        <StarOutlined key={`empty-${i}`} style={{ color: '#d9d9d9', fontSize: '14px' }} />
+        <StarOutlined key={`empty-${i}`} style={{ color: emptyColor, fontSize: '14px' }} />
       )
     );
   }
@@ -46,6 +49,8 @@ const MobileAddToWatchlistDrawer: React.FC<MobileAddToWatchlistDrawerProps> = ({
   onClose,
   onSuccess
 }) => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
   const [form] = Form.useForm();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
@@ -164,8 +169,12 @@ const MobileAddToWatchlistDrawer: React.FC<MobileAddToWatchlistDrawerProps> = ({
     }
   };
 
+  const drawerSurface = isDark ? '#1a2234' : undefined;
+  const drawerBorder = isDark ? '#364152' : undefined;
+
   return (
     <Drawer
+      className={`mobile-add-watchlist-drawer${isDark ? ' mobile-add-watchlist-drawer--dark' : ''}`}
       title="Add Stock"
       placement="bottom"
       closable
@@ -173,7 +182,18 @@ const MobileAddToWatchlistDrawer: React.FC<MobileAddToWatchlistDrawerProps> = ({
       onClose={handleClose}
       open={open}
       destroyOnClose
-      bodyStyle={{ paddingBottom: 80 }}
+      getContainer={() => document.querySelector('.App') ?? document.body}
+      styles={{
+        body: { paddingBottom: 80, background: drawerSurface },
+        header: {
+          background: drawerSurface,
+          borderBottom: drawerBorder ? `1px solid ${drawerBorder}` : undefined,
+          color: isDark ? '#e0e6f1' : undefined,
+        },
+        footer: { background: drawerSurface },
+        mask: isDark ? { background: 'rgba(0, 0, 0, 0.65)' } : undefined,
+        wrapper: isDark ? { background: 'transparent' } : undefined,
+      }}
       extra={
         selectedStock ? (
           <Tag color="blue">
@@ -209,11 +229,7 @@ const MobileAddToWatchlistDrawer: React.FC<MobileAddToWatchlistDrawerProps> = ({
                   dataSource={stocks}
                   renderItem={(stock) => (
                     <List.Item
-                      style={{
-                        padding: '8px 0',
-                        cursor: 'pointer',
-                        backgroundColor: selectedStock?.ticker === stock.ticker ? '#f0f8ff' : 'transparent'
-                      }}
+                      className={`mobile-add-watchlist-result-item${selectedStock?.ticker === stock.ticker ? ' is-selected' : ''}`}
                       onClick={() => handleSelectStock(stock)}
                     >
                       <List.Item.Meta
@@ -273,19 +289,19 @@ const MobileAddToWatchlistDrawer: React.FC<MobileAddToWatchlistDrawerProps> = ({
               <Space direction="vertical">
                 <Radio value={1}>
                   <Space>
-                    {renderStars(1)}
+                    {renderStars(1, isDark)}
                     <Text>Low Priority</Text>
                   </Space>
                 </Radio>
                 <Radio value={2}>
                   <Space>
-                    {renderStars(2)}
+                    {renderStars(2, isDark)}
                     <Text>Medium Priority</Text>
                   </Space>
                 </Radio>
                 <Radio value={3}>
                   <Space>
-                    {renderStars(3)}
+                    {renderStars(3, isDark)}
                     <Text>High Priority</Text>
                   </Space>
                 </Radio>

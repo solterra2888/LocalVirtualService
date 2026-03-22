@@ -1,15 +1,29 @@
 import React, { useState } from 'react';
 import { Modal, Upload, Button, message, Space, ConfigProvider, theme as antdTheme, Tag } from 'antd';
-import { InboxOutlined, SoundOutlined } from '@ant-design/icons';
+import { InboxOutlined, SoundOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 
+/** 未指定时与历史行为一致：允许 isAudioFile 所含全部格式（含视频容器） */
+export type UploadAudioModalVariant = 'audio' | 'video';
+
 interface UploadAudioModalProps {
   visible: boolean;
   onCancel: () => void;
   themeMode: 'light' | 'dark';
+  /** 区分纯音频与视频上传（UI 与 accept；仍走同一 upload-audio 管道） */
+  variant?: UploadAudioModalVariant;
+}
+
+const VIDEO_EXTENSIONS = new Set([
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'mpeg', 'm4v', 'mpg',
+]);
+
+function isVideoExtension(filename: string): boolean {
+  const ext = filesAPI.getFileExtension(filename);
+  return VIDEO_EXTENSIONS.has(ext);
 }
 
 interface AudioFile {
@@ -22,7 +36,7 @@ interface AudioFile {
 
 const { Dragger } = Upload;
 
-const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, themeMode }) => {
+const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, themeMode, variant }) => {
   const isDark = themeMode === 'dark';
   const [audioFile, setAudioFile] = useState<AudioFile | null>(null);
   const { addTask, updateTaskStatus } = useFileProcessing();
@@ -38,11 +52,25 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
   // 处理文件选择
   const handleBeforeUpload = (file: File) => {
     if (audioFile) {
-      message.warning('Upload Audio Files supports a maximum of 1 file. Please remove the current file before adding another.');
+      message.warning('Only one file at a time. Please remove the current file before adding another.');
       return false;
     }
 
-    if (!filesAPI.isAudioFile(file.name)) {
+    if (variant === 'video') {
+      if (!filesAPI.isAudioFile(file.name) || !isVideoExtension(file.name)) {
+        message.error('Please upload a video file (e.g. mp4, mov, webm, mkv).');
+        return false;
+      }
+    } else if (variant === 'audio') {
+      if (!filesAPI.isAudioFile(file.name)) {
+        message.error('Please upload an audio file. Supported: mp3, wav, m4a, aac, flac, ogg, etc.');
+        return false;
+      }
+      if (isVideoExtension(file.name)) {
+        message.warning('This looks like a video. Use "Upload Video" for video files.');
+        return false;
+      }
+    } else if (!filesAPI.isAudioFile(file.name)) {
       message.error('please upload audio files. supported formats: mp3, wav, m4a, aac, flac, ogg, etc.');
       return false;
     }
@@ -197,8 +225,14 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
       <Modal
         title={
           <Space>
-            <SoundOutlined style={{ fontSize: '18px' }} />
-            <span>Upload Audio Files</span>
+            {variant === 'video' ? (
+              <VideoCameraOutlined style={{ fontSize: '18px' }} />
+            ) : (
+              <SoundOutlined style={{ fontSize: '18px' }} />
+            )}
+            <span>
+              {variant === 'video' ? 'Upload Video' : variant === 'audio' ? 'Upload Audio' : 'Upload Audio Files'}
+            </span>
           </Space>
         }
         open={visible}
@@ -223,7 +257,13 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
               maxCount={1}
               beforeUpload={handleBeforeUpload}
               showUploadList={false}
-              accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.amr"
+              accept={
+                variant === 'video'
+                  ? 'video/*,.mp4,.mov,.avi,.mkv,.webm,.flv,.wmv,.mpeg,.m4v,.mpg'
+                  : variant === 'audio'
+                    ? 'audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.amr'
+                    : 'audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.amr,.mp4,.mov,.avi,.mkv,.webm,.flv,.wmv,.mpeg,.m4v'
+              }
               style={{
                 background: isDark ? '#212936' : '#fafafa',
                 border: `2px dashed ${isDark ? '#364152' : '#d9d9d9'}`,
@@ -238,14 +278,20 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
                 color: isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
                 marginTop: '16px'
               }}>
-                click or drag audio file to this area
+                {variant === 'video'
+                  ? 'Click or drag video file to this area'
+                  : 'click or drag audio file to this area'}
               </p>
               <p className="ant-upload-hint" style={{ 
                 fontSize: '13px', 
                 color: isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)',
                 marginTop: '8px'
               }}>
-                supported formats: mp3, wav, m4a, aac, flac, ogg, opus, wma, etc.
+                {variant === 'video'
+                  ? 'Supported: mp4, mov, avi, mkv, webm, flv, wmv, mpeg, etc.'
+                  : variant === 'audio'
+                    ? 'Supported: mp3, wav, m4a, aac, flac, ogg, opus, wma, etc.'
+                    : 'supported formats: mp3, wav, m4a, aac, flac, ogg, opus, wma, etc.'}
               </p>
               <p className="ant-upload-hint" style={{ 
                 fontSize: '12px', 

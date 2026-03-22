@@ -1,10 +1,10 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { StockOutlined, NotificationOutlined, CalendarOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { FileTextOutlined, ReadOutlined, StockOutlined } from '@ant-design/icons';
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏组件
+ * 移动端底部导航栏：Sources（上传/文件）、Feeds、Watchlist
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
@@ -12,33 +12,31 @@ const MobileBottomNav: React.FC = () => {
 
   const navItems = [
     {
+      key: '/files',
+      icon: <FileTextOutlined />,
+      label: 'Sources',
+    },
+    {
+      key: '/feeds',
+      icon: <ReadOutlined />,
+      label: 'Feeds',
+    },
+    {
       key: '/dashboard',
       icon: <StockOutlined />,
       label: 'Watchlist',
     },
-    {
-      key: '/news',
-      icon: <NotificationOutlined />,
-      label: 'News',
-    },
-    {
-      key: '/markets/economic-events',
-      icon: <CalendarOutlined />,
-      label: 'Events',
-    },
-    {
-      key: '/files',
-      icon: <AppstoreOutlined />,
-      label: 'More',
-    },
   ];
+
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
 
   return (
     <div className="mobile-bottom-nav">
       {navItems.map(item => (
         <div
           key={item.key}
-          className={`nav-item ${location.pathname === item.key ? 'active' : ''}`}
+          className={`nav-item ${isActive(item.key) ? 'active' : ''}`}
           onClick={() => navigate(item.key)}
         >
           <div className="nav-icon">{item.icon}</div>
@@ -50,4 +48,3 @@ const MobileBottomNav: React.FC = () => {
 };
 
 export default MobileBottomNav;
-

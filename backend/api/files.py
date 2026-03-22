@@ -767,7 +767,7 @@ async def get_task_status(
             }
         elif task_result.state == 'PROGRESS':
             info = task_result.info or {}
-            return {
+            out = {
                 "task_id": task_id,
                 "status": info.get("status", "processing"),
                 "progress": info.get("progress", 0),
@@ -778,6 +778,11 @@ async def get_task_status(
                 "total_files": info.get("total_files", 0),
                 "logs": info.get("logs", [])
             }
+            if info.get("asr_fallback_notice"):
+                out["asr_fallback_notice"] = True
+            if info.get("asr_wait_notice"):
+                out["asr_wait_notice"] = True
+            return out
         elif task_result.state == 'SUCCESS':
             result = task_result.result or {}
             # 部分任务（如 YouTube）在逻辑失败时仍 return 字典而非抛异常，Celery 会标为 SUCCESS，需按 result.status 区分
@@ -1110,9 +1115,10 @@ async def create_file_tag(
                 detail="Failed to connect to database"
             )
         
+        from psycopg2.extras import Json
         cursor = conn.cursor()
         
-        # 插入标签
+        ticker_jsonb = Json([tag.ticker]) if tag.ticker else None
         cursor.execute("""
             INSERT INTO file_tags (file_id, sector, industry, ticker, tagged_by)
             VALUES (%s, %s, %s, %s, %s)
@@ -1121,7 +1127,7 @@ async def create_file_tag(
             tag.file_id,
             tag.sector,
             tag.industry,
-            tag.ticker,
+            ticker_jsonb,
             current_user.username
         ))
         
@@ -1129,12 +1135,13 @@ async def create_file_tag(
         conn.commit()
         conn.close()
         
+        ticker_val = result[4] if isinstance(result[4], list) else (result[4] or [])
         return FileTagResponse(
             id=result[0],
             file_id=result[1],
             sector=result[2],
             industry=result[3],
-            ticker=result[4],
+            ticker=json.dumps(ticker_val),
             tagged_by=result[5],
             created_at=result[6]
         )
@@ -1167,13 +1174,12 @@ async def get_tag_stats(
         
         cursor = conn.cursor()
         
-        # 查询标签统计
         cursor.execute("""
             SELECT 
                 COUNT(*) as total_tags,
                 COUNT(DISTINCT sector) as unique_sectors,
                 COUNT(DISTINCT industry) as unique_industries,
-                COUNT(DISTINCT ticker) as unique_tickers
+                (SELECT COUNT(DISTINCT t) FROM file_tags, jsonb_array_elements_text(ticker) AS t) as unique_tickers
             FROM file_tags
         """)
         
@@ -1230,8 +1236,8 @@ async def get_files_with_tags(
             where_clause += " AND ft.industry = %s"
             params.append(industry)
         if ticker:
-            where_clause += " AND ft.ticker = %s"
-            params.append(ticker)
+            where_clause += " AND ft.ticker @> %s::jsonb"
+            params.append(json.dumps([ticker]))
         
         # 查询带标签的文件
         query = f"""
@@ -1250,6 +1256,7 @@ async def get_files_with_tags(
         
         files = []
         for row in cursor.fetchall():
+            ticker_val = row[13] if isinstance(row[13], list) else (row[13] or [])
             files.append(FileWithTag(
                 id=row[0],
                 filename=row[1],
@@ -1264,7 +1271,7 @@ async def get_files_with_tags(
                 created_at=row[10],
                 sector=row[11],
                 industry=row[12],
-                ticker=row[13],
+                ticker=json.dumps(ticker_val),
                 tagged_by=row[14]
             ))
         

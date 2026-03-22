@@ -18,6 +18,7 @@ from urllib3.util.retry import Retry
 
 from backend.utils.logger import get_logger
 from backend.utils.env_loader import load_project_env
+from backend.utils.processing_timeout import get_file_processing_timeout_seconds
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 
@@ -688,6 +689,8 @@ class LLMService:
                 temperature = float(row[10]) if row[10] else 0.7
                 top_p = float(row[11]) if row[11] else 0.8
                 timeout = row[12] if row[12] else 180  # 默认180秒，适应大文件分析
+                cap = get_file_processing_timeout_seconds()
+                timeout = min(int(timeout), cap)
                 
                 if not enabled or not api_key:
                     continue
@@ -798,6 +801,7 @@ class LLMService:
         """Load Qwen configuration"""
         api_key = os.getenv('QWEN_API_KEY')
         if api_key and os.getenv('QWEN_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
             config = LLMConfig(
                 provider_type=LLMProviderType.QWEN,
                 api_key=api_key,
@@ -807,7 +811,8 @@ class LLMService:
                         'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
                 max_tokens=int(os.getenv('QWEN_MAX_TOKENS', '2000')),
                 temperature=float(os.getenv('QWEN_TEMPERATURE', '0.7')),
-                top_p=float(os.getenv('QWEN_TOP_P', '0.8'))
+                top_p=float(os.getenv('QWEN_TOP_P', '0.8')),
+                timeout=min(90, _cap),
             )
             self.providers['qwen'] = QwenProvider(config)
             self.logger.info(f"已加载提供商: qwen (Qwen)")
@@ -816,6 +821,7 @@ class LLMService:
         """Load Doubao configuration"""
         api_key = os.getenv('DOUBAO_API_KEY')
         if api_key and os.getenv('DOUBAO_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
             config = LLMConfig(
                 provider_type=LLMProviderType.DOUBAO,
                 api_key=api_key,
@@ -824,7 +830,8 @@ class LLMService:
                 models=['doubao-seed-1-6-250615'],
                 max_tokens=int(os.getenv('DOUBAO_MAX_TOKENS', '4000')),
                 temperature=float(os.getenv('DOUBAO_TEMPERATURE', '0.7')),
-                top_p=float(os.getenv('DOUBAO_TOP_P', '0.9'))
+                top_p=float(os.getenv('DOUBAO_TOP_P', '0.9')),
+                timeout=min(90, _cap),
             )
             self.providers['doubao'] = DoubaoProvider(config)
     
@@ -833,6 +840,7 @@ class LLMService:
         """Load GLM configuration"""
         api_key = os.getenv('GLM_API_KEY')
         if api_key and os.getenv('GLM_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
             config = LLMConfig(
                 provider_type=LLMProviderType.GLM,
                 api_key=api_key,
@@ -841,7 +849,8 @@ class LLMService:
                 models=['glm-4.6', 'glm-4', 'glm-4-flash'],
                 max_tokens=int(os.getenv('GLM_MAX_TOKENS', '8000')),
                 temperature=float(os.getenv('GLM_TEMPERATURE', '0.7')),
-                top_p=float(os.getenv('GLM_TOP_P', '0.8'))
+                top_p=float(os.getenv('GLM_TOP_P', '0.8')),
+                timeout=min(90, _cap),
             )
             self.providers['glm'] = GLMProvider(config)
             self.logger.info(f"已加载提供商: glm (GLM)")

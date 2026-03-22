@@ -19,6 +19,7 @@ except ImportError:
     DASHSCOPE_AVAILABLE = False
 
 from backend.utils.logger import info, error, warning
+from backend.utils.processing_timeout import get_file_processing_timeout_seconds
 
 
 class ASRService:
@@ -177,7 +178,7 @@ class ASRService:
     def wait_for_completion(
         self,
         task_id: str,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
         poll_interval: int = 5
     ) -> Dict[str, Any]:
         """
@@ -185,7 +186,7 @@ class ASRService:
         
         Args:
             task_id: 任务 ID
-            timeout: 超时时间（秒），默认 300 秒（5分钟）
+            timeout: 超时时间（秒），默认取自 FILE_PROCESSING_TIMEOUT_MINUTES
             poll_interval: 轮询间隔（秒），默认 5 秒
             
         Returns:
@@ -209,25 +210,50 @@ class ASRService:
             if not self.is_configured():
                 result["error"] = "ASR 服务未配置"
                 return result
+
+            if timeout is None:
+                timeout = get_file_processing_timeout_seconds()
             
             info(f"等待 ASR 任务完成: task_id={task_id}, timeout={timeout}s")
             
-            # 使用 DashScope 的 wait 方法
-            transcription_response = Transcription.wait(task=task_id)
-            
-            if transcription_response.status_code == HTTPStatus.OK:
-                output = transcription_response.output
-                results = output.get('results', [])
-                
-                result["success"] = True
-                result["status"] = "SUCCEEDED"
-                result["results"] = results
-                
-                info(f"ASR 任务完成: task_id={task_id}, 结果数={len(results)}")
-            else:
-                result["status"] = "FAILED"
-                result["error"] = f"任务失败: {transcription_response.output.message if hasattr(transcription_response.output, 'message') else 'Unknown error'}"
-                error(f"ASR 任务失败: {result['error']}")
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                transcription_response = Transcription.fetch(task=task_id)
+                sc = getattr(transcription_response, "status_code", HTTPStatus.OK)
+                if sc != HTTPStatus.OK:
+                    warning(f"ASR fetch 返回非 OK: status_code={sc}, task_id={task_id}")
+                    time.sleep(poll_interval)
+                    continue
+                if not transcription_response or not transcription_response.output:
+                    time.sleep(poll_interval)
+                    continue
+                out = transcription_response.output
+                if isinstance(out, dict):
+                    task_status = out.get("task_status", "UNKNOWN")
+                    results = out.get("results", [])
+                else:
+                    task_status = getattr(out, "task_status", None) or "UNKNOWN"
+                    results = getattr(out, "results", None) or []
+                if task_status == "SUCCEEDED":
+                    result["success"] = True
+                    result["status"] = "SUCCEEDED"
+                    result["results"] = results
+                    info(f"ASR 任务完成: task_id={task_id}, 结果数={len(results)}")
+                    return result
+                if task_status == "FAILED":
+                    result["status"] = "FAILED"
+                    if isinstance(out, dict):
+                        err_detail = out.get("message") or out.get("code") or out.get("task_id")
+                    else:
+                        err_detail = getattr(out, "message", None) or getattr(out, "code", None)
+                    result["error"] = f"任务失败: {err_detail or 'Unknown error'}"
+                    error(f"ASR 任务失败: {result['error']}")
+                    return result
+                time.sleep(poll_interval)
+
+            result["status"] = "TIMEOUT"
+            result["error"] = f"ASR 任务等待超时（{timeout} 秒）"
+            error(f"{result['error']}, task_id={task_id}")
             
         except Exception as e:
             error_msg = f"等待 ASR 任务完成失败: {str(e)}"

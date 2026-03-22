@@ -44,6 +44,8 @@ export function getModalStyles(themeMode: ThemeMode): ModalStylesMap {
     header: {
       backgroundColor: MODAL_DARK_BG,
       borderBottomColor: MODAL_DARK_BORDER,
+      /** 标题区文字（否则 antd 默认仍为深色字，在深蓝底上几乎看不见） */
+      color: 'rgba(255, 255, 255, 0.88)',
     },
     body: {
       backgroundColor: MODAL_DARK_BG,
@@ -51,6 +53,7 @@ export function getModalStyles(themeMode: ThemeMode): ModalStylesMap {
     footer: {
       backgroundColor: MODAL_DARK_BG,
       borderTopColor: MODAL_DARK_BORDER,
+      color: 'rgba(255, 255, 255, 0.88)',
     },
   };
 }

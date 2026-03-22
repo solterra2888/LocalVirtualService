@@ -294,6 +294,7 @@ const MobileDashboardPage: React.FC = () => {
             onChange={(value) => setPriorityFilter(value as PriorityFilterValue)}
             size="large"
             className="mobile-dashboard-priority-select"
+            popupClassName="mobile-dashboard-priority-dropdown"
           >
             {PRIORITY_FILTER_OPTIONS.map(option => (
               <Option key={option.value} value={option.value}>

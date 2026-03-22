@@ -1,0 +1,573 @@
+.mobile-sources-page {
+  min-height: 100%;
+  background: #f5f5f5;
+  padding-bottom: 96px;
+}
+
+.mobile-sources-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.mobile-sources-toolbar-input-row {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.mobile-sources-search-compact {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 整条搜索区外轮廓四角统一圆角；边框与 Batch 默认按钮一致（由页面注入 --mobile-sources-control-border） */
+.mobile-sources-search-compact.ant-space-compact {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--mobile-sources-control-border, var(--ant-color-border, #d9d9d9));
+  background: var(--mobile-sources-control-bg, var(--ant-color-bg-container, #fff));
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mobile-sources-search-compact.ant-space-compact:focus-within {
+  border-color: var(--ant-color-primary, #1677ff);
+  box-shadow: 0 0 0 2px var(--ant-control-outline, rgba(5, 145, 255, 0.1));
+}
+
+.mobile-sources-segmented-in-search.ant-segmented {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+}
+
+/* 与右侧 Input 同高；去掉 group 默认内边距，避免高亮块四周留白 */
+.mobile-sources-segmented-in-search.ant-segmented .ant-segmented-group {
+  min-height: 100%;
+  align-items: stretch;
+  padding: 0;
+}
+
+.mobile-sources-segmented-in-search.ant-segmented .ant-segmented-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+/* 选中高亮铺满选项格（覆盖 antd 对 thumb 的内联 top/height，避免竖向留白） */
+.mobile-sources-segmented-in-search.ant-segmented .ant-segmented-thumb {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+  margin-block: 0 !important;
+}
+
+.mobile-sources-toolbar-search {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Compact 已包外层边框，子项去重边框以便中间接缝贴合 */
+.mobile-sources-search-compact .mobile-sources-segmented-in-search.ant-segmented {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.mobile-sources-search-compact .mobile-sources-segmented-in-search.ant-segmented .ant-segmented-group {
+  border-radius: 0;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-search.ant-input-affix-wrapper {
+  border-radius: 0;
+  border: 0;
+  border-left: 1px solid var(--mobile-sources-control-border, var(--ant-color-split, rgba(5, 5, 5, 0.06)));
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-search.ant-input-affix-wrapper .ant-input {
+  font-size: 12px;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-search.ant-input-affix-wrapper .ant-input-prefix .anticon {
+  font-size: 12px;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-search.ant-input-affix-wrapper:focus,
+.mobile-sources-search-compact .mobile-sources-toolbar-search.ant-input-affix-wrapper-focused {
+  box-shadow: none;
+}
+
+/* Title / Content / Ticker：三档 Segmented 略收紧，避免窄屏溢出 */
+.mobile-sources-search-compact .mobile-sources-segmented-three.ant-segmented .ant-segmented-item {
+  padding: 0 6px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.mobile-sources-search-compact .mobile-sources-segmented-three.ant-segmented .ant-segmented-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 72px;
+}
+
+/* Ticker：AutoComplete 与右侧 Input 同缝、同字号（Select 非 affix-wrapper） */
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete {
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete .ant-select-selector {
+  border-radius: 0 !important;
+  border: 0 !important;
+  border-left: 1px solid var(--mobile-sources-control-border, var(--ant-color-split, rgba(5, 5, 5, 0.06))) !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  min-height: 32px !important;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete .ant-select-selection-search-input,
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete .ant-select-selection-placeholder {
+  font-size: 12px !important;
+}
+
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete.ant-select-focused .ant-select-selector,
+.mobile-sources-search-compact .mobile-sources-toolbar-ticker.ant-select-auto-complete .ant-select-selector:focus {
+  box-shadow: none !important;
+}
+
+/* Ticker 模糊搜索下拉（portal 到 body） */
+.mobile-sources-ticker-autocomplete-popup.ant-select-dropdown .ant-select-item,
+.mobile-sources-ticker-autocomplete-popup.ant-select-dropdown .ant-select-item-option-content {
+  font-size: 11px !important;
+  line-height: 1.35;
+}
+
+.mobile-sources-batch-btn.ant-btn {
+  flex-shrink: 0;
+}
+
+.mobile-sources-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #e6f7ff;
+  border-bottom: 1px solid #91d5ff;
+  font-size: 13px;
+}
+
+.mobile-sources-list {
+  padding: 12px 16px 0;
+}
+
+.mobile-sources-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid #f0f0f0;
+}
+
+.mobile-sources-card:active {
+  background: #fafafa;
+}
+
+.mobile-sources-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mobile-sources-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.mobile-sources-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 6px;
+}
+
+.mobile-sources-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-sources-meta-row .anticon {
+  font-size: 11px;
+  color: #8c8c8c;
+}
+
+.mobile-sources-card-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  margin-top: 2px;
+}
+
+.mobile-sources-card-footer-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobile-sources-file-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mobile-sources-file-type-icon .anticon {
+  display: block;
+}
+
+.mobile-sources-card-footer-share {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.mobile-sources-share-divider {
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+  opacity: 0.45;
+}
+
+/* 文件处理状态：纯文案（无图标、无语义色），与标题区次要文字色一致由行内 style 注入 */
+.mobile-sources-status-text {
+  font-size: 11px;
+  line-height: 1.45;
+  flex: 1;
+  min-width: 0;
+  display: block;
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+  cursor: default;
+}
+
+.mobile-sources-fab {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  z-index: 900;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-sources-fab:active {
+  opacity: 0.85;
+}
+
+.mobile-sources-upload-sheet .ant-modal-content {
+  padding: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.mobile-sources-upload-sheet .ant-modal-body {
+  padding: 24px 16px 28px;
+}
+
+.mobile-sources-loading-more {
+  text-align: center;
+  padding: 16px;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.mobile-sources-card--openable {
+  cursor: pointer;
+}
+
+/* Ticker tags row — aligned with Watchlist > Sources card */
+.mobile-sources-card-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+/* 全屏文件详情：AI Analysis（默认）/ Original / Info */
+.mobile-source-file-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  touch-action: manipulation;
+}
+
+.mobile-source-file-detail-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 4px;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  background: inherit;
+}
+
+.mobile-source-file-detail-back.ant-btn {
+  flex-shrink: 0;
+}
+
+.mobile-source-file-detail-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0 !important;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mobile-source-file-detail-header-spacer {
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.mobile-source-file-detail-tabs {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: inherit;
+}
+
+.mobile-source-file-detail-segmented.ant-segmented {
+  font-size: 12px;
+}
+
+.mobile-source-file-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px 24px;
+  /* 三个 Tab 正文统一基准字号 */
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.mobile-source-file-detail-pane--original {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane--original > div {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane--info .ant-descriptions-item-label {
+  width: 42% !important;
+  max-width: 120px;
+}
+
+/* —— Info：卡片与描述、标签 —— */
+.mobile-source-file-detail-pane--info .ant-card {
+  font-size: 12px;
+}
+
+.mobile-source-file-detail-pane--info .ant-card-head-title {
+  font-size: 13px !important;
+}
+
+.mobile-source-file-detail-pane--info .ant-descriptions-item-label,
+.mobile-source-file-detail-pane--info .ant-descriptions-item-content {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--info .ant-tag {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+}
+
+.mobile-source-file-detail-pane--info .ant-btn.ant-btn-link {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--info .ant-typography {
+  font-size: inherit;
+}
+
+/* Info > Tags：Edit Tags 弹窗（与手机详情正文 12px 统一） */
+.mobile-source-file-detail-pane--info .edit-tags-modal-content {
+  font-size: 12px;
+}
+
+.mobile-source-file-detail-pane--info .edit-tags-modal-content > div:first-child span {
+  font-size: 13px !important;
+  font-weight: 600;
+}
+
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-form-item-label > label,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-form-item .ant-form-item-tooltip {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-input,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-input-affix-wrapper,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-select .ant-select-selector,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-select-selection-item,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-select-selection-placeholder {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-form-item-explain,
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-form-item-extra {
+  font-size: 11px !important;
+}
+
+.mobile-source-file-detail-pane--info .edit-tags-modal-content .ant-btn {
+  font-size: 12px !important;
+}
+
+/* —— Original：Ant 控件与常见内联大字 —— */
+.mobile-source-file-detail-pane--original .ant-btn {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--original .ant-input,
+.mobile-source-file-detail-pane--original .ant-input-affix-wrapper,
+.mobile-source-file-detail-pane--original textarea {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--original div[style*='font-size: 16px'] {
+  font-size: 13px !important;
+}
+
+.mobile-source-file-detail-pane--original div[style*='font-size: 14px'] {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--original span[style*='font-size: 13px'] {
+  font-size: 12px !important;
+}
+
+/* —— AI Analysis：工具条、编辑区、Markdown（含组件内联字号） —— */
+.mobile-source-file-detail-pane--analysis .ant-btn {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ant-select,
+.mobile-source-file-detail-pane--analysis .ant-select-selection-item {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ant-typography {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--analysis textarea.ant-input {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content {
+  padding: 14px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content > div {
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+/* MarkdownRenderer 标题为内联样式，需覆盖以与正文统一缩小 */
+.mobile-source-file-detail-pane--analysis .ai-analysis-content h1 {
+  font-size: 18px !important;
+  margin-top: 16px !important;
+  margin-bottom: 10px !important;
+  padding-bottom: 6px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content h2 {
+  font-size: 15px !important;
+  margin-top: 14px !important;
+  margin-bottom: 8px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content h3 {
+  font-size: 14px !important;
+  margin-top: 12px !important;
+  margin-bottom: 6px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content h4 {
+  font-size: 12px !important;
+  margin-top: 10px !important;
+  margin-bottom: 6px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content p,
+.mobile-source-file-detail-pane--analysis .ai-analysis-content li {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content pre,
+.mobile-source-file-detail-pane--analysis .ai-analysis-content code {
+  font-size: 11px !important;
+}
+
+.mobile-source-file-detail-pane--analysis .ai-analysis-content th,
+.mobile-source-file-detail-pane--analysis .ai-analysis-content td {
+  font-size: 11px !important;
+}

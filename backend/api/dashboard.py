@@ -6,6 +6,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import json
 import os
 import urllib.parse
 import asyncio
@@ -17,8 +18,50 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig
 from backend.utils.database_config import get_database_config
+from backend.utils.avatar import resolve_avatar_url
 
 logger = get_logger("dashboard_api")
+
+
+def _fetch_share_info_by_file_ids(db_manager: DatabaseManager, file_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """与 tasks 列表 share_info 结构一致，按 file_processing_details.id 聚合。"""
+    if not file_ids:
+        return {}
+    share_rows = db_manager.fetch_all(
+        """
+        SELECT fpd.id,
+               u_by.id, u_by.username, u_by.avatar_url,
+               u_to.id, u_to.username, u_to.avatar_url
+        FROM file_shares fs
+        JOIN file_processing_details fpd ON fpd.id = fs.file_id
+        JOIN users u_by ON u_by.id = fs.shared_by_user_id
+        JOIN users u_to ON u_to.id = fs.shared_to_user_id
+        WHERE fpd.id = ANY(%s)
+        ORDER BY fs.created_at ASC
+        """,
+        (file_ids,),
+    )
+    share_info_map: Dict[int, Dict[str, Any]] = {}
+    for row in share_rows or []:
+        file_id = row[0]
+        if file_id not in share_info_map:
+            share_info_map[file_id] = {
+                "shared_by": {
+                    "user_id": row[1],
+                    "username": row[2],
+                    "avatar_url": resolve_avatar_url(row[3]),
+                },
+                "shared_to": [],
+            }
+        to_user = {
+            "user_id": row[4],
+            "username": row[5],
+            "avatar_url": resolve_avatar_url(row[6]),
+        }
+        existing_ids = [u["user_id"] for u in share_info_map[file_id]["shared_to"]]
+        if to_user["user_id"] not in existing_ids:
+            share_info_map[file_id]["shared_to"].append(to_user)
+    return share_info_map
 
 def get_smart_ticker_formats(ticker: str) -> List[str]:
     """
@@ -1005,11 +1048,11 @@ async def get_ticker_research_reports(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取与指定ticker关联的上传文件（研究报告）
-    
+    获取与指定 ticker 关联、且已在系统中分享过的上传文件（未产生任何 file_shares 记录的不返回）。
+
     Args:
         ticker: 股票代码
-        
+
     Returns:
         包含文件信息的列表
     """
@@ -1017,9 +1060,12 @@ async def get_ticker_research_reports(
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
-        # 查询与ticker关联的文件
-        # 支持多种ticker格式匹配，类似新闻查询的逻辑
-        query = """
+        ticker_formats = get_smart_ticker_formats(ticker)
+        
+        ticker_conditions = " OR ".join(["ft.ticker @> %s::jsonb"] * len(ticker_formats))
+        ticker_params = [json.dumps([t]) for t in ticker_formats]
+        
+        query = f"""
         SELECT DISTINCT
             f.id,
             f.filename,
@@ -1031,33 +1077,41 @@ async def get_ticker_research_reports(
             ft.sector,
             ft.industry,
             ft.ticker,
-            ft.tagged_at
+            ft.tagged_at,
+            f.processing_stats_id,
+            ps.rc_agent_status
         FROM file_processing_details f
         INNER JOIN file_tags ft ON f.id = ft.file_id
-        WHERE ft.ticker = ANY(%s)
+        LEFT JOIN processing_stats ps ON f.processing_stats_id = ps.id
+        WHERE ({ticker_conditions})
         AND f.status = 'completed'
+        AND EXISTS (SELECT 1 FROM file_shares fs WHERE fs.file_id = f.id)
         ORDER BY ft.tagged_at DESC, f.created_at DESC
         """
         
-        # 使用智能ticker格式匹配
-        ticker_formats = get_smart_ticker_formats(ticker)
-        
-        results = db_manager.fetch_all(query, [ticker_formats])
+        results = db_manager.fetch_all(query, ticker_params)
+
+        file_ids = list({row[0] for row in results}) if results else []
+        share_info_map = _fetch_share_info_by_file_ids(db_manager, file_ids)
         
         research_reports = []
         for row in results:
+            ticker_val = row[9] if isinstance(row[9], list) else (row[9] or [])
             report = {
                 "id": row[0],
                 "file_name": row[1],
                 "file_path": row[2],
-                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,  # 转换为字节
+                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,
                 "file_type": row[4],
                 "uploaded_at": row[5].isoformat() if row[5] else None,
                 "status": row[6],
                 "sector": row[7],
                 "industry": row[8],
-                "ticker": row[9],
-                "tagged_at": row[10].isoformat() if row[10] else None
+                "ticker": ticker_val,
+                "tagged_at": row[10].isoformat() if row[10] else None,
+                "execution_id": str(row[11]) if row[11] is not None else None,
+                "rc_agent_status": row[12],
+                "share_info": share_info_map.get(row[0]),
             }
             research_reports.append(report)
         
@@ -1083,8 +1137,12 @@ async def test_get_ticker_research_reports(ticker: str):
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
-        # 查询与ticker关联的文件
-        query = """
+        ticker_formats = get_smart_ticker_formats(ticker)
+        
+        ticker_conditions = " OR ".join(["ft.ticker @> %s::jsonb"] * len(ticker_formats))
+        ticker_params = [json.dumps([t]) for t in ticker_formats]
+        
+        query = f"""
         SELECT DISTINCT
             f.id,
             f.filename,
@@ -1096,33 +1154,41 @@ async def test_get_ticker_research_reports(ticker: str):
             ft.sector,
             ft.industry,
             ft.ticker,
-            ft.tagged_at
+            ft.tagged_at,
+            f.processing_stats_id,
+            ps.rc_agent_status
         FROM file_processing_details f
         INNER JOIN file_tags ft ON f.id = ft.file_id
-        WHERE ft.ticker = ANY(%s)
+        LEFT JOIN processing_stats ps ON f.processing_stats_id = ps.id
+        WHERE ({ticker_conditions})
         AND f.status = 'completed'
+        AND EXISTS (SELECT 1 FROM file_shares fs WHERE fs.file_id = f.id)
         ORDER BY ft.tagged_at DESC, f.created_at DESC
         """
         
-        # 使用智能ticker格式匹配
-        ticker_formats = get_smart_ticker_formats(ticker)
-        
-        results = db_manager.fetch_all(query, [ticker_formats])
+        results = db_manager.fetch_all(query, ticker_params)
+
+        file_ids = list({row[0] for row in results}) if results else []
+        share_info_map = _fetch_share_info_by_file_ids(db_manager, file_ids)
         
         research_reports = []
         for row in results:
+            ticker_val = row[9] if isinstance(row[9], list) else (row[9] or [])
             report = {
                 "id": row[0],
                 "file_name": row[1],
                 "file_path": row[2],
-                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,  # 转换为字节
+                "file_size": int(row[3] * 1024 * 1024) if row[3] else 0,
                 "file_type": row[4],
                 "uploaded_at": row[5].isoformat() if row[5] else None,
                 "status": row[6],
                 "sector": row[7],
                 "industry": row[8],
-                "ticker": row[9],
-                "tagged_at": row[10].isoformat() if row[10] else None
+                "ticker": ticker_val,
+                "tagged_at": row[10].isoformat() if row[10] else None,
+                "execution_id": str(row[11]) if row[11] is not None else None,
+                "rc_agent_status": row[12],
+                "share_info": share_info_map.get(row[0]),
             }
             research_reports.append(report)
         

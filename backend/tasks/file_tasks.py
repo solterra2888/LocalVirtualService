@@ -660,6 +660,9 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
                     conn.commit()
                     conn.close()
             else:
+                detail = failed_files[0].get("error") if failed_files else ""
+                if detail:
+                    raise ValueError(f"LlamaParse 解析失败: {detail}")
                 raise ValueError(f"LlamaParse解析文档失败: {filename}")
         else:
             update_progress(progress=55, log_message=f"使用已有文档内容进行分析，内容长度: {len(file_content_for_llm)} 字符")
@@ -1025,6 +1028,9 @@ def reparse_document_task(self, file_id, params, username):
         
         if not successful_results:
             mode_label = "Quick Process" if processing_mode == "quick" else "LlamaParse"
+            detail = failed_files[0].get("error") if failed_files else ""
+            if detail:
+                raise ValueError(f"{mode_label} 解析失败: {detail}")
             raise ValueError(f"{mode_label} 解析文档失败: {filename}")
         
         file_content = successful_results[0].get('content', '')
@@ -1142,7 +1148,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
     if language_hints is None:
         language_hints = ['zh', 'en']
     
-    def update_progress(status=None, progress=None, log_message=None, **kwargs):
+    def update_progress(status=None, progress=None, log_message=None, **meta_extra):
         try:
             if progress is not None:
                 _last_progress[0] = progress
@@ -1159,16 +1165,20 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                 })
                 if len(update_progress.logs) > 50:
                     update_progress.logs = update_progress.logs[-50:]
+            meta = {
+                'status': _last_status[0],
+                'progress': _last_progress[0],
+                'message': log_message or '',
+                'filename': filename,
+                'username': username,
+                'logs': update_progress.logs
+            }
+            for k, v in meta_extra.items():
+                if v is not None:
+                    meta[k] = v
             current_task.update_state(
                 state='PROGRESS',
-                meta={
-                    'status': _last_status[0],
-                    'progress': _last_progress[0],
-                    'message': log_message or '',
-                    'filename': filename,
-                    'username': username,
-                    'logs': update_progress.logs
-                }
+                meta=meta
             )
             if log_message:
                 info(f"AudioUpload {self.request.id}: {log_message}", source="celery_audio_upload")
@@ -1234,7 +1244,11 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             raise ValueError(f"提交 ASR 任务失败: {submit_result['error']}")
         
         task_id = submit_result["task_id"]
-        update_progress(progress=40, log_message=f"ASR 任务已提交: {task_id}")
+        update_progress(
+            progress=40,
+            log_message=f"ASR 任务已提交: {task_id}",
+            asr_wait_notice=True,
+        )
         
         # 3. 等待 ASR 完成
         transcription_result = asr_service.get_transcription_results(task_id)
@@ -1818,8 +1832,8 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
     
     task_id = self.request.id
     
-    # 更新任务状态的辅助函数
-    def update_progress(status=None, progress=None, log_message=None):
+    # 更新任务状态的辅助函数（kwargs 会并入 Celery meta，供前端弹窗等）
+    def update_progress(status=None, progress=None, log_message=None, **meta_extra):
         try:
             state_data = {
                 'status': status or 'processing',
@@ -1838,6 +1852,9 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     'level': 'error' if status == 'failed' else 'info',
                     'message': log_message
                 })
+            for k, v in meta_extra.items():
+                if v is not None:
+                    state_data[k] = v
             current_task.update_state(
                 state='PROGRESS',
                 meta=state_data
@@ -1845,6 +1862,8 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
         except Exception as e:
             error(f"更新进度失败: {str(e)}", source="youtube_task")
     
+    stats_id = None
+    file_id = None
     try:
         task_start_time = time.time()
         info(f"开始处理 YouTube 链接: url={youtube_url}, task_id={task_id}", 
@@ -1895,8 +1914,11 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                            log_message=f"Transcript fetched: {len(transcript_result['transcript'])} segments "
                                        f"in {transcript_result['language']}")
         else:
-            update_progress(progress=35,
-                           log_message='No transcript available — switching to Fun-ASR transcription...')
+            update_progress(
+                progress=35,
+                log_message='No transcript available — switching to Fun-ASR transcription...',
+                asr_fallback_notice=True,
+            )
 
         # ── Step 2: 保存基础记录到数据库 ──────────────────────────────────
         update_progress(progress=70 if transcript_result else 37,
@@ -1915,6 +1937,8 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 full_text = YouTubeService.get_full_text(transcript_result) if transcript_result else ''
                 asr_json = json.dumps(transcript_result) if transcript_result else None
                 db_status = 'completed' if transcript_result else 'processing'
+                # 仅在有官方字幕且已写入正文时记 completed；走 Fun-ASR 时在 ASR 成功后再记 completed
+                rc_agent_status_init = 'completed' if transcript_result else 'processing'
 
                 cursor.execute("""
                     INSERT INTO processing_stats (
@@ -1934,7 +1958,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                         "is_generated": transcript_result.get('is_generated', False) if transcript_result else False,
                         "asr_used": use_asr,
                     }),
-                    '', 'completed'
+                    '', rc_agent_status_init
                 ))
                 stats_id = cursor.fetchone()[0]
 
@@ -2051,19 +2075,26 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                           len(full_text), asr_elapsed_seconds, file_id))
                     cursor.execute("""
                         UPDATE processing_stats
-                        SET total_time = %s, total_file_processing_time = %s
+                        SET total_time = %s, total_file_processing_time = %s,
+                            rc_agent_status = 'completed'
                         WHERE id = %s
                     """, (asr_elapsed_seconds, asr_elapsed_seconds, stats_id))
                 info(f"Fun-ASR 转写完成并保存: file_id={file_id}", source="youtube_task")
 
             except Exception as asr_err:
                 error(f"Fun-ASR pipeline failed for file_id={file_id}: {asr_err}", source="youtube_task")
-                # ASR 失败时标记文件为 failed，但整个 Celery 任务以失败告终
+                # ASR 失败时标记文件与 execution 为 failed（避免 rc_agent 仍为 completed/processing）
                 try:
                     with db_manager.get_connection_context() as conn:
-                        conn.cursor().execute(
+                        cur = conn.cursor()
+                        cur.execute(
                             "UPDATE file_processing_details SET status='failed' WHERE id=%s", (file_id,)
                         )
+                        if stats_id is not None:
+                            cur.execute(
+                                "UPDATE processing_stats SET rc_agent_status='failed' WHERE id=%s",
+                                (stats_id,),
+                            )
                 except Exception:
                     pass
                 update_progress(status='failed', progress=0,
@@ -2102,6 +2133,17 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
     except Exception as e:
         error_msg = f"YouTube 处理失败: {str(e)}"
         error(f"{error_msg}, task_id={task_id}", source="youtube_task")
+        # 若已创建 processing_stats 但未在子流程中标记失败，补记 failed
+        if stats_id is not None:
+            try:
+                dbm = DatabaseManager(get_database_config())
+                with dbm.get_connection_context() as conn:
+                    conn.cursor().execute(
+                        "UPDATE processing_stats SET rc_agent_status='failed' WHERE id=%s AND rc_agent_status <> 'failed'",
+                        (stats_id,),
+                    )
+            except Exception:
+                pass
         
         # 更新失败状态
         failure_meta = {

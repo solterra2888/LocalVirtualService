@@ -154,6 +154,24 @@ class FileTagsService {
 
     return response.json();
   }
+
+  /**
+   * 获取所有去重的ticker列表（用于搜索自动补全）
+   */
+  async getDistinctTickers(search?: string): Promise<Array<{ ticker: string; file_count: number }>> {
+    const params = new URLSearchParams();
+    if (search) params.append('search', search);
+    const url = `${API_BASE_URL}/distinct-tickers${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url, {
+      headers: this.getAuthHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`获取ticker列表失败: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
 }
 
 export const fileTagsService = new FileTagsService();

@@ -28,6 +28,44 @@ def get_db():
     return DatabaseManager(db_config)
 
 
+@router.get("/distinct-tickers")
+def get_distinct_tickers(
+    search: Optional[str] = Query(None, description="按ticker代码模糊搜索"),
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    获取file_tags中所有去重的ticker列表（用于搜索自动补全）
+    """
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT t.ticker_val, COUNT(*) as file_count
+            FROM file_tags, jsonb_array_elements_text(ticker) AS t(ticker_val)
+            GROUP BY t.ticker_val
+            ORDER BY file_count DESC, t.ticker_val
+        """)
+        
+        results = []
+        search_upper = search.strip().upper() if search else None
+        for row in cursor.fetchall():
+            ticker_val = row[0]
+            if search_upper and search_upper not in ticker_val.upper():
+                continue
+            results.append({
+                'ticker': ticker_val,
+                'file_count': row[1]
+            })
+        
+        return results
+    finally:
+        conn.close()
+
+
 @router.get("/{file_id}", response_model=FileTagsResponse)
 def get_file_tags(
     file_id: int,
@@ -58,29 +96,9 @@ def get_file_tags(
         if not row:
             raise HTTPException(status_code=404, detail="文件标签不存在")
         
-        # 解析ticker JSON
-        tickers = []
-        ticker_raw = row[6]
-        if ticker_raw:
-            try:
-                tickers = json.loads(ticker_raw)
-            except:
-                tickers = [ticker_raw]
-        
-        # 解析concepts JSON
-        concepts = []
-        if row[7]:
-            try:
-                if isinstance(row[7], list):
-                    concepts = row[7]
-                elif isinstance(row[7], str):
-                    concepts = json.loads(row[7])
-                else:
-                    concepts = row[7]
-            except:
-                concepts = []
-        
-        # 解析additional_tags
+        tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
+        ticker_raw = json.dumps(tickers) if tickers else None
+        concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
         additional_tags = row[8] if row[8] else {}
         
         return {
@@ -138,9 +156,8 @@ def list_file_tags(
             params.append(industry)
         
         if ticker:
-            # 使用LIKE查询ticker字段（JSON字符串）
-            conditions.append("ft.ticker LIKE %s")
-            params.append(f'%"{ticker}"%')
+            conditions.append("ft.ticker @> %s::jsonb")
+            params.append(json.dumps([ticker]))
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
@@ -165,28 +182,9 @@ def list_file_tags(
         
         results = []
         for row in rows:
-            # 解析ticker
-            tickers = []
-            ticker_raw = row[6]
-            if ticker_raw:
-                try:
-                    tickers = json.loads(ticker_raw)
-                except:
-                    tickers = [ticker_raw]
-            
-            # 解析concepts
-            concepts = []
-            if row[7]:
-                try:
-                    if isinstance(row[7], list):
-                        concepts = row[7]
-                    elif isinstance(row[7], str):
-                        concepts = json.loads(row[7])
-                    else:
-                        concepts = row[7]
-                except:
-                    concepts = []
-            
+            tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
+            ticker_raw = json.dumps(tickers) if tickers else None
+            concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
             additional_tags = row[8] if row[8] else {}
             
             results.append({
@@ -443,19 +441,14 @@ def get_tags_stats(
         """)
         industries = {row[0]: row[1] for row in cursor.fetchall()}
         
-        # Top tickers（从JSON字段中提取）
         cursor.execute("""
             SELECT ticker FROM file_tags WHERE ticker IS NOT NULL
         """)
         ticker_counts = {}
         for row in cursor.fetchall():
-            ticker_json = row[0]
-            try:
-                tickers = json.loads(ticker_json)
-                for ticker in tickers:
-                    ticker_counts[ticker] = ticker_counts.get(ticker, 0) + 1
-            except:
-                pass
+            tickers = row[0] if isinstance(row[0], list) else []
+            for t in tickers:
+                ticker_counts[t] = ticker_counts.get(t, 0) + 1
         
         top_tickers = [
             {'ticker': ticker, 'count': count}

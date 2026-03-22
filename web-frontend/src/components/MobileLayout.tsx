@@ -1,25 +1,37 @@
-import React, { useState } from 'react';
-import { Layout as AntLayout, Button, Dropdown, Avatar, Typography, Drawer, Menu } from 'antd';
-import {
-  UserOutlined,
-  LogoutOutlined,
-  MenuOutlined,
-  SettingOutlined,
-  BuildOutlined,
-  FundOutlined,
-  AppstoreOutlined,
-  ControlOutlined,
-  TeamOutlined,
-  RobotOutlined,
-  HistoryOutlined,
-  BarChartOutlined
-} from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import type { MenuProps } from 'antd';
+import { Layout as AntLayout, Button, Dropdown, Avatar, Typography, Switch } from 'antd';
+import { LogoutOutlined, EditOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useFileProcessing } from '../contexts/FileProcessingContext';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import UserProfileModal from './UserProfileModal';
 import MobileBottomNav from './mobile/navigation/MobileBottomNav';
+import MobileTaskProgressBar, { MOBILE_TASK_PROGRESS_BAR_HEIGHT } from './mobile/MobileTaskProgressBar';
+import { userAvatarLetter, USER_AVATAR_LETTER_BG } from '../utils/userAvatar';
 
 const { Header, Content } = AntLayout;
 const { Title } = Typography;
+
+const MOBILE_SHELL_THEME = {
+  light: {
+    layoutBg: '#f5f5f5',
+    headerBg: '#ffffff',
+    headerBorder: '#f0f0f0',
+    titleColor: 'rgba(0, 0, 0, 0.88)',
+    headerShadow: undefined as string | undefined,
+    avatarBtnColor: undefined as string | undefined,
+  },
+  dark: {
+    layoutBg: '#1a202c',
+    headerBg: '#1a2234',
+    headerBorder: '#364152',
+    titleColor: '#e0e6f1',
+    headerShadow: '0 1px 4px rgba(0,0,0,0.2)',
+    avatarBtnColor: '#e0e6f1',
+  },
+} as const;
 
 /**
  * 移动端布局组件
@@ -28,100 +40,58 @@ const { Title } = Typography;
 const MobileLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const [drawerVisible, setDrawerVisible] = useState(false);
+  const { tasks } = useFileProcessing();
+  const { themeMode, setThemeMode } = useDashboardSettings();
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const showTaskProgressBar = tasks.size > 0;
+  const shell = MOBILE_SHELL_THEME[themeMode];
+
+  useEffect(() => {
+    const root = document.querySelector('.App');
+    if (root) {
+      root.classList.toggle('app-dark', themeMode === 'dark');
+    }
+    return () => {
+      root?.classList.remove('app-dark');
+    };
+  }, [themeMode]);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  // 更多功能菜单项
-  const moreMenuItems = [
-    {
-      key: 'market-weekly',
-      icon: <BarChartOutlined />,
-      label: 'Market Weekly',
-      onClick: () => {
-        navigate('/market-weekly');
-        setDrawerVisible(false);
-      }
-    },
-    {
-      key: 'prompt-templates',
-      icon: <BuildOutlined />,
-      label: 'Prompt Templates',
-      onClick: () => {
-        navigate('/prompt-templates');
-        setDrawerVisible(false);
-      }
-    },
-    {
-      key: 'investment-themes',
-      icon: <FundOutlined />,
-      label: 'Investment Themes',
-      onClick: () => {
-        navigate('/investment-themes');
-        setDrawerVisible(false);
-      }
-    },
-    {
-      key: 'tasks',
-      icon: <AppstoreOutlined />,
-      label: 'AI Agent Settings',
-      onClick: () => {
-        navigate('/tasks');
-        setDrawerVisible(false);
-      }
-    },
-    {
-      key: 'scheduler',
-      icon: <ControlOutlined />,
-      label: 'Scheduler',
-      onClick: () => {
-        navigate('/scheduler');
-        setDrawerVisible(false);
-      }
-    },
-    {
-      key: 'scheduler-logs',
-      icon: <HistoryOutlined />,
-      label: 'Scheduler Logs',
-      onClick: () => {
-        navigate('/scheduler/logs');
-        setDrawerVisible(false);
-      }
-    },
-    ...(user?.is_admin ? [
-      {
-        key: 'llm-config',
-        icon: <RobotOutlined />,
-        label: 'LLM Settings',
-        onClick: () => {
-          navigate('/llm-config');
-          setDrawerVisible(false);
-        }
-      },
-      {
-        key: 'users',
-        icon: <TeamOutlined />,
-        label: 'User Management',
-        onClick: () => {
-          navigate('/users');
-          setDrawerVisible(false);
-        }
-      }
-    ] : [])
-  ];
-
-  // 用户菜单
   const userMenuItems = [
     {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: 'Settings',
-      onClick: () => {
-        // TODO: 实现设置功能
-      }
+      key: 'theme',
+      icon: themeMode === 'dark' ? <MoonOutlined /> : <SunOutlined />,
+      label: (
+        <span
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%',
+            gap: 8,
+          }}
+        >
+          <span>Mode</span>
+          <Switch
+            size="small"
+            checked={themeMode === 'dark'}
+            onChange={(checked) => setThemeMode(checked ? 'dark' : 'light')}
+          />
+        </span>
+      ),
+      onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
+    },
+    { type: 'divider' as const },
+    {
+      key: 'edit-profile',
+      icon: <EditOutlined />,
+      label: 'Edit Profile',
+      onClick: () => setProfileModalOpen(true),
     },
     {
       key: 'logout',
@@ -132,7 +102,7 @@ const MobileLayout: React.FC = () => {
   ];
 
   return (
-    <AntLayout style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
+    <AntLayout style={{ minHeight: '100vh', backgroundColor: shell.layoutBg }}>
       <Header
         style={{
           position: 'fixed',
@@ -144,8 +114,9 @@ const MobileLayout: React.FC = () => {
           justifyContent: 'space-between',
           alignItems: 'center',
           padding: '0 16px',
-          backgroundColor: '#ffffff',
-          borderBottom: '1px solid #f0f0f0',
+          backgroundColor: shell.headerBg,
+          borderBottom: `1px solid ${shell.headerBorder}`,
+          boxShadow: shell.headerShadow,
           height: '56px',
           lineHeight: '56px',
         }}
@@ -158,62 +129,60 @@ const MobileLayout: React.FC = () => {
             fontWeight: 500,
             fontFamily: "'Aladin', cursive",
             letterSpacing: '0.02em',
+            color: shell.titleColor,
           }}
         >
           {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
         </Title>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Dropdown
+          menu={{ items: userMenuItems, style: { minWidth: 200 } }}
+          placement="bottomRight"
+        >
           <Button
             type="text"
-            icon={<MenuOutlined />}
-            onClick={() => setDrawerVisible(true)}
-            style={{ fontSize: '20px' }}
+            icon={
+              user?.avatar_url ? (
+                <Avatar size="small" src={user.avatar_url} />
+              ) : (
+                <Avatar size="small" style={{ backgroundColor: USER_AVATAR_LETTER_BG, fontSize: 12 }}>
+                  {userAvatarLetter(user?.username)}
+                </Avatar>
+              )
+            }
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              ...(shell.avatarBtnColor ? { color: shell.avatarBtnColor } : {}),
+            }}
           />
-          
-          <Dropdown 
-            menu={{ items: userMenuItems }}
-            placement="bottomRight"
-          >
-            <Button
-              type="text"
-              icon={<Avatar size="small" icon={<UserOutlined />} />}
-              style={{ display: 'flex', alignItems: 'center' }}
-            />
-          </Dropdown>
-        </div>
+        </Dropdown>
       </Header>
+
+      <UserProfileModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        themeMode={themeMode}
+      />
+
+      <MobileTaskProgressBar />
 
       <Content
         style={{
-          marginTop: '56px',
+          marginTop: showTaskProgressBar ? 56 + MOBILE_TASK_PROGRESS_BAR_HEIGHT : 56,
           marginBottom: '60px',
-          minHeight: 'calc(100vh - 116px)',
-          backgroundColor: '#f5f5f5',
+          minHeight: showTaskProgressBar
+            ? `calc(100vh - ${116 + MOBILE_TASK_PROGRESS_BAR_HEIGHT}px)`
+            : 'calc(100vh - 116px)',
+          backgroundColor: shell.layoutBg,
         }}
       >
         <Outlet />
       </Content>
 
       <MobileBottomNav />
-
-      {/* 更多功能抽屉 */}
-      <Drawer
-        title="More Features"
-        placement="right"
-        onClose={() => setDrawerVisible(false)}
-        open={drawerVisible}
-        width="80%"
-      >
-        <Menu
-          mode="inline"
-          items={moreMenuItems}
-          style={{ border: 'none' }}
-        />
-      </Drawer>
     </AntLayout>
   );
 };
 
 export default MobileLayout;
-

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode, useMemo } from 'react';
+import { Modal } from 'antd';
 import { filesAPI } from '../services/files';
 import type { TaskStatusResponse } from '../services/files';
 
@@ -37,6 +38,8 @@ const SOURCE_LIST_REFRESH_DELAY_MS = 1500;
 
 // ── localStorage 持久化 ──────────────────────────────────────────────────────
 const STORAGE_KEY = 'rc_processing_tasks_v1';
+/** 与 GET /api/health 的 app_boot_unix 对齐；后端重启后 Celery 任务 ID 在 Redis 中失效，需丢弃旧任务条 */
+const BACKEND_BOOT_KEY = 'rc_processing_tasks_backend_boot_v1';
 // 超过 4 小时的任务视为过期（即便服务端已完成也不再恢复）
 const MAX_TASK_AGE_MS = 4 * 60 * 60 * 1000;
 
@@ -71,10 +74,44 @@ function persistTasks(tasks: Map<string, TaskInfo>): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [tasks, setTasks] = useState<Map<string, TaskInfo>>(() => loadPersistedTasks());
+  const [tasks, setTasks] = useState<Map<string, TaskInfo>>(() => new Map());
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const tasksRef = useRef<Map<string, TaskInfo>>(new Map());
   const onSourceListRefreshRef = useRef<(() => void) | null>(null);
+  const asrFallbackNoticeShownRef = useRef<Set<string>>(new Set());
+  const asrWaitNoticeShownRef = useRef<Set<string>>(new Set());
+
+  // 首次挂载：拉取 /api/health 的 app_boot_unix；若与上次不一致说明 API 进程已重启，丢弃持久化的进行中任务（避免 Celery ID 失效后永远 PENDING）
+  useEffect(() => {
+    let cancelled = false;
+    const apiBase = (process.env.REACT_APP_API_BASE_URL || '/api').replace(/\/$/, '');
+
+    (async () => {
+      try {
+        const res = await fetch(`${apiBase}/health`, { credentials: 'same-origin' });
+        const data = (await res.json()) as { app_boot_unix?: number };
+        const boot = data.app_boot_unix != null ? String(data.app_boot_unix) : '';
+        if (cancelled || !boot) {
+          setTasks(loadPersistedTasks());
+          return;
+        }
+        const prevBoot = localStorage.getItem(BACKEND_BOOT_KEY);
+        if (prevBoot !== null && prevBoot !== boot) {
+          localStorage.removeItem(STORAGE_KEY);
+          setTasks(new Map());
+        } else {
+          setTasks(loadPersistedTasks());
+        }
+        localStorage.setItem(BACKEND_BOOT_KEY, boot);
+      } catch {
+        if (!cancelled) setTasks(loadPersistedTasks());
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 同步 tasks 到 tasksRef（用于轮询，避免频繁重启 interval）
   // 同时持久化到 localStorage，以便刷新后恢复
@@ -263,9 +300,32 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
 
         try {
           const status = await filesAPI.getTaskStatus(taskId);
+          if (status.asr_fallback_notice && !asrFallbackNoticeShownRef.current.has(taskId)) {
+            asrFallbackNoticeShownRef.current.add(taskId);
+            Modal.info({
+              title: '无法自动获取 YouTube 字幕',
+              content:
+                '该视频未提供可拉取的字幕，已改为下载音频并用 Fun-ASR 转写。处理时间较长（可能数分钟），请耐心等待，勿关闭页面。',
+              okText: '知道了',
+            });
+          }
+          if (status.asr_wait_notice && !asrWaitNoticeShownRef.current.has(taskId)) {
+            asrWaitNoticeShownRef.current.add(taskId);
+            Modal.info({
+              title: '语音识别进行中',
+              content:
+                '已提交 Fun-ASR，大文件或长音频可能需要较长时间，请耐心等待。',
+              okText: '知道了',
+            });
+          }
           updateTaskStatus(taskId, status);
-        } catch (error) {
+        } catch (error: unknown) {
           console.error(`Failed to poll task ${taskId}:`, error);
+          const ax = error as { response?: { status?: number } };
+          const st = ax?.response?.status;
+          if (st === 404 || st === 410) {
+            removeTask(taskId);
+          }
         }
       }
     };
@@ -281,7 +341,7 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
         pollingRef.current = null;
       }
     };
-  }, [tasks.size, updateTaskStatus]);
+  }, [tasks.size, updateTaskStatus, removeTask]);
 
   // 兼容旧代码：返回最新任务
   const latestTask = useMemo(() => {

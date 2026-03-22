@@ -44,6 +44,7 @@ import {
 import { theme as antdTheme } from 'antd';
 import type { MenuProps } from 'antd';
 import MarkdownRenderer from './MarkdownRenderer';
+import ReportTickerTags, { SOURCE_FILE_TICKER_TAG_STYLE } from './ReportTickerTags';
 import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
 import { MODAL_DARK_BG, MODAL_DARK_BORDER } from '../utils/modalStyles';
 import { 
@@ -2782,8 +2783,10 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                 }
                 description={
                   <Space wrap>
-                    <Tag color="orange">{report.industry}</Tag>
-                    <Tag color="blue">{report.ticker}</Tag>
+                    <Tag color="orange" style={SOURCE_FILE_TICKER_TAG_STYLE}>
+                      {report.industry}
+                    </Tag>
+                    <ReportTickerTags tickers={report.ticker} maxVisible={6} tagColor="blue" />
                     <Text type="secondary" style={{ fontSize: '12px' }}>
                       Tagged: {new Date(report.tagged_at).toLocaleDateString()}
                     </Text>
@@ -3217,7 +3220,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                   tab={
                     <span>
                       <FileTextOutlined />
-                      Research Report
+                      Sources
                     </span>
                   } 
                   key="reports"

@@ -26,6 +26,7 @@ import {
   Descriptions,
   Avatar,
   Segmented,
+  AutoComplete,
   theme as antdTheme
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -50,8 +51,11 @@ import {
   DoubleRightOutlined,
   TagsOutlined,
   CheckCircleOutlined,
+  CheckOutlined,
   ReloadOutlined,
   LinkOutlined,
+  VideoCameraOutlined,
+  AppstoreOutlined,
   CloseOutlined,
   ShareAltOutlined,
   UsergroupAddOutlined,
@@ -61,13 +65,20 @@ import {
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
+import { fileTagsService } from '../services/fileTags';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
+import {
+  getExecutionStatusDisplay,
+  getRcAgentStatusTagColor,
+  normalizeRcAgentStatusForAnalyze,
+} from '../utils/rcAgentStatus';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
+import ReportTickerTags, { parseReportTickers, PC_INFO_TAGS_TAG_STYLE } from '../components/ReportTickerTags';
 import TemplateSelector from '../components/TemplateSelector';
 import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
@@ -204,6 +215,7 @@ interface TaskExecution {
     shared_by: { user_id: number; username: string; avatar_url?: string | null };
     shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
   } | null;
+  ticker_tags?: string[] | null;
 }
 
 interface ProcessingParams {
@@ -352,8 +364,10 @@ const FilesPageInner: React.FC = () => {
   const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
   const [contentDetailLoading, setContentDetailLoading] = useState(false);
   const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube'>('all');
-  const [searchType, setSearchType] = useState<'file_name' | 'content'>('file_name');
+  const [searchType, setSearchType] = useState<'file_name' | 'content' | 'ticker'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
+  const [tickerFilter, setTickerFilter] = useState<string | undefined>(undefined);
+  const [tickerSearchOptions, setTickerSearchOptions] = useState<Array<{ value: string; label: string }>>([]);
   
   
   // 文件内容查看相关状态
@@ -561,6 +575,7 @@ const FilesPageInner: React.FC = () => {
         page: pageToLoad,
         page_size: EXECUTIONS_PAGE_SIZE,
         ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
+        ...(searchType === 'ticker' && tickerFilter ? { ticker: tickerFilter } : {}),
       });
       
       if (append) {
@@ -623,7 +638,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, selectedExecutionForView]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -672,6 +687,20 @@ const FilesPageInner: React.FC = () => {
     }, delay);
     return () => clearTimeout(t);
   }, [searchType, searchQuery]); // 只依赖搜索相关的状态，不依赖函数
+
+  const tickerSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ticker filter change: small delay ensures the ref has been updated with
+  // the new loadTaskExecutionsFunc that captures the latest tickerFilter
+  const isTickerMountRef = useRef(true);
+  useEffect(() => {
+    if (isTickerMountRef.current) { isTickerMountRef.current = false; return; }
+    const t = setTimeout(() => {
+      loadTaskExecutionsFuncRef.current(false, false, false);
+    }, 50);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickerFilter]);
 
   // loadTaskTypes 函数定义需要移到这里
   const loadTaskTypes = useCallback(async (showError = true) => {
@@ -2165,8 +2194,12 @@ const FilesPageInner: React.FC = () => {
         const isDocAnalyzing = record.rc_agent_status === 'analyzing' || docAnalyzingIds.has(record.id);
         const _isAnalyzing = isAudioAnalyzing || isDocAnalyzing;
         const hasAnalysis = record.rc_agent_status === 'success';
-        // 音频文件且ASR已完成但未进行AI分析（YouTube 不需要 AI 分析）
-        const canAnalyzeAudio = isAudioFile && !hasAnalysis && !isAudioAnalyzing && record.rc_agent_status === 'completed';
+        // 音频文件且ASR已完成但未进行AI分析（YouTube 不需要 AI 分析）；旧 skipped 视为 completed
+        const canAnalyzeAudio =
+          isAudioFile &&
+          !hasAnalysis &&
+          !isAudioAnalyzing &&
+          normalizeRcAgentStatusForAnalyze(record.rc_agent_status) === 'completed';
         // 文档分析：需要区分"仅上传"和"正在处理"
         // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
         // 2. 如果rc_agent_status为failed，允许重新分析
@@ -2174,12 +2207,12 @@ const FilesPageInner: React.FC = () => {
         const isProcessingDoc = record.rc_agent_status === 'processing' || 
                                 record.rc_agent_status === 'initializing' ||
                                 (record.first_task_id != null && record.rc_agent_status === 'uploaded');
-        // 允许分析的状态：uploaded（仅上传）、failed（可重试）、skipped（已处理未做AI）、completed（如处理完成但无报告）
+        const rcForAnalyze = normalizeRcAgentStatusForAnalyze(record.rc_agent_status);
+        // 允许分析的状态：uploaded、failed、completed（含旧数据 skipped，已映射为 completed）
         const _canAnalyzeDoc = !isAudioFile && !hasAnalysis && !isDocAnalyzing && !isProcessingDoc && (
-          record.rc_agent_status === 'uploaded' ||
-          record.rc_agent_status === 'failed' ||
-          record.rc_agent_status === 'skipped' ||
-          record.rc_agent_status === 'completed'
+          rcForAnalyze === 'uploaded' ||
+          rcForAnalyze === 'failed' ||
+          rcForAnalyze === 'completed'
         );
         
         return (
@@ -2324,9 +2357,11 @@ const FilesPageInner: React.FC = () => {
       ) : (() => {
         const isAudioModal = aiAnalysisExecution?.first_file_type === 'audio';
         
-        // 音频分析：只有转写完成(completed)或失败(failed)时才允许AI分析
-        const canAnalyzeAudioModal = isAudioModal && 
-          (aiAnalysisExecution?.rc_agent_status === 'completed' || aiAnalysisExecution?.rc_agent_status === 'failed');
+        // 音频分析：只有转写完成(completed，含旧 skipped)或失败(failed)时才允许AI分析
+        const stModal = aiAnalysisExecution?.rc_agent_status;
+        const canAnalyzeAudioModal =
+          isAudioModal &&
+          (normalizeRcAgentStatusForAnalyze(stModal) === 'completed' || stModal === 'failed');
         
         // 文档分析：需要区分"仅上传"和"正在处理"
         // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
@@ -2335,12 +2370,11 @@ const FilesPageInner: React.FC = () => {
         const isProcessingDocModal = aiAnalysisExecution?.rc_agent_status === 'processing' || 
                                       aiAnalysisExecution?.rc_agent_status === 'initializing' ||
                                       (aiAnalysisExecution?.first_task_id != null && aiAnalysisExecution?.rc_agent_status === 'uploaded');
-        // 与右侧面板一致：uploaded、failed、skipped、completed 均显示模板与可选参数
+        const rcModal = normalizeRcAgentStatusForAnalyze(aiAnalysisExecution?.rc_agent_status);
         const canAnalyzeDocModal = !isAudioModal && aiAnalysisExecution && !isProcessingDocModal && (
-          aiAnalysisExecution?.rc_agent_status === 'uploaded' ||
-          aiAnalysisExecution?.rc_agent_status === 'failed' ||
-          aiAnalysisExecution?.rc_agent_status === 'skipped' ||
-          aiAnalysisExecution?.rc_agent_status === 'completed'
+          rcModal === 'uploaded' ||
+          rcModal === 'failed' ||
+          rcModal === 'completed'
         );
         
         const isAudioAnalyzingModal = aiAnalysisExecution ? audioAnalyzingIds.has(aiAnalysisExecution.id) : false;
@@ -2647,14 +2681,19 @@ const FilesPageInner: React.FC = () => {
     ? filteredByType.filter(exec => (exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
     : filteredByType;
 
-  const FILE_TYPE_TABS: { key: typeof fileTypeFilter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'pdf', label: 'PDF' },
-    { key: 'doc', label: 'Doc' },
-    { key: 'excel', label: 'Excel' },
-    { key: 'image', label: 'Image' },
-    { key: 'audio', label: 'Audio' },
-    { key: 'youtube', label: 'YouTube' },
+  /** 筛选栏图标：中性色，与 `.files-list-type-tab` 文字色一致（无类型专色） */
+  const FILE_TYPE_TABS: {
+    key: typeof fileTypeFilter;
+    label: string;
+    icon: React.ReactElement;
+  }[] = [
+    { key: 'all', label: 'All types', icon: <AppstoreOutlined /> },
+    { key: 'pdf', label: 'PDF', icon: <FilePdfOutlined /> },
+    { key: 'doc', label: 'Word', icon: <FileWordOutlined /> },
+    { key: 'excel', label: 'Excel', icon: <FileExcelOutlined /> },
+    { key: 'image', label: 'Image', icon: <FileImageOutlined /> },
+    { key: 'audio', label: 'Audio', icon: <SoundOutlined /> },
+    { key: 'youtube', label: 'YouTube', icon: <VideoCameraOutlined /> },
   ];
 
   // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple, YouTube=red)
@@ -2667,6 +2706,35 @@ const FilesPageInner: React.FC = () => {
     if (['youtube'].includes(t)) return { color: 'red', text: 'YouTube' };
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
     return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
+  };
+
+  /** 与移动端 Sources 卡片一致：彩色类型图标 + 文案状态（非 Tag） */
+  const getFileTypeIconDisplay = (firstFileType: string | undefined): {
+    tooltip: string;
+    icon: React.ReactElement;
+    color: string;
+  } => {
+    const t = (firstFileType || '').toLowerCase();
+    if (['pdf'].includes(t) || t.includes('pdf')) {
+      return { tooltip: 'PDF', icon: <FilePdfOutlined />, color: '#f5222d' };
+    }
+    if (['doc', 'docx', 'word'].includes(t) || t.includes('word') || t.includes('msword')) {
+      return { tooltip: 'Word', icon: <FileWordOutlined />, color: '#1890ff' };
+    }
+    if (['excel', 'xlsx', 'xls'].includes(t) || t.includes('excel') || t.includes('spreadsheet')) {
+      return { tooltip: 'Excel', icon: <FileExcelOutlined />, color: '#52c41a' };
+    }
+    if (['audio'].includes(t) || t.startsWith('audio/')) {
+      return { tooltip: 'Audio', icon: <SoundOutlined />, color: '#722ed1' };
+    }
+    if (['youtube'].includes(t)) {
+      return { tooltip: 'YouTube', icon: <VideoCameraOutlined />, color: '#ff4d4f' };
+    }
+    if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t) || t.startsWith('image/')) {
+      return { tooltip: 'Image', icon: <FileImageOutlined />, color: '#fa8c16' };
+    }
+    const label = (firstFileType || 'File').toUpperCase();
+    return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };
   };
 
   return (
@@ -2720,37 +2788,98 @@ const FilesPageInner: React.FC = () => {
               </Space>
             </div>
             <div className="files-list-type-tabs">
-              {FILE_TYPE_TABS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
-                  onClick={() => setFileTypeFilter(key)}
-                >
-                  {label}
-                </button>
+              {FILE_TYPE_TABS.map(({ key, label, icon }) => (
+                <Tooltip key={key} title={label}>
+                  <button
+                    type="button"
+                    className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
+                    onClick={() => setFileTypeFilter(key)}
+                    aria-label={label}
+                  >
+                    <span className="files-list-type-tab-icon">{icon}</span>
+                  </button>
+                </Tooltip>
               ))}
             </div>
-            <div className="files-list-search-bar">
-              <Select
-                value={searchType}
-                onChange={(v) => setSearchType(v)}
-                size="small"
-                className="files-list-search-type"
-                dropdownClassName="files-list-search-type-dropdown"
-                options={[
-                  { value: 'file_name', label: 'Title' },
-                  { value: 'content', label: 'Content' },
-                ]}
-              />
-              <Input
-                size="small"
-                placeholder={searchType === 'file_name' ? 'Search by title' : 'Search by content'}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                allowClear
-                className="files-list-search-input"
-              />
+            <div
+              className="files-list-search-bar"
+              style={
+                {
+                  '--files-sources-search-border': themeColors.cardBorder,
+                  '--files-sources-search-bg': themeColors.cardBg,
+                } as React.CSSProperties
+              }
+            >
+              <Space.Compact block className="files-list-search-compact">
+                <Segmented
+                  size="small"
+                  className="files-list-search-segmented files-list-search-segmented-three"
+                  value={searchType}
+                  onChange={(v) => {
+                    const next = v as 'file_name' | 'content' | 'ticker';
+                    setSearchType(next);
+                    if (next === 'ticker') {
+                      setSearchQuery('');
+                    } else {
+                      setTickerFilter(undefined);
+                      setTickerSearchOptions([]);
+                    }
+                  }}
+                  options={[
+                    { label: 'Title', value: 'file_name' },
+                    { label: 'Content', value: 'content' },
+                    { label: 'Ticker', value: 'ticker' },
+                  ]}
+                />
+                {searchType === 'ticker' ? (
+                  <AutoComplete
+                    size="small"
+                    placeholder="Search ticker..."
+                    options={tickerSearchOptions}
+                    value={tickerFilter}
+                    onSearch={(text) => {
+                      if (tickerSearchTimerRef.current) clearTimeout(tickerSearchTimerRef.current);
+                      if (!text.trim()) {
+                        setTickerSearchOptions([]);
+                        return;
+                      }
+                      tickerSearchTimerRef.current = setTimeout(() => {
+                        fileTagsService
+                          .getDistinctTickers(text.trim())
+                          .then((results) => {
+                            setTickerSearchOptions(
+                              results.map((r) => ({
+                                value: r.ticker,
+                                label: `${r.ticker} (${r.file_count})`,
+                              })),
+                            );
+                          })
+                          .catch(() => {});
+                      }, 300);
+                    }}
+                    onSelect={(val: string) => setTickerFilter(val)}
+                    onChange={(val: string) => {
+                      if (!val) {
+                        setTickerFilter(undefined);
+                        setTickerSearchOptions([]);
+                      }
+                    }}
+                    allowClear
+                    className="files-list-search-input files-list-search-ticker"
+                    classNames={{ popup: { root: 'files-list-ticker-autocomplete-popup' } }}
+                  />
+                ) : (
+                  <Input
+                    size="small"
+                    placeholder={searchType === 'file_name' ? 'Search by title' : 'Search in content'}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    allowClear
+                    className="files-list-search-input"
+                    prefix={<SearchOutlined style={{ color: themeColors.textSecondary }} />}
+                  />
+                )}
+              </Space.Compact>
             </div>
             {batchMode && selectedExecutionIds.length > 0 && (
               <div className="files-list-batch-bar">
@@ -2783,12 +2912,16 @@ const FilesPageInner: React.FC = () => {
               {filteredExecutions.map(execution => {
                 const isSelected = selectedExecutionForView?.id === execution.id;
                 const isUploadOnly = execution.rc_agent_status === 'uploaded';
+                const isFailed = execution.rc_agent_status === 'failed';
                 const isAudioFile = execution.first_file_type === 'audio';
                 const canAnalyze = isUploadOnly || execution.rc_agent_status === 'failed';
-                const fileTypeTag = getFileTypeTagConfig(execution.first_file_type);
+                const fileTypeDisplay = getFileTypeIconDisplay(execution.first_file_type);
                 const isDocAnalyzing = docAnalyzingIds.has(execution.id);
                 const isAudioAnalyzing = audioAnalyzingIds.has(execution.id);
                 const isItemAnalyzing = execution.rc_agent_status === 'analyzing' || isDocAnalyzing || isAudioAnalyzing;
+                const statusDisplay = getExecutionStatusDisplay(execution);
+                const statusLabel = isItemAnalyzing ? 'Analyzing…' : statusDisplay.label;
+                const statusTooltip = isItemAnalyzing ? 'AI analyzing…' : statusDisplay.tooltip;
                 const isSharedFile = execution.access_type === 'shared';
                 const cardMenuItems: MenuProps['items'] = [
                   // 文档文件：未分析时显示 Analyze 入口
@@ -2878,16 +3011,26 @@ const FilesPageInner: React.FC = () => {
                       {new Date(execution.created_at).toLocaleString()}
                     </div>
                     <div className="files-list-item-tags" style={{ justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        <Tag color={fileTypeTag.color} style={{ margin: 0, fontSize: '11px' }}>
-                          {fileTypeTag.text}
-                        </Tag>
-                        <Tag
-                          color={isItemAnalyzing ? 'warning' : isUploadOnly ? 'blue' : (execution.rc_agent_status === 'success' ? 'success' : 'default')}
-                          style={{ margin: 0, fontSize: '11px' }}
-                        >
-                          {isItemAnalyzing ? 'Analyzing...' : isUploadOnly ? 'Uploaded' : (execution.rc_agent_status === 'success' ? 'Analyzed' : 'Not Analyzed')}
-                        </Tag>
+                      <div className="files-list-item-type-status">
+                        <Tooltip title={fileTypeDisplay.tooltip}>
+                          <span
+                            className="files-list-item-file-type-icon"
+                            style={{ color: fileTypeDisplay.color }}
+                            aria-label={fileTypeDisplay.tooltip}
+                          >
+                            {fileTypeDisplay.icon}
+                          </span>
+                        </Tooltip>
+                        <Tooltip title={statusTooltip}>
+                          <span
+                            className="files-list-item-status-text"
+                            style={{ color: themeColors.textSecondary }}
+                            aria-label={statusLabel}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {statusLabel}
+                          </span>
+                        </Tooltip>
                       </div>
                       {execution.share_info && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
@@ -2917,6 +3060,11 @@ const FilesPageInner: React.FC = () => {
                         </div>
                       )}
                     </div>
+                    {parseReportTickers(execution.ticker_tags).length > 0 && (
+                      <div className="files-list-item-tickers">
+                        <ReportTickerTags tickers={execution.ticker_tags} maxVisible={3} />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -3372,7 +3520,7 @@ const FilesPage: React.FC = () => {
 };
 
 // 右侧 Info Tab：仅展示 Basic Information（不含 File Processing Details）
-const ExecutionDetailsPanel: React.FC<{
+export const ExecutionDetailsPanel: React.FC<{
   execution: TaskExecution;
   themeColors: any;
   isDark?: boolean;
@@ -3386,20 +3534,13 @@ const ExecutionDetailsPanel: React.FC<{
   const [tagsLoading, setTagsLoading] = useState(false);
   const [editTagsVisible, setEditTagsVisible] = useState(false);
   const [tagForm] = Form.useForm();
-  
-  const statusConfig: Record<string, { color: string; text: string }> = {
-    success: { color: 'success', text: 'AI Analysis Complete' },
-    failed: { color: 'error', text: 'Failed' },
-    pending: { color: 'processing', text: 'Pending' },
-    skipped: { color: 'default', text: 'Skipped' },
-    uploaded: { color: 'blue', text: 'Upload Only' },
-    analyzing: { color: 'warning', text: 'AI Analyzing...' },
-    completed: { color: 'cyan', text: 'ASR Complete' },
-  };
 
-  const statusItem = execution.rc_agent_status
-    ? (statusConfig[execution.rc_agent_status] || { color: 'default', text: execution.rc_agent_status })
-    : { color: 'default', text: 'Unknown' };
+  const statusDisplay = getExecutionStatusDisplay(execution);
+  const statusItem = {
+    color: getRcAgentStatusTagColor(execution.rc_agent_status),
+    text: statusDisplay.label,
+    tooltip: statusDisplay.tooltip,
+  };
 
   // 加载文件ID、状态和标签信息
   const fileStatusRef = useRef<string | null>(null);
@@ -3706,7 +3847,9 @@ const ExecutionDetailsPanel: React.FC<{
             {execution.total_cost ? `¥${execution.total_cost.toFixed(4)}` : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="Status">
-            <Tag color={statusItem.color as any}>{statusItem.text}</Tag>
+            <Tooltip title={statusItem.tooltip}>
+              <Tag color={statusItem.color as any}>{statusItem.text}</Tag>
+            </Tooltip>
           </Descriptions.Item>
           {(execution.llm_model || execution.llm_provider) && (
             <Descriptions.Item label="Analysis Model">
@@ -3802,18 +3945,18 @@ const ExecutionDetailsPanel: React.FC<{
             contentStyle={{ color: themeColors.text }}
           >
             <Descriptions.Item label="Sector">
-              <Space size={4} wrap>
-                <Tag color="blue" style={{ fontSize: 13 }}>{fileTags.sector}</Tag>
+              <Space size={[4, 4]} wrap>
+                <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.sector}</Tag>
                 {fileTags.sector_en && (
-                  <Tag color="default" style={{ fontSize: 12 }}>{fileTags.sector_en}</Tag>
+                  <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.sector_en}</Tag>
                 )}
               </Space>
             </Descriptions.Item>
             <Descriptions.Item label="Industry">
-              <Space size={4} wrap>
-                <Tag color="cyan" style={{ fontSize: 13 }}>{fileTags.industry}</Tag>
+              <Space size={[4, 4]} wrap>
+                <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.industry}</Tag>
                 {fileTags.industry_en && (
-                  <Tag color="default" style={{ fontSize: 12 }}>{fileTags.industry_en}</Tag>
+                  <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.industry_en}</Tag>
                 )}
               </Space>
             </Descriptions.Item>
@@ -3821,7 +3964,7 @@ const ExecutionDetailsPanel: React.FC<{
               <Descriptions.Item label="Stock Tickers">
                 <Space size={[4, 4]} wrap>
                   {fileTags.tickers.map((ticker: string) => (
-                    <Tag key={ticker} color="green" style={{ fontSize: 12 }}>
+                    <Tag key={ticker} style={PC_INFO_TAGS_TAG_STYLE}>
                       {ticker}
                     </Tag>
                   ))}
@@ -3832,7 +3975,7 @@ const ExecutionDetailsPanel: React.FC<{
               <Descriptions.Item label="Concepts">
                 <Space size={[4, 4]} wrap>
                   {fileTags.concepts.map((concept: string) => (
-                    <Tag key={concept} color="orange" style={{ fontSize: 12 }}>
+                    <Tag key={concept} style={PC_INFO_TAGS_TAG_STYLE}>
                       {concept}
                     </Tag>
                   ))}
@@ -3842,9 +3985,14 @@ const ExecutionDetailsPanel: React.FC<{
             {fileTags.confidence != null && (
               <Descriptions.Item label="Confidence">
                 <Space size={4}>
-                  <Tag 
+                  <Tag
                     color={fileTags.confidence > 0.8 ? 'success' : fileTags.confidence > 0.5 ? 'warning' : 'error'}
-                    icon={fileTags.confidence > 0.8 ? <CheckCircleOutlined /> : undefined}
+                    icon={
+                      fileTags.confidence > 0.8 ? (
+                        <CheckCircleOutlined style={{ fontSize: 10 }} />
+                      ) : undefined
+                    }
+                    style={PC_INFO_TAGS_TAG_STYLE}
                   >
                     {(fileTags.confidence * 100).toFixed(0)}%
                   </Tag>
@@ -3883,7 +4031,7 @@ const ExecutionDetailsPanel: React.FC<{
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 1000,
+            zIndex: 1100,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -4557,7 +4705,7 @@ const ContentMarkdownView: React.FC<{
 };
 
 // 原文内容查看组件（仅支持单文件，不再显示文件列表）
-const OriginalContentView: React.FC<{
+export const OriginalContentView: React.FC<{
   execution: TaskExecution;
   themeColors: any;
   isDark: boolean;
@@ -5430,49 +5578,78 @@ const AudioDiarizationView: React.FC<{
           style={{
             marginBottom: '12px',
             display: 'flex',
-            flexWrap: 'wrap',
-            gap: '8px',
-            alignItems: 'center',
-            fontSize: 10,
+            flexDirection: 'column',
+            gap: 10,
+            width: '100%',
           }}
         >
-          <Input
-            allowClear
-            prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
-            placeholder="Search transcript..."
-            value={transcriptSearch}
-            onChange={(e) => setTranscriptSearch(e.target.value)}
-            style={{ width: 140, fontSize: 10 }}
-          />
-          {normSearch ? (
-            <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
-              {ytFiltered.length} match{ytFiltered.length === 1 ? '' : 'es'}
-            </span>
-          ) : null}
-          <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap', marginLeft: 4 }}>Replace:</span>
-          <Input
-            placeholder="Find"
-            value={replaceFind}
-            onChange={(e) => setReplaceFind(e.target.value)}
-            style={{ width: 100, fontSize: 10 }}
-            allowClear
-          />
-          <Input
-            placeholder="Replace with"
-            value={replaceWith}
-            onChange={(e) => setReplaceWith(e.target.value)}
-            style={{ width: 100, fontSize: 10 }}
-            allowClear
-          />
-          <Button
-            type="default"
-            size="small"
-            onClick={handleReplaceAll}
-            loading={replacing}
-            style={{ fontSize: 10 }}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              alignItems: 'center',
+              width: '100%',
+            }}
           >
-            Replace all
-          </Button>
+            <Input
+              allowClear
+              prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
+              placeholder="Search transcript..."
+              value={transcriptSearch}
+              onChange={(e) => setTranscriptSearch(e.target.value)}
+              style={{ flex: '1 1 220px', minWidth: 200, maxWidth: '100%', fontSize: 10 }}
+            />
+            {normSearch ? (
+              <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                {ytFiltered.length} match{ytFiltered.length === 1 ? '' : 'es'}
+              </span>
+            ) : null}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              alignItems: 'center',
+              width: '100%',
+            }}
+          >
+            <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap' }}>Replace:</span>
+            <div
+              style={{
+                display: 'flex',
+                flex: '1 1 180px',
+                gap: 6,
+                minWidth: 0,
+                alignItems: 'center',
+              }}
+            >
+              <Input
+                placeholder="Find"
+                value={replaceFind}
+                onChange={(e) => setReplaceFind(e.target.value)}
+                style={{ flex: 1, minWidth: 72, fontSize: 10 }}
+                allowClear
+              />
+              <Input
+                placeholder="Replace with"
+                value={replaceWith}
+                onChange={(e) => setReplaceWith(e.target.value)}
+                style={{ flex: 1, minWidth: 72, fontSize: 10 }}
+                allowClear
+              />
+            </div>
+            <Button
+              type="default"
+              size="small"
+              onClick={handleReplaceAll}
+              loading={replacing}
+              style={{ fontSize: 10, flexShrink: 0 }}
+            >
+              Replace all
+            </Button>
+          </div>
         </div>
         
         {/* YouTube 转录内容 */}
@@ -5679,69 +5856,98 @@ const AudioDiarizationView: React.FC<{
         style={{
           marginBottom: '12px',
           display: 'flex',
-          flexWrap: 'wrap',
-          gap: '8px',
-          alignItems: 'center',
-          fontSize: 10,
+          flexDirection: 'column',
+          gap: 10,
+          width: '100%',
         }}
       >
-        <Input
-          allowClear
-          prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
-          placeholder="Search transcript..."
-          value={transcriptSearch}
-          onChange={(e) => setTranscriptSearch(e.target.value)}
-          style={{ width: 140, fontSize: 10 }}
-        />
-        {normSearch ? (
-          <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
-            {audioFiltered.length} match{audioFiltered.length === 1 ? '' : 'es'}
-          </span>
-        ) : null}
-        <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap', marginLeft: 4 }}>Replace:</span>
-        <Input
-          placeholder="Find"
-          value={replaceFind}
-          onChange={(e) => setReplaceFind(e.target.value)}
-          style={{ width: 100, fontSize: 10 }}
-          allowClear
-        />
-        <Input
-          placeholder="Replace with"
-          value={replaceWith}
-          onChange={(e) => setReplaceWith(e.target.value)}
-          style={{ width: 100, fontSize: 10 }}
-          allowClear
-        />
-        <Tooltip title="Replace all">
-          <Button
-            type="default"
-            size="small"
-            icon={<ReloadOutlined style={{ fontSize: 10 }} />}
-            onClick={handleReplaceAll}
-            loading={replacing}
-            style={{ fontSize: 10 }}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px',
+            alignItems: 'center',
+            width: '100%',
+          }}
+        >
+          <Input
+            allowClear
+            prefix={<SearchOutlined style={{ color: themeColors.textMuted, fontSize: 10 }} />}
+            placeholder="Search transcript..."
+            value={transcriptSearch}
+            onChange={(e) => setTranscriptSearch(e.target.value)}
+            style={{ flex: '1 1 220px', minWidth: 200, maxWidth: '100%', fontSize: 10 }}
           />
-        </Tooltip>
-        <Tooltip title="download transcript">
-          <Button
-            type="primary"
-            icon={<DownloadOutlined style={{ fontSize: 10 }} />}
-            onClick={handleDownloadDialogueTxt}
-            size="small"
-            style={{ fontSize: 10 }}
-          />
-        </Tooltip>
-        <Tooltip title="Play audio">
-          <Button
-            type="default"
-            icon={<SoundOutlined style={{ fontSize: 10 }} />}
-            onClick={handlePlayAudio}
-            size="small"
-            disabled={!fileContent.file_url}
-            style={{ fontSize: 10 }}
-          />
-        </Tooltip>
+          {normSearch ? (
+            <span style={{ fontSize: 10, color: themeColors.textSecondary }}>
+              {audioFiltered.length} match{audioFiltered.length === 1 ? '' : 'es'}
+            </span>
+          ) : null}
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px',
+            alignItems: 'center',
+            width: '100%',
+          }}
+        >
+          <span style={{ fontSize: 10, color: themeColors.textSecondary, whiteSpace: 'nowrap' }}>Replace:</span>
+          <div
+            style={{
+              display: 'flex',
+              flex: '1 1 180px',
+              gap: 6,
+              minWidth: 0,
+              alignItems: 'center',
+            }}
+          >
+            <Input
+              placeholder="Find"
+              value={replaceFind}
+              onChange={(e) => setReplaceFind(e.target.value)}
+              style={{ flex: 1, minWidth: 72, fontSize: 10 }}
+              allowClear
+            />
+            <Input
+              placeholder="Replace with"
+              value={replaceWith}
+              onChange={(e) => setReplaceWith(e.target.value)}
+              style={{ flex: 1, minWidth: 72, fontSize: 10 }}
+              allowClear
+            />
+          </div>
+          <Tooltip title="Replace all">
+            <Button
+              type="default"
+              size="small"
+              icon={<ReloadOutlined style={{ fontSize: 10 }} />}
+              onClick={handleReplaceAll}
+              loading={replacing}
+              style={{ fontSize: 10, flexShrink: 0 }}
+            />
+          </Tooltip>
+          <Tooltip title="download transcript">
+            <Button
+              type="primary"
+              icon={<DownloadOutlined style={{ fontSize: 10 }} />}
+              onClick={handleDownloadDialogueTxt}
+              size="small"
+              style={{ fontSize: 10, flexShrink: 0 }}
+            />
+          </Tooltip>
+          <Tooltip title="Play audio">
+            <Button
+              type="default"
+              icon={<SoundOutlined style={{ fontSize: 10 }} />}
+              onClick={handlePlayAudio}
+              size="small"
+              disabled={!fileContent.file_url}
+              style={{ fontSize: 10, flexShrink: 0 }}
+            />
+          </Tooltip>
+        </div>
       </div>
       
       {/* 时间轴 */}
@@ -5945,7 +6151,7 @@ const AudioDiarizationView: React.FC<{
 };
 
 // AI Analysis 查看组件
-const AIAnalysisView: React.FC<{
+export const AIAnalysisView: React.FC<{
   execution: TaskExecution;
   themeColors: any;
   isDark: boolean;
@@ -5960,7 +6166,25 @@ const AIAnalysisView: React.FC<{
   audioAnalyzing?: boolean;
   docAnalyzing?: boolean;
   audioTemplateId?: number;
-}> = ({ execution, themeColors, isDark, aiAnalysisData, aiAnalysisLoading, onLoadAnalysis, onDownloadPdf, pdfDownloading, onAnalyzeAudio, onAnalyzeDocument, onAnalysisSaved, audioAnalyzing, docAnalyzing, audioTemplateId }) => {
+  /** 手机端：除含「Re-analyze」文案的按钮外，其余仅显示图标（配 Tooltip） */
+  mobileCompactActions?: boolean;
+}> = ({
+  execution,
+  themeColors,
+  isDark,
+  aiAnalysisData,
+  aiAnalysisLoading,
+  onLoadAnalysis,
+  onDownloadPdf,
+  pdfDownloading,
+  onAnalyzeAudio,
+  onAnalyzeDocument,
+  onAnalysisSaved,
+  audioAnalyzing,
+  docAnalyzing,
+  audioTemplateId,
+  mobileCompactActions = false,
+}) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
   const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
   const [audioTemplateVars, setAudioTemplateVars] = useState<Record<string, any>>({});
@@ -6055,22 +6279,24 @@ const AIAnalysisView: React.FC<{
 
   if (!aiAnalysisData?.execution?.final_report) {
     const isAudioFile = execution.first_file_type === 'audio';
-    const canAnalyzeAudio = isAudioFile && onAnalyzeAudio && 
-      (execution.rc_agent_status === 'completed' || execution.rc_agent_status === 'failed');
+    const canAnalyzeAudio =
+      isAudioFile &&
+      onAnalyzeAudio &&
+      (normalizeRcAgentStatusForAnalyze(execution.rc_agent_status) === 'completed' ||
+        execution.rc_agent_status === 'failed');
     // 文档分析：需要区分"仅上传"和"正在处理"
     // 1. 如果first_task_id为null且rc_agent_status为uploaded，说明仅上传未处理，允许分析
     // 2. 如果rc_agent_status为failed，允许重新分析
-    // 3. skipped/completed 表示已处理但未做AI或无报告，也应显示模板与可选参数
+    // 3. completed（含旧 skipped）表示已处理但未做AI或无报告，也应显示模板与可选参数
     // 4. 如果有task_id或状态为processing/initializing等，说明正在处理，禁止重复分析
     const isProcessingDoc = execution.rc_agent_status === 'processing' || 
                             execution.rc_agent_status === 'initializing' ||
                             (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
-    // Document 与 YouTube 均使用 analyze_document
+    const rcDoc = normalizeRcAgentStatusForAnalyze(execution.rc_agent_status);
     const canAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && (
-      execution.rc_agent_status === 'uploaded' ||
-      execution.rc_agent_status === 'failed' ||
-      execution.rc_agent_status === 'skipped' ||
-      execution.rc_agent_status === 'completed'
+      rcDoc === 'uploaded' ||
+      rcDoc === 'failed' ||
+      rcDoc === 'completed'
     );
 
     return (
@@ -6102,9 +6328,10 @@ const AIAnalysisView: React.FC<{
                 onClick={() => onAnalyzeAudio(execution, audioTemplateVars)}
                 style={{
                   height: '40px',
-                  paddingInline: '24px',
+                  paddingInline: mobileCompactActions ? '16px' : '24px',
                   fontSize: '14px',
                   borderRadius: '8px',
+                  maxWidth: '100%',
                 }}
               >
                 Analyze Audio
@@ -6141,9 +6368,10 @@ const AIAnalysisView: React.FC<{
                   onClick={() => selectedTemplateId != null && onAnalyzeDocument(execution, selectedTemplateId, templateVariables)}
                   style={{
                     height: '40px',
-                    paddingInline: '24px',
+                    paddingInline: mobileCompactActions ? '16px' : '24px',
                     fontSize: '14px',
                     borderRadius: '8px',
+                    maxWidth: '100%',
                   }}
                 >
                   Analyze Document
@@ -6172,45 +6400,90 @@ const AIAnalysisView: React.FC<{
         backgroundColor: themeColors.boxMuted,
         borderRadius: '6px'
       }}>
-        <Row gutter={16} align="middle">
-          <Col span={12}>
-            <Text strong>Analysis Time:</Text> {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
-          </Col>
-          <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-            {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
-              <Button
-                type="default"
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => setReAnalyzeModalVisible(true)}
-              >
-                Re-analyze
-              </Button>
-            )}
-            {!isEditing && (
-              <Button
-                type="primary"
-                ghost
-                size="small"
-                icon={<EditOutlined />}
-                onClick={handleStartEdit}
-              >
-                Edit
-              </Button>
-            )}
-            {onDownloadPdf && !isEditing && (
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={onDownloadPdf}
-                loading={pdfDownloading}
-                size="small"
-                className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
-              >
-                Export
-              </Button>
-            )}
-          </Col>
-        </Row>
+        {mobileCompactActions ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div
+              style={{
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: themeColors.text,
+                wordBreak: 'break-word',
+              }}
+            >
+              Analysis Time: {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+              {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReAnalyzeModalVisible(true)}
+                >
+                  Re-analyze
+                </Button>
+              )}
+              {!isEditing && (
+                <Tooltip title="Edit">
+                  <Button
+                    type="primary"
+                    ghost
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={handleStartEdit}
+                    aria-label="Edit"
+                  />
+                </Tooltip>
+              )}
+              {onDownloadPdf && !isEditing && (
+                <Tooltip title="Export PDF">
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={onDownloadPdf}
+                    loading={pdfDownloading}
+                    size="small"
+                    className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                    aria-label="Export PDF"
+                  />
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        ) : (
+          <Row gutter={16} align="middle">
+            <Col span={12}>
+              <Text strong>Analysis Time:</Text> {new Date(aiAnalysisData.execution.created_at).toLocaleString()}
+            </Col>
+            <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+              {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReAnalyzeModalVisible(true)}
+                >
+                  Re-analyze
+                </Button>
+              )}
+              {!isEditing && (
+                <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
+                  Edit
+                </Button>
+              )}
+              {onDownloadPdf && !isEditing && (
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={onDownloadPdf}
+                  loading={pdfDownloading}
+                  size="small"
+                  className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                >
+                  Export
+                </Button>
+              )}
+            </Col>
+          </Row>
+        )}
       </div>
 
       {reAnalyzeModalVisible && (
@@ -6218,7 +6491,7 @@ const AIAnalysisView: React.FC<{
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 1000,
+            zIndex: 1100,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -6368,12 +6641,33 @@ const AIAnalysisView: React.FC<{
             className={isDark ? 'files-content-textarea-dark' : ''}
           />
           <Space style={{ marginTop: 12 }}>
-            <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
-              Save
-            </Button>
-            <Button onClick={handleCancelEdit} disabled={saving}>
-              Cancel
-            </Button>
+            {mobileCompactActions ? (
+              <>
+                <Tooltip title="Save">
+                  <Button
+                    type="primary"
+                    onClick={handleSave}
+                    loading={saving}
+                    icon={<CheckOutlined />}
+                    aria-label="Save"
+                  />
+                </Tooltip>
+                <Tooltip title="Cancel">
+                  <span>
+                    <Button onClick={handleCancelEdit} disabled={saving} icon={<CloseOutlined />} aria-label="Cancel" />
+                  </span>
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
+                  Save
+                </Button>
+                <Button onClick={handleCancelEdit} disabled={saving}>
+                  Cancel
+                </Button>
+              </>
+            )}
           </Space>
         </div>
       ) : (

@@ -7,6 +7,7 @@ import json
 import os
 import time
 from typing import Dict, Any, Optional, Callable
+from psycopg2.extras import Json
 from backend.services.local_llm_analysis_service import LocalLLMAnalysisService
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -249,28 +250,8 @@ class ContentTaggingService:
             if not row:
                 return None
             
-            # 解析ticker JSON
-            tickers = []
-            if row[5]:
-                try:
-                    tickers = json.loads(row[5])
-                except:
-                    tickers = [row[5]]  # 如果解析失败，作为单个ticker
-            
-            # 解析concepts JSON
-            concepts = []
-            if row[6]:
-                try:
-                    if isinstance(row[6], list):
-                        concepts = row[6]
-                    elif isinstance(row[6], str):
-                        concepts = json.loads(row[6])
-                    else:
-                        concepts = row[6]
-                except:
-                    concepts = []
-            
-            # 解析additional_tags
+            tickers = row[5] if isinstance(row[5], list) else (row[5] or [])
+            concepts = row[6] if isinstance(row[6], list) else (row[6] or [])
             additional_tags = row[7] if row[7] else {}
             
             return {
@@ -327,10 +308,7 @@ class ContentTaggingService:
             confidence = tag_data.get('confidence')
             reasoning = tag_data.get('reasoning')
             
-            # 将tickers转换为JSON字符串
-            ticker_str = json.dumps(tickers) if tickers else None
-            
-            # 将concepts转换为JSON字符串
+            ticker_jsonb = Json(tickers) if tickers else None
             concepts_json = json.dumps(concepts, ensure_ascii=False) if concepts else '[]'
             
             # 构建additional_tags（包含完整的tickers和AI元数据）
@@ -375,7 +353,7 @@ class ContentTaggingService:
                 sector_en,
                 industry,
                 industry_en,
-                ticker_str,
+                ticker_jsonb,
                 concepts_json,
                 json.dumps(additional_tags),
                 confidence,
@@ -445,11 +423,9 @@ class ContentTaggingService:
             
             if 'tickers' in updates:
                 tickers = updates['tickers']
-                ticker_str = json.dumps(tickers) if tickers else None
                 update_fields.append("ticker = %s")
-                params.append(ticker_str)
+                params.append(Json(tickers) if tickers else None)
                 
-                # 同时更新additional_tags中的tickers_full
                 update_fields.append("additional_tags = jsonb_set(additional_tags, '{tickers_full}', %s::jsonb)")
                 params.append(json.dumps(tickers))
             

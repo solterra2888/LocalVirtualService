@@ -443,6 +443,19 @@
   min-height: 32px !important;
 }
 
+/* Upload & Process Files 暗色：Quick / LlamaParse Segmented 选中块与文字再加强一层 */
+.upload-files-modal--dark .ant-segmented .ant-segmented-thumb {
+  background: rgba(33, 150, 243, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(130, 200, 255, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.upload-files-modal--dark .ant-segmented .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #f0f8ff !important;
+  font-weight: 600;
+}
+
 /* 文件卡片列表样式 */
 .file-card-list::-webkit-scrollbar {
   width: 8px;
@@ -617,7 +630,7 @@
 }
 
 .files-page-layout .files-list-type-tab {
-  padding: 2px 6px;
+  padding: 4px 7px;
   font-size: 10px;
   font-weight: 500;
   color: var(--files-panel-meta, rgba(0, 0, 0, 0.5));
@@ -625,7 +638,23 @@
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.files-page-layout .files-list-type-tab .files-list-type-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: inherit;
+}
+
+.files-page-layout .files-list-type-tab .files-list-type-tab-icon .anticon {
+  color: inherit;
 }
 
 .files-page-layout .files-list-type-tab:hover {
@@ -654,36 +683,140 @@
   border-color: rgba(255, 255, 255, 0.06);
 }
 
+/* Sources 筛选：与手机端 MobileSources 同一套 Compact + Segmented + 输入/AutoComplete 外观 */
 .files-page-layout .files-list-search-bar {
-  display: flex;
-  gap: 6px;
   padding: 6px 10px 8px;
   border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
   background: var(--files-panel-bg, #fff);
+}
+
+.files-page-layout .files-list-search-compact {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.files-page-layout .files-list-search-compact.ant-space-compact {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--files-sources-search-border, var(--files-panel-border, #e5e7eb));
+  background: var(--files-sources-search-bg, var(--files-panel-bg, #fff));
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.files-page-layout .files-list-search-compact.ant-space-compact:focus-within {
+  border-color: var(--ant-color-primary, #1677ff);
+  box-shadow: 0 0 0 2px var(--ant-control-outline, rgba(5, 145, 255, 0.1));
+}
+
+.files-page-layout .files-list-search-segmented.ant-segmented {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+}
+
+.files-page-layout .files-list-search-segmented.ant-segmented .ant-segmented-group {
+  min-height: 100%;
+  align-items: stretch;
+  padding: 0;
+}
+
+.files-page-layout .files-list-search-segmented.ant-segmented .ant-segmented-item {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  min-height: 100%;
 }
 
-.files-page-layout .files-list-search-type {
-  width: 100px;
-  font-size: 11px;
-}
-
-.files-page-layout .files-list-search-type .ant-select-selector {
-  font-size: 11px !important;
-}
-
-.files-list-search-type-dropdown.ant-select-dropdown .ant-select-item {
-  font-size: 11px;
+.files-page-layout .files-list-search-segmented.ant-segmented .ant-segmented-thumb {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+  margin-block: 0 !important;
 }
 
 .files-page-layout .files-list-search-input {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
 }
 
-.files-page-layout .files-list-search-input .ant-input {
+.files-page-layout .files-list-search-compact .files-list-search-segmented.ant-segmented {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-segmented.ant-segmented .ant-segmented-group {
+  border-radius: 0;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper {
+  border-radius: 0;
+  border: 0;
+  border-left: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06)));
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper .ant-input {
+  font-size: 12px;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper .ant-input-prefix .anticon {
+  font-size: 12px;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper:focus,
+.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper-focused {
+  box-shadow: none;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-segmented-three.ant-segmented .ant-segmented-item {
+  padding: 0 6px;
   font-size: 11px;
+  min-width: 0;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-segmented-three.ant-segmented .ant-segmented-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 72px;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete {
+  flex: 1;
+  min-width: 0;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selector {
+  border-radius: 0 !important;
+  border: 0 !important;
+  border-left: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06))) !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  min-height: 24px !important;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-search-input,
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-placeholder {
+  font-size: 12px !important;
+}
+
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete.ant-select-focused .ant-select-selector,
+.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selector:focus {
+  box-shadow: none !important;
+}
+
+/* Ticker 模糊搜索下拉（挂到 body，需独立类名） */
+.files-list-ticker-autocomplete-popup.ant-select-dropdown .ant-select-item,
+.files-list-ticker-autocomplete-popup.ant-select-dropdown .ant-select-item-option-content {
+  font-size: 11px !important;
+  line-height: 1.35;
 }
 
 .app-dark .files-page-layout .files-list-search-bar {
@@ -867,7 +1000,51 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: flex-start;
+}
+
+/* 与移动端 Sources 一致：类型图标 + 纯文案状态（非 Tag） */
+.files-page-layout .files-list-item-type-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.files-page-layout .files-list-item-file-type-icon {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.files-page-layout .files-list-item-file-type-icon .anticon {
+  display: block;
+}
+
+.files-page-layout .files-list-item-status-text {
+  font-size: 11px;
+  line-height: 1.45;
+  flex: 1;
+  min-width: 0;
+  display: block;
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+  cursor: default;
+}
+
+/* Ticker 行：与移动端 Sources / Watchlist 卡片一致 */
+.files-page-layout .files-list-item-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .files-page-layout .files-list-item-tags .ant-tag {

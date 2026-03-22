@@ -121,7 +121,7 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
     },
     {
       key: 'reports',
-      label: 'Research Reports',
+      label: 'Sources',
       children: (
         <div className="mobile-tab-content">
           {loading ? (
@@ -130,7 +130,7 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
             </div>
           ) : researchReports.length === 0 ? (
             <div className="mobile-loading">
-              <Text type="secondary">No research reports available</Text>
+              <Text type="secondary">No Data available</Text>
             </div>
           ) : (
             <MobileResearchReports reports={researchReports} />

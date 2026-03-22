@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { MenuProps } from 'antd';
-import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Badge, Switch, Modal, Popover, Input, message } from 'antd';
+import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Badge, Switch, Modal, Popover, message } from 'antd';
 import {
   FileTextOutlined,
   AppstoreOutlined,
-  UserOutlined,
   LogoutOutlined,
   TeamOutlined,
   CodeOutlined,
@@ -27,7 +26,6 @@ import {
   MoonOutlined,
   ReadOutlined,
   EditOutlined,
-  CameraOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -36,12 +34,13 @@ import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 import { LogViewer } from '../components/LogViewer';
-import { usersApi } from '../services/users';
+import UserProfileModal from './UserProfileModal';
 import TimeDisplay from './TimeDisplay';
 import UploadFilesModal from './UploadFilesModal';
 import UploadAudioModal from './UploadAudioModal';
 import UploadYouTubeLinkModal from './UploadYouTubeLinkModal';
 import { TaskProgressPopover } from './TaskProgressPopover';
+import { userAvatarLetter, USER_AVATAR_LETTER_BG } from '../utils/userAvatar';
 
 // 导航栏主题（与 Dashboard dark 蓝灰一致）
 const LAYOUT_NAV_THEME = {
@@ -71,7 +70,7 @@ const { Title } = Typography;
 const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, updateUser } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const globalLogger = useGlobalLogger();
   const { themeMode, setThemeMode } = useDashboardSettings();
   const { tasks } = useFileProcessing();
@@ -84,85 +83,8 @@ const Layout: React.FC = () => {
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
 
-  // Profile edit modal
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [profileUsername, setProfileUsername] = useState('');
-  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | undefined>();
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  const openProfileModal = () => {
-    setProfileUsername(user?.username || '');
-    setProfileAvatarUrl(user?.avatar_url);
-    setNewPassword('');
-    setConfirmPassword('');
-    setProfileModalOpen(true);
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowed.includes(file.type)) {
-      message.error('Only JPG, PNG, GIF, WEBP allowed');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      message.error('Avatar must be under 5MB');
-      return;
-    }
-    setAvatarUploading(true);
-    try {
-      const result = await usersApi.uploadAvatar(file);
-      setProfileAvatarUrl(result.avatar_url);
-      updateUser({ avatar_url: result.avatar_url });
-      message.success('Avatar uploaded');
-    } catch {
-      message.error('Avatar upload failed');
-    } finally {
-      setAvatarUploading(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = '';
-    }
-  };
-
-  const handleProfileSave = async () => {
-    if (!profileUsername.trim()) {
-      message.error('Username cannot be empty');
-      return;
-    }
-    if (newPassword || confirmPassword) {
-      if (newPassword.length < 6) {
-        message.error('Password must be at least 6 characters');
-        return;
-      }
-      if (newPassword !== confirmPassword) {
-        message.error('Passwords do not match');
-        return;
-      }
-    }
-    setProfileSaving(true);
-    try {
-      const updated = await usersApi.updateMyProfile({
-        username: profileUsername.trim(),
-        avatar_url: profileAvatarUrl,
-      });
-      updateUser({ username: updated.username, avatar_url: updated.avatar_url });
-
-      if (newPassword && user?.id) {
-        await usersApi.changePassword(user.id, newPassword);
-      }
-
-      message.success(newPassword ? 'Profile and password updated' : 'Profile updated');
-      setProfileModalOpen(false);
-    } catch {
-      message.error('Failed to update profile');
-    } finally {
-      setProfileSaving(false);
-    }
-  };
+  const openProfileModal = () => setProfileModalOpen(true);
 
   // 快捷键支持：Ctrl + ` 切换日志窗口
   useEffect(() => {
@@ -383,7 +305,7 @@ const Layout: React.FC = () => {
                 <span style={{ 
                   fontSize: 13, 
                   fontWeight: 500,
-                  color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.85)' 
+                  color: '#1890ff',
                 }}>
                   {tasks.size} {tasks.size === 1 ? 'task' : 'tasks'}
                 </span>
@@ -428,7 +350,11 @@ const Layout: React.FC = () => {
               icon={
                 user?.avatar_url
                   ? <Avatar size="small" src={user.avatar_url} />
-                  : <Avatar size="small" icon={<UserOutlined />} />
+                  : (
+                    <Avatar size="small" style={{ backgroundColor: USER_AVATAR_LETTER_BG, fontSize: 12 }}>
+                      {userAvatarLetter(user?.username)}
+                    </Avatar>
+                  )
               }
               style={{ display: 'flex', alignItems: 'center', color: navTheme.headerText }}
             />
@@ -626,87 +552,11 @@ const Layout: React.FC = () => {
         themeMode={themeMode}
       />
       
-      {/* Edit Profile Modal */}
-      <Modal
-        title="Edit Profile"
+      <UserProfileModal
         open={profileModalOpen}
-        onCancel={() => setProfileModalOpen(false)}
-        onOk={handleProfileSave}
-        okText="Save"
-        confirmLoading={profileSaving}
-        width={400}
-        centered
-        styles={getModalStyles(themeMode)}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: '16px 0' }}>
-          <div
-            style={{ position: 'relative', cursor: 'pointer' }}
-            onClick={() => avatarInputRef.current?.click()}
-          >
-            {profileAvatarUrl ? (
-              <Avatar size={80} src={profileAvatarUrl} />
-            ) : (
-              <Avatar size={80} icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />
-            )}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                right: 0,
-                background: themeMode === 'dark' ? '#364152' : '#fff',
-                borderRadius: '50%',
-                width: 28,
-                height: 28,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-                border: `2px solid ${themeMode === 'dark' ? '#1a2234' : '#fff'}`,
-              }}
-            >
-              {avatarUploading ? <SyncOutlined spin style={{ fontSize: 14, color: '#1890ff' }} /> : <CameraOutlined style={{ fontSize: 14, color: themeMode === 'dark' ? '#e0e6f1' : '#666' }} />}
-            </div>
-            <input
-              ref={avatarInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/gif,image/webp"
-              style={{ display: 'none' }}
-              onChange={handleAvatarUpload}
-            />
-          </div>
-          <div style={{ width: '100%' }}>
-            <div style={{ marginBottom: 8, fontWeight: 500, color: themeMode === 'dark' ? '#e0e6f1' : undefined }}>Username</div>
-            <Input
-              value={profileUsername}
-              onChange={e => setProfileUsername(e.target.value)}
-              maxLength={50}
-              style={themeMode === 'dark' ? { background: '#212936', borderColor: '#364152', color: '#e0e6f1' } : undefined}
-            />
-          </div>
-          <div style={{ width: '100%', borderTop: `1px solid ${themeMode === 'dark' ? '#364152' : '#f0f0f0'}`, paddingTop: 16 }}>
-            <div style={{ marginBottom: 12, fontWeight: 500, fontSize: 13, color: themeMode === 'dark' ? '#94a3b8' : '#999' }}>Change Password (optional)</div>
-            <div style={{ marginBottom: 8, fontWeight: 500, color: themeMode === 'dark' ? '#e0e6f1' : undefined }}>New Password</div>
-            <Input.Password
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              placeholder="Leave empty to keep current"
-              style={themeMode === 'dark' ? { background: '#212936', borderColor: '#364152', color: '#e0e6f1' } : undefined}
-            />
-            {newPassword && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ marginBottom: 8, fontWeight: 500, color: themeMode === 'dark' ? '#e0e6f1' : undefined }}>Confirm Password</div>
-                <Input.Password
-                  value={confirmPassword}
-                  onChange={e => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter new password"
-                  status={confirmPassword && confirmPassword !== newPassword ? 'error' : undefined}
-                  style={themeMode === 'dark' ? { background: '#212936', borderColor: confirmPassword && confirmPassword !== newPassword ? undefined : '#364152', color: '#e0e6f1' } : undefined}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
+        onClose={() => setProfileModalOpen(false)}
+        themeMode={themeMode}
+      />
 
       {/* 全局日志查看器 */}
       <LogViewer

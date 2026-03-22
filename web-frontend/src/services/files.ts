@@ -44,6 +44,10 @@ export interface TaskStatusResponse {
     message: string;
   }>;
   result?: any;
+  /** YouTube：无官方字幕，已切换 Fun-ASR（前端可弹窗提示用户等待） */
+  asr_fallback_notice?: boolean;
+  /** 音频上传：已提交 Fun-ASR，等待结果（前端可弹窗提示耐心等待） */
+  asr_wait_notice?: boolean;
 }
 
 export interface FileDetail {

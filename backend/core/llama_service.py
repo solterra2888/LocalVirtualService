@@ -17,6 +17,7 @@ from pathlib import Path
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
 from backend.utils.logger import get_logger
+from backend.utils.processing_timeout import get_file_processing_timeout_seconds
 
 
 LLAMA_REGION_URLS = {
@@ -261,12 +262,13 @@ class LlamaService:
                     )
                     
                     # 使用session进行请求，设置超时
+                    _read_timeout = max(get_file_processing_timeout_seconds(), 60)
                     response = self.session.post(
                         url, 
                         headers=headers, 
                         files=files, 
                         data=params,
-                        timeout=(30, 300)  # 连接超时30秒，读取超时300秒
+                        timeout=(30, _read_timeout)  # 读取超时不超过 FILE_PROCESSING_TIMEOUT
                     )
                     
                     # 检查响应状态
@@ -368,16 +370,21 @@ class LlamaService:
         
         return None, None, "上传文件失败（已重试所有尝试）"
     
-    async def poll_job_status(self, job_id):
+    async def poll_job_status(self, job_id, max_wait_seconds=None):
         """
         轮询LlamaIndex API获取任务状态
         
         Args:
             job_id (str): 要检查的任务ID
+            max_wait_seconds: 整段轮询最长等待（秒），默认 FILE_PROCESSING_TIMEOUT_MINUTES
             
         Returns:
             tuple: (response_data, poll_count) 包含状态的响应数据和轮询次数，失败时返回 (None, 0)
         """
+        if max_wait_seconds is None:
+            max_wait_seconds = get_file_processing_timeout_seconds()
+        deadline = time.monotonic() + max_wait_seconds
+
         url = f'{self.base_url}/api/parsing/job/{job_id}'
         headers = {
             'accept': 'application/json',
@@ -389,6 +396,12 @@ class LlamaService:
         max_consecutive_failures = 5
         
         while True:
+            if time.monotonic() >= deadline:
+                msg = f"LlamaParse 任务等待超时（{max_wait_seconds} 秒）"
+                print(f"❌ job {job_id} polling exceeded max wait")
+                self.log(msg, "error")
+                return {'status': 'TIMEOUT', 'error': msg}, poll_count
+
             poll_count += 1
             try:
                 response = self.session.get(
