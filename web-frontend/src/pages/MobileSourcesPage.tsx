@@ -619,13 +619,19 @@ const MobileSourcesInner: React.FC = () => {
                   key: 'share',
                   icon: <ShareAltOutlined />,
                   label: 'Share',
-                  onClick: () => handleOpenShareModal(execution),
+                  onClick: e => {
+                    e.domEvent.stopPropagation();
+                    handleOpenShareModal(execution);
+                  },
                 },
                 {
                   key: 'rename',
                   icon: <EditOutlined />,
                   label: 'Rename',
-                  onClick: () => handleOpenRename(execution),
+                  onClick: e => {
+                    e.domEvent.stopPropagation();
+                    handleOpenRename(execution);
+                  },
                 },
                 ...(!isSharedFile
                   ? [
@@ -634,7 +640,10 @@ const MobileSourcesInner: React.FC = () => {
                         icon: <DeleteOutlined />,
                         label: 'Delete',
                         danger: true,
-                        onClick: () => handleDeleteExecution(execution),
+                        onClick: (e: { domEvent: { stopPropagation: () => void } }) => {
+                          e.domEvent.stopPropagation();
+                          handleDeleteExecution(execution);
+                        },
                       },
                     ]
                   : []),
@@ -890,6 +899,7 @@ const MobileSourcesInner: React.FC = () => {
         onCancel={() => setShareModalVisible(false)}
         onOk={handleConfirmShare}
         okText="Share"
+        cancelText="cancel"
         confirmLoading={sharingInProgress}
         okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
         width={400}
@@ -948,6 +958,7 @@ const MobileSourcesInner: React.FC = () => {
         onOk={handleConfirmRename}
         confirmLoading={renameLoading}
         okText="Save"
+        cancelText="cancel"
         centered
         styles={getModalStyles(themeMode)}
       >

@@ -3305,7 +3305,7 @@ const FilesPageInner: React.FC = () => {
             setRenameInputValue('');
           }}
           okText="Save"
-          cancelText="Cancel"
+          cancelText="cancel"
           confirmLoading={renameLoading}
           centered
           destroyOnClose
@@ -3432,6 +3432,7 @@ const FilesPageInner: React.FC = () => {
           onCancel={() => setShareModalVisible(false)}
           onOk={handleConfirmShare}
           okText="Share"
+          cancelText="cancel"
           confirmLoading={sharingInProgress}
           okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
           width={520}
@@ -4876,11 +4877,8 @@ export const OriginalContentView: React.FC<{
               </div>
             );
           } else {
-            // 桌面端：普通 iframe 即可。移动端 WebKit（尤其 iOS）在嵌套 flex 里对 height:100% 的 iframe 常算不出高度，
-            // 只显示缩略图标 +「Open」；用绝对定位填满 + 明确 min-height，并提供新窗口打开走系统全屏预览。
-            const openPdfFullscreen = () => {
-              window.open(fileContent.file_url, '_blank', 'noopener,noreferrer');
-            };
+            // 内嵌 PDF：iframe + 绝对定位填满。移动端 WebKit 在嵌套 flex 里对 height:100% 常算不出高度，
+            // 需明确 min-height；手机端详情页用 CSS 类 `.original-pdf-frame-host` 绑定 100dvh 余量，与 PC 一致直接预览、无额外按钮。
             return (
               <div
                 style={{
@@ -4888,21 +4886,14 @@ export const OriginalContentView: React.FC<{
                   minHeight: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: isMobile ? 8 : 0,
                 }}
               >
-                {isMobile && (
-                  <div style={{ padding: '0 8px', flexShrink: 0 }}>
-                    <Button type="primary" icon={<LinkOutlined />} block onClick={openPdfFullscreen}>
-                      Open PDF (full screen)
-                    </Button>
-                  </div>
-                )}
                 <div
+                  className={isMobile ? 'original-pdf-frame-host' : undefined}
                   style={{
                     position: 'relative',
                     flex: 1,
-                    minHeight: isMobile ? 'min(78dvh, 900px)' : 0,
+                    minHeight: isMobile ? undefined : 0,
                     border: `1px solid ${themeColors.cardBorder}`,
                     borderRadius: '8px',
                     overflow: 'hidden',

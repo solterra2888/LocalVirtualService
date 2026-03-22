@@ -451,6 +451,11 @@
   flex-direction: column;
 }
 
+/* Original 内嵌 PDF：给 iframe 父级明确视口高度，避免 iOS/Android WebKit 只显示插件占位图 */
+.mobile-source-file-detail-pane--original .original-pdf-frame-host {
+  min-height: calc(100dvh - 140px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+}
+
 .mobile-source-file-detail-pane--info .ant-descriptions-item-label {
   width: 42% !important;
   max-width: 120px;
