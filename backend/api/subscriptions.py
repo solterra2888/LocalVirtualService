@@ -282,7 +282,10 @@ async def create_subscription(
         
         # 🔥 如果是 YouTube 订阅，先验证频道是否存在
         elif request.channel_type == 'youtube':
-            from backend.services.youtube_subscription_service import YouTubeSubscriptionService
+            from backend.services.youtube_subscription_service import (
+                YouTubeSubscriptionService,
+                normalize_youtube_channel_id,
+            )
             
             # 去除 @ 前缀
             clean_identifier = request.channel_identifier.lstrip('@')
@@ -316,7 +319,9 @@ async def create_subscription(
             # ⚠️ 重要：使用 channel_id 作为 channel_identifier（保持与 author_identifier 一致）
             channel_id = validation_result.get('channel_id')
             if channel_id:
-                request.channel_identifier = channel_id  # 使用 channel_id 而不是用户名
+                request.channel_identifier = (
+                    normalize_youtube_channel_id(channel_id) or channel_id
+                )  # 使用 channel_id 而不是用户名（补全可能被 RSS 截断的 UC 前缀）
                 if not request.metadata:
                     request.metadata = {}
                 request.metadata['original_username'] = clean_identifier  # 保存原始用户名

@@ -49,6 +49,13 @@ export function showFeedListSecondaryExcerpt(c: SubscriptionContent): boolean {
   return Boolean((c.content || '').trim());
 }
 
+/**
+ * Twitter 多数无 title，列表主行实为推文正文 — 应用正文排版，勿用标题字重/字号。
+ */
+export function feedListPrimaryLineIsTweetBody(c: SubscriptionContent): boolean {
+  return c.channel_type === 'twitter' && !(c.title || '').trim();
+}
+
 /** Heat level badge config for subscription content */
 export function getHeatLevelConfig(heatLevel?: number) {
   switch (heatLevel) {

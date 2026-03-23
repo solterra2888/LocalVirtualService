@@ -3,14 +3,13 @@
  * 参考 Feeder.co 的设计
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Layout,
   List,
   Avatar,
   Button,
   Space,
-  Tag,
   Modal,
   Form,
   Input,
@@ -35,6 +34,8 @@ import {
   DeleteOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -52,8 +53,14 @@ import {
   getHeatLevelConfig,
   playNewItemsNotificationSound,
   showFeedListSecondaryExcerpt,
+  feedListPrimaryLineIsTweetBody,
 } from '../components/feed/feedUtils';
-import { getChannelIcon } from '../components/feed/feedChannelConfig';
+import {
+  getChannelIcon,
+  FEED_CHANNEL_TYPE_FILTER_TABS,
+  matchesFeedChannelTypeFilter,
+  type FeedChannelTypeFilterKey,
+} from '../components/feed/feedChannelConfig';
 import FeedArticleBody from '../components/feed/FeedArticleBody';
 import FeedSourceIconPicker from '../components/feed/FeedSourceIconPicker';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
@@ -64,6 +71,7 @@ const { Sider, Content } = Layout;
 const { Text } = Typography;
 
 const FeedReaderPageInner: React.FC = () => {
+  const { modal } = App.useApp();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
@@ -91,7 +99,36 @@ const FeedReaderPageInner: React.FC = () => {
   
   // 🔍 过滤器：Active / Disabled
   const [subscriptionFilter, setSubscriptionFilter] = useState<'active' | 'disabled'>('active');
-  
+  const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
+
+  const statusFilteredSubscriptions = useMemo(
+    () =>
+      subscriptions.filter((sub) =>
+        subscriptionFilter === 'active' ? sub.enabled : !sub.enabled
+      ),
+    [subscriptions, subscriptionFilter]
+  );
+
+  const visibleSubscriptions = useMemo(
+    () =>
+      statusFilteredSubscriptions.filter((sub) =>
+        matchesFeedChannelTypeFilter(sub.channel_type, feedChannelTypeFilter)
+      ),
+    [statusFilteredSubscriptions, feedChannelTypeFilter]
+  );
+
+  /** 切换 Active/Disabled 或频道类型时，若当前选中不在列表内则改选第一项 */
+  useEffect(() => {
+    if (visibleSubscriptions.length === 0) {
+      setSelectedSubscription(null);
+      return;
+    }
+    setSelectedSubscription((prev) => {
+      if (prev && visibleSubscriptions.some((s) => s.id === prev.id)) return prev;
+      return visibleSubscriptions[0];
+    });
+  }, [visibleSubscriptions]);
+
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
 
@@ -564,7 +601,7 @@ const FeedReaderPageInner: React.FC = () => {
           <div style={{ padding: '16px 12px', borderBottom: `1px solid ${themeColors.cardBorder}` }}>
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
               <Text strong style={{ color: themeColors.textSecondary, fontSize: 12 }}>
-                MY FEEDS ({subscriptions.length})
+                MY FEEDS ({visibleSubscriptions.length})
               </Text>
               <Space size="small">
                 <Tooltip title="Add Feed">
@@ -596,38 +633,62 @@ const FeedReaderPageInner: React.FC = () => {
                 </Tooltip>
               </Space>
             </Space>
-            
-            {/* 🔍 过滤器：Active / Disabled */}
-            <div style={{ 
-              padding: '12px 12px 8px',
-              borderBottom: `1px solid ${themeColors.cardBorder}`,
-              display: 'flex',
-              gap: 8,
-            }}>
-              <Button
-                type={subscriptionFilter === 'active' ? 'primary' : 'text'}
-                size="small"
-                onClick={() => setSubscriptionFilter('active')}
-                style={{
-                  fontSize: 11,
-                  height: 24,
-                  ...(subscriptionFilter === 'active' ? {} : { color: themeColors.textSecondary }),
-                }}
+
+            <div className="feed-list-filter-row">
+              <div className="feed-list-type-tabs">
+                {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
+                  <Tooltip key={key} title={label}>
+                    <button
+                      type="button"
+                      className={`feed-list-type-tab ${feedChannelTypeFilter === key ? 'is-active' : ''}`}
+                      onClick={() => setFeedChannelTypeFilter(key)}
+                      aria-label={label}
+                    >
+                      <span className="feed-list-type-tab-icon">{icon}</span>
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+              <div
+                className="feed-list-status-tabs"
+                role="group"
+                aria-label="Subscription status"
               >
-                Active ({subscriptions.filter(s => s.enabled).length})
-              </Button>
-              <Button
-                type={subscriptionFilter === 'disabled' ? 'primary' : 'text'}
-                size="small"
-                onClick={() => setSubscriptionFilter('disabled')}
-                style={{
-                  fontSize: 11,
-                  height: 24,
-                  ...(subscriptionFilter === 'disabled' ? {} : { color: themeColors.textSecondary }),
-                }}
-              >
-                Disabled ({subscriptions.filter(s => !s.enabled).length})
-              </Button>
+                <Tooltip
+                  title={`Active (${subscriptions.filter((s) => s.enabled).length})`}
+                >
+                  <button
+                    type="button"
+                    className={`feed-list-type-tab feed-list-status-tab ${
+                      subscriptionFilter === 'active' ? 'is-active' : ''
+                    }`}
+                    onClick={() => setSubscriptionFilter('active')}
+                    aria-label="Active subscriptions"
+                    aria-pressed={subscriptionFilter === 'active'}
+                  >
+                    <span className="feed-list-type-tab-icon">
+                      <PlayCircleOutlined />
+                    </span>
+                  </button>
+                </Tooltip>
+                <Tooltip
+                  title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}
+                >
+                  <button
+                    type="button"
+                    className={`feed-list-type-tab feed-list-status-tab ${
+                      subscriptionFilter === 'disabled' ? 'is-active' : ''
+                    }`}
+                    onClick={() => setSubscriptionFilter('disabled')}
+                    aria-label="Disabled subscriptions"
+                    aria-pressed={subscriptionFilter === 'disabled'}
+                  >
+                    <span className="feed-list-type-tab-icon">
+                      <PauseCircleOutlined />
+                    </span>
+                  </button>
+                </Tooltip>
+              </div>
             </div>
           </div>
 
@@ -649,14 +710,7 @@ const FeedReaderPageInner: React.FC = () => {
             }}>
               <Empty description="No subscriptions yet" />
             </div>
-          ) : (() => {
-            // 🔍 根据过滤器筛选：Active = enabled, Disabled = !enabled
-            const filteredSubscriptions = subscriptions.filter(sub => {
-              if (subscriptionFilter === 'active') return sub.enabled;
-              return !sub.enabled; // 'disabled'
-            });
-            
-            return filteredSubscriptions.length === 0 ? (
+          ) : visibleSubscriptions.length === 0 ? (
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -664,13 +718,24 @@ const FeedReaderPageInner: React.FC = () => {
                 height: 'calc(100vh - 200px)'
               }}>
                 <Empty
-                  description={subscriptionFilter === 'active' ? 'No active subscriptions' : 'No disabled subscriptions'}
+                  description={
+                    feedChannelTypeFilter !== 'all'
+                      ? `No ${FEED_CHANNEL_TYPE_FILTER_TABS.find((t) => t.key === feedChannelTypeFilter)?.label ?? 'matching'} feeds`
+                      : subscriptionFilter === 'active'
+                        ? 'No active subscriptions'
+                        : 'No disabled subscriptions'
+                  }
                 />
               </div>
             ) : (
               <List
-                dataSource={filteredSubscriptions}
-                renderItem={(subscription) => (
+                dataSource={visibleSubscriptions}
+                renderItem={(subscription) => {
+                const displayName =
+                  subscription.channel_name || `@${subscription.channel_identifier}`;
+                const unreadCount = subscription.unread_count ?? 0;
+                const hasUnread = unreadCount > 0;
+                return (
                 <List.Item
                   key={subscription.id}
                   style={{
@@ -685,7 +750,8 @@ const FeedReaderPageInner: React.FC = () => {
                         ? `3px solid ${themeColors.selectedBorder}`
                         : '3px solid transparent',
                     position: 'relative',
-                    paddingRight: 40,
+                    /* 为右上角未读角标 + 更多按钮留出空间，避免与标题重叠 */
+                    paddingRight: hasUnread ? 56 : 44,
                     // 🎨 禁用订阅的视觉效果
                     opacity: subscription.enabled ? 1 : 0.5,
                     filter: subscription.enabled ? 'none' : 'grayscale(30%)',
@@ -710,13 +776,13 @@ const FeedReaderPageInner: React.FC = () => {
                   }}
                 >
                   {/* 未读数量：右上角、10px 字体，不遮挡 More 按钮 */}
-                  {subscription.unread_count !== undefined && subscription.unread_count > 0 && (
+                  {hasUnread && (
                     <span
                       style={{
                         position: 'absolute',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        right: 36,
+                        right: 40,
                         fontSize: 10,
                         lineHeight: 1,
                         color: themeColors.textSecondary,
@@ -727,13 +793,17 @@ const FeedReaderPageInner: React.FC = () => {
                         textAlign: 'center',
                       }}
                     >
-                      {subscription.unread_count > 99 ? '99+' : subscription.unread_count}
+                      {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}
-                  <div onClick={() => handleSelectSubscription(subscription)} style={{ flex: 1 }}>
+                  <div
+                    onClick={() => handleSelectSubscription(subscription)}
+                    style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}
+                  >
                     <List.Item.Meta
                       avatar={
                         <Avatar
+                          size={24}
                           icon={getChannelIcon(subscription.channel_type)}
                           style={{
                             backgroundColor:
@@ -746,34 +816,29 @@ const FeedReaderPageInner: React.FC = () => {
                         />
                       }
                       title={
-                        <Space size={6} style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            minWidth: 0,
+                            width: '100%',
+                          }}
+                        >
                           <Text
                             strong
+                            ellipsis={{ tooltip: displayName }}
                             style={{
+                              flex: 1,
+                              minWidth: 0,
                               color: themeColors.text,
-                              fontSize: 14,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
+                              fontSize: 12,
+                              lineHeight: '20px',
                             }}
                           >
-                            {subscription.channel_name}
+                            {displayName}
                           </Text>
-                          {/* 🎨 禁用状态标签 */}
-                          {!subscription.enabled && (
-                            <Tag
-                              color="error"
-                              style={{
-                                fontSize: 10,
-                                padding: '0 4px',
-                                lineHeight: '16px',
-                                margin: 0,
-                              }}
-                            >
-                              Disabled
-                            </Tag>
-                          )}
-                        </Space>
+                        </div>
                       }
                       description={undefined}
                     />
@@ -784,16 +849,16 @@ const FeedReaderPageInner: React.FC = () => {
                     menu={{
                       items: [
                         {
-                          key: 'edit',
-                          label: 'Edit',
-                          icon: <EditOutlined />,
-                          onClick: () => handleEditSubscription(subscription),
-                        },
-                        {
                           key: 'toggle',
                           label: subscription.enabled ? 'Disable' : 'Enable',
                           icon: subscription.enabled ? <EyeInvisibleOutlined /> : <EyeOutlined />,
                           onClick: () => handleToggleEnabled(subscription),
+                        },
+                        {
+                          key: 'edit',
+                          label: 'Edit',
+                          icon: <EditOutlined />,
+                          onClick: () => handleEditSubscription(subscription),
                         },
                         {
                           type: 'divider',
@@ -804,11 +869,14 @@ const FeedReaderPageInner: React.FC = () => {
                           icon: <DeleteOutlined />,
                           danger: true,
                           onClick: () => {
-                            Modal.confirm({
+                            modal.confirm({
                               title: 'Delete Subscription',
                               content: `Are you sure you want to delete @${subscription.channel_identifier}?`,
                               okText: 'Delete',
                               okType: 'danger',
+                              cancelText: 'Cancel',
+                              centered: true,
+                              styles: getModalStyles(themeMode),
                               onOk: () => handleDeleteSubscription(subscription),
                             });
                           },
@@ -833,10 +901,10 @@ const FeedReaderPageInner: React.FC = () => {
                     />
                   </Dropdown>
                 </List.Item>
-              )}
+                );
+                }}
             />
-            );
-          })()}
+          )}
         </Sider>
 
         {/* 中间内容列表 */}
@@ -948,7 +1016,9 @@ const FeedReaderPageInner: React.FC = () => {
                 <>
                   <List
                     dataSource={contents}
-                    renderItem={(content) => (
+                    renderItem={(content) => {
+                      const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(content);
+                      return (
                       <List.Item
                         key={content.id}
                         onClick={() => handleSelectContent(content)}
@@ -979,14 +1049,14 @@ const FeedReaderPageInner: React.FC = () => {
                         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {/* title + 正文区域：严格限高，超出隐藏 */}
                           <div style={{ maxHeight: 96, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            {/* title行：最多2行截断 + 已读标记 */}
+                            {/* 主行：YouTube 等为标题；Twitter 无 title 时为推文正文 */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                               <span
                                 style={{
-                                  fontWeight: 600,
+                                  fontWeight: primaryIsTweetBody ? 400 : 600,
                                   color: themeColors.text,
-                                  fontSize: 14,
-                                  lineHeight: '1.4',
+                                  fontSize: primaryIsTweetBody ? 12 : 13,
+                                  lineHeight: '1.45',
                                   display: '-webkit-box',
                                   WebkitLineClamp: 2,
                                   WebkitBoxOrient: 'vertical',
@@ -1008,7 +1078,7 @@ const FeedReaderPageInner: React.FC = () => {
                               <Text
                                 style={{
                                   color: themeColors.textSecondary,
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   lineHeight: '1.4',
                                   display: '-webkit-box',
                                   WebkitLineClamp: 2,
@@ -1060,7 +1130,8 @@ const FeedReaderPageInner: React.FC = () => {
                           </Space>
                         </div>
                       </List.Item>
-                    )}
+                    );
+                    }}
                   />
                   
                   {/* 🔥 加载更多按钮 */}
@@ -1139,16 +1210,37 @@ const FeedReaderPageInner: React.FC = () => {
         </Content>
       </Layout>
 
-      {/* 添加订阅Modal */}
+      {/* 添加订阅Modal — 与 Upload / Layout 等弹窗同一套 mask、居中、classNames */}
       <Modal
-        title="Add New Feed"
+        title={
+          <Space>
+            <PlusOutlined />
+            <span>Add New Feed</span>
+          </Space>
+        }
         open={addModalVisible}
         onOk={handleCreateSubscription}
         onCancel={() => { if (!isSubmittingSubscription) setAddModalVisible(false); }}
         okText="Add"
+        cancelText="Cancel"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        styles={getModalStyles(themeMode)}
+        width={520}
+        centered
+        destroyOnClose
+        maskClosable={!isSubmittingSubscription}
+        classNames={{
+          content: isDark ? 'upload-files-modal upload-files-modal--dark' : 'upload-files-modal',
+        }}
+        maskStyle={{
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, padding: '20px 24px 24px' },
+        }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -1204,9 +1296,14 @@ const FeedReaderPageInner: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* 🎨 Edit Subscription Modal */}
+      {/* 编辑订阅 Modal */}
       <Modal
-        title="Edit Subscription"
+        title={
+          <Space>
+            <EditOutlined />
+            <span>Edit Subscription</span>
+          </Space>
+        }
         open={editModalVisible}
         onOk={handleSaveEdit}
         onCancel={() => {
@@ -1214,7 +1311,23 @@ const FeedReaderPageInner: React.FC = () => {
           editForm.resetFields();
         }}
         okText="Save"
-        styles={getModalStyles(themeMode)}
+        cancelText="Cancel"
+        width={520}
+        centered
+        destroyOnClose
+        maskClosable
+        classNames={{
+          content: isDark ? 'upload-files-modal upload-files-modal--dark' : 'upload-files-modal',
+        }}
+        maskStyle={{
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, padding: '20px 24px 24px' },
+        }}
       >
         <Form form={editForm} layout="vertical">
           <Form.Item

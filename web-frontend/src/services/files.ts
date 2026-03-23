@@ -534,6 +534,18 @@ export const filesAPI = {
     }
   },
 
+  /** 主文件名与扩展名（扩展名含前导点，如 ".pdf"）；无有效扩展名时 extension 为空。 */
+  splitFilenameStemAndExtension: (filename: string): { stem: string; extension: string } => {
+    const lastDot = filename.lastIndexOf('.');
+    if (lastDot <= 0 || lastDot === filename.length - 1) {
+      return { stem: filename, extension: '' };
+    }
+    return {
+      stem: filename.slice(0, lastDot),
+      extension: filename.slice(lastDot),
+    };
+  },
+
   // 获取文件扩展名
   getFileExtension: (filename: string): string => {
     return filename.split('.').pop()?.toLowerCase() || '';

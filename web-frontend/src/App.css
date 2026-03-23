@@ -1522,6 +1522,14 @@
   border-radius: 0;
 }
 
+.app-dark .feed-page-layout {
+  --files-panel-bg: #1a2234;
+  --files-panel-border: rgba(255, 255, 255, 0.06);
+  --files-panel-text: rgba(255, 255, 255, 0.88);
+  --files-panel-meta: #a0a3ad;
+  --files-batch-bar-bg: rgba(255, 255, 255, 0.06);
+}
+
 .feed-page-layout .ant-layout {
   min-height: 0;
   flex: 1;
@@ -1568,6 +1576,120 @@
 .app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
 .app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
   background: #5a6678;
+}
+
+/* My Feeds 左栏：长名称省略（flex 子项默认可收缩 + Meta 区域占满剩余宽度） */
+.feed-page-layout__sider .ant-list-item {
+  align-items: center;
+}
+
+.feed-page-layout__sider .ant-list-item-meta {
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+}
+
+.feed-page-layout__sider .ant-list-item-meta-avatar {
+  margin-top: 0;
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+}
+
+.feed-page-layout__sider .ant-list-item-meta-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.feed-page-layout__sider .ant-list-item-meta-title {
+  min-width: 0;
+  margin-bottom: 0 !important;
+  line-height: 1.35;
+}
+
+/* My Feeds 左栏：频道类型 + 右侧 Active/Disabled 图标（同一行） */
+.feed-page-layout .feed-list-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
+  background: var(--files-panel-bg, #fff);
+}
+
+.feed-page-layout .feed-list-type-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.feed-page-layout .feed-list-status-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  align-items: center;
+}
+
+.feed-page-layout .feed-list-type-tab {
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--files-panel-meta, rgba(0, 0, 0, 0.5));
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.feed-page-layout .feed-list-type-tab .feed-list-type-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: inherit;
+}
+
+.feed-page-layout .feed-list-type-tab .feed-list-type-tab-icon .anticon {
+  color: inherit;
+}
+
+.feed-page-layout .feed-list-type-tab:hover {
+  color: var(--files-panel-text, rgba(0, 0, 0, 0.88));
+  background: var(--files-batch-bar-bg, #f1f5f9);
+}
+
+.feed-page-layout .feed-list-type-tab.is-active {
+  color: var(--files-panel-text, rgba(0, 0, 0, 0.88));
+  background: var(--files-batch-bar-bg, #f1f5f9);
+  border-color: var(--files-panel-border, #e5e7eb);
+}
+
+.app-dark .feed-page-layout .feed-list-filter-row {
+  background: var(--files-panel-bg);
+}
+
+.app-dark .feed-page-layout .feed-list-type-tab {
+  color: #a0a3ad;
+}
+
+.app-dark .feed-page-layout .feed-list-type-tab:hover,
+.app-dark .feed-page-layout .feed-list-type-tab.is-active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 /* ========== Watchlist 页：与 Files 一致的固定左右栏（仅内部滚动） ========== */

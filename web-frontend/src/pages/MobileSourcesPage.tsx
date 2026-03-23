@@ -155,7 +155,8 @@ const MobileSourcesInner: React.FC = () => {
 
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [executionToRename, setExecutionToRename] = useState<TaskExecution | null>(null);
-  const [renameInputValue, setRenameInputValue] = useState('');
+  const [renameStem, setRenameStem] = useState('');
+  const [renameExtension, setRenameExtension] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
 
   const [deleteExecutionVisible, setDeleteExecutionVisible] = useState(false);
@@ -368,24 +369,29 @@ const MobileSourcesInner: React.FC = () => {
 
   const handleOpenRename = (execution: TaskExecution) => {
     setExecutionToRename(execution);
-    setRenameInputValue(execution.first_filename || 'Untitled');
+    const raw = execution.first_filename || 'Untitled';
+    const { stem, extension } = filesAPI.splitFilenameStemAndExtension(raw);
+    setRenameStem(stem);
+    setRenameExtension(extension);
     setRenameModalVisible(true);
   };
 
   const handleConfirmRename = async () => {
-    if (!executionToRename || !renameInputValue.trim()) return;
+    if (!executionToRename || !renameStem.trim()) return;
+    const newFilename = `${renameStem.trim()}${renameExtension}`;
     try {
       setRenameLoading(true);
-      await tasksAPI.renameExecutionFile(executionToRename.id, renameInputValue.trim());
+      await tasksAPI.renameExecutionFile(executionToRename.id, newFilename);
       setTaskExecutions(prev =>
         prev.map(exec =>
-          exec.id === executionToRename.id ? { ...exec, first_filename: renameInputValue.trim() } : exec
+          exec.id === executionToRename.id ? { ...exec, first_filename: newFilename } : exec
         )
       );
       message.success('Renamed');
       setRenameModalVisible(false);
       setExecutionToRename(null);
-      setRenameInputValue('');
+      setRenameStem('');
+      setRenameExtension('');
     } catch (error: unknown) {
       message.error(getErrorMessage(error, 'Rename failed'));
     } finally {
@@ -960,15 +966,27 @@ const MobileSourcesInner: React.FC = () => {
       <Modal
         title="Rename"
         open={renameModalVisible}
-        onCancel={() => setRenameModalVisible(false)}
+        onCancel={() => {
+          setRenameModalVisible(false);
+          setExecutionToRename(null);
+          setRenameStem('');
+          setRenameExtension('');
+        }}
         onOk={handleConfirmRename}
+        okButtonProps={{ disabled: !renameStem.trim() }}
         confirmLoading={renameLoading}
         okText="Save"
         cancelText="cancel"
         centered
+        destroyOnClose
         styles={getModalStyles(themeMode)}
       >
-        <Input value={renameInputValue} onChange={e => setRenameInputValue(e.target.value)} placeholder="File name" />
+        <Input
+          value={renameStem}
+          onChange={e => setRenameStem(e.target.value)}
+          addonAfter={renameExtension || undefined}
+          placeholder="File name"
+        />
       </Modal>
 
       <Modal

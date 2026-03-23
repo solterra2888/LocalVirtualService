@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   App,
@@ -17,6 +17,7 @@ import {
   Tag,
   Typography,
   Dropdown,
+  Tooltip,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -33,18 +34,26 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RetweetOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useMobileFeeds } from '../contexts/MobileFeedsContext';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
-import { getChannelIcon } from '../components/feed/feedChannelConfig';
+import {
+  getChannelIcon,
+  FEED_CHANNEL_TYPE_FILTER_TABS,
+  matchesFeedChannelTypeFilter,
+  type FeedChannelTypeFilterKey,
+} from '../components/feed/feedChannelConfig';
 import {
   collapseWhitespaceForPreview,
   getFeedListHeadline,
   getHeatLevelConfig,
   showFeedListSecondaryExcerpt,
+  feedListPrimaryLineIsTweetBody,
 } from '../components/feed/feedUtils';
 import FeedSourceIconPicker from '../components/feed/FeedSourceIconPicker';
 import { getModalStyles } from '../utils/modalStyles';
@@ -64,7 +73,7 @@ const { Text } = Typography;
  * Mobile Feeds home: list-first, drawer for subscriptions, segmented All / Unread.
  */
 const MobileFeedsListView: React.FC = () => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
@@ -91,6 +100,7 @@ const MobileFeedsListView: React.FC = () => {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [subscriptionFilter, setSubscriptionFilter] = useState<'active' | 'disabled'>('active');
+  const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -277,22 +287,37 @@ const MobileFeedsListView: React.FC = () => {
     }
   };
 
-  const filteredSubscriptions = subscriptions.filter((sub) =>
-    subscriptionFilter === 'active' ? sub.enabled : !sub.enabled
+  const filteredSubscriptions = useMemo(
+    () =>
+      subscriptions
+        .filter((sub) => (subscriptionFilter === 'active' ? sub.enabled : !sub.enabled))
+        .filter((sub) => matchesFeedChannelTypeFilter(sub.channel_type, feedChannelTypeFilter)),
+    [subscriptions, subscriptionFilter, feedChannelTypeFilter]
   );
 
+  useEffect(() => {
+    if (filteredSubscriptions.length === 0) {
+      setSelectedSubscription(null);
+      return;
+    }
+    setSelectedSubscription((prev) => {
+      if (prev && filteredSubscriptions.some((s) => s.id === prev.id)) return prev;
+      return filteredSubscriptions[0];
+    });
+  }, [filteredSubscriptions, setSelectedSubscription]);
+
   const subscriptionMenu = (subscription: Subscription): MenuProps['items'] => [
-    {
-      key: 'edit',
-      label: 'Edit',
-      icon: <EditOutlined />,
-      onClick: () => handleEditSubscription(subscription),
-    },
     {
       key: 'toggle',
       label: subscription.enabled ? 'Disable' : 'Enable',
       icon: subscription.enabled ? <EyeInvisibleOutlined /> : <EyeOutlined />,
       onClick: () => handleToggleEnabled(subscription),
+    },
+    {
+      key: 'edit',
+      label: 'Edit',
+      icon: <EditOutlined />,
+      onClick: () => handleEditSubscription(subscription),
     },
     { type: 'divider' },
     {
@@ -301,11 +326,14 @@ const MobileFeedsListView: React.FC = () => {
       icon: <DeleteOutlined />,
       danger: true,
       onClick: () => {
-        Modal.confirm({
+        modal.confirm({
           title: 'Delete Subscription',
           content: `Are you sure you want to delete @${subscription.channel_identifier}?`,
           okText: 'Delete',
           okType: 'danger',
+          cancelText: 'Cancel',
+          centered: true,
+          styles: getModalStyles(themeMode),
           onOk: () => handleDeleteSubscription(subscription),
         });
       },
@@ -378,7 +406,9 @@ const MobileFeedsListView: React.FC = () => {
         </div>
       ) : (
         <div className="mobile-feeds-list-scroll">
-          {contents.map((c) => (
+          {contents.map((c) => {
+            const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(c);
+            return (
             <div
               key={c.id}
               role="button"
@@ -409,9 +439,9 @@ const MobileFeedsListView: React.FC = () => {
                   <span
                     style={{
                       color: themeColors.text,
-                      fontWeight: 600,
-                      fontSize: 14,
-                      lineHeight: 1.4,
+                      fontWeight: primaryIsTweetBody ? 400 : 600,
+                      fontSize: primaryIsTweetBody ? 12 : 13,
+                      lineHeight: 1.45,
                       flex: 1,
                       minWidth: 0,
                       minHeight: 0,
@@ -432,7 +462,7 @@ const MobileFeedsListView: React.FC = () => {
                     style={{
                       marginTop: 5,
                       color: themeColors.textSecondary,
-                      fontSize: 13,
+                      fontSize: 12,
                       lineHeight: 1.4,
                       minHeight: 0,
                       display: '-webkit-box',
@@ -467,7 +497,8 @@ const MobileFeedsListView: React.FC = () => {
                 </Space>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {hasMoreContents && (
             <div style={{ textAlign: 'center', padding: 16 }}>
@@ -496,25 +527,66 @@ const MobileFeedsListView: React.FC = () => {
           ...(isDark ? { mask: { background: 'rgba(0, 0, 0, 0.65)' } } : {}),
         }}
       >
-        <Segmented
-          block
-          value={subscriptionFilter}
-          onChange={(v) => setSubscriptionFilter(v as 'active' | 'disabled')}
-          options={[
-            { label: `Active (${subscriptions.filter((s) => s.enabled).length})`, value: 'active' },
-            { label: `Disabled (${subscriptions.filter((s) => !s.enabled).length})`, value: 'disabled' },
-          ]}
-          style={{
-            marginBottom: 12,
-            ...(isDark && { background: themeColors.boxMuted }),
-          }}
-        />
+        <div
+          className={`mobile-feeds-drawer-filter-row${isDark ? ' mobile-feeds-drawer-filter-row--dark' : ''}`}
+        >
+          <div className="mobile-feeds-drawer-type-tabs">
+            {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
+              <Tooltip key={key} title={label}>
+                <button
+                  type="button"
+                  className={`mobile-feeds-drawer-type-tab ${feedChannelTypeFilter === key ? 'is-active' : ''}`}
+                  onClick={() => setFeedChannelTypeFilter(key)}
+                  aria-label={label}
+                >
+                  <span className="mobile-feeds-drawer-type-tab-icon">{icon}</span>
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+          <div className="mobile-feeds-drawer-status-tabs" role="group" aria-label="Subscription status">
+            <Tooltip title={`Active (${subscriptions.filter((s) => s.enabled).length})`}>
+              <button
+                type="button"
+                className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
+                  subscriptionFilter === 'active' ? 'is-active' : ''
+                }`}
+                onClick={() => setSubscriptionFilter('active')}
+                aria-label="Active subscriptions"
+                aria-pressed={subscriptionFilter === 'active'}
+              >
+                <span className="mobile-feeds-drawer-type-tab-icon">
+                  <PlayCircleOutlined />
+                </span>
+              </button>
+            </Tooltip>
+            <Tooltip title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}>
+              <button
+                type="button"
+                className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
+                  subscriptionFilter === 'disabled' ? 'is-active' : ''
+                }`}
+                onClick={() => setSubscriptionFilter('disabled')}
+                aria-label="Disabled subscriptions"
+                aria-pressed={subscriptionFilter === 'disabled'}
+              >
+                <span className="mobile-feeds-drawer-type-tab-icon">
+                  <PauseCircleOutlined />
+                </span>
+              </button>
+            </Tooltip>
+          </div>
+        </div>
 
         {filteredSubscriptions.length === 0 ? (
           <Empty
             description={
               <span style={{ color: themeColors.textSecondary }}>
-                {subscriptionFilter === 'active' ? 'No active feeds' : 'No disabled feeds'}
+                {feedChannelTypeFilter !== 'all'
+                  ? `No ${FEED_CHANNEL_TYPE_FILTER_TABS.find((t) => t.key === feedChannelTypeFilter)?.label ?? 'matching'} feeds`
+                  : subscriptionFilter === 'active'
+                    ? 'No active feeds'
+                    : 'No disabled feeds'}
               </span>
             }
           />
@@ -543,17 +615,27 @@ const MobileFeedsListView: React.FC = () => {
                         sub.channel_type === 'twitter' ? '#1DA1F2' : sub.channel_type === 'youtube' ? '#FF0000' : '#ccc',
                     }}
                   />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <Space size={6}>
-                      <Text strong ellipsis style={{ maxWidth: 200, color: themeColors.text }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        minWidth: 0,
+                      }}
+                    >
+                      <Text
+                        strong
+                        ellipsis={{ tooltip: true }}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          color: themeColors.text,
+                        }}
+                      >
                         {sub.channel_name || `@${sub.channel_identifier}`}
                       </Text>
-                      {!sub.enabled && (
-                        <Tag color="error" style={{ margin: 0, fontSize: 10 }}>
-                          Off
-                        </Tag>
-                      )}
-                    </Space>
+                    </div>
                     {sub.unread_count != null && sub.unread_count > 0 && (
                       <div>
                         <Tag
@@ -586,16 +668,37 @@ const MobileFeedsListView: React.FC = () => {
       </Drawer>
 
       <Modal
-        title="Add feed"
+        title={
+          <Space>
+            <PlusOutlined />
+            <span>Add New Feed</span>
+          </Space>
+        }
         open={addModalVisible}
         onOk={handleCreateSubscription}
         onCancel={() => {
           if (!isSubmittingSubscription) setAddModalVisible(false);
         }}
         okText="Add"
+        cancelText="Cancel"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        styles={getModalStyles(themeMode)}
+        width={520}
+        centered
+        destroyOnClose
+        maskClosable={!isSubmittingSubscription}
+        classNames={{
+          content: isDark ? 'upload-files-modal upload-files-modal--dark' : 'upload-files-modal',
+        }}
+        maskStyle={{
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, padding: '20px 24px 24px' },
+        }}
       >
         <Form form={form} layout="vertical">
           <Form.Item name="channel_type" label="Source" rules={[{ required: true, message: 'Select a source' }]}>
@@ -627,7 +730,12 @@ const MobileFeedsListView: React.FC = () => {
       </Modal>
 
       <Modal
-        title="Edit subscription"
+        title={
+          <Space>
+            <EditOutlined />
+            <span>Edit Subscription</span>
+          </Space>
+        }
         open={editModalVisible}
         onOk={handleSaveEdit}
         onCancel={() => {
@@ -635,7 +743,23 @@ const MobileFeedsListView: React.FC = () => {
           editForm.resetFields();
         }}
         okText="Save"
-        styles={getModalStyles(themeMode)}
+        cancelText="Cancel"
+        width={520}
+        centered
+        destroyOnClose
+        maskClosable
+        classNames={{
+          content: isDark ? 'upload-files-modal upload-files-modal--dark' : 'upload-files-modal',
+        }}
+        maskStyle={{
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={{
+          ...getModalStyles(themeMode),
+          body: { ...getModalStyles(themeMode).body, padding: '20px 24px 24px' },
+        }}
       >
         <Form form={editForm} layout="vertical">
           <Form.Item label="Channel" extra={`${editingSubscription?.channel_type}: @${editingSubscription?.channel_identifier}`}>

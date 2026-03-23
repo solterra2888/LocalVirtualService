@@ -48,6 +48,23 @@ def _get_youtube_api_key() -> Optional[str]:
     return key or None
 
 
+def normalize_youtube_channel_id(raw: Optional[str]) -> Optional[str]:
+    """
+    规范化 YouTube channel_id（应为 UC + 22 位字符，共 24 位）。
+    部分 RSS / feedparser 对 yt:channelId 会丢掉「UC」前缀，只剩 22 字符，导致后续用错 identifier。
+    """
+    if raw is None:
+        return None
+    c = str(raw).strip()
+    if not c:
+        return None
+    if len(c) >= 24 and c.startswith('UC'):
+        return c
+    if len(c) == 22 and re.match(r'^[A-Za-z0-9_-]{22}$', c):
+        return 'UC' + c
+    return c
+
+
 class YouTubeSubscriptionService:
     """YouTube 订阅服务类 - 使用 RSS Feed"""
 
@@ -176,6 +193,9 @@ class YouTubeSubscriptionService:
                 return result
             if _check_unreachable(result):
                 return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
+            api_result = YouTubeSubscriptionService._validate_channel_via_data_api(username)
+            if api_result:
+                return api_result
         
         # 尝试2：用用户名格式的 RSS
         rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
@@ -212,9 +232,15 @@ class YouTubeSubscriptionService:
             if result['exists']:
                 result['channel_id'] = channel_id
                 return result
+            api_result = YouTubeSubscriptionService._validate_channel_via_data_api(channel_id)
+            if api_result:
+                return api_result
         
         # 所有尝试都失败
-        error_msg = f"YouTube channel '{username}' not found or RSS feed unavailable"
+        error_msg = (
+            f"YouTube channel '{username}' not found or RSS feed unavailable. "
+            "YouTube 官方 RSS 常返回 404/500；若已配置 YOUTUBE_DATA_API_KEY，将自动用 API 验证。"
+        )
         error(error_msg, source="youtube_subscription")
         return {
             'exists': False,
@@ -237,21 +263,57 @@ class YouTubeSubscriptionService:
 
             # 通过 requests 获取 RSS 内容（支持代理），再交由 feedparser 解析
             proxies = _get_proxies()
-            try:
-                resp = requests.get(
-                    rss_url,
-                    headers={'User-Agent': 'feedparser/6.0'},
-                    timeout=YouTubeSubscriptionService.REQUEST_TIMEOUT,
-                    proxies=proxies,
-                )
-                resp.raise_for_status()
-                feed = feedparser.parse(resp.content)
-            except requests.exceptions.RequestException as req_err:
-                warning(f"RSS Feed 请求失败: {req_err}", source="youtube_subscription")
-                if _is_network_unreachable(req_err):
-                    return {'exists': False, 'network_unreachable': True,
-                            'error': 'network_unreachable'}
-                return {'exists': False, 'error': f'RSS feed request failed: {req_err}'}
+            rss_headers = {'User-Agent': 'feedparser/6.0'}
+            max_rss_attempts = 3
+            resp = None
+            last_req_err = None
+            for attempt in range(max_rss_attempts):
+                try:
+                    resp = requests.get(
+                        rss_url,
+                        headers=rss_headers,
+                        timeout=YouTubeSubscriptionService.REQUEST_TIMEOUT,
+                        proxies=proxies,
+                    )
+                    if resp.status_code in (500, 502, 503, 504) and attempt < max_rss_attempts - 1:
+                        warning(
+                            f"RSS Feed 暂时不可用 (HTTP {resp.status_code})，"
+                            f"重试 {attempt + 1}/{max_rss_attempts}...",
+                            source="youtube_subscription",
+                        )
+                        time.sleep(0.6 * (attempt + 1))
+                        continue
+                    resp.raise_for_status()
+                    break
+                except requests.exceptions.RequestException as req_err:
+                    last_req_err = req_err
+                    retryable = False
+                    if isinstance(req_err, requests.exceptions.HTTPError) and req_err.response is not None:
+                        code = req_err.response.status_code
+                        retryable = code in (500, 502, 503, 504)
+                    if retryable and attempt < max_rss_attempts - 1:
+                        warning(
+                            f"RSS Feed 请求失败，重试 {attempt + 1}/{max_rss_attempts}: {req_err}",
+                            source="youtube_subscription",
+                        )
+                        time.sleep(0.6 * (attempt + 1))
+                        continue
+                    warning(f"RSS Feed 请求失败: {req_err}", source="youtube_subscription")
+                    if _is_network_unreachable(req_err):
+                        return {'exists': False, 'network_unreachable': True,
+                                'error': 'network_unreachable'}
+                    return {'exists': False, 'error': f'RSS feed request failed: {req_err}'}
+
+            if resp is None:
+                if last_req_err:
+                    warning(f"RSS Feed 请求失败: {last_req_err}", source="youtube_subscription")
+                    if _is_network_unreachable(last_req_err):
+                        return {'exists': False, 'network_unreachable': True,
+                                'error': 'network_unreachable'}
+                    return {'exists': False, 'error': f'RSS feed request failed: {last_req_err}'}
+                return {'exists': False, 'error': 'RSS feed request failed'}
+
+            feed = feedparser.parse(resp.content)
 
             # 检查是否成功获取
             if not feed or not hasattr(feed, 'entries') or len(feed.entries) == 0:
@@ -261,24 +323,22 @@ class YouTubeSubscriptionService:
             # 提取频道信息
             channel_name = feed.feed.get('title', 'Unknown Channel')
             
-            # 尝试从 feed 中提取 channel_id（在 yt:channelId 标签中）
+            # channel_id：优先从条目 author 链接解析（最可靠），其次 yt:channelId（可能被 feedparser 截断缺 UC）
             channel_id = None
-            if hasattr(feed.feed, 'yt_channelid'):
-                channel_id = feed.feed.yt_channelid
-            
-            # 构建频道 URL
+            channel_url = f"https://www.youtube.com/@{channel_name}"
+            if feed.entries and hasattr(feed.entries[0], 'author_detail'):
+                author_detail = feed.entries[0].author_detail
+                if 'href' in author_detail:
+                    href = author_detail['href']
+                    m_ch = re.search(r'/channel/(UC[A-Za-z0-9_-]{22})', href)
+                    if m_ch:
+                        channel_id = m_ch.group(1)
+                    channel_url = href
+            if not channel_id and hasattr(feed.feed, 'yt_channelid') and feed.feed.yt_channelid:
+                channel_id = normalize_youtube_channel_id(str(feed.feed.yt_channelid).strip())
+            channel_id = normalize_youtube_channel_id(channel_id)
             if channel_id:
                 channel_url = f"https://www.youtube.com/channel/{channel_id}"
-            else:
-                # 如果没有 channel_id，从第一个视频的 author_detail 中提取
-                if feed.entries and hasattr(feed.entries[0], 'author_detail'):
-                    author_detail = feed.entries[0].author_detail
-                    if 'href' in author_detail:
-                        channel_url = author_detail['href']
-                    else:
-                        channel_url = f"https://www.youtube.com/@{channel_name}"
-                else:
-                    channel_url = f"https://www.youtube.com/@{channel_name}"
             
             info(f"频道验证成功: name={channel_name}, channel_id={channel_id}", source="youtube_subscription")
             
@@ -299,6 +359,55 @@ class YouTubeSubscriptionService:
     
     YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
     YOUTUBE_API_TIMEOUT = 10
+
+    @staticmethod
+    def _validate_channel_via_data_api(channel_id: str) -> Optional[Dict[str, Any]]:
+        """
+        当官方 RSS 返回 404/500 等时，用 YouTube Data API v3 `channels.list` 验证频道并取标题。
+        需配置环境变量 YOUTUBE_DATA_API_KEY；未配置或调用失败时返回 None。
+        """
+        api_key = _get_youtube_api_key()
+        if not api_key:
+            return None
+        base = YouTubeSubscriptionService.YOUTUBE_API_BASE
+        timeout = YouTubeSubscriptionService.YOUTUBE_API_TIMEOUT
+        proxies = _get_proxies()
+        try:
+            resp = requests.get(
+                f"{base}/channels",
+                params={"part": "snippet", "id": channel_id, "key": api_key},
+                headers={"Accept": "application/json"},
+                timeout=timeout,
+                proxies=proxies,
+            )
+            if resp.status_code == 403:
+                warning(
+                    "YouTube Data API 配额已用尽或 key 无权限，无法用作频道验证回退",
+                    source="youtube_subscription",
+                )
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            if not items:
+                return None
+            snippet = items[0].get("snippet", {})
+            title = snippet.get("title", "Unknown Channel")
+            channel_url = f"https://www.youtube.com/channel/{channel_id}"
+            info(
+                f"频道验证成功 (Data API): name={title}, channel_id={channel_id}",
+                source="youtube_subscription",
+            )
+            return {
+                "exists": True,
+                "channel_id": channel_id,
+                "channel_name": title,
+                "channel_url": channel_url,
+                "video_count": 0,
+            }
+        except requests.exceptions.RequestException as e:
+            warning(f"Data API 验证频道失败: {e}", source="youtube_subscription")
+            return None
 
     @staticmethod
     def _fetch_channel_videos_via_api(
@@ -533,6 +642,7 @@ class YouTubeSubscriptionService:
                         match = re.search(r'/channel/([^/]+)', author_url)
                         if match:
                             channel_id = match.group(1)
+                    channel_id = normalize_youtube_channel_id(channel_id) if channel_id else None
 
                     video_data = {
                         'id': video_id,

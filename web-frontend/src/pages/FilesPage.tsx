@@ -383,7 +383,8 @@ const FilesPageInner: React.FC = () => {
   const [deletingExecutions, setDeletingExecutions] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [executionToRename, setExecutionToRename] = useState<TaskExecution | null>(null);
-  const [renameInputValue, setRenameInputValue] = useState('');
+  const [renameStem, setRenameStem] = useState('');
+  const [renameExtension, setRenameExtension] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
   
   // AI Analysis 相关状态
@@ -1440,31 +1441,36 @@ const FilesPageInner: React.FC = () => {
 
   const handleOpenRename = (execution: TaskExecution) => {
     setExecutionToRename(execution);
-    setRenameInputValue(execution.first_filename || `${execution.files_processed} file(s)`);
+    const raw = execution.first_filename || `${execution.files_processed} file(s)`;
+    const { stem, extension } = filesAPI.splitFilenameStemAndExtension(raw);
+    setRenameStem(stem);
+    setRenameExtension(extension);
     setRenameModalVisible(true);
   };
 
   const handleConfirmRename = async () => {
-    if (!executionToRename || !renameInputValue.trim()) return;
+    if (!executionToRename || !renameStem.trim()) return;
+    const newFilename = `${renameStem.trim()}${renameExtension}`;
     try {
       setRenameLoading(true);
-      await tasksAPI.renameExecutionFile(executionToRename.id, renameInputValue.trim());
+      await tasksAPI.renameExecutionFile(executionToRename.id, newFilename);
       setTaskExecutions(prev =>
         prev.map(exec =>
           exec.id === executionToRename.id
-            ? { ...exec, first_filename: renameInputValue.trim() }
+            ? { ...exec, first_filename: newFilename }
             : exec
         )
       );
       if (selectedExecutionForView?.id === executionToRename.id) {
         setSelectedExecutionForView(prev =>
-          prev ? { ...prev, first_filename: renameInputValue.trim() } : null
+          prev ? { ...prev, first_filename: newFilename } : null
         );
       }
       message.success('Renamed successfully');
       setRenameModalVisible(false);
       setExecutionToRename(null);
-      setRenameInputValue('');
+      setRenameStem('');
+      setRenameExtension('');
     } catch (error: any) {
       const errMsg = error?.response?.data?.detail || getErrorMessage(error, 'Rename failed');
       message.error(errMsg);
@@ -3351,11 +3357,12 @@ const FilesPageInner: React.FC = () => {
           title="Rename File"
           open={renameModalVisible}
           onOk={handleConfirmRename}
-          okButtonProps={{ disabled: !renameInputValue.trim() }}
+          okButtonProps={{ disabled: !renameStem.trim() }}
           onCancel={() => {
             setRenameModalVisible(false);
             setExecutionToRename(null);
-            setRenameInputValue('');
+            setRenameStem('');
+            setRenameExtension('');
           }}
           okText="Save"
           cancelText="cancel"
@@ -3368,8 +3375,9 @@ const FilesPageInner: React.FC = () => {
             <div>
               <p style={{ marginBottom: 8 }}>New file name:</p>
               <Input
-                value={renameInputValue}
-                onChange={(e) => setRenameInputValue(e.target.value)}
+                value={renameStem}
+                onChange={(e) => setRenameStem(e.target.value)}
+                addonAfter={renameExtension || undefined}
                 placeholder="Enter new file name"
                 onPressEnter={handleConfirmRename}
               />
