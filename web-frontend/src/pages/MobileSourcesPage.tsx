@@ -330,7 +330,12 @@ const MobileSourcesInner: React.FC = () => {
   };
 
   const handleConfirmShare = async () => {
-    if (!shareTargetExecution || selectedShareUserIds.length === 0) return;
+    if (!shareTargetExecution) return;
+    if (selectedShareUserIds.length === 0) {
+      setShareModalVisible(false);
+      handleDetailRefreshList().catch(() => {});
+      return;
+    }
     setSharingInProgress(true);
     try {
       const detailResp = await tasksAPI.getTaskExecutionDetails(shareTargetExecution.id);
@@ -342,6 +347,7 @@ const MobileSourcesInner: React.FC = () => {
       const result = await filesAPI.shareFile(fileId, selectedShareUserIds);
       message.success(`Shared to ${result.shared_count} user(s)`);
       setShareModalVisible(false);
+      await handleDetailRefreshList();
     } catch {
       message.error('Failed to share');
     } finally {
@@ -354,6 +360,7 @@ const MobileSourcesInner: React.FC = () => {
       await filesAPI.unshareFile(fileId, [userId]);
       setCurrentShares(prev => prev.filter(s => s.shared_to_user_id !== userId));
       message.success('Share removed');
+      handleDetailRefreshList().catch(() => {});
     } catch {
       message.error('Failed to remove share');
     }
@@ -898,10 +905,9 @@ const MobileSourcesInner: React.FC = () => {
         open={shareModalVisible}
         onCancel={() => setShareModalVisible(false)}
         onOk={handleConfirmShare}
-        okText="Share"
+        okText={selectedShareUserIds.length > 0 ? 'Share' : 'Done'}
         cancelText="cancel"
         confirmLoading={sharingInProgress}
-        okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
         width={400}
         centered
         styles={getModalStyles(themeMode)}

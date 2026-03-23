@@ -126,6 +126,72 @@ def _oss_object_key_from_url(url: str) -> Optional[str]:
         return None
 
 
+def _oss_virtual_host_bucket_endpoint(url: str) -> Optional[tuple[str, str]]:
+    """
+    从 OSS 虚拟主机风格 URL 解析 bucket 与 endpoint。
+    例: https://guanhetech-hk.oss-cn-hongkong.aliyuncs.com/audio/x.m4a
+        -> ("guanhetech-hk", "oss-cn-hongkong.aliyuncs.com")
+    兼容模式读取时必须与 URL 一致；仅用环境变量默认 bucket 会在跨桶/迁桶时 NoSuchKey。
+    """
+    from urllib.parse import urlparse
+
+    if not url or not (url.startswith("http://") or url.startswith("https://")):
+        return None
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if ".oss-" not in host or "aliyuncs.com" not in host:
+            return None
+        parts = host.split(".", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1].startswith("oss-"):
+            return None
+        return parts[0], parts[1]
+    except Exception:
+        return None
+
+
+def _legacy_oss_buckets_to_try(file_path: str, oss_bucket_db: Optional[str], svc: OSSService):
+    """
+    旧数据 original_file_path 为完整 OSS URL 时，按优先级返回可尝试的 oss2.Bucket 列表。
+    1) URL 主机名对应的 bucket+endpoint（最可信）
+    2) 数据库 oss_bucket 字段 + 当前 endpoint
+    3) 环境变量默认 bucket
+    """
+    import oss2
+
+    if not svc.is_configured():
+        return []
+    ak = os.getenv("OSS_ACCESS_KEY_ID")
+    sk = os.getenv("OSS_ACCESS_KEY_SECRET")
+    if not ak or not sk:
+        return []
+    auth = oss2.Auth(ak, sk)
+    out = []
+    seen = set()
+
+    be = _oss_virtual_host_bucket_endpoint(file_path)
+    if be:
+        bname, ep = be
+        k = (bname, ep)
+        if k not in seen:
+            seen.add(k)
+            out.append(oss2.Bucket(auth, ep, bname))
+
+    dbn = (oss_bucket_db or "").strip()
+    if dbn:
+        k = (dbn, svc.endpoint)
+        if k not in seen:
+            seen.add(k)
+            out.append(oss2.Bucket(auth, svc.endpoint, dbn))
+
+    k = (svc.bucket_name, svc.endpoint)
+    if k not in seen:
+        seen.add(k)
+        out.append(svc.bucket)
+
+    return out
+
+
 def _serve_file_bytes_response(content: bytes, filename: str, file_type: Optional[str]):
     """
     将 OSS/本地读取的文件字节返回给浏览器（PDF/图片 inline，其余 attachment）。
@@ -150,11 +216,15 @@ def _serve_file_bytes_response(content: bytes, filename: str, file_type: Optiona
         "gif": "image/gif",
         "bmp": "image/bmp",
         "image": "image/jpeg",
-        "audio": "application/octet-stream",
+        # DB 常为 audio；无扩展名时避免 octet-stream，否则部分浏览器 <audio> 解码失败
+        "audio": "audio/mpeg",
     }
     media_type = guessed or fallback_types.get(ft, "application/octet-stream")
+    if ft == "audio" and (not media_type or media_type == "application/octet-stream"):
+        media_type = guessed or "audio/mpeg"
     encoded_fn = quote(filename or "file")
-    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image"]
+    # 音频需 inline + 正确 MIME，否则 <audio> 表现不一致（有的能播、有的触发下载或 MEDIA_ERR）
+    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image", "audio"]
     disposition = "inline" if is_previewable else "attachment"
     return RawResponse(
         content=content,
@@ -1414,7 +1484,7 @@ async def get_original_file_info(
                         # 导致 iframe 内无法预览、只能下载。PDF/图片/音频改为走后端 serve 代理（inline 或可下载流）。
                         # Word/Excel 需公网 HTTPS URL 供 Microsoft Office Online Viewer 拉取，故仍用签名 URL。
                         preview_via_serve = (file_type or '').lower() in (
-                            'pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio'
+                            'pdf', 'application/pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio'
                         )
                         if preview_via_serve:
                             file_url = f"/api/files/serve/{file_id}"
@@ -2088,7 +2158,8 @@ async def serve_file(
                                     "Accept-Ranges": "bytes",
                                     "Content-Range": f"bytes {start}-{end}/{total_size}",
                                     "Content-Length": str(end - start + 1),
-                                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}",
+                                    # 与整段响应一致：attachment 会导致部分浏览器在 Range 时无法稳定播放
+                                    "Content-Disposition": f"inline; filename*=UTF-8''{encoded_fn}",
                                 }
                             )
                         oss_result = oss_service.bucket.get_object(file_path)
@@ -2119,52 +2190,67 @@ async def serve_file(
             if legacy_key:
                 oss_legacy = OSSService()
                 if oss_legacy.is_configured():
-                    try:
-                        total_size = int(oss_legacy.bucket.head_object(legacy_key).content_length or 0)
-                        parsed_range = _parse_http_range(range_header, total_size) if (file_type or '').lower() == 'audio' else None
-                        if parsed_range:
-                            start, end = parsed_range
-                            oss_result = oss_legacy.bucket.get_object(legacy_key, byte_range=(start, end))
+                    last_err = None
+                    for ob in _legacy_oss_buckets_to_try(file_path, oss_bucket, oss_legacy):
+                        try:
+                            total_size = int(ob.head_object(legacy_key).content_length or 0)
+                            parsed_range = _parse_http_range(range_header, total_size) if (file_type or '').lower() == 'audio' else None
+                            if parsed_range:
+                                start, end = parsed_range
+                                oss_result = ob.get_object(legacy_key, byte_range=(start, end))
+                                content = oss_result.read()
+                                from mimetypes import guess_type
+                                from urllib.parse import quote
+                                media_type = guess_type(filename or "")[0] or "audio/mpeg"
+                                encoded_fn = quote(filename or "audio")
+                                return StreamingResponse(
+                                    iter([content]),
+                                    status_code=status.HTTP_206_PARTIAL_CONTENT,
+                                    media_type=media_type,
+                                    headers={
+                                        "Accept-Ranges": "bytes",
+                                        "Content-Range": f"bytes {start}-{end}/{total_size}",
+                                        "Content-Length": str(end - start + 1),
+                                        "Content-Disposition": f"inline; filename*=UTF-8''{encoded_fn}",
+                                    }
+                                )
+                            oss_result = ob.get_object(legacy_key)
                             content = oss_result.read()
-                            from mimetypes import guess_type
-                            from urllib.parse import quote
-                            media_type = guess_type(filename or "")[0] or "audio/mpeg"
-                            encoded_fn = quote(filename or "audio")
-                            return StreamingResponse(
-                                iter([content]),
-                                status_code=status.HTTP_206_PARTIAL_CONTENT,
-                                media_type=media_type,
-                                headers={
-                                    "Accept-Ranges": "bytes",
-                                    "Content-Range": f"bytes {start}-{end}/{total_size}",
-                                    "Content-Length": str(end - start + 1),
-                                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}",
-                                }
+                            info(
+                                f"兼容旧数据：从 URL 解析 OSS object key 并返回文件流 file_id={file_id}",
+                                source="api",
                             )
-                        oss_result = oss_legacy.bucket.get_object(legacy_key)
-                        content = oss_result.read()
-                        info(
-                            f"兼容旧数据：从 URL 解析 OSS object key 并返回文件流 file_id={file_id}",
-                            source="api",
-                        )
-                        resp = _serve_file_bytes_response(content, filename, file_type)
-                        resp.headers["Accept-Ranges"] = "bytes"
-                        return resp
-                    except Exception as e:
+                            resp = _serve_file_bytes_response(content, filename, file_type)
+                            resp.headers["Accept-Ranges"] = "bytes"
+                            return resp
+                        except Exception as e:
+                            last_err = e
+                            continue
+                    if last_err is not None:
                         warning(
-                            f"兼容模式 OSS 读取失败，继续尝试本地路径: {e}",
+                            f"兼容模式 OSS 读取失败（已依次尝试 URL 主机 bucket、DB oss_bucket、默认 bucket）: {last_err}",
                             source="api",
                             file_id=file_id,
                         )
 
         # 本地文件：检查文件是否存在
         if not file_path or not os.path.exists(file_path):
+            if isinstance(file_path, str) and file_path.startswith(("http://", "https://")):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        "Original file is not available in storage (OSS object not found or removed, "
+                        f"or URL outdated). file_id={file_id}"
+                    ),
+                )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
+                detail="File not found",
             )
         
         # 根据文件类型设置MIME type（支持非音频文件预览：pdf/doc/docx/excel/xlsx/xls/csv 等）
+        import mimetypes as _mimetypes
+
         mime_types = {
             'pdf': 'application/pdf',
             'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -2179,20 +2265,26 @@ async def serve_file(
             'jpeg': 'image/jpeg',
             'png': 'image/png',
             'gif': 'image/gif',
-            'bmp': 'image/bmp'
+            'bmp': 'image/bmp',
+            'audio': 'audio/mpeg',
         }
-        
-        media_type = mime_types.get(file_type.lower(), 'application/octet-stream')
-        
+
+        ft_lower = (file_type or "").lower()
+        guessed_mt, _ = _mimetypes.guess_type(filename or "")
+        media_type = mime_types.get(ft_lower, 'application/octet-stream')
+        if ft_lower == 'audio':
+            media_type = guessed_mt or media_type
+            if not media_type or media_type == 'application/octet-stream':
+                media_type = 'audio/mpeg'
+
         # 对文件名进行URL编码以支持中文等非ASCII字符
         # 使用RFC 2231标准的filename*参数
         from urllib.parse import quote
         encoded_filename = quote(filename)
-        
+
         # 使用FileResponse直接返回文件
-        # 对于PDF和图片，使用inline模式让浏览器直接显示
-        # 对于其他文件类型，使用attachment模式让浏览器下载
-        if file_type.lower() in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image']:
+        # PDF/图片/音频：inline，便于浏览器内预览与 <audio> 播放；其余默认 attachment
+        if ft_lower in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio']:
             # inline模式 - 浏览器直接显示
             return FileResponse(
                 path=file_path,

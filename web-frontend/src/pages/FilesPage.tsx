@@ -83,6 +83,7 @@ import ReportTickerTags, { parseReportTickers, PC_INFO_TAGS_TAG_STYLE } from '..
 import TemplateSelector from '../components/TemplateSelector';
 import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
+import OriginalPdfJsViewer from '../components/OriginalPdfJsViewer';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -115,6 +116,51 @@ function appendServeAuthToken(fileUrl: string, token: string | null): string {
   if (!pathOnly.includes('/api/files/serve/')) return fileUrl;
   const separator = fileUrl.includes('?') ? '&' : '?';
   return `${fileUrl}${separator}token=${encodeURIComponent(token)}`;
+}
+
+/** Original 面板：与后端枚举 / MIME 对齐，避免 application/pdf 等落入「无法在线预览」分支 */
+function isOriginalPdfFile(fileType: string | undefined | null, filename: string | undefined | null): boolean {
+  const ft = (fileType || '').toLowerCase();
+  if (ft === 'pdf' || ft === 'application/pdf') return true;
+  return /\.pdf$/i.test(filename || '');
+}
+
+/**
+ * 阿里云 OSS 虚拟主机默认域名且不像已签名 URL 时，浏览器常被 Content-Disposition 强制下载，iframe 无法内嵌预览。
+ * 签名参数不止 OSSAccessKeyId（STS / V4 等），需一并识别；走 `/api/files/serve/` 代理的 URL 一律视为可预览。
+ */
+function isUnsignedOssDefaultDomainObjectUrl(fileUrl: string): boolean {
+  if (!fileUrl) return false;
+  if (fileUrl.includes('/api/files/serve/')) return false;
+  try {
+    const u = new URL(fileUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const host = u.hostname.toLowerCase();
+    if (!host.includes('aliyuncs.com') && !host.includes('aliyuncs.net')) return false;
+    const q = u.search.slice(1).toLowerCase();
+    if (!q) return true;
+    if (
+      q.includes('ossaccesskeyid') ||
+      q.includes('signature=') ||
+      q.includes('x-oss-signature') ||
+      q.includes('x-oss-credential') ||
+      q.includes('security-token')
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** iframe/embed 使用绝对 URL，避免部分手机 WebView 对相对路径解析异常 */
+function absoluteUrlForEmbeddedFile(fileUrl: string): string {
+  if (!fileUrl) return fileUrl;
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) return fileUrl;
+  if (typeof window === 'undefined') return fileUrl;
+  if (fileUrl.startsWith('//')) return `${window.location.protocol}${fileUrl}`;
+  if (fileUrl.startsWith('/')) return `${window.location.origin}${fileUrl}`;
+  return fileUrl;
 }
 
 // 与 FRONTEND_STYLE_GUIDE 一致：语义化色板 + Behance 风格
@@ -1352,7 +1398,12 @@ const FilesPageInner: React.FC = () => {
   };
 
   const handleConfirmShare = async () => {
-    if (!shareTargetExecution || selectedShareUserIds.length === 0) return;
+    if (!shareTargetExecution) return;
+    if (selectedShareUserIds.length === 0) {
+      setShareModalVisible(false);
+      loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
+      return;
+    }
     setSharingInProgress(true);
     try {
       const detailResp = await tasksAPI.getTaskExecutionDetails(shareTargetExecution.id);
@@ -1367,6 +1418,7 @@ const FilesPageInner: React.FC = () => {
         result.skipped.forEach(s => message.warning(`Skipped user ${s.user_id}: ${s.reason}`));
       }
       setShareModalVisible(false);
+      loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
     } catch (err) {
       message.error('Failed to share file');
       console.error(err);
@@ -1380,6 +1432,7 @@ const FilesPageInner: React.FC = () => {
       await filesAPI.unshareFile(fileId, [userId]);
       setCurrentShares(prev => prev.filter(s => s.shared_to_user_id !== userId));
       message.success('Share removed');
+      loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
     } catch (err) {
       message.error('Failed to remove share');
     }
@@ -3431,10 +3484,9 @@ const FilesPageInner: React.FC = () => {
           open={shareModalVisible}
           onCancel={() => setShareModalVisible(false)}
           onOk={handleConfirmShare}
-          okText="Share"
+          okText={selectedShareUserIds.length > 0 ? 'Share' : 'Done'}
           cancelText="cancel"
           confirmLoading={sharingInProgress}
-          okButtonProps={{ disabled: selectedShareUserIds.length === 0 }}
           width={520}
           centered
           styles={getModalStyles(themeMode)}
@@ -4820,17 +4872,14 @@ export const OriginalContentView: React.FC<{
   return (
     <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', color: themeColors.text }}>
       {(() => {
-        const fileType = fileContent.file_type.toLowerCase();
+        const fileType = (fileContent.file_type || '').toLowerCase();
 
-        if (fileType === 'pdf') {
+        if (isOriginalPdfFile(fileContent.file_type, fileContent.filename)) {
           // PDF预览：仅当使用未签名的 OSS 默认域名时才无法预览（会被强制下载）
-          // 带签名的 URL（含 OSSAccessKeyId）已设置 response-content-disposition=inline，可正常预览
-          const isSignedOssUrl = fileContent.file_url && fileContent.file_url.includes('OSSAccessKeyId');
-          const isOssDefaultDomain = fileContent.file_url &&
-            fileContent.file_url.includes('.oss-cn-') &&
-            !isSignedOssUrl;
-          
-          if (isOssDefaultDomain) {
+          // 带签名的 URL 已设置 response-content-disposition=inline，可正常预览
+          const pdfEmbedSrc = absoluteUrlForEmbeddedFile(fileContent.file_url || '');
+
+          if (isUnsignedOssDefaultDomainObjectUrl(fileContent.file_url || '')) {
             // OSS 默认域名会强制下载，显示提示和下载按钮
             return (
               <div style={{ 
@@ -4877,8 +4926,8 @@ export const OriginalContentView: React.FC<{
               </div>
             );
           } else {
-            // 内嵌 PDF：iframe + 绝对定位填满。移动端 WebKit 在嵌套 flex 里对 height:100% 常算不出高度，
-            // 需明确 min-height；手机端详情页用 CSS 类 `.original-pdf-frame-host` 绑定 100dvh 余量，与 PC 一致直接预览、无额外按钮。
+            // 桌面：iframe 内嵌。手机：多数 Android WebView/自带浏览器无法在 iframe/embed 内嵌 PDF（Chrome 常只给 Open 外链），
+            // 使用 PDF.js 画布渲染，与浏览器内核无关、可滚动预览整份 PDF。
             return (
               <div
                 style={{
@@ -4897,19 +4946,30 @@ export const OriginalContentView: React.FC<{
                     border: `1px solid ${themeColors.cardBorder}`,
                     borderRadius: '8px',
                     overflow: 'hidden',
+                    display: isMobile ? 'flex' : undefined,
+                    flexDirection: isMobile ? 'column' : undefined,
                   }}
                 >
-                  <iframe
-                    src={fileContent.file_url}
-                    title={fileContent.filename}
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      width: '100%',
-                      height: '100%',
-                      border: 'none',
-                    }}
-                  />
+                  {isMobile ? (
+                    <OriginalPdfJsViewer
+                      fileUrl={pdfEmbedSrc}
+                      style={{ flex: 1, minHeight: 0 }}
+                      text={themeColors.text}
+                      textMuted={themeColors.textSecondary}
+                    />
+                  ) : (
+                    <iframe
+                      src={pdfEmbedSrc}
+                      title={fileContent.filename}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -5107,13 +5167,14 @@ export const OriginalContentView: React.FC<{
             </div>
           );
         } else if (fileType === 'audio' && fileContent.asr_with_diarization) {
-          // 音频文件：显示说话人分离可视化界面
+          // 音频文件：显示说话人分离可视化界面（手机端内联原生播放条，避免仅依赖 Modal 内 controls）
           return (
             <AudioDiarizationView
               fileContent={fileContent}
               themeColors={themeColors}
               isDark={isDark}
               onTranscriptPersisted={handleTranscriptPersisted}
+              inlineAudioPlayer={isMobile}
             />
           );
         } else if (fileType === 'youtube' && fileContent.asr_with_diarization) {
@@ -5175,7 +5236,9 @@ const AudioDiarizationView: React.FC<{
   onSpeakerUpdated?: () => void;
   /** 转写保存成功后：刷新 Original 数据与 Markdown 列表 */
   onTranscriptPersisted?: () => void | Promise<void>;
-}> = ({ fileContent, themeColors, isDark, onSpeakerUpdated, onTranscriptPersisted }) => {
+  /** 手机端：在正文顶部展示粘性原生 audio 控件，不依赖弹窗内播放 */
+  inlineAudioPlayer?: boolean;
+}> = ({ fileContent, themeColors, isDark, onSpeakerUpdated, onTranscriptPersisted, inlineAudioPlayer }) => {
   const themeMode = isDark ? 'dark' : 'light';
   const [localAsrData, setLocalAsrData] = useState(fileContent.asr_with_diarization);
   const [audioPlayerVisible, setAudioPlayerVisible] = useState(false);
@@ -5199,6 +5262,10 @@ const AudioDiarizationView: React.FC<{
   useEffect(() => {
     setLocalAsrData(fileContent.asr_with_diarization);
   }, [fileContent.asr_with_diarization]);
+
+  useEffect(() => {
+    setAudioPlaybackFailed(false);
+  }, [fileContent.file_id, fileContent.file_url]);
 
   const orderedAudioSentences = useMemo(() => {
     const sents = localAsrData?.sentences;
@@ -5384,8 +5451,8 @@ const AudioDiarizationView: React.FC<{
 
   const handleAudioPlaybackError = () => {
     setAudioPlaybackFailed(true);
-    message.warning('Cannot play audio in browser, downloading instead');
-    handleDownloadAudioFile();
+    // 不在此处自动触发下载：部分浏览器/WebView 会误报 error，自动下载会造成「播不了就变下载」
+    message.warning('Could not play this audio in the browser. Use Download audio or check the file format.');
   };
 
   const handleEditSpeaker = (speaker: any) => {
@@ -5801,15 +5868,57 @@ const AudioDiarizationView: React.FC<{
   
   // 渲染 Audio 格式（原有逻辑）
   return (
-    <div style={{ 
-      flex: 1, 
-      minHeight: 0, 
-      overflow: 'auto',
-      padding: '20px',
-      border: `1px solid ${themeColors.cardBorder}`,
-      borderRadius: '8px',
-      backgroundColor: isDark ? '#1a1d2e' : '#fafafa'
-    }}>
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          padding: '20px',
+          border: `1px solid ${themeColors.cardBorder}`,
+          borderRadius: '8px',
+          backgroundColor: isDark ? '#1a1d2e' : '#fafafa',
+        }}
+      >
+        {inlineAudioPlayer && fileContent.file_url && (
+          <div
+            className="original-inline-audio-player"
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 4,
+              margin: '-20px -20px 16px -20px',
+              padding: '12px 20px',
+              backgroundColor: isDark ? '#232738' : '#f5f5f5',
+              borderBottom: `1px solid ${themeColors.cardBorder}`,
+            }}
+          >
+            {!audioPlaybackFailed ? (
+              <audio
+                key={fileContent.file_id ?? fileContent.file_url}
+                src={fileContent.file_url}
+                controls
+                preload="metadata"
+                playsInline
+                onError={handleAudioPlaybackError}
+                style={{ width: '100%', display: 'block' }}
+              />
+            ) : (
+              <div style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                Playback unavailable in browser. Use Download or open the file link.
+              </div>
+            )}
+          </div>
+        )}
       {/* 头部信息 */}
       <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <div>
@@ -6085,6 +6194,8 @@ const AudioDiarizationView: React.FC<{
         })}
       </div>
 
+      </div>
+
       {/* 编辑说话人名称的 Modal */}
       <Modal
         title="Modify speaker name"
@@ -6156,6 +6267,7 @@ const AudioDiarizationView: React.FC<{
             controls
             autoPlay
             preload="metadata"
+            playsInline
             onError={handleAudioPlaybackError}
             style={{ width: '100%' }}
           />
