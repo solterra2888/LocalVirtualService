@@ -61,9 +61,14 @@ import {
   UsergroupAddOutlined,
   UserOutlined,
   ThunderboltOutlined,
-  CloudUploadOutlined
+  CloudUploadOutlined,
+  PlusOutlined,
+  FolderAddOutlined,
+  InboxOutlined,
+  DownOutlined,
+  UpOutlined
 } from '@ant-design/icons';
-import { filesAPI, SectorOption, TickerOption } from '../services/files';
+import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { fileTagsService } from '../services/fileTags';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -419,8 +424,21 @@ const FilesPageInner: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [tickerFilter, setTickerFilter] = useState<string | undefined>(undefined);
   const [tickerSearchOptions, setTickerSearchOptions] = useState<Array<{ value: string; label: string }>>([]);
+  /** 方案 B：高级搜索（Title / Content / Ticker）默认折叠 */
+  const [searchPanelExpanded, setSearchPanelExpanded] = useState(false);
   
-  
+  // Folder state
+  const [folders, setFolders] = useState<FolderResponse[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(undefined);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [editingFolderId, setEditingFolderId] = useState<number | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState('');
+  const [moveToFolderVisible, setMoveToFolderVisible] = useState(false);
+  const [moveTargetExecution, setMoveTargetExecution] = useState<any>(null);
+  /** 文件夹区：折叠块 + 内部滚动，默认收缩 */
+  const [folderPanelExpanded, setFolderPanelExpanded] = useState(false);
+
   // 文件内容查看相关状态
   const [fileContentVisible, setFileContentVisible] = useState(false);
   const [selectedFileContent, setSelectedFileContent] = useState<any>(null);
@@ -631,6 +649,7 @@ const FilesPageInner: React.FC = () => {
         page_size: EXECUTIONS_PAGE_SIZE,
         ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
         ...(searchType === 'ticker' && tickerFilter ? { ticker: tickerFilter } : {}),
+        ...(selectedFolderId ? { folder_id: selectedFolderId } : {}),
       });
       
       if (append) {
@@ -693,7 +712,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -832,12 +851,76 @@ const FilesPageInner: React.FC = () => {
     }
   }, [logger, setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
 
+  // ── Folder helpers ────────────────────────────────────────
+  const loadFolders = useCallback(async () => {
+    try {
+      const data = await filesAPI.getFolders();
+      setFolders(data);
+    } catch (e) {
+      console.error('Failed to load folders:', e);
+    }
+  }, []);
+
+  const handleCreateFolder = useCallback(async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    try {
+      await filesAPI.createFolder(name);
+      setNewFolderName('');
+      setCreatingFolder(false);
+      await loadFolders();
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Failed to create folder');
+    }
+  }, [newFolderName, loadFolders]);
+
+  const handleRenameFolder = useCallback(async (folderId: number) => {
+    const name = editingFolderName.trim();
+    if (!name) return;
+    try {
+      await filesAPI.updateFolder(folderId, { name });
+      setEditingFolderId(null);
+      setEditingFolderName('');
+      await loadFolders();
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Failed to rename folder');
+    }
+  }, [editingFolderName, loadFolders]);
+
+  const handleDeleteFolder = useCallback(async (folderId: number) => {
+    try {
+      await filesAPI.deleteFolder(folderId);
+      if (selectedFolderId === String(folderId)) {
+        setSelectedFolderId(undefined);
+      }
+      await loadFolders();
+      loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Failed to delete folder');
+    }
+  }, [selectedFolderId, loadFolders]);
+
+  const handleMoveToFolder = useCallback(async (executionId: string, folderId: number | null) => {
+    try {
+      await filesAPI.moveExecutionToFolder(Number(executionId), folderId);
+      await loadFolders();
+      loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+      message.success('Moved successfully');
+    } catch (e: unknown) {
+      const err = e as { response?: unknown };
+      if (!err?.response) {
+        message.error(getErrorMessage(e, 'Failed to move file'));
+      }
+    }
+  }, [loadFolders]);
+
   // 初始化加载：仅在组件挂载时执行一次
   useEffect(() => {
     loadTaskTypes();
     loadTaskExecutionsFunc();
     loadDefaultConfig();
     loadAllTemplates();
+    loadFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 空依赖数组，只在组件挂载时执行一次
 
@@ -846,6 +929,17 @@ const FilesPageInner: React.FC = () => {
   useEffect(() => {
     loadTaskExecutionsFuncRef.current = loadTaskExecutionsFunc;
   }, [loadTaskExecutionsFunc]);
+
+  // Refresh executions when folder filter changes (after ref update to avoid stale closure)
+  const isFolderMountRef = useRef(true);
+  useEffect(() => {
+    if (isFolderMountRef.current) { isFolderMountRef.current = false; return; }
+    const t = setTimeout(() => {
+      loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+    }, 50);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFolderId]);
 
   /** Watchlist 等外链：`/files?execution=<processing_stats_id>` 打开并选中对应来源任务，并重置筛选以便列表能显示该条 */
   useEffect(() => {
@@ -2832,6 +2926,27 @@ const FilesPageInner: React.FC = () => {
     ? filteredByType.filter(exec => (exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
     : filteredByType;
 
+  const hasActiveSourcesSearch =
+    (searchType !== 'ticker' && searchQuery.trim().length > 0) ||
+    (searchType === 'ticker' && Boolean(tickerFilter));
+
+  /** 类型筛选已并入 Search 面板：任一非默认即视为面板内有筛选 */
+  const hasAnySearchPanelFilter = hasActiveSourcesSearch || fileTypeFilter !== 'all';
+
+  const clearSourcesSearchFilters = () => {
+    setSearchQuery('');
+    setTickerFilter(undefined);
+    setTickerSearchOptions([]);
+    setFileTypeFilter('all');
+  };
+
+  const folderFilterSummary = useMemo(() => {
+    if (!selectedFolderId) return 'All';
+    if (selectedFolderId === 'uncategorized') return 'Uncategorized';
+    const f = folders.find(x => String(x.id) === selectedFolderId);
+    return f ? f.name : selectedFolderId;
+  }, [selectedFolderId, folders]);
+
   /** 筛选栏图标：中性色，与 `.files-list-type-tab` 文字色一致（无类型专色） */
   const FILE_TYPE_TABS: {
     key: typeof fileTypeFilter;
@@ -2938,22 +3053,211 @@ const FilesPageInner: React.FC = () => {
                 )}
               </Space>
             </div>
-            <div className="files-list-type-tabs">
-              {FILE_TYPE_TABS.map(({ key, label, icon }) => (
-                <Tooltip key={key} title={label}>
-                  <button
-                    type="button"
-                    className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
-                    onClick={() => setFileTypeFilter(key)}
-                    aria-label={label}
-                  >
-                    <span className="files-list-type-tab-icon">{icon}</span>
-                  </button>
-                </Tooltip>
-              ))}
+            {/* Folders：折叠块 + 内部滚动；file type + search 在 Search 面板 */}
+            <div
+              className={`files-folder-panel${isDark ? ' files-folder-panel--dark' : ''}`}
+              style={{ borderBottom: `1px solid ${themeColors.cardBorder}` }}
+            >
+              <button
+                type="button"
+                className="files-folder-panel-header"
+                onClick={() => setFolderPanelExpanded(v => !v)}
+                aria-expanded={folderPanelExpanded}
+                style={{ color: themeColors.text }}
+              >
+                <FolderOutlined style={{ fontSize: 14, opacity: 0.85 }} />
+                <span className="files-folder-panel-title">Folders</span>
+                <span
+                  className="files-folder-panel-summary"
+                  style={{ color: themeColors.textSecondary }}
+                  title={folderFilterSummary}
+                >
+                  {folderFilterSummary}
+                </span>
+                {folderPanelExpanded ? (
+                  <UpOutlined style={{ fontSize: 10, opacity: 0.65, marginLeft: 'auto' }} />
+                ) : (
+                  <DownOutlined style={{ fontSize: 10, opacity: 0.65, marginLeft: 'auto' }} />
+                )}
+              </button>
+              {folderPanelExpanded && (
+                <div className="files-folder-panel-body">
+                  <div className="files-folder-strip-scroll">
+                    <button
+                      type="button"
+                      className={`files-folder-chip${!selectedFolderId ? ' is-active' : ''}`}
+                      onClick={() => setSelectedFolderId(undefined)}
+                      style={{
+                        background: !selectedFolderId ? (isDark ? 'rgba(33,150,243,0.18)' : 'rgba(24,144,255,0.08)') : 'transparent',
+                        color: !selectedFolderId ? (isDark ? '#64B5F6' : '#1890ff') : themeColors.textSecondary,
+                        border: !selectedFolderId ? `1px solid ${isDark ? 'rgba(33,150,243,0.35)' : 'rgba(24,144,255,0.25)'}` : '1px solid transparent',
+                      }}
+                    >
+                      <AppstoreOutlined style={{ fontSize: 12, marginRight: 4 }} />All
+                    </button>
+                    <button
+                      type="button"
+                      className={`files-folder-chip${selectedFolderId === 'uncategorized' ? ' is-active' : ''}`}
+                      onClick={() => setSelectedFolderId(selectedFolderId === 'uncategorized' ? undefined : 'uncategorized')}
+                      style={{
+                        background: selectedFolderId === 'uncategorized' ? (isDark ? 'rgba(33,150,243,0.18)' : 'rgba(24,144,255,0.08)') : 'transparent',
+                        color: selectedFolderId === 'uncategorized' ? (isDark ? '#64B5F6' : '#1890ff') : themeColors.textSecondary,
+                        border: selectedFolderId === 'uncategorized' ? `1px solid ${isDark ? 'rgba(33,150,243,0.35)' : 'rgba(24,144,255,0.25)'}` : '1px solid transparent',
+                      }}
+                    >
+                      <InboxOutlined style={{ fontSize: 12, marginRight: 4 }} />Uncategorized
+                    </button>
+                    {folders.map(folder => {
+                      const isActive = selectedFolderId === String(folder.id);
+                      return (
+                        <Dropdown
+                          key={folder.id}
+                          trigger={['contextMenu']}
+                          menu={{
+                            items: [
+                              { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
+                              { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'rename') {
+                                setEditingFolderId(folder.id);
+                                setEditingFolderName(folder.name);
+                              } else if (key === 'delete') {
+                                Modal.confirm({
+                                  title: 'Delete folder?',
+                                  content: `Files in "${folder.name}" will be moved to Uncategorized.`,
+                                  okText: 'Delete',
+                                  okButtonProps: { danger: true },
+                                  onOk: () => handleDeleteFolder(folder.id),
+                                });
+                              }
+                            },
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`files-folder-chip${isActive ? ' is-active' : ''}`}
+                            onClick={() => setSelectedFolderId(isActive ? undefined : String(folder.id))}
+                            style={{
+                              background: isActive ? (isDark ? 'rgba(33,150,243,0.18)' : 'rgba(24,144,255,0.08)') : 'transparent',
+                              color: isActive ? (isDark ? '#64B5F6' : '#1890ff') : themeColors.textSecondary,
+                              border: isActive ? `1px solid ${isDark ? 'rgba(33,150,243,0.35)' : 'rgba(24,144,255,0.25)'}` : '1px solid transparent',
+                            }}
+                          >
+                            {editingFolderId === folder.id ? (
+                              <Input
+                                size="small"
+                                value={editingFolderName}
+                                onChange={e => setEditingFolderName(e.target.value)}
+                                onPressEnter={() => handleRenameFolder(folder.id)}
+                                onBlur={() => handleRenameFolder(folder.id)}
+                                autoFocus
+                                style={{ width: 80, height: 20, fontSize: 12, padding: '0 4px' }}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            ) : (
+                              <>
+                                <FolderOutlined style={{ fontSize: 12, marginRight: 4 }} />
+                                {folder.name}
+                                <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 11 }}>({folder.file_count})</span>
+                              </>
+                            )}
+                          </button>
+                        </Dropdown>
+                      );
+                    })}
+                    {creatingFolder ? (
+                      <Input
+                        size="small"
+                        placeholder="Folder name"
+                        value={newFolderName}
+                        onChange={e => setNewFolderName(e.target.value)}
+                        onPressEnter={handleCreateFolder}
+                        onBlur={() => { if (!newFolderName.trim()) setCreatingFolder(false); else handleCreateFolder(); }}
+                        autoFocus
+                        style={{ width: 100, height: 24, fontSize: 12, borderRadius: 12 }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="files-folder-chip files-folder-chip-add"
+                        onClick={() => setCreatingFolder(true)}
+                        style={{ color: themeColors.textSecondary }}
+                      >
+                        <PlusOutlined style={{ fontSize: 11 }} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div
-              className={`files-list-search-bar${isDark ? ' files-list-search-bar--dark' : ''}`}
+              className={`files-list-search-toggle-row${isDark ? ' files-list-search-toggle-row--dark' : ''}`}
+              style={{ borderBottom: `1px solid ${themeColors.cardBorder}` }}
+            >
+              <button
+                type="button"
+                className="files-list-search-toggle-btn"
+                onClick={() => setSearchPanelExpanded(v => !v)}
+                aria-expanded={searchPanelExpanded}
+              >
+                <SearchOutlined style={{ marginRight: 6, color: themeColors.textSecondary }} />
+                <span style={{ color: themeColors.text, fontWeight: 500 }}>Search</span>
+                {hasAnySearchPanelFilter && (
+                  <span className="files-search-active-dot" title="Filters active" />
+                )}
+                {searchPanelExpanded ? <UpOutlined style={{ marginLeft: 6, fontSize: 10, opacity: 0.65 }} /> : <DownOutlined style={{ marginLeft: 6, fontSize: 10, opacity: 0.65 }} />}
+              </button>
+              {!searchPanelExpanded && hasAnySearchPanelFilter && (
+                <span
+                  className="files-search-filter-preview"
+                  title={
+                    [
+                      fileTypeFilter !== 'all' ? `Type: ${FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}` : '',
+                      hasActiveSourcesSearch
+                        ? (searchType === 'ticker' ? `Ticker: ${tickerFilter}` : `${searchType === 'file_name' ? 'Title' : 'Content'}: ${searchQuery.trim()}`)
+                        : '',
+                    ].filter(Boolean).join(' · ')
+                  }
+                >
+                  {fileTypeFilter !== 'all' && (
+                    <>
+                      Type:{' '}
+                      <span className="files-search-filter-preview-value">
+                        {FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}
+                      </span>
+                      {(hasActiveSourcesSearch) ? <span style={{ opacity: 0.45 }}> · </span> : null}
+                    </>
+                  )}
+                  {hasActiveSourcesSearch && (
+                    <>
+                      {searchType === 'file_name' && 'Title: '}
+                      {searchType === 'content' && 'Content: '}
+                      {searchType === 'ticker' && 'Ticker: '}
+                      <span className="files-search-filter-preview-value">
+                        {searchType === 'ticker' ? tickerFilter : (searchQuery.trim() || '…')}
+                      </span>
+                    </>
+                  )}
+                </span>
+              )}
+              {hasAnySearchPanelFilter && (
+                <Button
+                  type="link"
+                  size="small"
+                  className="files-search-clear-link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearSourcesSearchFilters();
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            {searchPanelExpanded && (
+            <div
+              className={`files-list-search-bar files-list-search-bar--expandable${isDark ? ' files-list-search-bar--dark' : ''}`}
               style={
                 {
                   '--files-sources-search-border': themeColors.cardBorder,
@@ -2961,6 +3265,20 @@ const FilesPageInner: React.FC = () => {
                 } as React.CSSProperties
               }
             >
+              <div className="files-list-type-tabs files-list-type-tabs--in-search" aria-label="File type">
+                {FILE_TYPE_TABS.map(({ key, label, icon }) => (
+                  <Tooltip key={key} title={label}>
+                    <button
+                      type="button"
+                      className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
+                      onClick={() => setFileTypeFilter(key)}
+                      aria-label={label}
+                    >
+                      <span className="files-list-type-tab-icon">{icon}</span>
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
               <Space.Compact block className="files-list-search-compact">
                 <Segmented
                   size="small"
@@ -3032,9 +3350,57 @@ const FilesPageInner: React.FC = () => {
                 )}
               </Space.Compact>
             </div>
+            )}
             {batchMode && selectedExecutionIds.length > 0 && (
               <div className="files-list-batch-bar">
                 <span className="files-list-batch-count">{selectedExecutionIds.length} selected</span>
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'move-root', icon: <InboxOutlined />, label: 'Uncategorized',
+                        onClick: async () => {
+                          try {
+                            await filesAPI.batchMoveToFolder(selectedExecutionIds.map(Number), null);
+                            await loadFolders();
+                            loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+                            message.success('Moved to Uncategorized');
+                          } catch (e: unknown) {
+                            const err = e as { response?: unknown };
+                            if (!err?.response) {
+                              message.error(getErrorMessage(e, 'Move failed'));
+                            }
+                          }
+                        },
+                      },
+                      ...folders.map(f => ({
+                        key: `bmove-${f.id}`, icon: <FolderOutlined />, label: f.name,
+                        onClick: async () => {
+                          try {
+                            await filesAPI.batchMoveToFolder(selectedExecutionIds.map(Number), f.id);
+                            await loadFolders();
+                            loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+                            message.success(`Moved to ${f.name}`);
+                          } catch (e: unknown) {
+                            const err = e as { response?: unknown };
+                            if (!err?.response) {
+                              message.error(getErrorMessage(e, 'Move failed'));
+                            }
+                          }
+                        },
+                      })),
+                    ],
+                  }}
+                  trigger={['click']}
+                >
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<FolderOutlined />}
+                    className="files-list-batch-bar-btn"
+                  >
+                    Move to
+                  </Button>
+                </Dropdown>
                 <Button
                   type="primary"
                   danger
@@ -3103,6 +3469,25 @@ const FilesPageInner: React.FC = () => {
                       handleOpenRename(execution);
                     },
                   },
+                  ...(!isSharedFile ? [{
+                    key: 'move-to-folder',
+                    icon: <FolderOutlined />,
+                    label: 'Move to Folder',
+                    children: [
+                      {
+                        key: 'move-to-root',
+                        icon: <InboxOutlined />,
+                        label: 'Uncategorized',
+                        onClick: (e: any) => { e.domEvent.stopPropagation(); handleMoveToFolder(execution.id, null); },
+                      },
+                      ...folders.map(f => ({
+                        key: `move-to-${f.id}`,
+                        icon: <FolderOutlined />,
+                        label: f.name,
+                        onClick: (e: any) => { e.domEvent.stopPropagation(); handleMoveToFolder(execution.id, f.id); },
+                      })),
+                    ],
+                  }] : []),
                   ...(!isSharedFile ? [{
                     key: 'delete',
                     icon: <DeleteOutlined />,
@@ -5950,6 +6335,7 @@ const AudioDiarizationView: React.FC<{
           confirmLoading={savingTranscript}
           centered
           width={560}
+          zIndex={1100}
           styles={getModalStyles(themeMode)}
         >
           <div style={{ marginTop: 12 }}>
@@ -6306,6 +6692,7 @@ const AudioDiarizationView: React.FC<{
         cancelText="cancel"
         confirmLoading={savingLabel}
         centered
+        zIndex={1100}
         styles={getModalStyles(themeMode)}
       >
         <div style={{ marginTop: '16px' }}>
@@ -6332,6 +6719,7 @@ const AudioDiarizationView: React.FC<{
         confirmLoading={savingTranscript}
         centered
         width={560}
+        zIndex={1100}
         styles={getModalStyles(themeMode)}
       >
         <div style={{ marginTop: 12 }}>
@@ -6359,6 +6747,7 @@ const AudioDiarizationView: React.FC<{
         ]}
         centered
         width={640}
+        zIndex={1100}
         styles={getModalStyles(themeMode)}
       >
         {!audioPlaybackFailed ? (

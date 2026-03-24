@@ -288,7 +288,8 @@ async def get_task_executions(
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     search_type: Optional[str] = Query(None, description="搜索类型: file_name 或 content"),
     q: Optional[str] = Query(None, description="搜索关键词"),
-    ticker: Optional[str] = Query(None, description="按ticker筛选（精确匹配file_tags中的ticker数组元素）")
+    ticker: Optional[str] = Query(None, description="按ticker筛选（精确匹配file_tags中的ticker数组元素）"),
+    folder_id: Optional[str] = Query(None, description="按文件夹筛选: 数字=指定文件夹, 'uncategorized'=未分类, 不传=全部")
 ):
     """
     获取任务执行历史
@@ -298,6 +299,7 @@ async def get_task_executions(
     - **search_type**: 搜索类型（file_name 按文件名，content 按文件内容）
     - **q**: 搜索关键词，与 search_type 配合使用
     - **ticker**: 按股票代码筛选，匹配file_tags中包含该ticker的执行记录
+    - **folder_id**: 按文件夹筛选，数字=指定文件夹ID，'uncategorized'=未分类文件
     """
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
@@ -348,6 +350,21 @@ async def get_task_executions(
             )
             params.append(json.dumps([ticker.strip()]))
         
+        if folder_id is not None and folder_id != '':
+            if folder_id == 'uncategorized':
+                where_conditions.append(
+                    "EXISTS (SELECT 1 FROM file_processing_details fpd_f WHERE fpd_f.processing_stats_id = ps.id AND fpd_f.folder_id IS NULL)"
+                )
+            else:
+                try:
+                    fid = int(folder_id)
+                    where_conditions.append(
+                        "EXISTS (SELECT 1 FROM file_processing_details fpd_f WHERE fpd_f.processing_stats_id = ps.id AND fpd_f.folder_id = %s)"
+                    )
+                    params.append(fid)
+                except ValueError:
+                    pass
+
         where_clause = ("WHERE " + " AND ".join(where_conditions)) if where_conditions else ""
         
         access_type_expr = """CASE WHEN ps."user" = %s THEN 'owner' ELSE 'shared' END"""
@@ -376,7 +393,14 @@ async def get_task_executions(
                 ORDER BY id ASC LIMIT 1) as first_task_id,
                ps.upload_params,
                {access_type_expr} as access_type,
-               {shared_by_expr} as shared_by
+               {shared_by_expr} as shared_by,
+               (SELECT fpd_fo.folder_id FROM file_processing_details fpd_fo
+                WHERE fpd_fo.processing_stats_id = ps.id
+                ORDER BY fpd_fo.id ASC LIMIT 1) as folder_id,
+               (SELECT ff.name FROM file_processing_details fpd_fn
+                JOIN file_folders ff ON ff.id = fpd_fn.folder_id
+                WHERE fpd_fn.processing_stats_id = ps.id
+                ORDER BY fpd_fn.id ASC LIMIT 1) as folder_name
         FROM processing_stats ps
         {where_clause}
         ORDER BY ps.id DESC 
@@ -437,6 +461,8 @@ async def get_task_executions(
                 shared_by=stat[19] if len(stat) > 19 else None,
                 share_info=share_info_map.get(stat[0]),
                 ticker_tags=ticker_tags_map.get(stat[0]),
+                folder_id=stat[20] if len(stat) > 20 else None,
+                folder_name=stat[21] if len(stat) > 21 else None,
             )
             for stat in stats
         ]

@@ -6,9 +6,9 @@
 
 .mobile-sources-toolbar {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   padding: 12px 16px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
@@ -17,12 +17,41 @@
   z-index: 5;
 }
 
+.mobile-sources-toolbar-top {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.mobile-sources-toolbar-top .mobile-sources-batch-btn.ant-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.mobile-sources-toolbar-title-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-sources-toolbar-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.mobile-sources-toolbar-sub {
+  font-size: 12px;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+
 .mobile-sources-toolbar-input-row {
   display: flex;
-  flex: 1;
   align-items: center;
   min-width: 0;
-  gap: 12px;
+  width: 100%;
 }
 
 .mobile-sources-search-compact {
@@ -30,7 +59,7 @@
   min-width: 0;
 }
 
-/* 整条搜索区外轮廓四角统一圆角；边框与 Batch 默认按钮一致（由页面注入 --mobile-sources-control-border） */
+/* 整条搜索区外轮廓四角统一圆角（由页面注入 --mobile-sources-control-border） */
 .mobile-sources-search-compact.ant-space-compact {
   display: flex;
   align-items: stretch;
@@ -186,10 +215,6 @@
   line-height: 1.35;
 }
 
-.mobile-sources-batch-btn.ant-btn {
-  flex-shrink: 0;
-}
-
 .mobile-sources-batch-bar {
   display: flex;
   align-items: center;
@@ -199,6 +224,77 @@
   background: #e6f7ff;
   border-bottom: 1px solid #91d5ff;
   font-size: 13px;
+}
+
+/* 左侧文件夹 Drawer（与 Feeds 订阅抽屉布局一致：全宽可点行） */
+.mobile-sources-folder-row-wrap {
+  margin-bottom: 4px;
+}
+
+.mobile-sources-folder-row-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.mobile-sources-folder-row-inner .mobile-sources-folder-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-sources-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1.3;
+  transition: background 0.15s;
+}
+
+.mobile-sources-folder-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.mobile-sources-page--dark .mobile-sources-folder-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mobile-sources-folder-row.is-active {
+  background: rgba(24, 144, 255, 0.1);
+}
+
+.mobile-sources-page--dark .mobile-sources-folder-row.is-active {
+  background: rgba(33, 150, 243, 0.22);
+}
+
+.mobile-sources-folder-row-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.mobile-sources-folder-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.mobile-sources-folder-row-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .mobile-sources-list {

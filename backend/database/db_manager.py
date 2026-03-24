@@ -207,6 +207,46 @@ class DatabaseManager:
             print(f"迁移asr_with_diarization字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
+    def _create_file_folders_table(self, cursor):
+        """创建 file_folders 表（一级文件夹功能）"""
+        try:
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS file_folders (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                username TEXT NOT NULL,
+                color VARCHAR(20) DEFAULT '',
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, name)
+            )
+            """)
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_file_folders_username ON file_folders(username)
+            """)
+        except Exception as e:
+            print(f"创建file_folders表时出错: {str(e)}")
+
+    def _migrate_add_folder_id_to_file_processing_details(self, cursor):
+        """迁移：为file_processing_details表添加folder_id字段"""
+        try:
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='file_processing_details' AND column_name='folder_id'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("""
+                ALTER TABLE file_processing_details 
+                ADD COLUMN folder_id INTEGER REFERENCES file_folders(id) ON DELETE SET NULL
+                """)
+                cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fpd_folder_id ON file_processing_details(folder_id)
+                """)
+                print("已添加folder_id字段到file_processing_details表")
+        except Exception as e:
+            print(f"迁移folder_id字段时出错: {str(e)}")
+
     def _create_file_shares_table(self, cursor):
         """创建 file_shares 表（文件分享功能）"""
         try:
@@ -491,6 +531,10 @@ class DatabaseManager:
             
             # 创建 IPO 日历相关表
             self._create_ipo_calendar_tables(conn)
+            
+            # 创建文件夹相关表 + 迁移 folder_id 字段
+            self._create_file_folders_table(conn.cursor())
+            self._migrate_add_folder_id_to_file_processing_details(conn.cursor())
             
             conn.commit()
             conn.close()

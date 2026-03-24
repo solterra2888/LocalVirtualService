@@ -69,6 +69,8 @@ class TaskExecutionResponse(BaseModel):
         None,
         description="该 execution 下所有文件 file_tags.ticker 合并去重后的代码列表（与移动端卡片一致）",
     )
+    folder_id: Optional[int] = Field(None, description="文件夹 ID（首个文件的 folder_id）")
+    folder_name: Optional[str] = Field(None, description="文件夹名称")
     
     class Config:
         from_attributes = True

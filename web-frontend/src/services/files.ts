@@ -162,6 +162,15 @@ export interface FileTagBatchCreate {
   ticker?: string;
 }
 
+export interface FolderResponse {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  file_count: number;
+  created_at?: string;
+}
+
 export const filesAPI = {
   // 上传文件
   uploadFiles: async (files: File[]): Promise<FileUploadResponse[]> => {
@@ -811,5 +820,50 @@ export const filesAPI = {
 
   getShareableUsers: async (): Promise<Array<{ id: number; username: string }>> => {
     return api.get('/users/shareable');
+  },
+
+  // ── Folder APIs ──────────────────────────────────────────────
+
+  getFolders: async (): Promise<FolderResponse[]> => {
+    return api.get<FolderResponse[]>('/files/folders');
+  },
+
+  createFolder: async (name: string, color?: string): Promise<FolderResponse> => {
+    return api.post<FolderResponse>('/files/folders', { name, color: color || '' });
+  },
+
+  updateFolder: async (folderId: number, data: { name?: string; color?: string; sort_order?: number }): Promise<FolderResponse> => {
+    return api.patch<FolderResponse>(`/files/folders/${folderId}`, data);
+  },
+
+  deleteFolder: async (folderId: number): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/files/folders/${folderId}`);
+  },
+
+  moveExecutionToFolder: async (executionId: number, folderId: number | null): Promise<{ message: string }> => {
+    const eid = Math.trunc(Number(executionId));
+    if (!Number.isFinite(eid) || eid <= 0) {
+      return Promise.reject(new Error('Invalid execution id'));
+    }
+    const fid = folderId == null ? null : Math.trunc(Number(folderId));
+    const safeFid =
+      fid == null || !Number.isFinite(fid) ? null : fid;
+    return api.patch<{ message: string }>(`/files/folders/move/${eid}`, { folder_id: safeFid });
+  },
+
+  batchMoveToFolder: async (executionIds: number[], folderId: number | null): Promise<{ message: string }> => {
+    const ids = executionIds
+      .map((x) => Math.trunc(Number(x)))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (ids.length === 0) {
+      return Promise.reject(new Error('No valid execution ids'));
+    }
+    const fid = folderId == null ? null : Math.trunc(Number(folderId));
+    const safeFid =
+      fid == null || !Number.isFinite(fid) ? null : fid;
+    return api.patch<{ message: string }>('/files/folders/batch-move', {
+      execution_ids: ids,
+      folder_id: safeFid,
+    });
   },
 }; 

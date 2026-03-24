@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import MobileSourceFileDetail from '../components/MobileSourceFileDetail';
 import {
   App,
@@ -18,6 +18,7 @@ import {
   Tooltip,
   Tag,
   Typography,
+  Drawer,
   theme as antdTheme,
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -38,8 +39,12 @@ import {
   EllipsisOutlined,
   FolderAddOutlined,
   ShareAltOutlined,
+  MenuOutlined,
+  FolderOutlined,
+  InboxOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
-import { filesAPI } from '../services/files';
+import { filesAPI, FolderResponse } from '../services/files';
 import { fileTagsService } from '../services/fileTags';
 import { tasksAPI, TaskExecution } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -134,6 +139,16 @@ const MobileSourcesInner: React.FC = () => {
   const searchQueryRef = useRef(searchQuery);
   const tickerFilterRef = useRef<string | undefined>(undefined);
   const prevSearchTypeForReloadRef = useRef<'file_name' | 'content' | 'ticker'>(searchType);
+  const selectedFolderIdRef = useRef<string | undefined>(undefined);
+
+  const [folders, setFolders] = useState<FolderResponse[]>([]);
+  const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(undefined);
+  const [batchMoveLoading, setBatchMoveLoading] = useState(false);
 
   const [batchMode, setBatchMode] = useState(false);
   const [selectedExecutionIds, setSelectedExecutionIds] = useState<string[]>([]);
@@ -182,6 +197,10 @@ const MobileSourcesInner: React.FC = () => {
   }, [searchType, searchQuery, tickerFilter]);
 
   useEffect(() => {
+    selectedFolderIdRef.current = selectedFolderId;
+  }, [selectedFolderId]);
+
+  useEffect(() => {
     detailExecutionRef.current = detailExecution;
   }, [detailExecution]);
 
@@ -197,12 +216,14 @@ const MobileSourcesInner: React.FC = () => {
       const tf = tickerFilterRef.current;
       const useContentApi = st === 'content' && sq.length > 0;
       const useTickerApi = st === 'ticker' && !!tf;
+      const fid = selectedFolderIdRef.current;
 
       const executions = await tasksAPI.getTaskExecutions({
         page: pageToLoad,
         page_size: EXECUTIONS_PAGE_SIZE,
         ...(useContentApi ? { search_type: 'content', q: sq } : {}),
         ...(useTickerApi && tf ? { ticker: tf } : {}),
+        ...(fid ? { folder_id: fid } : {}),
       });
 
       if (append) {
@@ -222,6 +243,104 @@ const MobileSourcesInner: React.FC = () => {
     }
   }, [message]);
 
+  const loadFolders = useCallback(async () => {
+    try {
+      const data = await filesAPI.getFolders();
+      setFolders(data);
+    } catch (e) {
+      console.error('Failed to load folders:', e);
+    }
+  }, []);
+
+  const handleCreateFolder = useCallback(async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    try {
+      await filesAPI.createFolder(name);
+      setNewFolderName('');
+      setCreatingFolder(false);
+      await loadFolders();
+    } catch (e: unknown) {
+      message.error(getErrorMessage(e, 'Failed to create folder'));
+    }
+  }, [newFolderName, loadFolders, message]);
+
+  const handleRenameFolder = useCallback(async (folderId: number) => {
+    const name = editingFolderName.trim();
+    if (!name) return;
+    try {
+      await filesAPI.updateFolder(folderId, { name });
+      setEditingFolderId(null);
+      setEditingFolderName('');
+      await loadFolders();
+    } catch (e: unknown) {
+      message.error(getErrorMessage(e, 'Failed to rename folder'));
+    }
+  }, [editingFolderName, loadFolders, message]);
+
+  const handleDeleteFolder = useCallback(
+    async (folderId: number) => {
+      try {
+        await filesAPI.deleteFolder(folderId);
+        if (selectedFolderId === String(folderId)) {
+          setSelectedFolderId(undefined);
+        }
+        await loadFolders();
+        loadTaskExecutionsFuncRef.current(false, false).catch(() => {});
+      } catch (e: unknown) {
+        message.error(getErrorMessage(e, 'Failed to delete folder'));
+      }
+    },
+    [selectedFolderId, loadFolders, message],
+  );
+
+  const handleMoveToFolder = useCallback(
+    async (executionId: string, folderId: number | null) => {
+      try {
+        await filesAPI.moveExecutionToFolder(Number(executionId), folderId);
+        await loadFolders();
+        loadTaskExecutionsFuncRef.current(false, false).catch(() => {});
+        message.success('Moved successfully');
+      } catch (e: unknown) {
+        const err = e as { response?: unknown };
+        if (!err?.response) {
+          message.error(getErrorMessage(e, 'Failed to move file'));
+        }
+      }
+    },
+    [loadFolders, message],
+  );
+
+  const handleBatchMoveToFolder = useCallback(
+    async (folderId: number | null) => {
+      if (selectedExecutionIds.length === 0) {
+        message.warning('Select items first');
+        return;
+      }
+      try {
+        setBatchMoveLoading(true);
+        await filesAPI.batchMoveToFolder(selectedExecutionIds.map(Number), folderId);
+        await loadFolders();
+        loadTaskExecutionsFuncRef.current(false, false).catch(() => {});
+        message.success('Moved successfully');
+        setSelectedExecutionIds([]);
+        setBatchMode(false);
+      } catch (e: unknown) {
+        message.error(getErrorMessage(e, 'Move failed'));
+      } finally {
+        setBatchMoveLoading(false);
+      }
+    },
+    [selectedExecutionIds, loadFolders, message],
+  );
+
+  const folderFilterSummary = useMemo(() => {
+    if (!selectedFolderId) return 'All';
+    if (selectedFolderId === 'uncategorized') return 'Uncategorized';
+    const f = folders.find(x => String(x.id) === selectedFolderId);
+    return f ? f.name : selectedFolderId;
+  }, [selectedFolderId, folders]);
+
   const handleDetailRefreshList = useCallback(async () => {
     await loadTaskExecutionsFunc(false, false);
     const id = detailExecutionRef.current?.id;
@@ -239,9 +358,25 @@ const MobileSourcesInner: React.FC = () => {
   }, [loadTaskExecutionsFunc]);
 
   useEffect(() => {
+    loadFolders();
+  }, [loadFolders]);
+
+  useEffect(() => {
     loadTaskExecutionsFunc(true, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const isFolderMountRef = useRef(true);
+  useEffect(() => {
+    if (isFolderMountRef.current) {
+      isFolderMountRef.current = false;
+      return;
+    }
+    const t = setTimeout(() => {
+      loadTaskExecutionsFuncRef.current(false, false).catch(() => {});
+    }, 50);
+    return () => clearTimeout(t);
+  }, [selectedFolderId]);
 
   /** 内容搜索：切换类型或关键词时重新拉取（防抖与 PC Sources 一致） */
   useEffect(() => {
@@ -503,6 +638,35 @@ const MobileSourcesInner: React.FC = () => {
           borderBottom: `1px solid ${themeColors.cardBorder}`,
         }}
       >
+        <div className="mobile-sources-toolbar-top">
+          <Button
+            type="text"
+            icon={<MenuOutlined style={{ fontSize: 18 }} />}
+            onClick={() => setFolderDrawerOpen(true)}
+            aria-label="Folders"
+            style={{ color: themeColors.textSecondary }}
+          />
+          <div className="mobile-sources-toolbar-title-block">
+            <div className="mobile-sources-toolbar-title" style={{ color: themeColors.text }}>
+              Sources
+            </div>
+            <div className="mobile-sources-toolbar-sub" style={{ color: themeColors.textSecondary }}>
+              {folderFilterSummary}
+            </div>
+          </div>
+          <Button
+            type={batchMode ? 'primary' : 'default'}
+            shape="circle"
+            className="mobile-sources-batch-btn"
+            icon={<FolderAddOutlined />}
+            onClick={() => {
+              setBatchMode(v => !v);
+              if (batchMode) setSelectedExecutionIds([]);
+            }}
+            aria-label={batchMode ? 'Exit batch mode' : 'Batch operations'}
+            title={batchMode ? 'Exit batch mode' : 'Batch operations'}
+          />
+        </div>
         <div className="mobile-sources-toolbar-input-row">
           <Space.Compact block className="mobile-sources-search-compact">
             <Segmented
@@ -574,39 +738,60 @@ const MobileSourcesInner: React.FC = () => {
               />
             )}
           </Space.Compact>
-          <Button
-            type={batchMode ? 'primary' : 'default'}
-            shape="circle"
-            className="mobile-sources-batch-btn"
-            icon={<FolderAddOutlined />}
-            onClick={() => {
-              setBatchMode(v => !v);
-              if (batchMode) setSelectedExecutionIds([]);
-            }}
-            aria-label={batchMode ? 'Exit batch mode' : 'Batch operations'}
-            title={batchMode ? 'Exit batch mode' : 'Batch operations'}
-          />
         </div>
       </div>
 
       {batchMode && selectedExecutionIds.length > 0 && (
         <div className="mobile-sources-batch-bar">
           <span>{selectedExecutionIds.length} selected</span>
-          <Button
-            type="primary"
-            danger
-            size="small"
-            loading={deletingExecutions}
-            icon={<DeleteOutlined />}
-            onClick={handleBatchDeleteExecutions}
-          >
-            Delete
-          </Button>
+          <Space size={8}>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'uncat',
+                    icon: <InboxOutlined />,
+                    label: 'Uncategorized',
+                    onClick: () => {
+                      void handleBatchMoveToFolder(null);
+                    },
+                  },
+                  ...folders.map(f => ({
+                    key: `f-${f.id}`,
+                    icon: <FolderOutlined />,
+                    label: f.name,
+                    onClick: () => {
+                      void handleBatchMoveToFolder(f.id);
+                    },
+                  })),
+                ],
+              }}
+              trigger={['click']}
+            >
+              <Button size="small" loading={batchMoveLoading} icon={<FolderOutlined />}>
+                Move
+              </Button>
+            </Dropdown>
+            <Button
+              type="primary"
+              danger
+              size="small"
+              loading={deletingExecutions}
+              icon={<DeleteOutlined />}
+              onClick={handleBatchDeleteExecutions}
+            >
+              Delete
+            </Button>
+          </Space>
         </div>
       )}
 
       <Spin spinning={listLoading}>
-        <div ref={filesListScrollRef} className="mobile-sources-list" style={{ maxHeight: 'calc(100vh - 210px)', overflowY: 'auto' }}>
+        <div
+          ref={filesListScrollRef}
+          className="mobile-sources-list"
+          style={{ maxHeight: 'calc(100vh - 268px)', overflowY: 'auto' }}
+        >
           {filteredExecutions.length === 0 && !listLoading ? (
             <Empty
               description={
@@ -649,6 +834,31 @@ const MobileSourcesInner: React.FC = () => {
                 ...(!isSharedFile
                   ? [
                       {
+                        key: 'move-to-folder',
+                        icon: <FolderOutlined />,
+                        label: 'Move to Folder',
+                        children: [
+                          {
+                            key: 'move-to-root',
+                            icon: <InboxOutlined />,
+                            label: 'Uncategorized',
+                            onClick: (e: { domEvent: { stopPropagation: () => void } }) => {
+                              e.domEvent.stopPropagation();
+                              void handleMoveToFolder(execution.id, null);
+                            },
+                          },
+                          ...folders.map(f => ({
+                            key: `move-to-${f.id}`,
+                            icon: <FolderOutlined />,
+                            label: f.name,
+                            onClick: (e: { domEvent: { stopPropagation: () => void } }) => {
+                              e.domEvent.stopPropagation();
+                              void handleMoveToFolder(execution.id, f.id);
+                            },
+                          })),
+                        ],
+                      },
+                      {
                         key: 'delete',
                         icon: <DeleteOutlined />,
                         label: 'Delete',
@@ -672,8 +882,12 @@ const MobileSourcesInner: React.FC = () => {
                     background: themeColors.cardBg,
                     borderColor: themeColors.cardBorder,
                   }}
-                  onClick={() => {
-                    if (!batchMode) setDetailExecution(execution);
+                  onClick={e => {
+                    if (batchMode) return;
+                    // Portal 菜单事件会沿 React 树冒泡到卡片，需忽略下拉内点击（如 Move to Folder 子菜单）
+                    const el = e.target as HTMLElement;
+                    if (el.closest?.('.ant-dropdown')) return;
+                    setDetailExecution(execution);
                   }}
                   onKeyDown={e => {
                     if (batchMode) return;
@@ -788,6 +1002,169 @@ const MobileSourcesInner: React.FC = () => {
           )}
         </div>
       </Spin>
+
+      <Drawer
+        title={<span style={{ color: themeColors.text }}>Folders</span>}
+        placement="left"
+        width="min(100%, 360px)"
+        onClose={() => setFolderDrawerOpen(false)}
+        open={folderDrawerOpen}
+        rootClassName={isDark ? 'mobile-sources-folder-drawer--dark' : 'mobile-sources-folder-drawer--light'}
+        styles={{
+          content: { background: themeColors.cardBg },
+          header: {
+            background: themeColors.cardBg,
+            borderBottom: `1px solid ${themeColors.cardBorder}`,
+          },
+          body: {
+            background: themeColors.cardBg,
+            paddingTop: 8,
+            paddingLeft: 16,
+            paddingRight: 16,
+            paddingBottom: 24,
+            overflowY: 'auto',
+          },
+          ...(isDark ? { mask: { background: 'rgba(0, 0, 0, 0.65)' } } : {}),
+        }}
+      >
+        <div className="mobile-sources-folder-drawer-hint" style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+          Filter by folder
+        </div>
+        <button
+          type="button"
+          className={`mobile-sources-folder-row${!selectedFolderId ? ' is-active' : ''}`}
+          style={{ color: themeColors.text }}
+          onClick={() => {
+            setSelectedFolderId(undefined);
+            setFolderDrawerOpen(false);
+          }}
+        >
+          <AppstoreOutlined />
+          <span className="mobile-sources-folder-row-label">All</span>
+        </button>
+        <button
+          type="button"
+          className={`mobile-sources-folder-row${selectedFolderId === 'uncategorized' ? ' is-active' : ''}`}
+          style={{ color: themeColors.text }}
+          onClick={() => {
+            setSelectedFolderId('uncategorized');
+            setFolderDrawerOpen(false);
+          }}
+        >
+          <InboxOutlined />
+          <span className="mobile-sources-folder-row-label">Uncategorized</span>
+        </button>
+        {folders.map(folder => (
+          <div key={folder.id} className="mobile-sources-folder-row-wrap">
+            {editingFolderId === String(folder.id) ? (
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  value={editingFolderName}
+                  onChange={e => setEditingFolderName(e.target.value)}
+                  onPressEnter={() => void handleRenameFolder(folder.id)}
+                />
+                <Button type="primary" size="small" onClick={() => void handleRenameFolder(folder.id)}>
+                  Save
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setEditingFolderId(null);
+                    setEditingFolderName('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Space.Compact>
+            ) : (
+              <div className="mobile-sources-folder-row-inner">
+                <button
+                  type="button"
+                  className={`mobile-sources-folder-row${selectedFolderId === String(folder.id) ? ' is-active' : ''}`}
+                  style={{ color: themeColors.text }}
+                  onClick={() => {
+                    setSelectedFolderId(String(folder.id));
+                    setFolderDrawerOpen(false);
+                  }}
+                >
+                  <FolderOutlined />
+                  <span className="mobile-sources-folder-row-name">{folder.name}</span>
+                  <span className="mobile-sources-folder-row-count" style={{ color: themeColors.textSecondary }}>
+                    {folder.file_count}
+                  </span>
+                </button>
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'ren',
+                        label: 'Rename',
+                        icon: <EditOutlined />,
+                        onClick: () => {
+                          setEditingFolderId(String(folder.id));
+                          setEditingFolderName(folder.name);
+                        },
+                      },
+                      {
+                        key: 'del',
+                        label: 'Delete',
+                        danger: true,
+                        icon: <DeleteOutlined />,
+                        onClick: () => {
+                          modal.confirm({
+                            title: 'Delete folder?',
+                            content: 'Files remain in your library as uncategorized.',
+                            okText: 'Delete',
+                            okType: 'danger',
+                            cancelText: 'Cancel',
+                            centered: true,
+                            styles: getModalStyles(themeMode),
+                            onOk: () => handleDeleteFolder(folder.id),
+                          });
+                        },
+                      },
+                    ],
+                  }}
+                  trigger={['click']}
+                >
+                  <Button type="text" size="small" icon={<EllipsisOutlined />} aria-label="Folder actions" />
+                </Dropdown>
+              </div>
+            )}
+          </div>
+        ))}
+        {creatingFolder ? (
+          <Space.Compact style={{ width: '100%', marginTop: 16 }}>
+            <Input
+              placeholder="Folder name"
+              value={newFolderName}
+              onChange={e => setNewFolderName(e.target.value)}
+              onPressEnter={() => void handleCreateFolder()}
+            />
+            <Button type="primary" onClick={() => void handleCreateFolder()}>
+              Add
+            </Button>
+            <Button
+              onClick={() => {
+                setCreatingFolder(false);
+                setNewFolderName('');
+              }}
+            >
+              Cancel
+            </Button>
+          </Space.Compact>
+        ) : (
+          <Button
+            type="dashed"
+            block
+            icon={<PlusOutlined />}
+            onClick={() => setCreatingFolder(true)}
+            style={{ marginTop: 16 }}
+          >
+            New folder
+          </Button>
+        )}
+      </Drawer>
 
       {!detailExecution && (
         <button

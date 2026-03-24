@@ -5,6 +5,7 @@ import {
   isSessionReplaced401Detail,
   showSessionReplacedModal,
 } from '../utils/authSession';
+import { formatFastAPIDetail } from '../utils/errorHandler';
 
 // API基础配置
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
@@ -91,7 +92,8 @@ apiClient.interceptors.response.use(
       // 不在这里显示400错误，让调用方根据 detail 自行展示（如创建订阅时 Twitter 用户不存在）
       console.warn('400 Bad Request:', error.response?.data);
     } else if (error.response?.status && error.response.status >= 500) {
-      const errorMessage = (error.response?.data as any)?.detail || 'server internal error';
+      const raw = (error.response?.data as any)?.detail;
+      const errorMessage = raw != null ? formatFastAPIDetail(raw) : 'server internal error';
       message.error(`server error: ${errorMessage}`);
       console.error('Server Error Details:', error.response?.data);
     } else if (error.message === 'Network Error') {
@@ -104,7 +106,7 @@ apiClient.interceptors.response.use(
       const detail = (error.response?.data as any)?.detail;
       const errorMessage =
         detail != null
-          ? (typeof detail === 'string' ? detail : (detail?.message ?? String(detail)))
+          ? formatFastAPIDetail(detail)
           : error.message || 'unknown error';
       message.error(error.response?.data != null ? errorMessage : `request failed: ${errorMessage}`);
     }

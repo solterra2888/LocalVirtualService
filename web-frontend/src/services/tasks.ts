@@ -43,6 +43,8 @@ export interface TaskExecution {
   } | null;
   /** Aggregated from file_tags.ticker for all files in this execution (list + detail). */
   ticker_tags?: string[] | null;
+  folder_id?: number | null;
+  folder_name?: string | null;
 }
 
 export interface TaskCreateRequest {
@@ -107,6 +109,7 @@ export interface PaginationParams {
   search_type?: 'file_name' | 'content';
   q?: string;
   ticker?: string;
+  folder_id?: string;
 }
 
 export const tasksAPI = {

@@ -690,6 +690,107 @@
   border-color: rgba(255, 255, 255, 0.06);
 }
 
+/* 方案 B：折叠搜索 — 单行切换 + 展开后面板 */
+.files-page-layout .files-list-search-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 12px 8px;
+  background: var(--files-panel-bg, #fff);
+}
+
+.files-page-layout .files-list-search-toggle-row--dark {
+  background: var(--files-panel-bg);
+}
+
+.files-page-layout .files-list-search-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.files-page-layout .files-list-search-toggle-btn:hover {
+  background: var(--files-batch-bar-bg, #f1f5f9);
+}
+
+.app-dark .files-page-layout .files-list-search-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.files-page-layout .files-search-active-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #1890ff;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.app-dark .files-page-layout .files-search-active-dot {
+  background: #64b5f6;
+}
+
+.files-page-layout .files-search-filter-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--files-panel-meta, rgba(0, 0, 0, 0.45));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-dark .files-page-layout .files-search-filter-preview {
+  color: #A0A3AD;
+}
+
+.files-page-layout .files-search-filter-preview-value {
+  color: var(--files-panel-text, rgba(0, 0, 0, 0.88));
+  font-weight: 500;
+}
+
+.app-dark .files-page-layout .files-search-filter-preview-value {
+  color: #e6e9ef;
+}
+
+.files-page-layout .files-search-clear-link.ant-btn {
+  padding: 0 4px;
+  height: auto;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.files-page-layout .files-list-search-bar--expandable {
+  padding-top: 2px;
+}
+
+/* 类型筛选并入 Search 展开面板：置于 Title/Content/Ticker 之上 */
+.files-page-layout .files-list-type-tabs--in-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 10px 8px;
+  margin: 0;
+  border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
+  background: var(--files-panel-bg, #fff);
+}
+
+.app-dark .files-page-layout .files-list-type-tabs--in-search {
+  background: var(--files-panel-bg);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
 /* Sources 筛选：与手机端 MobileSources 同一套 Compact + Segmented + 输入/AutoComplete 外观 */
 .files-page-layout .files-list-search-bar {
   padding: 6px 10px 8px;
@@ -857,6 +958,139 @@
 .app-dark .files-page-layout .files-list-search-bar {
   background: var(--files-panel-bg);
 }
+
+/* ── Folders：折叠块 + 内部滚动 ───────────────────────────── */
+.files-page-layout .files-folder-panel {
+  background: var(--files-panel-bg, #fff);
+}
+
+.app-dark .files-page-layout .files-folder-panel {
+  background: var(--files-panel-bg);
+}
+
+.files-page-layout .files-folder-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  border-radius: 0;
+  transition: background 0.15s ease;
+}
+
+.files-page-layout .files-folder-panel-header:hover {
+  background: var(--files-batch-bar-bg, #f1f5f9);
+}
+
+.app-dark .files-page-layout .files-folder-panel-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.files-page-layout .files-folder-panel-title {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+
+.files-page-layout .files-folder-panel-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-page-layout .files-folder-panel-body {
+  max-height: 12rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 10px 10px;
+  border-top: 1px solid var(--files-panel-border, #f0f0f0);
+  scrollbar-gutter: stable;
+}
+
+.app-dark .files-page-layout .files-folder-panel-body {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+.files-page-layout .files-folder-panel-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.files-page-layout .files-folder-panel-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+.app-dark .files-page-layout .files-folder-panel-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.files-page-layout .files-folder-strip-scroll {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.files-page-layout .files-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+.files-page-layout .files-folder-chip:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.app-dark .files-page-layout .files-folder-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.files-page-layout .files-folder-chip.is-active {
+  font-weight: 600;
+}
+
+.files-page-layout .files-folder-chip-add {
+  padding: 2px 8px;
+  border: 1px dashed rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+}
+
+.files-page-layout .files-folder-chip-add:hover {
+  opacity: 1;
+  border-color: rgba(24, 144, 255, 0.4);
+  color: #1890ff !important;
+}
+
+.app-dark .files-page-layout .files-folder-chip-add {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.app-dark .files-page-layout .files-folder-chip-add:hover {
+  border-color: rgba(33, 150, 243, 0.5);
+  color: #64B5F6 !important;
+}
+/* ── end Folder strip ──────────────────────────────────────── */
 
 .files-page-layout .files-list-batch-bar {
   display: flex;
