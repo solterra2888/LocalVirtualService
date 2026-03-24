@@ -22,39 +22,46 @@ export interface NewsSourceConfig {
   identifier: string;
   label: string;
   color: string;
-  /** Hostname for brand favicon (Google s2 favicon service). */
+  /** Hostname (reference only; not used for runtime icon loading). */
   iconDomain: string;
+  /**
+   * Static asset under `public/feed-news-icons/` (served with the app, no external URL).
+   * Replace with brand favicons as needed; use `placeholder.svg` until then.
+   */
+  iconLocalFile: string;
   /** EODHD 暂不提供：灰显 + Coming soon，且不可订阅 */
   disabled?: boolean;
 }
 
 export const NEWS_SOURCES: NewsSourceConfig[] = [
-  { identifier: 'Yahoo Finance', label: 'Yahoo Finance', color: '#6001D2', iconDomain: 'finance.yahoo.com' },
-  { identifier: 'Seeking Alpha', label: 'Seeking Alpha', color: '#F57C00', iconDomain: 'seekingalpha.com' },
-  { identifier: 'CNBC', label: 'CNBC', color: '#005594', iconDomain: 'cnbc.com' },
-  { identifier: 'Nasdaq', label: 'Nasdaq', color: '#0096D6', iconDomain: 'nasdaq.com' },
-  { identifier: 'Fxstreet', label: 'FXStreet', color: '#1B5E20', iconDomain: 'fxstreet.com' },
-  { identifier: 'Globenewswire', label: 'GlobeNewsWire', color: '#2196F3', iconDomain: 'globenewswire.com' },
-  { identifier: 'U.Today', label: 'U.Today', color: '#FF5722', iconDomain: 'u.today' },
-  { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', disabled: true },
-  { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', disabled: true },
-  { identifier: 'Thecurrencyanalytics', label: 'Currency Analytics', color: '#7B1FA2', iconDomain: 'thecurrencyanalytics.com', disabled: true },
-  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', disabled: true },
-  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', disabled: true },
-  { identifier: 'MarketWatch', label: 'MarketWatch', color: '#00A651', iconDomain: 'marketwatch.com', disabled: true },
-  { identifier: 'Wall Street Journal', label: 'WSJ', color: '#0274B6', iconDomain: 'wsj.com', disabled: true },
-  { identifier: 'Financial Times', label: 'Financial Times', color: '#265761', iconDomain: 'ft.com', disabled: true },
-  { identifier: 'Forbes', label: 'Forbes', color: '#B10000', iconDomain: 'forbes.com', disabled: true },
-  { identifier: 'Business Insider', label: 'Business Insider', color: '#0066CC', iconDomain: 'businessinsider.com', disabled: true },
+  { identifier: 'Yahoo Finance', label: 'Yahoo Finance', color: '#6001D2', iconDomain: 'finance.yahoo.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Seeking Alpha', label: 'Seeking Alpha', color: '#F57C00', iconDomain: 'seekingalpha.com', iconLocalFile: 'seeking-alpha.ico' },
+  { identifier: 'CNBC', label: 'CNBC', color: '#005594', iconDomain: 'cnbc.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Nasdaq', label: 'Nasdaq', color: '#0096D6', iconDomain: 'nasdaq.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Fxstreet', label: 'FXStreet', color: '#1B5E20', iconDomain: 'fxstreet.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Globenewswire', label: 'GlobeNewsWire', color: '#2196F3', iconDomain: 'globenewswire.com', iconLocalFile: 'globenewswire.ico' },
+  { identifier: 'U.Today', label: 'U.Today', color: '#FF5722', iconDomain: 'u.today', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Thecurrencyanalytics', label: 'Currency Analytics', color: '#7B1FA2', iconDomain: 'thecurrencyanalytics.com', iconLocalFile: 'thecurrencyanalytics.ico', disabled: true },
+  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'MarketWatch', label: 'MarketWatch', color: '#00A651', iconDomain: 'marketwatch.com', iconLocalFile: 'marketwatch.ico', disabled: true },
+  { identifier: 'Wall Street Journal', label: 'WSJ', color: '#0274B6', iconDomain: 'wsj.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Financial Times', label: 'Financial Times', color: '#265761', iconDomain: 'ft.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Forbes', label: 'Forbes', color: '#B10000', iconDomain: 'forbes.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Business Insider', label: 'Business Insider', color: '#0066CC', iconDomain: 'businessinsider.com', iconLocalFile: 'placeholder.svg', disabled: true },
 ];
 
-/** Favicon URL for a configured news source (used in picker tiles and list avatars). */
+const FEED_NEWS_ICONS_BASE = `${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/feed-news-icons`;
+
+/** Local static icon URL for a news source (served from `public/feed-news-icons/`, no external fetch). */
 export function getNewsSourceFaviconUrl(identifier: string): string | undefined {
   const source = NEWS_SOURCES.find(
     (s) => s.identifier.toLowerCase() === identifier.toLowerCase()
   );
-  if (!source?.iconDomain) return undefined;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(source.iconDomain)}&sz=64`;
+  if (!source?.iconLocalFile) return undefined;
+  return `${FEED_NEWS_ICONS_BASE}/${encodeURIComponent(source.iconLocalFile)}`;
 }
 
 /** My Feeds 侧栏：与 Sources 文件类型栏一致的频道类型筛选 */

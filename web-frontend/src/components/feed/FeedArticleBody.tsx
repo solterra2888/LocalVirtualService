@@ -306,12 +306,15 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         </Text>
       )}
 
-      <div style={{ marginTop: selectedContent.channel_type === 'youtube' ? 0 : 16 }}>
-        {selectedContent.channel_type === 'youtube' ? (
+      {selectedContent.channel_type === 'youtube' && (
+        <div style={{ marginTop: 0 }}>
           <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap' }}>
             {selectedContent.content}
           </Text>
-        ) : (
+        </div>
+      )}
+      {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && (
+        <div style={{ marginTop: 16 }}>
           <FeedTweetContent
             content={selectedContent}
             themeColors={themeColors}
@@ -320,8 +323,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             originalTweetLoading={originalTweetLoading}
             tweetContainerRef={tweetContainerRef}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       {selectedContent.channel_type !== 'youtube' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
         <div>
