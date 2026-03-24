@@ -7,12 +7,14 @@ from .base_adapter import BaseContentAdapter
 from .twitter_adapter import TwitterAdapter
 from .youtube_adapter import YouTubeAdapter
 from .rss_adapter import RSSAdapter
+from .news_adapter import NewsAdapter
 
 __all__ = [
     'BaseContentAdapter',
     'TwitterAdapter',
     'YouTubeAdapter',
     'RSSAdapter',
+    'NewsAdapter',
 ]
 
 
@@ -21,7 +23,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
     获取指定渠道类型的适配器实例
     
     Args:
-        channel_type: 渠道类型 (twitter, youtube, rss, zhishixingqiu)
+        channel_type: 渠道类型 (twitter, youtube, rss, news, zhishixingqiu)
         
     Returns:
         对应的适配器实例
@@ -33,7 +35,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
         'twitter': TwitterAdapter(),
         'youtube': YouTubeAdapter(),
         'rss': RSSAdapter(),
-        # 'zhishixingqiu': ZhishixingqiuAdapter(),  # 待实现
+        'news': NewsAdapter(),
     }
     
     adapter = adapters.get(channel_type)

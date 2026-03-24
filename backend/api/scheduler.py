@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -1462,6 +1462,117 @@ async def create_default_ipo_calendar_task(
         logger.error("创建默认财报日历定时任务失败", 
                     exception=str(e), 
                     user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+class CreateNewsFeedTaskRequest(BaseModel):
+    """创建 News Feed 定时任务请求模型"""
+    name: str = Field(default="News Feed Auto Fetch", description="任务名称")
+    cron_expression: str = Field(default="*/30 * * * *", description="Cron表达式（默认每30分钟）")
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    max_results: int = Field(default=200, ge=1, le=1000, description="每次拉取最大条数")
+    recent_days: int = Field(default=1, ge=1, le=7, description="拉取最近 N 天的新闻")
+
+
+@router.post("/tasks/news-feed", summary="创建 News Feed 定时任务")
+async def create_news_feed_task(
+    request: CreateNewsFeedTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 EODHD News Feed 订阅定时任务
+
+    该任务从 EODHD API 拉取新闻并按来源分发到订阅了对应 source 的用户的 subscription_content 中。
+    """
+    try:
+        logger.info("创建 News Feed 定时任务请求",
+                     user=current_user.username,
+                     task_name=request.name,
+                     cron_expression=request.cron_expression)
+
+        scheduler_service = await get_scheduler_service()
+
+        task_params = {
+            'max_results': request.max_results,
+            'recent_days': request.recent_days,
+        }
+
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="news_feed",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+
+        if result['success']:
+            logger.info("News Feed 定时任务创建成功",
+                         task_id=result['task_id'],
+                         user=current_user.username)
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result['message'])
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建 News Feed 定时任务失败",
+                     exception=str(e),
+                     user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/news-feed/default", summary="创建默认 News Feed 定时任务")
+async def create_default_news_feed_task(
+    current_user=Depends(get_current_user)
+):
+    """创建默认的 News Feed 定时任务（每30分钟执行，拉取最近1天的200条新闻）"""
+    try:
+        logger.info("创建默认 News Feed 定时任务请求", user=current_user.username)
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="News Feed Auto Fetch",
+            task_type="news_feed",
+            cron_expression="*/30 * * * *",
+            timezone="America/New_York",
+            enabled=True,
+            task_params={
+                'max_results': 200,
+                'recent_days': 1,
+            },
+            created_by=current_user.username
+        )
+
+        if result['success']:
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认 News Feed 定时任务失败",
+                     exception=str(e),
+                     user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 

@@ -115,7 +115,7 @@ const CARD_STYLE_BEHANCE_DARK = {
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -220,6 +220,24 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure YouTube Fetch Schedule',
           description: 'Set up periodic YouTube subscription fetching (default: every 60 minutes)',
           endpoint: '/scheduler/tasks/youtube-subscription',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'news_feed',
+      name: 'News Feed (My Feeds)',
+      type: 'news_feed',
+      description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_news_feed_schedule',
+          name: 'Configure News Feed Schedule',
+          description: 'Set up periodic news feed fetching (default: every 30 minutes)',
+          endpoint: '/scheduler/tasks/news-feed',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -493,6 +511,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -555,6 +574,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
         (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
         (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+        (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -768,6 +788,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
           (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
+          (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -884,7 +906,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1372,6 +1394,7 @@ const SchedulerPage: React.FC = () => {
                                 (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
                                 (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
                                 (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+                                (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
                                 (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                 (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                 (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1426,7 +1449,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed'}
           dataSourceName={selectedDataSource.name}
         />
       )}

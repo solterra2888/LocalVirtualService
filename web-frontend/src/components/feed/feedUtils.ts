@@ -26,6 +26,12 @@ export function collapseWhitespaceForPreview(s: string): string {
   return (s || '').replace(/\s+/g, ' ').trim();
 }
 
+/** Twitter handle: trim and strip one leading @ before API storage. */
+export function normalizeTwitterUsername(raw: string): string {
+  const t = (raw || '').trim();
+  return t.startsWith('@') ? t.slice(1).trim() : t;
+}
+
 /**
  * List card primary line: YouTube etc. use `title`; Twitter items usually have no title — use tweet text.
  */

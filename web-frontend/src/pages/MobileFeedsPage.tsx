@@ -38,6 +38,7 @@ const MobileFeedsPage: React.FC = () => {
         <MobileFeedsProvider>
           <div
             className="mobile-feeds-page"
+            data-theme={themeMode}
             style={
               {
                 background: themeColors.pageBg,
@@ -46,6 +47,9 @@ const MobileFeedsPage: React.FC = () => {
                 ['--mobile-feeds-border' as string]: themeColors.cardBorder,
                 ['--mobile-feeds-accent' as string]: themeColors.selectedBorder,
                 ['--mobile-feeds-selected-bg' as string]: themeColors.selectedItemBg,
+                ['--mobile-feeds-box-muted' as string]: themeColors.boxMuted,
+                ['--mobile-feeds-text' as string]: themeColors.text,
+                ['--mobile-feeds-text-secondary' as string]: themeColors.textSecondary,
               } as React.CSSProperties
             }
           >

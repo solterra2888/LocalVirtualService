@@ -31,7 +31,8 @@ import {
   CalendarOutlined,
   GlobalOutlined,
   TwitterOutlined,
-  YoutubeOutlined
+  YoutubeOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -58,7 +59,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -69,6 +70,10 @@ interface ConfigFormData {
   
   // 任务参数
   taskParams?: Record<string, any>;
+
+  // News Feed params
+  maxResults?: number;
+  recentDays?: number;
 }
 
 const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
@@ -201,6 +206,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 2 * * 0',
       defaultName: 'Watchlist Fundamentals Weekly Update',
       description: 'Automatically update fundamentals data for all watchlist stocks (weekly on Sunday 2 AM, skips stocks updated within 24 hours)'
+    },
+    news_feed: {
+      icon: <FileTextOutlined style={{ color: '#722ed1' }} />,
+      params: ['max_results', 'recent_days'],
+      defaultSchedule: '*/30 * * * *',
+      defaultName: 'News Feed Auto Fetch',
+      description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.) every 30 minutes'
     }
   };
 
@@ -402,6 +414,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             end_date: data.taskParams?.end_date
           };
           result = await schedulerAPI.createIPOCalendarTask(ipoCalendarParams);
+        } else if (dataSourceType === 'news_feed') {
+          const newsFeedParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            max_results: data.maxResults || 200,
+            recent_days: data.recentDays || 1,
+          };
+          result = await schedulerAPI.createNewsFeedTask(newsFeedParams);
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
           const watchlistFundamentalsParams = {
@@ -1034,7 +1056,55 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         
         case 'youtube_subscription':
           return null;
-          
+
+        case 'news_feed':
+          return (
+            <>
+              <Alert
+                message="News Feed Parameters"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Fetch news from EODHD API and distribute to users who subscribed to specific news sources (Yahoo Finance, CNBC, etc.) in My Feeds."
+              />
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="maxResults"
+                    label={
+                      <Space>
+                        Max Results
+                        <Tooltip title="Maximum number of articles to fetch per run from EODHD API">
+                          <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    initialValue={200}
+                  >
+                    <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="recentDays"
+                    label={
+                      <Space>
+                        Recent Days
+                        <Tooltip title="Only fetch news published within the last N days">
+                          <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    initialValue={1}
+                  >
+                    <InputNumber min={1} max={7} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          );
+
         case 'eodhd_events':
           return (
             <>

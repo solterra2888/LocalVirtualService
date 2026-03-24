@@ -71,7 +71,8 @@ class SchedulerService:
             'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
             'market_data': self._execute_market_data_task,  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
             'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
-            'ipo_calendar': self._execute_ipo_calendar_task  # IPO 日历数据获取任务
+            'ipo_calendar': self._execute_ipo_calendar_task,  # IPO 日历数据获取任务
+            'news_feed': self._execute_news_feed_task,  # EODHD 新闻 Feed 订阅任务
         }
         
         # 添加事件监听器
@@ -1406,6 +1407,55 @@ class SchedulerService:
                 'error': str(e)
             }
     
+    async def _execute_news_feed_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 EODHD 新闻 Feed 订阅任务 —— 拉取新闻并写入 subscription_content
+
+        Args:
+            params: 任务参数
+                - max_results: 每次拉取最大条数（默认 200）
+                - recent_days: 拉取最近 N 天的新闻（默认 1）
+        """
+        try:
+            logger.info("执行 News Feed 订阅任务", params=params)
+
+            max_results = params.get('max_results', 200)
+            recent_days = params.get('recent_days', 1)
+
+            from backend.services.eodhd_news_feed_service import EODHDNewsFeedService
+
+            import asyncio
+            import concurrent.futures
+
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = await loop.run_in_executor(
+                    executor,
+                    lambda: EODHDNewsFeedService().fetch_and_distribute_news(
+                        max_results=max_results,
+                        recent_days=recent_days,
+                    )
+                )
+
+            if result.get('success'):
+                message = (
+                    f"✅ 获取 {result.get('articles_fetched', 0)} 篇新闻，"
+                    f"新增 {result.get('articles_new', 0)} 篇，"
+                    f"匹配 {result.get('sources_matched', 0)} 个源"
+                )
+                return {'success': True, 'message': message, 'data': result}
+            else:
+                return {
+                    'success': False,
+                    'message': f"❌ {result.get('message', 'News Feed 任务执行失败')}",
+                    'data': result,
+                }
+
+        except Exception as e:
+            error_msg = f"News Feed 任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
     async def _execute_cctv_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行CCTV新闻爬取任务"""
         try:

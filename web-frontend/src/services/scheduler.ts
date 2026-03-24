@@ -410,6 +410,33 @@ export class SchedulerAPI {
   }
 
   /**
+   * 创建 News Feed (My Feeds) 定时任务
+   */
+  async createNewsFeedTask(params: {
+    name: string;
+    cron_expression: string;
+    timezone: string;
+    enabled: boolean;
+    max_results?: number;
+    recent_days?: number;
+  }): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/news-feed', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建 News Feed 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建 News Feed 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建 News Feed 定时任务失败'
+      };
+    }
+  }
+
+  /**
    * 创建EODHD基本面数据定时任务
    */
   async createEODHDFundamentalsTask(params: CreateEODHDFundamentalsTaskParams): Promise<TaskCreateResponse> {

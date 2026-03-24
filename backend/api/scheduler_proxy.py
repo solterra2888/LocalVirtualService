@@ -472,6 +472,31 @@ async def create_default_ipo_calendar_task_proxy(request: Request, current_user=
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create default IPO calendar task: {str(e)}")
 
+@router.post("/tasks/news-feed", summary="create news feed task")
+async def create_news_feed_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 News Feed 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/news-feed", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建 News Feed 任务代理失败: {str(e)}")
+
+@router.post("/tasks/news-feed/default", summary="create default news feed task")
+async def create_default_news_feed_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 News Feed 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/news-feed/default", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认 News Feed 任务代理失败: {str(e)}")
+
 @router.post("/tasks/{task_id}/enable", summary="enable task")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""

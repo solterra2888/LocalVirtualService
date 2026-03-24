@@ -18,10 +18,12 @@ import {
   LikeOutlined,
   LinkOutlined,
   MessageOutlined,
+  ReadOutlined,
   RetweetOutlined,
   TwitterOutlined,
   YoutubeOutlined,
 } from '@ant-design/icons';
+import { getNewsSourceColor } from './feedChannelConfig';
 import { useFileProcessing } from '../../contexts/FileProcessingContext';
 import FeedTweetContent from './FeedTweetContent';
 import type { FeedThemeColors } from './feedTheme';
@@ -188,8 +190,21 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
       <div>
         <Space>
           <Avatar
-            icon={selectedContent.channel_type === 'youtube' ? <YoutubeOutlined /> : <TwitterOutlined />}
-            style={{ backgroundColor: selectedContent.channel_type === 'youtube' ? '#FF0000' : '#1DA1F2' }}
+            icon={
+              selectedContent.channel_type === 'youtube'
+                ? <YoutubeOutlined />
+                : selectedContent.channel_type === 'news'
+                ? <ReadOutlined />
+                : <TwitterOutlined />
+            }
+            style={{
+              backgroundColor:
+                selectedContent.channel_type === 'youtube'
+                  ? '#FF0000'
+                  : selectedContent.channel_type === 'news'
+                  ? getNewsSourceColor(selectedContent.author_identifier)
+                  : '#1DA1F2',
+            }}
           />
           <div>
             <div>
@@ -203,6 +218,58 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           </div>
         </Space>
       </div>
+
+      {selectedContent.channel_type === 'news' && selectedContent.title && (
+        <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block', marginTop: 8 }}>
+          {selectedContent.title}
+        </Text>
+      )}
+
+      {selectedContent.channel_type === 'news' && (
+        <>
+          <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap', lineHeight: '1.7' }}>
+            {selectedContent.content}
+          </Text>
+
+          {selectedContent.metadata?.symbols && (selectedContent.metadata.symbols as string[]).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Symbols:</Text>
+              {(selectedContent.metadata.symbols as string[]).map((sym) => (
+                <Tag key={sym} color="blue" style={{ fontSize: 11 }}>{sym}</Tag>
+              ))}
+            </div>
+          )}
+
+          {selectedContent.categories && selectedContent.categories.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Tags:</Text>
+              {selectedContent.categories.map((tag) => (
+                <Tag key={tag} style={{ fontSize: 11 }}>{tag}</Tag>
+              ))}
+            </div>
+          )}
+
+          {selectedContent.metadata?.sentiment && (selectedContent.metadata.sentiment as { polarity?: number }).polarity != null && (
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Sentiment:</Text>
+              <Tag color={
+                (selectedContent.metadata.sentiment as { polarity: number }).polarity > 0.1
+                  ? 'green'
+                  : (selectedContent.metadata.sentiment as { polarity: number }).polarity < -0.1
+                  ? 'red'
+                  : 'default'
+              }>
+                {(selectedContent.metadata.sentiment as { polarity: number }).polarity > 0.1
+                  ? 'Positive'
+                  : (selectedContent.metadata.sentiment as { polarity: number }).polarity < -0.1
+                  ? 'Negative'
+                  : 'Neutral'}
+                {' '}({(selectedContent.metadata.sentiment as { polarity: number }).polarity.toFixed(2)})
+              </Tag>
+            </div>
+          )}
+        </>
+      )}
 
       {selectedContent.channel_type === 'youtube' && selectedContent.content_id && (
         <div
@@ -358,7 +425,11 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           >
             <Space>
               <LinkOutlined />
-              {selectedContent.channel_type === 'youtube' ? 'Watch on YouTube' : 'View on Twitter'}
+              {selectedContent.channel_type === 'youtube'
+                ? 'Watch on YouTube'
+                : selectedContent.channel_type === 'news'
+                ? 'Read Original Article'
+                : 'View on Twitter'}
             </Space>
           </a>
         </div>

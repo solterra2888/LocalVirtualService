@@ -44,6 +44,9 @@ import { useMobileFeeds } from '../contexts/MobileFeedsContext';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import {
   getChannelIcon,
+  getNewsSourceColor,
+  getNewsSourceFaviconUrl,
+  getNewsSourceLabel,
   FEED_CHANNEL_TYPE_FILTER_TABS,
   matchesFeedChannelTypeFilter,
   type FeedChannelTypeFilterKey,
@@ -52,10 +55,11 @@ import {
   collapseWhitespaceForPreview,
   getFeedListHeadline,
   getHeatLevelConfig,
+  normalizeTwitterUsername,
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
 } from '../components/feed/feedUtils';
-import FeedSourceIconPicker from '../components/feed/FeedSourceIconPicker';
+import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import { getModalStyles } from '../utils/modalStyles';
 import {
   subscriptionsAPI,
@@ -120,9 +124,14 @@ const MobileFeedsListView: React.FC = () => {
   const handleCreateSubscription = async () => {
     try {
       const values = await form.validateFields();
+      const { channelType, channelIdentifier: newsSource } = parsePickerValue(values.channel_type);
+      let channelIdentifier = newsSource ?? values.channel_identifier;
+      if (channelType === 'twitter' && typeof channelIdentifier === 'string') {
+        channelIdentifier = normalizeTwitterUsername(channelIdentifier);
+      }
       const request: CreateSubscriptionRequest = {
-        channel_type: values.channel_type,
-        channel_identifier: values.channel_identifier,
+        channel_type: channelType,
+        channel_identifier: channelIdentifier,
         enabled: values.enabled !== undefined ? values.enabled : true,
       };
 
@@ -132,7 +141,7 @@ const MobileFeedsListView: React.FC = () => {
         const newSubscription = response.data;
         setAddModalVisible(false);
         form.resetFields();
-        message.success(`Subscription "@${values.channel_identifier}" created successfully`);
+        message.success(`Subscription "@${channelIdentifier}" created successfully`);
         await loadSubscriptions();
         setSelectedSubscription(newSubscription);
 
@@ -306,6 +315,21 @@ const MobileFeedsListView: React.FC = () => {
     });
   }, [filteredSubscriptions, setSelectedSubscription]);
 
+  const toolbarSubline = (sub: Subscription | null) => {
+    if (!sub) return null;
+    if (sub.channel_type === 'news') {
+      const label = getNewsSourceLabel(sub.channel_identifier);
+      const main =
+        (sub.channel_name && sub.channel_name.trim()) ||
+        `@${sub.channel_identifier}`;
+      const normalized = main.startsWith('@') ? main.slice(1) : main;
+      if (normalized === label) return 'News';
+      return label;
+    }
+    if (sub.channel_type === 'twitter') return `@${sub.channel_identifier}`;
+    return sub.channel_identifier;
+  };
+
   const subscriptionMenu = (subscription: Subscription): MenuProps['items'] => [
     {
       key: 'toggle',
@@ -348,11 +372,19 @@ const MobileFeedsListView: React.FC = () => {
           icon={<MenuOutlined style={{ fontSize: 18 }} />}
           onClick={() => setDrawerOpen(true)}
           aria-label="Subscriptions"
+          style={{ color: themeColors.textSecondary }}
         />
-        <div className="mobile-feeds-toolbar-title" style={{ color: themeColors.text }}>
-          {selectedSubscription
-            ? selectedSubscription.channel_name || `@${selectedSubscription.channel_identifier}`
-            : 'Feeds'}
+        <div className="mobile-feeds-toolbar-title-block">
+          <div className="mobile-feeds-toolbar-title" style={{ color: themeColors.text }}>
+            {selectedSubscription
+              ? selectedSubscription.channel_name || `@${selectedSubscription.channel_identifier}`
+              : 'Feeds'}
+          </div>
+          {selectedSubscription && (
+            <div className="mobile-feeds-toolbar-sub" style={{ color: themeColors.textSecondary }}>
+              {toolbarSubline(selectedSubscription)}
+            </div>
+          )}
         </div>
         <Space size={4}>
           <Button
@@ -363,8 +395,16 @@ const MobileFeedsListView: React.FC = () => {
               if (selectedSubscription) loadContents(selectedSubscription.id, onlyUnread);
             }}
             loading={loading}
+            style={{ color: themeColors.textSecondary }}
           />
-          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setAddModalVisible(true)} />
+          <Button
+            type="primary"
+            size="small"
+            shape="round"
+            icon={<PlusOutlined />}
+            onClick={() => setAddModalVisible(true)}
+            aria-label="Add feed"
+          />
         </Space>
       </div>
 
@@ -383,24 +423,32 @@ const MobileFeedsListView: React.FC = () => {
       </div>
 
       {loading && subscriptions.length === 0 ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
-          <Spin />
+        <div className="mobile-feeds-spin-wrap">
+          <Spin size="large" />
         </div>
       ) : !selectedSubscription ? (
-        <div style={{ padding: 24 }}>
-          <Empty description="Add a feed or pick one from the menu" />
-        </div>
-      ) : contentsLoading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
-          <Spin />
-        </div>
-      ) : contents.length === 0 ? (
-        <div style={{ padding: 24 }}>
+        <div style={{ padding: '32px 20px', textAlign: 'center' }}>
           <Empty
             description={
-              selectedSubscription.last_fetched_at
-                ? 'No content in this filter'
-                : 'Fetching content… try refresh in a moment'
+              <span style={{ color: themeColors.textSecondary }}>
+                Add a feed with +, or open the menu to choose a subscription
+              </span>
+            }
+          />
+        </div>
+      ) : contentsLoading ? (
+        <div className="mobile-feeds-spin-wrap">
+          <Spin size="large" />
+        </div>
+      ) : contents.length === 0 ? (
+        <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+          <Empty
+            description={
+              <span style={{ color: themeColors.textSecondary }}>
+                {selectedSubscription.last_fetched_at
+                  ? 'No items match this filter'
+                  : 'Loading content… pull to refresh or try again shortly'}
+              </span>
             }
           />
         </div>
@@ -501,9 +549,22 @@ const MobileFeedsListView: React.FC = () => {
           })}
 
           {hasMoreContents && (
-            <div style={{ textAlign: 'center', padding: 16 }}>
-              <Button type="link" loading={loadingMore} onClick={() => loadMoreContents()} style={{ color: themeColors.text }}>
-                {loadingMore ? 'Loading…' : `Load more (${Math.max(0, contentTotal - contentOffset)} left)`}
+            <div className="mobile-feeds-load-more">
+              <Button
+                type="default"
+                block
+                loading={loadingMore}
+                onClick={() => loadMoreContents()}
+                style={{
+                  color: themeColors.text,
+                  borderColor: themeColors.cardBorder,
+                  background: themeColors.cardBg,
+                  borderRadius: 12,
+                  height: 44,
+                  fontWeight: 600,
+                }}
+              >
+                {loadingMore ? 'Loading…' : `Load more · ${Math.max(0, contentTotal - contentOffset)} left`}
               </Button>
             </div>
           )}
@@ -523,63 +584,76 @@ const MobileFeedsListView: React.FC = () => {
             background: themeColors.cardBg,
             borderBottom: `1px solid ${themeColors.cardBorder}`,
           },
-          body: { background: themeColors.cardBg, paddingTop: 12 },
+          body: {
+            background: themeColors.cardBg,
+            paddingTop: 4,
+            paddingLeft: 0,
+            paddingRight: 0,
+            paddingBottom: 8,
+            overflowY: 'auto',
+          },
           ...(isDark ? { mask: { background: 'rgba(0, 0, 0, 0.65)' } } : {}),
         }}
       >
+        <div className="mobile-feeds-drawer-body-pad">
         <div
           className={`mobile-feeds-drawer-filter-row${isDark ? ' mobile-feeds-drawer-filter-row--dark' : ''}`}
         >
-          <div className="mobile-feeds-drawer-type-tabs">
-            {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
-              <Tooltip key={key} title={label}>
+          <div className="mobile-feeds-drawer-filter-surface">
+            <div className="mobile-feeds-drawer-type-tabs" aria-label="Feed type">
+              {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
+                <Tooltip key={key} title={label}>
+                  <button
+                    type="button"
+                    className={`mobile-feeds-drawer-type-tab ${feedChannelTypeFilter === key ? 'is-active' : ''}`}
+                    onClick={() => setFeedChannelTypeFilter(key)}
+                    aria-label={label}
+                    aria-pressed={feedChannelTypeFilter === key}
+                  >
+                    <span className="mobile-feeds-drawer-type-tab-icon">{icon}</span>
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+            <div className="mobile-feeds-drawer-filter-divider" aria-hidden />
+            <div className="mobile-feeds-drawer-status-tabs" role="group" aria-label="Subscription status">
+              <Tooltip title={`Active (${subscriptions.filter((s) => s.enabled).length})`}>
                 <button
                   type="button"
-                  className={`mobile-feeds-drawer-type-tab ${feedChannelTypeFilter === key ? 'is-active' : ''}`}
-                  onClick={() => setFeedChannelTypeFilter(key)}
-                  aria-label={label}
+                  className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
+                    subscriptionFilter === 'active' ? 'is-active' : ''
+                  }`}
+                  onClick={() => setSubscriptionFilter('active')}
+                  aria-label="Active subscriptions"
+                  aria-pressed={subscriptionFilter === 'active'}
                 >
-                  <span className="mobile-feeds-drawer-type-tab-icon">{icon}</span>
+                  <span className="mobile-feeds-drawer-type-tab-icon">
+                    <PlayCircleOutlined />
+                  </span>
                 </button>
               </Tooltip>
-            ))}
-          </div>
-          <div className="mobile-feeds-drawer-status-tabs" role="group" aria-label="Subscription status">
-            <Tooltip title={`Active (${subscriptions.filter((s) => s.enabled).length})`}>
-              <button
-                type="button"
-                className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
-                  subscriptionFilter === 'active' ? 'is-active' : ''
-                }`}
-                onClick={() => setSubscriptionFilter('active')}
-                aria-label="Active subscriptions"
-                aria-pressed={subscriptionFilter === 'active'}
-              >
-                <span className="mobile-feeds-drawer-type-tab-icon">
-                  <PlayCircleOutlined />
-                </span>
-              </button>
-            </Tooltip>
-            <Tooltip title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}>
-              <button
-                type="button"
-                className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
-                  subscriptionFilter === 'disabled' ? 'is-active' : ''
-                }`}
-                onClick={() => setSubscriptionFilter('disabled')}
-                aria-label="Disabled subscriptions"
-                aria-pressed={subscriptionFilter === 'disabled'}
-              >
-                <span className="mobile-feeds-drawer-type-tab-icon">
-                  <PauseCircleOutlined />
-                </span>
-              </button>
-            </Tooltip>
+              <Tooltip title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}>
+                <button
+                  type="button"
+                  className={`mobile-feeds-drawer-type-tab mobile-feeds-drawer-status-tab ${
+                    subscriptionFilter === 'disabled' ? 'is-active' : ''
+                  }`}
+                  onClick={() => setSubscriptionFilter('disabled')}
+                  aria-label="Disabled subscriptions"
+                  aria-pressed={subscriptionFilter === 'disabled'}
+                >
+                  <span className="mobile-feeds-drawer-type-tab-icon">
+                    <PauseCircleOutlined />
+                  </span>
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </div>
 
         {filteredSubscriptions.length === 0 ? (
           <Empty
+            style={{ margin: '24px 0' }}
             description={
               <span style={{ color: themeColors.textSecondary }}>
                 {feedChannelTypeFilter !== 'all'
@@ -593,10 +667,15 @@ const MobileFeedsListView: React.FC = () => {
         ) : (
           <List
             dataSource={filteredSubscriptions}
-            renderItem={(sub: Subscription) => (
+            renderItem={(sub: Subscription) => {
+              const newsFavicon =
+                sub.channel_type === 'news' ? getNewsSourceFaviconUrl(sub.channel_identifier) : undefined;
+              return (
               <List.Item style={{ padding: '8px 0', border: 'none' }}>
                 <div
-                  className="mobile-feeds-drawer-sub"
+                  className={`mobile-feeds-drawer-sub${
+                    selectedSubscription?.id === sub.id ? ' mobile-feeds-drawer-sub--selected' : ''
+                  }`}
                   style={{
                     width: '100%',
                     cursor: 'pointer',
@@ -609,10 +688,24 @@ const MobileFeedsListView: React.FC = () => {
                   }}
                 >
                   <Avatar
-                    icon={getChannelIcon(sub.channel_type)}
+                    size={40}
+                    src={newsFavicon}
+                    icon={
+                      sub.channel_type === 'news' && newsFavicon
+                        ? undefined
+                        : getChannelIcon(sub.channel_type)
+                    }
                     style={{
                       backgroundColor:
-                        sub.channel_type === 'twitter' ? '#1DA1F2' : sub.channel_type === 'youtube' ? '#FF0000' : '#ccc',
+                        sub.channel_type === 'twitter'
+                          ? '#1DA1F2'
+                          : sub.channel_type === 'youtube'
+                            ? '#FF0000'
+                            : sub.channel_type === 'news'
+                              ? newsFavicon
+                                ? '#fff'
+                                : getNewsSourceColor(sub.channel_identifier)
+                              : '#ccc',
                     }}
                   />
                   <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -662,9 +755,11 @@ const MobileFeedsListView: React.FC = () => {
                   </Dropdown>
                 </div>
               </List.Item>
-            )}
+              );
+            }}
           />
         )}
+        </div>
       </Drawer>
 
       <Modal
@@ -701,30 +796,54 @@ const MobileFeedsListView: React.FC = () => {
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="channel_type" label="Source" rules={[{ required: true, message: 'Select a source' }]}>
-            <FeedSourceIconPicker />
-          </Form.Item>
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, cur) => prev.channel_type !== cur.channel_type}
-          >
-            {({ getFieldValue }) => {
-              const channelType = getFieldValue('channel_type');
-              return (
-                <Form.Item
-                  name="channel_identifier"
-                  label={channelType === 'twitter' ? 'Twitter username' : 'Channel'}
-                  rules={[{ required: true, message: 'Required' }]}
-                  extra={
-                    channelType === 'twitter'
-                      ? 'Without @ (e.g. elonmusk)'
-                      : 'YouTube channel handle or name'
-                  }
-                >
-                  <Input placeholder={channelType === 'twitter' ? 'elonmusk' : 'channel'} />
-                </Form.Item>
-              );
-            }}
+          <Form.Item label="Source">
+            <Form.Item name="channel_type" rules={[{ required: true, message: 'Select a source' }]} noStyle>
+              <FeedSourceIconPicker
+                isDark={isDark}
+                belowPlatforms={
+                  <Form.Item noStyle shouldUpdate={(prev, cur) => prev.channel_type !== cur.channel_type}>
+                    {({ getFieldValue }) => {
+                      const rawChannelType = getFieldValue('channel_type') || '';
+                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube') {
+                        return null;
+                      }
+                      const channelType = rawChannelType;
+                      return (
+                        <Form.Item
+                          name="channel_identifier"
+                          label={channelType === 'twitter' ? 'Twitter username' : 'YouTube channel'}
+                          rules={
+                            channelType === 'twitter'
+                              ? [
+                                  { required: true, message: 'Required' },
+                                  {
+                                    validator: (_: unknown, value: string) => {
+                                      const n = normalizeTwitterUsername(value || '');
+                                      if (!n) {
+                                        return Promise.reject(new Error('Enter a username'));
+                                      }
+                                      return Promise.resolve();
+                                    },
+                                  },
+                                ]
+                              : [{ required: true, message: 'Required' }]
+                          }
+                          extra={
+                            channelType === 'twitter'
+                              ? 'With or without @ (e.g. @elonmusk or elonmusk)'
+                              : 'YouTube channel handle or name'
+                          }
+                        >
+                          <Input
+                            placeholder={channelType === 'twitter' ? '@elonmusk or elonmusk' : 'channel'}
+                          />
+                        </Form.Item>
+                      );
+                    }}
+                  </Form.Item>
+                }
+              />
+            </Form.Item>
           </Form.Item>
         </Form>
       </Modal>

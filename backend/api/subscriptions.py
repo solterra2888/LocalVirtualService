@@ -24,7 +24,7 @@ router = APIRouter()
 # Pydantic模型
 class CreateSubscriptionRequest(BaseModel):
     """创建订阅请求模型"""
-    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, rss")
+    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, rss, news")
     channel_identifier: str = Field(..., description="频道唯一标识: Twitter用户名、YouTube频道ID等")
     channel_name: Optional[str] = Field(None, description="频道显示名称（可选，Twitter 等会从 API 自动填充）")
     channel_description: Optional[str] = Field(None, description="频道描述")
@@ -95,6 +95,15 @@ def get_db_manager():
     """获取数据库管理器实例"""
     db_params = get_database_config()
     return DatabaseManager(db_params)
+
+
+@router.get("/news-sources")
+async def get_news_sources(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """返回可订阅的新闻源列表"""
+    from backend.services.eodhd_news_feed_service import EODHDNewsFeedService
+    return EODHDNewsFeedService.get_available_sources()
 
 
 @router.get("", response_model=List[SubscriptionResponse])
@@ -257,8 +266,29 @@ async def create_subscription(
     db_manager = get_db_manager()
     
     try:
+        # 🔥 如果是 News 订阅，验证 source 是否在可选列表中
+        if request.channel_type == 'news':
+            from backend.services.eodhd_news_feed_service import AVAILABLE_NEWS_SOURCES
+            
+            available_lower = {s.lower(): s for s in AVAILABLE_NEWS_SOURCES}
+            identifier_lower = request.channel_identifier.lower()
+            
+            if identifier_lower not in available_lower:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"News source '{request.channel_identifier}' is not available. "
+                           f"Available sources: {', '.join(AVAILABLE_NEWS_SOURCES)}"
+                )
+            
+            # 标准化 channel_identifier（使用规范名称）
+            request.channel_identifier = available_lower[identifier_lower]
+            if not request.channel_name:
+                request.channel_name = request.channel_identifier
+            
+            logger.info(f"News source 验证成功 | source={request.channel_identifier}")
+        
         # 🔥 如果是 Twitter 订阅，先验证用户是否存在
-        if request.channel_type == 'twitter':
+        elif request.channel_type == 'twitter':
             from backend.services.twitter_subscription_service import TwitterSubscriptionService
             
             logger.info(f"验证Twitter用户 | username={request.channel_identifier}")

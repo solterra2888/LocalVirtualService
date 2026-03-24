@@ -51,18 +51,21 @@ import { FEED_THEME_COLORS as THEME_COLORS } from '../components/feed/feedTheme'
 import {
   getFeedListHeadline,
   getHeatLevelConfig,
+  normalizeTwitterUsername,
   playNewItemsNotificationSound,
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
 } from '../components/feed/feedUtils';
 import {
   getChannelIcon,
+  getNewsSourceColor,
+  getNewsSourceFaviconUrl,
   FEED_CHANNEL_TYPE_FILTER_TABS,
   matchesFeedChannelTypeFilter,
   type FeedChannelTypeFilterKey,
 } from '../components/feed/feedChannelConfig';
 import FeedArticleBody from '../components/feed/FeedArticleBody';
-import FeedSourceIconPicker from '../components/feed/FeedSourceIconPicker';
+import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
@@ -323,9 +326,14 @@ const FeedReaderPageInner: React.FC = () => {
   const handleCreateSubscription = async () => {
     try {
       const values = await form.validateFields();
+      const { channelType, channelIdentifier: newsSource } = parsePickerValue(values.channel_type);
+      let channelIdentifier = newsSource ?? values.channel_identifier;
+      if (channelType === 'twitter' && typeof channelIdentifier === 'string') {
+        channelIdentifier = normalizeTwitterUsername(channelIdentifier);
+      }
       const request: CreateSubscriptionRequest = {
-        channel_type: values.channel_type,
-        channel_identifier: values.channel_identifier,
+        channel_type: channelType,
+        channel_identifier: channelIdentifier,
         enabled: values.enabled !== undefined ? values.enabled : true,
       };
 
@@ -340,7 +348,7 @@ const FeedReaderPageInner: React.FC = () => {
         
         // 显示成功提示
         message.success(
-          `Subscription "@${values.channel_identifier}" created successfully`
+          `Subscription "@${channelIdentifier}" created successfully`
         );
         
         // 重新加载订阅列表
@@ -733,6 +741,10 @@ const FeedReaderPageInner: React.FC = () => {
                 renderItem={(subscription) => {
                 const displayName =
                   subscription.channel_name || `@${subscription.channel_identifier}`;
+                const newsFavicon =
+                  subscription.channel_type === 'news'
+                    ? getNewsSourceFaviconUrl(subscription.channel_identifier)
+                    : undefined;
                 const unreadCount = subscription.unread_count ?? 0;
                 const hasUnread = unreadCount > 0;
                 return (
@@ -804,14 +816,23 @@ const FeedReaderPageInner: React.FC = () => {
                       avatar={
                         <Avatar
                           size={24}
-                          icon={getChannelIcon(subscription.channel_type)}
+                          src={newsFavicon}
+                          icon={
+                            subscription.channel_type === 'news' && newsFavicon
+                              ? undefined
+                              : getChannelIcon(subscription.channel_type)
+                          }
                           style={{
                             backgroundColor:
                               subscription.channel_type === 'twitter'
                                 ? '#1DA1F2'
                                 : subscription.channel_type === 'youtube'
                                   ? '#FF0000'
-                                  : '#ccc',
+                                  : subscription.channel_type === 'news'
+                                    ? newsFavicon
+                                      ? '#fff'
+                                      : getNewsSourceColor(subscription.channel_identifier)
+                                    : '#ccc',
                           }}
                         />
                       }
@@ -1243,55 +1264,71 @@ const FeedReaderPageInner: React.FC = () => {
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="channel_type"
-            label="Feed Source"
-            rules={[{ required: true, message: 'Please select a feed source' }]}
-          >
-            <FeedSourceIconPicker />
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) =>
-              prevValues.channel_type !== currentValues.channel_type
-            }
-          >
-            {({ getFieldValue }) => {
-              const channelType = getFieldValue('channel_type');
-              return (
-                <>
+          <Form.Item label="Feed Source">
+            <Form.Item
+              name="channel_type"
+              rules={[{ required: true, message: 'Please select a feed source' }]}
+              noStyle
+            >
+              <FeedSourceIconPicker
+                isDark={isDark}
+                belowPlatforms={
                   <Form.Item
-                    name="channel_identifier"
-                    label={
-                      channelType === 'twitter'
-                        ? 'Twitter Username'
-                        : channelType === 'youtube'
-                        ? 'YouTube Channel'
-                        : 'Channel Identifier'
-                    }
-                    rules={[{ required: true, message: 'Please input identifier' }]}
-                    extra={
-                      channelType === 'twitter'
-                        ? 'Enter without @ symbol (e.g., elonmusk)'
-                        : channelType === 'youtube'
-                        ? 'YouTube channel username or handle (e.g., creativeplanning or @creativeplanning)'
-                        : 'Channel ID or username'
+                    noStyle
+                    shouldUpdate={(prevValues, currentValues) =>
+                      prevValues.channel_type !== currentValues.channel_type
                     }
                   >
-                    <Input 
-                      placeholder={
-                        channelType === 'twitter' 
-                          ? 'e.g., elonmusk' 
-                          : channelType === 'youtube'
-                          ? 'e.g., creativeplanning'
-                          : 'Enter channel identifier'
-                      } 
-                    />
+                    {({ getFieldValue }) => {
+                      const rawChannelType = getFieldValue('channel_type') || '';
+                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube') {
+                        return null;
+                      }
+                      const channelType = rawChannelType;
+                      return (
+                        <Form.Item
+                          name="channel_identifier"
+                          label={
+                            channelType === 'twitter' ? 'Twitter Username' : 'YouTube Channel'
+                          }
+                          rules={
+                            channelType === 'twitter'
+                              ? [
+                                  { required: true, message: 'Please input identifier' },
+                                  {
+                                    validator: (_: unknown, value: string) => {
+                                      const n = normalizeTwitterUsername(value || '');
+                                      if (!n) {
+                                        return Promise.reject(
+                                          new Error('Please enter a username')
+                                        );
+                                      }
+                                      return Promise.resolve();
+                                    },
+                                  },
+                                ]
+                              : [{ required: true, message: 'Please input identifier' }]
+                          }
+                          extra={
+                            channelType === 'twitter'
+                              ? 'With or without @ (e.g. @elonmusk or elonmusk)'
+                              : 'YouTube channel username (e.g., @markets or markets)'
+                          }
+                        >
+                          <Input
+                            placeholder={
+                              channelType === 'twitter'
+                                ? '@elonmusk or elonmusk'
+                                : 'e.g., creativeplanning'
+                            }
+                          />
+                        </Form.Item>
+                      );
+                    }}
                   </Form.Item>
-                </>
-              );
-            }}
+                }
+              />
+            </Form.Item>
           </Form.Item>
         </Form>
       </Modal>

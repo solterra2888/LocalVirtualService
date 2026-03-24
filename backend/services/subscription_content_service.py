@@ -215,7 +215,7 @@ class SubscriptionContentService:
             
             conn.commit()
             
-            logger.info(
+            logger.debug(
                 f"{'Inserted' if is_new else 'Updated'} {normalized_data['channel_type']} content: "
                 f"id={content_id}, content_id={normalized_data['content_id']}"
             )

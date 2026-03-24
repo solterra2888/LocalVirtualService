@@ -110,6 +110,8 @@ export interface SubscriptionContent {
   in_reply_to_user_id?: string;
   // YouTube: 仅是否有 transcript（正文不返回，减轻加载）
   has_transcript?: boolean;
+  // RSS/News 特定字段
+  categories?: string[];
 }
 
 export interface SubscriptionContentsResponse {
