@@ -439,6 +439,21 @@ async def create_subscription(
             
             existing_content_count = cursor.fetchone()[0]
             has_existing_content = existing_content_count > 0
+
+        # News：库里可能已有该源文章（scheduler 为其他用户写入），与「是否有其他订阅者」无关
+        if request.channel_type == 'news':
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM subscription_content
+                WHERE channel_type = 'news'
+                AND author_identifier = %s
+                """,
+                (request.channel_identifier,),
+            )
+            news_existing_count = cursor.fetchone()[0]
+            if news_existing_count > 0:
+                has_existing_content = True
+                existing_content_count = news_existing_count
         
         conn.commit()
         cursor.close()
@@ -531,6 +546,22 @@ async def create_subscription(
                     queue='data_fetching'  # 使用 data_fetching 队列
                 )
                 logger.info(f"Celery task scheduled: fetch_youtube_subscription (task_id={task.id})")
+        
+        # News：已有文章时把新用户并入 user_ids（与 Twitter/YouTube 复用逻辑一致）
+        elif request.enabled and request.channel_type == 'news':
+            from backend.tasks.subscription_tasks import add_user_to_existing_content_task
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing news content for {request.channel_identifier}: "
+                    f"{existing_content_count} items found. Adding user {user_id} to user_ids."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (news) (task_id={task.id})")
         
         return SubscriptionResponse(
             id=subscription_id,

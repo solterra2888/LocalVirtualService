@@ -1048,13 +1048,10 @@ async def get_ticker_research_reports(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取与指定 ticker 关联、且已在系统中分享过的上传文件（未产生任何 file_shares 记录的不返回）。
+    获取与指定 ticker 关联的上传文件：已在系统中分享过的，或当前用户自己上传的（见 processing_stats.user）。
 
-    Args:
-        ticker: 股票代码
-
-    Returns:
-        包含文件信息的列表
+    历史上仅返回存在 file_shares 的记录，导致用户本地上传、打标签后仍不出现在 Watchlist Sources；
+    现已包含上传者本人可见的文件。
     """
     try:
         db_conn_params = get_database_config()
@@ -1064,6 +1061,8 @@ async def get_ticker_research_reports(
         
         ticker_conditions = " OR ".join(["ft.ticker @> %s::jsonb"] * len(ticker_formats))
         ticker_params = [json.dumps([t]) for t in ticker_formats]
+        # 分享给他人的文件 OR 本人上传（与 file_shares 无记录时仍应出现在自己的 Sources）
+        query_params = ticker_params + [current_user.username]
         
         query = f"""
         SELECT DISTINCT
@@ -1085,11 +1084,14 @@ async def get_ticker_research_reports(
         LEFT JOIN processing_stats ps ON f.processing_stats_id = ps.id
         WHERE ({ticker_conditions})
         AND f.status = 'completed'
-        AND EXISTS (SELECT 1 FROM file_shares fs WHERE fs.file_id = f.id)
+        AND (
+            EXISTS (SELECT 1 FROM file_shares fs WHERE fs.file_id = f.id)
+            OR ps."user" = %s
+        )
         ORDER BY ft.tagged_at DESC, f.created_at DESC
         """
         
-        results = db_manager.fetch_all(query, ticker_params)
+        results = db_manager.fetch_all(query, query_params)
 
         file_ids = list({row[0] for row in results}) if results else []
         share_info_map = _fetch_share_info_by_file_ids(db_manager, file_ids)

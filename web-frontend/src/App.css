@@ -1541,19 +1541,56 @@
   /* 与 files 页一致的滚动条样式 */
 }
 
+/* My Feeds 左栏：顶部标题 + 添加/刷新 + 类型筛选固定，仅下方列表滚动 */
+.feed-page-layout__sider-my-feeds.ant-layout-sider {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.feed-page-layout__sider-my-feeds .ant-layout-sider-children {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.feed-page-layout__sider-head {
+  flex-shrink: 0;
+}
+
+.feed-page-layout__sider-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 避免 flex 子项把 List 压扁，保证仅外层区域滚动 */
+.feed-page-layout__sider-scroll > .ant-list {
+  flex-shrink: 0;
+}
+
 .feed-page-layout__sider::-webkit-scrollbar,
+.feed-page-layout__sider-scroll::-webkit-scrollbar,
 .feed-page-layout__content-list::-webkit-scrollbar,
 .feed-page-layout__detail::-webkit-scrollbar {
   width: 8px;
 }
 
 .feed-page-layout__sider::-webkit-scrollbar-track,
+.feed-page-layout__sider-scroll::-webkit-scrollbar-track,
 .feed-page-layout__content-list::-webkit-scrollbar-track,
 .feed-page-layout__detail::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .feed-page-layout__sider::-webkit-scrollbar-thumb,
+.feed-page-layout__sider-scroll::-webkit-scrollbar-thumb,
 .feed-page-layout__content-list::-webkit-scrollbar-thumb,
 .feed-page-layout__detail::-webkit-scrollbar-thumb {
   background: #cbd5e1;
@@ -1561,18 +1598,21 @@
 }
 
 .feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
+.feed-page-layout__sider-scroll::-webkit-scrollbar-thumb:hover,
 .feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
 .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
 .app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb,
+.app-dark .feed-page-layout__sider-scroll::-webkit-scrollbar-thumb,
 .app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb,
 .app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb {
   background: #4a5568;
 }
 
 .app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
+.app-dark .feed-page-layout__sider-scroll::-webkit-scrollbar-thumb:hover,
 .app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
 .app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
   background: #5a6678;

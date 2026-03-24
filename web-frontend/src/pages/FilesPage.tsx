@@ -73,6 +73,7 @@ import {
   getRcAgentStatusTagColor,
   normalizeRcAgentStatusForAnalyze,
 } from '../utils/rcAgentStatus';
+import { useSearchParams } from 'react-router-dom';
 import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
@@ -310,6 +311,8 @@ interface ProcessingResult {
 }
 
 const FilesPageInner: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const executionFromUrl = searchParams.get('execution');
   const { themeMode } = useDashboardSettings();
   const { addTask, updateTaskStatus: updateGlobalTaskStatus, registerSourceListRefresh } = useFileProcessing();
   const { modal } = App.useApp();
@@ -596,6 +599,10 @@ const FilesPageInner: React.FC = () => {
   const [hasMoreExecutions, setHasMoreExecutions] = useState(true);
   const [loadingMoreExecutions, setLoadingMoreExecutions] = useState(false);
   const filesListScrollRef = useRef<HTMLDivElement>(null);
+  /** Watchlist `/files?execution=` 进入后：左侧列表需滚动到已定位的条目 */
+  const pendingScrollToExecutionFromDeepLinkRef = useRef(false);
+  const scrollDeepLinkTargetExecutionIdRef = useRef<string | null>(null);
+  const deepLinkScrollAppendAttemptsRef = useRef(0);
 
   // 加载任务执行历史的函数
   const loadTaskExecutionsFunc = useCallback(async (showError = true, isAutoRefresh = false, append = false) => {
@@ -839,6 +846,90 @@ const FilesPageInner: React.FC = () => {
   useEffect(() => {
     loadTaskExecutionsFuncRef.current = loadTaskExecutionsFunc;
   }, [loadTaskExecutionsFunc]);
+
+  /** Watchlist 等外链：`/files?execution=<processing_stats_id>` 打开并选中对应来源任务，并重置筛选以便列表能显示该条 */
+  useEffect(() => {
+    if (!executionFromUrl) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const execution = await tasksAPI.getTaskExecution(executionFromUrl);
+        if (cancelled) return;
+        setFileTypeFilter('all');
+        setSearchQuery('');
+        setTickerFilter(undefined);
+        setSearchType('file_name');
+        setSelectedExecutionForView(execution);
+        setViewMode('original');
+        setSelectedFileForView(null);
+        scrollDeepLinkTargetExecutionIdRef.current = execution.id;
+        pendingScrollToExecutionFromDeepLinkRef.current = true;
+        deepLinkScrollAppendAttemptsRef.current = 0;
+        loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+        setSearchParams(
+          prev => {
+            const next = new URLSearchParams(prev);
+            next.delete('execution');
+            return next;
+          },
+          { replace: true }
+        );
+      } catch (e) {
+        console.error(e);
+        message.error('无法打开链接对应的来源任务');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [executionFromUrl, setSearchParams]);
+
+  /** 外链进入后：左侧列表滚动到已选中的条目（必要时自动加载更多分页直至出现） */
+  useEffect(() => {
+    if (!pendingScrollToExecutionFromDeepLinkRef.current) return;
+    const targetId = scrollDeepLinkTargetExecutionIdRef.current;
+    if (!targetId || selectedExecutionForView?.id !== targetId) {
+      pendingScrollToExecutionFromDeepLinkRef.current = false;
+      scrollDeepLinkTargetExecutionIdRef.current = null;
+      deepLinkScrollAppendAttemptsRef.current = 0;
+      return;
+    }
+    const scrollEl = filesListScrollRef.current;
+    if (!scrollEl) return;
+
+    const tryScroll = (): boolean => {
+      const row = scrollEl.querySelector(`[data-execution-id="${CSS.escape(targetId)}"]`);
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return true;
+      }
+      return false;
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (tryScroll()) {
+          pendingScrollToExecutionFromDeepLinkRef.current = false;
+          scrollDeepLinkTargetExecutionIdRef.current = null;
+          deepLinkScrollAppendAttemptsRef.current = 0;
+          return;
+        }
+        if (hasMoreExecutions && !loadingMoreExecutions && deepLinkScrollAppendAttemptsRef.current < 25) {
+          deepLinkScrollAppendAttemptsRef.current += 1;
+          loadTaskExecutionsFuncRef.current(false, false, true).catch(() => {});
+        } else {
+          pendingScrollToExecutionFromDeepLinkRef.current = false;
+          scrollDeepLinkTargetExecutionIdRef.current = null;
+          deepLinkScrollAppendAttemptsRef.current = 0;
+        }
+      });
+    });
+  }, [
+    selectedExecutionForView?.id,
+    taskExecutions,
+    loadingMoreExecutions,
+    hasMoreExecutions,
+  ]);
 
   // 注册 Source 列表刷新：Upload Files 弹窗点击 Start Processing 关闭后或任务完成时会触发
   useEffect(() => {
@@ -3027,6 +3118,7 @@ const FilesPageInner: React.FC = () => {
                 return (
                   <div
                     key={execution.id}
+                    data-execution-id={execution.id}
                     className={`files-list-item ${isSelected ? 'is-selected' : ''} ${isChecked ? 'is-checked' : ''}`}
                     onClick={() => {
                       setSelectedExecutionForView(execution);

@@ -34,23 +34,23 @@ export interface NewsSourceConfig {
 }
 
 export const NEWS_SOURCES: NewsSourceConfig[] = [
-  { identifier: 'Yahoo Finance', label: 'Yahoo Finance', color: '#6001D2', iconDomain: 'finance.yahoo.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'Yahoo Finance', label: 'Yahoo Finance', color: '#6001D2', iconDomain: 'finance.yahoo.com', iconLocalFile: 'yahoo-finance.ico' },
   { identifier: 'Seeking Alpha', label: 'Seeking Alpha', color: '#F57C00', iconDomain: 'seekingalpha.com', iconLocalFile: 'seeking-alpha.ico' },
-  { identifier: 'CNBC', label: 'CNBC', color: '#005594', iconDomain: 'cnbc.com', iconLocalFile: 'placeholder.svg' },
-  { identifier: 'Nasdaq', label: 'Nasdaq', color: '#0096D6', iconDomain: 'nasdaq.com', iconLocalFile: 'placeholder.svg' },
-  { identifier: 'Fxstreet', label: 'FXStreet', color: '#1B5E20', iconDomain: 'fxstreet.com', iconLocalFile: 'placeholder.svg' },
+  { identifier: 'CNBC', label: 'CNBC', color: '#005594', iconDomain: 'cnbc.com', iconLocalFile: 'cnbc.ico' },
+  { identifier: 'Nasdaq', label: 'Nasdaq', color: '#0096D6', iconDomain: 'nasdaq.com', iconLocalFile: 'nasdaq.ico' },
+  { identifier: 'Fxstreet', label: 'FXStreet', color: '#1B5E20', iconDomain: 'fxstreet.com', iconLocalFile: 'fxstreet.ico' },
   { identifier: 'Globenewswire', label: 'GlobeNewsWire', color: '#2196F3', iconDomain: 'globenewswire.com', iconLocalFile: 'globenewswire.ico' },
-  { identifier: 'U.Today', label: 'U.Today', color: '#FF5722', iconDomain: 'u.today', iconLocalFile: 'placeholder.svg' },
-  { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', iconLocalFile: 'placeholder.svg', disabled: true },
-  { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'U.Today', label: 'U.Today', color: '#FF5722', iconDomain: 'u.today', iconLocalFile: 'u-today.ico' },
+  { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', iconLocalFile: 'actionforex.ico', disabled: true },
+  { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', iconLocalFile: 'dailyhodl.ico', disabled: true },
   { identifier: 'Thecurrencyanalytics', label: 'Currency Analytics', color: '#7B1FA2', iconDomain: 'thecurrencyanalytics.com', iconLocalFile: 'thecurrencyanalytics.ico', disabled: true },
-  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', iconLocalFile: 'placeholder.svg', disabled: true },
-  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', iconLocalFile: 'bloomberg.ico', disabled: true },
+  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', iconLocalFile: 'reuters.ico', disabled: true },
   { identifier: 'MarketWatch', label: 'MarketWatch', color: '#00A651', iconDomain: 'marketwatch.com', iconLocalFile: 'marketwatch.ico', disabled: true },
-  { identifier: 'Wall Street Journal', label: 'WSJ', color: '#0274B6', iconDomain: 'wsj.com', iconLocalFile: 'placeholder.svg', disabled: true },
-  { identifier: 'Financial Times', label: 'Financial Times', color: '#265761', iconDomain: 'ft.com', iconLocalFile: 'placeholder.svg', disabled: true },
-  { identifier: 'Forbes', label: 'Forbes', color: '#B10000', iconDomain: 'forbes.com', iconLocalFile: 'placeholder.svg', disabled: true },
-  { identifier: 'Business Insider', label: 'Business Insider', color: '#0066CC', iconDomain: 'businessinsider.com', iconLocalFile: 'placeholder.svg', disabled: true },
+  { identifier: 'Wall Street Journal', label: 'WSJ', color: '#0274B6', iconDomain: 'wsj.com', iconLocalFile: 'wsj.ico', disabled: true },
+  { identifier: 'Financial Times', label: 'Financial Times', color: '#265761', iconDomain: 'ft.com', iconLocalFile: 'ft.ico', disabled: true },
+  { identifier: 'Forbes', label: 'Forbes', color: '#B10000', iconDomain: 'forbes.com', iconLocalFile: 'forbes.ico', disabled: true },
+  { identifier: 'Business Insider', label: 'Business Insider', color: '#0066CC', iconDomain: 'businessinsider.com', iconLocalFile: 'business-insider.ico', disabled: true },
 ];
 
 const FEED_NEWS_ICONS_BASE = `${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/feed-news-icons`;

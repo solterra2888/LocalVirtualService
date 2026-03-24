@@ -172,7 +172,7 @@ const FeedReaderPageInner: React.FC = () => {
           if (newUnreadCount > 0) {
             playNewItemsNotificationSound();
             message.info({
-              content: `🔔 ${newUnreadCount} new item${newUnreadCount > 1 ? 's' : ''} available`,
+              content: `🔔 ${newUnreadCount} new message(s)${newUnreadCount > 1 ? 's' : ''} available`,
               duration: 5,
             });
           }
@@ -599,14 +599,16 @@ const FeedReaderPageInner: React.FC = () => {
         {/* 左侧订阅列表 */}
         <Sider
           width={280}
-          className="feed-page-layout__sider"
+          className="feed-page-layout__sider feed-page-layout__sider-my-feeds"
           style={{
             backgroundColor: themeColors.cardBg,
             borderRight: `1px solid ${themeColors.cardBorder}`,
-            overflowY: 'auto',
           }}
         >
-          <div style={{ padding: '16px 12px', borderBottom: `1px solid ${themeColors.cardBorder}` }}>
+          <div
+            className="feed-page-layout__sider-head"
+            style={{ padding: '16px 12px', borderBottom: `1px solid ${themeColors.cardBorder}` }}
+          >
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
               <Text strong style={{ color: themeColors.textSecondary, fontSize: 12 }}>
                 MY FEEDS ({visibleSubscriptions.length})
@@ -700,31 +702,41 @@ const FeedReaderPageInner: React.FC = () => {
             </div>
           </div>
 
+          <div className="feed-page-layout__sider-scroll">
           {loading ? (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              height: 'calc(100vh - 200px)'
-            }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1,
+                minHeight: 200,
+              }}
+            >
               <Spin />
             </div>
           ) : subscriptions.length === 0 ? (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              height: 'calc(100vh - 200px)'
-            }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1,
+                minHeight: 200,
+              }}
+            >
               <Empty description="No subscriptions yet" />
             </div>
           ) : visibleSubscriptions.length === 0 ? (
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                height: 'calc(100vh - 200px)'
-              }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flex: 1,
+                  minHeight: 200,
+                }}
+              >
                 <Empty
                   description={
                     feedChannelTypeFilter !== 'all'
@@ -926,6 +938,7 @@ const FeedReaderPageInner: React.FC = () => {
                 }}
             />
           )}
+          </div>
         </Sider>
 
         {/* 中间内容列表 */}

@@ -1,0 +1,50 @@
+/* PC Watchlist > Sources：与移动端一致的文件卡片，网格布局 */
+
+.watchlist-research-sources-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+  padding: 4px 0 8px;
+}
+
+.watchlist-research-sources-grid .mobile-sources-card {
+  margin-bottom: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.watchlist-research-sources-grid .mobile-sources-card-tickers {
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.watchlist-research-card-industry {
+  font-size: 11px;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* 右侧面板较窄时自动减列，避免卡片过挤 */
+@media (max-width: 1480px) {
+  .watchlist-research-sources-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .watchlist-research-sources-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.watchlist-research-sources-skeleton-card {
+  border-radius: 12px;
+}

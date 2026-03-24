@@ -83,18 +83,21 @@ def add_user_to_existing_content_task(
     self,
     user_id: int,
     channel_type: str,
-    channel_identifier: str
+    channel_identifier: str,
+    subscription_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    将用户添加到现有Twitter内容的user_ids数组（Celery任务）
-    
-    用于复用场景：当其他用户已订阅该作者时，直接将新用户加到现有内容
-    
+    将用户添加到现有 subscription_content 的 user_ids（Celery 任务）
+
+    用于复用：Twitter / YouTube / News 等渠道在库里已有该作者内容时，
+    新订阅用户需写入 user_ids，否则列表接口（user_id = ANY(user_ids)）查不到数据。
+
     Args:
-        user_id: 新用户ID
-        channel_type: 渠道类型（'twitter'）
+        user_id: 新用户 ID
+        channel_type: 渠道类型
         channel_identifier: 作者标识符
-    
+        subscription_id: 若提供，在合并 user_ids 后刷新该订阅的 unread_count
+
     Returns:
         更新结果
     """
@@ -119,11 +122,28 @@ def add_user_to_existing_content_task(
         """, (user_id, channel_type, channel_identifier, user_id))
         
         updated_count = cursor.rowcount
+
+        if subscription_id is not None and updated_count >= 0:
+            try:
+                cursor.execute(
+                    "SELECT update_subscription_unread_count(%s, %s)",
+                    (subscription_id, user_id),
+                )
+                cursor.fetchone()
+            except Exception as unread_exc:
+                logger.warning(
+                    f"[Celery Task] update_subscription_unread_count failed: {unread_exc}",
+                    exc_info=True,
+                )
+
         conn.commit()
         cursor.close()
         conn.close()
         
-        logger.info(f"[Celery Task] Added user {user_id} to {updated_count} existing tweets from {channel_identifier}")
+        logger.info(
+            f"[Celery Task] Added user {user_id} to {updated_count} existing rows "
+            f"from {channel_identifier} ({channel_type})"
+        )
         
         return {
             'success': True,

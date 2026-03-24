@@ -29,6 +29,7 @@ import FeedTweetContent from './FeedTweetContent';
 import type { FeedThemeColors } from './feedTheme';
 import type { SubscriptionContent } from '../../services/subscriptions';
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
+import { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
 
 const { Text } = Typography;
 
@@ -232,11 +233,25 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           </Text>
 
           {selectedContent.metadata?.symbols && (selectedContent.metadata.symbols as string[]).length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Symbols:</Text>
-              {(selectedContent.metadata.symbols as string[]).map((sym) => (
-                <Tag key={sym} color="blue" style={{ fontSize: 11 }}>{sym}</Tag>
-              ))}
+            <div
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px 8px',
+              }}
+            >
+              <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                Ticker:
+              </Text>
+              <Space size={[4, 4]} wrap>
+                {(selectedContent.metadata.symbols as string[]).map((sym) => (
+                  <Tag key={sym} style={PC_INFO_TAGS_TAG_STYLE}>
+                    {sym}
+                  </Tag>
+                ))}
+              </Space>
             </div>
           )}
 
