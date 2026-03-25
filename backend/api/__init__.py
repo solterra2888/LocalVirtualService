@@ -12,6 +12,7 @@ from . import markets
 from . import scheduler
 from . import dashboard
 from . import screener
+from . import twitter_daily_reports
 
 __all__ = [
     'auth',
@@ -22,5 +23,6 @@ __all__ = [
     'markets',
     'scheduler',
     'dashboard',
-    'screener'
+    'screener',
+    'twitter_daily_reports',
 ] 

@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_daily_report';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -893,6 +893,51 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认 Watchlist Fundamentals 定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建 Twitter Daily Report 定时任务
+   */
+  async createTwitterDailyReportTask(params: {
+    name?: string;
+    cron_expression?: string;
+    timezone?: string;
+    enabled?: boolean;
+  }): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/twitter-daily-report', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建 Twitter Daily Report 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建 Twitter Daily Report 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建 Twitter Daily Report 定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认 Twitter Daily Report 定时任务
+   */
+  async createDefaultTwitterDailyReportTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/twitter-daily-report/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认 Twitter Daily Report 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认 Twitter Daily Report 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认 Twitter Daily Report 定时任务失败'
       };
     }
   }

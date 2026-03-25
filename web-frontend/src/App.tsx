@@ -35,6 +35,7 @@ import MarketWeekly from './pages/MarketWeekly';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import DashboardSettingsPage from './pages/DashboardSettingsPage';
+import TwitterDailyReportPage from './pages/TwitterDailyReportPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -136,6 +137,7 @@ const AppContent: React.FC = () => {
           ) : (
             <Route path="feeds" element={<FeedReaderPage />} />
           )}
+          <Route path="twitter-daily-report" element={<TwitterDailyReportPage />} />
           <Route path="prompt-templates" element={<PromptTemplatesPage />} />
           <Route path="investment-themes" element={<InvestmentThemesPage />} />
           <Route path="projects" element={<ProjectsPage />} />

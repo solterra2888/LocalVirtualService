@@ -26,6 +26,7 @@ import {
   MoonOutlined,
   ReadOutlined,
   EditOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -143,6 +144,11 @@ const Layout: React.FC = () => {
       key: '/market-weekly',
       icon: <BarChartOutlined />,
       label: 'Market Weekly',
+    },
+    {
+      key: '/twitter-daily-report',
+      icon: <ProfileOutlined />,
+      label: 'Twitter Report',
     },
     {
       key: 'ug-data',

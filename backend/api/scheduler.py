@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_daily_report)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(eodhd_news|watchlist_news|cctv_news|twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_daily_report)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -1571,6 +1571,107 @@ async def create_default_news_feed_task(
         raise
     except Exception as e:
         logger.error("创建默认 News Feed 定时任务失败",
+                     exception=str(e),
+                     user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ── Twitter Daily Report 定时任务 ──────────────────────────────────────────
+
+
+class CreateTwitterDailyReportTaskRequest(BaseModel):
+    """创建 Twitter Daily Report 定时任务请求模型"""
+    name: str = Field(default="Twitter Daily Report", description="任务名称")
+    cron_expression: str = Field(default="0 6 * * *", description="Cron表达式（默认每天早上6点）")
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+
+
+@router.post("/tasks/twitter-daily-report", summary="创建 Twitter Daily Report 定时任务")
+async def create_twitter_daily_report_task(
+    request: CreateTwitterDailyReportTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 Twitter Daily Report 定时任务
+
+    每天定时为所有启用了 Twitter 订阅的用户生成前一天的 Daily Report。
+    """
+    try:
+        logger.info("创建 Twitter Daily Report 定时任务请求",
+                     user=current_user.username,
+                     task_name=request.name,
+                     cron_expression=request.cron_expression)
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="twitter_daily_report",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params={},
+            created_by=current_user.username
+        )
+
+        if result['success']:
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建 Twitter Daily Report 定时任务失败",
+                     exception=str(e),
+                     user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/twitter-daily-report/default", summary="创建默认 Twitter Daily Report 定时任务")
+async def create_default_twitter_daily_report_task(
+    current_user=Depends(get_current_user)
+):
+    """创建默认的 Twitter Daily Report 定时任务（每天早上6点CST执行）"""
+    try:
+        logger.info("创建默认 Twitter Daily Report 定时任务请求", user=current_user.username)
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="Twitter Daily Report",
+            task_type="twitter_daily_report",
+            cron_expression="0 6 * * *",
+            timezone="Asia/Shanghai",
+            enabled=True,
+            task_params={},
+            created_by=current_user.username
+        )
+
+        if result['success']:
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建默认 Twitter Daily Report 定时任务失败",
                      exception=str(e),
                      user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")

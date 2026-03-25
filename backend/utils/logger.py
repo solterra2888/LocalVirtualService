@@ -58,11 +58,13 @@ class UnifiedLogger:
         # 检测是否在Celery worker环境中运行
         is_celery_worker = False
         try:
-            # 检查是否有celery logger，或者检测环境变量
             celery_logger = logging.getLogger('celery')
             is_celery_worker = len(celery_logger.handlers) > 0
         except:
             pass
+        
+        if is_celery_worker:
+            self.logger.propagate = True
         
         # 控制台输出
         if log_to_console and not is_celery_worker:

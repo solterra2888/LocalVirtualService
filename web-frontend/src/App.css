@@ -615,7 +615,8 @@
 }
 
 .files-page-layout .files-list-header {
-  padding: 14px 16px;
+  /* 与 Folders / Search 的 files-folder-panel-header 同高同左右内边距，左侧图标纵向对齐 */
+  padding: 8px 12px;
   border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
   font-weight: 600;
   font-size: 15px;
@@ -625,6 +626,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.files-page-layout .files-list-header-lead.ant-space {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
 .files-page-layout .files-list-type-tabs {
@@ -690,40 +697,38 @@
   border-color: rgba(255, 255, 255, 0.06);
 }
 
-/* 方案 B：折叠搜索 — 单行切换 + 展开后面板 */
-.files-page-layout .files-list-search-toggle-row {
+/* Search 侧栏：与 Folders 同用 files-folder-panel-header，顶栏 + Clear 同一行 */
+.files-page-layout .files-search-panel-header-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 6px 12px 8px;
-  background: var(--files-panel-bg, #fff);
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
 }
 
-.files-page-layout .files-list-search-toggle-row--dark {
-  background: var(--files-panel-bg);
+.files-page-layout .files-search-panel-header-row .files-folder-panel-header {
+  flex: 1;
+  min-width: 0;
 }
 
-.files-page-layout .files-list-search-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 4px;
-  margin: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: inherit;
-  transition: background 0.15s ease;
+.files-page-layout .files-search-panel-header-row .files-search-clear-link.ant-btn {
+  align-self: center;
+  flex-shrink: 0;
+  margin: 0 8px 0 0;
+  padding: 0 4px;
+  height: auto;
+  font-size: 12px;
 }
 
-.files-page-layout .files-list-search-toggle-btn:hover {
-  background: var(--files-batch-bar-bg, #f1f5f9);
+.files-page-layout .files-search-panel-body {
+  border-top: 1px solid var(--files-panel-border, #f0f0f0);
 }
 
-.app-dark .files-page-layout .files-list-search-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+.app-dark .files-page-layout .files-search-panel-body {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+.files-page-layout .files-search-panel-body .files-list-search-bar {
+  border-bottom: none;
 }
 
 .files-page-layout .files-search-active-dot {
@@ -762,13 +767,6 @@
 
 .app-dark .files-page-layout .files-search-filter-preview-value {
   color: #e6e9ef;
-}
-
-.files-page-layout .files-search-clear-link.ant-btn {
-  padding: 0 4px;
-  height: auto;
-  font-size: 12px;
-  flex-shrink: 0;
 }
 
 .files-page-layout .files-list-search-bar--expandable {

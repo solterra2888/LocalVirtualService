@@ -63,8 +63,10 @@ task_routes = {
     'fetch_youtube_subscription': {'queue': 'data_fetching'},  # YouTube订阅内容获取
     'transcribe_youtube_feed_task': {'queue': 'file_processing'},  # YouTube Feed 手动触发 ASR 转写
     'transcribe_youtube_file_asr_task': {'queue': 'file_processing'},  # Upload YouTube Link 手动重新 ASR 转写
-    'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},  # 复用现有内容
-    'smart_wait_and_add_user': {'queue': 'data_fetching'},  # 智能等待
+    'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
+    'smart_wait_and_add_user': {'queue': 'data_fetching'},
+    'generate_twitter_daily_report': {'queue': 'ai_processing'},
+    'generate_all_twitter_daily_reports': {'queue': 'ai_processing'},
 }
 
 # Worker配置

@@ -73,6 +73,7 @@ class SchedulerService:
             'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
             'ipo_calendar': self._execute_ipo_calendar_task,  # IPO 日历数据获取任务
             'news_feed': self._execute_news_feed_task,  # EODHD 新闻 Feed 订阅任务
+            'twitter_daily_report': self._execute_twitter_daily_report_task,  # Twitter Daily Report 生成
         }
         
         # 添加事件监听器
@@ -1453,6 +1454,40 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"News Feed 任务执行异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_twitter_daily_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 Twitter Daily Report 生成任务 — 通过 Celery 异步分发给所有启用的用户。
+        每份报告耗时 200-500s，必须走 Celery worker 避免阻塞 scheduler。
+
+        Args:
+            params: 任务参数
+                - report_date: 报告日期 (YYYY-MM-DD)，默认昨天
+        """
+        try:
+            logger.info("分发 Twitter Daily Report Celery 任务", params=params)
+
+            from datetime import date, timedelta, datetime
+            from backend.tasks.report_tasks import generate_all_twitter_daily_reports_task
+
+            report_date_str = params.get('report_date')
+            if report_date_str:
+                report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                report_date = date.today() - timedelta(days=1)
+
+            task = generate_all_twitter_daily_reports_task.delay(report_date=str(report_date))
+
+            message = (
+                f"✅ Twitter Daily Report ({report_date}): "
+                f"已提交 Celery 异步任务 {task.id}"
+            )
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Twitter Daily Report 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

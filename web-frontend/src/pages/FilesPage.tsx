@@ -3009,8 +3009,8 @@ const FilesPageInner: React.FC = () => {
           {/* 左侧：Behance 风格文件列表 */}
           <div className="files-list-panel">
             <div className="files-list-header">
-              <Space size={8}>
-                <FileTextOutlined />
+              <Space size={8} className="files-list-header-lead">
+                <FileTextOutlined style={{ fontSize: 14, opacity: 0.85 }} />
                 <span>Sources</span>
                 <span style={{ fontWeight: 400, fontSize: '13px', opacity: 0.7 }}>({filteredExecutions.length})</span>
               </Space>
@@ -3192,70 +3192,78 @@ const FilesPageInner: React.FC = () => {
               )}
             </div>
             <div
-              className={`files-list-search-toggle-row${isDark ? ' files-list-search-toggle-row--dark' : ''}`}
+              className={`files-folder-panel${isDark ? ' files-folder-panel--dark' : ''}`}
               style={{ borderBottom: `1px solid ${themeColors.cardBorder}` }}
             >
-              <button
-                type="button"
-                className="files-list-search-toggle-btn"
-                onClick={() => setSearchPanelExpanded(v => !v)}
-                aria-expanded={searchPanelExpanded}
-              >
-                <SearchOutlined style={{ marginRight: 6, color: themeColors.textSecondary }} />
-                <span style={{ color: themeColors.text, fontWeight: 500 }}>Search</span>
+              <div className="files-search-panel-header-row">
+                <button
+                  type="button"
+                  className="files-folder-panel-header"
+                  onClick={() => setSearchPanelExpanded(v => !v)}
+                  aria-expanded={searchPanelExpanded}
+                  style={{ color: themeColors.text }}
+                >
+                  <SearchOutlined style={{ fontSize: 14, opacity: 0.85 }} />
+                  <span className="files-folder-panel-title">Search</span>
+                  {hasAnySearchPanelFilter && (
+                    <span className="files-search-active-dot" title="Filters active" />
+                  )}
+                  {!searchPanelExpanded && hasAnySearchPanelFilter && (
+                    <span
+                      className="files-folder-panel-summary files-search-filter-preview"
+                      style={{ color: themeColors.textSecondary }}
+                      title={
+                        [
+                          fileTypeFilter !== 'all' ? `Type: ${FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}` : '',
+                          hasActiveSourcesSearch
+                            ? (searchType === 'ticker' ? `Ticker: ${tickerFilter}` : `${searchType === 'file_name' ? 'Title' : 'Content'}: ${searchQuery.trim()}`)
+                            : '',
+                        ].filter(Boolean).join(' · ')
+                      }
+                    >
+                      {fileTypeFilter !== 'all' && (
+                        <>
+                          Type:{' '}
+                          <span className="files-search-filter-preview-value">
+                            {FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}
+                          </span>
+                          {(hasActiveSourcesSearch) ? <span style={{ opacity: 0.45 }}> · </span> : null}
+                        </>
+                      )}
+                      {hasActiveSourcesSearch && (
+                        <>
+                          {searchType === 'file_name' && 'Title: '}
+                          {searchType === 'content' && 'Content: '}
+                          {searchType === 'ticker' && 'Ticker: '}
+                          <span className="files-search-filter-preview-value">
+                            {searchType === 'ticker' ? tickerFilter : (searchQuery.trim() || '…')}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {searchPanelExpanded ? (
+                    <UpOutlined style={{ fontSize: 10, opacity: 0.65, marginLeft: 'auto' }} />
+                  ) : (
+                    <DownOutlined style={{ fontSize: 10, opacity: 0.65, marginLeft: 'auto' }} />
+                  )}
+                </button>
                 {hasAnySearchPanelFilter && (
-                  <span className="files-search-active-dot" title="Filters active" />
+                  <Button
+                    type="link"
+                    size="small"
+                    className="files-search-clear-link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearSourcesSearchFilters();
+                    }}
+                  >
+                    Clear
+                  </Button>
                 )}
-                {searchPanelExpanded ? <UpOutlined style={{ marginLeft: 6, fontSize: 10, opacity: 0.65 }} /> : <DownOutlined style={{ marginLeft: 6, fontSize: 10, opacity: 0.65 }} />}
-              </button>
-              {!searchPanelExpanded && hasAnySearchPanelFilter && (
-                <span
-                  className="files-search-filter-preview"
-                  title={
-                    [
-                      fileTypeFilter !== 'all' ? `Type: ${FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}` : '',
-                      hasActiveSourcesSearch
-                        ? (searchType === 'ticker' ? `Ticker: ${tickerFilter}` : `${searchType === 'file_name' ? 'Title' : 'Content'}: ${searchQuery.trim()}`)
-                        : '',
-                    ].filter(Boolean).join(' · ')
-                  }
-                >
-                  {fileTypeFilter !== 'all' && (
-                    <>
-                      Type:{' '}
-                      <span className="files-search-filter-preview-value">
-                        {FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}
-                      </span>
-                      {(hasActiveSourcesSearch) ? <span style={{ opacity: 0.45 }}> · </span> : null}
-                    </>
-                  )}
-                  {hasActiveSourcesSearch && (
-                    <>
-                      {searchType === 'file_name' && 'Title: '}
-                      {searchType === 'content' && 'Content: '}
-                      {searchType === 'ticker' && 'Ticker: '}
-                      <span className="files-search-filter-preview-value">
-                        {searchType === 'ticker' ? tickerFilter : (searchQuery.trim() || '…')}
-                      </span>
-                    </>
-                  )}
-                </span>
-              )}
-              {hasAnySearchPanelFilter && (
-                <Button
-                  type="link"
-                  size="small"
-                  className="files-search-clear-link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    clearSourcesSearchFilters();
-                  }}
-                >
-                  Clear
-                </Button>
-              )}
-            </div>
-            {searchPanelExpanded && (
+              </div>
+              {searchPanelExpanded && (
+            <div className="files-search-panel-body">
             <div
               className={`files-list-search-bar files-list-search-bar--expandable${isDark ? ' files-list-search-bar--dark' : ''}`}
               style={
@@ -3350,7 +3358,9 @@ const FilesPageInner: React.FC = () => {
                 )}
               </Space.Compact>
             </div>
-            )}
+            </div>
+              )}
+            </div>
             {batchMode && selectedExecutionIds.length > 0 && (
               <div className="files-list-batch-bar">
                 <span className="files-list-batch-count">{selectedExecutionIds.length} selected</span>
