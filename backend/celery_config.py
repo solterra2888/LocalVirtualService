@@ -67,6 +67,7 @@ task_routes = {
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_twitter_daily_report': {'queue': 'ai_processing'},
     'generate_all_twitter_daily_reports': {'queue': 'ai_processing'},
+    'cleanup_llm_usage_logs': {'queue': 'data_fetching'},
 }
 
 # Worker配置
@@ -100,5 +101,16 @@ task_log_level = 'INFO'
 # 日志轮转配置
 worker_log_max_bytes = 10 * 1024 * 1024  # 10MB
 worker_log_backup_count = 5
+
+# Celery Beat 定时任务
+from celery.schedules import crontab
+
+beat_schedule = {
+    'cleanup-llm-usage-logs-daily': {
+        'task': 'cleanup_llm_usage_logs',
+        'schedule': crontab(hour=3, minute=0),  # 每天凌晨 3:00 执行
+        'kwargs': {'retain_days': 7},
+    },
+}
 
 

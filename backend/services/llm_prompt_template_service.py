@@ -838,17 +838,19 @@ class LLMPromptTemplateService:
         try:
             cursor = conn.cursor()
             
-            # 不写入 rendered_prompt / variables_data / response_content，避免 TOAST 膨胀；
-            # 监控与统计仅使用元数据字段，详见 docs/llm_prompt_usage_logs_evaluation.md
+            import json as _json
+            variables_json = _json.dumps(variables_data, ensure_ascii=False, default=str) if variables_data else None
+
             query = """
                 INSERT INTO llm_prompt_usage_logs (
                     template_id, user_id, rendered_prompt, variables_data,
                     response_content, provider, model, tokens_used, cost,
                     response_time_ms, success, error_message
-                ) VALUES (%s, %s, NULL, NULL, NULL, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cursor.execute(query, (
-                template_id, user_id, provider, model, tokens_used, cost,
+                template_id, user_id, rendered_prompt, variables_json,
+                response_content, provider, model, tokens_used, cost,
                 response_time_ms, success, error_message
             ))
             

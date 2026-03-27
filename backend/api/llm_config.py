@@ -799,6 +799,9 @@ class DetailedUsageLog(BaseModel):
     cost: Optional[float]
     success: bool
     error_message: Optional[str]
+    rendered_prompt: Optional[str] = None
+    variables_data: Optional[Dict[str, Any]] = None
+    response_content: Optional[str] = None
 
 class MonitoringDashboard(BaseModel):
     """监控仪表板完整数据"""
@@ -1194,7 +1197,8 @@ async def get_detailed_logs(
         cursor.execute(f"""
             SELECT 
                 id, template_id, user_id, provider, model, created_at,
-                response_time_ms, tokens_used, cost, success, error_message
+                response_time_ms, tokens_used, cost, success, error_message,
+                rendered_prompt, variables_data, response_content
             FROM llm_prompt_usage_logs
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -1207,6 +1211,13 @@ async def get_detailed_logs(
         
         data = []
         for row in rows:
+            variables = row[12] if row[12] else None
+            if isinstance(variables, str):
+                import json as _json
+                try:
+                    variables = _json.loads(variables)
+                except (ValueError, TypeError):
+                    variables = None
             data.append({
                 "id": row[0],
                 "template_id": row[1] if row[1] else None,
@@ -1218,7 +1229,10 @@ async def get_detailed_logs(
                 "tokens_used": row[7] if row[7] else 0,
                 "cost": float(row[8]) if row[8] else 0.0,
                 "success": row[9] if row[9] is not None else True,
-                "error_message": row[10] if row[10] else ""
+                "error_message": row[10] if row[10] else "",
+                "rendered_prompt": row[11] if row[11] else None,
+                "variables_data": variables,
+                "response_content": row[13] if row[13] else None
             })
         
         return {
@@ -1306,3 +1320,123 @@ async def get_template_stats(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取模板统计失败: {str(e)}")
+
+
+@router.get("/monitoring/logs/{log_id}")
+async def get_single_log_detail(
+    log_id: int,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """获取单条使用日志的完整详情（含 rendered_prompt / variables_data / response_content）"""
+    try:
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                l.id, l.template_id, l.user_id, l.provider, l.model, l.created_at,
+                l.response_time_ms, l.tokens_used, l.cost, l.success, l.error_message,
+                l.rendered_prompt, l.variables_data, l.response_content, l.user_feedback,
+                t.template_name, t.template_code
+            FROM llm_prompt_usage_logs l
+            LEFT JOIN llm_prompt_templates t ON l.template_id = t.id
+            WHERE l.id = %s
+        """, (log_id,))
+
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="日志记录不存在")
+
+        variables = row[12] if row[12] else None
+        if isinstance(variables, str):
+            import json as _json
+            try:
+                variables = _json.loads(variables)
+            except (ValueError, TypeError):
+                variables = None
+
+        return {
+            "id": row[0],
+            "template_id": row[1],
+            "user_id": row[2],
+            "provider": row[3] or "",
+            "model": row[4] or "",
+            "created_at": row[5].isoformat() if row[5] else "",
+            "response_time_ms": row[6],
+            "tokens_used": row[7],
+            "cost": float(row[8]) if row[8] else 0.0,
+            "success": row[9] if row[9] is not None else True,
+            "error_message": row[10] or "",
+            "rendered_prompt": row[11],
+            "variables_data": variables,
+            "response_content": row[13],
+            "user_feedback": row[14],
+            "template_name": row[15],
+            "template_code": row[16]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get log detail: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取日志详情失败: {str(e)}")
+
+
+@router.delete("/monitoring/logs/cleanup")
+async def cleanup_old_usage_logs(
+    retain_days: int = 7,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
+    """手动清理超过指定天数的 LLM usage logs"""
+    if retain_days < 1:
+        raise HTTPException(status_code=400, detail="保留天数不能小于 1")
+
+    try:
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM llm_prompt_usage_logs WHERE created_at < CURRENT_TIMESTAMP - INTERVAL %s",
+            (f"{retain_days} days",)
+        )
+        count_to_delete = cursor.fetchone()[0]
+
+        if count_to_delete == 0:
+            cursor.close()
+            conn.close()
+            return {"deleted": 0, "message": f"没有超过 {retain_days} 天的日志需要清理"}
+
+        cursor.execute(
+            "DELETE FROM llm_prompt_usage_logs WHERE created_at < CURRENT_TIMESTAMP - INTERVAL %s",
+            (f"{retain_days} days",)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        logger.info(f"Cleaned up {count_to_delete} old usage logs (retain_days={retain_days})")
+        return {
+            "deleted": count_to_delete,
+            "retain_days": retain_days,
+            "message": f"已清理 {count_to_delete} 条超过 {retain_days} 天的日志"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cleanup usage logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清理日志失败: {str(e)}")
