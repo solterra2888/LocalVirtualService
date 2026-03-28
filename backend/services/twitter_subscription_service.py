@@ -4,12 +4,13 @@ Twitter订阅服务 - 基于用户订阅列表获取Twitter推文
 """
 
 import os
+import uuid
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
 import psycopg2
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 
@@ -291,6 +292,75 @@ class TwitterSubscriptionService:
         
         return dict(aggregated)
     
+    def _calculate_fetch_since_hours(self, author_subs: List[Dict[str, Any]]) -> int:
+        """
+        根据订阅的 last_fetched_at 计算最优时间窗口，避免每次都拉取 24 小时的全量数据。
+        """
+        latest_fetch = None
+        for sub in author_subs:
+            lfa = sub.get('last_fetched_at')
+            if lfa and (latest_fetch is None or lfa > latest_fetch):
+                latest_fetch = lfa
+        
+        if latest_fetch is None:
+            return self.default_query_hours
+        
+        if not isinstance(latest_fetch, datetime):
+            return self.default_query_hours
+        
+        # DB 列为 timestamp without time zone，存储的是服务器本地时间，
+        # 必须用同类型的 naive datetime 比较，避免时区偏移导致负值。
+        if latest_fetch.tzinfo is None:
+            now = datetime.now()
+        else:
+            now = datetime.now(timezone.utc)
+        
+        hours_since = (now - latest_fetch).total_seconds() / 3600
+        
+        if hours_since < 0:
+            return self.default_query_hours
+        
+        # 加 30 分钟 buffer 并向上取整，最小 1 小时
+        smart_hours = max(1, int(hours_since + 1.5))
+        return min(smart_hours, self.default_query_hours)
+    
+    def _calculate_max_pages(self, since_hours: int) -> int:
+        """根据时间窗口动态调整最大分页数。窗口越小，所需页数越少。"""
+        if since_hours <= 3:
+            return 2
+        elif since_hours <= 12:
+            return 3
+        return 5
+    
+    def _get_existing_tweet_ids(self, conn, tweet_ids: List[str]) -> set:
+        """批量查询哪些 tweet ID 已存在于数据库，返回已存在的 ID 集合。"""
+        if not tweet_ids:
+            return set()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT content_id FROM subscription_content "
+            "WHERE channel_type = 'twitter' AND content_id = ANY(%s)",
+            (tweet_ids,)
+        )
+        existing = {row[0] for row in cursor.fetchall()}
+        cursor.close()
+        return existing
+    
+    def _ensure_user_ids_for_author(self, conn, author: str, user_ids: List[int]):
+        """批量确保该作者所有已有内容都包含这些 user_ids（处理新订阅用户场景）。"""
+        if not user_ids:
+            return
+        cursor = conn.cursor()
+        for uid in user_ids:
+            cursor.execute("""
+                UPDATE subscription_content
+                SET user_ids = ARRAY(SELECT DISTINCT UNNEST(user_ids || %s::integer))
+                WHERE channel_type = 'twitter'
+                AND author_identifier = %s
+                AND NOT (%s = ANY(user_ids))
+            """, (uid, author, uid))
+        cursor.close()
+    
     def fetch_tweets_from_api(self, author: str, since_hours: int = None, max_pages: int = 5) -> List[Dict[str, Any]]:
         """
         从Twitter API获取推文
@@ -306,17 +376,15 @@ class TwitterSubscriptionService:
         if since_hours is None:
             since_hours = self.default_query_hours
         
-        logger.info("开始获取Twitter推文", author=author, since_hours=since_hours)
+        logger.info("开始获取Twitter推文", author=author, since_hours=since_hours, max_pages=max_pages)
         
         try:
-            # 计算时间范围
-            until_time = datetime.utcnow()
+            until_time = datetime.now(timezone.utc)
             since_time = until_time - timedelta(hours=since_hours)
             
             since_str = since_time.strftime("%Y-%m-%d_%H:%M:%S_UTC")
             until_str = until_time.strftime("%Y-%m-%d_%H:%M:%S_UTC")
             
-            # 构建查询
             query = f"from:{author} since:{since_str} until:{until_str} include:nativeretweets"
             
             params = {
@@ -328,18 +396,12 @@ class TwitterSubscriptionService:
                 "X-API-Key": self.api_key
             }
             
-            # 🐛 调试日志：记录查询参数
-            logger.info("API请求参数", 
-                       author=author,
-                       since_str=since_str,
-                       until_str=until_str,
-                       query=query,
-                       api_url=self.api_base_url)
+            logger.debug("API请求参数", author=author, query=query)
             
-            # 处理分页
             all_tweets = []
             next_cursor = None
             page_count = 0
+            api_calls = 0
             
             while page_count < max_pages:
                 if next_cursor:
@@ -352,69 +414,43 @@ class TwitterSubscriptionService:
                     timeout=30,
                     verify=True
                 )
+                api_calls += 1
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    # 🐛 调试日志：记录 API 原始响应
-                    logger.info("API响应详情", 
-                               author=author,
-                               response_keys=list(data.keys()) if isinstance(data, dict) else "list",
-                               data_type=str(type(data)),
-                               has_tweets="tweets" in data if isinstance(data, dict) else False,
-                               has_data="data" in data if isinstance(data, dict) else False)
-                    
-                    # 处理不同的响应格式
-                    tweets = None
-                    if isinstance(data, list):
-                        tweets = data
-                        logger.info("响应格式：直接列表", count=len(tweets))
-                    elif "tweets" in data:
-                        tweets = data.get("tweets", [])
-                        logger.info("响应格式：data.tweets", count=len(tweets))
-                    elif "data" in data:
-                        tweets = data.get("data", [])
-                        logger.info("响应格式：data.data", count=len(tweets))
-                    else:
-                        tweets = []
-                        logger.warning("响应格式未知，返回空列表", 
-                                     response_sample=str(data)[:500])
-                    
-                    if tweets:
-                        all_tweets.extend(tweets)
-                        logger.info("获取到推文", author=author, count=len(tweets), total=len(all_tweets))
-                    else:
-                        logger.warning("当前页没有推文数据", 
-                                     author=author, 
-                                     page=page_count,
-                                     response_keys=list(data.keys()) if isinstance(data, dict) else "N/A")
-                    
-                    # 检查分页
-                    has_next = data.get("has_next_page", False) or data.get("hasNextPage", False)
-                    next_cursor_val = data.get("next_cursor", "") or data.get("nextCursor", "")
-                    
-                    logger.info("分页信息", 
-                               author=author,
-                               has_next=has_next,
-                               has_cursor=bool(next_cursor_val),
-                               page_count=page_count,
-                               max_pages=max_pages)
-                    
-                    if has_next and next_cursor_val:
-                        next_cursor = next_cursor_val
-                        page_count += 1
-                        time.sleep(1)  # 避免API限流
-                        continue
-                    else:
-                        break
-                else:
+                if response.status_code != 200:
                     logger.error("API请求失败", 
                                author=author,
                                status_code=response.status_code,
                                response=response.text[:200])
                     break
+                
+                data = response.json()
+                
+                tweets = []
+                if isinstance(data, list):
+                    tweets = data
+                elif isinstance(data, dict):
+                    tweets = data.get("tweets") or data.get("data") or []
+                
+                if not tweets:
+                    logger.debug("无更多推文，停止分页", author=author, page=page_count)
+                    break
+                
+                all_tweets.extend(tweets)
+                
+                has_next = False
+                cursor_val = ""
+                if isinstance(data, dict):
+                    has_next = bool(data.get("has_next_page") or data.get("hasNextPage"))
+                    cursor_val = (data.get("next_cursor") or data.get("nextCursor") or "")
+                
+                if has_next and cursor_val:
+                    next_cursor = cursor_val
+                    page_count += 1
+                    time.sleep(1)
+                    continue
+                break
             
-            logger.info("推文获取完成", author=author, total_tweets=len(all_tweets))
+            logger.info("推文获取完成", author=author, total_tweets=len(all_tweets), api_calls=api_calls)
             return all_tweets
             
         except Exception as e:
@@ -523,54 +559,86 @@ class TwitterSubscriptionService:
             total_tweets_existing = 0
             author_results = {}
             
+            total_api_calls_saved = 0
+            
             for author, author_subs in aggregated.items():
                 try:
                     logger.info("处理作者", author=author, subscriptions_count=len(author_subs))
                     
+                    # 收集user_ids和subscription_ids
+                    user_ids = list({sub['user_id'] for sub in author_subs})
+                    subscription_ids = [sub['id'] for sub in author_subs]
+                    
                     # 检查是否是首次获取（该作者没有任何内容）
-                    cursor.execute("""
-                        SELECT COUNT(*) 
-                        FROM subscription_content 
-                        WHERE channel_type = 'twitter' 
-                        AND author_identifier = %s
-                    """, (author,))
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM subscription_content "
+                        "WHERE channel_type = 'twitter' AND author_identifier = %s",
+                        (author,)
+                    )
                     content_count = cursor.fetchone()[0]
                     is_first_fetch = content_count == 0
                     
-                    # 获取推文
                     if force_fetch:
                         if is_first_fetch:
-                            # 🎯 首次获取：使用 7 天时间范围
                             logger.info("首次获取订阅内容", author=author, hours=self.initial_fetch_hours)
                             tweets = self.fetch_tweets_from_api(
                                 author, 
                                 since_hours=self.initial_fetch_hours, 
-                                max_pages=3  # 适当增加页数
+                                max_pages=3
                             )
                         else:
-                            # 常规 Test Fetch：使用 12 小时
                             tweets = self.fetch_tweets_from_api(
                                 author, 
                                 since_hours=self.test_fetch_query_hours, 
                                 max_pages=2
                             )
                     else:
-                        tweets = self.fetch_tweets_from_api(author, max_pages=5)
+                        # 定时任务：根据 last_fetched_at 动态计算时间窗口
+                        smart_hours = self._calculate_fetch_since_hours(author_subs)
+                        smart_max_pages = self._calculate_max_pages(smart_hours)
+                        
+                        if smart_hours < self.default_query_hours:
+                            logger.info("增量拉取",
+                                       author=author,
+                                       smart_hours=smart_hours,
+                                       max_pages=smart_max_pages)
+                        
+                        tweets = self.fetch_tweets_from_api(
+                            author,
+                            since_hours=smart_hours,
+                            max_pages=smart_max_pages
+                        )
+                    
                     total_tweets_fetched += len(tweets)
                     
-                    # 收集user_ids和subscription_ids
-                    user_ids = [sub['user_id'] for sub in author_subs]
-                    subscription_ids = [sub['id'] for sub in author_subs]
-                    
-                    # 保存推文
+                    # 批量去重：先查哪些 tweet 已存在，跳过无需写库的
                     new_count = 0
                     existing_count = 0
                     
-                    for tweet in tweets:
-                        if self.save_tweet_to_db(conn, cursor, tweet, user_ids, subscription_ids):
-                            new_count += 1
-                        else:
-                            existing_count += 1
+                    if tweets:
+                        tweet_ids = [str(t.get('id', '')) for t in tweets if t.get('id')]
+                        existing_ids = self._get_existing_tweet_ids(conn, tweet_ids)
+                        skipped = len(existing_ids)
+                        
+                        if skipped > 0:
+                            total_api_calls_saved += skipped
+                            logger.debug("批量去重跳过已知推文",
+                                        author=author, skipped=skipped, remaining=len(tweets) - skipped)
+                        
+                        # 确保所有 user_ids 在已有内容上得到合并
+                        if existing_ids:
+                            self._ensure_user_ids_for_author(conn, author, user_ids)
+                        
+                        for tweet in tweets:
+                            tid = str(tweet.get('id', ''))
+                            if tid in existing_ids:
+                                existing_count += 1
+                                continue
+                            
+                            if self.save_tweet_to_db(conn, cursor, tweet, user_ids, subscription_ids):
+                                new_count += 1
+                            else:
+                                existing_count += 1
                     
                     total_tweets_new += new_count
                     total_tweets_existing += existing_count
@@ -578,7 +646,7 @@ class TwitterSubscriptionService:
                     # 更新订阅状态
                     for sub in author_subs:
                         self._update_subscription_status(cursor, sub['id'], 
-                                                        items_count=len(tweets),
+                                                        items_count=new_count,
                                                         status='success')
                     
                     author_results[author] = {
@@ -597,14 +665,12 @@ class TwitterSubscriptionService:
                     
                     conn.commit()
                     
-                    # API限流等待
                     time.sleep(2)
                     
                 except Exception as e:
                     logger.error("处理作者失败", author=author, exception=str(e))
                     conn.rollback()
                     
-                    # 更新失败状态
                     for sub in author_subs:
                         self._update_subscription_status(cursor, sub['id'],
                                                         items_count=0,
@@ -630,6 +696,7 @@ class TwitterSubscriptionService:
                 'tweets_fetched': total_tweets_fetched,
                 'tweets_new': total_tweets_new,
                 'tweets_existing': total_tweets_existing,
+                'db_writes_saved': total_api_calls_saved,
                 'author_results': author_results,
                 'execution_duration_ms': execution_duration
             }
@@ -678,8 +745,20 @@ class TwitterSubscriptionService:
                              status: str = 'success',
                              error_message: str = None,
                              execution_duration_ms: int = None):
-        """记录获取历史"""
+        """记录获取历史。订阅已删除时跳过；INSERT 用 SAVEPOINT 隔离，避免单条 FK 失败中止整批事务。"""
+        cursor.execute(
+            "SELECT 1 FROM subscription_list WHERE id = %s",
+            (subscription_id,),
+        )
+        if not cursor.fetchone():
+            logger.warning(
+                "跳过抓取历史记录：订阅不存在（可能已删除）",
+                subscription_id=subscription_id,
+            )
+            return
+        sp = f"sp_rf_{uuid.uuid4().hex[:16]}"
         try:
+            cursor.execute(f"SAVEPOINT {sp}")
             cursor.execute('''
             INSERT INTO subscription_fetch_history
             (subscription_id, items_fetched, items_new, items_duplicated,
@@ -687,5 +766,10 @@ class TwitterSubscriptionService:
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ''', (subscription_id, items_fetched, items_new, items_duplicated,
                   status, error_message, execution_duration_ms))
+            cursor.execute(f"RELEASE SAVEPOINT {sp}")
         except Exception as e:
+            try:
+                cursor.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            except Exception:
+                pass
             logger.error("记录获取历史失败", subscription_id=subscription_id, exception=str(e))

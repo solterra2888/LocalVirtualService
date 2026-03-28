@@ -1,10 +1,10 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FileTextOutlined, ReadOutlined, StockOutlined } from '@ant-design/icons';
+import { FileTextOutlined, ProfileOutlined, ReadOutlined, StockOutlined } from '@ant-design/icons';
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏：Sources（上传/文件）、Feeds、Watchlist
+ * 移动端底部导航栏：Sources、Feeds、Reports、Watchlist
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +20,11 @@ const MobileBottomNav: React.FC = () => {
       key: '/feeds',
       icon: <ReadOutlined />,
       label: 'Feeds',
+    },
+    {
+      key: '/reports',
+      icon: <ProfileOutlined />,
+      label: 'Reports',
     },
     {
       key: '/dashboard',

@@ -443,6 +443,9 @@ class DatabaseManager:
                 """)
                 print("file_processing_details表创建成功")
             
+            # 旧库可能仍为不含 skipped 的 CHECK；调度器并发跳过写入需要该状态
+            self._ensure_task_execution_logs_status_constraint(cursor)
+            
             conn.commit()
             print("数据库架构迁移完成")
         except Exception as e:
@@ -659,10 +662,12 @@ class DatabaseManager:
                 error_traceback TEXT,
                 execution_params JSONB,
                 
-                CONSTRAINT valid_execution_status CHECK (status IN ('running', 'success', 'failed', 'timeout')),
+                CONSTRAINT valid_execution_status CHECK (status IN ('running', 'success', 'failed', 'timeout', 'skipped', 'cancelled')),
                 CONSTRAINT fk_task_execution_logs_task_id FOREIGN KEY (task_id) REFERENCES task_scheduling(id) ON DELETE CASCADE
             )
             """)
+            
+            self._ensure_task_execution_logs_status_constraint(cursor)
             
             # task_default_configs 表已删除，不再需要创建和插入默认配置
             
@@ -671,6 +676,26 @@ class DatabaseManager:
             print(f"创建调度器表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
+
+    def _ensure_task_execution_logs_status_constraint(self, cursor):
+        """已有库可能仍为旧版 CHECK（不含 skipped）；与 scheduler 跳过并发执行时写入的 status 对齐。"""
+        try:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'task_execution_logs'
+                )
+            """)
+            if not cursor.fetchone()[0]:
+                return
+            cursor.execute("ALTER TABLE task_execution_logs DROP CONSTRAINT IF EXISTS valid_execution_status")
+            cursor.execute("""
+                ALTER TABLE task_execution_logs ADD CONSTRAINT valid_execution_status
+                CHECK (status IN ('running', 'success', 'failed', 'timeout', 'skipped', 'cancelled'))
+            """)
+            print("已确保 task_execution_logs.valid_execution_status 含 skipped")
+        except Exception as e:
+            print(f"更新 task_execution_logs 状态约束时出错: {e}")
 
     def _update_task_scheduling_constraints(self, cursor):
         """更新现有task_scheduling表的约束"""

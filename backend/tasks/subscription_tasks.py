@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=3,
     default_retry_delay=60,  # 失败后60秒重试
-    time_limit=300,  # 5分钟硬限制
-    soft_time_limit=240,  # 4分钟软限制
+    time_limit=900,   # 15分钟硬限制（实测拉取全量需 ~266s，预留充足裕量）
+    soft_time_limit=780,  # 13分钟软限制
 )
 def fetch_twitter_subscription_task(
     self,

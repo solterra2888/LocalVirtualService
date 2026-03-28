@@ -632,7 +632,7 @@ curl http://你的公网IP/api/health
 
 应看到登录页面。使用配置的管理员账号密码登录。
 
----
+
 
 ## 7. 设置开机自启（可选）
 
@@ -657,7 +657,7 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 | 前端构建并部署      | `cd web-frontend && npm run deploy`                                            |
 | 修改配置后重新部署    | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh`                 |
 | 查看某服务日志      | `journalctl -u rc-webapp -f`                                                   |
-| 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log`                                            |
+| 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log`（AI）；`tail -f logs/celery_data_worker.log`（数据/订阅等） |
 | 查看 Nginx 日志  | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50` |
 
 
@@ -958,6 +958,51 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 
 
 **要点**：Word/Excel 在线预览依赖 **公网可访问的 HTTPS 文件地址**。若使用 OSS 且未配置自定义域名，必须依赖后端生成的**签名 URL**；配置了 `OSS_CUSTOM_DOMAIN` 时，会直接使用该域名的公共 URL，同样满足 Office 预览要求。
+
+
+
+### Twitter 订阅推文拉取（优化说明与调度）
+
+Twitter 订阅由 **APScheduler** 触发任务类型 `twitter_subscription`，实际拉取在 **Celery Data Worker**（`fetch_twitter_subscription`）中执行，避免阻塞调度器进程。数据源为 [twitterapi.io Advanced Search](https://docs.twitterapi.io/api-reference/endpoint/tweet_advanced_search)（按请求计费，每页最多约 20 条，需 `cursor` 分页）。
+
+#### 行为要点（代码：`backend/services/twitter_subscription_service.py`）
+
+1. **动态时间窗口**：定时任务（`force_fetch=False`）根据同一作者下各订阅的 `last_fetched_at` 计算 `since_hours`，避免每次固定拉取 24 小时全量。公式含约 1.5 小时缓冲，并封顶为环境变量 `TWITTER_DEFAULT_QUERY_HOURS`（默认 24）。
+2. **时区与数据库**：`subscription_list.last_fetched_at` 为 **无时区** 的 `timestamp`（与服务器本地时间一致）。计算间隔时使用 **本地 naive `datetime.now()`** 与库中时间比较；若误用 UTC 与本地时间混比，会导致间隔为负、始终回退到 24 小时窗口。
+3. **动态分页上限**：窗口较小时自动降低 `max_pages`（例如 ≤3 小时 → 2 页；≤12 小时 → 3 页；否则 5 页），减少无效翻页请求。
+4. **空页提前结束**：某一页返回 0 条推文时不再继续请求下一页，避免浪费 token。
+5. **批量去重写库**：拉取后先批量查询已存在的 `content_id`，对已知推文跳过 `save_content` 的 UPSERT；若仍需合并 `user_ids`，会走轻量 `UPDATE`。任务结果中的 `db_writes_saved` 表示因此跳过的写入次数。
+6. **首次 / 强制拉取**：`force_fetch=True` 时仍按原逻辑（首次作者 7 天、非首次 12 小时等），不受上述增量窗口影响。
+
+#### 环境变量（可选）
+
+| 变量 | 含义 |
+| --- | --- |
+| `TWITTER_API_KEY` | twitterapi.io 密钥（必填） |
+| `TWITTER_DEFAULT_QUERY_HOURS` | 无历史或回退时的默认查询窗口（小时），默认 `24` |
+| `TWITTER_INITIAL_FETCH_HOURS` | 某作者首次入库时的回溯窗口，默认 `168`（7 天） |
+
+#### 调度 Cron 建议
+
+- 若对实时性不敏感、**每天两次**即可：在任务配置中使用 Cron `0 8,20 * * *`，时区 `America/New_York`（覆盖美东交易日 + 国内早晚查看习惯）。两次间隔约 12 小时时，增量窗口会自动扩大到约 13～14 小时并配合 `max_pages=5`，避免漏拉。
+- 若仍使用 **每 30 分钟**（`*/30 * * * *`），增量窗口与 `max_pages` 会随间隔自动缩小，API 调用量显著低于「固定 24h」旧逻辑。
+
+#### 部署后需重启
+
+修改 `twitter_subscription_service.py` 后须重启 **Data Worker** 使 Celery 加载新代码：
+
+```bash
+sudo systemctl restart rc-celery-data
+# 或: sudo ./restart_services.sh
+```
+
+#### 日志与自检
+
+- 日志文件：`tail -f logs/celery_data_worker.log`
+- 正常增量拉取会出现：`增量拉取` / `smart_hours` / `since_hours` / `max_pages`；完成行含 `api_calls`、`db_writes_saved`、`execution_duration_ms`。
+- 参考脚本（与后端同一 Advanced Search）：`scripts/fetch_twitter_user_recent.py`。
+
+---
 
 ---
 
