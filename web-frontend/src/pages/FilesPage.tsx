@@ -482,6 +482,13 @@ const FilesPageInner: React.FC = () => {
     if (rightPanelView === 'review') setRightPanelView('info');
   }, [selectedExecutionForView?.id]);
 
+  // 活动报告（IB）：右侧面板不展示 AI Analysis / Markdown；若当前在对应 Tab 则切回 Info
+  useEffect(() => {
+    if (ibReportDataForReview && (rightPanelView === 'analysis' || rightPanelView === 'content')) {
+      setRightPanelView('info');
+    }
+  }, [ibReportDataForReview, rightPanelView]);
+
   // 获取 audio_analysis_v1 模板ID（供音频分析的可选参数编辑器使用）
   useEffect(() => {
     const fetchAudioTemplateId = async () => {
@@ -3668,7 +3675,7 @@ const FilesPageInner: React.FC = () => {
                       />
                     </div>
                   </div>
-                  {/* 右侧：Info + AI Analysis（可收缩） */}
+                  {/* 右侧：Info / AI Analysis / Markdown / Trade Review（可收缩）；活动报告仅 Info + Trade Review */}
                   <div className={`files-detail-right ${rightPanelCollapsed ? 'files-detail-right--collapsed' : ''}`}>
                     {rightPanelCollapsed ? (
                       <div className="files-detail-right-collapsed-bar">
@@ -3693,18 +3700,22 @@ const FilesPageInner: React.FC = () => {
                           >
                             Info
                           </div>
-                          <div
-                            className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
-                            onClick={() => setRightPanelView('analysis')}
-                          >
-                            AI Analysis
-                          </div>
-                          <div
-                            className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
-                            onClick={() => setRightPanelView('content')}
-                          >
-                            Markdown
-                          </div>
+                          {!ibReportDataForReview && (
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('analysis')}
+                            >
+                              AI Analysis
+                            </div>
+                          )}
+                          {!ibReportDataForReview && (
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('content')}
+                            >
+                              Markdown
+                            </div>
+                          )}
                           {ibReportDataForReview && (
                             <div
                               className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
@@ -3736,7 +3747,7 @@ const FilesPageInner: React.FC = () => {
                               onExecutionRefresh={onExecutionRefresh}
                             />
                           )}
-                          {rightPanelView === 'analysis' && (
+                          {rightPanelView === 'analysis' && !ibReportDataForReview && (
                             <AIAnalysisView
                               execution={selectedExecutionForView}
                               themeColors={themeColors}
@@ -3769,7 +3780,7 @@ const FilesPageInner: React.FC = () => {
                               audioTemplateId={audioTemplateId}
                             />
                           )}
-                          {rightPanelView === 'content' && (
+                          {rightPanelView === 'content' && !ibReportDataForReview && (
                             <ContentMarkdownView
                               execution={selectedExecutionForView}
                               themeColors={themeColors}

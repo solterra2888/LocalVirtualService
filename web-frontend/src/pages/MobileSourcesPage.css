@@ -712,3 +712,22 @@
 .mobile-source-file-detail-pane--analysis .ai-analysis-content td {
   font-size: 11px !important;
 }
+
+/* —— Trade Review（活动报告 / IB）：K 线与卡片 —— */
+.mobile-source-file-detail-pane--review {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane--review .ant-card {
+  font-size: 12px;
+}
+
+.mobile-source-file-detail-pane--review .ant-card-head-title {
+  font-size: 12px !important;
+}
+
+.mobile-source-file-detail-pane--review .ant-empty-description {
+  font-size: 12px;
+}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Button, Segmented, Typography } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import {
@@ -6,6 +6,8 @@ import {
   OriginalContentView,
   AIAnalysisView,
 } from '../pages/FilesPage';
+import TradeReviewView from './TradeReviewView';
+import { isIBReportContent, type IBReportData } from './IBTradingReportView';
 import { filesAPI } from '../services/files';
 import { tasksAPI, TaskExecution, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -28,7 +30,7 @@ export type MobileSourceFileDetailThemeColors = {
   inputBg?: string;
 };
 
-type DetailTab = 'info' | 'original' | 'analysis';
+type DetailTab = 'info' | 'original' | 'analysis' | 'review';
 
 export type MobileSourceFileDetailProps = {
   execution: TaskExecution;
@@ -57,12 +59,49 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
   const [audioTemplateId, setAudioTemplateId] = useState<number | undefined>(undefined);
   const [allTemplates, setAllTemplates] = useState<PromptTemplate[]>([]);
+  /** 活动报告（IB）：与桌面端一致，用于 Trade Review Tab，并隐藏 AI Analysis */
+  const [ibReportDataForReview, setIbReportDataForReview] = useState<IBReportData | null>(null);
 
   useEffect(() => {
     setDetailTab('analysis');
     setSelectedFileForView(null);
     setAiAnalysisData(null);
+    setIbReportDataForReview(null);
   }, [execution.id]);
+
+  const handleIBReportDetected = useCallback((data: IBReportData | null) => {
+    setIbReportDataForReview(data);
+    if (data) {
+      setDetailTab(t => (t === 'analysis' ? 'review' : t));
+    } else {
+      setDetailTab(t => (t === 'review' ? 'analysis' : t));
+    }
+  }, []);
+
+  /**
+   * Original 仅在「Original」Tab 挂载时才拉取；此处预取 execution details，便于一进入详情就识别活动报告并展示复盘 Tab。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const details = await tasksAPI.getTaskExecutionDetails(execution.id);
+        const file = details.files?.[0];
+        if (!file?.content) {
+          if (!cancelled) handleIBReportDetected(null);
+          return;
+        }
+        const parsed = isIBReportContent(file.content);
+        if (cancelled) return;
+        handleIBReportDetected(parsed);
+      } catch {
+        if (!cancelled) handleIBReportDetected(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [execution.id, handleIBReportDetected]);
 
   useEffect(() => {
     promptTemplateService
@@ -109,6 +148,22 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const onExecutionRefresh = useCallback(() => {
     void onRefreshList();
   }, [onRefreshList]);
+
+  const segmentedOptions = useMemo(
+    () =>
+      ibReportDataForReview
+        ? [
+            { label: 'Trade Review', value: 'review' as DetailTab },
+            { label: 'Original', value: 'original' as DetailTab },
+            { label: 'Info', value: 'info' as DetailTab },
+          ]
+        : [
+            { label: 'AI Analysis', value: 'analysis' as DetailTab },
+            { label: 'Original', value: 'original' as DetailTab },
+            { label: 'Info', value: 'info' as DetailTab },
+          ],
+    [ibReportDataForReview]
+  );
 
   const handleDownloadPdf = async () => {
     if (!aiAnalysisData?.execution?.final_report) {
@@ -323,11 +378,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
           size="small"
           value={detailTab}
           onChange={v => setDetailTab(v as DetailTab)}
-          options={[
-            { label: 'AI Analysis', value: 'analysis' },
-            { label: 'Original', value: 'original' },
-            { label: 'Info', value: 'info' },
-          ]}
+          options={segmentedOptions}
           className="mobile-source-file-detail-segmented"
         />
       </div>
@@ -355,10 +406,16 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
               onTranscriptPersisted={async () => {
                 await onRefreshList();
               }}
+              onIBReportDetected={handleIBReportDetected}
             />
           </div>
         )}
-        {detailTab === 'analysis' && (
+        {detailTab === 'review' && ibReportDataForReview && (
+          <div className="mobile-source-file-detail-pane mobile-source-file-detail-pane--review">
+            <TradeReviewView data={ibReportDataForReview} isDark={isDark} themeColors={themeColors} />
+          </div>
+        )}
+        {detailTab === 'analysis' && !ibReportDataForReview && (
           <div className="mobile-source-file-detail-pane mobile-source-file-detail-pane--analysis">
             <AIAnalysisView
               execution={execution}

@@ -75,6 +75,61 @@ const MARKER_COLORS = {
   sell: { bg: '#e53e3e', border: '#c53030', text: '#fff' },
 };
 
+/**
+ * IB 成交时间可能是 "2025-03-27 10:30"、"2025-03-27, 10:30"、"Mar 27, 2025, 10:30" 等。
+ * 不能只用 split(' ')[0]（会得到 "Mar"），需统一成 YYYY-MM-DD 再与 OHLC 的 date 对齐。
+ */
+function normalizeTradeDateToYmd(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+  m = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, '0');
+    const day = m[3].padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+  }
+
+  m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日?/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, '0');
+    const day = m[3].padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+  }
+
+  const parsed = Date.parse(s.replace(/,/g, ' '));
+  if (!Number.isNaN(parsed)) {
+    const d = new Date(parsed);
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+  }
+  return null;
+}
+
+function tradeYmdToUnixSec(ymd: string): number {
+  return Math.floor(new Date(ymd + 'T00:00:00').getTime() / 1000);
+}
+
+/** 无当日 K 线时（EOD 滞后），用不晚于成交日的最近一根 K 线做横轴定位 */
+function lastBarOnOrBefore(
+  sortedPriceData: CandlestickDataPoint[],
+  tradeYmd: string,
+): CandlestickDataPoint | null {
+  let last: CandlestickDataPoint | null = null;
+  for (const row of sortedPriceData) {
+    if (row.date <= tradeYmd) last = row;
+    else break;
+  }
+  return last;
+}
+
 const TradeReviewChart: React.FC<TradeReviewChartProps> = ({
   symbol,
   trades,
@@ -113,13 +168,15 @@ const TradeReviewChart: React.FC<TradeReviewChartProps> = ({
     const plotAreaEndX = containerWidth - rightAxisWidth;
 
     const positions = new Map<string, { left: number; top: number; marker: TradeMarker }>();
+    const sortedBars = [...priceData].sort((a, b) => a.date.localeCompare(b.date));
 
     trades.forEach((trade, idx) => {
-      const dateStr = trade.date.split(' ')[0].split('T')[0];
-      const hasDataPoint = priceData.some((d) => d.date === dateStr);
-      if (!hasDataPoint) return;
+      const tradeYmd = normalizeTradeDateToYmd(trade.date);
+      if (!tradeYmd) return;
+      const bar = lastBarOnOrBefore(sortedBars, tradeYmd);
+      if (!bar) return;
 
-      const timestamp = Math.floor(new Date(dateStr + 'T00:00:00').getTime() / 1000) as Time;
+      const timestamp = tradeYmdToUnixSec(bar.date) as Time;
       const xCoordinate = timeScale.timeToCoordinate(timestamp);
       if (xCoordinate === null || xCoordinate < plotAreaStartX || xCoordinate > plotAreaEndX) return;
 
@@ -237,15 +294,35 @@ const TradeReviewChart: React.FC<TradeReviewChartProps> = ({
       candlestickSeries.setData(candlestickData);
       volumeSeries.setData(volumeData);
 
-      // Default visible range: 3 months, ending near the last trade date
+      // Default visible range: 3 months，右端对齐「最后成交日」；EOD 若滞后，时间轴需多出空白（setVisibleRange 的 to 会被夹到最后一根 K）
       if (trades.length > 0) {
-        const tradeDates = trades.map((t) => new Date(t.date.split(' ')[0].split('T')[0]).getTime());
-        const maxTradeDate = Math.max(...tradeDates);
+        const tradeYmds = trades
+          .map((t) => normalizeTradeDateToYmd(t.date))
+          .filter((ymd): ymd is string => !!ymd);
+        const maxTradeYmd = tradeYmds.length ? tradeYmds.reduce((a, b) => (a > b ? a : b)) : '';
+        const tradeMs = tradeYmds.map((ymd) => new Date(ymd + 'T00:00:00').getTime());
+        const lastBarMs =
+          sortedEntries.length > 0 ? sortedEntries[sortedEntries.length - 1][0] * 1000 : 0;
+        const maxTradeMs = tradeMs.length ? Math.max(...tradeMs) : 0;
+        const endAnchorMs = Math.max(lastBarMs, maxTradeMs);
         const threeMonthsMs = 90 * 24 * 60 * 60 * 1000;
         const paddingMs = 7 * 24 * 60 * 60 * 1000;
-        const rangeTo = (Math.floor((maxTradeDate + paddingMs) / 1000)) as Time;
-        const rangeFrom = (Math.floor((maxTradeDate + paddingMs - threeMonthsMs) / 1000)) as Time;
+        const rangeTo = (Math.floor((endAnchorMs + paddingMs) / 1000)) as Time;
+        const rangeFrom = (Math.floor((endAnchorMs + paddingMs - threeMonthsMs) / 1000)) as Time;
         chart.timeScale().setVisibleRange({ from: rangeFrom, to: rangeTo });
+
+        const lastBarYmd = sortedEntries.length ? sortedEntries[sortedEntries.length - 1][1].date : '';
+        if (maxTradeYmd && lastBarYmd && lastBarYmd < maxTradeYmd) {
+          const lr = chart.timeScale().getVisibleLogicalRange();
+          if (lr) {
+            const calDays = Math.ceil(
+              (new Date(maxTradeYmd + 'T12:00:00').getTime() - new Date(lastBarYmd + 'T12:00:00').getTime()) /
+                (24 * 60 * 60 * 1000),
+            );
+            const padBars = Math.min(20, Math.max(1, calDays));
+            chart.timeScale().setVisibleLogicalRange({ from: lr.from, to: lr.to + padBars });
+          }
+        }
       } else {
         chart.timeScale().fitContent();
       }
