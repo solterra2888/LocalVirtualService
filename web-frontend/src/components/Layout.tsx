@@ -83,7 +83,6 @@ const Layout: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
-
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const openProfileModal = () => setProfileModalOpen(true);
 
@@ -557,7 +556,7 @@ const Layout: React.FC = () => {
         onCancel={() => setShowUploadYouTubeModal(false)}
         themeMode={themeMode}
       />
-      
+
       <UserProfileModal
         open={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}

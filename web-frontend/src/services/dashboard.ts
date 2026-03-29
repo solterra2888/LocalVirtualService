@@ -425,6 +425,25 @@ export const dashboardAPI = {
     }
   },
 
+  batchGetStockHistoricalData: async (
+    tickers: Array<{ symbol: string; currency: string }>,
+    days: number = 365,
+    fetchMissing: boolean = true,
+  ): Promise<{
+    success: boolean;
+    results: Record<string, {
+      success: boolean;
+      data: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>;
+      count: number;
+    }>;
+  }> => {
+    return api.post('/dashboard/batch-stock-historical-data', {
+      tickers,
+      days,
+      fetch_missing: fetchMissing,
+    });
+  },
+
   // === Custom Groups API ===
 
   // 获取用户的自定义组列表

@@ -1618,6 +1618,158 @@ async def get_stock_historical_data(
             detail=f"Failed to fetch historical data: {str(e)}"
         )
 
+@router.post("/batch-stock-historical-data", summary="Batch fetch historical stock data for multiple tickers")
+async def batch_stock_historical_data(
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Batch-fetch historical OHLCV data for multiple tickers in a single request.
+    For tickers not found locally, optionally triggers on-demand EODHD fetch.
+
+    Request body:
+        tickers: [{ symbol: "1072", currency: "HKD" }, ...]
+        days: 365  (optional, default 365)
+        fetch_missing: true  (optional, default true – whether to fetch from EODHD)
+    """
+    from datetime import timedelta
+
+    tickers = request.get("tickers", [])
+    days = request.get("days", 365)
+    fetch_missing = request.get("fetch_missing", True)
+
+    if not tickers or not isinstance(tickers, list):
+        raise HTTPException(status_code=400, detail="tickers must be a non-empty list")
+
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=days)
+
+    def _infer_suffix(currency: str, symbol: str) -> str:
+        cur = (currency or "").upper()
+        if cur == "HKD":
+            return ".HK"
+        if cur in ("CNH", "CNY", "RMB"):
+            code = symbol.lstrip("0123456789") and symbol or symbol
+            num = "".join(c for c in symbol if c.isdigit())
+            if num.startswith("6"):
+                return ".SHG"
+            if num.startswith("0") or num.startswith("3"):
+                return ".SHE"
+            return ".SHG"
+        return ".US"
+
+    # Build candidate code list: for each ticker try bare symbol + suffixed version
+    ticker_map: Dict[str, Dict] = {}  # symbol → { currency, candidates: [code1, code2] }
+    all_candidates: list = []
+
+    for t in tickers:
+        sym = (t.get("symbol") or "").strip()
+        cur = (t.get("currency") or "USD").strip()
+        if not sym:
+            continue
+        suffix = _infer_suffix(cur, sym)
+        suffixed = sym if "." in sym else f"{sym}{suffix}"
+        candidates = [sym]
+        if suffixed != sym:
+            candidates.append(suffixed)
+        ticker_map[sym] = {"currency": cur, "candidates": candidates, "data": []}
+        all_candidates.extend(candidates)
+
+    if not all_candidates:
+        return {"success": True, "results": {}}
+
+    # Single batch DB query for all candidate codes
+    placeholders = ",".join(["%s"] * len(all_candidates))
+    query = f"""
+        SELECT code, date, open, high, low, close, volume
+        FROM stock_prices_eod
+        WHERE code IN ({placeholders})
+          AND date >= %s AND date <= %s AND period = 'd'
+        ORDER BY code, date ASC
+    """
+    params = all_candidates + [start_date, end_date]
+    rows = db_manager.fetch_all(query, params)
+
+    # Group results by code
+    code_data: Dict[str, list] = {}
+    for row in rows:
+        code = row[0]
+        code_data.setdefault(code, []).append({
+            "date": row[1].strftime("%Y-%m-%d"),
+            "open": float(row[2]) if row[2] else 0,
+            "high": float(row[3]) if row[3] else 0,
+            "low": float(row[4]) if row[4] else 0,
+            "close": float(row[5]) if row[5] else 0,
+            "volume": int(row[6]) if row[6] else 0,
+        })
+
+    # Assign data to tickers (prefer suffixed match if bare symbol has no data)
+    missing_tickers: list = []
+    for sym, info in ticker_map.items():
+        for candidate in info["candidates"]:
+            if candidate in code_data and code_data[candidate]:
+                info["data"] = code_data[candidate]
+                break
+        if not info["data"]:
+            missing_tickers.append(sym)
+
+    # For missing tickers, parallel-fetch from EODHD
+    if fetch_missing and missing_tickers:
+        try:
+            from backend.services.eod_fetch_service import EODFetchService
+            eod_service = EODFetchService()
+
+            single_query = """
+                SELECT code, date, open, high, low, close, volume
+                FROM stock_prices_eod
+                WHERE code = %s AND date >= %s AND date <= %s AND period = 'd'
+                ORDER BY date ASC
+            """
+
+            async def _fetch_one(sym: str):
+                info = ticker_map[sym]
+                suffix = _infer_suffix(info["currency"], sym)
+                eodhd_ticker = sym if "." in sym else f"{sym}{suffix}"
+                try:
+                    result = await eod_service.fetch_and_store_eod_data_with_timeout(
+                        ticker=eodhd_ticker, period="d", timeout_seconds=25
+                    )
+                    if result.get("success"):
+                        for candidate in list(dict.fromkeys(info["candidates"] + [eodhd_ticker])):
+                            re_rows = db_manager.fetch_all(
+                                single_query, [candidate, start_date, end_date]
+                            )
+                            if re_rows:
+                                info["data"] = [{
+                                    "date": r[1].strftime("%Y-%m-%d"),
+                                    "open": float(r[2]) if r[2] else 0,
+                                    "high": float(r[3]) if r[3] else 0,
+                                    "low": float(r[4]) if r[4] else 0,
+                                    "close": float(r[5]) if r[5] else 0,
+                                    "volume": int(r[6]) if r[6] else 0,
+                                } for r in re_rows]
+                                break
+                except Exception as e:
+                    logger.warning(f"EODHD fetch failed for {sym}: {e}")
+
+            await asyncio.gather(*[_fetch_one(sym) for sym in missing_tickers])
+        except ImportError:
+            logger.warning("EODFetchService not available, skipping EODHD fetch")
+
+    # Build response
+    results: Dict[str, dict] = {}
+    for sym, info in ticker_map.items():
+        results[sym] = {
+            "success": len(info["data"]) > 0,
+            "data": info["data"],
+            "count": len(info["data"]),
+        }
+
+    return {"success": True, "results": results}
+
+
 @router.put("/watchlist/reorder", summary="Reorder watchlist items")
 async def reorder_watchlist_items(
     request: dict,

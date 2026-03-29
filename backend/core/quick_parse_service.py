@@ -106,10 +106,24 @@ class QuickParseService:
     def _parse_csv(file_path: str) -> str:
         import csv
 
-        parts: List[str] = []
         with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
+            raw_content = f.read()
+
+        if not raw_content.strip():
+            return ""
+
+        from backend.services.trading_report_extractor import (
+            is_ib_trading_report,
+            extract_tables_from_content,
+            to_structured_content,
+        )
+
+        if is_ib_trading_report(raw_content):
+            tables, orders = extract_tables_from_content(raw_content)
+            return to_structured_content(tables, orders)
+
+        parts: List[str] = []
+        rows = list(csv.reader(raw_content.splitlines()))
 
         if not rows:
             return ""

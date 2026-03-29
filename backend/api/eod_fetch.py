@@ -5,6 +5,7 @@ EOD Fetch API - 历史股价数据获取API
 
 import os
 import io
+import asyncio
 import tempfile
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -124,7 +125,6 @@ async def fetch_eod_data(
             logger.info(f"发现已存储的EOD数据 {len(existing_data)} 条，将在后台更新")
             
             # 后台异步更新数据，不阻塞前端响应
-            import asyncio
             asyncio.create_task(
                 _background_fetch_and_store(
                     eod_service, request.ticker, request.period, 

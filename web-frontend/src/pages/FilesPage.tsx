@@ -84,6 +84,8 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import IBTradingReportView, { isIBReportContent, IBReportData } from '../components/IBTradingReportView';
+import TradeReviewView from '../components/TradeReviewView';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
 import ReportTickerTags, { parseReportTickers, PC_INFO_TAGS_TAG_STYLE } from '../components/ReportTickerTags';
 import TemplateSelector from '../components/TemplateSelector';
@@ -412,8 +414,8 @@ const FilesPageInner: React.FC = () => {
   
   // 新布局相关状态
   const [selectedExecutionForView, setSelectedExecutionForView] = useState<TaskExecution | null>(null);
-  const [viewMode, setViewMode] = useState<'original' | 'content'>('original');
-  const [rightPanelView, setRightPanelView] = useState<'info' | 'analysis'>('info');
+  const [rightPanelView, setRightPanelView] = useState<'info' | 'analysis' | 'content' | 'review'>('info');
+  const [ibReportDataForReview, setIbReportDataForReview] = useState<IBReportData | null>(null);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [selectedFileForView, setSelectedFileForView] = useState<any>(null);
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
@@ -476,6 +478,8 @@ const FilesPageInner: React.FC = () => {
   useEffect(() => {
     setOriginalFileInfoForTabs(null);
     setContentDetailData(null);
+    setIbReportDataForReview(null);
+    if (rightPanelView === 'review') setRightPanelView('info');
   }, [selectedExecutionForView?.id]);
 
   // 获取 audio_analysis_v1 模板ID（供音频分析的可选参数编辑器使用）
@@ -954,7 +958,7 @@ const FilesPageInner: React.FC = () => {
         setTickerFilter(undefined);
         setSearchType('file_name');
         setSelectedExecutionForView(execution);
-        setViewMode('original');
+        setRightPanelView('info');
         setSelectedFileForView(null);
         scrollDeepLinkTargetExecutionIdRef.current = execution.id;
         pendingScrollToExecutionFromDeepLinkRef.current = true;
@@ -3517,7 +3521,7 @@ const FilesPageInner: React.FC = () => {
                     className={`files-list-item ${isSelected ? 'is-selected' : ''} ${isChecked ? 'is-checked' : ''}`}
                     onClick={() => {
                       setSelectedExecutionForView(execution);
-                      setViewMode('original');
+                      setRightPanelView('info');
                       setSelectedFileForView(null);
                     }}
                   >
@@ -3640,74 +3644,28 @@ const FilesPageInner: React.FC = () => {
                   {/* 左侧：Original + Content */}
                   <div className="files-detail-left">
                     <div className="files-detail-left-tabs">
-                      <div
-                        className={`files-detail-tab ${viewMode === 'original' ? 'is-active' : ''}`}
-                        onClick={() => setViewMode('original')}
-                      >
-                        Original
-                      </div>
-                      <div
-                        className={`files-detail-tab ${viewMode === 'content' ? 'is-active' : ''}`}
-                        onClick={() => setViewMode('content')}
-                      >
-                        Markdown
-                      </div>
+                      <div className="files-detail-tab is-active">Original</div>
                       <div style={{ flex: 1 }} />
                     </div>
                     <div className="files-detail-left-content">
-                      {viewMode === 'original' ? (
-                        <OriginalContentView
-                          execution={selectedExecutionForView}
-                          themeColors={themeColors}
-                          isDark={isDark}
-                          onFileSelect={setSelectedFileForView}
-                          selectedFile={selectedFileForView}
-                          onFileInfoLoaded={setOriginalFileInfoForTabs}
-                          onTranscriptPersisted={async () => {
-                            if (!selectedExecutionForView) return;
-                            try {
-                              const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
-                              setContentDetailData(details);
-                            } catch {
-                              message.error('Failed to refresh Markdown content');
-                            }
-                          }}
-                        />
-                      ) : (
-                        <ContentMarkdownView
-                          execution={selectedExecutionForView}
-                          themeColors={themeColors}
-                          isDark={isDark}
-                          contentDetailData={contentDetailData}
-                          contentDetailLoading={contentDetailLoading}
-                          onLoadContent={async () => {
-                            if (!selectedExecutionForView) return;
-                            try {
-                              setContentDetailLoading(true);
-                              const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
-                              setContentDetailData(details);
-                              // 刷新 execution 列表以更新 Basic Information（processing/AI 完成后）
-                              loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
-                            } catch (error) {
-                              message.error('Failed to load content');
-                            } finally {
-                              setContentDetailLoading(false);
-                            }
-                          }}
-                          onContentSaved={(fileId, newContent) => {
-                            setContentDetailData(prev => {
-                              if (!prev) return prev;
-                              return {
-                                ...prev,
-                                files: prev.files.map(f =>
-                                  f.id === fileId ? { ...f, content: newContent } : f
-                                ),
-                              };
-                            });
-                          }}
-                          selectedFileForView={selectedFileForView}
-                        />
-                      )}
+                      <OriginalContentView
+                        execution={selectedExecutionForView}
+                        themeColors={themeColors}
+                        isDark={isDark}
+                        onFileSelect={setSelectedFileForView}
+                        selectedFile={selectedFileForView}
+                        onFileInfoLoaded={setOriginalFileInfoForTabs}
+                        onTranscriptPersisted={async () => {
+                          if (!selectedExecutionForView) return;
+                          try {
+                            const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                            setContentDetailData(details);
+                          } catch {
+                            message.error('Failed to refresh Markdown content');
+                          }
+                        }}
+                        onIBReportDetected={setIbReportDataForReview}
+                      />
                     </div>
                   </div>
                   {/* 右侧：Info + AI Analysis（可收缩） */}
@@ -3741,6 +3699,20 @@ const FilesPageInner: React.FC = () => {
                           >
                             AI Analysis
                           </div>
+                          <div
+                            className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
+                            onClick={() => setRightPanelView('content')}
+                          >
+                            Markdown
+                          </div>
+                          {ibReportDataForReview && (
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('review')}
+                            >
+                              Trade Review
+                            </div>
+                          )}
                           <div style={{ flex: 1 }} />
                           <Tooltip title="Collapse panel">
                             <span
@@ -3755,17 +3727,16 @@ const FilesPageInner: React.FC = () => {
                           </Tooltip>
                         </div>
                         <div className="files-detail-right-content">
-                          {rightPanelView === 'info' ? (
-                            selectedExecutionForView && (
-                              <ExecutionDetailsPanel
-                                execution={selectedExecutionForView}
-                                themeColors={themeColors}
-                                isDark={isDark}
-                                getDisplayAgentName={getDisplayAgentName}
-                                onExecutionRefresh={onExecutionRefresh}
-                              />
-                            )
-                          ) : (
+                          {rightPanelView === 'info' && selectedExecutionForView && (
+                            <ExecutionDetailsPanel
+                              execution={selectedExecutionForView}
+                              themeColors={themeColors}
+                              isDark={isDark}
+                              getDisplayAgentName={getDisplayAgentName}
+                              onExecutionRefresh={onExecutionRefresh}
+                            />
+                          )}
+                          {rightPanelView === 'analysis' && (
                             <AIAnalysisView
                               execution={selectedExecutionForView}
                               themeColors={themeColors}
@@ -3796,6 +3767,47 @@ const FilesPageInner: React.FC = () => {
                               audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
                               docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
                               audioTemplateId={audioTemplateId}
+                            />
+                          )}
+                          {rightPanelView === 'content' && (
+                            <ContentMarkdownView
+                              execution={selectedExecutionForView}
+                              themeColors={themeColors}
+                              isDark={isDark}
+                              contentDetailData={contentDetailData}
+                              contentDetailLoading={contentDetailLoading}
+                              onLoadContent={async () => {
+                                if (!selectedExecutionForView) return;
+                                try {
+                                  setContentDetailLoading(true);
+                                  const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                                  setContentDetailData(details);
+                                  loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
+                                } catch (error) {
+                                  message.error('Failed to load content');
+                                } finally {
+                                  setContentDetailLoading(false);
+                                }
+                              }}
+                              onContentSaved={(fileId, newContent) => {
+                                setContentDetailData(prev => {
+                                  if (!prev) return prev;
+                                  return {
+                                    ...prev,
+                                    files: prev.files.map(f =>
+                                      f.id === fileId ? { ...f, content: newContent } : f
+                                    ),
+                                  };
+                                });
+                              }}
+                              selectedFileForView={selectedFileForView}
+                            />
+                          )}
+                          {rightPanelView === 'review' && ibReportDataForReview && (
+                            <TradeReviewView
+                              data={ibReportDataForReview}
+                              isDark={isDark}
+                              themeColors={themeColors}
                             />
                           )}
                         </div>
@@ -4820,7 +4832,9 @@ const ContentMarkdownView: React.FC<{
     ? files.find((f: { id: number }) => f.id === selectedFileForView.id)
     : files[0];
   const content = fileToShow?.content;
-  const contentStr = content == null ? '' : typeof content === 'string' ? content : String(content);
+  const rawStr = content == null ? '' : typeof content === 'string' ? content : String(content);
+  const ibData = isIBReportContent(rawStr);
+  const contentStr = ibData ? ibData.markdown : rawStr;
 
   if (!fileToShow) {
     return (
@@ -5265,11 +5279,13 @@ export const OriginalContentView: React.FC<{
   onFileInfoLoaded?: (info: { filename?: string; file_type?: string }) => void;
   /** 转写保存后刷新 Markdown 等（Original 会在内部自行重新拉取 getOriginalFileInfo） */
   onTranscriptPersisted?: () => void | Promise<void>;
-}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded, onTranscriptPersisted }) => {
+  onIBReportDetected?: (data: IBReportData | null) => void;
+}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded, onTranscriptPersisted, onIBReportDetected }) => {
   const { isMobile } = useDeviceDetection();
   const [loading, setLoading] = useState(true);
   const [fileContent, setFileContent] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ibReportData, setIbReportData] = useState<ReturnType<typeof isIBReportContent>>(null);
 
   const handleTranscriptPersisted = useCallback(async () => {
     try {
@@ -5294,6 +5310,7 @@ export const OriginalContentView: React.FC<{
       try {
         setLoading(true);
         setLoadError(null);
+        setIbReportData(null);
         const details = await tasksAPI.getTaskExecutionDetails(execution.id);
         const files = details.files || [];
         if (files.length === 0) {
@@ -5302,6 +5319,16 @@ export const OriginalContentView: React.FC<{
         }
         const file = files[0];
         onFileSelect(file);
+
+        const parsed = isIBReportContent(file.content);
+        if (parsed) {
+          setIbReportData(parsed);
+          onIBReportDetected?.(parsed);
+          onFileInfoLoaded?.({ filename: file.filename, file_type: file.file_type });
+          return;
+        }
+        onIBReportDetected?.(null);
+
         const originalFileInfo = await filesAPI.getOriginalFileInfo(file.id);
 
         // 仅 serve 代理 URL 需要 token；OSS 签名 URL 不可追加额外 query
@@ -5341,6 +5368,14 @@ export const OriginalContentView: React.FC<{
           <LoadingOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
           <div style={{ marginTop: '16px', color: themeColors.textSecondary }}>Loading...</div>
         </div>
+      </div>
+    );
+  }
+
+  if (ibReportData) {
+    return (
+      <div style={{ width: '100%', flex: 1, minHeight: 0, overflow: 'auto', color: themeColors.text }}>
+        <IBTradingReportView data={ibReportData} isDark={isDark} />
       </div>
     );
   }

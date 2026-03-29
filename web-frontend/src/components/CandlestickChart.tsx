@@ -6,7 +6,9 @@ import {
   ISeriesApi,
   Time,
   CandlestickData as LWCandlestickData,
-  HistogramData
+  HistogramData,
+  isUTCTimestamp,
+  isBusinessDay,
 } from 'lightweight-charts';
 import { ReloadOutlined } from '@ant-design/icons';
 import { dashboardAPI, type StockPriceData } from '../services/dashboard';
@@ -15,6 +17,16 @@ import EventEditModal from './EventEditModal';
 import { ChartEvent, EventFormData, EVENT_TYPE_CONFIGS } from '../types/events';
 
 const { Title } = Typography;
+
+function timeToDate(time: Time): Date {
+  if (isUTCTimestamp(time)) {
+    return new Date(time * 1000);
+  }
+  if (isBusinessDay(time)) {
+    return new Date(time.year, time.month - 1, time.day);
+  }
+  return new Date(time);
+}
 
 interface CandlestickDataPoint {
   date: string;
@@ -466,8 +478,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       return;
     }
 
-    // 将时间戳转换为日期字符串 (YYYY-MM-DD)
-    const date = new Date(timestamp * 1000);
+    // 将 Time 转为日期字符串 (YYYY-MM-DD)
+    const date = timeToDate(timestamp);
     const dateStr = date.toISOString().split('T')[0];
 
     // 查找对应的数据点
