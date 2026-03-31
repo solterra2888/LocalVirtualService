@@ -371,6 +371,9 @@ async def update_template(
         
         if success:
             logger.info(f"User {current_user.username} updated template {template_id}")
+            if llm_service.config_resolver:
+                llm_service.config_resolver.clear_cache()
+                logger.info("ConfigResolver cache cleared after template update")
             return {"success": True, "message": "模板更新成功"}
         else:
             raise HTTPException(status_code=500, detail="更新模板失败")

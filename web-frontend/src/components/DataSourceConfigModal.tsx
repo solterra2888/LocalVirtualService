@@ -59,7 +59,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_daily_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -214,13 +214,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultName: 'News Feed Auto Fetch',
       description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.) every 30 minutes'
     },
-    twitter_daily_report: {
+    twitter_author_summary: {
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
       params: [],
-      defaultSchedule: '0 6 * * *',
-      defaultName: 'Twitter Daily Report',
-      description: 'Generate AI-powered daily summary and analysis of Twitter subscription data (daily at 6 AM CST)'
-    }
+      defaultSchedule: '0 5 * * *',
+      defaultName: 'Twitter Author Summary',
+      description: 'Pre-generate per-author daily summaries (Phase 1). Auto-chains to Daily Report generation (daily at 5 AM CST)'
+    },
   };
 
   const currentConfig = dataSourceConfigs[dataSourceType];
@@ -431,14 +431,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             recent_days: data.recentDays || 1,
           };
           result = await schedulerAPI.createNewsFeedTask(newsFeedParams);
-        } else if (dataSourceType === 'twitter_daily_report') {
-          const twitterReportParams = {
+        } else if (dataSourceType === 'twitter_author_summary') {
+          const authorSummaryParams = {
             name: currentConfig.defaultName,
             cron_expression: data.cronExpression!,
             timezone: data.timezone!,
             enabled: true,
+            chain_daily_reports: true,
           };
-          result = await schedulerAPI.createTwitterDailyReportTask(twitterReportParams);
+          result = await schedulerAPI.createTwitterAuthorSummaryTask(authorSummaryParams);
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
           const watchlistFundamentalsParams = {
@@ -1069,7 +1070,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'twitter_subscription':
           return null;
         
-        case 'twitter_daily_report':
+        case 'twitter_author_summary':
           return null;
 
         case 'youtube_subscription':

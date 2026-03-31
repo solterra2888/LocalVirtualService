@@ -36,18 +36,6 @@ export interface TwitterReportListResponse {
   offset: number;
 }
 
-export interface GenerateReportResult {
-  success: boolean;
-  report_id?: number;
-  task_id?: string;
-  report_date?: string;
-  message?: string;
-  tweet_count?: number;
-  author_count?: number;
-  generation_time_seconds?: number;
-  skipped?: boolean;
-}
-
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -95,22 +83,6 @@ export const twitterDailyReportsAPI = {
     } catch (error: any) {
       console.error('Failed to get report:', error);
       return { success: false, error: error.message || 'Failed to get report' };
-    }
-  },
-
-  async generateReport(
-    reportDate?: string,
-    force: boolean = false
-  ): Promise<ApiResponse<GenerateReportResult>> {
-    try {
-      const data = await api.post<ApiResponse<GenerateReportResult>>(
-        '/reports/twitter-daily/generate',
-        { report_date: reportDate || null, force }
-      );
-      return data;
-    } catch (error: any) {
-      console.error('Failed to generate report:', error);
-      return { success: false, error: error.message || 'Failed to generate report' };
     }
   },
 };

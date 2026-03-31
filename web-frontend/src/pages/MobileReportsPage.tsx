@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   App,
   Button,
@@ -21,7 +21,6 @@ import {
   LoadingOutlined,
   MenuOutlined,
   ReloadOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import MarkdownRenderer from '../components/MarkdownRenderer';
@@ -44,6 +43,7 @@ const STATUS_MAP: Record<string, { color: string; icon: React.ReactNode; label: 
 
 /**
  * Mobile Reports: Twitter Daily Report with left drawer (date + list), Feeds-like toolbar.
+ * Reports are generated automatically by the scheduler — this page is read-only.
  */
 const MobileReportsPageInner: React.FC = () => {
   const { message } = App.useApp();
@@ -55,20 +55,8 @@ const MobileReportsPageInner: React.FC = () => {
   const [selectedReport, setSelectedReport] = useState<TwitterDailyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(() => dayjs().subtract(1, 'day'));
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPolling = useCallback(() => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => stopPolling(), [stopPolling]);
 
   const loadReportDetail = useCallback(async (dateStr: string) => {
     setDetailLoading(true);
@@ -147,62 +135,6 @@ const MobileReportsPageInner: React.FC = () => {
     setDrawerOpen(false);
   };
 
-  const handleGenerate = async (force = false) => {
-    setGenerating(true);
-    stopPolling();
-    try {
-      const dateStr = selectedDate.format('YYYY-MM-DD');
-      const res = await twitterDailyReportsAPI.generateReport(dateStr, force);
-      if (res.success) {
-        if (res.data?.skipped) {
-          message.info(res.message || 'Report already exists');
-          loadReportDetail(dateStr);
-          setGenerating(false);
-          return;
-        }
-        message.info('Report generation started, please wait...');
-
-        let elapsed = 0;
-        const MAX_POLL = 600_000;
-        const INTERVAL = 5_000;
-        pollIntervalRef.current = setInterval(async () => {
-          elapsed += INTERVAL;
-          if (elapsed > MAX_POLL) {
-            stopPolling();
-            setGenerating(false);
-            message.warning('Generation timed out. Please refresh later.');
-            return;
-          }
-          try {
-            const detail = await twitterDailyReportsAPI.getReportByDate(dateStr);
-            const status = detail.data?.status;
-            if (status === 'completed') {
-              stopPolling();
-              setSelectedReport(detail.data ?? null);
-              await loadReports();
-              setGenerating(false);
-              message.success('Report generated successfully');
-            } else if (status === 'failed') {
-              stopPolling();
-              setSelectedReport(detail.data ?? null);
-              await loadReports();
-              setGenerating(false);
-              message.error(detail.data?.error_message || 'Generation failed');
-            }
-          } catch {
-            /* ignore poll errors */
-          }
-        }, INTERVAL);
-      } else {
-        message.error(res.error || 'Generation failed');
-        setGenerating(false);
-      }
-    } catch {
-      message.error('Generation failed');
-      setGenerating(false);
-    }
-  };
-
   const borderColor = themeColors.cardBorder;
 
   return (
@@ -256,15 +188,6 @@ const MobileReportsPageInner: React.FC = () => {
             style={{ color: themeColors.textSecondary }}
             aria-label="Refresh list"
           />
-          <Button
-            type="primary"
-            size="small"
-            shape="round"
-            icon={<ThunderboltOutlined />}
-            onClick={() => handleGenerate(false)}
-            loading={generating}
-            aria-label="Generate report"
-          />
         </Space>
       </div>
 
@@ -303,14 +226,6 @@ const MobileReportsPageInner: React.FC = () => {
                   </Text>
                 )}
               </Space>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => handleGenerate(true)}
-                loading={generating}
-              >
-                Regenerate
-              </Button>
             </div>
             <MarkdownRenderer
               content={selectedReport.report_content}
@@ -319,30 +234,17 @@ const MobileReportsPageInner: React.FC = () => {
           </div>
         ) : selectedReport?.status === 'failed' ? (
           <div style={{ padding: '48px 16px', textAlign: 'center' }}>
-            <Empty description={selectedReport.error_message || 'Report generation failed'}>
-              <Button type="primary" onClick={() => handleGenerate(true)}>
-                Retry
-              </Button>
-            </Empty>
+            <Empty description={selectedReport.error_message || 'Report generation failed'} />
           </div>
         ) : (
           <div style={{ padding: '48px 16px', textAlign: 'center' }}>
             <Empty
               description={
                 <span style={{ color: themeColors.textSecondary }}>
-                  No report for this date — open the menu to pick another day, or generate one.
+                  No report for this date. Reports are generated automatically by the scheduler.
                 </span>
               }
-            >
-              <Button
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                onClick={() => handleGenerate(false)}
-                loading={generating}
-              >
-                Generate for {selectedDate.format('YYYY-MM-DD')}
-              </Button>
-            </Empty>
+            />
           </div>
         )}
       </div>
@@ -389,19 +291,6 @@ const MobileReportsPageInner: React.FC = () => {
               allowClear={false}
             />
           </div>
-
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            onClick={() => {
-              handleGenerate(false);
-            }}
-            loading={generating}
-            block
-            style={{ marginBottom: 16 }}
-          >
-            {generating ? 'Generating…' : 'Generate report'}
-          </Button>
 
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
             History

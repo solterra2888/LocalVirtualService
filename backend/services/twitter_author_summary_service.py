@@ -1,0 +1,468 @@
+# -*- coding: utf-8 -*-
+"""
+Twitter Author Daily Summary 服务 — 全局作者摘要预生成
+
+将原本 per-user 的 Phase 1（按作者摘要）提升为全局共享：
+同一作者 + 同一天只调用一次 LLM，结果存入 twitter_author_daily_summaries 表，
+所有订阅该作者的用户在生成 Daily Report 时直接复用。
+"""
+
+import time
+from datetime import date, datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+
+from backend.database.db_manager import DatabaseManager
+from backend.utils.database_config import get_database_config
+from backend.utils.logger import get_logger
+from backend.core.llm_framework import llm_service
+
+logger = get_logger("twitter_author_summary_service")
+
+DEFAULT_PHASE1_TEMPLATE = "twitter_daily_phase1_default"
+MAX_TWEETS_PER_AUTHOR_CHUNK = 30
+MAX_TOKENS_OUTPUT_PHASE1 = 2000
+
+
+class TwitterAuthorSummaryService:
+    """全局 Twitter 作者每日摘要生成服务"""
+
+    def __init__(self):
+        db_params = get_database_config()
+        self.db_manager = DatabaseManager(db_params)
+
+    # ── Public API ─────────────────────────────────────────────────────────
+
+    async def generate_all_author_summaries(
+        self, summary_date: date, force: bool = False
+    ) -> Dict[str, Any]:
+        """
+        为所有启用的 Twitter 订阅作者批量生成当日摘要。
+
+        Returns:
+            {'success': bool, 'message': str, 'results': [...]}
+        """
+        start_time = time.time()
+        authors = self._get_distinct_enabled_authors()
+        if not authors:
+            return {'success': True, 'message': '没有启用的 Twitter 订阅作者', 'results': []}
+
+        logger.info(f"开始批量生成作者摘要: {len(authors)} 位作者, date={summary_date}")
+
+        results = []
+        succeeded = 0
+        skipped = 0
+        for author_id, author_name in authors:
+            result = await self.generate_author_summary(
+                author_id, author_name, summary_date, force=force
+            )
+            results.append({'author': author_id, **result})
+            if result.get('skipped'):
+                skipped += 1
+            elif result.get('success'):
+                succeeded += 1
+
+        elapsed = round(time.time() - start_time, 2)
+        logger.info(f"批量作者摘要完成: {succeeded} 成功, {skipped} 跳过, "
+                    f"{len(authors) - succeeded - skipped} 失败, 耗时 {elapsed}s")
+
+        return {
+            'success': True,
+            'message': f'{len(authors)} 位作者: {succeeded} 成功, {skipped} 跳过, 耗时 {elapsed}s',
+            'total': len(authors),
+            'succeeded': succeeded,
+            'skipped': skipped,
+            'generation_time_seconds': elapsed,
+            'results': results,
+        }
+
+    async def generate_author_summary(
+        self,
+        author_identifier: str,
+        author_name: Optional[str],
+        summary_date: date,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        为单个作者生成指定日期的摘要。
+
+        Returns:
+            {'success': bool, 'summary_id': int | None, 'message': str, ...}
+        """
+        start_time = time.time()
+        logger.info(f"开始生成作者摘要: @{author_identifier}, date={summary_date}")
+
+        if not force:
+            existing = self._get_existing_summary(author_identifier, summary_date)
+            if existing and existing['status'] == 'completed':
+                logger.info(f"作者摘要已存在, 跳过: @{author_identifier}")
+                return {
+                    'success': True,
+                    'summary_id': existing['id'],
+                    'message': '摘要已存在',
+                    'skipped': True,
+                }
+
+        summary_id = self._upsert_summary_status(
+            author_identifier, author_name or author_identifier, summary_date, 'generating'
+        )
+
+        try:
+            tweets = self._fetch_author_tweets(author_identifier, summary_date)
+            logger.info(f"@{author_identifier}: 拉取到 {len(tweets)} 条推文")
+
+            if not tweets:
+                self._update_summary(
+                    summary_id,
+                    status='completed',
+                    content='当天无推文。',
+                    tweet_count=0,
+                    ref_map={},
+                    top_tweets=[],
+                )
+                return {
+                    'success': True,
+                    'summary_id': summary_id,
+                    'message': '当天无推文',
+                    'tweet_count': 0,
+                    'skipped': False,
+                }
+
+            ref_map = self._prepare_author_refs(tweets)
+            summary_text = await self._run_phase1(
+                tweets, ref_map, author_identifier,
+                author_name or author_identifier, summary_date
+            )
+            top_tweets = self._get_author_top_tweets(tweets, ref_map, top_n=5)
+
+            elapsed = round(time.time() - start_time, 2)
+            metadata = {
+                'generation_time_seconds': elapsed,
+                'chunk_count': max(1, (len(tweets) - 1) // MAX_TWEETS_PER_AUTHOR_CHUNK + 1),
+            }
+
+            self._update_summary(
+                summary_id,
+                status='completed',
+                content=summary_text,
+                tweet_count=len(tweets),
+                ref_map=ref_map,
+                top_tweets=top_tweets,
+                metadata=metadata,
+            )
+
+            logger.info(f"@{author_identifier} 摘要完成: {len(tweets)} 条推文, "
+                        f"{len(summary_text)} 字符, 耗时 {elapsed}s")
+
+            return {
+                'success': True,
+                'summary_id': summary_id,
+                'message': f'摘要生成成功（{len(tweets)} 条推文，{elapsed}s）',
+                'tweet_count': len(tweets),
+                'generation_time_seconds': elapsed,
+                'skipped': False,
+            }
+
+        except Exception as e:
+            error_msg = f"作者摘要生成失败: {str(e)}"
+            logger.error(error_msg, author=author_identifier, exception=str(e))
+            self._update_summary(summary_id, status='failed', error_message=error_msg)
+            return {'success': False, 'summary_id': summary_id, 'message': error_msg, 'skipped': False}
+
+    # ── Data fetching ──────────────────────────────────────────────────────
+
+    def _get_distinct_enabled_authors(self) -> List[Tuple[str, Optional[str]]]:
+        """
+        查询 subscription_list 中所有启用的 twitter 作者（去重）。
+
+        Returns:
+            [(channel_identifier, channel_name), ...]
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT DISTINCT channel_identifier, MAX(channel_name) as channel_name
+                FROM subscription_list
+                WHERE channel_type = 'twitter'
+                  AND enabled = true
+                GROUP BY channel_identifier
+                ORDER BY channel_identifier
+            """)
+            return [(row[0], row[1]) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    def _fetch_author_tweets(self, author_identifier: str, summary_date: date) -> List[Dict[str, Any]]:
+        """查询指定作者在指定日期的所有推文（不按用户过滤）。"""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            start_dt = datetime.combine(summary_date, datetime.min.time())
+            end_dt = start_dt + timedelta(days=1)
+            cursor.execute("""
+                SELECT id, content_id, title, content, author_name, author_identifier,
+                       url, media_urls, published_at, engagement_count, view_count,
+                       metadata, is_retweet, retweeted_author, retweeted_content,
+                       retweeted_url, is_quote, quoted_author, quoted_content,
+                       quoted_url, is_reply, in_reply_to_username, heat_level
+                FROM subscription_content
+                WHERE channel_type = 'twitter'
+                  AND author_identifier = %s
+                  AND published_at >= %s AND published_at < %s
+                ORDER BY published_at ASC
+            """, (author_identifier, start_dt, end_dt))
+            columns = [
+                'id', 'content_id', 'title', 'content', 'author_name',
+                'author_identifier', 'url', 'media_urls', 'published_at',
+                'engagement_count', 'view_count', 'metadata',
+                'is_retweet', 'retweeted_author', 'retweeted_content',
+                'retweeted_url', 'is_quote', 'quoted_author', 'quoted_content',
+                'quoted_url', 'is_reply', 'in_reply_to_username', 'heat_level',
+            ]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    # ── Tweet preparation ──────────────────────────────────────────────────
+
+    def _prepare_author_refs(self, tweets: List[Dict[str, Any]]) -> Dict[str, Dict]:
+        """
+        为每条推文分配内部键 T-001…T-n（仅用于 ref_map / top_tweets / 阶段 B 元数据）。
+        LLM 输入里不展示 T-xxx；摘要若按「每条要点附原文 URL」输出，正文可不含 [T-xxx]。
+        """
+        ref_map: Dict[str, Dict] = {}
+        for idx, tw in enumerate(tweets, start=1):
+            ref_id = f"T-{idx:03d}"
+            tw['ref_id'] = ref_id
+            ref_map[ref_id] = {
+                'url': tw.get('url') or '',
+                'content': (tw.get('content') or '')[:200],
+                'author': tw.get('author_identifier') or '',
+                'author_name': tw.get('author_name') or tw.get('author_identifier') or '',
+                'time': tw['published_at'].strftime('%H:%M') if tw.get('published_at') else '',
+                'engagement': tw.get('engagement_count') or 0,
+            }
+        return ref_map
+
+    def _format_author_tweets(self, author_tweets: List[Dict], ref_map: Dict) -> str:
+        """将一个作者的推文格式化为 LLM 输入文本（时间 + 正文 + URL，不暴露内部 T-xxx 编号）。"""
+        lines = []
+        for tw in author_tweets:
+            time_str = tw['published_at'].strftime('%H:%M') if tw.get('published_at') else ''
+            content = (tw.get('content') or '').strip()
+            url = tw.get('url', '')
+            engagement = tw.get('engagement_count', 0)
+
+            entry = f"({time_str}) 互动:{engagement}\n\"{content}\"\nURL: {url}"
+
+            if tw.get('is_retweet') and tw.get('retweeted_content'):
+                entry += f"\n  ↻ 转推 @{tw.get('retweeted_author','')}: \"{tw['retweeted_content'][:100]}\""
+            if tw.get('is_quote') and tw.get('quoted_content'):
+                entry += f"\n  ❝ 引用 @{tw.get('quoted_author','')}: \"{tw['quoted_content'][:100]}\""
+            if tw.get('is_reply') and tw.get('in_reply_to_username'):
+                entry += f"\n  ↩ 回复 @{tw['in_reply_to_username']}"
+
+            lines.append(entry)
+        return '\n\n'.join(lines)
+
+    def _get_author_top_tweets(
+        self, tweets: List[Dict], ref_map: Dict, top_n: int = 5
+    ) -> List[Dict]:
+        """返回该作者互动最高的推文列表（结构化数据，供组装时使用）。"""
+        sorted_tweets = sorted(tweets, key=lambda t: t.get('engagement_count') or 0, reverse=True)
+        result = []
+        for tw in sorted_tweets[:top_n]:
+            result.append({
+                'ref_id': tw.get('ref_id', ''),
+                'author': tw.get('author_identifier', ''),
+                'author_name': tw.get('author_name', ''),
+                'engagement': tw.get('engagement_count', 0),
+                'content_preview': (tw.get('content') or '')[:120].replace('\n', ' '),
+                'url': tw.get('url', ''),
+            })
+        return result
+
+    # ── Phase 1 LLM ──────────────────────────────────────────────────────
+
+    async def _run_phase1(
+        self,
+        tweets: List[Dict],
+        ref_map: Dict,
+        author_identifier: str,
+        author_display_name: str,
+        summary_date: date,
+    ) -> str:
+        """执行 Phase 1 LLM 调用，支持多 chunk 切分。"""
+        chunks = [
+            tweets[i:i + MAX_TWEETS_PER_AUTHOR_CHUNK]
+            for i in range(0, len(tweets), MAX_TWEETS_PER_AUTHOR_CHUNK)
+        ]
+
+        logger.info(f"[Phase 1] @{author_identifier}: "
+                    f"{len(tweets)} 条推文, {len(chunks)} 个 chunk")
+
+        chunk_summaries = []
+        for chunk_idx, chunk in enumerate(chunks):
+            tweets_text = self._format_author_tweets(chunk, ref_map)
+
+            variables = {
+                'author_name': author_display_name,
+                'report_date': str(summary_date),
+                'tweet_count': str(len(chunk)),
+                'tweets_text': tweets_text,
+                'report_language': 'zh',
+                'custom_instructions': '',
+            }
+
+            logger.info(f"[Phase 1] @{author_identifier} chunk {chunk_idx+1}/{len(chunks)}: "
+                        f"{len(chunk)} 条推文, tweets_text={len(tweets_text)} 字符")
+
+            summary = await self._call_llm(
+                template_code=DEFAULT_PHASE1_TEMPLATE,
+                variables=variables,
+                max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
+            )
+            chunk_summaries.append(summary)
+
+        return '\n\n'.join(chunk_summaries)
+
+    async def _call_llm(
+        self, template_code: str, variables: Dict[str, Any], max_tokens: int = 2000
+    ) -> str:
+        """通过 DB 模板调用 LLM。"""
+        var_preview = {k: (f"{str(v)[:200]}..." if len(str(v)) > 200 else str(v))
+                       for k, v in variables.items()}
+        logger.info(f"[LLM 调用] 模板={template_code}, max_tokens={max_tokens}, 变量预览={var_preview}")
+
+        llm_start = time.time()
+        response = await llm_service.chat_completion_with_template(
+            template_code=template_code,
+            variables=variables,
+            max_tokens=max_tokens,
+        )
+        llm_elapsed = round(time.time() - llm_start, 2)
+
+        content_preview = response.content[:300] if response.content else "(empty)"
+        logger.info(f"[LLM 响应] 模板={template_code}, 耗时={llm_elapsed}s, "
+                    f"响应长度={len(response.content)}字符, 预览: {content_preview}")
+        return response.content
+
+    # ── Summary persistence ───────────────────────────────────────────────
+
+    def _get_existing_summary(self, author_identifier: str, summary_date: date) -> Optional[Dict]:
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT id, status, summary_content, ref_map, top_tweets, tweet_count
+                FROM twitter_author_daily_summaries
+                WHERE author_identifier = %s AND summary_date = %s
+            """, (author_identifier, summary_date))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0], 'status': row[1], 'summary_content': row[2],
+                    'ref_map': row[3], 'top_tweets': row[4], 'tweet_count': row[5],
+                }
+            return None
+        finally:
+            cursor.close()
+
+    def _upsert_summary_status(
+        self, author_identifier: str, author_name: str, summary_date: date, status: str
+    ) -> int:
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO twitter_author_daily_summaries
+                    (author_identifier, author_name, summary_date, status)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (author_identifier, summary_date) DO UPDATE
+                    SET status = EXCLUDED.status,
+                        author_name = EXCLUDED.author_name,
+                        error_message = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            """, (author_identifier, author_name, summary_date, status))
+            conn.commit()
+            return cursor.fetchone()[0]
+        finally:
+            cursor.close()
+
+    def _update_summary(
+        self, summary_id: int, *,
+        status: str,
+        content: Optional[str] = None,
+        tweet_count: Optional[int] = None,
+        ref_map: Optional[Dict] = None,
+        top_tweets: Optional[List] = None,
+        metadata: Optional[Dict] = None,
+        error_message: Optional[str] = None,
+    ):
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            from psycopg2.extras import Json
+            cursor.execute("""
+                UPDATE twitter_author_daily_summaries
+                SET status = %s,
+                    summary_content = COALESCE(%s, summary_content),
+                    tweet_count = COALESCE(%s, tweet_count),
+                    ref_map = COALESCE(%s, ref_map),
+                    top_tweets = COALESCE(%s, top_tweets),
+                    metadata = COALESCE(%s, metadata),
+                    error_message = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (
+                status,
+                content,
+                tweet_count,
+                Json(ref_map) if ref_map is not None else None,
+                Json(top_tweets) if top_tweets is not None else None,
+                Json(metadata) if metadata is not None else None,
+                error_message,
+                summary_id,
+            ))
+            conn.commit()
+        finally:
+            cursor.close()
+
+    # ── Query helpers ─────────────────────────────────────────────────────
+
+    def get_author_summaries_for_date(
+        self, author_identifiers: List[str], summary_date: date
+    ) -> Dict[str, Dict]:
+        """
+        批量获取指定作者列表在某天的已完成摘要。
+
+        Returns:
+            {author_identifier: {summary_content, ref_map, top_tweets, tweet_count}}
+        """
+        if not author_identifiers:
+            return {}
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT author_identifier, author_name, summary_content,
+                       ref_map, top_tweets, tweet_count
+                FROM twitter_author_daily_summaries
+                WHERE author_identifier = ANY(%s)
+                  AND summary_date = %s
+                  AND status = 'completed'
+            """, (author_identifiers, summary_date))
+            result = {}
+            for row in cursor.fetchall():
+                result[row[0]] = {
+                    'author_identifier': row[0],
+                    'author_name': row[1],
+                    'summary_content': row[2],
+                    'ref_map': row[3] or {},
+                    'top_tweets': row[4] or [],
+                    'tweet_count': row[5] or 0,
+                }
+            return result
+        finally:
+            cursor.close()

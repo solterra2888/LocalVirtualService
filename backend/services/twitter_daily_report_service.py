@@ -2,16 +2,15 @@
 """
 Twitter Daily Report 服务 — AI Agent 定期为每个用户生成 Twitter 数据总结报告
 
-两阶段 LLM 策略：
-  Phase 1: 按作者分组，逐作者生成摘要（保留推文引用编号 + URL）
-  Phase 2: 汇总所有作者摘要，生成结构化 Daily Report（Markdown）
+优化后的两阶段解耦架构：
+  阶段 A（全局）: TwitterAuthorSummaryService 按作者预生成摘要，同一作者同一天只调 LLM 一次
+  阶段 B（本服务）: 读取预计算的作者摘要 → 全局引用重编号 → Phase 2 综合报告
 
-使用系统默认 prompt 模板：twitter_daily_phase1_default / twitter_daily_phase2_default
+如果预计算摘要缺失，会自动 fallback 到即时生成并缓存。
 """
 
-import asyncio
+import re
 import time
-import concurrent.futures
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -22,16 +21,14 @@ from backend.core.llm_framework import llm_service
 
 logger = get_logger("twitter_daily_report_service")
 
-DEFAULT_PHASE1_TEMPLATE = "twitter_daily_phase1_default"
 DEFAULT_PHASE2_TEMPLATE = "twitter_daily_phase2_default"
-
-MAX_TWEETS_PER_AUTHOR_CHUNK = 30
-MAX_TOKENS_OUTPUT_PHASE1 = 2000
 MAX_TOKENS_OUTPUT_PHASE2 = 4000
+
+_REF_PATTERN = re.compile(r'\[T-(\d{3,})\]')
 
 
 class TwitterDailyReportService:
-    """Twitter Daily Report 生成服务"""
+    """Twitter Daily Report 生成服务（阶段 B：组装用户报告）"""
 
     def __init__(self):
         db_params = get_database_config()
@@ -47,6 +44,8 @@ class TwitterDailyReportService:
     ) -> Dict[str, Any]:
         """
         为指定用户生成指定日期的 Twitter Daily Report。
+        优先从 twitter_author_daily_summaries 读取预计算摘要（阶段 A），
+        缺失时自动 fallback 到即时生成。
 
         Returns:
             {'success': bool, 'report_id': int | None, 'message': str, ...}
@@ -55,7 +54,6 @@ class TwitterDailyReportService:
         logger.info("开始生成 Twitter Daily Report",
                      user_id=user_id, report_date=str(report_date))
 
-        # 如果已存在且非强制，跳过
         if not force:
             existing = self._get_existing_report(user_id, report_date)
             if existing and existing.get('status') == 'completed':
@@ -67,17 +65,66 @@ class TwitterDailyReportService:
                     'skipped': True,
                 }
 
-        # 创建 / 更新为 generating 状态
         report_id = self._upsert_report_status(user_id, report_date, 'generating')
 
         try:
-            # 1) 拉取该用户当天的推文
-            tweets = self._fetch_user_tweets(user_id, report_date)
-            logger.info(f"[Step 1/7] 推文拉取完成: {len(tweets)} 条",
-                        user_id=user_id, report_date=str(report_date))
-            if not tweets:
+            # 1) 获取用户订阅的 Twitter 作者列表
+            user_authors = self._get_user_subscribed_authors(user_id)
+            logger.info(f"[Step 1/6] 用户订阅作者: {len(user_authors)} 位",
+                        user_id=user_id)
+            if not user_authors:
                 self._update_report(report_id, status='completed',
-                                    content='当天无推文数据。', metadata={'tweet_count': 0})
+                                    content='当前没有启用的 Twitter 订阅。',
+                                    metadata={'tweet_count': 0, 'author_count': 0})
+                return {
+                    'success': True,
+                    'report_id': report_id,
+                    'message': '没有启用的 Twitter 订阅',
+                    'tweet_count': 0,
+                }
+
+            # 2) 从 twitter_author_daily_summaries 批量读取预计算摘要
+            from backend.services.twitter_author_summary_service import TwitterAuthorSummaryService
+            author_summary_service = TwitterAuthorSummaryService()
+
+            author_ids = [a[0] for a in user_authors]
+            cached_summaries = author_summary_service.get_author_summaries_for_date(
+                author_ids, report_date
+            )
+            logger.info(f"[Step 2/6] 缓存摘要命中: {len(cached_summaries)}/{len(author_ids)}",
+                        user_id=user_id)
+
+            # 3) 补生成缺失的摘要（fallback）
+            missing_authors = [
+                (aid, aname) for aid, aname in user_authors
+                if aid not in cached_summaries
+            ]
+            if missing_authors:
+                logger.info(f"[Step 3/6] Fallback: 需即时生成 {len(missing_authors)} 位作者摘要",
+                            user_id=user_id)
+                for aid, aname in missing_authors:
+                    result = await author_summary_service.generate_author_summary(
+                        aid, aname, report_date
+                    )
+                    if result.get('success'):
+                        fresh = author_summary_service.get_author_summaries_for_date(
+                            [aid], report_date
+                        )
+                        cached_summaries.update(fresh)
+            else:
+                logger.info(f"[Step 3/6] 所有作者摘要均已缓存，无需 fallback",
+                            user_id=user_id)
+
+            # 过滤掉无推文数据的作者
+            active_summaries = {
+                k: v for k, v in cached_summaries.items()
+                if v.get('tweet_count', 0) > 0
+            }
+
+            if not active_summaries:
+                self._update_report(report_id, status='completed',
+                                    content='当天无推文数据。',
+                                    metadata={'tweet_count': 0, 'author_count': 0})
                 return {
                     'success': True,
                     'report_id': report_id,
@@ -85,70 +132,64 @@ class TwitterDailyReportService:
                     'tweet_count': 0,
                 }
 
-            # 2) 分配全局引用编号 + 按作者分组
-            ref_map, grouped = self._prepare_tweets(tweets)
-            authors_summary = {author: len(tws) for author, tws in grouped.items()}
-            logger.info(f"[Step 2/6] 推文分组完成: {len(grouped)} 位作者, "
-                        f"引用编号 {len(ref_map)} 个, 分布: {authors_summary}",
-                        user_id=user_id)
-
-            # 3) Phase 1 — per-author summaries
-            logger.info(f"[Step 3/6] Phase 1 开始 — 逐作者生成摘要 ({len(grouped)} 位作者)...",
-                        user_id=user_id)
-            phase1_start = time.time()
-            author_summaries = await self._phase1_author_summaries(
-                grouped, ref_map, report_date
+            # 4) 全局引用重编号 + 组装
+            renumbered_summaries, global_ref_map, author_display_map = self._renumber_and_assemble(
+                active_summaries
             )
-            phase1_elapsed = round(time.time() - phase1_start, 2)
-            for author, summary in author_summaries.items():
-                logger.info(f"[Phase 1] @{author} 摘要完成: {len(summary)} 字符")
-            logger.info(f"[Step 3/6] Phase 1 完成: {len(author_summaries)} 位作者, 耗时 {phase1_elapsed}s",
+            total_tweet_count = sum(s.get('tweet_count', 0) for s in active_summaries.values())
+            top_tweets_text = self._merge_top_tweets(active_summaries, global_ref_map)
+            logger.info(f"[Step 4/6] 组装完成: {len(renumbered_summaries)} 位作者, "
+                        f"{total_tweet_count} 条推文, {len(global_ref_map)} 引用",
                         user_id=user_id)
 
-            # 4) Phase 2 — synthesize final report
-            top_tweets = self._get_top_tweets(tweets, ref_map, top_n=5)
-            logger.info(f"[Step 4/6] Phase 2 开始 — 综合分析报告生成...",
+            # 5) Phase 2 — 综合报告
+            logger.info(f"[Step 5/6] Phase 2 开始 — 综合分析报告生成...",
                         user_id=user_id)
             phase2_start = time.time()
-            report_content, phase2_usage = await self._phase2_synthesize(
-                author_summaries, ref_map, top_tweets,
-                report_date, len(tweets)
+            report_content, _ = await self._phase2_synthesize(
+                renumbered_summaries, global_ref_map, top_tweets_text,
+                report_date, total_tweet_count
+            )
+            report_content = self._append_author_summaries_appendix(
+                report_content, renumbered_summaries, author_display_map
             )
             phase2_elapsed = round(time.time() - phase2_start, 2)
-            logger.info(f"[Step 4/6] Phase 2 完成: 报告 {len(report_content)} 字符, 耗时 {phase2_elapsed}s",
-                        user_id=user_id)
+            logger.info(f"[Step 5/6] Phase 2 完成: 报告（含附录）{len(report_content)} 字符, "
+                        f"耗时 {phase2_elapsed}s", user_id=user_id)
 
-            # 5) 构建 metadata
+            # 6) 保存
             elapsed = round(time.time() - start_time, 2)
             metadata = {
-                'tweet_count': len(tweets),
-                'author_count': len(grouped),
-                'top_authors': [a for a, _ in sorted(
-                    grouped.items(), key=lambda x: len(x[1]), reverse=True
-                )[:5]],
+                'tweet_count': total_tweet_count,
+                'author_count': len(renumbered_summaries),
+                'top_authors': sorted(
+                    active_summaries.keys(),
+                    key=lambda a: active_summaries[a].get('tweet_count', 0),
+                    reverse=True
+                )[:5],
                 'generation_time_seconds': elapsed,
                 'tweet_references': [
                     {'ref_id': rid, 'url': info['url'], 'author': info['author']}
-                    for rid, info in ref_map.items()
+                    for rid, info in global_ref_map.items()
                 ],
+                'used_cached_summaries': len(cached_summaries) - len(missing_authors),
+                'fallback_generated': len(missing_authors),
             }
-            logger.info(f"[Step 5/6] Metadata 已构建", user_id=user_id)
-
-            # 6) 保存
             self._update_report(report_id, status='completed',
                                 content=report_content, metadata=metadata)
 
             logger.info(f"[Step 6/6] Twitter Daily Report 生成完成: "
-                        f"{len(tweets)} 条推文, {len(grouped)} 位作者, "
-                        f"Phase1={phase1_elapsed}s, Phase2={phase2_elapsed}s, 总计={elapsed}s",
+                        f"{total_tweet_count} 条推文, {len(renumbered_summaries)} 位作者, "
+                        f"Phase2={phase2_elapsed}s, 总计={elapsed}s",
                         user_id=user_id, report_date=str(report_date))
 
             return {
                 'success': True,
                 'report_id': report_id,
-                'message': f'报告生成成功（{len(tweets)} 条推文，{len(grouped)} 位作者，{elapsed}s）',
-                'tweet_count': len(tweets),
-                'author_count': len(grouped),
+                'message': f'报告生成成功（{total_tweet_count} 条推文，'
+                           f'{len(renumbered_summaries)} 位作者，{elapsed}s）',
+                'tweet_count': total_tweet_count,
+                'author_count': len(renumbered_summaries),
                 'generation_time_seconds': elapsed,
             }
 
@@ -178,35 +219,20 @@ class TwitterDailyReportService:
 
     # ── Data fetching ──────────────────────────────────────────────────────
 
-    def _fetch_user_tweets(self, user_id: int, report_date: date) -> List[Dict[str, Any]]:
-        """查询该用户在指定日期内可见的所有 Twitter 内容。"""
+    def _get_user_subscribed_authors(self, user_id: int) -> List[Tuple[str, Optional[str]]]:
+        """获取用户订阅的所有启用 Twitter 作者 [(channel_identifier, channel_name)]。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
-            start_dt = datetime.combine(report_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=1)
             cursor.execute("""
-                SELECT id, content_id, title, content, author_name, author_identifier,
-                       url, media_urls, published_at, engagement_count, view_count,
-                       metadata, is_retweet, retweeted_author, retweeted_content,
-                       retweeted_url, is_quote, quoted_author, quoted_content,
-                       quoted_url, is_reply, in_reply_to_username, heat_level
-                FROM subscription_content
-                WHERE channel_type = 'twitter'
-                  AND published_at >= %s AND published_at < %s
-                  AND %s = ANY(user_ids)
-                ORDER BY published_at ASC
-            """, (start_dt, end_dt, user_id))
-            columns = [
-                'id', 'content_id', 'title', 'content', 'author_name',
-                'author_identifier', 'url', 'media_urls', 'published_at',
-                'engagement_count', 'view_count', 'metadata',
-                'is_retweet', 'retweeted_author', 'retweeted_content',
-                'retweeted_url', 'is_quote', 'quoted_author', 'quoted_content',
-                'quoted_url', 'is_reply', 'in_reply_to_username', 'heat_level',
-            ]
-            rows = cursor.fetchall()
-            return [dict(zip(columns, row)) for row in rows]
+                SELECT channel_identifier, channel_name
+                FROM subscription_list
+                WHERE user_id = %s
+                  AND channel_type = 'twitter'
+                  AND enabled = true
+                ORDER BY channel_identifier
+            """, (user_id,))
+            return [(row[0], row[1]) for row in cursor.fetchall()]
         finally:
             cursor.close()
 
@@ -226,125 +252,86 @@ class TwitterDailyReportService:
         finally:
             cursor.close()
 
-    # ── Tweet preparation ──────────────────────────────────────────────────
+    # ── Ref renumbering & assembly ─────────────────────────────────────────
 
-    def _prepare_tweets(
-        self, tweets: List[Dict[str, Any]]
-    ) -> Tuple[Dict[str, Dict], Dict[str, List[Dict]]]:
+    def _renumber_and_assemble(
+        self, author_summaries: Dict[str, Dict]
+    ) -> Tuple[Dict[str, str], Dict[str, Dict], Dict[str, str]]:
         """
-        为每条推文分配全局引用编号，按作者分组。
+        合并各作者的 ref_map 为全局 T-001…T-m；若摘要正文含 [T-xxx] 则替换为全局编号。
+        以 URL 为要点的 Phase1 输出通常不含 [T-xxx]，此时仅更新元数据用的 global_ref_map。
+
+        Args:
+            author_summaries: {author_id: {summary_content, ref_map, ...}}
 
         Returns:
-            (ref_map, grouped)
-            ref_map: { 'T-001': { url, content, author, time, engagement, ... } }
-            grouped: { author_identifier: [tweet_dicts_with_ref_id] }
+            (renumbered_text_dict, global_ref_map, author_display_map)
+            renumbered_text_dict: {author_id: renumbered_summary_text}
+            global_ref_map: {T-001: {url, content, author, ...}} (globally unique)
+            author_display_map: {author_id: display_name}
         """
-        ref_map: Dict[str, Dict] = {}
-        grouped: Dict[str, List[Dict]] = {}
-        for idx, tw in enumerate(tweets, start=1):
-            ref_id = f"T-{idx:03d}"
-            tw['ref_id'] = ref_id
-            ref_map[ref_id] = {
-                'url': tw.get('url') or '',
-                'content': (tw.get('content') or '')[:200],
-                'author': tw.get('author_identifier') or '',
-                'author_name': tw.get('author_name') or tw.get('author_identifier') or '',
-                'time': tw['published_at'].strftime('%H:%M') if tw.get('published_at') else '',
-                'engagement': tw.get('engagement_count') or 0,
-            }
-            author = tw.get('author_identifier') or 'unknown'
-            grouped.setdefault(author, []).append(tw)
-        return ref_map, grouped
+        global_ref_map: Dict[str, Dict] = {}
+        renumbered: Dict[str, str] = {}
+        author_display_map: Dict[str, str] = {}
+        offset = 0
 
-    def _get_top_tweets(
-        self, tweets: List[Dict], ref_map: Dict, top_n: int = 5
+        for author_id, data in author_summaries.items():
+            local_ref_map = data.get('ref_map') or {}
+            summary_text = data.get('summary_content') or ''
+            author_display_map[author_id] = data.get('author_name') or author_id
+
+            if not local_ref_map:
+                renumbered[author_id] = summary_text
+                continue
+
+            rename_map = {}
+            for local_idx, (local_ref, info) in enumerate(local_ref_map.items(), start=1):
+                global_ref = f"T-{offset + local_idx:03d}"
+                rename_map[local_ref] = global_ref
+                global_ref_map[global_ref] = info
+
+            def _replace_ref(match):
+                old_ref = match.group(0).strip('[]')
+                return f"[{rename_map.get(old_ref, old_ref)}]"
+
+            renumbered_text = _REF_PATTERN.sub(_replace_ref, summary_text)
+            renumbered[author_id] = renumbered_text
+            offset += len(local_ref_map)
+
+        return renumbered, global_ref_map, author_display_map
+
+    def _merge_top_tweets(
+        self, author_summaries: Dict[str, Dict], global_ref_map: Dict
     ) -> str:
-        """返回互动最高的推文的格式化文本，供 Phase 2 使用。"""
-        sorted_tweets = sorted(tweets, key=lambda t: t.get('engagement_count') or 0, reverse=True)
+        """
+        合并各作者的 top_tweets，按互动量排序取 Top 5，
+        用全局 ref_map 中的 ref_id 输出格式化文本。
+        """
+        all_top = []
+        for author_id, data in author_summaries.items():
+            local_ref_map = data.get('ref_map') or {}
+            for tw in (data.get('top_tweets') or []):
+                local_ref = tw.get('ref_id', '')
+                global_ref = None
+                for gref, ginfo in global_ref_map.items():
+                    if ginfo.get('url') == tw.get('url') and ginfo.get('url'):
+                        global_ref = gref
+                        break
+                all_top.append({
+                    **tw,
+                    'global_ref': global_ref or local_ref,
+                })
+
+        all_top.sort(key=lambda t: t.get('engagement', 0), reverse=True)
         lines = []
-        for tw in sorted_tweets[:top_n]:
-            ref_id = tw.get('ref_id', '')
-            author = tw.get('author_identifier', '')
-            content_preview = (tw.get('content') or '')[:120].replace('\n', ' ')
-            engagement = tw.get('engagement_count', 0)
+        for tw in all_top[:5]:
+            ref = tw.get('global_ref', '')
+            author = tw.get('author', '')
+            engagement = tw.get('engagement', 0)
+            preview = tw.get('content_preview', '')
             url = tw.get('url', '')
-            lines.append(f"[{ref_id}] @{author} | 互动:{engagement} | \"{content_preview}\" | {url}")
+            lines.append(f"[{ref}] @{author} | 互动:{engagement} | \"{preview}\" | {url}")
         return '\n'.join(lines)
-
-    # ── Phase 1: Per-author summaries ──────────────────────────────────────
-
-    def _format_author_tweets(
-        self, author_tweets: List[Dict], ref_map: Dict
-    ) -> str:
-        """将一个作者的推文格式化为 LLM 输入文本。"""
-        lines = []
-        for tw in author_tweets:
-            ref_id = tw.get('ref_id', '')
-            time_str = tw['published_at'].strftime('%H:%M') if tw.get('published_at') else ''
-            content = (tw.get('content') or '').strip()
-            url = tw.get('url', '')
-            engagement = tw.get('engagement_count', 0)
-
-            entry = f"[{ref_id}] ({time_str}) 互动:{engagement}\n\"{content}\"\nURL: {url}"
-
-            if tw.get('is_retweet') and tw.get('retweeted_content'):
-                entry += f"\n  ↻ 转推 @{tw.get('retweeted_author','')}: \"{tw['retweeted_content'][:100]}\""
-            if tw.get('is_quote') and tw.get('quoted_content'):
-                entry += f"\n  ❝ 引用 @{tw.get('quoted_author','')}: \"{tw['quoted_content'][:100]}\""
-            if tw.get('is_reply') and tw.get('in_reply_to_username'):
-                entry += f"\n  ↩ 回复 @{tw['in_reply_to_username']}"
-
-            lines.append(entry)
-        return '\n\n'.join(lines)
-
-    async def _phase1_author_summaries(
-        self,
-        grouped: Dict[str, List[Dict]],
-        ref_map: Dict,
-        report_date: date,
-    ) -> Dict[str, str]:
-        """Phase 1: 逐作者生成摘要。返回 {author: summary_text}。"""
-        summaries: Dict[str, str] = {}
-
-        author_idx = 0
-        total_authors = len(grouped)
-        for author, author_tweets in grouped.items():
-            author_idx += 1
-            chunks = [
-                author_tweets[i:i + MAX_TWEETS_PER_AUTHOR_CHUNK]
-                for i in range(0, len(author_tweets), MAX_TWEETS_PER_AUTHOR_CHUNK)
-            ]
-
-            logger.info(f"[Phase 1] ({author_idx}/{total_authors}) @{author}: "
-                        f"{len(author_tweets)} 条推文, {len(chunks)} 个 chunk")
-
-            chunk_summaries = []
-            for chunk_idx, chunk in enumerate(chunks):
-                tweets_text = self._format_author_tweets(chunk, ref_map)
-                author_display = chunk[0].get('author_name') or author
-
-                variables = {
-                    'author_name': author_display,
-                    'report_date': str(report_date),
-                    'tweet_count': str(len(chunk)),
-                    'tweets_text': tweets_text,
-                    'report_language': 'zh',
-                    'custom_instructions': '',
-                }
-
-                logger.info(f"[Phase 1] @{author} chunk {chunk_idx+1}/{len(chunks)}: "
-                            f"{len(chunk)} 条推文, tweets_text={len(tweets_text)} 字符")
-
-                summary = await self._call_llm(
-                    template_code=DEFAULT_PHASE1_TEMPLATE,
-                    variables=variables,
-                    max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
-                )
-                chunk_summaries.append(summary)
-
-            summaries[author] = '\n\n'.join(chunk_summaries)
-
-        return summaries
 
     # ── Phase 2: Synthesis ─────────────────────────────────────────────────
 
@@ -384,6 +371,28 @@ class TwitterDailyReportService:
 
         logger.info(f"[Phase 2] 最终报告: {len(report_content)} 字符")
         return report_content, {}
+
+    def _append_author_summaries_appendix(
+        self,
+        report_body: str,
+        author_summaries: Dict[str, str],
+        author_display_map: Dict[str, str],
+    ) -> str:
+        """
+        在 Phase 2 主文下方追加附录：按作者顺序编号 S1…SN，对应各作者的 Phase 1 摘要全文。
+        """
+        if not author_summaries:
+            return report_body
+        parts: List[str] = [report_body.rstrip(), "\n\n---\n\n"]
+        n = len(author_summaries)
+        parts.append(f"## 附录：各作者摘要（S1–S{n}）\n\n")
+        for idx, author in enumerate(author_summaries.keys(), start=1):
+            display = author_display_map.get(author, author)
+            summary = (author_summaries.get(author) or "").strip()
+            parts.append(f"### S{idx} — @{display}\n\n")
+            parts.append(summary)
+            parts.append("\n\n")
+        return "".join(parts).rstrip() + "\n"
 
     # ── LLM call helper ───────────────────────────────────────────────────
 
@@ -560,4 +569,3 @@ class TwitterDailyReportService:
             return report
         finally:
             cursor.close()
-

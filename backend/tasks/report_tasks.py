@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 报告生成 Celery 任务
-将耗时的 LLM 报告生成（200-500s/份）放到 Celery worker 异步执行，
+将耗时的 LLM 报告生成放到 Celery worker 异步执行，
 避免阻塞 Web 进程和 Scheduler 事件循环。
+
+任务分两阶段：
+  1. 作者摘要（全局共享）: generate_all_author_summaries → generate_author_summary
+  2. 用户报告（per-user）: generate_all_twitter_daily_reports → generate_twitter_daily_report
 """
 
 import asyncio
@@ -27,6 +31,115 @@ def _run_async(coro):
     return loop.run_until_complete(coro)
 
 
+# ── 阶段 A：全局作者摘要任务 ─────────────────────────────────────────────
+
+@app.task(
+    bind=True,
+    name='generate_author_summary',
+    queue='ai_processing',
+    soft_time_limit=300,
+    time_limit=600,
+)
+def generate_author_summary_task(
+    self,
+    author_identifier: str,
+    author_name: str,
+    summary_date: str,
+    force: bool = False,
+):
+    """
+    为单个 Twitter 作者生成指定日期的摘要（Phase 1）。
+    结果存入 twitter_author_daily_summaries，供所有用户共享。
+    """
+    task_id = self.request.id
+    start = time.time()
+    logger.info(f"[Celery Task {task_id}] 开始生成作者摘要: "
+                f"@{author_identifier}, date={summary_date}, force={force}")
+
+    try:
+        from datetime import datetime
+        from backend.services.twitter_author_summary_service import TwitterAuthorSummaryService
+
+        dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
+        service = TwitterAuthorSummaryService()
+        result = _run_async(service.generate_author_summary(
+            author_identifier=author_identifier,
+            author_name=author_name,
+            summary_date=dt,
+            force=force,
+        ))
+
+        elapsed = round(time.time() - start, 2)
+        logger.info(f"[Celery Task {task_id}] 作者摘要完成: @{author_identifier}, "
+                    f"success={result.get('success')}, elapsed={elapsed}s")
+        return result
+
+    except Exception as exc:
+        elapsed = round(time.time() - start, 2)
+        logger.error(f"[Celery Task {task_id}] 作者摘要失败: "
+                     f"@{author_identifier}, elapsed={elapsed}s, error={str(exc)}")
+        raise self.retry(exc=exc, max_retries=1, countdown=30)
+
+
+@app.task(
+    bind=True,
+    name='generate_all_author_summaries',
+    queue='ai_processing',
+    soft_time_limit=3600,
+    time_limit=4200,
+)
+def generate_all_author_summaries_task(
+    self,
+    summary_date: str,
+    force: bool = False,
+    chain_daily_reports: bool = True,
+):
+    """
+    为所有启用的 Twitter 作者批量生成当日摘要（同步执行，逐作者串行）。
+    全部完成后再链式触发 generate_all_twitter_daily_reports，
+    确保 Daily Report 生成时所有缓存摘要已就绪。
+
+    Args:
+        summary_date: 摘要日期 (YYYY-MM-DD)
+        force: 是否强制重新生成
+        chain_daily_reports: 完成后是否自动触发 Daily Report 生成
+    """
+    task_id = self.request.id
+    logger.info(f"[Celery Task {task_id}] 开始批量生成作者摘要: date={summary_date}")
+
+    try:
+        from datetime import datetime
+        from backend.services.twitter_author_summary_service import TwitterAuthorSummaryService
+
+        dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
+        service = TwitterAuthorSummaryService()
+        result = _run_async(service.generate_all_author_summaries(dt, force=force))
+
+        logger.info(f"[Celery Task {task_id}] 作者摘要批量完成: {result.get('message')}")
+
+        if chain_daily_reports:
+            report_task = generate_all_twitter_daily_reports_task.delay(
+                report_date=summary_date
+            )
+            logger.info(f"[Celery Task {task_id}] 已链式触发 Daily Report: task_id={report_task.id}")
+
+        return {
+            'success': True,
+            'message': result.get('message', ''),
+            'total': result.get('total', 0),
+            'succeeded': result.get('succeeded', 0),
+            'skipped': result.get('skipped', 0),
+            'summary_date': summary_date,
+            'chain_daily_reports': chain_daily_reports,
+        }
+
+    except Exception as exc:
+        logger.error(f"[Celery Task {task_id}] 作者摘要批量失败: error={str(exc)}")
+        raise
+
+
+# ── 阶段 B：用户报告任务 ──────────────────────────────────────────────────
+
 @app.task(
     bind=True,
     name='generate_twitter_daily_report',
@@ -42,11 +155,8 @@ def generate_twitter_daily_report_task(
 ):
     """
     为单个用户生成 Twitter Daily Report。
-
-    Args:
-        user_id: 用户 ID
-        report_date: 报告日期 (YYYY-MM-DD)
-        force: 是否强制重新生成
+    会从 twitter_author_daily_summaries 读取预计算摘要，
+    缺失时自动 fallback 到即时生成。
     """
     task_id = self.request.id
     start = time.time()
@@ -91,9 +201,6 @@ def generate_all_twitter_daily_reports_task(self, report_date: str):
     """
     为所有启用的用户分发 Twitter Daily Report 生成任务。
     每个用户作为独立的子任务提交，实现并行生成。
-
-    Args:
-        report_date: 报告日期 (YYYY-MM-DD)
     """
     task_id = self.request.id
     logger.info(f"[Celery Task {task_id}] 开始分发 Twitter Daily Report: report_date={report_date}")

@@ -72,7 +72,7 @@ class SchedulerService:
             'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
             'ipo_calendar': self._execute_ipo_calendar_task,  # IPO 日历数据获取任务
             'news_feed': self._execute_news_feed_task,  # EODHD 新闻 Feed 订阅任务
-            'twitter_daily_report': self._execute_twitter_daily_report_task,  # Twitter Daily Report 生成
+            'twitter_author_summary': self._execute_twitter_author_summary_task,  # Twitter 作者摘要预生成（阶段A），完成后自动链式触发 Daily Report
         }
         
         # 添加事件监听器
@@ -1427,20 +1427,21 @@ class SchedulerService:
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
-    async def _execute_twitter_daily_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_twitter_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行 Twitter Daily Report 生成任务 — 通过 Celery 异步分发给所有启用的用户。
-        每份报告耗时 200-500s，必须走 Celery worker 避免阻塞 scheduler。
+        执行 Twitter 作者摘要预生成任务（阶段 A）。
+        为所有启用的 Twitter 作者批量生成当日摘要，完成后自动链式触发 Daily Report 生成。
 
         Args:
             params: 任务参数
-                - report_date: 报告日期 (YYYY-MM-DD)，默认昨天
+                - report_date: 摘要日期 (YYYY-MM-DD)，默认昨天
+                - chain_daily_reports: 完成后是否自动触发 Daily Report（默认 True）
         """
         try:
-            logger.info("分发 Twitter Daily Report Celery 任务", params=params)
+            logger.info("分发 Twitter 作者摘要 Celery 任务", params=params)
 
             from datetime import date, timedelta, datetime
-            from backend.tasks.report_tasks import generate_all_twitter_daily_reports_task
+            from backend.tasks.report_tasks import generate_all_author_summaries_task
 
             report_date_str = params.get('report_date')
             if report_date_str:
@@ -1448,16 +1449,23 @@ class SchedulerService:
             else:
                 report_date = date.today() - timedelta(days=1)
 
-            task = generate_all_twitter_daily_reports_task.delay(report_date=str(report_date))
+            chain_daily_reports = params.get('chain_daily_reports', True)
 
+            task = generate_all_author_summaries_task.delay(
+                summary_date=str(report_date),
+                force=False,
+                chain_daily_reports=chain_daily_reports,
+            )
+
+            chain_info = "，完成后自动触发 Daily Report" if chain_daily_reports else ""
             message = (
-                f"✅ Twitter Daily Report ({report_date}): "
-                f"已提交 Celery 异步任务 {task.id}"
+                f"✅ Twitter 作者摘要 ({report_date}): "
+                f"已提交 Celery 异步任务 {task.id}{chain_info}"
             )
             return {'success': True, 'message': message, 'celery_task_id': task.id}
 
         except Exception as e:
-            error_msg = f"Twitter Daily Report 任务分发异常: {str(e)}"
+            error_msg = f"Twitter 作者摘要任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

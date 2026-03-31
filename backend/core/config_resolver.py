@@ -291,29 +291,27 @@ class ConfigResolver:
         return self._provider_cache.get(provider_id)
     
     def _get_template_config(self, template_code: str) -> Optional[Dict[str, Any]]:
-        """获取Template配置（带缓存）"""
-        if template_code not in self._template_cache:
-            try:
-                from backend.services.llm_prompt_template_service import LLMPromptTemplateService
-                template_service = LLMPromptTemplateService()
-                template = template_service.get_template_by_code(template_code)
-                
-                if template:
-                    self._template_cache[template_code] = {
-                        'recommended_provider': template.get('recommended_provider'),
-                        'recommended_model': template.get('recommended_model'),
-                        'temperature': template.get('temperature'),
-                        'max_tokens': template.get('max_tokens')
-                    }
-                    logger.debug(f"模板配置已加载: {template_code}")
-                else:
-                    self._template_cache[template_code] = None
-                    logger.warning(f"模板配置未找到: {template_code}")
-            except Exception as e:
-                logger.error(f"加载模板配置失败: {template_code}, 错误: {str(e)}")
-                self._template_cache[template_code] = None
-        
-        return self._template_cache.get(template_code)
+        """获取Template配置（每次从DB读取，避免缓存导致模板更新不生效）"""
+        try:
+            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+            template_service = LLMPromptTemplateService()
+            template = template_service.get_template_by_code(template_code)
+            
+            if template:
+                config = {
+                    'recommended_provider': template.get('recommended_provider'),
+                    'recommended_model': template.get('recommended_model'),
+                    'temperature': template.get('temperature'),
+                    'max_tokens': template.get('max_tokens')
+                }
+                logger.debug(f"模板配置已加载: {template_code}, model={config['recommended_model']}, temp={config['temperature']}")
+                return config
+            else:
+                logger.warning(f"模板配置未找到: {template_code}")
+                return None
+        except Exception as e:
+            logger.error(f"加载模板配置失败: {template_code}, 错误: {str(e)}")
+            return None
     
     def _get_setting_value(self, settings: Dict[str, Any], key: str, default: Any) -> Any:
         """

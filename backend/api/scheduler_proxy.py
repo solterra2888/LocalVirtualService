@@ -497,30 +497,30 @@ async def create_default_news_feed_task_proxy(request: Request, current_user=Dep
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认 News Feed 任务代理失败: {str(e)}")
 
-@router.post("/tasks/twitter-daily-report", summary="create twitter daily report task")
-async def create_twitter_daily_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建 Twitter Daily Report 定时任务"""
+@router.post("/tasks/twitter-author-summary", summary="create twitter author summary task")
+async def create_twitter_author_summary_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 Twitter 作者摘要定时任务（阶段 A）"""
     try:
         auth_headers = get_auth_headers(request)
         json_data = await request.json()
-        result = await scheduler_client.post("/scheduler/tasks/twitter-daily-report", json_data=json_data, headers=auth_headers)
+        result = await scheduler_client.post("/scheduler/tasks/twitter-author-summary", json_data=json_data, headers=auth_headers)
         return result
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建 Twitter Daily Report 任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建 Twitter 作者摘要任务代理失败: {str(e)}")
 
-@router.post("/tasks/twitter-daily-report/default", summary="create default twitter daily report task")
-async def create_default_twitter_daily_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建默认 Twitter Daily Report 定时任务"""
+@router.post("/tasks/twitter-author-summary/default", summary="create default twitter author summary task")
+async def create_default_twitter_author_summary_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 Twitter 作者摘要定时任务"""
     try:
         auth_headers = get_auth_headers(request)
-        result = await scheduler_client.post("/scheduler/tasks/twitter-daily-report/default", headers=auth_headers)
+        result = await scheduler_client.post("/scheduler/tasks/twitter-author-summary/default", headers=auth_headers)
         return result
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建默认 Twitter Daily Report 任务代理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建默认 Twitter 作者摘要任务代理失败: {str(e)}")
 
 @router.post("/tasks/{task_id}/enable", summary="enable task")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):

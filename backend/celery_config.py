@@ -65,6 +65,8 @@ task_routes = {
     'transcribe_youtube_file_asr_task': {'queue': 'file_processing'},  # Upload YouTube Link 手动重新 ASR 转写
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
+    'generate_author_summary': {'queue': 'ai_processing'},
+    'generate_all_author_summaries': {'queue': 'ai_processing'},
     'generate_twitter_daily_report': {'queue': 'ai_processing'},
     'generate_all_twitter_daily_reports': {'queue': 'ai_processing'},
     'cleanup_llm_usage_logs': {'queue': 'data_fetching'},

@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Typography, DatePicker, Button, Spin, Empty, Tag, Space,
-  List, App, Tooltip,
+  List, App, Tooltip, ConfigProvider, theme as antdTheme,
 } from 'antd';
 import {
   ReloadOutlined, FileTextOutlined,
-  CalendarOutlined, ThunderboltOutlined, CheckCircleOutlined,
+  CalendarOutlined, CheckCircleOutlined,
   CloseCircleOutlined, ClockCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import {
   twitterDailyReportsAPI,
@@ -30,12 +31,12 @@ const TwitterDailyReportPageInner: React.FC = () => {
   const { message } = App.useApp();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
+  const themeColors = FEED_THEME_COLORS[themeMode];
 
   const [reports, setReports] = useState<TwitterDailyReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<TwitterDailyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(dayjs().subtract(1, 'day'));
 
   // ── Load reports list ──────────────────────────────────────────────────
@@ -90,76 +91,10 @@ const TwitterDailyReportPageInner: React.FC = () => {
     }
   };
 
-  // ── Generate ───────────────────────────────────────────────────────────
-  const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPolling = useCallback(() => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => stopPolling(), [stopPolling]);
-
-  const handleGenerate = async (force = false) => {
-    setGenerating(true);
-    stopPolling();
-    try {
-      const dateStr = selectedDate.format('YYYY-MM-DD');
-      const res = await twitterDailyReportsAPI.generateReport(dateStr, force);
-      if (res.success) {
-        if (res.data?.skipped) {
-          message.info(res.message || 'Report already exists');
-          loadReportDetail(dateStr);
-          setGenerating(false);
-          return;
-        }
-        message.info('Report generation started, please wait...');
-
-        let elapsed = 0;
-        const MAX_POLL = 600_000;
-        const INTERVAL = 5_000;
-        pollIntervalRef.current = setInterval(async () => {
-          elapsed += INTERVAL;
-          if (elapsed > MAX_POLL) {
-            stopPolling();
-            setGenerating(false);
-            message.warning('Generation timed out. Please refresh later.');
-            return;
-          }
-          try {
-            const detail = await twitterDailyReportsAPI.getReportByDate(dateStr);
-            const status = detail.data?.status;
-            if (status === 'completed') {
-              stopPolling();
-              setSelectedReport(detail.data ?? null);
-              loadReports();
-              setGenerating(false);
-              message.success('Report generated successfully');
-            } else if (status === 'failed') {
-              stopPolling();
-              setSelectedReport(detail.data ?? null);
-              loadReports();
-              setGenerating(false);
-              message.error(detail.data?.error_message || 'Generation failed');
-            }
-          } catch { /* ignore poll errors */ }
-        }, INTERVAL);
-      } else {
-        message.error(res.error || 'Generation failed');
-        setGenerating(false);
-      }
-    } catch {
-      message.error('Generation failed');
-      setGenerating(false);
-    }
-  };
-
   // ── Styling ────────────────────────────────────────────────────────────
-  const panelBg = isDark ? '#141414' : '#fff';
-  const borderColor = isDark ? 'rgba(255,255,255,0.12)' : '#f0f0f0';
-  const sidebarBg = isDark ? '#1a1a1a' : '#fafafa';
+  const panelBg = themeColors.pageBg;
+  const borderColor = themeColors.cardBorder;
+  const sidebarBg = themeColors.cardBg;
 
   return (
     <Layout style={{ height: '100%', background: 'transparent' }}>
@@ -186,20 +121,9 @@ const TwitterDailyReportPageInner: React.FC = () => {
           <DatePicker
             value={selectedDate}
             onChange={handleDateChange}
-            style={{ width: '100%', marginBottom: 8 }}
+            style={{ width: '100%', marginBottom: 12 }}
             allowClear={false}
           />
-
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            onClick={() => handleGenerate(false)}
-            loading={generating}
-            block
-            style={{ marginBottom: 12 }}
-          >
-            {generating ? 'Generating...' : 'Generate Report'}
-          </Button>
         </div>
 
         <List
@@ -216,7 +140,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
                 style={{
                   padding: '10px 12px',
                   cursor: 'pointer',
-                  background: isSelected ? (isDark ? 'rgba(22,119,255,0.15)' : '#e6f4ff') : 'transparent',
+                  background: isSelected ? themeColors.selectedItemBg : 'transparent',
                   borderBottom: `1px solid ${borderColor}`,
                   transition: 'background 0.2s',
                 }}
@@ -269,14 +193,6 @@ const TwitterDailyReportPageInner: React.FC = () => {
                   </Text>
                 )}
               </Space>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => handleGenerate(true)}
-                loading={generating}
-              >
-                Regenerate
-              </Button>
             </div>
             <MarkdownRenderer
               content={selectedReport.report_content}
@@ -285,19 +201,11 @@ const TwitterDailyReportPageInner: React.FC = () => {
           </div>
         ) : selectedReport?.status === 'failed' ? (
           <div style={{ textAlign: 'center', paddingTop: 120 }}>
-            <Empty description={selectedReport.error_message || 'Report generation failed'}>
-              <Button type="primary" onClick={() => handleGenerate(true)}>
-                Retry
-              </Button>
-            </Empty>
+            <Empty description={selectedReport.error_message || 'Report generation failed'} />
           </div>
         ) : (
           <div style={{ textAlign: 'center', paddingTop: 120 }}>
-            <Empty description="Select a date or generate a new report">
-              <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => handleGenerate(false)} loading={generating}>
-                Generate for {selectedDate.format('YYYY-MM-DD')}
-              </Button>
-            </Empty>
+            <Empty description="Select a date to view the report. Reports are generated automatically by the scheduler." />
           </div>
         )}
       </Content>
@@ -305,10 +213,36 @@ const TwitterDailyReportPageInner: React.FC = () => {
   );
 };
 
-const TwitterDailyReportPage: React.FC = () => (
-  <App>
-    <TwitterDailyReportPageInner />
-  </App>
-);
+const TwitterDailyReportPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const themeColors = FEED_THEME_COLORS[themeMode];
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: themeColors.cardBg,
+            colorBgElevated: themeColors.cardBg,
+            colorBorderSecondary: themeColors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: themeColors.text,
+            colorTextSecondary: themeColors.textSecondary,
+            colorFillQuaternary: themeColors.inputBg ?? '#1E202B',
+            colorBgLayout: themeColors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
+          },
+        }),
+      }}
+    >
+      <App>
+        <TwitterDailyReportPageInner />
+      </App>
+    </ConfigProvider>
+  );
+};
 
 export default TwitterDailyReportPage;

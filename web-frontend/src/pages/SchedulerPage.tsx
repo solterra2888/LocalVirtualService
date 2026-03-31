@@ -115,7 +115,7 @@ const CARD_STYLE_BEHANCE_DARK = {
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_daily_report' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'other';
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -244,18 +244,18 @@ const SchedulerPage: React.FC = () => {
       ]
     },
     {
-      id: 'twitter_daily_report',
-      name: 'Twitter Daily Report',
-      type: 'twitter_daily_report',
-      description: 'AI-generated daily summary and analysis of Twitter subscription data with source citations',
+      id: 'twitter_author_summary',
+      name: 'Twitter Author Summary',
+      type: 'twitter_author_summary',
+      description: 'Pre-generate per-author daily summaries (Phase 1). Shared across all users, auto-chains to Daily Report.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
-          id: 'configure_twitter_daily_report_schedule',
-          name: 'Configure Report Schedule',
-          description: 'Set up periodic Twitter Daily Report generation (default: daily at 6 AM CST)',
-          endpoint: '/scheduler/tasks/twitter-daily-report',
+          id: 'configure_twitter_author_summary_schedule',
+          name: 'Configure Summary Schedule',
+          description: 'Set up periodic Twitter Author Summary generation (default: daily at 5 AM CST, auto-chains Daily Report)',
+          endpoint: '/scheduler/tasks/twitter-author-summary',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -530,7 +530,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
-          (sourceIdLower === 'twitter_daily_report' && taskType === 'twitter_daily_report') ||
+          (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -594,7 +594,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
         (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
-        (sourceIdLower === 'twitter_daily_report' && taskType === 'twitter_daily_report') ||
+        (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -810,7 +810,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
-          (sourceIdLower === 'twitter_daily_report' && taskType === 'twitter_daily_report') ||
+          (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -927,7 +927,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_daily_report' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1416,7 +1416,7 @@ const SchedulerPage: React.FC = () => {
                                 (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
                                 (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
                                 (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
-                                (sourceIdLower === 'twitter_daily_report' && taskType === 'twitter_daily_report') ||
+                                (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
                                 (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                                 (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                                 (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1471,7 +1471,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_daily_report'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary'}
           dataSourceName={selectedDataSource.name}
         />
       )}

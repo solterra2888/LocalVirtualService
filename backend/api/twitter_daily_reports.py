@@ -6,14 +6,14 @@ Twitter Daily Report API
   GET  /reports/twitter-daily              — 报告列表（分页）
   GET  /reports/twitter-daily/latest       — 最新已完成报告
   GET  /reports/twitter-daily/{date}       — 指定日期报告
-  POST /reports/twitter-daily/generate     — 手动触发生成
+
+报告由 Scheduler 定时自动生成，不提供手动触发接口。
 """
 
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
 
 from backend.auth.jwt_utils import get_current_user
 from backend.schemas.user import TokenData
@@ -22,19 +22,6 @@ from backend.utils.logger import get_logger
 logger = get_logger("twitter_daily_reports_api")
 
 router = APIRouter(prefix="/reports/twitter-daily", tags=["Twitter Daily Report"])
-
-
-# ── Request / Response Models ──────────────────────────────────────────────
-
-class GenerateReportRequest(BaseModel):
-    report_date: Optional[str] = Field(
-        default=None,
-        description="报告日期 (YYYY-MM-DD)，默认昨天"
-    )
-    force: bool = Field(
-        default=False,
-        description="是否强制重新生成（即使已存在）"
-    )
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -87,45 +74,6 @@ async def get_latest_report(
         return {"success": True, "data": report}
     except Exception as e:
         logger.error(f"获取最新报告失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/generate", summary="手动触发报告生成")
-async def generate_report(
-    request: GenerateReportRequest,
-    current_user: TokenData = Depends(get_current_user),
-):
-    """手动触发为当前用户生成指定日期的 Twitter Daily Report（异步 Celery 任务）。"""
-    try:
-        report_date = _parse_date(request.report_date)
-
-        if not request.force:
-            service = _get_service()
-            existing = service._get_existing_report(current_user.user_id, report_date)
-            if existing and existing.get('status') == 'completed':
-                return {
-                    "success": True,
-                    "data": {"report_id": existing['id'], "skipped": True},
-                    "message": "报告已存在",
-                }
-
-        from backend.tasks.report_tasks import generate_twitter_daily_report_task
-        task = generate_twitter_daily_report_task.delay(
-            user_id=current_user.user_id,
-            report_date=str(report_date),
-            force=request.force,
-        )
-        logger.info(f"Twitter Daily Report 任务已提交 Celery",
-                     task_id=task.id, user_id=current_user.user_id, report_date=str(report_date))
-        return {
-            "success": True,
-            "data": {"task_id": task.id, "report_date": str(report_date)},
-            "message": "报告生成任务已提交，请稍后刷新查看结果",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"提交报告生成任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
