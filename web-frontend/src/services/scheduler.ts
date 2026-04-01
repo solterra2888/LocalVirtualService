@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_author_summary';
+  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_author_summary' | 'youtube_author_summary';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -906,6 +906,7 @@ export class SchedulerAPI {
     timezone?: string;
     enabled?: boolean;
     chain_daily_reports?: boolean;
+    force?: boolean;
   }): Promise<TaskCreateResponse> {
     try {
       const response = await api.post('/scheduler/tasks/twitter-author-summary', params);
@@ -939,6 +940,53 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认 Twitter 作者摘要定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建 YouTube 频道摘要定时任务（阶段 A）
+   */
+  async createYouTubeAuthorSummaryTask(params: {
+    name?: string;
+    cron_expression?: string;
+    timezone?: string;
+    enabled?: boolean;
+    chain_daily_reports?: boolean;
+    force?: boolean;
+  }): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/youtube-author-summary', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建 YouTube 频道摘要定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建 YouTube 频道摘要定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建 YouTube 频道摘要定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认 YouTube 频道摘要定时任务
+   */
+  async createDefaultYouTubeAuthorSummaryTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/youtube-author-summary/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认 YouTube 频道摘要定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认 YouTube 频道摘要定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认 YouTube 频道摘要定时任务失败'
       };
     }
   }

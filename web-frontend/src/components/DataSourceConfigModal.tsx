@@ -59,7 +59,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -216,10 +216,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     },
     twitter_author_summary: {
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
-      params: [],
+      params: ['force'],
       defaultSchedule: '0 5 * * *',
       defaultName: 'Twitter Author Summary',
       description: 'Pre-generate per-author daily summaries (Phase 1). Auto-chains to Daily Report generation (daily at 5 AM CST)'
+    },
+    youtube_author_summary: {
+      icon: <YoutubeOutlined style={{ color: '#FF0000' }} />,
+      params: ['force'],
+      defaultSchedule: '0 6 * * *',
+      defaultName: 'YouTube Author Summary',
+      description: 'Pre-generate per-channel video summaries (Phase 1). Auto-chains to Daily Report generation (daily at 6 AM CST)'
     },
   };
 
@@ -438,8 +445,19 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             timezone: data.timezone!,
             enabled: true,
             chain_daily_reports: true,
+            force: data.taskParams?.force || false,
           };
           result = await schedulerAPI.createTwitterAuthorSummaryTask(authorSummaryParams);
+        } else if (dataSourceType === 'youtube_author_summary') {
+          const authorSummaryParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            chain_daily_reports: true,
+            force: data.taskParams?.force || false,
+          };
+          result = await schedulerAPI.createYouTubeAuthorSummaryTask(authorSummaryParams);
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
           const watchlistFundamentalsParams = {
@@ -1071,7 +1089,37 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
         
         case 'twitter_author_summary':
-          return null;
+        case 'youtube_author_summary':
+          return (
+            <>
+              <Alert
+                message="Force Regenerate"
+                type="info"
+                showIcon
+                description="Enable this to ignore cached summaries and regenerate all data using the latest prompt template and model settings. Disable after regeneration to resume normal caching behavior."
+                style={{ marginTop: 16 }}
+              />
+              <Form.Item
+                label={
+                  <span>
+                    Force Regenerate&nbsp;
+                    <Tooltip title="When enabled, all cached author/channel summaries and daily reports will be regenerated from scratch, ignoring existing cached data. Useful after changing LLM model or prompt template.">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </span>
+                }
+                style={{ marginTop: 16 }}
+              >
+                <Switch
+                  checked={formData.taskParams?.force || false}
+                  onChange={(checked) => setFormData(prev => ({
+                    ...prev,
+                    taskParams: { ...prev.taskParams, force: checked }
+                  }))}
+                />
+              </Form.Item>
+            </>
+          );
 
         case 'youtube_subscription':
           return null;

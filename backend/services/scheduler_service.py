@@ -73,6 +73,7 @@ class SchedulerService:
             'ipo_calendar': self._execute_ipo_calendar_task,  # IPO 日历数据获取任务
             'news_feed': self._execute_news_feed_task,  # EODHD 新闻 Feed 订阅任务
             'twitter_author_summary': self._execute_twitter_author_summary_task,  # Twitter 作者摘要预生成（阶段A），完成后自动链式触发 Daily Report
+            'youtube_author_summary': self._execute_youtube_author_summary_task,  # YouTube 频道摘要预生成（阶段A），完成后自动链式触发 Daily Report
         }
         
         # 添加事件监听器
@@ -1451,21 +1452,71 @@ class SchedulerService:
 
             chain_daily_reports = params.get('chain_daily_reports', True)
 
+            force = params.get('force', False)
+
             task = generate_all_author_summaries_task.delay(
                 summary_date=str(report_date),
-                force=False,
+                force=force,
                 chain_daily_reports=chain_daily_reports,
             )
 
             chain_info = "，完成后自动触发 Daily Report" if chain_daily_reports else ""
+            force_info = "（强制重新生成）" if force else ""
+            logger.info(f"分发 Twitter 作者摘要 Celery 任务 | params={{'chain_daily_reports': {chain_daily_reports}, 'force': {force}}}")
             message = (
                 f"✅ Twitter 作者摘要 ({report_date}): "
-                f"已提交 Celery 异步任务 {task.id}{chain_info}"
+                f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
             )
             return {'success': True, 'message': message, 'celery_task_id': task.id}
 
         except Exception as e:
             error_msg = f"Twitter 作者摘要任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_youtube_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 YouTube 频道摘要预生成任务（阶段 A）。
+        为所有启用的 YouTube 频道批量生成当日摘要，完成后自动链式触发 Daily Report 生成。
+
+        Args:
+            params: 任务参数
+                - report_date: 摘要日期 (YYYY-MM-DD)，默认昨天
+                - chain_daily_reports: 完成后是否自动触发 Daily Report（默认 True）
+        """
+        try:
+            logger.info("分发 YouTube 频道摘要 Celery 任务", params=params)
+
+            from datetime import date, timedelta, datetime
+            from backend.tasks.report_tasks import generate_all_yt_author_summaries_task
+
+            report_date_str = params.get('report_date')
+            if report_date_str:
+                report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                report_date = date.today() - timedelta(days=1)
+
+            chain_daily_reports = params.get('chain_daily_reports', True)
+
+            force = params.get('force', False)
+
+            task = generate_all_yt_author_summaries_task.delay(
+                summary_date=str(report_date),
+                force=force,
+                chain_daily_reports=chain_daily_reports,
+            )
+
+            chain_info = "，完成后自动触发 Daily Report" if chain_daily_reports else ""
+            force_info = "（强制重新生成）" if force else ""
+            logger.info(f"分发 YouTube 频道摘要 Celery 任务 | params={{'chain_daily_reports': {chain_daily_reports}, 'force': {force}}}")
+            message = (
+                f"✅ YouTube 频道摘要 ({report_date}): "
+                f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
+            )
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"YouTube 频道摘要任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

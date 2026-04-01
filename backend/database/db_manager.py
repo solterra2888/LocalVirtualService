@@ -763,6 +763,7 @@ class DatabaseManager:
                 'news_feed',
                 'twitter_author_summary',
                 'twitter_daily_report',
+                'youtube_author_summary',
             ]
             
             # 合并现有类型和新类型（去重）

@@ -34,6 +34,18 @@ class TwitterDailyReportService:
         db_params = get_database_config()
         self.db_manager = DatabaseManager(db_params)
 
+    def _get_template_updated_at(self, template_code: str) -> Optional[datetime]:
+        """获取模板的最近更新时间，用于检测模板变更后自动重新生成。"""
+        try:
+            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+            svc = LLMPromptTemplateService()
+            tpl = svc.get_template_by_code(template_code)
+            if tpl and tpl.get('updated_at'):
+                return datetime.fromisoformat(tpl['updated_at'])
+        except Exception as e:
+            logger.warning(f"获取模板更新时间失败: {template_code}, {e}")
+        return None
+
     # ── Public API ─────────────────────────────────────────────────────────
 
     async def generate_report(
@@ -57,13 +69,33 @@ class TwitterDailyReportService:
         if not force:
             existing = self._get_existing_report(user_id, report_date)
             if existing and existing.get('status') == 'completed':
-                logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
-                return {
-                    'success': True,
-                    'report_id': existing['id'],
-                    'message': '报告已存在',
-                    'skipped': True,
-                }
+                tpl_updated = self._get_template_updated_at(DEFAULT_PHASE2_TEMPLATE)
+                report_updated = existing.get('updated_at')
+                if tpl_updated and report_updated:
+                    if isinstance(report_updated, str):
+                        report_updated = datetime.fromisoformat(report_updated)
+                    if tpl_updated > report_updated:
+                        logger.info(
+                            f"Phase2 模板已更新 (模板={tpl_updated}, 报告={report_updated}), "
+                            f"自动重新生成",
+                            user_id=user_id, report_date=str(report_date)
+                        )
+                    else:
+                        logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
+                        return {
+                            'success': True,
+                            'report_id': existing['id'],
+                            'message': '报告已存在',
+                            'skipped': True,
+                        }
+                else:
+                    logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
+                    return {
+                        'success': True,
+                        'report_id': existing['id'],
+                        'message': '报告已存在',
+                        'skipped': True,
+                    }
 
         report_id = self._upsert_report_status(user_id, report_date, 'generating')
 
@@ -427,13 +459,13 @@ class TwitterDailyReportService:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT id, status, report_content, metadata
+                SELECT id, status, report_content, metadata, updated_at
                 FROM twitter_daily_reports
                 WHERE user_id = %s AND report_date = %s
             """, (user_id, report_date))
             row = cursor.fetchone()
             if row:
-                return {'id': row[0], 'status': row[1], 'content': row[2], 'metadata': row[3]}
+                return {'id': row[0], 'status': row[1], 'content': row[2], 'metadata': row[3], 'updated_at': row[4]}
             return None
         finally:
             cursor.close()

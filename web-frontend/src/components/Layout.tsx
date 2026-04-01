@@ -27,6 +27,7 @@ import {
   ReadOutlined,
   EditOutlined,
   ProfileOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -148,6 +149,11 @@ const Layout: React.FC = () => {
       key: '/twitter-daily-report',
       icon: <ProfileOutlined />,
       label: 'Twitter Report',
+    },
+    {
+      key: '/youtube-daily-report',
+      icon: <VideoCameraOutlined />,
+      label: 'YouTube Report',
     },
     {
       key: 'ug-data',

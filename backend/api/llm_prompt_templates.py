@@ -93,7 +93,7 @@ class TemplateResponse(BaseModel):
     id: int
     template_code: str
     template_name: str
-    category_id: int
+    category_id: Optional[int]
     category_name: Optional[str]
     description: Optional[str]
     scope: str

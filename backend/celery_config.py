@@ -69,6 +69,10 @@ task_routes = {
     'generate_all_author_summaries': {'queue': 'ai_processing'},
     'generate_twitter_daily_report': {'queue': 'ai_processing'},
     'generate_all_twitter_daily_reports': {'queue': 'ai_processing'},
+    'generate_yt_author_summary': {'queue': 'ai_processing'},
+    'generate_all_yt_author_summaries': {'queue': 'ai_processing'},
+    'generate_youtube_daily_report': {'queue': 'ai_processing'},
+    'generate_all_youtube_daily_reports': {'queue': 'ai_processing'},
     'cleanup_llm_usage_logs': {'queue': 'data_fetching'},
 }
 

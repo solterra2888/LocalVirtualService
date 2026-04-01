@@ -13,6 +13,7 @@ from . import scheduler
 from . import dashboard
 from . import screener
 from . import twitter_daily_reports
+from . import youtube_daily_reports
 
 __all__ = [
     'auth',
@@ -25,4 +26,5 @@ __all__ = [
     'dashboard',
     'screener',
     'twitter_daily_reports',
+    'youtube_daily_reports',
 ] 

@@ -30,6 +30,33 @@ class TwitterAuthorSummaryService:
         db_params = get_database_config()
         self.db_manager = DatabaseManager(db_params)
 
+    def _get_template_updated_at(self, template_code: str) -> Optional[datetime]:
+        """获取模板的最近更新时间，用于检测模板变更后自动重新生成。"""
+        try:
+            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+            svc = LLMPromptTemplateService()
+            tpl = svc.get_template_by_code(template_code)
+            if tpl and tpl.get('updated_at'):
+                return datetime.fromisoformat(tpl['updated_at'])
+        except Exception as e:
+            logger.warning(f"获取模板更新时间失败: {template_code}, {e}")
+        return None
+
+    def _get_template_model_info(self, template_code: str) -> Dict[str, Optional[str]]:
+        """获取模板当前配置的 provider/model 信息。"""
+        try:
+            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+            svc = LLMPromptTemplateService()
+            tpl = svc.get_template_by_code(template_code)
+            if tpl:
+                return {
+                    'recommended_provider': tpl.get('recommended_provider'),
+                    'recommended_model': tpl.get('recommended_model'),
+                }
+        except Exception:
+            pass
+        return {'recommended_provider': None, 'recommended_model': None}
+
     # ── Public API ─────────────────────────────────────────────────────────
 
     async def generate_all_author_summaries(
@@ -94,13 +121,21 @@ class TwitterAuthorSummaryService:
         if not force:
             existing = self._get_existing_summary(author_identifier, summary_date)
             if existing and existing['status'] == 'completed':
-                logger.info(f"作者摘要已存在, 跳过: @{author_identifier}")
-                return {
-                    'success': True,
-                    'summary_id': existing['id'],
-                    'message': '摘要已存在',
-                    'skipped': True,
-                }
+                tpl_updated = self._get_template_updated_at(DEFAULT_PHASE1_TEMPLATE)
+                summary_updated = existing.get('updated_at')
+                if tpl_updated and summary_updated and tpl_updated > summary_updated:
+                    logger.info(
+                        f"模板已更新 (模板={tpl_updated}, 摘要={summary_updated}), "
+                        f"自动重新生成: @{author_identifier}"
+                    )
+                else:
+                    logger.info(f"作者摘要已存在, 跳过: @{author_identifier}")
+                    return {
+                        'success': True,
+                        'summary_id': existing['id'],
+                        'message': '摘要已存在',
+                        'skipped': True,
+                    }
 
         summary_id = self._upsert_summary_status(
             author_identifier, author_name or author_identifier, summary_date, 'generating'
@@ -135,9 +170,13 @@ class TwitterAuthorSummaryService:
             top_tweets = self._get_author_top_tweets(tweets, ref_map, top_n=5)
 
             elapsed = round(time.time() - start_time, 2)
+            tpl_model_info = self._get_template_model_info(DEFAULT_PHASE1_TEMPLATE)
             metadata = {
                 'generation_time_seconds': elapsed,
                 'chunk_count': max(1, (len(tweets) - 1) // MAX_TWEETS_PER_AUTHOR_CHUNK + 1),
+                'template_code': DEFAULT_PHASE1_TEMPLATE,
+                'recommended_provider': tpl_model_info.get('recommended_provider'),
+                'recommended_model': tpl_model_info.get('recommended_model'),
             }
 
             self._update_summary(
@@ -354,7 +393,7 @@ class TwitterAuthorSummaryService:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT id, status, summary_content, ref_map, top_tweets, tweet_count
+                SELECT id, status, summary_content, ref_map, top_tweets, tweet_count, updated_at
                 FROM twitter_author_daily_summaries
                 WHERE author_identifier = %s AND summary_date = %s
             """, (author_identifier, summary_date))
@@ -363,6 +402,7 @@ class TwitterAuthorSummaryService:
                 return {
                     'id': row[0], 'status': row[1], 'summary_content': row[2],
                     'ref_map': row[3], 'top_tweets': row[4], 'tweet_count': row[5],
+                    'updated_at': row[6],
                 }
             return None
         finally:

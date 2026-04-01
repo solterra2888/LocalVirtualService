@@ -37,6 +37,8 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import DashboardSettingsPage from './pages/DashboardSettingsPage';
 import TwitterDailyReportPage from './pages/TwitterDailyReportPage';
 import MobileReportsPage from './pages/MobileReportsPage';
+import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
+import MobileYouTubeReportsPage from './pages/MobileYouTubeReportsPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -141,6 +143,10 @@ const AppContent: React.FC = () => {
           <Route
             path="twitter-daily-report"
             element={isMobile ? <MobileReportsPage /> : <TwitterDailyReportPage />}
+          />
+          <Route
+            path="youtube-daily-report"
+            element={isMobile ? <MobileYouTubeReportsPage /> : <YouTubeDailyReportPage />}
           />
           {isMobile ? (
             <Route path="reports" element={<MobileReportsPage />} />
