@@ -2756,13 +2756,19 @@ async def upload_web_clip(
 <title>{escaped_title}</title>
 <meta name="source-url" content="{escaped_url}">
 <style>
-body {{ max-width: 860px; margin: 0 auto; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.7; color: #333; }}
+html {{ color-scheme: light dark; }}
+body {{ max-width: 860px; margin: 0 auto; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.7; color: #333; background: #fff; }}
 img {{ max-width: 100%; height: auto; border-radius: 4px; }}
 a {{ color: #1677ff; }}
+@media (prefers-color-scheme: dark) {{
+  body {{ background: #141414; color: #e8eaed; }}
+  a {{ color: #69b1ff; }}
+  .web-clip-source {{ color: #a0a3ad !important; }}
+}}
 </style>
 </head>
 <body>
-<p style="font-size:12px;color:#999;margin-bottom:16px;">
+<p class="web-clip-source" style="font-size:12px;color:#999;margin-bottom:16px;">
   Source: <a href="{escaped_url}" target="_blank" rel="noopener noreferrer">{escaped_url}</a>
 </p>
 {html_content}

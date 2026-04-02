@@ -5740,6 +5740,7 @@ export const OriginalContentView: React.FC<{
           return (
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <div
+                className="original-web-frame-host"
                 style={{
                   position: 'relative',
                   flex: 1,
@@ -5747,6 +5748,7 @@ export const OriginalContentView: React.FC<{
                   border: `1px solid ${themeColors.cardBorder}`,
                   borderRadius: '8px',
                   overflow: 'hidden',
+                  backgroundColor: themeColors.cardBg,
                 }}
               >
                 <iframe
@@ -5759,6 +5761,8 @@ export const OriginalContentView: React.FC<{
                     width: '100%',
                     height: '100%',
                     border: 'none',
+                    colorScheme: isDark ? 'dark' : 'light',
+                    backgroundColor: isDark ? '#141414' : '#fff',
                   }}
                 />
               </div>
