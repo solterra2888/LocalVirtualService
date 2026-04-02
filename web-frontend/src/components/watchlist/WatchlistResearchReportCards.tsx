@@ -9,6 +9,7 @@ import {
   FileWordOutlined,
   SoundOutlined,
   VideoCameraOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import type { ResearchReport } from '../../services/dashboard';
 import ReportTickerTags, { parseReportTickers } from '../ReportTickerTags';
@@ -46,6 +47,9 @@ function getFileTypeIconDisplay(firstFileType: string | undefined): {
   }
   if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t) || t.startsWith('image/')) {
     return { tooltip: 'Image', icon: <FileImageOutlined />, color: '#fa8c16' };
+  }
+  if (['web'].includes(t)) {
+    return { tooltip: 'Web Clip', icon: <GlobalOutlined />, color: '#13c2c2' };
   }
   const label = (firstFileType || 'File').toUpperCase();
   return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };

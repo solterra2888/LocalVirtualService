@@ -12,6 +12,7 @@ class UserLoginRequest(BaseModel):
     """用户登录请求模型"""
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
     password: str = Field(..., min_length=1, description="密码")
+    client_type: Optional[str] = Field(None, description="客户端类型，extension 表示浏览器扩展登录（不会踢掉其他会话）")
 
 
 class UserCreateRequest(BaseModel):

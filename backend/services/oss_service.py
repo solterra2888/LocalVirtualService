@@ -54,6 +54,7 @@ class OSSService:
         self.audio_prefix = os.getenv('OSS_AUDIO_PREFIX', 'audio/')
         self.document_prefix = os.getenv('OSS_DOCUMENT_PREFIX', 'documents/')
         self.image_prefix = os.getenv('OSS_IMAGE_PREFIX', 'images/')
+        self.web_clip_prefix = os.getenv('OSS_WEB_CLIP_PREFIX', 'web-clips/')
         self.temp_prefix = os.getenv('OSS_TEMP_PREFIX', 'temp/')
         
         # 自定义域名（可选，用于在浏览器内预览 PDF）
@@ -248,6 +249,7 @@ class OSSService:
             'audio': self.audio_prefix,
             'document': self.document_prefix,
             'image': self.image_prefix,
+            'web_clip': self.web_clip_prefix,
             'other': self.temp_prefix
         }
         prefix = prefix_map.get(file_category, self.audio_prefix)
@@ -462,6 +464,58 @@ class OSSService:
             asr_public_read=asr_public_read
         )
     
+    def upload_bytes(
+        self,
+        object_name: str,
+        data: bytes,
+        content_type: str = 'application/octet-stream',
+        content_disposition: str = 'inline'
+    ) -> Dict[str, Any]:
+        """
+        直接将字节内容上传到 OSS（无需本地文件），适用于 Web Clip 等场景
+        
+        Args:
+            object_name: OSS 对象名称
+            data: 字节内容
+            content_type: MIME 类型
+            content_disposition: inline 或 attachment
+            
+        Returns:
+            Dict[str, Any]: 上传结果
+        """
+        result = {
+            "success": False,
+            "object_name": object_name,
+            "bucket": self.bucket_name,
+            "file_size": len(data),
+            "error": None
+        }
+        
+        try:
+            if not self.is_configured():
+                result["error"] = "OSS 服务未配置"
+                return result
+            
+            self.bucket.put_object(
+                object_name,
+                data,
+                headers={
+                    'Content-Type': content_type,
+                    'Content-Disposition': content_disposition
+                }
+            )
+            
+            result["success"] = True
+            result["upload_time"] = datetime.now().isoformat()
+            info(f"字节内容已上传到 OSS: {object_name} (size: {len(data) / 1024:.1f}KB)")
+            
+        except Exception as e:
+            error_msg = f"OSS 字节上传失败: {str(e)}"
+            error(error_msg)
+            result["error"] = error_msg
+        
+        return result
+
     def get_signed_url(
         self, 
         object_name: str, 
@@ -488,7 +542,7 @@ class OSSService:
             if force_inline is None:
                 file_ext = os.path.splitext(object_name)[1].lower()
                 # PDF 和图片自动 inline，其他文件 attachment
-                force_inline = file_ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+                force_inline = file_ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.html', '.htm']
             
             # 如果需要强制 inline（浏览器预览），设置响应头
             if force_inline:

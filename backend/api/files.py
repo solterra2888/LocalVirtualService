@@ -19,7 +19,8 @@ from backend.schemas.file import (
     FileProcessResponse,
     FileDetailResponse,
     FileType,
-    ProcessingParamsRequest
+    ProcessingParamsRequest,
+    WebClipRequest
 )
 from backend.schemas.file_tag import (
     FileTagCreate,
@@ -48,7 +49,8 @@ from backend.tasks.file_tasks import (
     analyze_audio_task, 
     analyze_document_task,
     upload_and_transcribe_audio_task,
-    upload_and_process_document_task
+    upload_and_process_document_task,
+    process_web_clip_task
 )
 
 # 统一的环境变量加载
@@ -218,13 +220,14 @@ def _serve_file_bytes_response(content: bytes, filename: str, file_type: Optiona
         "image": "image/jpeg",
         # DB 常为 audio；无扩展名时避免 octet-stream，否则部分浏览器 <audio> 解码失败
         "audio": "audio/mpeg",
+        "web": "text/html",
     }
     media_type = guessed or fallback_types.get(ft, "application/octet-stream")
     if ft == "audio" and (not media_type or media_type == "application/octet-stream"):
         media_type = guessed or "audio/mpeg"
     encoded_fn = quote(filename or "file")
     # 音频需 inline + 正确 MIME，否则 <audio> 表现不一致（有的能播、有的触发下载或 MEDIA_ERR）
-    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image", "audio"]
+    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image", "audio", "web"]
     disposition = "inline" if is_previewable else "attachment"
     return RawResponse(
         content=content,
@@ -1484,7 +1487,7 @@ async def get_original_file_info(
                         # 导致 iframe 内无法预览、只能下载。PDF/图片/音频改为走后端 serve 代理（inline 或可下载流）。
                         # Word/Excel 需公网 HTTPS URL 供 Microsoft Office Online Viewer 拉取，故仍用签名 URL。
                         preview_via_serve = (file_type or '').lower() in (
-                            'pdf', 'application/pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio'
+                            'pdf', 'application/pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio', 'web'
                         )
                         if preview_via_serve:
                             file_url = f"/api/files/serve/{file_id}"
@@ -2267,6 +2270,7 @@ async def serve_file(
             'gif': 'image/gif',
             'bmp': 'image/bmp',
             'audio': 'audio/mpeg',
+            'web': 'text/html',
         }
 
         ft_lower = (file_type or "").lower()
@@ -2284,7 +2288,7 @@ async def serve_file(
 
         # 使用FileResponse直接返回文件
         # PDF/图片/音频：inline，便于浏览器内预览与 <audio> 播放；其余默认 attachment
-        if ft_lower in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio']:
+        if ft_lower in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio', 'web']:
             # inline模式 - 浏览器直接显示
             return FileResponse(
                 path=file_path,
@@ -2715,6 +2719,177 @@ async def upload_and_process_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload document file failed: {str(e)}"
+        )
+
+
+@router.post("/upload-web-clip", summary="Save web page clip from Chrome extension")
+async def upload_web_clip(
+    request: WebClipRequest,
+    current_user = Depends(get_current_user)
+):
+    """
+    接收 Chrome Extension 发送的网页剪藏内容，上传到 OSS 并异步提取文本。
+    """
+    import re as _re
+    import html as _html
+
+    try:
+        oss_service = OSSService()
+        if not oss_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OSS service not configured"
+            )
+
+        title = request.title.strip()
+        source_url = request.source_url.strip()
+        html_content = request.html
+
+        # 构建完整 HTML 文档
+        escaped_title = _html.escape(title)
+        escaped_url = _html.escape(source_url)
+        full_html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{escaped_title}</title>
+<meta name="source-url" content="{escaped_url}">
+<style>
+body {{ max-width: 860px; margin: 0 auto; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.7; color: #333; }}
+img {{ max-width: 100%; height: auto; border-radius: 4px; }}
+a {{ color: #1677ff; }}
+</style>
+</head>
+<body>
+<p style="font-size:12px;color:#999;margin-bottom:16px;">
+  Source: <a href="{escaped_url}" target="_blank" rel="noopener noreferrer">{escaped_url}</a>
+</p>
+{html_content}
+</body>
+</html>"""
+
+        # Slugify title for filename
+        slug = _re.sub(r'[^\w\u4e00-\u9fff\-]', '', title.replace(' ', '-'))
+        slug = slug[:80] or 'web-clip'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{slug}_{timestamp}.html"
+
+        # Upload to OSS
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        oss_object_name = f"{oss_service.web_clip_prefix}{current_user.username}/{date_str}/{filename}"
+
+        html_bytes = full_html.encode('utf-8')
+        upload_result = oss_service.upload_bytes(
+            object_name=oss_object_name,
+            data=html_bytes,
+            content_type='text/html; charset=utf-8',
+            content_disposition='inline'
+        )
+
+        if not upload_result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"OSS upload failed: {upload_result.get('error')}"
+            )
+
+        file_size_mb = len(html_bytes) / (1024 * 1024)
+
+        # Save to DB
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database connection failed"
+            )
+
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO processing_stats
+            (timestamp, files_processed, files_failed, total_time,
+             total_file_processing_time, total_ai_time, task_name,
+             "user", total_tokens, total_price, upload_params,
+             final_report, rc_agent_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            datetime.now(), 1, 0, 0, 0, 0,
+            'Web Clip',
+            current_user.username,
+            0, 0,
+            json.dumps({"source_url": source_url, "title": title}),
+            '', 'processing'
+        ))
+        processing_stats_id = cursor.fetchone()[0]
+
+        cursor.execute("""
+            INSERT INTO file_processing_details
+            (processing_stats_id, filename, file_type, file_size_mb,
+             processing_time, ai_time, content_length, status,
+             total_tokens, cost, content, created_at, task_id,
+             original_file_path, file_storage_type, oss_bucket)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            processing_stats_id,
+            filename,
+            'web',
+            file_size_mb,
+            0, 0, 0,
+            'processing',
+            0, 0, '',
+            datetime.now(),
+            '',
+            oss_object_name,
+            'oss',
+            upload_result.get("bucket")
+        ))
+        file_detail_id = cursor.fetchone()[0]
+
+        conn.commit()
+        conn.close()
+
+        # Enqueue async text extraction task
+        task = process_web_clip_task.apply_async(
+            args=[file_detail_id, processing_stats_id, full_html, current_user.username],
+            queue='file_processing'
+        )
+
+        # Update task_id in DB
+        conn2 = db_manager.get_connection()
+        if conn2:
+            cursor2 = conn2.cursor()
+            cursor2.execute(
+                "UPDATE file_processing_details SET task_id = %s WHERE id = %s",
+                (task.id, file_detail_id)
+            )
+            conn2.commit()
+            conn2.close()
+
+        info(f"Web clip saved: {filename}, file_id={file_detail_id}, task_id={task.id}",
+             source="api", user=current_user.username)
+
+        return {
+            "success": True,
+            "file_id": file_detail_id,
+            "task_id": task.id,
+            "filename": filename,
+            "title": title,
+            "source_url": source_url,
+            "file_size_mb": round(file_size_mb, 2),
+            "status": "processing",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"Web clip upload failed: {str(e)}", source="api", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Web clip upload failed: {str(e)}"
         )
 
 

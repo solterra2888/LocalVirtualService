@@ -43,6 +43,7 @@ import {
   FolderOutlined,
   InboxOutlined,
   AppstoreOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { filesAPI, FolderResponse } from '../services/files';
 import { fileTagsService } from '../services/fileTags';
@@ -112,6 +113,9 @@ function getFileTypeIconDisplay(firstFileType: string | undefined): {
   }
   if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) {
     return { tooltip: 'Image', icon: <FileImageOutlined />, color: '#fa8c16' };
+  }
+  if (['web'].includes(t)) {
+    return { tooltip: 'Web Clip', icon: <GlobalOutlined />, color: '#13c2c2' };
   }
   const label = (firstFileType || 'File').toUpperCase();
   return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };

@@ -16,7 +16,15 @@ class FileType(str, Enum):
     CSV = "csv"  # CSV 单独分类（不同于 Excel）
     IMAGE = "image"
     DOC = "doc"
+    WEB = "web"
     OTHER = "other"
+
+
+class WebClipRequest(BaseModel):
+    """Chrome Extension 网页剪藏请求"""
+    title: str = Field(..., min_length=1, max_length=500, description="网页标题")
+    html: str = Field(..., min_length=1, description="已内嵌 base64 图片的 HTML 内容")
+    source_url: str = Field(..., min_length=1, description="原始网页 URL")
 
 
 class ProcessingStatus(str, Enum):

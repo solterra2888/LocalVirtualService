@@ -48,11 +48,16 @@ async def login(login_request: UserLoginRequest):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 新登录递增会话版本，使其它设备上的旧 JWT 失效
+    # Extension 登录不递增会话版本，允许 Web 和 Extension 同时在线
     user_auth = UserAuth(db_conn_params)
-    new_tv = user_auth.increment_token_version(login_request.username)
-    if new_tv is None:
-        new_tv = 1
+    if login_request.client_type == "extension":
+        new_tv = user_auth.get_token_version(login_request.username)
+        if new_tv is None or new_tv == -1:
+            new_tv = 1
+    else:
+        new_tv = user_auth.increment_token_version(login_request.username)
+        if new_tv is None:
+            new_tv = 1
     
     # 创建访问令牌
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

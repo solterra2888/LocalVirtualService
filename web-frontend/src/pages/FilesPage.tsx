@@ -66,7 +66,8 @@ import {
   FolderAddOutlined,
   InboxOutlined,
   DownOutlined,
-  UpOutlined
+  UpOutlined,
+  GlobalOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -421,7 +422,7 @@ const FilesPageInner: React.FC = () => {
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
   const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
   const [contentDetailLoading, setContentDetailLoading] = useState(false);
-  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube'>('all');
+  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube' | 'web'>('all');
   const [searchType, setSearchType] = useState<'file_name' | 'content' | 'ticker'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
   const [tickerFilter, setTickerFilter] = useState<string | undefined>(undefined);
@@ -2930,6 +2931,7 @@ const FilesPageInner: React.FC = () => {
     const t = firstFileType?.toLowerCase() || '';
     if (tab === 'all') return true;
     if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t);
+    if (tab === 'web') return t === 'web';
     return t === tab;
   };
   const filteredByType = taskExecutions.filter(exec => matchesFileType(exec.first_file_type, fileTypeFilter));
@@ -2971,6 +2973,7 @@ const FilesPageInner: React.FC = () => {
     { key: 'image', label: 'Image', icon: <FileImageOutlined /> },
     { key: 'audio', label: 'Audio', icon: <SoundOutlined /> },
     { key: 'youtube', label: 'YouTube', icon: <VideoCameraOutlined /> },
+    { key: 'web', label: 'Web', icon: <GlobalOutlined /> },
   ];
 
   // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple, YouTube=red)
@@ -2982,6 +2985,7 @@ const FilesPageInner: React.FC = () => {
     if (['audio'].includes(t)) return { color: 'purple', text: 'Audio' };
     if (['youtube'].includes(t)) return { color: 'red', text: 'YouTube' };
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
+    if (['web'].includes(t)) return { color: 'cyan', text: 'Web' };
     return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
   };
 
@@ -3009,6 +3013,9 @@ const FilesPageInner: React.FC = () => {
     }
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t) || t.startsWith('image/')) {
       return { tooltip: 'Image', icon: <FileImageOutlined />, color: '#fa8c16' };
+    }
+    if (['web'].includes(t)) {
+      return { tooltip: 'Web Clip', icon: <GlobalOutlined />, color: '#13c2c2' };
     }
     const label = (firstFileType || 'File').toUpperCase();
     return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };
@@ -5727,6 +5734,35 @@ export const OriginalContentView: React.FC<{
               isDark={isDark}
               onTranscriptPersisted={handleTranscriptPersisted}
             />
+          );
+        } else if (fileType === 'web') {
+          const webEmbedSrc = absoluteUrlForEmbeddedFile(fileContent.file_url || '');
+          return (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div
+                style={{
+                  position: 'relative',
+                  flex: 1,
+                  minHeight: 0,
+                  border: `1px solid ${themeColors.cardBorder}`,
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                }}
+              >
+                <iframe
+                  src={webEmbedSrc}
+                  title={fileContent.filename}
+                  sandbox="allow-same-origin"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                  }}
+                />
+              </div>
+            </div>
           );
         } else {
           return (

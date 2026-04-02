@@ -57,7 +57,7 @@ sudo mkdir -p /etc/docker
 sudo nano /etc/docker/daemon.json
 ```
 
-2. 写入或合并如下内容（**保留 JSON 合法**：最后一项后不要有逗号）：
+1. 写入或合并如下内容（**保留 JSON 合法**：最后一项后不要有逗号）：
 
 ```json
 {
@@ -70,19 +70,19 @@ sudo nano /etc/docker/daemon.json
 
 > **说明**：公开镜像站地址可能变更，若失效请搜索「Docker 镜像加速 2025」等关键词替换为当前可用地址；云厂商（阿里云、腾讯云等）控制台通常也提供**专属加速地址**，优先使用。
 
-3. 保存并退出 **nano**：
+1. 保存并退出 **nano**：
 
 - `Ctrl + O` → 回车（保存）
 - `Ctrl + X`（退出）
 
-4. 重载并重启 Docker 使配置生效：
+1. 重载并重启 Docker 使配置生效：
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-5. 验证：
+1. 验证：
 
 ```bash
 docker info | grep -A5 "Registry Mirrors"
@@ -632,8 +632,6 @@ curl http://你的公网IP/api/health
 
 应看到登录页面。使用配置的管理员账号密码登录。
 
-
-
 ## 7. 设置开机自启（可选）
 
 ```bash
@@ -648,17 +646,17 @@ systemctl enable rc-webapp rc-celery-ai rc-celery-data rc-scheduler
 ## 8. 常用运维命令
 
 
-| 操作           | 命令                                                                             |
-| ------------ | ------------------------------------------------------------------------------ |
-| 启动所有服务       | `sudo ./start_services.sh`                                                     |
-| 停止所有服务       | `sudo ./stop_services.sh`                                                      |
-| 重启所有服务       | `sudo ./restart_services.sh`                                                   |
-| 仅重启后端        | `sudo ./restart_backend.sh`                                                    |
-| 前端构建并部署      | `cd web-frontend && npm run deploy`                                            |
-| 修改配置后重新部署    | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh`                 |
-| 查看某服务日志      | `journalctl -u rc-webapp -f`                                                   |
+| 操作           | 命令                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------- |
+| 启动所有服务       | `sudo ./start_services.sh`                                                            |
+| 停止所有服务       | `sudo ./stop_services.sh`                                                             |
+| 重启所有服务       | `sudo ./restart_services.sh`                                                          |
+| 仅重启后端        | `sudo ./restart_backend.sh`                                                           |
+| 前端构建并部署      | `cd web-frontend && npm run deploy`                                                   |
+| 修改配置后重新部署    | `sudo bash deployment/deploy.sh && sudo ./restart_services.sh`                        |
+| 查看某服务日志      | `journalctl -u rc-webapp -f`                                                          |
 | 查看 Celery 日志 | `tail -f logs/celery_ai_worker.log`（AI）；`tail -f logs/celery_data_worker.log`（数据/订阅等） |
-| 查看 Nginx 日志  | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50` |
+| 查看 Nginx 日志  | `tail -f /opt/nginx/log/rc_project_access.log` 或 `docker logs nginx --tail 50`        |
 
 
 ---
@@ -727,21 +725,21 @@ dial tcp ... registry-1.docker.io:443: i/o timeout
 **解决方案**（任选其一或组合）：
 
 1. **推荐**：拉取最新代码后重新安装依赖（已使用 NumPy 2.x）：
-   ```bash
+  ```bash
    conda activate guanhe
    pip install -U pip
    pip install -r requirements.txt
-   ```
+  ```
 2. **仍从源码编译时**：安装编译工具后再 `pip install`：
-   ```bash
+  ```bash
    sudo apt update && sudo apt install -y build-essential
-   ```
+  ```
 3. **备选环境**：若个别包仍与 Python 3.13 不兼容，可使用 **Python 3.12** 创建环境：
-   ```bash
+  ```bash
    conda create -n guanhe python=3.12 -y
    conda activate guanhe
    pip install -r requirements.txt
-   ```
+  ```
 
 ### 服务启动失败 (exit code 203)
 
@@ -959,8 +957,6 @@ OSS_CUSTOM_DOMAIN=your-domain.com
 
 **要点**：Word/Excel 在线预览依赖 **公网可访问的 HTTPS 文件地址**。若使用 OSS 且未配置自定义域名，必须依赖后端生成的**签名 URL**；配置了 `OSS_CUSTOM_DOMAIN` 时，会直接使用该域名的公共 URL，同样满足 Office 预览要求。
 
-
-
 ### Twitter 订阅推文拉取（优化说明与调度）
 
 Twitter 订阅由 **APScheduler** 触发任务类型 `twitter_subscription`，实际拉取在 **Celery Data Worker**（`fetch_twitter_subscription`）中执行，避免阻塞调度器进程。数据源为 [twitterapi.io Advanced Search](https://docs.twitterapi.io/api-reference/endpoint/tweet_advanced_search)（按请求计费，每页最多约 20 条，需 `cursor` 分页）。
@@ -976,16 +972,18 @@ Twitter 订阅由 **APScheduler** 触发任务类型 `twitter_subscription`，�
 
 #### 环境变量（可选）
 
-| 变量 | 含义 |
-| --- | --- |
-| `TWITTER_API_KEY` | twitterapi.io 密钥（必填） |
-| `TWITTER_DEFAULT_QUERY_HOURS` | 无历史或回退时的默认查询窗口（小时），默认 `24` |
+
+| 变量                            | 含义                          |
+| ----------------------------- | --------------------------- |
+| `TWITTER_API_KEY`             | twitterapi.io 密钥（必填）        |
+| `TWITTER_DEFAULT_QUERY_HOURS` | 无历史或回退时的默认查询窗口（小时），默认 `24`  |
 | `TWITTER_INITIAL_FETCH_HOURS` | 某作者首次入库时的回溯窗口，默认 `168`（7 天） |
+
 
 #### 调度 Cron 建议
 
-- 若对实时性不敏感、**每天两次**即可：在任务配置中使用 Cron `0 8,20 * * *`，时区 `America/New_York`（覆盖美东交易日 + 国内早晚查看习惯）。两次间隔约 12 小时时，增量窗口会自动扩大到约 13～14 小时并配合 `max_pages=5`，避免漏拉。
-- 若仍使用 **每 30 分钟**（`*/30 * * * *`），增量窗口与 `max_pages` 会随间隔自动缩小，API 调用量显著低于「固定 24h」旧逻辑。
+- 若对实时性不敏感、**每天两次**即可：在任务配置中使用 Cron `0 8,20 * * `*，时区 `America/New_York`（覆盖美东交易日 + 国内早晚查看习惯）。两次间隔约 12 小时时，增量窗口会自动扩大到约 13～14 小时并配合 `max_pages=5`，避免漏拉。
+- 若仍使用 **每 30 分钟**（`*/30 * * * `*），增量窗口与 `max_pages` 会随间隔自动缩小，API 调用量显著低于「固定 24h」旧逻辑。
 
 #### 部署后需重启
 
@@ -1003,6 +1001,72 @@ sudo systemctl restart rc-celery-data
 - 参考脚本（与后端同一 Advanced Search）：`scripts/fetch_twitter_user_recent.py`。
 
 ---
+
+## 11. Chrome Extension (Web Clipper) 部署
+
+Web Clipper 是一个 Chrome 扩展，用户可在浏览器中一键将网页内容（含内嵌图片）保存到平台 OSS，自动提取文本并支持后续 AI 分析。
+
+### 11.1 配置扩展默认服务器地址
+
+部署前需将扩展代码中的占位域名替换为实际的生产地址：
+
+```bash
+cd /opt/guanhetech/chrome-extension
+sed -i "s|https://your-domain.com|https://你的实际域名|g" popup.js background.js
+```
+
+> **纯 HTTP 部署（场景 B）**：将 `https://` 改为 `http://你的公网IP`。
+
+### 11.2 替换扩展图标（可选）
+
+默认提供蓝色占位图标。如需替换为品牌图标，准备 16×16、48×48、128×128 三个尺寸的 PNG 文件，覆盖 `chrome-extension/` 下的 `icon16.png`、`icon48.png`、`icon128.png`。
+
+### 11.3 企业分发安装
+
+本扩展不发布到 Chrome Web Store，通过企业内部分发方式安装：
+
+1. 将 `chrome-extension/` 文件夹打包或直接分发给用户
+2. 用户打开 Chrome → 地址栏输入 `chrome://extensions/`
+3. 开启右上角 **开发者模式**
+4. 点击 **加载已解压的扩展程序** → 选择 `chrome-extension/` 文件夹
+5. 将扩展固定到工具栏
+
+> **移动端**：Android Chrome 不支持扩展。移动端用户可通过 Kiwi Browser 或 Yandex Browser 加载 Chrome 扩展。iOS 不支持。
+
+### 11.4 用户使用流程
+
+1. 点击工具栏扩展图标，输入平台账号密码登录（JWT 会自动保存）
+2. 打开任意网页，点击扩展图标 → **Capture Page**
+3. 扩展自动提取内容、下载图片内嵌为 base64、发送到后端
+4. 页面右上角显示绿色 toast 表示保存成功
+5. 在平台 Sources 页面可看到新增的 **Web** 类型文件卡片，Original 标签页可预览完整网页
+
+### 11.5 可选环境变量
+
+
+| 变量                    | 含义                      | 默认值          |
+| --------------------- | ----------------------- | ------------ |
+| `OSS_WEB_CLIP_PREFIX` | Web Clip 文件在 OSS 中的存储前缀 | `web-clips/` |
+
+
+如需修改，在对应环境的配置文件中添加后重新生成 `.env`：
+
+```bash
+# 服务器：编辑 deployment/config.defaults.env 或 deployment/deploy.conf
+# 本地：编辑 development/deploy.conf
+# 然后重新生成 .env
+```
+
+### 11.6 故障排查
+
+
+| 症状                                | 原因与解决                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| Capture 后提示 "Not logged in"       | 扩展未登录。点击扩展图标，输入账号密码登录                                                                        |
+| Capture 后提示 "Session expired"     | JWT 已过期（8 小时有效）。重新登录即可                                                                       |
+| 提示 "Is the server running at ..." | 服务器地址配置错误或后端未启动。检查扩展 popup 中的 Server URL，确认后端可达                                              |
+| 保存成功但 Sources 列表无新文件              | 刷新页面。若仍无，检查后端日志 `journalctl -u rc-webapp -f` 和 Celery 日志 `tail -f logs/celery_ai_worker.log` |
+
 
 ---
 

@@ -1727,6 +1727,117 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         }
 
 
+@app.task(bind=True, name='process_web_clip_async', queue='file_processing')
+def process_web_clip_task(self, file_detail_id, processing_stats_id, html_content, username):
+    """
+    异步处理 Web Clip：从 HTML 中提取纯文本，写入 DB content 字段，
+    以便后续 AI 分析和自动打标签。
+
+    Args:
+        file_detail_id: file_processing_details.id
+        processing_stats_id: processing_stats.id
+        html_content: 完整 HTML 文档内容
+        username: 用户名
+    """
+    try:
+        info(f"开始 Web Clip 文本提取任务 {self.request.id}, file_detail_id={file_detail_id}",
+             source="celery_web_clip")
+
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 30, 'message': 'Extracting text from HTML...'}
+        )
+
+        import re
+        from html import unescape
+
+        text = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'</(?:p|div|h[1-6]|li|tr|blockquote|section|article)>', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', '', text)
+        text = unescape(text)
+        lines = [line.strip() for line in text.splitlines()]
+        plain_text = '\n'.join(line for line in lines if line)
+
+        if len(plain_text) > 500000:
+            plain_text = plain_text[:500000]
+
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'saving', 'progress': 80, 'message': 'Saving extracted text...'}
+        )
+
+        from backend.database.db_manager import DatabaseManager
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+
+        if not conn:
+            raise ValueError("无法连接到数据库")
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE file_processing_details
+            SET content = %s,
+                content_length = %s,
+                status = 'completed'
+            WHERE id = %s
+        """, (plain_text, len(plain_text), file_detail_id))
+
+        cursor.execute("""
+            UPDATE processing_stats
+            SET rc_agent_status = 'completed'
+            WHERE id = %s
+        """, (processing_stats_id,))
+
+        conn.commit()
+        conn.close()
+
+        info(f"Web Clip 文本提取完成: file_detail_id={file_detail_id}, content_length={len(plain_text)}",
+             source="celery_web_clip")
+
+        trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+
+        return {
+            'status': 'completed',
+            'file_detail_id': file_detail_id,
+            'content_length': len(plain_text),
+        }
+
+    except Exception as e:
+        error_msg = f"Web Clip 文本提取失败: {str(e)}"
+        error(f"WebClip {self.request.id}: {error_msg}", source="celery_web_clip")
+
+        try:
+            db_conn_params = get_database_config()
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(db_conn_params)
+            conn = db_manager.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE file_processing_details
+                    SET status = 'failed', error_message = %s
+                    WHERE id = %s
+                """, (str(e), file_detail_id))
+                cursor.execute("""
+                    UPDATE processing_stats
+                    SET rc_agent_status = 'failed'
+                    WHERE id = %s
+                """, (processing_stats_id,))
+                conn.commit()
+                conn.close()
+        except Exception:
+            pass
+
+        current_task.update_state(
+            state='FAILURE',
+            meta={'error': str(error_msg), 'status': 'failed'}
+        )
+        raise Exception(error_msg)
+
+
 def _find_node_binary() -> str:
     """查找系统中的 Node.js 可执行文件路径"""
     import shutil
