@@ -13,7 +13,11 @@ import { marketWeeklyAPI } from '../services/marketWeekly';
 import type { MarketWeeklyReport } from '../types/marketWeekly';
 import './MarketWeekly.css';
 
-const MarketWeekly: React.FC = () => {
+interface MarketWeeklyProps {
+  compact?: boolean;
+}
+
+const MarketWeekly: React.FC<MarketWeeklyProps> = ({ compact = false }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,9 +119,8 @@ const MarketWeekly: React.FC = () => {
   }
 
   return (
-    <div className="market-weekly-container">
-      {/* 固定侧边栏目录 */}
-      <TableOfContents />
+    <div className={`market-weekly-container${compact ? ' market-weekly-compact' : ''}`}>
+      {!compact && <TableOfContents />}
 
       {/* 主内容区域 */}
       <div className="market-weekly-content">
@@ -249,7 +252,7 @@ const MarketWeekly: React.FC = () => {
               </p>
 
               {/* Combined US and China AI WoW Chart */}
-              <div className="chart-container" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="chart-container themes-wow-grid">
                 {/* US AI WoW */}
                 {reportData.weekly_performance.us_ai_wow && reportData.weekly_performance.us_ai_wow.length > 0 && (
                   <div>

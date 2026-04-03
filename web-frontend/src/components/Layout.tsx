@@ -15,7 +15,6 @@ import {
   BuildOutlined,
   CalendarOutlined,
   ControlOutlined,
-  BarChartOutlined,
   HistoryOutlined,
   FolderOutlined,
   UploadOutlined,
@@ -27,7 +26,6 @@ import {
   ReadOutlined,
   EditOutlined,
   ProfileOutlined,
-  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -141,19 +139,9 @@ const Layout: React.FC = () => {
       label: 'News',
     },
     {
-      key: '/market-weekly',
-      icon: <BarChartOutlined />,
-      label: 'Market Weekly',
-    },
-    {
-      key: '/twitter-daily-report',
+      key: '/reports',
       icon: <ProfileOutlined />,
-      label: 'Twitter Report',
-    },
-    {
-      key: '/youtube-daily-report',
-      icon: <VideoCameraOutlined />,
-      label: 'YouTube Report',
+      label: 'Reports',
     },
     {
       key: 'ug-data',
@@ -263,7 +251,7 @@ const Layout: React.FC = () => {
           <Menu
             mode="horizontal"
             theme={themeMode}
-            selectedKeys={[location.pathname]}
+            selectedKeys={[location.pathname.startsWith('/reports') ? '/reports' : location.pathname]}
             items={menuItems}
             onClick={handleMenuClick}
             style={{

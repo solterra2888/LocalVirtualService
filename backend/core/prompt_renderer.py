@@ -73,7 +73,6 @@ class PromptRenderer:
         template_id: Optional[int] = None,
         template_code: Optional[str] = None,
         variables_data: Dict[str, Any] = None,
-        user_id: Optional[int] = None
     ) -> RenderedPrompt:
         """
         渲染模板
@@ -82,7 +81,6 @@ class PromptRenderer:
             template_id: 模板ID（template_id和template_code至少提供一个）
             template_code: 模板代码
             variables_data: 变量数据
-            user_id: 用户ID（用于获取用户偏好）
         
         Returns:
             RenderedPrompt对象
@@ -91,7 +89,7 @@ class PromptRenderer:
             variables_data = {}
         
         # 1. 加载模板
-        template = self._load_template(template_id, template_code, user_id)
+        template = self._load_template(template_id, template_code)
         if not template:
             raise ValueError(f"Template not found: id={template_id}, code={template_code}")
         
@@ -145,14 +143,11 @@ class PromptRenderer:
         self, 
         template_id: Optional[int],
         template_code: Optional[str],
-        user_id: Optional[int]
     ) -> Optional[Dict[str, Any]]:
         """
-        加载模板（支持用户偏好）
+        加载模板
         
-        优先级：
-        1. 用户自定义模板（如果user_id提供且有偏好设置）
-        2. 指定的template_id或template_code
+        通过 template_id 或 template_code 加载模板。
         """
         conn = self.db_manager.get_connection()
         if not conn:
@@ -161,29 +156,6 @@ class PromptRenderer:
         
         try:
             cursor = conn.cursor()
-            
-            # 如果提供了user_id，先检查用户偏好
-            if user_id and template_code:
-                # 通过template_code找到category_id
-                cursor.execute("""
-                    SELECT category_id FROM llm_prompt_templates 
-                    WHERE template_code = %s
-                """, (template_code,))
-                result = cursor.fetchone()
-                if result:
-                    category_id = result[0]
-                    
-                    # 查找用户偏好
-                    cursor.execute("""
-                        SELECT preferred_template_id, custom_parameters
-                        FROM llm_user_template_preferences
-                        WHERE user_id = %s AND category_id = %s AND is_active = true
-                    """, (user_id, category_id))
-                    pref = cursor.fetchone()
-                    
-                    if pref and pref[0]:
-                        template_id = pref[0]
-                        logger.info(f"Using user preferred template: {template_id}")
             
             # 加载模板
             if template_id:
@@ -366,7 +338,7 @@ class PromptRenderer:
             解析后的结构化数据，如果解析失败返回None
         """
         # 加载模板
-        template = self._load_template(template_id=template_id, template_code=None, user_id=None)
+        template = self._load_template(template_id=template_id, template_code=None)
         if not template:
             logger.error(f"Template {template_id} not found for output parsing")
             return None
@@ -432,7 +404,7 @@ class PromptRenderer:
         Returns:
             变量定义字典
         """
-        template = self._load_template(template_id=template_id, template_code=None, user_id=None)
+        template = self._load_template(template_id=template_id, template_code=None)
         if template:
             return template.get('variables', {})
         return {}

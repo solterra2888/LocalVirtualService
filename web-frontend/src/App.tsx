@@ -39,6 +39,8 @@ import TwitterDailyReportPage from './pages/TwitterDailyReportPage';
 import MobileReportsPage from './pages/MobileReportsPage';
 import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
 import MobileYouTubeReportsPage from './pages/MobileYouTubeReportsPage';
+import ReportsLayout from './components/ReportsLayout';
+import MobileReportsLayout from './components/MobileReportsLayout';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -120,7 +122,6 @@ const AppContent: React.FC = () => {
           }
         >
           <Route index element={<Navigate to="/files" replace />} />
-          <Route path="market-weekly" element={<MarketWeekly />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
           <Route path="markets/economic-events" element={<EconomicEventsPage />} />
@@ -140,19 +141,16 @@ const AppContent: React.FC = () => {
           ) : (
             <Route path="feeds" element={<FeedReaderPage />} />
           )}
-          <Route
-            path="twitter-daily-report"
-            element={isMobile ? <MobileReportsPage /> : <TwitterDailyReportPage />}
-          />
-          <Route
-            path="youtube-daily-report"
-            element={isMobile ? <MobileYouTubeReportsPage /> : <YouTubeDailyReportPage />}
-          />
-          {isMobile ? (
-            <Route path="reports" element={<MobileReportsPage />} />
-          ) : (
-            <Route path="reports" element={<Navigate to="/twitter-daily-report" replace />} />
-          )}
+          <Route path="reports" element={isMobile ? <MobileReportsLayout /> : <ReportsLayout />}>
+            <Route index element={<Navigate to="/reports/twitter" replace />} />
+            <Route path="twitter" element={isMobile ? <MobileReportsPage /> : <TwitterDailyReportPage />} />
+            <Route path="youtube" element={isMobile ? <MobileYouTubeReportsPage /> : <YouTubeDailyReportPage />} />
+            <Route path="market-weekly" element={<MarketWeekly compact={isMobile} />} />
+          </Route>
+          {/* Backward-compatible redirects for old report URLs */}
+          <Route path="twitter-daily-report" element={<Navigate to="/reports/twitter" replace />} />
+          <Route path="youtube-daily-report" element={<Navigate to="/reports/youtube" replace />} />
+          <Route path="market-weekly" element={<Navigate to="/reports/market-weekly" replace />} />
           <Route path="prompt-templates" element={<PromptTemplatesPage />} />
           <Route path="investment-themes" element={<InvestmentThemesPage />} />
           <Route path="projects" element={<ProjectsPage />} />

@@ -140,21 +140,6 @@ class TestTemplateResponse(BaseModel):
     response_time: Optional[float]
     error: Optional[str]
 
-class UserPreferenceSet(BaseModel):
-    category_id: int
-    template_id: int
-    custom_parameters: Optional[Dict[str, Any]] = None
-
-class UserPreferenceResponse(BaseModel):
-    id: int
-    category_id: int
-    category_name: Optional[str]
-    preferred_template_id: int
-    template_name: Optional[str]
-    custom_parameters: Dict[str, Any]
-    created_at: Optional[str]
-    updated_at: Optional[str]
-
 class TemplateStatsResponse(BaseModel):
     template_id: int
     period_days: int
@@ -438,7 +423,6 @@ async def test_template(
             template_id=request.template_id,
             template_code=request.template_code,
             variables_data=request.variables,
-            user_id=current_user.user_id
         )
         
         # 2. 调用LLM
@@ -505,49 +489,6 @@ async def test_template(
             response_time=None,
             error=str(e)
         )
-
-
-# === 用户偏好 ===
-
-@router.get("/preferences", response_model=List[UserPreferenceResponse], summary="获取用户模板偏好")
-async def get_user_preferences(
-    current_user: TokenData = Depends(get_current_user)
-):
-    """获取当前用户的所有模板偏好设置"""
-    try:
-        service = LLMPromptTemplateService()
-        preferences = service.get_user_preferences(current_user.user_id)
-        return preferences
-    except Exception as e:
-        logger.error(f"Failed to get user preferences: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取用户偏好失败: {str(e)}")
-
-
-@router.post("/preferences", summary="设置用户模板偏好")
-async def set_user_preference(
-    preference: UserPreferenceSet,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """设置用户对某个场景的模板偏好"""
-    try:
-        service = LLMPromptTemplateService()
-        success = service.set_user_preference(
-            user_id=current_user.user_id,
-            category_id=preference.category_id,
-            template_id=preference.template_id,
-            custom_parameters=preference.custom_parameters
-        )
-        
-        if success:
-            logger.info(f"User {current_user.username} set preference for category {preference.category_id}")
-            return {"success": True, "message": "偏好设置成功"}
-        else:
-            raise HTTPException(status_code=500, detail="设置偏好失败")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to set user preference: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"设置用户偏好失败: {str(e)}")
 
 
 # === 统计分析 ===

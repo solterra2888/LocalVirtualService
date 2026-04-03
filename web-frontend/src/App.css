@@ -2103,4 +2103,21 @@
 .original-word-content th, .original-word-content td { border: 1px solid rgba(0,0,0,0.12); padding: 6px 10px; text-align: left; }
 .original-word-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
 .original-word-content--dark th, .original-word-content--dark td { border-color: rgba(255,255,255,0.12); }
-.original-word-content--dark th { background: rgba(255,255,255,0.06); } 
+.original-word-content--dark th { background: rgba(255,255,255,0.06); }
+
+/* Reports Layout Tabs — dark mode */
+.app-dark .reports-layout-tabs .ant-tabs-nav::before {
+  border-bottom-color: #364152;
+}
+.app-dark .reports-layout-tabs .ant-tabs-tab {
+  color: #a0a3ad;
+}
+.app-dark .reports-layout-tabs .ant-tabs-tab:hover {
+  color: #d1d5db;
+}
+.app-dark .reports-layout-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #69b1ff;
+}
+.app-dark .reports-layout-tabs .ant-tabs-ink-bar {
+  background: #69b1ff;
+} 

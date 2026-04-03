@@ -184,6 +184,13 @@
   margin: 24px 0;
 }
 
+/* Themes WoW 2-column grid */
+.themes-wow-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
 /* Responsive Design */
 @media (max-width: 1600px) {
   .market-weekly-content {
@@ -217,5 +224,65 @@
   .summary-grid {
     grid-template-columns: 1fr;
   }
+
+  .themes-wow-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Compact mode (mobile inside MobileReportsLayout) ── */
+.market-weekly-compact {
+  min-height: auto;
+}
+
+.market-weekly-compact .market-weekly-content {
+  padding: 16px 12px 40px;
+  max-width: 100%;
+}
+
+.market-weekly-compact .section-title {
+  font-size: 18px;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+}
+
+.market-weekly-compact .subsection-title {
+  font-size: 15px;
+  margin-bottom: 14px;
+  margin-top: 20px;
+}
+
+.market-weekly-compact .report-section {
+  margin-bottom: 36px;
+}
+
+.market-weekly-compact .subsection {
+  margin-bottom: 28px;
+}
+
+.market-weekly-compact .summary-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.market-weekly-compact .summary-card {
+  padding: 16px;
+}
+
+.market-weekly-compact .regional-overview {
+  padding: 16px;
+}
+
+.market-weekly-compact .chart-container {
+  padding: 12px 8px;
+  margin: 12px 0;
+}
+
+.market-weekly-compact .themes-wow-grid {
+  grid-template-columns: 1fr;
+}
+
+.market-weekly-compact .performer-change {
+  font-size: 20px;
 }
 

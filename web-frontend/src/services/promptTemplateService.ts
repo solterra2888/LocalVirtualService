@@ -130,17 +130,6 @@ export interface TestTemplateResponse {
   error?: string;
 }
 
-export interface UserPreference {
-  id: number;
-  category_id: number;
-  category_name?: string;
-  preferred_template_id: number;
-  template_name?: string;
-  custom_parameters: Record<string, any>;
-  created_at?: string;
-  updated_at?: string;
-}
-
 export interface TemplateStats {
   template_id: number;
   period_days: number;
@@ -205,22 +194,6 @@ class PromptTemplateService {
   
   async testTemplate(request: TestTemplateRequest): Promise<TestTemplateResponse> {
     const response = await api.post('/llm/prompts/templates/test', request);
-    return response.data;
-  }
-  
-  // === 用户偏好 ===
-  
-  async getUserPreferences(): Promise<UserPreference[]> {
-    const response = await api.get('/llm/prompts/preferences');
-    return response.data;
-  }
-  
-  async setUserPreference(categoryId: number, templateId: number, customParameters?: Record<string, any>): Promise<{ success: boolean }> {
-    const response = await api.post('/llm/prompts/preferences', {
-      category_id: categoryId,
-      template_id: templateId,
-      custom_parameters: customParameters
-    });
     return response.data;
   }
   

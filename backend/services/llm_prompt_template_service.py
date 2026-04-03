@@ -2,7 +2,7 @@
 """
 LLM Prompt模板管理服务
 
-提供Prompt模板的完整CRUD操作、版本管理、统计分析等功能
+提供Prompt模板的完整CRUD操作、统计分析等功能
 """
 
 import json
@@ -633,124 +633,6 @@ class LLMPromptTemplateService:
             conn.rollback()
             conn.close()
             return False
-    
-    # ==================== 用户偏好管理 ====================
-    
-    def set_user_preference(
-        self,
-        user_id: int,
-        category_id: int,
-        template_id: int,
-        custom_parameters: Optional[Dict] = None
-    ) -> bool:
-        """
-        设置用户对某个场景的模板偏好
-        
-        Args:
-            user_id: 用户ID
-            category_id: 分类ID
-            template_id: 首选模板ID
-            custom_parameters: 自定义参数
-        
-        Returns:
-            成功返回True
-        """
-        conn = self.db_manager.get_connection()
-        if not conn:
-            return False
-        
-        try:
-            cursor = conn.cursor()
-            
-            query = """
-                INSERT INTO llm_user_template_preferences 
-                (user_id, category_id, preferred_template_id, custom_parameters, is_active)
-                VALUES (%s, %s, %s, %s, true)
-                ON CONFLICT (user_id, category_id) 
-                DO UPDATE SET 
-                    preferred_template_id = EXCLUDED.preferred_template_id,
-                    custom_parameters = EXCLUDED.custom_parameters,
-                    is_active = true,
-                    updated_at = CURRENT_TIMESTAMP
-            """
-            
-            cursor.execute(query, (
-                user_id,
-                category_id,
-                template_id,
-                json.dumps(custom_parameters or {})
-            ))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            logger.info(f"Set user preference: user={user_id}, category={category_id}, template={template_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to set user preference: {str(e)}")
-            conn.rollback()
-            conn.close()
-            return False
-    
-    def get_user_preferences(self, user_id: int) -> List[Dict[str, Any]]:
-        """
-        获取用户的所有模板偏好
-        
-        Args:
-            user_id: 用户ID
-        
-        Returns:
-            偏好设置列表
-        """
-        conn = self.db_manager.get_connection()
-        if not conn:
-            return []
-        
-        try:
-            cursor = conn.cursor()
-            
-            query = """
-                SELECT p.id, p.category_id, p.preferred_template_id, p.custom_parameters,
-                       p.is_active, p.created_at, p.updated_at,
-                       c.category_name, c.category_code,
-                       t.template_name, t.template_code
-                FROM llm_user_template_preferences p
-                LEFT JOIN llm_prompt_categories c ON p.category_id = c.id
-                LEFT JOIN llm_prompt_templates t ON p.preferred_template_id = t.id
-                WHERE p.user_id = %s AND p.is_active = true
-                ORDER BY c.sort_order, c.category_name
-            """
-            
-            cursor.execute(query, (user_id,))
-            rows = cursor.fetchall()
-            
-            preferences = []
-            for row in rows:
-                preferences.append({
-                    'id': row[0],
-                    'category_id': row[1],
-                    'preferred_template_id': row[2],
-                    'custom_parameters': row[3] if row[3] else {},
-                    'is_active': row[4],
-                    'created_at': row[5].isoformat() if row[5] else None,
-                    'updated_at': row[6].isoformat() if row[6] else None,
-                    'category_name': row[7],
-                    'category_code': row[8],
-                    'template_name': row[9],
-                    'template_code': row[10]
-                })
-            
-            cursor.close()
-            conn.close()
-            
-            return preferences
-            
-        except Exception as e:
-            logger.error(f"Failed to get user preferences: {str(e)}")
-            conn.close()
-            return []
     
     # ==================== 统计分析 ====================
     

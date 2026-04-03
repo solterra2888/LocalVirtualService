@@ -939,7 +939,7 @@ class LLMService:
             template_id: 模板ID
             template_code: 模板代码（template_id和template_code至少提供一个）
             variables: 模板变量值
-            user_id: 用户ID（用于获取用户偏好）
+            user_id: 用户ID（用于记录使用日志）
             provider: LLM提供商（可选，覆盖模板推荐）
             model: 模型（可选，覆盖模板推荐）
             **kwargs: 其他LLM参数
@@ -968,7 +968,6 @@ class LLMService:
                 template_id=template_id,
                 template_code=template_code,
                 variables_data=variables,
-                user_id=user_id
             )
         except Exception as e:
             self.logger.error(f"Failed to render template: {str(e)}")
