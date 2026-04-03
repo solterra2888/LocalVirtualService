@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+from backend.services.template_preference_service import TemplatePreferenceService
 from backend.core.prompt_renderer import PromptRenderer
 from backend.core.llm_framework import llm_service, LLMMessage
 from backend.auth.jwt_utils import get_current_user, get_current_admin_user
@@ -206,6 +207,7 @@ async def list_templates(
             category_id=category_id,
             scope=scope,
             user_id=current_user.user_id,
+            is_admin=current_user.is_admin or False,
             search=search,
             active_only=active_only
         )
@@ -577,4 +579,115 @@ async def export_template(
     except Exception as e:
         logger.error(f"Failed to export template: {str(e)}")
         raise HTTPException(status_code=500, detail=f"导出模板失败: {str(e)}")
+
+
+# ==================== 用户模板偏好 ====================
+
+class SetPreferenceRequest(BaseModel):
+    template_id: int = Field(..., description="选择的模板ID")
+
+
+class PreferenceResponse(BaseModel):
+    id: int
+    module_code: str
+    template_id: int
+    template_code: str
+    template_name: str
+    scope: str
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class ModuleInfo(BaseModel):
+    module_code: str
+    module_name: str
+    description: str
+    configurable: bool
+    default_template_code: Optional[str]
+
+
+@router.get("/modules", summary="获取可配模块列表")
+async def list_configurable_modules(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """返回所有已注册的功能模块及其配置信息"""
+    try:
+        pref_service = TemplatePreferenceService()
+        modules = pref_service.get_modules()
+        return {"success": True, "modules": modules}
+    except Exception as e:
+        logger.error(f"Failed to list modules: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取模块列表失败: {str(e)}")
+
+
+@router.get("/preferences", summary="获取当前用户所有模板偏好")
+async def list_preferences(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """获取当前用户所有已设置的模板偏好"""
+    try:
+        pref_service = TemplatePreferenceService()
+        preferences = pref_service.list_user_preferences(current_user.user_id)
+        return {"success": True, "preferences": preferences}
+    except Exception as e:
+        logger.error(f"Failed to list preferences: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取偏好列表失败: {str(e)}")
+
+
+@router.get("/preferences/{module_code}", summary="获取指定模块的模板偏好")
+async def get_preference(
+    module_code: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """获取当前用户在指定模块的模板偏好，未设置时返回 null"""
+    try:
+        pref_service = TemplatePreferenceService()
+        preference = pref_service.get_preference(current_user.user_id, module_code)
+        return {"success": True, "preference": preference}
+    except Exception as e:
+        logger.error(f"Failed to get preference: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取偏好失败: {str(e)}")
+
+
+@router.put("/preferences/{module_code}", summary="设置模板偏好")
+async def set_preference(
+    module_code: str,
+    body: SetPreferenceRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """设置当前用户在指定模块的模板偏好"""
+    try:
+        pref_service = TemplatePreferenceService()
+        pref_service.set_preference(
+            user_id=current_user.user_id,
+            module_code=module_code,
+            template_id=body.template_id,
+            is_admin=current_user.is_admin or False,
+        )
+        return {"success": True, "message": "偏好设置成功"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to set preference: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"设置偏好失败: {str(e)}")
+
+
+@router.delete("/preferences/{module_code}", summary="重置模板偏好为系统默认")
+async def delete_preference(
+    module_code: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """删除当前用户在指定模块的偏好，恢复为系统默认模板"""
+    try:
+        pref_service = TemplatePreferenceService()
+        deleted = pref_service.delete_preference(current_user.user_id, module_code)
+        if deleted:
+            return {"success": True, "message": "已恢复为系统默认模板"}
+        else:
+            return {"success": True, "message": "该模块未设置过偏好"}
+    except Exception as e:
+        logger.error(f"Failed to delete preference: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重置偏好失败: {str(e)}")
 

@@ -22,7 +22,7 @@ from backend.database.db_manager import DatabaseManager
 class FileProcessingWorker:
     """文件处理工作者"""
     
-    def __init__(self, task_id: str, username: str, db_conn_params: Dict[str, Any]):
+    def __init__(self, task_id: str, username: str, db_conn_params: Dict[str, Any], user_id: Optional[int] = None):
         """
         初始化文件处理工作者
         
@@ -30,9 +30,11 @@ class FileProcessingWorker:
             task_id: 任务ID
             username: 用户名
             db_conn_params: 数据库连接参数
+            user_id: 用户ID（用于模板偏好解析等）
         """
         self.task_id = task_id
         self.username = username
+        self.user_id = user_id
         self.db_conn_params = db_conn_params
         self.db_manager = DatabaseManager(db_conn_params)
         self.file_processor = FileProcessor()

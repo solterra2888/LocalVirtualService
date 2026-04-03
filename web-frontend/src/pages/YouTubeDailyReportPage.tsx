@@ -4,7 +4,7 @@ import {
   List, App, Tooltip, ConfigProvider, theme as antdTheme,
 } from 'antd';
 import {
-  ReloadOutlined, VideoCameraOutlined,
+  ReloadOutlined, VideoCameraOutlined, ThunderboltOutlined,
   CalendarOutlined, CheckCircleOutlined,
   CloseCircleOutlined, ClockCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons';
@@ -38,6 +38,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(dayjs().subtract(1, 'day'));
+  const [generating, setGenerating] = useState(false);
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,27 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   }, []);
 
   useEffect(() => { loadReports(); }, [loadReports]);
+
+  const handleGenerate = useCallback(async (force: boolean = false) => {
+    const dateStr = selectedDate.format('YYYY-MM-DD');
+    setGenerating(true);
+    try {
+      const res = await youtubeDailyReportsAPI.generateReport(dateStr, force);
+      if (res.success) {
+        message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
+        setTimeout(() => {
+          loadReports();
+          loadReportDetail(dateStr);
+        }, 3000);
+      } else {
+        message.error(res.error || 'Failed to trigger report generation');
+      }
+    } catch {
+      message.error('Failed to trigger report generation');
+    } finally {
+      setGenerating(false);
+    }
+  }, [selectedDate, loadReports, loadReportDetail, message]);
 
   const handleDateChange = (date: dayjs.Dayjs | null) => {
     if (!date) return;
@@ -117,9 +139,34 @@ const YouTubeDailyReportPageInner: React.FC = () => {
           <DatePicker
             value={selectedDate}
             onChange={handleDateChange}
-            style={{ width: '100%', marginBottom: 12 }}
+            style={{ width: '100%', marginBottom: 8 }}
             allowClear={false}
           />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Tooltip title="Generate report for the selected date">
+              <Button
+                size="small"
+                icon={<ThunderboltOutlined />}
+                onClick={() => handleGenerate(false)}
+                loading={generating}
+                style={{ flex: 1 }}
+              >
+                Generate
+              </Button>
+            </Tooltip>
+            <Tooltip title="Force re-generate (overwrite existing)">
+              <Button
+                size="small"
+                danger
+                icon={<ReloadOutlined />}
+                onClick={() => handleGenerate(true)}
+                loading={generating}
+                style={{ flex: 1 }}
+              >
+                Re-generate
+              </Button>
+            </Tooltip>
+          </div>
         </div>
 
         <List

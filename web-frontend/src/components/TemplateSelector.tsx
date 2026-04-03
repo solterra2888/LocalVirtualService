@@ -46,7 +46,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   categoryCode,
   value,
   onChange,
-  placeholder = '请选择模板',
+  placeholder = 'Select Template',
   disabled = false,
   allowClear = true,
   style = {},

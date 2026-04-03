@@ -3,17 +3,17 @@
 Twitter Daily Report API
 
 端点:
-  GET  /reports/twitter-daily              — 报告列表（分页）
-  GET  /reports/twitter-daily/latest       — 最新已完成报告
-  GET  /reports/twitter-daily/{date}       — 指定日期报告
-
-报告由 Scheduler 定时自动生成，不提供手动触发接口。
+  GET   /reports/twitter-daily              — 报告列表（分页）
+  GET   /reports/twitter-daily/latest       — 最新已完成报告
+  GET   /reports/twitter-daily/{date}       — 指定日期报告
+  POST  /reports/twitter-daily/generate     — 手动触发生成（异步 Celery）
 """
 
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field
 
 from backend.auth.jwt_utils import get_current_user
 from backend.schemas.user import TokenData
@@ -74,6 +74,39 @@ async def get_latest_report(
         return {"success": True, "data": report}
     except Exception as e:
         logger.error(f"获取最新报告失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class GenerateReportRequest(BaseModel):
+    report_date: Optional[str] = Field(None, description="日期 YYYY-MM-DD，默认昨天")
+    force: bool = Field(False, description="强制重新生成（覆盖已有报告）")
+
+
+@router.post("/generate", summary="手动触发报告生成")
+async def generate_report(
+    body: GenerateReportRequest,
+    current_user: TokenData = Depends(get_current_user),
+):
+    """触发 Celery 异步任务为当前用户生成 Twitter Daily Report。"""
+    try:
+        parsed_date = _parse_date(body.report_date)
+        from backend.tasks.report_tasks import generate_twitter_daily_report_task
+        task = generate_twitter_daily_report_task.delay(
+            user_id=current_user.user_id,
+            report_date=str(parsed_date),
+            force=body.force,
+        )
+        logger.info(
+            f"用户 {current_user.username} 触发 Twitter Daily Report 生成: "
+            f"date={parsed_date}, force={body.force}, task_id={task.id}"
+        )
+        return {
+            "success": True,
+            "data": {"task_id": task.id, "report_date": str(parsed_date)},
+            "message": "报告生成任务已提交",
+        }
+    except Exception as e:
+        logger.error(f"触发报告生成失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

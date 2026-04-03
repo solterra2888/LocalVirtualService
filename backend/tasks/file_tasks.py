@@ -130,7 +130,8 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
         db_conn_params = get_database_config()
         
         # 创建文件处理工作者
-        worker = FileProcessingWorker(self.request.id, username, db_conn_params)
+        task_user_id = params.get('user_id') if params else None
+        worker = FileProcessingWorker(self.request.id, username, db_conn_params, user_id=task_user_id)
         worker.set_status_callback(update_progress)
         
         # 更新初始状态

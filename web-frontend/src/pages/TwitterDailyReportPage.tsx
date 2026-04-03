@@ -4,7 +4,7 @@ import {
   List, App, Tooltip, ConfigProvider, theme as antdTheme,
 } from 'antd';
 import {
-  ReloadOutlined, FileTextOutlined,
+  ReloadOutlined, FileTextOutlined, ThunderboltOutlined,
   CalendarOutlined, CheckCircleOutlined,
   CloseCircleOutlined, ClockCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons';
@@ -38,6 +38,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(dayjs().subtract(1, 'day'));
+  const [generating, setGenerating] = useState(false);
 
   // ── Load reports list ──────────────────────────────────────────────────
   const loadReports = useCallback(async () => {
@@ -74,6 +75,28 @@ const TwitterDailyReportPageInner: React.FC = () => {
   }, []);
 
   useEffect(() => { loadReports(); }, [loadReports]);
+
+  // ── Generate report ────────────────────────────────────────────────────
+  const handleGenerate = useCallback(async (force: boolean = false) => {
+    const dateStr = selectedDate.format('YYYY-MM-DD');
+    setGenerating(true);
+    try {
+      const res = await twitterDailyReportsAPI.generateReport(dateStr, force);
+      if (res.success) {
+        message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
+        setTimeout(() => {
+          loadReports();
+          loadReportDetail(dateStr);
+        }, 3000);
+      } else {
+        message.error(res.error || 'Failed to trigger report generation');
+      }
+    } catch {
+      message.error('Failed to trigger report generation');
+    } finally {
+      setGenerating(false);
+    }
+  }, [selectedDate, loadReports, loadReportDetail, message]);
 
   // ── Date selection ─────────────────────────────────────────────────────
   const handleDateChange = (date: dayjs.Dayjs | null) => {
@@ -121,9 +144,34 @@ const TwitterDailyReportPageInner: React.FC = () => {
           <DatePicker
             value={selectedDate}
             onChange={handleDateChange}
-            style={{ width: '100%', marginBottom: 12 }}
+            style={{ width: '100%', marginBottom: 8 }}
             allowClear={false}
           />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Tooltip title="Generate report for the selected date">
+              <Button
+                size="small"
+                icon={<ThunderboltOutlined />}
+                onClick={() => handleGenerate(false)}
+                loading={generating}
+                style={{ flex: 1 }}
+              >
+                Generate
+              </Button>
+            </Tooltip>
+            <Tooltip title="Force re-generate (overwrite existing)">
+              <Button
+                size="small"
+                danger
+                icon={<ReloadOutlined />}
+                onClick={() => handleGenerate(true)}
+                loading={generating}
+                style={{ flex: 1 }}
+              >
+                Re-generate
+              </Button>
+            </Tooltip>
+          </div>
         </div>
 
         <List

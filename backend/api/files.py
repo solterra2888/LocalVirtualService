@@ -780,6 +780,7 @@ async def process_files(
         processing_params = request.params.copy()
         _strip_llamaindex_key_from_client_params(processing_params)
         processing_params['analysis_mode'] = analysis_mode
+        processing_params['user_id'] = current_user.user_id
         
         if analysis_mode == 'local_llm':
             processing_params['template_id'] = request.template_id

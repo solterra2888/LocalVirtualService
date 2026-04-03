@@ -23,7 +23,8 @@ import {
   Badge,
   Popconfirm,
   ConfigProvider,
-  theme as antdTheme
+  theme as antdTheme,
+  Grid,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -46,6 +47,7 @@ import {
   BarChartOutlined,
   LineChartOutlined,
   CalendarOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -62,6 +64,7 @@ import TaskStatusModal from '../components/TaskStatusModal';
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
+const { useBreakpoint } = Grid;
 
 // Theme colors per FRONTEND_STYLE_GUIDE: Light/Dark + Behance
 const THEME_COLORS = {
@@ -112,10 +115,14 @@ const CARD_STYLE_BEHANCE_DARK = {
 };
 
 // Data source configuration
+/** 数据获取类：拉取外部数据；报告生成类：预生成摘要/报告等 */
+type SchedulerCategory = 'data_fetch' | 'report_generation';
+
 interface DataSource {
   id: string;
   name: string;
   type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'other';
+  category: SchedulerCategory;
   description: string;
   enabled: boolean;
   status: 'idle' | 'running' | 'success' | 'error';
@@ -152,11 +159,14 @@ const SchedulerPage: React.FC = () => {
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
   const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
+  const screens = useBreakpoint();
+  const isLgUp = !!screens?.lg;
   const [dataSources, setDataSources] = useState<DataSource[]>([
     {
       id: 'eodhd_news',
       name: 'EODHD News Data',
       type: 'eodhd',
+      category: 'data_fetch',
       description: 'Get latest stock news from EODHD API',
       enabled: true,
       status: 'idle',
@@ -175,6 +185,7 @@ const SchedulerPage: React.FC = () => {
       id: 'watchlist_news',
       name: 'My Watchlist News',
       type: 'watchlist',
+      category: 'data_fetch',
       description: 'Get news for stocks in your watchlist from EODHD API',
       enabled: true,
       status: 'idle',
@@ -193,6 +204,7 @@ const SchedulerPage: React.FC = () => {
       id: 'twitter_subscription',
       name: 'Twitter Subscription Feed',
       type: 'twitter_subscription',
+      category: 'data_fetch',
       description: 'Fetch tweets from subscribed Twitter authors (supports multi-user subscriptions)',
       enabled: true,
       status: 'idle',
@@ -211,6 +223,7 @@ const SchedulerPage: React.FC = () => {
       id: 'youtube_subscription',
       name: 'YouTube Subscription Feed',
       type: 'youtube_subscription',
+      category: 'data_fetch',
       description: 'Fetch videos from subscribed YouTube channels via RSS (supports multi-user subscriptions)',
       enabled: true,
       status: 'idle',
@@ -229,6 +242,7 @@ const SchedulerPage: React.FC = () => {
       id: 'news_feed',
       name: 'News Feed (My Feeds)',
       type: 'news_feed',
+      category: 'data_fetch',
       description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.)',
       enabled: true,
       status: 'idle',
@@ -247,6 +261,7 @@ const SchedulerPage: React.FC = () => {
       id: 'twitter_author_summary',
       name: 'Twitter Author Summary',
       type: 'twitter_author_summary',
+      category: 'report_generation',
       description: 'Pre-generate per-author daily summaries (Phase 1). Shared across all users, auto-chains to Daily Report.',
       enabled: true,
       status: 'idle',
@@ -265,6 +280,7 @@ const SchedulerPage: React.FC = () => {
       id: 'youtube_author_summary',
       name: 'YouTube Author Summary',
       type: 'youtube_author_summary',
+      category: 'report_generation',
       description: 'Pre-generate per-channel video summaries (Phase 1). Shared across all users, auto-chains to Daily Report.',
       enabled: true,
       status: 'idle',
@@ -283,6 +299,7 @@ const SchedulerPage: React.FC = () => {
       id: 'cctv_news',
       name: 'CCTV News (新闻联播)',
       type: 'cctv',
+      category: 'data_fetch',
       description: 'Scrape daily news from CCTV News (央视新闻联播) website',
       enabled: true,
       status: 'idle',
@@ -301,6 +318,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_stock_prices',
       name: 'EODHD Stock Prices',
       type: 'eodhd_stock_prices',
+      category: 'data_fetch',
       description: 'Get real-time stock prices for watchlist stocks from EODHD API',
       enabled: true,
       status: 'idle',
@@ -319,6 +337,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_eod_stock_prices',
       name: 'EODHD EOD Stock Prices',
       type: 'eodhd_eod_stock_prices',
+      category: 'data_fetch',
       description: 'Get historical EOD (End of Day) stock prices for watchlist and theme associated stocks from EODHD API',
       enabled: true,
       status: 'idle',
@@ -338,6 +357,7 @@ const SchedulerPage: React.FC = () => {
       id: 'market_data',
       name: 'Market Data (Indices, Forex, Commodities, Bonds, Sectors)',
       type: 'market_data',
+      category: 'data_fetch',
       description: 'Get real-time and historical market data from EODHD API (32 assets: indices, forex, commodities, bond yields, sectors)',
       enabled: true,
       status: 'idle',
@@ -356,6 +376,7 @@ const SchedulerPage: React.FC = () => {
       id: 'earnings_calendar',
       name: 'Earnings Calendar',
       type: 'earnings_calendar',
+      category: 'data_fetch',
       description: 'Get US earnings calendar from EODHD API (no S&P 500 filtering, all US stocks)',
       enabled: true,
       status: 'idle',
@@ -374,6 +395,7 @@ const SchedulerPage: React.FC = () => {
       id: 'ipo_calendar',
       name: 'IPO Calendar',
       type: 'ipo_calendar',
+      category: 'data_fetch',
       description: 'Get IPO calendar data from EODHD API for US and HK exchanges',
       enabled: true,
       status: 'idle',
@@ -392,6 +414,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_events',
       name: 'EODHD Economic Events',
       type: 'eodhd_events',
+      category: 'data_fetch',
       description: 'Get economic calendar event data from EODHD API',
       enabled: true,
       status: 'idle',
@@ -410,6 +433,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_macro',
       name: 'EODHD Macro Indicators',
       type: 'eodhd_macro',
+      category: 'data_fetch',
       description: 'Get macroeconomic indicator data from EODHD API',
       enabled: true,
       status: 'idle',
@@ -427,6 +451,7 @@ const SchedulerPage: React.FC = () => {
       id: 'eodhd_fundamentals',
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
+      category: 'data_fetch',
       description: 'Manually get company fundamentals data from EODHD',
       enabled: true,
       status: 'idle',
@@ -445,6 +470,7 @@ const SchedulerPage: React.FC = () => {
       id: 'finviz_screener',
       name: 'Finviz Screener',
       type: 'finviz_screener',
+      category: 'data_fetch',
       description: 'Comprehensive stock screener data from Finviz with technical and fundamental metrics',
       enabled: true,
       status: 'idle',
@@ -463,6 +489,7 @@ const SchedulerPage: React.FC = () => {
       id: 'watchlist_fundamentals',
       name: 'Watchlist Fundamentals',
       type: 'watchlist_fundamentals',
+      category: 'data_fetch',
       description: 'Automatically update fundamentals data for all watchlist stocks (weekly)',
       enabled: true,
       status: 'idle',
@@ -1098,6 +1125,207 @@ const SchedulerPage: React.FC = () => {
   const enabledSources = dataSources.filter(s => s.enabled).length;
   const runningSources = dataSources.filter(s => s.status === 'running').length;
   const enabledTasks = scheduledTasks.filter(t => t.enabled).length;
+  const dataFetchSources = dataSources.filter((s) => s.category === 'data_fetch');
+  const reportGenerationSources = dataSources.filter((s) => s.category === 'report_generation');
+
+  const renderSchedulerListItem = (source: DataSource, index: number, columnLength: number) => {
+    const cronInfo = getCronInfo(source.id);
+    const formattedParams = cronInfo ? formatTaskParams(source.id, cronInfo.params) : null;
+    const configContent = cronInfo ? (
+      <div style={{ maxWidth: 400, color: '#fff' }}>
+        <div style={{ marginBottom: 10 }}>
+          <Space>
+            <ScheduleOutlined style={{ color: '#2196F3' }} />
+            <span style={{ fontSize: 13, fontWeight: 'bold' }}>Configuration Details</span>
+          </Space>
+        </div>
+        <div style={{ marginBottom: 8, fontSize: 12 }}>
+          Timezone: <span style={{ color: '#2196F3' }}>{cronInfo.timezone}</span>
+        </div>
+        {cronInfo.description && (
+          <div style={{ marginBottom: 8, fontSize: 12 }}>
+            Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
+          </div>
+        )}
+        {formattedParams && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+            <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>Configuration Parameters:</div>
+            <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#2196F3', backgroundColor: 'rgba(0,0,0,0.3)', padding: 8, borderRadius: 8, maxHeight: 200, overflow: 'auto' }}>
+              {formattedParams}
+            </pre>
+            {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Full JSON:</div>
+                <pre style={{ margin: 0, fontSize: 10, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#52c41a', backgroundColor: 'rgba(0,0,0,0.3)', padding: 6, borderRadius: 4, maxHeight: 150, overflow: 'auto' }}>
+                  {JSON.stringify(cronInfo.params, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+    return (
+      <div
+        key={source.id}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 16,
+          padding: '16px 24px',
+          borderBottom: index < columnLength - 1 ? `1px solid ${colors.cardBorder}` : 'none',
+          backgroundColor: 'transparent',
+          transition: 'background-color 0.2s',
+          opacity: source.enabled ? 1 : 0.65,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = isDark ? colors.hoverBg ?? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+      >
+        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{source.name}</span>
+            {getStatusTag(source.status)}
+            {source.lastRun && (
+              <span style={{ fontSize: 12, color: colors.textSecondary }}>Last: {source.lastRun}</span>
+            )}
+          </div>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: cronInfo ? 8 : 0 }}>
+            {source.description}
+          </div>
+          {cronInfo && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 8,
+                backgroundColor: cronInfo.isValid ? colors.scheduleValidBg : colors.scheduleInvalidBg,
+                border: `1px solid ${cronInfo.isValid ? colors.scheduleValidBorder : colors.scheduleInvalidBorder}`,
+              }}
+            >
+              <ScheduleOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 12 }} />
+              <Text code style={{ fontSize: 11, backgroundColor: 'transparent', padding: 0, color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f' }}>
+                {cronInfo.expression}
+              </Text>
+              <Tooltip title={configContent} placement="top" overlayStyle={{ maxWidth: 450 }} overlayInnerStyle={{ backgroundColor: 'rgba(0,0,0,0.85)', padding: 12, borderRadius: 8 }}>
+                <SettingOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 14, cursor: 'pointer' }} />
+              </Tooltip>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          {source.quickActions.map((action) => {
+            const isConfigButton = action.id.includes('configure') || action.id === 'update_fundamentals_data';
+            return (
+              <Tooltip key={action.id} title={isConfigButton ? action.name : action.description} placement="topRight">
+                <Button
+                  type="default"
+                  size="middle"
+                  icon={isConfigButton ? <SettingOutlined /> : action.icon}
+                  onClick={() => showQuickActionModal(action, source)}
+                  disabled={action.id.includes('configure') ? false : !source.enabled}
+                  loading={source.status === 'running'}
+                  style={{
+                    borderRadius: isConfigButton ? 8 : 20,
+                    fontWeight: 500,
+                    height: 36,
+                    width: isConfigButton ? 36 : undefined,
+                    paddingLeft: isConfigButton ? 0 : 16,
+                    paddingRight: isConfigButton ? 0 : 16,
+                    border: `1.5px solid ${isDark ? '#2196F3' : '#1890ff'}`,
+                    color: isDark ? '#2196F3' : '#1890ff',
+                    background: 'transparent',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: 'none',
+                  }}
+                  onMouseEnter={(e) => {
+                    const btn = e.currentTarget as HTMLButtonElement;
+                    if (!btn.disabled) {
+                      btn.style.background = isDark ? '#2196F3' : '#1890ff';
+                      btn.style.color = '#fff';
+                      btn.style.transform = 'translateY(-2px) scale(1.02)';
+                      btn.style.boxShadow = isDark
+                        ? '0 6px 20px rgba(33, 150, 243, 0.4)'
+                        : '0 6px 20px rgba(24, 144, 255, 0.3)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    const btn = e.currentTarget as HTMLButtonElement;
+                    if (!btn.disabled) {
+                      btn.style.background = 'transparent';
+                      btn.style.color = isDark ? '#2196F3' : '#1890ff';
+                      btn.style.transform = 'translateY(0) scale(1)';
+                      btn.style.boxShadow = 'none';
+                    }
+                  }}
+                >
+                  {isConfigButton ? null : action.name}
+                </Button>
+              </Tooltip>
+            );
+          })}
+          {source.id !== 'eodhd_fundamentals' && (
+            <Tooltip
+              title={
+                source.description.includes('Coming soon')
+                  ? 'This data source is coming soon'
+                  : !source.enabled && scheduledTasks.filter(task => {
+                      const taskType = task.type.toLowerCase();
+                      const sourceIdLower = source.id.toLowerCase();
+                      return (
+                        (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
+                        (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
+                        (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
+                        (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
+                        (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+                        (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
+                        (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
+                        (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
+                        (sourceIdLower === 'market_data' && taskType === 'market_data') ||
+                        (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
+                        (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
+                        (sourceIdLower.includes('events') && taskType.includes('events')) ||
+                        (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
+                      );
+                    }).length === 0
+                  ? 'Please configure data fetch strategy first'
+                  : undefined
+              }
+            >
+              <div
+                style={{
+                  position: 'relative',
+                  display: 'inline-block',
+                }}
+              >
+                <Switch
+                  checked={source.enabled}
+                  onChange={(checked) => toggleDataSource(source.id, checked)}
+                  disabled={source.description.includes('Coming soon') || loading}
+                  loading={loading && source.status === 'running'}
+                  style={{
+                    backgroundColor: source.enabled
+                      ? (isDark ? '#2196F3' : '#1890ff')
+                      : undefined,
+                    boxShadow: source.enabled
+                      ? `0 0 12px ${isDark ? 'rgba(33, 150, 243, 0.4)' : 'rgba(24, 144, 255, 0.3)'}`
+                      : undefined,
+                  }}
+                />
+              </div>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   if (!user?.is_admin) {
     return (
@@ -1198,7 +1426,7 @@ const SchedulerPage: React.FC = () => {
             Scheduler Management
           </Title>
           <Text type="secondary" style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            Simplified data fetching scheduler - Manage EODHD, Finviz and other data sources
+            数据获取类与报告生成类任务分栏展示 — 管理行情、新闻、摘要与定时报告
           </Text>
         </div>
         <Space>
@@ -1275,209 +1503,59 @@ const SchedulerPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Data source list - Behance list style */}
-        <div style={{ padding: 0 }}>
-          {dataSources.map((source, index) => {
-            const cronInfo = getCronInfo(source.id);
-            const formattedParams = cronInfo ? formatTaskParams(source.id, cronInfo.params) : null;
-            const configContent = cronInfo ? (
-              <div style={{ maxWidth: 400, color: '#fff' }}>
-                <div style={{ marginBottom: 10 }}>
-                  <Space>
-                    <ScheduleOutlined style={{ color: '#2196F3' }} />
-                    <span style={{ fontSize: 13, fontWeight: 'bold' }}>Configuration Details</span>
-                  </Space>
-                </div>
-                <div style={{ marginBottom: 8, fontSize: 12 }}>
-                  Timezone: <span style={{ color: '#2196F3' }}>{cronInfo.timezone}</span>
-                </div>
-                {cronInfo.description && (
-                  <div style={{ marginBottom: 8, fontSize: 12 }}>
-                    Description: <span style={{ color: '#52c41a' }}>{cronInfo.description}</span>
-                  </div>
-                )}
-                {formattedParams && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                    <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>Configuration Parameters:</div>
-                    <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#2196F3', backgroundColor: 'rgba(0,0,0,0.3)', padding: 8, borderRadius: 8, maxHeight: 200, overflow: 'auto' }}>
-                      {formattedParams}
-                    </pre>
-                    {cronInfo.params && Object.keys(cronInfo.params).length > 0 && (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Full JSON:</div>
-                        <pre style={{ margin: 0, fontSize: 10, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#52c41a', backgroundColor: 'rgba(0,0,0,0.3)', padding: 6, borderRadius: 4, maxHeight: 150, overflow: 'auto' }}>
-                          {JSON.stringify(cronInfo.params, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
+        {/* Data source list — two columns: data fetch vs report generation */}
+        <Row gutter={[0, 0]} style={{ margin: 0 }}>
+          <Col xs={24} lg={12} style={{ padding: 0 }}>
+            <div
+              style={{
+                padding: '14px 24px 10px',
+                borderBottom: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CloudDownloadOutlined style={{ color: isDark ? '#2196F3' : '#1890ff', fontSize: 16 }} />
+                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>数据获取类</span>
               </div>
-            ) : null;
-
-            return (
-              <div
-                key={source.id}
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  gap: 16,
-                  padding: '16px 24px',
-                  borderBottom: index < dataSources.length - 1 ? `1px solid ${colors.cardBorder}` : 'none',
-                  backgroundColor: 'transparent',
-                  transition: 'background-color 0.2s',
-                  opacity: source.enabled ? 1 : 0.65,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDark ? colors.hoverBg ?? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                {/* Left: name, status, description, schedule */}
-                <div style={{ flex: '1 1 280px', minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{source.name}</span>
-                    {getStatusTag(source.status)}
-                    {source.lastRun && (
-                      <span style={{ fontSize: 12, color: colors.textSecondary }}>Last: {source.lastRun}</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: cronInfo ? 8 : 0 }}>
-                    {source.description}
-                  </div>
-                  {cronInfo && (
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        backgroundColor: cronInfo.isValid ? colors.scheduleValidBg : colors.scheduleInvalidBg,
-                        border: `1px solid ${cronInfo.isValid ? colors.scheduleValidBorder : colors.scheduleInvalidBorder}`,
-                      }}
-                    >
-                      <ScheduleOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 12 }} />
-                      <Text code style={{ fontSize: 11, backgroundColor: 'transparent', padding: 0, color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f' }}>
-                        {cronInfo.expression}
-                      </Text>
-                      <Tooltip title={configContent} placement="top" overlayStyle={{ maxWidth: 450 }} overlayInnerStyle={{ backgroundColor: 'rgba(0,0,0,0.85)', padding: 12, borderRadius: 8 }}>
-                        <SettingOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 14, cursor: 'pointer' }} />
-                      </Tooltip>
-                    </div>
-                  )}
-                </div>
-                {/* Right: primary action buttons + switch - Modern style */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                  {source.quickActions.map((action) => {
-                    const isConfigButton = action.id.includes('configure') || action.id === 'update_fundamentals_data';
-                    return (
-                      <Tooltip key={action.id} title={isConfigButton ? action.name : action.description} placement="topRight">
-                        <Button
-                          type="default"
-                          size="middle"
-                          icon={isConfigButton ? <SettingOutlined /> : action.icon}
-                          onClick={() => showQuickActionModal(action, source)}
-                          disabled={action.id.includes('configure') ? false : !source.enabled}
-                          loading={source.status === 'running'}
-                          style={{
-                            borderRadius: isConfigButton ? 8 : 20,
-                            fontWeight: 500,
-                            height: 36,
-                            width: isConfigButton ? 36 : undefined,
-                            paddingLeft: isConfigButton ? 0 : 16,
-                            paddingRight: isConfigButton ? 0 : 16,
-                            border: `1.5px solid ${isDark ? '#2196F3' : '#1890ff'}`,
-                            color: isDark ? '#2196F3' : '#1890ff',
-                            background: 'transparent',
-                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                            boxShadow: 'none',
-                          }}
-                          onMouseEnter={(e) => {
-                            const btn = e.currentTarget as HTMLButtonElement;
-                            if (!btn.disabled) {
-                              btn.style.background = isDark ? '#2196F3' : '#1890ff';
-                              btn.style.color = '#fff';
-                              btn.style.transform = 'translateY(-2px) scale(1.02)';
-                              btn.style.boxShadow = isDark 
-                                ? '0 6px 20px rgba(33, 150, 243, 0.4)' 
-                                : '0 6px 20px rgba(24, 144, 255, 0.3)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            const btn = e.currentTarget as HTMLButtonElement;
-                            if (!btn.disabled) {
-                              btn.style.background = 'transparent';
-                              btn.style.color = isDark ? '#2196F3' : '#1890ff';
-                              btn.style.transform = 'translateY(0) scale(1)';
-                              btn.style.boxShadow = 'none';
-                            }
-                          }}
-                        >
-                          {isConfigButton ? null : action.name}
-                        </Button>
-                      </Tooltip>
-                    );
-                  })}
-                  {source.id !== 'eodhd_fundamentals' && (
-                    <Tooltip
-                      title={
-                        source.description.includes('Coming soon')
-                          ? 'This data source is coming soon'
-                          : !source.enabled && scheduledTasks.filter(task => {
-                              const taskType = task.type.toLowerCase();
-                              const sourceIdLower = source.id.toLowerCase();
-                              return (
-                                (sourceIdLower === 'eodhd_news' && taskType === 'eodhd_news') ||
-                                (sourceIdLower === 'watchlist_news' && taskType === 'watchlist_news') ||
-                                (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
-                                (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
-                                (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
-                                (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
-                                (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
-                                (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
-                                (sourceIdLower === 'market_data' && taskType === 'market_data') ||
-                                (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
-                                (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
-                                (sourceIdLower.includes('events') && taskType.includes('events')) ||
-                                (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators')))
-                              );
-                            }).length === 0
-                          ? 'Please configure data fetch strategy first'
-                          : undefined
-                      }
-                    >
-                      <div
-                        style={{
-                          position: 'relative',
-                          display: 'inline-block',
-                        }}
-                      >
-                        <Switch
-                          checked={source.enabled}
-                          onChange={(checked) => toggleDataSource(source.id, checked)}
-                          disabled={source.description.includes('Coming soon') || loading}
-                          loading={loading && source.status === 'running'}
-                          style={{
-                            backgroundColor: source.enabled 
-                              ? (isDark ? '#2196F3' : '#1890ff')
-                              : undefined,
-                            boxShadow: source.enabled 
-                              ? `0 0 12px ${isDark ? 'rgba(33, 150, 243, 0.4)' : 'rgba(24, 144, 255, 0.3)'}`
-                              : undefined,
-                          }}
-                        />
-                      </div>
-                    </Tooltip>
-                  )}
-                </div>
+              <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
+                定时拉取行情、新闻、订阅源、日历与基本面等外部数据
+              </Text>
+            </div>
+            <div style={{ padding: 0 }}>
+              {dataFetchSources.map((source, index) =>
+                renderSchedulerListItem(source, index, dataFetchSources.length)
+              )}
+            </div>
+          </Col>
+          <Col
+            xs={24}
+            lg={12}
+            style={{
+              padding: 0,
+              borderTop: isLgUp ? undefined : `1px solid ${colors.cardBorder}`,
+              borderLeft: isLgUp ? `1px solid ${colors.cardBorder}` : undefined,
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 24px 10px',
+                borderBottom: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <FileTextOutlined style={{ color: isDark ? '#52c41a' : '#389e0d', fontSize: 16 }} />
+                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>报告生成类</span>
               </div>
-            );
-          })}
-        </div>
+              <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
+                预生成作者/频道摘要，并可链接至日报等报告流程
+              </Text>
+            </div>
+            <div style={{ padding: 0 }}>
+              {reportGenerationSources.map((source, index) =>
+                renderSchedulerListItem(source, index, reportGenerationSources.length)
+              )}
+            </div>
+          </Col>
+        </Row>
       </div>
 
 

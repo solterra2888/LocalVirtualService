@@ -141,6 +141,25 @@ export interface TemplateStats {
   success_rate: number;
 }
 
+export interface UserTemplatePreference {
+  id: number;
+  module_code: string;
+  template_id: number;
+  template_code: string;
+  template_name: string;
+  scope: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ModuleInfo {
+  module_code: string;
+  module_name: string;
+  description: string;
+  configurable: boolean;
+  default_template_code: string | null;
+}
+
 // ==================== API服务 ====================
 
 class PromptTemplateService {
@@ -307,6 +326,35 @@ class PromptTemplateService {
       valid: errors.length === 0,
       errors
     };
+  }
+
+  // === 用户模板偏好 ===
+
+  async getModules(): Promise<ModuleInfo[]> {
+    const response = await api.get('/llm/prompts/modules');
+    return response.data.modules || [];
+  }
+
+  async getPreferences(): Promise<UserTemplatePreference[]> {
+    const response = await api.get('/llm/prompts/preferences');
+    return response.data.preferences || [];
+  }
+
+  async getPreference(moduleCode: string): Promise<UserTemplatePreference | null> {
+    const response = await api.get(`/llm/prompts/preferences/${moduleCode}`);
+    return response.data.preference || null;
+  }
+
+  async setPreference(moduleCode: string, templateId: number): Promise<{ success: boolean }> {
+    const response = await api.put(`/llm/prompts/preferences/${moduleCode}`, {
+      template_id: templateId,
+    });
+    return response.data;
+  }
+
+  async deletePreference(moduleCode: string): Promise<{ success: boolean }> {
+    const response = await api.delete(`/llm/prompts/preferences/${moduleCode}`);
+    return response.data;
   }
 }
 

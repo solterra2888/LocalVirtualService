@@ -85,4 +85,20 @@ export const twitterDailyReportsAPI = {
       return { success: false, error: error.message || 'Failed to get report' };
     }
   },
+
+  async generateReport(
+    reportDate: string,
+    force: boolean = false
+  ): Promise<ApiResponse<{ task_id: string; report_date: string }>> {
+    try {
+      const data = await api.post<ApiResponse<{ task_id: string; report_date: string }>>(
+        '/reports/twitter-daily/generate',
+        { report_date: reportDate, force }
+      );
+      return data;
+    } catch (error: any) {
+      console.error('Failed to generate report:', error);
+      return { success: false, error: error.message || 'Failed to generate report' };
+    }
+  },
 };

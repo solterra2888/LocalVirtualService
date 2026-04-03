@@ -66,10 +66,16 @@ class TwitterDailyReportService:
         logger.info("开始生成 Twitter Daily Report",
                      user_id=user_id, report_date=str(report_date))
 
+        # 解析用户 Phase 2 模板偏好
+        from backend.services.template_preference_service import TemplatePreferenceService
+        pref_service = TemplatePreferenceService()
+        phase2_template = pref_service.resolve_template_code(user_id, 'twitter_phase2')
+        logger.info(f"Phase2 模板解析完成: {phase2_template}", user_id=user_id)
+
         if not force:
             existing = self._get_existing_report(user_id, report_date)
             if existing and existing.get('status') == 'completed':
-                tpl_updated = self._get_template_updated_at(DEFAULT_PHASE2_TEMPLATE)
+                tpl_updated = self._get_template_updated_at(phase2_template)
                 report_updated = existing.get('updated_at')
                 if tpl_updated and report_updated:
                     if isinstance(report_updated, str):
@@ -180,7 +186,8 @@ class TwitterDailyReportService:
             phase2_start = time.time()
             report_content, _ = await self._phase2_synthesize(
                 renumbered_summaries, global_ref_map, top_tweets_text,
-                report_date, total_tweet_count
+                report_date, total_tweet_count,
+                template_code=phase2_template,
             )
             report_content = self._append_author_summaries_appendix(
                 report_content, renumbered_summaries, author_display_map
@@ -374,6 +381,7 @@ class TwitterDailyReportService:
         top_tweets: str,
         report_date: date,
         tweet_count: int,
+        template_code: str = DEFAULT_PHASE2_TEMPLATE,
     ) -> Tuple[str, Dict]:
         """Phase 2: 合成最终报告。返回 (report_markdown, usage_info)。"""
         all_summaries = '\n\n---\n\n'.join(
@@ -393,10 +401,10 @@ class TwitterDailyReportService:
 
         logger.info(f"[Phase 2] 输入: {len(author_summaries)} 位作者摘要 "
                     f"({len(all_summaries)} 字符), top_tweets={len(top_tweets)} 字符, "
-                    f"模板={DEFAULT_PHASE2_TEMPLATE}")
+                    f"模板={template_code}")
 
         report_content = await self._call_llm(
-            template_code=DEFAULT_PHASE2_TEMPLATE,
+            template_code=template_code,
             variables=variables,
             max_tokens=MAX_TOKENS_OUTPUT_PHASE2,
         )

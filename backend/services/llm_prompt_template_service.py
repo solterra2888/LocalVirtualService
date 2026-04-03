@@ -137,16 +137,22 @@ class LLMPromptTemplateService:
         category_id: Optional[int] = None,
         scope: Optional[str] = None,
         user_id: Optional[int] = None,
+        is_admin: bool = False,
         search: Optional[str] = None,
         active_only: bool = True
     ) -> List[Dict[str, Any]]:
         """
         获取模板列表
         
+        可见性规则：
+        - 普通用户：仅自己创建的模板
+        - 管理员：系统模板 + 自己创建的模板
+        
         Args:
             category_id: 分类ID过滤
             scope: 范围过滤（system/user/shared）
-            user_id: 用户ID（获取用户自己的模板）
+            user_id: 用户ID
+            is_admin: 是否为管理员
             search: 搜索关键词
             active_only: 是否只返回活跃模板
         
@@ -188,9 +194,12 @@ class LLMPromptTemplateService:
                 query += " AND t.scope = %s"
                 params.append(scope)
             elif user_id:
-                # 如果指定了用户，返回系统模板和该用户的模板
-                query += " AND (t.scope = 'system' OR (t.scope = 'user' AND t.created_by = %s) OR (t.scope = 'shared' AND t.is_public = true))"
-                params.append(user_id)
+                if is_admin:
+                    query += " AND (t.scope = 'system' OR t.created_by = %s)"
+                    params.append(user_id)
+                else:
+                    query += " AND t.created_by = %s"
+                    params.append(user_id)
             
             if search:
                 query += " AND (t.template_name ILIKE %s OR t.template_code ILIKE %s OR t.description ILIKE %s)"
