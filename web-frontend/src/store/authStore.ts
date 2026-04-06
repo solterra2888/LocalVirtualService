@@ -116,9 +116,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         
         if (verifyResponse.ok) {
           const verifyData = await verifyResponse.json();
-          console.log('Token验证成功，恢复用户状态:', user, '验证数据:', verifyData);
+          console.log('Token验证成功，验证数据:', verifyData);
+
+          let freshUser = user;
+          try {
+            const meResponse = await fetch(`${apiBaseURL}/auth/me`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            if (meResponse.ok) {
+              freshUser = await meResponse.json();
+              localStorage.setItem('user', JSON.stringify(freshUser));
+            }
+          } catch (e) {
+            console.warn('获取最新用户信息失败，使用缓存:', e);
+          }
+
           set({
-            user,
+            user: freshUser,
             token,
             isAuthenticated: true,
             isInitialized: true

@@ -127,7 +127,7 @@ async def get_my_profile(current_user=Depends(get_current_user)):
         is_admin=user_info.get('is_admin', False),
         created_at=user_info.get('created_at'),
         last_login=user_info.get('last_login'),
-        avatar_url=user_info.get('avatar_url')
+        avatar_url=resolve_avatar_url(user_info.get('avatar_url'))
     )
 
 

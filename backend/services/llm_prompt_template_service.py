@@ -193,6 +193,10 @@ class LLMPromptTemplateService:
             if scope:
                 query += " AND t.scope = %s"
                 params.append(scope)
+                # user-scope 额外限制只看自己的（无论是否 admin，私有模板不互见）
+                if scope == 'user' and user_id:
+                    query += " AND t.created_by = %s"
+                    params.append(user_id)
             elif user_id:
                 if is_admin:
                     query += " AND (t.scope = 'system' OR t.created_by = %s)"

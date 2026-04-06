@@ -31,6 +31,7 @@ import {
   DeleteOutlined,
   ExperimentOutlined,
   StarFilled,
+  StarOutlined,
   FileTextOutlined,
   DownloadOutlined,
   SearchOutlined,
@@ -153,6 +154,11 @@ const PromptTemplatesPage: React.FC = () => {
 
   const [modules, setModules] = useState<ModuleInfo[]>([]);
 
+  // 「设为我的默认」弹窗状态
+  const [setDefaultModalTemplate, setSetDefaultModalTemplate] = useState<PromptTemplateDetail | null>(null);
+  const [setDefaultModuleCode, setSetDefaultModuleCode] = useState<string | undefined>();
+  const [settingDefault, setSettingDefault] = useState(false);
+
   const [form] = Form.useForm();
   const [testForm] = Form.useForm();
 
@@ -191,36 +197,14 @@ const PromptTemplatesPage: React.FC = () => {
     }
   }, [searchText, scopeFilter]);
 
+  // loadData 只负责加载分类和模块元数据（模板统一由 loadTemplates 负责）
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [categoriesData, templatesData] = await Promise.all([
+      const [categoriesData] = await Promise.all([
         promptTemplateService.getCategories(),
-        promptTemplateService.listTemplates()
       ]);
       setCategories(categoriesData);
-
-      const detailedTemplates = await Promise.all(
-        templatesData.map(async (template) => {
-          try {
-            return await promptTemplateService.getTemplate(template.id);
-          } catch (error) {
-            console.warn(`Failed to load details for template ${template.id}:`, error);
-            return {
-              ...template,
-              user_prompt_template: '',
-              variables: {},
-              output_format: { type: 'text' },
-              tags: [],
-              example_input: {},
-              example_output: '',
-              is_public: false,
-              parent_template_id: undefined
-            } as PromptTemplateDetail;
-          }
-        })
-      );
-      setTemplates(detailedTemplates);
 
       try {
         const modulesData = await promptTemplateService.getModules();
@@ -235,10 +219,9 @@ const PromptTemplatesPage: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // searchText 或 scopeFilter 变化时重新拉取模板（含清空搜索时恢复全量列表）
   useEffect(() => {
-    if (searchText || scopeFilter !== 'all') {
-      loadTemplates();
-    }
+    loadTemplates();
   }, [searchText, scopeFilter, loadTemplates]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
@@ -256,7 +239,11 @@ const PromptTemplatesPage: React.FC = () => {
   const handleScopeChange = (scope: string) => {
     setCurrentScope(scope);
     if (scope === 'user') form.setFieldValue('is_public', false);
-    else if (scope === 'system') form.setFieldValue('is_public', true);
+    else if (scope === 'system') {
+      form.setFieldValue('is_public', true);
+      form.setFieldValue('admin_module_code', undefined);
+      setSelectedModuleCode(undefined);
+    }
   };
 
   const handleCreateTemplate = () => {
@@ -287,6 +274,11 @@ const PromptTemplatesPage: React.FC = () => {
         setAvailableModels(PROVIDER_MODEL_MAPPING[detail.recommended_provider] || []);
       }
 
+      // 从 template_code 或 category_code 推断 module_code（user-scope 模板通用逻辑）
+      const inferredModuleCode = Object.keys(MODULE_TO_CATEGORY).find(mc =>
+        detail.template_code?.startsWith(`user_${mc}_`)
+      ) || (detail.scope === 'user' ? detail.category_code : undefined);
+
       const formValues: any = {
         template_name: detail.template_name,
         template_code: detail.template_code,
@@ -303,13 +295,16 @@ const PromptTemplatesPage: React.FC = () => {
         is_active: detail.is_active,
         tags: detail.tags
       };
+
       if (!isAdmin) {
-        const moduleCode = Object.keys(MODULE_TO_CATEGORY).find(mc =>
-          detail.template_code?.startsWith(`user_${mc}_`)
-        ) || detail.category_code;
-        formValues.module_code = moduleCode;
-        setSelectedModuleCode(moduleCode);
+        // 非 Admin：回填 module_code 字段
+        formValues.module_code = inferredModuleCode;
+        setSelectedModuleCode(inferredModuleCode);
         setCurrentEditingCategoryId(detail.category_id);
+      } else if (detail.scope === 'user') {
+        // Admin 编辑 user-scope：回填 admin_module_code 字段，同步 selectedModuleCode
+        formValues.admin_module_code = inferredModuleCode;
+        setSelectedModuleCode(inferredModuleCode);
       }
       form.setFieldsValue(formValues);
 
@@ -323,30 +318,53 @@ const PromptTemplatesPage: React.FC = () => {
     try {
       const payload = { ...values };
 
-      if (!isAdmin) {
-        if (selectedModuleCode && !payload.category_id) {
-          const catCode = MODULE_TO_CATEGORY[selectedModuleCode] || selectedModuleCode;
+      // admin_module_code 是表单专用字段，不传给后端模板接口
+      const resolvedModuleCode = payload.admin_module_code ?? selectedModuleCode;
+      delete payload.admin_module_code;
+
+      // user-scope 模板（admin 或非 admin）走统一逻辑：
+      //   - category 从 module 映射自动填充
+      //   - template_code 自动生成（如未手动填写）
+      //   - scope 锁定为 'user'，is_public 锁定为 false
+      const isUserScope = !isAdmin || payload.scope === 'user';
+      if (isUserScope) {
+        if (resolvedModuleCode && !payload.category_id) {
+          const catCode = MODULE_TO_CATEGORY[resolvedModuleCode] || resolvedModuleCode;
           const matchedCat = categories.find(c => c.category_code === catCode);
           if (matchedCat) {
             payload.category_id = matchedCat.id;
           } else {
-            message.error(`No matching category for module "${selectedModuleCode}"`);
+            message.error(`No matching category for module "${resolvedModuleCode}"`);
             return;
           }
         }
         if (!editingTemplate && !payload.template_code) {
-          payload.template_code = `user_${selectedModuleCode}_${Date.now()}`;
+          payload.template_code = `user_${resolvedModuleCode}_${Date.now()}`;
         }
-        payload.scope = 'user';
-        payload.is_public = false;
+        if (!isAdmin) {
+          payload.scope = 'user';
+          payload.is_public = false;
+        }
       }
 
       if (editingTemplate) {
         await promptTemplateService.updateTemplate(editingTemplate.id, payload);
         message.success('Template updated successfully');
       } else {
-        await promptTemplateService.createTemplate(payload as TemplateCreateData);
-        message.success('Template created successfully');
+        const result = await promptTemplateService.createTemplate(payload as TemplateCreateData);
+
+        // 创建成功后自动绑定模板偏好（user-scope 且有 module）
+        if (result?.template_id && resolvedModuleCode && isUserScope) {
+          try {
+            await promptTemplateService.setPreference(resolvedModuleCode, result.template_id);
+            message.success(`Template created and set as your default for "${modules.find(m => m.module_code === resolvedModuleCode)?.module_name || resolvedModuleCode}"`);
+          } catch (prefErr: any) {
+            message.success('Template created successfully');
+            message.warning(`Could not auto-set preference: ${prefErr?.response?.data?.detail || prefErr?.message || 'Unknown error'}`);
+          }
+        } else {
+          message.success('Template created successfully');
+        }
       }
       setIsEditorVisible(false);
       loadTemplates();
@@ -419,6 +437,36 @@ const PromptTemplatesPage: React.FC = () => {
       message.success('Export successful');
     } catch (error: any) {
       message.error('Export failed: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  // 推断模板关联的 module_code（非 Admin 创建的模板遵循 user_{moduleCode}_timestamp 命名规则）
+  const inferModuleCode = (template: PromptTemplateDetail): string | undefined => {
+    for (const mc of Object.keys(MODULE_TO_CATEGORY)) {
+      if (template.template_code?.startsWith(`user_${mc}_`)) return mc;
+    }
+    return undefined;
+  };
+
+  const handleOpenSetDefault = (template: PromptTemplateDetail) => {
+    const inferred = inferModuleCode(template);
+    setSetDefaultModalTemplate(template);
+    setSetDefaultModuleCode(inferred);
+  };
+
+  const handleConfirmSetDefault = async () => {
+    if (!setDefaultModalTemplate || !setDefaultModuleCode) return;
+    setSettingDefault(true);
+    try {
+      await promptTemplateService.setPreference(setDefaultModuleCode, setDefaultModalTemplate.id);
+      const moduleName = modules.find(m => m.module_code === setDefaultModuleCode)?.module_name || setDefaultModuleCode;
+      message.success(`"${setDefaultModalTemplate.template_name}" is now your default for "${moduleName}"`);
+      setSetDefaultModalTemplate(null);
+      setSetDefaultModuleCode(undefined);
+    } catch (err: any) {
+      message.error(`Failed to set preference: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`);
+    } finally {
+      setSettingDefault(false);
     }
   };
 
@@ -513,6 +561,15 @@ const PromptTemplatesPage: React.FC = () => {
                   <Tooltip title="Export" key="export">
                     <DownloadOutlined onClick={() => handleExportTemplate(template)} />
                   </Tooltip>,
+                  // 「设为我的默认」：user-scope 模板（可配模块）显示此按钮
+                  ...(!isSystem ? [
+                    <Tooltip title="Set as my default for a module" key="set-default">
+                      <StarOutlined
+                        style={{ color: '#faad14' }}
+                        onClick={() => handleOpenSetDefault(template)}
+                      />
+                    </Tooltip>
+                  ] : []),
                   ...(deletable ? [
                     <Tooltip title="Delete" key="delete">
                       <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDeleteTemplate(template)} />
@@ -624,35 +681,100 @@ const PromptTemplatesPage: React.FC = () => {
             >
               {isAdmin ? (
                 <>
-                  {/* Admin: Template Name + Template Code */}
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
-                        name="template_name"
-                        rules={[{ required: true, message: 'Please enter template name' }]}
-                      >
-                        <Input placeholder="e.g.: News Summary Generation" style={EDITOR_FORM_CONTROL} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Template Code</Text>}
-                        name="template_code"
-                        rules={[{ required: true, message: 'Please enter template code' }]}
-                      >
-                        <Input
-                          placeholder="e.g.: news_summary_v1"
-                          disabled={!!editingTemplate}
-                          style={EDITOR_FORM_CONTROL}
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
+                  {/* Admin 始终显示 Scope 选择（编辑已有模板时只读） */}
+                  <Form.Item
+                    label={<Text style={{ fontSize: 14 }}>Visibility Scope</Text>}
+                    name="scope"
+                    initialValue="user"
+                    extra={
+                      currentScope === 'user'
+                        ? 'Private template — only visible to you. Use this for personal daily report styles.'
+                        : currentScope === 'system'
+                        ? 'System template — available to all users as a standard option.'
+                        : ''
+                    }
+                  >
+                    <Select
+                      style={EDITOR_FORM_CONTROL}
+                      onChange={handleScopeChange}
+                      disabled={!!editingTemplate}
+                    >
+                      <Option value="user">🔒 Private (Only Me)</Option>
+                      <Option value="system">🌟 System (All Users)</Option>
+                    </Select>
+                  </Form.Item>
 
-                  {/* Admin: Category + Scope */}
-                  <Row gutter={12}>
-                    <Col span={12}>
+                  {currentScope === 'user' ? (
+                    <>
+                      {/* Admin user-scope：与非 Admin 一致——选 Module，auto 生成 template_code */}
+                      <Row gutter={12}>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
+                            name="template_name"
+                            rules={[{ required: true, message: 'Please enter template name' }]}
+                          >
+                            <Input placeholder="e.g.: My Twitter Report Style" style={EDITOR_FORM_CONTROL} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<Text style={{ fontSize: 14 }}>Target Module</Text>}
+                            name="admin_module_code"
+                            rules={[{ required: !editingTemplate, message: 'Please select a target module' }]}
+                            extra="Choose which feature this template is for"
+                          >
+                            <Select
+                              placeholder="Select target module"
+                              style={EDITOR_FORM_CONTROL}
+                              disabled={!!editingTemplate}
+                              onChange={(value: string) => {
+                                setSelectedModuleCode(value);
+                                const catCode = MODULE_TO_CATEGORY[value] || value;
+                                const matchedCat = categories.find(c => c.category_code === catCode);
+                                if (matchedCat) {
+                                  setCurrentEditingCategoryId(matchedCat.id);
+                                  form.setFieldValue('category_id', matchedCat.id);
+                                }
+                              }}
+                            >
+                              {modules.filter(m => m.configurable).map(m => (
+                                <Option key={m.module_code} value={m.module_code}>
+                                  {m.module_name}
+                                </Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </>
+                  ) : (
+                    <>
+                      {/* Admin system-scope：完整控制——手动 Template Name + Template Code + Category */}
+                      <Row gutter={12}>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
+                            name="template_name"
+                            rules={[{ required: true, message: 'Please enter template name' }]}
+                          >
+                            <Input placeholder="e.g.: News Summary Generation" style={EDITOR_FORM_CONTROL} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            label={<Text style={{ fontSize: 14 }}>Template Code</Text>}
+                            name="template_code"
+                            rules={[{ required: true, message: 'Please enter template code' }]}
+                          >
+                            <Input
+                              placeholder="e.g.: news_summary_v1"
+                              disabled={!!editingTemplate}
+                              style={EDITOR_FORM_CONTROL}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
                       <Form.Item
                         label={<Text style={{ fontSize: 14 }}>Category</Text>}
                         name="category_id"
@@ -670,24 +792,8 @@ const PromptTemplatesPage: React.FC = () => {
                           ))}
                         </Select>
                       </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Visibility Scope</Text>}
-                        name="scope"
-                        initialValue="user"
-                        extra={
-                          currentScope === 'user' ? 'Only you can see and use this template' :
-                          currentScope === 'system' ? 'Available to all users as a standard template' : ''
-                        }
-                      >
-                        <Select style={EDITOR_FORM_CONTROL} onChange={handleScopeChange}>
-                          <Option value="user">🔒 Private (Only Me)</Option>
-                          <Option value="system">🌟 System (Admin Only)</Option>
-                        </Select>
-                      </Form.Item>
-                    </Col>
-                  </Row>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -1070,6 +1176,45 @@ const PromptTemplatesPage: React.FC = () => {
 
         {renderEditor()}
         {renderTestPanel()}
+
+        {/* 「设为我的默认」确认弹窗 */}
+        <Modal
+          title={<Space><StarOutlined style={{ color: '#faad14' }} />Set as My Default Template</Space>}
+          open={!!setDefaultModalTemplate}
+          onCancel={() => { setSetDefaultModalTemplate(null); setSetDefaultModuleCode(undefined); }}
+          onOk={handleConfirmSetDefault}
+          okText="Set as Default"
+          okButtonProps={{ loading: settingDefault, disabled: !setDefaultModuleCode }}
+          cancelText="Cancel"
+          styles={getModalStyles(themeMode)}
+          width={480}
+        >
+          {setDefaultModalTemplate && (
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <div>
+                <Text>Set <Text strong>"{setDefaultModalTemplate.template_name}"</Text> as your preferred template for:</Text>
+              </div>
+              <Select
+                style={{ width: '100%' }}
+                placeholder="Select module"
+                value={setDefaultModuleCode}
+                onChange={(v: string) => setSetDefaultModuleCode(v)}
+              >
+                {modules.filter(m => m.configurable).map(m => (
+                  <Option key={m.module_code} value={m.module_code}>
+                    {m.module_name}
+                    <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>— {m.description}</Text>
+                  </Option>
+                ))}
+              </Select>
+              <Alert
+                type="info"
+                showIcon
+                message="After setting, all your generated daily reports will use this template instead of the system default."
+              />
+            </Space>
+          )}
+        </Modal>
       </div>
     </ConfigProvider>
   );
