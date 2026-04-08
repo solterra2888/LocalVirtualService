@@ -1,0 +1,39 @@
+# ============================================================
+# YouTube Celery Worker systemd 用户服务
+# 安装：
+#   mkdir -p ~/.config/systemd/user
+#   cp youtube-worker.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now youtube-worker.service
+#
+# 前提：
+#   1. ssh-tunnel.service 已启动
+#   2. 项目已克隆到 ~/guanhetech 并安装好 Python 依赖
+#   3. .env 已按 .env.template 配置好
+# ============================================================
+
+[Unit]
+Description=YouTube Celery Worker (youtube_fetching queue)
+After=ssh-tunnel.service
+Requires=ssh-tunnel.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/guanhetech
+EnvironmentFile=%h/guanhetech/.env
+Environment=PYTHONPATH=%h/guanhetech
+
+ExecStart=%h/guanhetech/venv/bin/celery -A backend.celery_app worker \
+    --queues=youtube_fetching \
+    --concurrency=1 \
+    --max-tasks-per-child=10 \
+    --hostname=youtube-worker@%%h \
+    --loglevel=info \
+    --logfile=%h/guanhetech/logs/celery_youtube_worker.log \
+    --pidfile=%h/guanhetech/logs/celery_youtube_worker.pid
+
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

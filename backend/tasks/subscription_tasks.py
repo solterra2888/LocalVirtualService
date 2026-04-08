@@ -345,3 +345,51 @@ def fetch_youtube_subscription_task(
                 'videos_new': 0,
                 'videos_existing': 0,
             }
+
+
+@app.task(
+    name='fetch_all_youtube_subscriptions',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def fetch_all_youtube_subscriptions_task(self) -> Dict[str, Any]:
+    """
+    批量获取所有启用的 YouTube 订阅内容（Celery 任务）。
+
+    供 Scheduler 的 youtube_subscription 定时任务调用，
+    路由到 youtube_fetching 队列，由家用电脑的远程 Worker 执行，
+    以使用住宅 IP 绕过 YouTube 对云厂商 IP 的封锁。
+    """
+    try:
+        logger.info("[Celery Task] Starting batch YouTube fetch for all subscriptions")
+
+        from backend.services.youtube_subscription_service import YouTubeSubscriptionService
+
+        result = YouTubeSubscriptionService.fetch_all_subscriptions()
+
+        logger.info(
+            f"[Celery Task] Batch YouTube fetch completed: "
+            f"channels={result.get('channels_count', 0)}, "
+            f"new={result.get('videos_new', 0)}, "
+            f"existing={result.get('videos_existing', 0)}"
+        )
+        return result
+
+    except Exception as exc:
+        logger.error(f"[Celery Task] Batch YouTube fetch failed: {str(exc)}", exc_info=True)
+
+        if self.request.retries < self.max_retries:
+            logger.warning(f"[Celery Task] Retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc)
+        else:
+            logger.error("[Celery Task] Max retries reached, batch YouTube fetch failed permanently")
+            return {
+                'success': False,
+                'message': f'Failed after {self.max_retries} retries: {str(exc)}',
+                'channels_count': 0,
+                'videos_new': 0,
+                'videos_existing': 0,
+            }
