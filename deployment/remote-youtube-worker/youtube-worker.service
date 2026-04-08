@@ -14,8 +14,8 @@
 
 [Unit]
 Description=YouTube Celery Worker (youtube_fetching queue)
-After=ssh-tunnel.service
-Requires=ssh-tunnel.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

@@ -1,5 +1,7 @@
 # ============================================================
-# SSH Tunnel systemd 用户服务
+# 【可选】SSH 隧道 — 仅在不开放公网 Redis/PG 端口时使用
+# 默认部署见 DEPLOY_UBUNTU_VMWARE.md（公网直连 + 防火墙限源）
+#
 # 安装：
 #   mkdir -p ~/.config/systemd/user
 #   cp ssh-tunnel.service ~/.config/systemd/user/
