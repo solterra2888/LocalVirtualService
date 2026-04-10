@@ -468,7 +468,7 @@
   margin-top: 8px;
 }
 
-/* 全屏文件详情：AI Analysis（默认）/ Original / Info */
+/* 全屏文件详情：Original（默认）/ AI Analysis / Info */
 .mobile-source-file-detail {
   position: fixed;
   inset: 0;

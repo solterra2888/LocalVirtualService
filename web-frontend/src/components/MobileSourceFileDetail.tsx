@@ -50,7 +50,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const { message } = App.useApp();
   const { addTask, updateTaskStatus: updateGlobalTaskStatus } = useFileProcessing();
 
-  const [detailTab, setDetailTab] = useState<DetailTab>('analysis');
+  const [detailTab, setDetailTab] = useState<DetailTab>('original');
   const [selectedFileForView, setSelectedFileForView] = useState<unknown>(null);
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
@@ -63,7 +63,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const [ibReportDataForReview, setIbReportDataForReview] = useState<IBReportData | null>(null);
 
   useEffect(() => {
-    setDetailTab('analysis');
+    setDetailTab('original');
     setSelectedFileForView(null);
     setAiAnalysisData(null);
     setIbReportDataForReview(null);
@@ -72,9 +72,9 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const handleIBReportDetected = useCallback((data: IBReportData | null) => {
     setIbReportDataForReview(data);
     if (data) {
-      setDetailTab(t => (t === 'analysis' ? 'review' : t));
+      setDetailTab(t => (t === 'original' || t === 'analysis' ? 'review' : t));
     } else {
-      setDetailTab(t => (t === 'review' ? 'analysis' : t));
+      setDetailTab(t => (t === 'review' ? 'original' : t));
     }
   }, []);
 
@@ -153,13 +153,13 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
     () =>
       ibReportDataForReview
         ? [
-            { label: 'Trade Review', value: 'review' as DetailTab },
             { label: 'Original', value: 'original' as DetailTab },
+            { label: 'Trade Review', value: 'review' as DetailTab },
             { label: 'Info', value: 'info' as DetailTab },
           ]
         : [
-            { label: 'AI Analysis', value: 'analysis' as DetailTab },
             { label: 'Original', value: 'original' as DetailTab },
+            { label: 'AI Analysis', value: 'analysis' as DetailTab },
             { label: 'Info', value: 'info' as DetailTab },
           ],
     [ibReportDataForReview]
