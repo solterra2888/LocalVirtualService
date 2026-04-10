@@ -102,7 +102,6 @@ class LocalLLMAnalysisService:
                 template_id=self.template_id,
                 template_code=self.template_code,
                 variables_data=variables,
-                user_id=user_id
             )
             
             # 3. 构建消息
