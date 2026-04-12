@@ -20,7 +20,8 @@ from backend.schemas.file import (
     FileDetailResponse,
     FileType,
     ProcessingParamsRequest,
-    WebClipRequest
+    WebClipRequest,
+    WebLinkRequest
 )
 from backend.schemas.file_tag import (
     FileTagCreate,
@@ -2897,6 +2898,54 @@ a {{ color: #1677ff; }}
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Web clip upload failed: {str(e)}"
+        )
+
+
+@router.post("/upload-web-link", summary="Scrape web page by URL")
+async def upload_web_link(
+    request: WebLinkRequest,
+    current_user = Depends(get_current_user)
+):
+    """
+    接收 URL，服务端抓取网页正文 + 内嵌图片，存储到 OSS 并提取文本。
+    功能等同于 Chrome Extension 的 Web Clipper，但无需安装浏览器扩展，
+    适用于移动端和任意浏览器。仅支持公开（无需登录）的网页。
+    """
+    from backend.services.web_scraper_service import WebScraperService
+    from backend.tasks.file_tasks import scrape_and_process_web_link_task
+
+    try:
+        url = request.url.strip()
+        if not WebScraperService.validate_url(url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid URL. Please provide a valid HTTP/HTTPS link."
+            )
+
+        username = current_user.username if hasattr(current_user, 'username') else 'guest'
+
+        info(f"Received Web Link: url={url}, user={username}", source="api")
+
+        task = scrape_and_process_web_link_task.apply_async(
+            args=(url, username),
+            queue='file_processing'
+        )
+
+        info(f"Web Link task started: task_id={task.id}, url={url}", source="api")
+
+        return {
+            "task_id": task.id,
+            "url": url,
+            "message": "Web page scraping started. You can track the progress in the task status."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"Web Link upload failed: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Web Link processing failed: {str(e)}"
         )
 
 

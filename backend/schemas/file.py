@@ -27,6 +27,11 @@ class WebClipRequest(BaseModel):
     source_url: str = Field(..., min_length=1, description="原始网页 URL")
 
 
+class WebLinkRequest(BaseModel):
+    """Web Link 网页抓取请求"""
+    url: str = Field(..., min_length=1, max_length=2000, description="目标网页 URL")
+
+
 class ProcessingStatus(str, Enum):
     """处理状态枚举"""
     PENDING = "pending"

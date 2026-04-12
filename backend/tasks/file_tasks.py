@@ -1839,6 +1839,278 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
         raise Exception(error_msg)
 
 
+@app.task(bind=True, name='scrape_and_process_web_link', queue='file_processing')
+def scrape_and_process_web_link_task(self, url, username):
+    """
+    服务端网页抓取：抓取 URL → Readability 提取正文 → 图片 base64 内嵌 → 上传 OSS → 写入 DB。
+    替代 Chrome Extension 在浏览器端完成的全部工作。
+    """
+    import re as _re
+    from backend.services.web_scraper_service import WebScraperService
+    from backend.services.oss_service import OSSService
+    from backend.database.db_manager import DatabaseManager
+
+    processing_stats_id = None
+    file_detail_id = None
+
+    try:
+        # 防御性清理：若 Redis 中残留该 task_id 的损坏 FAILURE 状态（如上次崩溃后重新投递），
+        # 先删除再写入，避免 update_state 内部读取旧状态时级联 ValueError。
+        try:
+            from backend.celery_app import app as _celery_app
+            _celery_app.backend.delete(self.request.id)
+        except Exception:
+            pass
+
+        # ── 10→40%: 抓取网页 + 提取正文（httpx 先试，内容不足自动 Playwright fallback）──
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 10, 'message': 'Fetching web page...'}
+        )
+        info(f"Web Link task {self.request.id}: fetching {url}", source="celery_web_link")
+
+        def _on_status(msg):
+            current_task.update_state(
+                state='PROGRESS',
+                meta={'status': 'processing', 'progress': 25, 'message': msg}
+            )
+
+        title, article_html, used_playwright = WebScraperService.smart_fetch(url, on_status=_on_status)
+
+        if used_playwright:
+            info(f"Web Link task {self.request.id}: used Playwright for {url}", source="celery_web_link")
+
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 40, 'message': 'Article content extracted.'}
+        )
+
+        if not article_html or len(article_html.strip()) < 20:
+            raise ValueError("Failed to extract article content from the page. The page may require login or have anti-scraping protection.")
+
+        # ── 50%: 下载图片并内嵌 ──
+        def _img_progress(done, total):
+            pct = 50 + int(20 * done / max(total, 1))
+            current_task.update_state(
+                state='PROGRESS',
+                meta={'status': 'processing', 'progress': pct, 'message': f'Downloading images ({done}/{total})...'}
+            )
+
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 50, 'message': 'Downloading and embedding images...'}
+        )
+        article_html = WebScraperService.inline_images(article_html, url, on_progress=_img_progress)
+
+        # ── 70%: 构建完整 HTML 并上传 OSS ──
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 70, 'message': 'Uploading to storage...'}
+        )
+        full_html = WebScraperService.build_full_html(title, url, article_html)
+        html_bytes = full_html.encode('utf-8')
+        file_size_mb = len(html_bytes) / (1024 * 1024)
+
+        oss_service = OSSService()
+        if not oss_service.is_configured():
+            raise ValueError("OSS service not configured")
+
+        slug = _re.sub(r'[^\w\u4e00-\u9fff\-]', '', title.replace(' ', '-'))
+        slug = slug[:80] or 'web-link'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{slug}_{timestamp}.html"
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        oss_object_name = f"{oss_service.web_clip_prefix}{username}/{date_str}/{filename}"
+
+        upload_result = oss_service.upload_bytes(
+            object_name=oss_object_name,
+            data=html_bytes,
+            content_type='text/html; charset=utf-8',
+            content_disposition='inline'
+        )
+        if not upload_result["success"]:
+            raise ValueError(f"OSS upload failed: {upload_result.get('error')}")
+
+        # ── 80%: 写入 DB ──
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 80, 'message': 'Saving to database...'}
+        )
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+        conn = db_manager.get_connection()
+        if not conn:
+            raise ValueError("Database connection failed")
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO processing_stats
+            (timestamp, files_processed, files_failed, total_time,
+             total_file_processing_time, total_ai_time, task_name,
+             "user", total_tokens, total_price, upload_params,
+             final_report, rc_agent_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            datetime.now(), 1, 0, 0, 0, 0,
+            'Web Link',
+            username,
+            0, 0,
+            json.dumps({"source_url": url, "title": title}),
+            '', 'processing'
+        ))
+        processing_stats_id = cursor.fetchone()[0]
+
+        cursor.execute("""
+            INSERT INTO file_processing_details
+            (processing_stats_id, filename, file_type, file_size_mb,
+             processing_time, ai_time, content_length, status,
+             total_tokens, cost, content, created_at, task_id,
+             original_file_path, file_storage_type, oss_bucket)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            processing_stats_id,
+            filename,
+            'web',
+            file_size_mb,
+            0, 0, 0,
+            'processing',
+            0, 0, '',
+            datetime.now(),
+            self.request.id,
+            oss_object_name,
+            'oss',
+            upload_result.get("bucket")
+        ))
+        file_detail_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+
+        # ── 90%: 提取纯文本 ──
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'processing', 'progress': 90, 'message': 'Extracting text content...'}
+        )
+        plain_text = WebScraperService.html_to_plain_text(full_html)
+
+        conn2 = db_manager.get_connection()
+        if conn2:
+            cursor2 = conn2.cursor()
+            cursor2.execute("""
+                UPDATE file_processing_details
+                SET content = %s, content_length = %s, status = 'completed'
+                WHERE id = %s
+            """, (plain_text, len(plain_text), file_detail_id))
+            cursor2.execute("""
+                UPDATE processing_stats
+                SET rc_agent_status = 'completed'
+                WHERE id = %s
+            """, (processing_stats_id,))
+            conn2.commit()
+            conn2.close()
+
+        # ── 100%: 完成 + 自动打标签 ──
+        info(f"Web Link task completed: url={url}, file_detail_id={file_detail_id}, "
+             f"content_length={len(plain_text)}", source="celery_web_link")
+
+        trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+
+        return {
+            'status': 'completed',
+            'file_detail_id': file_detail_id,
+            'content_length': len(plain_text),
+            'title': title,
+            'source_url': url,
+        }
+
+    except Exception as e:
+        error_msg = f"Web Link scraping failed: {str(e)}"
+        error(f"WebLink {self.request.id}: {error_msg}", source="celery_web_link")
+
+        try:
+            import re as _re_err
+            db_conn_params = get_database_config()
+            from backend.database.db_manager import DatabaseManager as _DM
+            db_manager = _DM(db_conn_params)
+            conn = db_manager.get_connection()
+            if conn:
+                cursor = conn.cursor()
+
+                if file_detail_id:
+                    cursor.execute("""
+                        UPDATE file_processing_details
+                        SET status = 'failed', error_message = %s
+                        WHERE id = %s
+                    """, (str(e), file_detail_id))
+                if processing_stats_id:
+                    cursor.execute("""
+                        UPDATE processing_stats
+                        SET rc_agent_status = 'failed'
+                        WHERE id = %s
+                    """, (processing_stats_id,))
+
+                # 如果还没创建 DB 记录就失败了（如反爬/登录墙在 smart_fetch 中触发），
+                # 仍创建记录并标记 failed，这样文件卡片能显示 'Failed' 状态
+                if not processing_stats_id:
+                    from urllib.parse import urlparse as _urlparse
+                    domain = _urlparse(url).netloc or 'unknown'
+                    cursor.execute("""
+                        INSERT INTO processing_stats
+                        (timestamp, files_processed, files_failed, total_time,
+                         total_file_processing_time, total_ai_time, task_name,
+                         "user", total_tokens, total_price, upload_params,
+                         final_report, rc_agent_status)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (
+                        datetime.now(), 0, 1, 0, 0, 0,
+                        'Web Link',
+                        username,
+                        0, 0,
+                        json.dumps({"source_url": url}),
+                        '', 'failed'
+                    ))
+                    processing_stats_id = cursor.fetchone()[0]
+
+                    slug = _re_err.sub(r'[^\w\u4e00-\u9fff\-]', '', domain.replace('.', '-'))
+                    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    fail_filename = f"WebLink-{slug}_{timestamp_str}.html"
+
+                    cursor.execute("""
+                        INSERT INTO file_processing_details
+                        (processing_stats_id, filename, file_type, file_size_mb,
+                         processing_time, ai_time, content_length, status,
+                         total_tokens, cost, content, created_at, task_id,
+                         error_message)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (
+                        processing_stats_id,
+                        fail_filename,
+                        'web',
+                        0,
+                        0, 0, 0,
+                        'failed',
+                        0, 0, '',
+                        datetime.now(),
+                        self.request.id,
+                        str(e),
+                    ))
+                    file_detail_id = cursor.fetchone()[0]
+
+                conn.commit()
+                conn.close()
+        except Exception:
+            pass
+
+        current_task.update_state(
+            state='PROGRESS',
+            meta={'status': 'failed', 'progress': 0, 'message': error_msg}
+        )
+        return {'status': 'failed', 'error': error_msg}
+
+
 def _find_node_binary() -> str:
     """查找系统中的 Node.js 可执行文件路径"""
     import shutil

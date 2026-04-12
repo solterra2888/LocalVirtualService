@@ -56,6 +56,7 @@ import { getExecutionStatusDisplay } from '../utils/rcAgentStatus';
 import UploadFilesModal from '../components/UploadFilesModal';
 import UploadAudioModal from '../components/UploadAudioModal';
 import UploadYouTubeLinkModal from '../components/UploadYouTubeLinkModal';
+import UploadWebLinkModal from '../components/UploadWebLinkModal';
 import ReportTickerTags, { parseReportTickers } from '../components/ReportTickerTags';
 import './MobileSourcesPage.css';
 
@@ -162,6 +163,7 @@ const MobileSourcesInner: React.FC = () => {
   const [showUploadDocModal, setShowUploadDocModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showYouTubeModal, setShowYouTubeModal] = useState(false);
+  const [showWebLinkModal, setShowWebLinkModal] = useState(false);
 
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [shareTargetExecution, setShareTargetExecution] = useState<TaskExecution | null>(null);
@@ -1211,7 +1213,7 @@ const MobileSourcesInner: React.FC = () => {
           body: { ...getModalStyles(themeMode).body, padding: '24px 16px' },
         }}
       >
-        {/* 与 PC `Layout.tsx` 上传选项一致：Upload Files / Upload Audio / YouTube Link */}
+        {/* 与 PC `Layout.tsx` 上传选项一致：Upload Files / Upload Audio / YouTube Link / Web Link */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <Button
             type="text"
@@ -1267,6 +1269,24 @@ const MobileSourcesInner: React.FC = () => {
           >
             <span style={{ marginLeft: '12px' }}>YouTube Link</span>
           </Button>
+          <Button
+            type="text"
+            size="large"
+            icon={<GlobalOutlined style={{ fontSize: '18px' }} />}
+            onClick={() => {
+              setUploadSheetOpen(false);
+              setShowWebLinkModal(true);
+            }}
+            style={uploadOptionButtonStyle}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = isDark ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = isDark ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Web Link</span>
+          </Button>
         </div>
       </Modal>
 
@@ -1284,6 +1304,11 @@ const MobileSourcesInner: React.FC = () => {
       <UploadYouTubeLinkModal
         visible={showYouTubeModal}
         onCancel={() => setShowYouTubeModal(false)}
+        themeMode={themeMode}
+      />
+      <UploadWebLinkModal
+        visible={showWebLinkModal}
+        onCancel={() => setShowWebLinkModal(false)}
         themeMode={themeMode}
       />
 

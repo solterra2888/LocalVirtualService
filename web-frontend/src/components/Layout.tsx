@@ -26,6 +26,7 @@ import {
   ReadOutlined,
   EditOutlined,
   ProfileOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -39,6 +40,7 @@ import TimeDisplay from './TimeDisplay';
 import UploadFilesModal from './UploadFilesModal';
 import UploadAudioModal from './UploadAudioModal';
 import UploadYouTubeLinkModal from './UploadYouTubeLinkModal';
+import UploadWebLinkModal from './UploadWebLinkModal';
 import { TaskProgressPopover } from './TaskProgressPopover';
 import { userAvatarLetter, USER_AVATAR_LETTER_BG } from '../utils/userAvatar';
 
@@ -82,6 +84,7 @@ const Layout: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
+  const [showUploadWebLinkModal, setShowUploadWebLinkModal] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const openProfileModal = () => setProfileModalOpen(true);
 
@@ -527,6 +530,37 @@ const Layout: React.FC = () => {
           >
             <span style={{ marginLeft: '12px' }}>YouTube Link</span>
           </Button>
+          <Button
+            type="text"
+            size="large"
+            icon={<GlobalOutlined style={{ fontSize: '18px' }} />}
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowUploadWebLinkModal(true);
+            }}
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+              border: 'none',
+              borderRadius: '26px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Web Link</span>
+          </Button>
         </div>
       </Modal>
 
@@ -548,6 +582,13 @@ const Layout: React.FC = () => {
       <UploadYouTubeLinkModal
         visible={showUploadYouTubeModal}
         onCancel={() => setShowUploadYouTubeModal(false)}
+        themeMode={themeMode}
+      />
+
+      {/* Upload Web Link Modal */}
+      <UploadWebLinkModal
+        visible={showUploadWebLinkModal}
+        onCancel={() => setShowUploadWebLinkModal(false)}
         themeMode={themeMode}
       />
 

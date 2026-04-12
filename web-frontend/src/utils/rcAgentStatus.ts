@@ -31,6 +31,13 @@ export function getCompletedPipelineLabel(firstFileType: string | undefined): {
       tooltip: 'Pre-AI pipeline finished; AI analysis may still be pending',
     };
   }
+  if (t === 'web') {
+    return {
+      short: 'Scraped',
+      detail: 'Web Page Scraped',
+      tooltip: 'Web page content scraped; AI analysis may still be pending',
+    };
+  }
   return {
     short: 'Parsed',
     detail: 'Document Parsed',

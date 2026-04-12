@@ -214,6 +214,19 @@ export const filesAPI = {
     });
   },
 
+  // 提交 Web Link 并异步抓取处理
+  uploadWebLink: async (url: string): Promise<{
+    task_id: string;
+    url: string;
+    message: string;
+  }> => {
+    return api.post<{
+      task_id: string;
+      url: string;
+      message: string;
+    }>('/files/upload-web-link', { url });
+  },
+
   // 上传文档并异步处理（推荐，避免 OSS 慢连接阻塞）
   uploadAndProcessDocument: async (
     file: File,

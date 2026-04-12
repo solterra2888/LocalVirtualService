@@ -6,7 +6,7 @@ import type { TaskStatusResponse } from '../services/files';
 export interface TaskInfo {
   taskId: string;
   fileName: string;
-  fileType: 'document' | 'audio' | 'youtube';
+  fileType: 'document' | 'audio' | 'youtube' | 'weblink';
   status: TaskStatusResponse;
   startTime: number;
 }
@@ -14,7 +14,7 @@ export interface TaskInfo {
 interface FileProcessingContextType {
   // 新增：多任务管理
   tasks: Map<string, TaskInfo>;
-  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube') => void;
+  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink') => void;
   updateTaskStatus: (taskId: string, status: Partial<TaskStatusResponse> & { status: string; progress: number; files_processed: number; total_files: number; logs: Array<{ timestamp: string; level: string; message: string; }> }) => void;
   removeTask: (taskId: string) => void;
   clearAllTasks: () => void;
@@ -130,7 +130,7 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   // 新增：添加任务
-  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube') => {
+  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink') => {
     setTasks(prev => {
       const newTasks = new Map(prev);
       newTasks.set(taskId, {
@@ -215,11 +215,13 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
       setTasks(prev => {
         if (!prev.has(id)) {
           const newTasks = new Map(prev);
-          let fileType: 'document' | 'audio' | 'youtube' = 'document';
+          let fileType: 'document' | 'audio' | 'youtube' | 'weblink' = 'document';
           if (id.startsWith('audio-')) {
             fileType = 'audio';
           } else if (id.startsWith('youtube-')) {
             fileType = 'youtube';
+          } else if (id.startsWith('weblink-')) {
+            fileType = 'weblink';
           }
           newTasks.set(id, {
             taskId: id,
