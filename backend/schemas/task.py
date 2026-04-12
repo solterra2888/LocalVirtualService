@@ -71,6 +71,7 @@ class TaskExecutionResponse(BaseModel):
     )
     folder_id: Optional[int] = Field(None, description="文件夹 ID（首个文件的 folder_id）")
     folder_name: Optional[str] = Field(None, description="文件夹名称")
+    first_display_name: Optional[str] = Field(None, description="AI 自动生成的文件显示名称")
     
     class Config:
         from_attributes = True

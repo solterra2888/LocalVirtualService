@@ -400,7 +400,10 @@ async def get_task_executions(
                (SELECT ff.name FROM file_processing_details fpd_fn
                 JOIN file_folders ff ON ff.id = fpd_fn.folder_id
                 WHERE fpd_fn.processing_stats_id = ps.id
-                ORDER BY fpd_fn.id ASC LIMIT 1) as folder_name
+                ORDER BY fpd_fn.id ASC LIMIT 1) as folder_name,
+               (SELECT display_name FROM file_processing_details
+                WHERE processing_stats_id = ps.id
+                ORDER BY id ASC LIMIT 1) as first_display_name
         FROM processing_stats ps
         {where_clause}
         ORDER BY ps.id DESC 
@@ -463,6 +466,7 @@ async def get_task_executions(
                 ticker_tags=ticker_tags_map.get(stat[0]),
                 folder_id=stat[20] if len(stat) > 20 else None,
                 folder_name=stat[21] if len(stat) > 21 else None,
+                first_display_name=stat[22] if len(stat) > 22 else None,
             )
             for stat in stats
         ]
@@ -507,7 +511,10 @@ async def get_task_execution(
                (SELECT task_id FROM file_processing_details 
                 WHERE processing_stats_id = ps.id 
                 ORDER BY id ASC LIMIT 1) as first_task_id,
-               ps.upload_params
+               ps.upload_params,
+               (SELECT display_name FROM file_processing_details
+                WHERE processing_stats_id = ps.id
+                ORDER BY id ASC LIMIT 1) as first_display_name
         FROM processing_stats ps
         WHERE ps.id = %s
         """, (execution_id,))
@@ -561,6 +568,7 @@ async def get_task_execution(
             upload_params=json.loads(stat[17]) if len(stat) > 17 and stat[17] else None,
             access_type=access_type,
             ticker_tags=ticker_tags_map.get(stat[0]),
+            first_display_name=stat[18] if len(stat) > 18 else None,
         )
         
     finally:
@@ -758,7 +766,7 @@ async def rename_execution_file(
             )
         
         cursor.execute(
-            "UPDATE file_processing_details SET filename = %s WHERE id = %s",
+            "UPDATE file_processing_details SET filename = %s, display_name = NULL WHERE id = %s",
             (filename, file_id)
         )
         conn.commit()
@@ -832,7 +840,7 @@ async def get_task_execution_details(
         cursor.execute("""
         SELECT id, filename, file_type, file_size_mb, processing_time,
                ai_time, content_length, status, total_tokens, cost,
-               error_message, content, created_at, original_file_path
+               error_message, content, created_at, original_file_path, display_name
         FROM file_processing_details 
         WHERE processing_stats_id = %s
         ORDER BY id
@@ -859,7 +867,7 @@ async def get_task_execution_details(
             "files": [
                 {
                     "id": file_detail[0],
-                    "filename": file_detail[1],
+                    "filename": (file_detail[14] if len(file_detail) > 14 and file_detail[14] else None) or file_detail[1],
                     "file_type": file_detail[2],
                     "file_size_mb": file_detail[3],
                     "processing_time": file_detail[4],
@@ -871,7 +879,8 @@ async def get_task_execution_details(
                     "error_message": file_detail[10],
                     "content": file_detail[11],
                     "created_at": file_detail[12],
-                    "original_file_path": file_detail[13] if len(file_detail) > 13 else None
+                    "original_file_path": file_detail[13] if len(file_detail) > 13 else None,
+                    "display_name": file_detail[14] if len(file_detail) > 14 else None
                 }
                 for file_detail in files_details
             ]

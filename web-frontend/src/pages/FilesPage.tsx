@@ -272,6 +272,7 @@ interface TaskExecution {
     shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
   } | null;
   ticker_tags?: string[] | null;
+  first_display_name?: string | null;
 }
 
 interface ProcessingParams {
@@ -1200,10 +1201,13 @@ const FilesPageInner: React.FC = () => {
         // 使用 ref 避免依赖项问题
         loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
         
-        // 延迟一段时间后再次刷新，确保数据同步
-        setTimeout(() => {
-          loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
-        }, 5000); // 等待5秒后再次刷新，确保数据完全同步
+        // 延迟再次刷新：DB 写入与后台 auto_name_v1 可能晚于任务状态 completed
+        const postAsyncDelays = [5000, 15000, 40000];
+        postAsyncDelays.forEach((ms) => {
+          setTimeout(() => {
+            loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
+          }, ms);
+        });
       }
     } catch (error) {
       console.error('failed to get task status:', error);
@@ -1297,7 +1301,7 @@ const FilesPageInner: React.FC = () => {
   // 音频AI分析 - 触发分析
   const handleAnalyzeAudio = async (record: TaskExecution, templateVariables?: Record<string, any>) => {
     const executionId = Number(record.id);
-    const fileName = record.first_filename || record.task_name || 'Audio file';
+    const fileName = record.first_display_name || record.first_filename || record.task_name || 'Audio file';
     
     try {
       setAudioAnalyzingIds(prev => new Set(prev).add(record.id));
@@ -1393,7 +1397,7 @@ const FilesPageInner: React.FC = () => {
   // 文档AI分析 - 触发分析（需要指定模板ID，可选 template_variables）
   const handleAnalyzeDocument = async (record: TaskExecution, templateId: number, templateVariables?: Record<string, any>) => {
     const executionId = Number(record.id);
-    const fileName = record.first_filename || record.task_name || 'Document';
+    const fileName = record.first_display_name || record.first_filename || record.task_name || 'Document';
     
     try {
       setDocAnalyzingIds(prev => new Set(prev).add(record.id));
@@ -1654,13 +1658,13 @@ const FilesPageInner: React.FC = () => {
       setTaskExecutions(prev =>
         prev.map(exec =>
           exec.id === executionToRename.id
-            ? { ...exec, first_filename: newFilename }
+            ? { ...exec, first_filename: newFilename, first_display_name: null }
             : exec
         )
       );
       if (selectedExecutionForView?.id === executionToRename.id) {
         setSelectedExecutionForView(prev =>
-          prev ? { ...prev, first_filename: newFilename } : null
+          prev ? { ...prev, first_filename: newFilename, first_display_name: null } : null
         );
       }
       message.success('Renamed successfully');
@@ -2347,9 +2351,10 @@ const FilesPageInner: React.FC = () => {
       ellipsis: true,
       render: (_: any, record: TaskExecution) => {
         const isShared = record.access_type === 'shared';
-        if (record.first_filename) {
+        const displayName = record.first_display_name || record.first_filename;
+        if (displayName) {
           return (
-            <Tooltip title={`${record.first_filename}${isShared && record.shared_by ? ` (shared by ${record.shared_by})` : ''}`} placement="topLeft">
+            <Tooltip title={`${displayName}${isShared && record.shared_by ? ` (shared by ${record.shared_by})` : ''}`} placement="topLeft">
               <div style={{ 
                 color: '#1890ff', 
                 cursor: 'pointer',
@@ -2363,7 +2368,7 @@ const FilesPageInner: React.FC = () => {
                 gap: 4
               }}>
                 <FileTextOutlined style={{ marginRight: 6, fontSize: '14px', flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{record.first_filename}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
                 {isShared && <Tag color="purple" style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px', flexShrink: 0 }}>Shared</Tag>}
               </div>
             </Tooltip>
@@ -2936,7 +2941,7 @@ const FilesPageInner: React.FC = () => {
   };
   const filteredByType = taskExecutions.filter(exec => matchesFileType(exec.first_file_type, fileTypeFilter));
   const filteredExecutions = searchType === 'file_name' && searchQuery.trim()
-    ? filteredByType.filter(exec => (exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    ? filteredByType.filter(exec => (exec.first_display_name || exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
     : filteredByType;
 
   const hasActiveSourcesSearch =
@@ -3556,7 +3561,7 @@ const FilesPageInner: React.FC = () => {
                         />
                       )}
                       <div className="files-list-item-title">
-                        {execution.first_filename || `${execution.files_processed} file(s)`}
+                        {execution.first_display_name || execution.first_filename || `${execution.files_processed} file(s)`}
                       </div>
                       <Dropdown
                         menu={{ items: cardMenuItems }}
@@ -4018,7 +4023,7 @@ const FilesPageInner: React.FC = () => {
         >
           <div style={{ marginBottom: 16 }}>
             <Text strong>File: </Text>
-            <Text>{shareTargetExecution?.first_filename || 'Unknown'}</Text>
+            <Text>{shareTargetExecution?.first_display_name || shareTargetExecution?.first_filename || 'Unknown'}</Text>
           </div>
 
           <div style={{ marginBottom: 16 }}>
@@ -4138,6 +4143,7 @@ export const ExecutionDetailsPanel: React.FC<{
     let pollCount = 0;
     const MAX_POLL_COUNT = 48; // 最多轮询4分钟（5秒 * 48 = 240秒）
     let isMounted = true;
+    const displayNameRefreshTimeouts: NodeJS.Timeout[] = [];
     
     const loadFileAndTags = async () => {
       if (!isMounted) return;
@@ -4157,6 +4163,14 @@ export const ExecutionDetailsPanel: React.FC<{
           const prevStatus = fileStatusRef.current;
           if (prevStatus === 'processing' && (firstFileStatus === 'completed' || firstFileStatus === 'failed')) {
             onExecutionRefresh?.();
+            // 主任务已完成，但 auto_name_v1 等 Celery 任务稍后写入 display_name，再刷新左侧卡片列表
+            [8000, 22000, 50000].forEach((ms) => {
+              displayNameRefreshTimeouts.push(
+                setTimeout(() => {
+                  if (isMounted) onExecutionRefresh?.();
+                }, ms)
+              );
+            });
           }
           fileStatusRef.current = firstFileStatus;
           
@@ -4233,6 +4247,7 @@ export const ExecutionDetailsPanel: React.FC<{
     // 清理函数：组件卸载时停止轮询
     return () => {
       isMounted = false;
+      displayNameRefreshTimeouts.forEach(clearTimeout);
       if (pollInterval) {
         clearInterval(pollInterval);
       }
@@ -4244,6 +4259,7 @@ export const ExecutionDetailsPanel: React.FC<{
     const isAiProcessing = execution.rc_agent_status === 'processing' || execution.rc_agent_status === 'analyzing';
     if (!isAiProcessing) return;
     let isMounted = true;
+    const postAsyncTimers: NodeJS.Timeout[] = [];
     const pollRcAgent = async () => {
       if (!isMounted) return;
       try {
@@ -4251,6 +4267,13 @@ export const ExecutionDetailsPanel: React.FC<{
         if (!isMounted) return;
         if (fresh.rc_agent_status === 'success' || fresh.rc_agent_status === 'failed') {
           onExecutionRefresh?.();
+          [8000, 22000, 50000].forEach((ms) => {
+            postAsyncTimers.push(
+              setTimeout(() => {
+                if (isMounted) onExecutionRefresh?.();
+              }, ms)
+            );
+          });
           return;
         }
         setTimeout(pollRcAgent, 5000);
@@ -4259,7 +4282,11 @@ export const ExecutionDetailsPanel: React.FC<{
       }
     };
     const t = setTimeout(pollRcAgent, 5000);
-    return () => { isMounted = false; clearTimeout(t); };
+    return () => {
+      isMounted = false;
+      clearTimeout(t);
+      postAsyncTimers.forEach(clearTimeout);
+    };
   }, [execution.id, execution.rc_agent_status, onExecutionRefresh]);
 
   const loadTags = async (fid: number) => {
@@ -4413,7 +4440,7 @@ export const ExecutionDetailsPanel: React.FC<{
         >
           <Descriptions.Item label="Agent Name">{getDisplayAgentName(execution.task_name)}</Descriptions.Item>
           <Descriptions.Item label="User">{execution.username}</Descriptions.Item>
-          <Descriptions.Item label="Document Name">{execution.first_filename ?? '-'}</Descriptions.Item>
+          <Descriptions.Item label="Document Name">{execution.first_display_name || execution.first_filename || '-'}</Descriptions.Item>
           <Descriptions.Item label="Document Type">
             {execution.first_file_type ? <Tag color="blue">{execution.first_file_type.toUpperCase()}</Tag> : '-'}
           </Descriptions.Item>

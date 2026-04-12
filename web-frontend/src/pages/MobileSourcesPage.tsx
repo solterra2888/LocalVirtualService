@@ -446,7 +446,7 @@ const MobileSourcesInner: React.FC = () => {
   const q = searchQuery.trim().toLowerCase();
   const filteredExecutions =
     searchType === 'file_name' && q
-      ? taskExecutions.filter(exec => (exec.first_filename || '').toLowerCase().includes(q))
+      ? taskExecutions.filter(exec => (exec.first_display_name || exec.first_filename || '').toLowerCase().includes(q))
       : taskExecutions;
 
   const handleOpenShareModal = async (execution: TaskExecution) => {
@@ -525,7 +525,7 @@ const MobileSourcesInner: React.FC = () => {
       await tasksAPI.renameExecutionFile(executionToRename.id, newFilename);
       setTaskExecutions(prev =>
         prev.map(exec =>
-          exec.id === executionToRename.id ? { ...exec, first_filename: newFilename } : exec
+          exec.id === executionToRename.id ? { ...exec, first_filename: newFilename, first_display_name: null } : exec
         )
       );
       message.success('Renamed');
@@ -918,7 +918,7 @@ const MobileSourcesInner: React.FC = () => {
                       />
                     )}
                     <div className="mobile-sources-card-title" style={{ color: themeColors.text }}>
-                      {execution.first_filename || 'Untitled'}
+                      {execution.first_display_name || execution.first_filename || 'Untitled'}
                     </div>
                     <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="bottomRight">
                       <Button type="text" size="small" icon={<EllipsisOutlined />} onClick={e => e.stopPropagation()} />
@@ -1326,7 +1326,7 @@ const MobileSourcesInner: React.FC = () => {
       >
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">File: </Text>
-          <Text>{shareTargetExecution?.first_filename || '—'}</Text>
+          <Text>{shareTargetExecution?.first_display_name || shareTargetExecution?.first_filename || '—'}</Text>
         </div>
         <Select
           mode="multiple"

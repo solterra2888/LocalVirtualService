@@ -134,6 +134,9 @@ class DatabaseManager:
             # 迁移：为file_processing_details表添加asr_with_diarization字段
             self._migrate_add_asr_with_diarization(cursor)
             
+            # 迁移：为file_processing_details表添加display_name字段（AI自动命名）
+            self._migrate_add_display_name(cursor)
+            
             # 创建 file_shares 表（文件分享）
             self._create_file_shares_table(cursor)
             
@@ -207,6 +210,24 @@ class DatabaseManager:
             print(f"迁移asr_with_diarization字段时出错: {str(e)}")
             # 迁移失败不应该阻止整个表创建过程
     
+    def _migrate_add_display_name(self, cursor):
+        """迁移：为file_processing_details表添加display_name字段（AI自动命名）"""
+        try:
+            cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='file_processing_details' AND column_name='display_name'
+            """)
+            
+            if not cursor.fetchone():
+                cursor.execute("""
+                ALTER TABLE file_processing_details 
+                ADD COLUMN display_name TEXT DEFAULT NULL
+                """)
+                print("已添加display_name字段到file_processing_details表")
+        except Exception as e:
+            print(f"迁移display_name字段时出错: {str(e)}")
+
     def _create_file_folders_table(self, cursor):
         """创建 file_folders 表（一级文件夹功能）"""
         try:
@@ -538,6 +559,9 @@ class DatabaseManager:
             # 创建文件夹相关表 + 迁移 folder_id 字段
             self._create_file_folders_table(conn.cursor())
             self._migrate_add_folder_id_to_file_processing_details(conn.cursor())
+            
+            # 迁移 display_name 字段（AI自动命名）
+            self._migrate_add_display_name(conn.cursor())
             
             conn.commit()
             conn.close()

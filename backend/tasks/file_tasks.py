@@ -21,6 +21,12 @@ def get_tagging_task():
     return tag_file_content_task
 
 
+def get_naming_task():
+    """延迟导入自动命名任务"""
+    from backend.tasks.naming_tasks import name_file_content_task
+    return name_file_content_task
+
+
 def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
     """
     触发自动打标签任务
@@ -55,6 +61,39 @@ def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
             info(f"已触发自动打标签任务: file_id={file_id}, delay={delay}s", source="auto_tagging")
         except Exception as e:
             error(f"触发打标签任务失败: file_id={file_id}, error={str(e)}", source="auto_tagging")
+
+
+def trigger_auto_naming(file_detail_ids, username=None, delay=2):
+    """
+    触发自动命名任务（与 trigger_auto_tagging 并行执行，互不依赖）
+
+    Args:
+        file_detail_ids: 文件detail ID列表或单个ID
+        username: 用户名
+        delay: 延迟执行时间（秒），默认2秒，确保DB事务已提交
+    """
+    auto_name_enabled = os.getenv('AUTO_NAME_ENABLED', 'true').lower() == 'true'
+    if not auto_name_enabled:
+        info("自动命名功能已禁用", source="auto_naming")
+        return
+
+    if not isinstance(file_detail_ids, list):
+        file_detail_ids = [file_detail_ids]
+
+    if not file_detail_ids:
+        return
+
+    name_task = get_naming_task()
+
+    for file_id in file_detail_ids:
+        try:
+            name_task.apply_async(
+                args=(file_id, username),
+                countdown=delay
+            )
+            info(f"已触发自动命名任务: file_id={file_id}, delay={delay}s", source="auto_naming")
+        except Exception as e:
+            error(f"触发自动命名任务失败: file_id={file_id}, error={str(e)}", source="auto_naming")
 
 @app.task(bind=True, name='process_files_async', queue='file_processing')
 def process_files_task(self, file_paths, task_info, custom_inputs, params, username):
@@ -197,8 +236,9 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                 if file_ids:
                     info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_task")
                     trigger_auto_tagging(file_ids, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+                    trigger_auto_naming(file_ids, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_task")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_task")
         
         return final_result
         
@@ -450,11 +490,12 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
         }
         info(f"音频分析任务 {self.request.id} 完成: {final_result}", source="celery_audio_analysis")
         
-        # 🏷️ 触发自动打标签任务
+        # 🏷️ 触发自动打标签 + 自动命名任务
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_audio_analysis")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_audio_analysis")
         
         return final_result
 
@@ -791,11 +832,12 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         }
         info(f"文档分析任务 {self.request.id} 完成: {final_result}", source="celery_doc_analysis")
         
-        # 🏷️ 触发自动打标签任务
+        # 🏷️ 触发自动打标签 + 自动命名任务
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_doc_analysis")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_doc_analysis")
         
         return final_result
 
@@ -1081,11 +1123,12 @@ def reparse_document_task(self, file_id, params, username):
         
         info(f"文档重新解析任务 {self.request.id} 完成: file_id={file_id}", source="celery_reparse")
         
-        # 🏷️ 触发自动打标签任务
+        # 🏷️ 触发自动打标签 + 自动命名任务
         try:
             trigger_auto_tagging(file_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_naming(file_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_reparse")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_reparse")
         
         return final_result
     
@@ -1403,11 +1446,12 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         
         info(f"音频上传和转写任务 {self.request.id} 完成: {filename}", source="celery_audio_upload")
         
-        # 🏷️ 触发自动打标签任务
+        # 🏷️ 触发自动打标签 + 自动命名任务
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_audio_upload")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_audio_upload")
         
         return final_result
         
@@ -1679,10 +1723,11 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                 conn.close()
                 
                 if file_ids:
-                    info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_doc_upload")
+                    info(f"触发自动打标签/命名: {len(file_ids)} 个文件", source="celery_doc_upload")
                     trigger_auto_tagging(file_ids, username=username, delay=2)
+                    trigger_auto_naming(file_ids, username=username, delay=2)
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="celery_doc_upload")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_doc_upload")
         
         info(f"文档上传和处理任务完成 {self.request.id}, file={filename}", 
              source="celery_doc_upload")
@@ -1799,6 +1844,7 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
              source="celery_web_clip")
 
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
 
         return {
             'status': 'completed',
@@ -2010,11 +2056,12 @@ def scrape_and_process_web_link_task(self, url, username):
             conn2.commit()
             conn2.close()
 
-        # ── 100%: 完成 + 自动打标签 ──
+        # ── 100%: 完成 + 自动打标签/命名 ──
         info(f"Web Link task completed: url={url}, file_detail_id={file_detail_id}, "
              f"content_length={len(plain_text)}", source="celery_web_link")
 
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
 
         return {
             'status': 'completed',
@@ -2491,13 +2538,14 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     except Exception:
                         pass
 
-        # ── Step 4: 触发自动打标签 ─────────────────────────────────────────
-        update_progress(progress=92, log_message='Triggering auto-tagging...')
+        # ── Step 4: 触发自动打标签 + 自动命名 ──────────────────────────────
+        update_progress(progress=92, log_message='Triggering auto-tagging & naming...')
         try:
             trigger_auto_tagging([file_id], username, delay=2)
-            info(f"已触发自动打标签: file_id={file_id}", source="youtube_task")
+            trigger_auto_naming([file_id], username, delay=2)
+            info(f"已触发自动打标签/命名: file_id={file_id}", source="youtube_task")
         except Exception as e:
-            error(f"触发自动打标签失败: {str(e)}", source="youtube_task")
+            error(f"触发自动打标签/命名失败: {str(e)}", source="youtube_task")
 
         update_progress(status='completed', progress=100,
                        log_message='YouTube processing completed!')

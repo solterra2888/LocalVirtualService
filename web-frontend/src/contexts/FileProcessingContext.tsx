@@ -35,6 +35,8 @@ const FileProcessingContext = createContext<FileProcessingContextType | undefine
 const POLL_INTERVAL_MS = 8000;
 const AUTO_REMOVE_DELAY_MS = 3000;
 const SOURCE_LIST_REFRESH_DELAY_MS = 1500;
+/** auto_name_v1 / content_tag_v1 在主任务结束后异步执行，完成后需再拉列表 */
+const SOURCE_LIST_POST_ASYNC_DELAYS_MS = [6000, 18000, 45000] as const;
 
 // ── localStorage 持久化 ──────────────────────────────────────────────────────
 const STORAGE_KEY = 'rc_processing_tasks_v1';
@@ -188,9 +190,12 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
       }
       return newTasks;
     });
-    // 任务完成或失败时立即刷新 Source 列表
+    // 任务完成或失败时立即刷新 Source 列表；后台自动命名/打标签稍后才写入 DB，再延迟刷新几次
     if (isCompleted) {
       onSourceListRefreshRef.current?.();
+      SOURCE_LIST_POST_ASYNC_DELAYS_MS.forEach((ms) => {
+        setTimeout(() => onSourceListRefreshRef.current?.(), ms);
+      });
     }
   }, []);
 

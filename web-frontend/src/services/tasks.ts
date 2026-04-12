@@ -45,6 +45,7 @@ export interface TaskExecution {
   ticker_tags?: string[] | null;
   folder_id?: number | null;
   folder_name?: string | null;
+  first_display_name?: string | null;
 }
 
 export interface TaskCreateRequest {

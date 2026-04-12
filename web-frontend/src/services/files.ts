@@ -67,6 +67,7 @@ export interface FileDetail {
   original_file_path?: string;
   access_type?: string;
   shared_by?: string;
+  display_name?: string;
 }
 
 export interface FileValidationResponse {

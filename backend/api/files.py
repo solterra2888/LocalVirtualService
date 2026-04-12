@@ -983,7 +983,7 @@ async def get_task_files(
         cursor.execute("""
         SELECT id, filename, file_type, file_size_mb, processing_time,
                ai_time, content_length, status, total_tokens, cost,
-               content, created_at, original_file_path
+               content, created_at, original_file_path, display_name
         FROM file_processing_details 
         WHERE task_id = %s
         ORDER BY created_at DESC
@@ -993,18 +993,19 @@ async def get_task_files(
         for row in cursor.fetchall():
             files.append(FileDetailResponse(
                 id=row[0],
-                task_id=task_id,  # 添加缺失的task_id字段
+                task_id=task_id,
                 filename=row[1],
                 file_type=safe_file_type_conversion(row[2]),
-                file_size=row[3],  # 修正字段名：file_size_mb -> file_size
+                file_size=row[3],
                 processing_time=row[4],
                 ai_time=row[5],
                 content_length=row[6],
                 status=row[7],
                 total_tokens=row[8],
                 cost=row[9],
-                error_message=row[10],  # 修正字段名：content -> error_message
-                created_at=row[11]
+                error_message=row[10],
+                created_at=row[11],
+                display_name=row[13] if len(row) > 13 else None
             ))
         
         conn.close()
@@ -1073,7 +1074,8 @@ async def get_files(
                    fpd.ai_time, fpd.content_length, fpd.status, fpd.total_tokens, fpd.cost, 
                    fpd.content, fpd.created_at, fpd.original_file_path,
                    {access_type_expr} as access_type,
-                   {shared_by_expr} as shared_by
+                   {shared_by_expr} as shared_by,
+                   fpd.display_name
             FROM file_processing_details fpd
             JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
             {where_clause}
@@ -1100,7 +1102,8 @@ async def get_files(
                 created_at=row[11],
                 original_file_path=row[12],
                 access_type=row[13],
-                shared_by=row[14]
+                shared_by=row[14],
+                display_name=row[15]
             ))
         
         conn.close()
@@ -1454,7 +1457,7 @@ async def get_original_file_info(
         
         cursor.execute("""
             SELECT filename, file_type, file_size_mb, original_file_path, created_at, 
-                   content, asr_with_diarization, file_storage_type, oss_bucket
+                   content, asr_with_diarization, file_storage_type, oss_bucket, display_name
             FROM file_processing_details 
             WHERE id = %s
         """, (file_id,))
@@ -1463,7 +1466,7 @@ async def get_original_file_info(
         conn.close()
         
         if result:
-            filename = result[0]
+            raw_filename = result[0]
             file_type = result[1]
             file_size_mb = result[2]
             original_file_path = result[3]
@@ -1472,6 +1475,8 @@ async def get_original_file_info(
             asr_with_diarization = result[6]
             storage_type = result[7] or 'local'  # 兼容旧数据
             oss_bucket = result[8]
+            display_name = result[9] if len(result) > 9 else None
+            filename = display_name or raw_filename
             
             # 根据存储类型生成 file_url
             if storage_type == 'oss':
@@ -1538,12 +1543,13 @@ async def get_original_file_info(
                 "file_type": file_type,
                 "file_size_mb": file_size_mb,
                 "original_file_path": original_file_path,
-                "file_url": file_url,  # 返回HTTP可访问的URL（OSS: 签名URL, Local: /serve）
-                "storage_type": storage_type,  # 新增：存储类型
-                "oss_bucket": oss_bucket,  # 新增：OSS bucket
+                "file_url": file_url,
+                "storage_type": storage_type,
+                "oss_bucket": oss_bucket,
                 "created_at": created_at,
-                "content": content,  # 转写文本内容
-                "asr_with_diarization": asr_data  # 结构化的ASR数据（说话人分离）
+                "content": content,
+                "asr_with_diarization": asr_data,
+                "display_name": display_name
             }
         else:
             raise HTTPException(

@@ -190,7 +190,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
 
   const handleAnalyzeAudio = async (record: TaskExecution, templateVariables?: Record<string, unknown>) => {
     const executionId = Number(record.id);
-    const fileName = record.first_filename || record.task_name || 'Audio file';
+    const fileName = record.first_display_name || record.first_filename || record.task_name || 'Audio file';
     try {
       setAudioAnalyzingIds(prev => new Set(prev).add(record.id));
       message.loading({ content: 'Submitting audio analysis task...', key: 'audioAnalyze', duration: 0 });
@@ -273,7 +273,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
     templateVariables?: Record<string, unknown>
   ) => {
     const executionId = Number(record.id);
-    const fileName = record.first_filename || record.task_name || 'Document';
+    const fileName = record.first_display_name || record.first_filename || record.task_name || 'Document';
     try {
       setDocAnalyzingIds(prev => new Set(prev).add(record.id));
       message.loading({ content: 'Submitting document analysis task...', key: 'docAnalyze', duration: 0 });
@@ -348,7 +348,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
     }
   };
 
-  const title = execution.first_filename || 'Source';
+  const title = execution.first_display_name || execution.first_filename || 'Source';
 
   return (
     <div

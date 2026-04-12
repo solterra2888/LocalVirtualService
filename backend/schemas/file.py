@@ -103,6 +103,7 @@ class FileDetailResponse(BaseModel):
     original_file_path: Optional[str] = None
     access_type: Optional[str] = None
     shared_by: Optional[str] = None
+    display_name: Optional[str] = None
     
     class Config:
         from_attributes = True

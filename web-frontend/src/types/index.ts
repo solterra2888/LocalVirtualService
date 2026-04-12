@@ -69,6 +69,7 @@ export interface FileDetail {
   error_message?: string;
   created_at: string;
   original_file_path?: string;
+  display_name?: string;
 }
 
 export interface ProcessingParams {

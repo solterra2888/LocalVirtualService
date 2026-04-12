@@ -469,3 +469,94 @@ def get_tags_stats(
         }
     finally:
         conn.close()
+
+
+# ── 自动命名相关端点 ────────────────────────────────────────────
+
+
+@router.post("/auto-name")
+def auto_name_file(
+    request: RetagRequest,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    手动触发单个文件的自动命名（使用 auto_name_v1 模板）
+
+    复用 RetagRequest schema（file_id + force）
+    """
+    from backend.tasks.naming_tasks import name_file_content_task
+
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, filename FROM file_processing_details WHERE id = %s
+        """, (request.file_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+        filename = row[1]
+        conn.close()
+
+        username = current_user.username if current_user else None
+        task = name_file_content_task.apply_async(
+            args=(request.file_id, username, request.force),
+            countdown=1
+        )
+
+        logger.info(f"已提交自动命名任务: file_id={request.file_id}, task_id={task.id}")
+
+        return {
+            'task_id': task.id,
+            'status': 'pending',
+            'progress': 0,
+            'message': f'已提交自动命名任务: {filename}',
+            'file_id': request.file_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"提交自动命名任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"提交自动命名任务失败: {str(e)}")
+
+
+@router.post("/auto-name-batch")
+def auto_name_files_batch(
+    request: BatchRetagRequest,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量自动命名文件
+
+    复用 BatchRetagRequest schema（file_ids + force）
+    """
+    from backend.tasks.naming_tasks import batch_name_files_task
+
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="文件ID列表为空")
+
+    username = current_user.username if current_user else None
+
+    task = batch_name_files_task.apply_async(
+        args=(request.file_ids, username, request.force),
+        countdown=1
+    )
+
+    logger.info(
+        f"已提交批量自动命名任务: {len(request.file_ids)} 个文件, task_id={task.id}"
+    )
+
+    return {
+        'task_id': task.id,
+        'status': 'pending',
+        'total_files': len(request.file_ids),
+        'message': f'已提交批量自动命名任务: {len(request.file_ids)} 个文件'
+    }
