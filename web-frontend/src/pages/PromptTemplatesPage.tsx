@@ -23,7 +23,8 @@ import {
   Statistic,
   Collapse,
   ConfigProvider,
-  theme as antdTheme
+  theme as antdTheme,
+  Grid,
 } from 'antd';
 import { 
   PlusOutlined,
@@ -39,7 +40,9 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
-  LockOutlined
+  LockOutlined,
+  RobotOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import promptTemplateService, {
   PromptCategory,
@@ -78,6 +81,9 @@ const THEME_COLORS = {
   },
 } as const;
 
+const listRowHoverBg = (isDark: boolean, colors: (typeof THEME_COLORS)[keyof typeof THEME_COLORS]) =>
+  isDark ? ('hoverBg' in colors && colors.hoverBg ? colors.hoverBg : 'rgba(255, 255, 255, 0.06)') : 'rgba(0, 0, 0, 0.02)';
+
 const CARD_STYLE_BEHANCE = {
   borderRadius: 12,
   boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
@@ -95,6 +101,7 @@ const EDITOR_FORM_TEXTAREA = { fontSize: 14 };
 const { Option } = Select;
 const { TextArea } = Input;
 const { Panel } = Collapse;
+const { useBreakpoint } = Grid;
 
 const PROVIDER_MODEL_MAPPING: Record<string, string[]> = {
   'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext',
@@ -125,6 +132,7 @@ const CODE_BOUND_TEMPLATES = new Set([
   'youtube_daily_phase2_default',
   'audio_analysis_v1',
   'content_tag_v1',
+  'auto_name_v1',
 ]);
 
 const PromptTemplatesPage: React.FC = () => {
@@ -133,13 +141,14 @@ const PromptTemplatesPage: React.FC = () => {
   const isAdmin = user?.is_admin || false;
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
+  const screens = useBreakpoint();
+  const isLgUp = !!screens?.lg;
   
   const [categories, setCategories] = useState<PromptCategory[]>([]);
   const [templates, setTemplates] = useState<PromptTemplateDetail[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplateDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchText, setSearchText] = useState<string>('');
-  const [scopeFilter, setScopeFilter] = useState<string>('all');
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [currentScope, setCurrentScope] = useState<string>('user');
@@ -168,7 +177,6 @@ const PromptTemplatesPage: React.FC = () => {
     try {
       const params: any = {};
       if (searchText) params.search = searchText;
-      if (scopeFilter !== 'all') params.scope = scopeFilter;
 
       const templatesData = await promptTemplateService.listTemplates(params);
       const detailedTemplates = await Promise.all(
@@ -195,7 +203,7 @@ const PromptTemplatesPage: React.FC = () => {
     } catch (error: any) {
       message.error('Failed to load templates: ' + (error.message || 'Unknown error'));
     }
-  }, [searchText, scopeFilter]);
+  }, [searchText]);
 
   // loadData 只负责加载分类和模块元数据（模板统一由 loadTemplates 负责）
   const loadData = useCallback(async () => {
@@ -219,10 +227,10 @@ const PromptTemplatesPage: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // searchText 或 scopeFilter 变化时重新拉取模板（含清空搜索时恢复全量列表）
+  // searchText 变化时重新拉取模板（含清空搜索时恢复全量列表）
   useEffect(() => {
     loadTemplates();
-  }, [searchText, scopeFilter, loadTemplates]);
+  }, [searchText, loadTemplates]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
@@ -508,9 +516,129 @@ const PromptTemplatesPage: React.FC = () => {
     return template.created_by === user?.id;
   };
 
-  // ── Card grid ─────────────────────────────────────────────────────────
+  // ── Two-column list (system | user), aligned with Scheduler Management layout ──
 
-  const renderTemplateCards = () => {
+  const renderTemplateListItem = (
+    template: PromptTemplateDetail,
+    index: number,
+    columnLength: number
+  ) => {
+    const isSystem = template.scope === 'system';
+    const codeBound = isCodeBound(template);
+    const editable = canEditTemplate(template);
+    const deletable = canDeleteTemplate(template);
+
+    return (
+      <div
+        key={template.id}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 16,
+          padding: '16px 24px',
+          borderBottom: index < columnLength - 1 ? `1px solid ${colors.cardBorder}` : 'none',
+          backgroundColor: 'transparent',
+          transition: 'background-color 0.2s',
+          opacity: template.is_active ? 1 : 0.72,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = listRowHoverBg(isDark, colors);
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+      >
+        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{template.template_name}</span>
+            {template.is_default && <StarFilled style={{ color: '#faad14' }} />}
+            {codeBound ? (
+              <Tooltip title="Code-bound: this template is hardcoded in backend services and cannot be deleted">
+                <Tag color="blue" icon={<LockOutlined />}>Code-bound</Tag>
+              </Tooltip>
+            ) : isSystem ? (
+              <Tag color="orange">System</Tag>
+            ) : (
+              <Tag color="green">User</Tag>
+            )}
+            {!template.is_active && <Tag color="red">Inactive</Tag>}
+            {template.recommended_model && (
+              <Tag style={{ fontSize: 11 }}>{template.recommended_model}</Tag>
+            )}
+          </div>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 6, lineHeight: 1.45 }}>
+            {template.description || 'No description'}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, fontSize: 12, color: colors.textSecondary }}>
+            <span>{template.category_name || '—'}</span>
+            <Tooltip title="Usage count">
+              <span>{template.usage_count ?? 0} uses</span>
+            </Tooltip>
+            {template.success_rate != null && (
+              <Tooltip title="Success rate">
+                <span style={{ color: template.success_rate >= 90 ? '#52c41a' : '#faad14' }}>
+                  {template.success_rate.toFixed(0)}%
+                </span>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <Tooltip title={editable ? 'Edit' : 'View'}>
+            <Button
+              type="text"
+              size="small"
+              icon={editable ? <EditOutlined /> : <EyeOutlined />}
+              onClick={() => handleEditTemplate(template)}
+              style={{ color: colors.textSecondary }}
+            />
+          </Tooltip>
+          <Tooltip title="Test">
+            <Button
+              type="text"
+              size="small"
+              icon={<ExperimentOutlined />}
+              onClick={() => handleTestTemplate(template)}
+              style={{ color: colors.textSecondary }}
+            />
+          </Tooltip>
+          <Tooltip title="Export">
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={() => handleExportTemplate(template)}
+              style={{ color: colors.textSecondary }}
+            />
+          </Tooltip>
+          {!isSystem && (
+            <Tooltip title="Set as my default for a module">
+              <Button
+                type="text"
+                size="small"
+                icon={<StarOutlined style={{ color: '#faad14' }} />}
+                onClick={() => handleOpenSetDefault(template)}
+              />
+            </Tooltip>
+          )}
+          {deletable && (
+            <Tooltip title="Delete">
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDeleteTemplate(template)}
+              />
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTemplateLists = () => {
     const filteredTemplates = templates.filter(t => {
       if (searchText &&
         !t.template_name.toLowerCase().includes(searchText.toLowerCase()) &&
@@ -520,124 +648,134 @@ const PromptTemplatesPage: React.FC = () => {
       return true;
     });
 
+    const systemTemplates = filteredTemplates.filter(t => t.scope === 'system');
+    const userPromptTemplates = filteredTemplates.filter(t => t.scope === 'user' || t.scope === 'shared');
+
     if (filteredTemplates.length === 0) {
       return <Empty description="No templates found" style={{ padding: '60px 0' }} />;
     }
 
-    return (
-      <Row gutter={[16, 16]}>
-        {filteredTemplates.map(template => {
-          const isSystem = template.scope === 'system';
-          const codeBound = isCodeBound(template);
-          const editable = canEditTemplate(template);
-          const deletable = canDeleteTemplate(template);
+    const listShellStyle = {
+      ...cardStyleBehance,
+      marginBottom: 0,
+      overflow: 'hidden' as const,
+    };
 
-          return (
-            <Col xs={24} sm={12} lg={8} key={template.id}>
-              <Card
-                hoverable
-                style={{
-                  ...cardStyleBehance,
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  ...(codeBound && { borderLeft: `3px solid ${isDark ? '#2196F3' : '#1890ff'}` }),
-                  ...(isSystem && !codeBound && { borderLeft: `3px solid ${isDark ? '#faad14' : '#fa8c16'}` }),
-                }}
-                bodyStyle={{ padding: '16px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}
-                actions={[
-                  editable ? (
-                    <Tooltip title="Edit" key="edit">
-                      <EditOutlined onClick={() => handleEditTemplate(template)} />
-                    </Tooltip>
-                  ) : (
-                    <Tooltip title="View" key="view">
-                      <EyeOutlined onClick={() => handleEditTemplate(template)} />
-                    </Tooltip>
-                  ),
-                  <Tooltip title="Test" key="test">
-                    <ExperimentOutlined onClick={() => handleTestTemplate(template)} />
-                  </Tooltip>,
-                  <Tooltip title="Export" key="export">
-                    <DownloadOutlined onClick={() => handleExportTemplate(template)} />
-                  </Tooltip>,
-                  // 「设为我的默认」：user-scope 模板（可配模块）显示此按钮
-                  ...(!isSystem ? [
-                    <Tooltip title="Set as my default for a module" key="set-default">
-                      <StarOutlined
-                        style={{ color: '#faad14' }}
-                        onClick={() => handleOpenSetDefault(template)}
-                      />
-                    </Tooltip>
-                  ] : []),
-                  ...(deletable ? [
-                    <Tooltip title="Delete" key="delete">
-                      <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDeleteTemplate(template)} />
-                    </Tooltip>
-                  ] : []),
-                ]}
-              >
-                {/* Header: name + tags */}
-                <div style={{ marginBottom: 8 }}>
-                  <Space wrap size={4} style={{ marginBottom: 4 }}>
-                    <Text strong style={{ fontSize: 15 }}>{template.template_name}</Text>
-                    {template.is_default && <StarFilled style={{ color: '#faad14' }} />}
-                  </Space>
-                  <div>
-                    <Space wrap size={4}>
-                      {codeBound ? (
-                        <Tooltip title="Code-bound: this template is hardcoded in backend services and cannot be deleted">
-                          <Tag color="blue" icon={<LockOutlined />}>Code-bound</Tag>
-                        </Tooltip>
-                      ) : isSystem ? (
-                        <Tag color="orange">System</Tag>
-                      ) : (
-                        <Tag color="green">User</Tag>
-                      )}
-                      {!template.is_active && <Tag color="red">Inactive</Tag>}
-                      {template.recommended_model && (
-                        <Tag style={{ fontSize: 11 }}>{template.recommended_model}</Tag>
-                      )}
-                    </Space>
-                  </div>
-                </div>
+    const userColumnHeader = (
+      <div
+        style={{
+          padding: '14px 24px 10px',
+          borderBottom: `1px solid ${colors.cardBorder}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <UserOutlined style={{ color: isDark ? '#52c41a' : '#389e0d', fontSize: 16 }} />
+          <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>User prompt 类</span>
+        </div>
+        <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
+          个人或业务场景下的用户提示词模板，可设为模块默认
+        </Text>
+      </div>
+    );
 
-                {/* Description */}
-                <Text
-                  type="secondary"
-                  style={{ fontSize: 12, flex: 1, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                >
-                  {template.description || 'No description'}
-                </Text>
+    const userColumnBody =
+      userPromptTemplates.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 User 模板" style={{ padding: '28px 16px' }} />
+      ) : (
+        userPromptTemplates.map((template, index) =>
+          renderTemplateListItem(template, index, userPromptTemplates.length)
+        )
+      );
 
-                {/* Footer info */}
-                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {template.category_name || '—'}
-                  </Text>
-                  <Space size={12}>
-                    <Tooltip title="Usage count">
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {template.usage_count ?? 0} uses
-                      </Text>
-                    </Tooltip>
-                    {template.success_rate != null && (
-                      <Tooltip title="Success rate">
-                        <Text
-                          type={template.success_rate >= 90 ? 'success' : 'warning'}
-                          style={{ fontSize: 11 }}
-                        >
-                          {template.success_rate.toFixed(0)}%
-                        </Text>
-                      </Tooltip>
-                    )}
-                  </Space>
-                </div>
-              </Card>
+    // 非管理员看不到 System 模板：不展示左侧空列，仅单列 User prompt
+    if (!isAdmin) {
+      return (
+        <div style={listShellStyle}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 24,
+              padding: '20px 24px',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#52c41a' : '#389e0d' }}>{userPromptTemplates.length}</span>
+              <span style={{ fontSize: 13, color: colors.textSecondary }}>User prompt</span>
+            </div>
+          </div>
+          <Row gutter={[0, 0]} style={{ margin: 0 }}>
+            <Col xs={24} style={{ padding: 0 }}>
+              {userColumnHeader}
+              <div style={{ padding: 0 }}>{userColumnBody}</div>
             </Col>
-          );
-        })}
-      </Row>
+          </Row>
+        </div>
+      );
+    }
+
+    return (
+      <div style={listShellStyle}>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 24,
+            padding: '20px 24px',
+            borderBottom: `1px solid ${colors.cardBorder}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#2196F3' : '#1890ff' }}>{systemTemplates.length}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>System prompt</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#52c41a' : '#389e0d' }}>{userPromptTemplates.length}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>User prompt</span>
+          </div>
+        </div>
+
+        <Row gutter={[0, 0]} style={{ margin: 0 }}>
+          <Col xs={24} lg={12} style={{ padding: 0 }}>
+            <div
+              style={{
+                padding: '14px 24px 10px',
+                borderBottom: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <RobotOutlined style={{ color: isDark ? '#2196F3' : '#1890ff', fontSize: 16 }} />
+                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>System prompt 类</span>
+              </div>
+              <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
+                平台预置与全局生效的系统提示词模板（含代码绑定项）
+              </Text>
+            </div>
+            <div style={{ padding: 0 }}>
+              {systemTemplates.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 System 模板" style={{ padding: '28px 16px' }} />
+              ) : (
+                systemTemplates.map((template, index) =>
+                  renderTemplateListItem(template, index, systemTemplates.length)
+                )
+              )}
+            </div>
+          </Col>
+          <Col
+            xs={24}
+            lg={12}
+            style={{
+              padding: 0,
+              borderTop: isLgUp ? undefined : `1px solid ${colors.cardBorder}`,
+              borderLeft: isLgUp ? `1px solid ${colors.cardBorder}` : undefined,
+            }}
+          >
+            {userColumnHeader}
+            <div style={{ padding: 0 }}>{userColumnBody}</div>
+          </Col>
+        </Row>
+      </div>
     );
   };
 
@@ -970,7 +1108,7 @@ const PromptTemplatesPage: React.FC = () => {
               categories={categories}
               onVariableInsert={handleVariableInsert}
               currentCategoryId={currentEditingCategoryId}
-              moduleCode={!isAdmin ? selectedModuleCode : undefined}
+              moduleCode={selectedModuleCode}
             />
           </Col>
         </Row>
@@ -1122,7 +1260,9 @@ const PromptTemplatesPage: React.FC = () => {
           <FileTextOutlined /> Prompt Template Management
         </Title>
         <Paragraph type="secondary" style={{ color: colors.textSecondary, marginBottom: 20 }}>
-          Manage and optimize your LLM Prompt templates with support for variables, version control, and online testing
+          {isAdmin
+            ? 'System prompt 与 User prompt 分栏列表展示 — 支持变量、版本与在线测试'
+            : '管理你的 User prompt 模板 — 支持变量、版本与在线测试'}
         </Paragraph>
 
         <Spin spinning={loading}>
@@ -1138,19 +1278,6 @@ const PromptTemplatesPage: React.FC = () => {
                 {...(isDark && { style: { backgroundColor: (colors as any).inputBg ?? '#1E202B' } })}
               />
             </Col>
-            {isAdmin && (
-              <Col>
-                <Select
-                  style={{ width: 160, ...(isDark ? { backgroundColor: (colors as any).inputBg } : {}) }}
-                  value={scopeFilter}
-                  onChange={setScopeFilter}
-                >
-                  <Option value="all">All Templates</Option>
-                  <Option value="system">System Only</Option>
-                  <Option value="user">User Only</Option>
-                </Select>
-              </Col>
-            )}
             <Col>
               <Button
                 type="primary"
@@ -1170,8 +1297,8 @@ const PromptTemplatesPage: React.FC = () => {
             </Col>
           </Row>
 
-          {/* Card grid */}
-          {renderTemplateCards()}
+          {/* Two-column template list */}
+          {renderTemplateLists()}
         </Spin>
 
         {renderEditor()}

@@ -109,6 +109,51 @@ def _get_conn():
     return conn
 
 
+def _filter_accessible_execution_ids(cursor, execution_ids: List[int], current_user) -> List[int]:
+    """Return execution IDs that the current user owns or has shared access to."""
+    if not execution_ids:
+        return []
+    placeholders = ",".join(["%s"] * len(execution_ids))
+    cursor.execute(
+        f"""
+        SELECT DISTINCT ps.id FROM processing_stats ps
+        WHERE ps.id IN ({placeholders})
+          AND (
+            ps."user" = %s
+            OR EXISTS (
+                SELECT 1 FROM file_processing_details fpd
+                JOIN file_shares fs ON fpd.id = fs.file_id
+                WHERE fpd.processing_stats_id = ps.id
+                  AND fs.shared_to_user_id = %s
+            )
+          )
+        """,
+        (*execution_ids, current_user.username, current_user.user_id),
+    )
+    return [row[0] for row in cursor.fetchall()]
+
+
+def _upsert_user_execution_folders(cursor, username: str, execution_ids: List[int], folder_id: Optional[int]):
+    """Insert or update the folder mapping for the given user and executions."""
+    if folder_id is None:
+        placeholders = ",".join(["%s"] * len(execution_ids))
+        cursor.execute(
+            f"DELETE FROM user_execution_folders WHERE username = %s AND processing_stats_id IN ({placeholders})",
+            (username, *execution_ids),
+        )
+    else:
+        for eid in execution_ids:
+            cursor.execute(
+                """
+                INSERT INTO user_execution_folders (username, processing_stats_id, folder_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (username, processing_stats_id)
+                DO UPDATE SET folder_id = EXCLUDED.folder_id
+                """,
+                (username, eid, folder_id),
+            )
+
+
 # ── CRUD endpoints ───────────────────────────────────────────────
 
 @router.get("/folders", response_model=List[FolderResponse], summary="List folders for current user")
@@ -118,13 +163,14 @@ async def list_folders(current_user=Depends(get_current_user)):
     try:
         cursor.execute("""
             SELECT f.id, f.name, f.color, f.sort_order, f.created_at,
-                   COUNT(fpd.id) AS file_count
+                   COUNT(uef.id) AS file_count
             FROM file_folders f
-            LEFT JOIN file_processing_details fpd ON fpd.folder_id = f.id
+            LEFT JOIN user_execution_folders uef
+                   ON uef.folder_id = f.id AND uef.username = %s
             WHERE f.username = %s
             GROUP BY f.id
             ORDER BY f.sort_order, f.created_at
-        """, (current_user.username,))
+        """, (current_user.username, current_user.username))
         rows = cursor.fetchall()
         return [
             FolderResponse(
@@ -182,17 +228,13 @@ async def batch_move_executions(body: BatchMoveRequest, current_user=Depends(get
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target folder not found")
 
         ids = body.execution_ids
-        placeholders = ",".join(["%s"] * len(ids))
-        cursor.execute(
-            f"""
-            UPDATE file_processing_details SET folder_id = %s
-            WHERE processing_stats_id IN ({placeholders})
-              AND processing_stats_id IN (SELECT id FROM processing_stats WHERE "user" = %s)
-            """,
-            (body.folder_id, *ids, current_user.username),
-        )
+        accessible_ids = _filter_accessible_execution_ids(cursor, ids, current_user)
+        if not accessible_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No accessible executions found")
+
+        _upsert_user_execution_folders(cursor, current_user.username, accessible_ids, body.folder_id)
         conn.commit()
-        return {"message": f"Moved {cursor.rowcount} files"}
+        return {"message": f"Moved {len(accessible_ids)} files"}
     except HTTPException:
         raise
     except Exception as e:
@@ -205,12 +247,12 @@ async def batch_move_executions(body: BatchMoveRequest, current_user=Depends(get
 
 @router.patch("/folders/move/{execution_id}", summary="Move an execution (all its files) to a folder")
 async def move_execution_to_folder(execution_id: int, body: MoveFileRequest, current_user=Depends(get_current_user)):
-    """Move all file_processing_details under a processing_stats to target folder."""
+    """Move an execution to target folder for the current user."""
     conn = _get_conn()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT id FROM processing_stats WHERE id = %s AND "user" = %s', (execution_id, current_user.username))
-        if not cursor.fetchone():
+        accessible = _filter_accessible_execution_ids(cursor, [execution_id], current_user)
+        if not accessible:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found or no permission")
 
         if body.folder_id is not None:
@@ -218,10 +260,7 @@ async def move_execution_to_folder(execution_id: int, body: MoveFileRequest, cur
             if not cursor.fetchone():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target folder not found")
 
-        cursor.execute(
-            "UPDATE file_processing_details SET folder_id = %s WHERE processing_stats_id = %s",
-            (body.folder_id, execution_id),
-        )
+        _upsert_user_execution_folders(cursor, current_user.username, [execution_id], body.folder_id)
         conn.commit()
         return {"message": "Moved successfully"}
     except HTTPException:
@@ -257,7 +296,7 @@ async def update_folder(folder_id: int, body: FolderUpdate, current_user=Depends
         cursor.execute(f"UPDATE file_folders SET {', '.join(sets)} WHERE id = %s RETURNING id, name, color, sort_order, created_at", vals)
         r = cursor.fetchone()
 
-        cursor.execute("SELECT COUNT(*) FROM file_processing_details WHERE folder_id = %s", (folder_id,))
+        cursor.execute("SELECT COUNT(*) FROM user_execution_folders WHERE folder_id = %s AND username = %s", (folder_id, current_user.username))
         cnt = cursor.fetchone()[0]
 
         conn.commit()
@@ -286,7 +325,7 @@ async def delete_folder(folder_id: int, current_user=Depends(get_current_user)):
         if not cursor.fetchone():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 
-        cursor.execute("UPDATE file_processing_details SET folder_id = NULL WHERE folder_id = %s", (folder_id,))
+        cursor.execute("DELETE FROM user_execution_folders WHERE folder_id = %s", (folder_id,))
         cursor.execute("DELETE FROM file_folders WHERE id = %s", (folder_id,))
         conn.commit()
         info(f"Folder deleted: {folder_id}", source="folders", user=current_user.username)

@@ -3502,7 +3502,7 @@ const FilesPageInner: React.FC = () => {
                       handleOpenRename(execution);
                     },
                   },
-                  ...(!isSharedFile ? [{
+                  {
                     key: 'move-to-folder',
                     icon: <FolderOutlined />,
                     label: 'Move to Folder',
@@ -3520,7 +3520,7 @@ const FilesPageInner: React.FC = () => {
                         onClick: (e: any) => { e.domEvent.stopPropagation(); handleMoveToFolder(execution.id, f.id); },
                       })),
                     ],
-                  }] : []),
+                  },
                   ...(!isSharedFile ? [{
                     key: 'delete',
                     icon: <DeleteOutlined />,

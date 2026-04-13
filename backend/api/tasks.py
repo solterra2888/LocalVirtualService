@@ -353,15 +353,16 @@ async def get_task_executions(
         if folder_id is not None and folder_id != '':
             if folder_id == 'uncategorized':
                 where_conditions.append(
-                    "EXISTS (SELECT 1 FROM file_processing_details fpd_f WHERE fpd_f.processing_stats_id = ps.id AND fpd_f.folder_id IS NULL)"
+                    "NOT EXISTS (SELECT 1 FROM user_execution_folders uef_f WHERE uef_f.processing_stats_id = ps.id AND uef_f.username = %s)"
                 )
+                params.append(current_user.username)
             else:
                 try:
                     fid = int(folder_id)
                     where_conditions.append(
-                        "EXISTS (SELECT 1 FROM file_processing_details fpd_f WHERE fpd_f.processing_stats_id = ps.id AND fpd_f.folder_id = %s)"
+                        "EXISTS (SELECT 1 FROM user_execution_folders uef_f WHERE uef_f.processing_stats_id = ps.id AND uef_f.username = %s AND uef_f.folder_id = %s)"
                     )
-                    params.append(fid)
+                    params.extend([current_user.username, fid])
                 except ValueError:
                     pass
 
@@ -375,7 +376,9 @@ async def get_task_executions(
             WHERE fpd3.processing_stats_id = ps.id AND fs.shared_to_user_id = %s
             ORDER BY fs.created_at DESC LIMIT 1
         )"""
-        select_params = [current_user.username, current_user.user_id]
+        uef_folder_id_expr = "(SELECT uef.folder_id FROM user_execution_folders uef WHERE uef.processing_stats_id = ps.id AND uef.username = %s LIMIT 1)"
+        uef_folder_name_expr = "(SELECT ff.name FROM user_execution_folders uef JOIN file_folders ff ON ff.id = uef.folder_id WHERE uef.processing_stats_id = ps.id AND uef.username = %s LIMIT 1)"
+        select_params = [current_user.username, current_user.user_id, current_user.username, current_user.username]
         
         cursor.execute(f"""
         SELECT ps.id, ps.timestamp, ps.files_processed, ps.files_failed, 
@@ -394,13 +397,8 @@ async def get_task_executions(
                ps.upload_params,
                {access_type_expr} as access_type,
                {shared_by_expr} as shared_by,
-               (SELECT fpd_fo.folder_id FROM file_processing_details fpd_fo
-                WHERE fpd_fo.processing_stats_id = ps.id
-                ORDER BY fpd_fo.id ASC LIMIT 1) as folder_id,
-               (SELECT ff.name FROM file_processing_details fpd_fn
-                JOIN file_folders ff ON ff.id = fpd_fn.folder_id
-                WHERE fpd_fn.processing_stats_id = ps.id
-                ORDER BY fpd_fn.id ASC LIMIT 1) as folder_name,
+               {uef_folder_id_expr} as folder_id,
+               {uef_folder_name_expr} as folder_name,
                (SELECT display_name FROM file_processing_details
                 WHERE processing_stats_id = ps.id
                 ORDER BY id ASC LIMIT 1) as first_display_name
