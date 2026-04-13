@@ -53,6 +53,12 @@ except ImportError as e:
     print(f"❌ 导入自动命名任务模块失败: {e}")
 
 try:
+    from backend.tasks import classify_tasks
+    print(f"✅ 成功导入自动归类任务模块: {classify_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入自动归类任务模块失败: {e}")
+
+try:
     from backend.tasks import subscription_tasks
     print(f"✅ 成功导入订阅任务模块: {subscription_tasks.__name__}")
 except ImportError as e:

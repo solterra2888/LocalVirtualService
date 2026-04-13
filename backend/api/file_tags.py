@@ -560,3 +560,94 @@ def auto_name_files_batch(
         'total_files': len(request.file_ids),
         'message': f'已提交批量自动命名任务: {len(request.file_ids)} 个文件'
     }
+
+
+# ── 自动归类相关端点 ────────────────────────────────────────────
+
+
+@router.post("/auto-classify")
+def auto_classify_file(
+    request: RetagRequest,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    手动触发单个文件的自动归类（使用 auto_classify_v1 模板）
+
+    复用 RetagRequest schema（file_id + force）
+    """
+    from backend.tasks.classify_tasks import classify_file_content_task
+
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, filename FROM file_processing_details WHERE id = %s
+        """, (request.file_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+        filename = row[1]
+        conn.close()
+
+        username = current_user.username if current_user else None
+        task = classify_file_content_task.apply_async(
+            args=(request.file_id, username, request.force),
+            countdown=1
+        )
+
+        logger.info(f"已提交自动归类任务: file_id={request.file_id}, task_id={task.id}")
+
+        return {
+            'task_id': task.id,
+            'status': 'pending',
+            'progress': 0,
+            'message': f'已提交自动归类任务: {filename}',
+            'file_id': request.file_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"提交自动归类任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"提交自动归类任务失败: {str(e)}")
+
+
+@router.post("/auto-classify-batch")
+def auto_classify_files_batch(
+    request: BatchRetagRequest,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量自动归类文件
+
+    复用 BatchRetagRequest schema（file_ids + force）
+    """
+    from backend.tasks.classify_tasks import batch_classify_files_task
+
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="文件ID列表为空")
+
+    username = current_user.username if current_user else None
+
+    task = batch_classify_files_task.apply_async(
+        args=(request.file_ids, username, request.force),
+        countdown=1
+    )
+
+    logger.info(
+        f"已提交批量自动归类任务: {len(request.file_ids)} 个文件, task_id={task.id}"
+    )
+
+    return {
+        'task_id': task.id,
+        'status': 'pending',
+        'total_files': len(request.file_ids),
+        'message': f'已提交批量自动归类任务: {len(request.file_ids)} 个文件'
+    }

@@ -27,6 +27,12 @@ def get_naming_task():
     return name_file_content_task
 
 
+def get_classify_task():
+    """延迟导入自动归类任务"""
+    from backend.tasks.classify_tasks import classify_file_content_task
+    return classify_file_content_task
+
+
 def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
     """
     触发自动打标签任务
@@ -94,6 +100,44 @@ def trigger_auto_naming(file_detail_ids, username=None, delay=2):
             info(f"已触发自动命名任务: file_id={file_id}, delay={delay}s", source="auto_naming")
         except Exception as e:
             error(f"触发自动命名任务失败: file_id={file_id}, error={str(e)}", source="auto_naming")
+
+
+def trigger_auto_classify(file_detail_ids, username=None, delay=2):
+    """
+    触发自动归类任务（与 trigger_auto_tagging / trigger_auto_naming 并行执行，互不依赖）
+
+    Args:
+        file_detail_ids: 文件detail ID列表或单个ID
+        username: 用户名（必须，用于查询该用户的文件夹列表）
+        delay: 延迟执行时间（秒），默认2秒，确保DB事务已提交
+    """
+    auto_classify_enabled = os.getenv('AUTO_CLASSIFY_ENABLED', 'true').lower() == 'true'
+    if not auto_classify_enabled:
+        info("自动归类功能已禁用", source="auto_classify")
+        return
+
+    if not username:
+        info("未提供用户名，跳过自动归类", source="auto_classify")
+        return
+
+    if not isinstance(file_detail_ids, list):
+        file_detail_ids = [file_detail_ids]
+
+    if not file_detail_ids:
+        return
+
+    classify_task = get_classify_task()
+
+    for file_id in file_detail_ids:
+        try:
+            classify_task.apply_async(
+                args=(file_id, username),
+                countdown=delay
+            )
+            info(f"已触发自动归类任务: file_id={file_id}, delay={delay}s", source="auto_classify")
+        except Exception as e:
+            error(f"触发自动归类任务失败: file_id={file_id}, error={str(e)}", source="auto_classify")
+
 
 @app.task(bind=True, name='process_files_async', queue='file_processing')
 def process_files_task(self, file_paths, task_info, custom_inputs, params, username):
@@ -237,8 +281,9 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                     info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_task")
                     trigger_auto_tagging(file_ids, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
                     trigger_auto_naming(file_ids, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+                    trigger_auto_classify(file_ids, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_task")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_task")
         
         return final_result
         
@@ -494,8 +539,9 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_audio_analysis")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_analysis")
         
         return final_result
 
@@ -836,8 +882,9 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_doc_analysis")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_analysis")
         
         return final_result
 
@@ -1127,8 +1174,9 @@ def reparse_document_task(self, file_id, params, username):
         try:
             trigger_auto_tagging(file_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_reparse")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_reparse")
         
         return final_result
     
@@ -1450,8 +1498,9 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_audio_upload")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_upload")
         
         return final_result
         
@@ -1723,11 +1772,12 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                 conn.close()
                 
                 if file_ids:
-                    info(f"触发自动打标签/命名: {len(file_ids)} 个文件", source="celery_doc_upload")
+                    info(f"触发自动打标签/命名/归类: {len(file_ids)} 个文件", source="celery_doc_upload")
                     trigger_auto_tagging(file_ids, username=username, delay=2)
                     trigger_auto_naming(file_ids, username=username, delay=2)
+                    trigger_auto_classify(file_ids, username=username, delay=2)
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="celery_doc_upload")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_upload")
         
         info(f"文档上传和处理任务完成 {self.request.id}, file={filename}", 
              source="celery_doc_upload")
@@ -1845,6 +1895,7 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
 
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+        trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
 
         return {
             'status': 'completed',
@@ -2056,12 +2107,13 @@ def scrape_and_process_web_link_task(self, url, username):
             conn2.commit()
             conn2.close()
 
-        # ── 100%: 完成 + 自动打标签/命名 ──
+        # ── 100%: 完成 + 自动打标签/命名/归类 ──
         info(f"Web Link task completed: url={url}, file_detail_id={file_detail_id}, "
              f"content_length={len(plain_text)}", source="celery_web_link")
 
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+        trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
 
         return {
             'status': 'completed',
@@ -2538,14 +2590,15 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     except Exception:
                         pass
 
-        # ── Step 4: 触发自动打标签 + 自动命名 ──────────────────────────────
-        update_progress(progress=92, log_message='Triggering auto-tagging & naming...')
+        # ── Step 4: 触发自动打标签 + 自动命名 + 自动归类 ─────────────────────
+        update_progress(progress=92, log_message='Triggering auto-tagging, naming & classify...')
         try:
             trigger_auto_tagging([file_id], username, delay=2)
             trigger_auto_naming([file_id], username, delay=2)
-            info(f"已触发自动打标签/命名: file_id={file_id}", source="youtube_task")
+            trigger_auto_classify([file_id], username, delay=2)
+            info(f"已触发自动打标签/命名/归类: file_id={file_id}", source="youtube_task")
         except Exception as e:
-            error(f"触发自动打标签/命名失败: {str(e)}", source="youtube_task")
+            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="youtube_task")
 
         update_progress(status='completed', progress=100,
                        log_message='YouTube processing completed!')
