@@ -2,7 +2,7 @@
 
 > 最后更新：2026-04-14
 
-本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、网页链接）的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
+本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、网页链接）以及 **用户直接撰写的文本笔记（My Notes / Thoughts，`file_type='text'`）** 的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
 
 ---
 
@@ -14,6 +14,7 @@
    - 2.2 [音频文件](#22-音频文件)
    - 2.3 [YouTube 链接](#23-youtube-链接)
    - 2.4 [网页链接（Web Link）](#24-网页链接web-link)
+   - 2.5 [文本笔记（My Notes / Thoughts）](#25-文本笔记my-notes--thoughts)
 3. [数据存储模型](#3-数据存储模型)
 4. [Prompt Template 与 LLM 分析流程](#4-prompt-template-与-llm-分析流程)
    - 4.1 [用户主动触发的内容分析](#41-用户主动触发的内容分析)
@@ -26,8 +27,9 @@
    - 4.8 [模板测试（前端 PromptTemplatesPage）](#48-模板测试前端-prompttemplatespage)
    - 4.9 [Remote Agent 路径（可选）](#49-remote-agent-路径可选)
 5. [前端服务层](#5-前端服务层)
-6. [API 端点速查表](#6-api-端点速查表)
-7. [关键注意事项](#7-关键注意事项)
+6. [任务执行与文件夹展示（Tasks API）](#6-任务执行与文件夹展示tasks-api)
+7. [API 端点速查表](#7-api-端点速查表)
+8. [关键注意事项](#8-关键注意事项)
 
 ---
 
@@ -82,6 +84,8 @@ file_tasks.py  ──►  FileProcessingWorker  ──►  解析/转写服务
                          ▼
           trigger_auto_tagging + trigger_auto_naming + trigger_auto_classify（同上并行执行）
 ```
+
+> **补充：** 用户通过 `POST /api/files/create-text-note` 创建的 **文本笔记**（`file_type='text'`）**不经过**上图中的 `FileProcessingWorker` 与 Celery 解析任务；在同步 API 内写入 `content` 后直接调用 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify`，与「`content` 非空写入完成后」的并行任务一致。
 
 ---
 
@@ -246,6 +250,37 @@ POST /api/files/upload-web-clip
 
 ---
 
+### 2.5 文本笔记（My Notes / Thoughts）
+
+用户**无需上传文件**，在桌面端浮动菜单或移动端上传面板中选择 **「My Notes / Thoughts」**（原「Edit Text」入口），在弹窗中填写可选标题与用户撰写的 Markdown 正文并保存。
+
+#### 流程
+
+```
+POST /api/files/create-text-note
+    Body: { title?: string, content: string }   # title 为空时服务端使用「Untitled Note」作为文件名
+    │
+    ├─ 同步写入 processing_stats（task_name='Text Note', rc_agent_status='completed' 等）
+    ├─ 同步写入 file_processing_details：
+    │       file_type = 'text'
+    │       status = 'completed'
+    │       content = 用户 Markdown
+    │       original_file_path / OSS 可为空（无原始文件对象）
+    │
+    └─ 事务提交后调用（与异步上传路径相同）：
+            trigger_auto_tagging + trigger_auto_naming + trigger_auto_classify
+```
+
+不经过 `FileProcessingWorker` 与 Celery 解析任务；并行 LLM 任务仍走 `file_processing` 队列。
+
+#### 前端要点
+
+- 桌面：`Layout.tsx` 上传菜单第一项；`CreateTextNoteModal.tsx`；保存成功后派发 `guanhe:task-executions-refresh`，`FilesPage` 订阅并刷新左侧 Sources（含重置类型筛选为 All，避免新建 `text` 被当前类型 Tab 过滤掉）。
+- 移动端：`MobileSourcesPage.tsx` 同步菜单与弹窗；同样监听上述事件以刷新列表（因移动端路由为 `/files` 但挂载的是 `MobileSourcesPage`，不能只依赖 `FilesPage` 内监听）。
+- `file_type='text'` 在 **Original** 面板由 `OriginalTextNotePanel` 直接渲染 Markdown，支持 **Edit** 编辑保存（`PATCH /api/files/details/{file_id}/content`）。
+
+---
+
 ## 3. 数据存储模型
 
 ### `processing_stats`（每次执行一行）
@@ -272,7 +307,7 @@ POST /api/files/upload-web-clip
 | `original_file_path` | OSS 对象键或 URL |
 | `file_storage_type` | `'oss'` / `'local'` |
 | `oss_bucket` | OSS Bucket 名称 |
-| `file_type` | `'document'` / `'audio'` / `'youtube'` / `'web'` |
+| `file_type` | `'document'` / `'audio'` / `'youtube'` / `'web'` / `'text'`（用户撰写的文本笔记，无 OSS 原文） |
 | `status` | `'uploaded'` / `'processing'` / `'completed'` / `'failed'` |
 | `task_id` | Celery 任务 ID |
 | `processing_time` | 处理耗时（秒） |
@@ -282,7 +317,7 @@ POST /api/files/upload-web-clip
 ## 4. Prompt Template 与 LLM 分析流程
 
 文件内容写入 DB 后，系统会触发两类 LLM 分析：
-- **系统自动触发（并行）**：自动打标签 + 自动命名，无需用户干预，content 写完即触发。
+- **系统自动触发（并行）**：自动打标签 + 自动命名 + **自动归类**（`classify_file_content_task`），无需用户干预，`content` 非空写入并满足各任务门槛后即触发。
 - **用户主动触发**：用户在 FilesPage 选择 Prompt Template，手动发起内容深度分析。
 
 ---
@@ -477,6 +512,7 @@ classify_file_content_task(file_id, username, force=False)
 | `analyze_document_task`（用户触发文档分析） | LLM 分析报告写入后 | 同上 |
 | `analyze_audio_task`（用户触发音频分析） | LLM 分析报告写入后 | 同上 |
 | `reparse_document_task`（重新解析） | 重新解析写入 `content` 后 | 同上 |
+| `POST /api/files/create-text-note`（**同步 HTTP**，非 Celery） | 插入 `file_processing_details` 并写入 `content` 后，在 API 内直接调用 | 同上 |
 
 > **例外：** `transcribe_youtube_file_asr_task`（单文件补充 ASR 转写）完成后**不触发**自动打标签/命名/归类，属于已知遗漏。
 
@@ -556,6 +592,8 @@ POST /api/llm-prompt-templates/templates/test
 | `uploadAudioFile()` | `POST /api/files/upload-audio` |
 | `uploadYouTubeLink()` | `POST /api/files/upload-youtube` |
 | `uploadWebLink()` | `POST /api/files/upload-web-link` |
+| `createTextNote()` | `POST /api/files/create-text-note` |
+| `updateFileDetailContent(fileId, content, triggerLlm?)` | `PATCH /api/files/details/{file_id}/content`（第三参数为可选 `trigger_llm`，用于保存后再次触发并行 LLM） |
 | `processFiles()` | `POST /api/files/process` |
 | `analyzeAudio()` | `POST /api/files/audio/analyze` |
 | `analyzeDocument()` | `POST /api/files/document/analyze` |
@@ -563,9 +601,21 @@ POST /api/llm-prompt-templates/templates/test
 | `getAudioAnalysisStatus()` | 轮询音频分析状态 |
 | `getDocumentAnalysisStatus()` | 轮询文档分析状态 |
 
+**Info 面板 · Basic Information**：`ExecutionDetailsPanel`（`FilesPage.tsx`，与移动端 `MobileSourceFileDetail` 共用）在 **Document Type** 下方展示 **Folder Type**，数据来自任务执行上的 `folder_name`（见第 6 节），对应自动归类任务成功匹配后写入的 `user_execution_folders`；无匹配或未写入时展示 **Uncategorized**。
+
 ---
 
-## 6. API 端点速查表
+## 6. 任务执行与文件夹展示（Tasks API）
+
+任务列表与部分 UI 依赖 `GET /api/tasks/executions` 返回的 `folder_id` / `folder_name`（子查询 `user_execution_folders` + `file_folders`）。
+
+**单条执行详情** `GET /api/tasks/executions/{execution_id}` 与列表使用同一套文件夹字段，便于右侧 **Info** 在未重新拉列表时也能显示 **Folder Type**。
+
+> 说明：`user_execution_folders` 也可由用户**手动**「移动到文件夹」更新；此时 **Folder Type** 展示的是**当前**所属文件夹，与列表一致，而非单独存储「仅自动归类结果」的历史字段。
+
+---
+
+## 7. API 端点速查表
 
 ### 文件上传与解析
 
@@ -578,6 +628,13 @@ POST /api/llm-prompt-templates/templates/test
 | 上传 YouTube 链接 | `POST /api/files/upload-youtube` | `upload_and_process_youtube_task` |
 | 上传网页链接 | `POST /api/files/upload-web-link` | `scrape_and_process_web_link_task` |
 | 上传 Chrome 剪藏 | `POST /api/files/upload-web-clip` | `process_web_clip_task` |
+| 创建文本笔记（无上传文件） | `POST /api/files/create-text-note` | —（同步 API，成功后 API 内触发并行 LLM 任务） |
+
+### 内容更新（Markdown 编辑）
+
+| 功能 | 方法 + 路径 | 说明 |
+|------|-------------|------|
+| 更新文件正文（Content / Original 编辑保存） | `PATCH /api/files/details/{file_id}/content` | Body：`content`；可选 `trigger_llm`（默认 `false`），为 `true` 时在保存后再次触发 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify` |
 
 ### 用户主动触发的 LLM 分析
 
@@ -608,7 +665,7 @@ POST /api/llm-prompt-templates/templates/test
 
 ---
 
-## 7. 关键注意事项
+## 8. 关键注意事项
 
 1. **`upload_and_process_document` 与 LLM 分析的参数传递问题**  
    `upload_and_process_document` 会将 `template_id` 和 `analysis_mode` 写入 `task_info`，但 `FileProcessingWorker` 从 `params` 读取这两个字段。当前前端 `UploadFilesModal` 默认设置 `use_ai_agent: false`，故解析阶段不触发 LLM，行为正确。若未来需在解析阶段直接调用 LLM，须将 `template_id` / `analysis_mode` 同步写入 `params`。
@@ -640,10 +697,20 @@ POST /api/llm-prompt-templates/templates/test
 8. **`transcribe_youtube_file_asr_task` 缺少自动触发**  
    单文件补充 ASR 转写任务完成后**不会**自动触发打标签/命名/归类。若需要该行为，需在任务末尾补充调用 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify`。
 
-9. **三类 LLM 任务对 content 的截断规则**  
+9. **并行自动任务对 content 的截断规则**  
    - 用户主动分析（`analyze_document_task` / `analyze_audio_task`）：不截断，传入完整 `content`。  
    - 自动打标签（`tag_file_content`）：截断至 `AUTO_TAG_CONTENT_MAX_CHARS`（默认 6000 字符）。  
-   - 自动命名（`name_file_content`）：截断至 `AUTO_NAME_CONTENT_MAX_CHARS`（默认 3000 字符）。
+   - 自动命名（`name_file_content`）：截断至 `AUTO_NAME_CONTENT_MAX_CHARS`（默认 3000 字符）。  
+   - 自动归类（`classify_file_content`）：截断至 `AUTO_CLASSIFY_CONTENT_MAX_CHARS`（默认 3000 字符）。
+
+10. **文本笔记 `create-text-note`**  
+    不经过 OSS 上传与文档解析流水线；`file_type` 固定为 `'text'`。保存成功后须刷新 Sources 列表：桌面端通过自定义事件 `guanhe:task-executions-refresh`（见 `CreateTextNoteModal.tsx` 导出常量），`FilesPage` 与 `MobileSourcesPage` 均需监听。
+
+11. **`PATCH .../content` 与 `trigger_llm`**  
+    更新 `content` 时可选 `trigger_llm: true`，在保存后再次投递并行打标签/命名/归类（适用于用户大幅改写正文后希望重新跑一遍自动任务）。
+
+12. **`GET /api/tasks/executions/{id}` 与文件夹字段**  
+    与列表接口一致返回 `folder_id` / `folder_name`，供 **Info → Folder Type** 与侧边栏筛选对齐；若仅依赖列表刷新而不同步单条详情，会出现 Folder Type 空白，故单条 API 必须带齐该字段。
 
 ---
 
@@ -651,9 +718,10 @@ POST /api/llm-prompt-templates/templates/test
 
 | 文件 | 说明 |
 |------|------|
-| `backend/api/files.py` | HTTP 入口，所有文件相关路由 |
-| `backend/api/file_tags.py` | 打标签/命名的 HTTP 管理接口 |
-| `backend/tasks/file_tasks.py` | Celery 任务定义（上传/解析/分析），含 `trigger_auto_tagging` / `trigger_auto_naming` |
+| `backend/api/files.py` | HTTP 入口；含 `create-text-note`、`PATCH .../content`（可选 `trigger_llm`） |
+| `backend/api/tasks.py` | 任务执行列表与单条详情；`folder_id` / `folder_name` 子查询 |
+| `backend/api/file_tags.py` | 打标签/命名/归类的 HTTP 管理接口 |
+| `backend/tasks/file_tasks.py` | Celery 任务定义（上传/解析/分析），含 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify` |
 | `backend/tasks/tagging_tasks.py` | `tag_file_content_task` Celery 任务 |
 | `backend/tasks/naming_tasks.py` | `name_file_content_task` Celery 任务 |
 | `backend/tasks/classify_tasks.py` | `classify_file_content_task` Celery 任务 |
@@ -672,5 +740,9 @@ POST /api/llm-prompt-templates/templates/test
 | `backend/core/llm_framework.py` | LLM 调用框架（`llm_service.chat_completion`） |
 | `backend/database/db_manager.py` | 数据库操作 |
 | `backend/schemas/file.py` | 请求/响应 Schema |
-| `web-frontend/src/services/files.ts` | 前端文件服务层 |
+| `web-frontend/src/services/files.ts` | 前端文件服务层（含 `createTextNote`、`updateFileDetailContent`） |
+| `web-frontend/src/components/CreateTextNoteModal.tsx` | 文本笔记弹窗；`TASK_EXECUTIONS_REFRESH_EVENT` |
+| `web-frontend/src/components/Layout.tsx` | 桌面浮动上传菜单（My Notes / Thoughts 置顶） |
+| `web-frontend/src/pages/MobileSourcesPage.tsx` | 移动端 Sources 与上传菜单 |
+| `web-frontend/src/pages/FilesPage.tsx` | PC Sources；`ExecutionDetailsPanel`（含 Folder Type）、`OriginalTextNotePanel` |
 | `web-frontend/src/pages/PromptTemplatesPage.tsx` | Prompt Template 管理与测试页面 |

@@ -51,7 +51,10 @@ from backend.tasks.file_tasks import (
     analyze_document_task,
     upload_and_transcribe_audio_task,
     upload_and_process_document_task,
-    process_web_clip_task
+    process_web_clip_task,
+    trigger_auto_tagging,
+    trigger_auto_naming,
+    trigger_auto_classify
 )
 
 # 统一的环境变量加载
@@ -1569,11 +1572,13 @@ async def get_original_file_info(
 async def update_file_detail_content(
     file_id: str,
     content: str = Body(..., embed=True),
+    trigger_llm: bool = Body(False, embed=True),
     current_user: dict = Depends(get_current_user)
 ):
     """
     更新 file_processing_details 表中的 content 字段（用于编辑 Content 标签页的 Markdown 内容）。
     仅允许该文件所属任务执行记录的用户（或管理员）更新。
+    当 trigger_llm=True 时，保存后重新触发 auto-tagging / auto-naming / auto-classify。
     """
     try:
         db_manager = DatabaseManager(get_database_config())
@@ -1584,7 +1589,6 @@ async def update_file_detail_content(
                 detail="Failed to connect to database"
             )
         cursor = conn.cursor()
-        # 获取文件所属的 processing_stats_id，并校验归属
         cursor.execute("""
             SELECT fpd.id, fpd.processing_stats_id
             FROM file_processing_details fpd
@@ -1616,12 +1620,23 @@ async def update_file_detail_content(
             )
         cursor.execute("""
             UPDATE file_processing_details
-            SET content = %s
+            SET content = %s, content_length = %s
             WHERE id = %s
-        """, (content, file_id))
+        """, (content, len(content), file_id))
         conn.commit()
         conn.close()
         info(f"更新文件 content 成功: file_id={file_id}", source="api", user=current_user.username)
+
+        if trigger_llm:
+            try:
+                username = current_user.username
+                trigger_auto_tagging(int(file_id), username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+                trigger_auto_naming(int(file_id), username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+                trigger_auto_classify(int(file_id), username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            except Exception as e:
+                warning(f"Failed to trigger auto LLM tasks after content update: {str(e)}",
+                        source="api", file_id=file_id)
+
         return {"success": True, "message": "Content updated"}
     except HTTPException:
         raise
@@ -1630,6 +1645,106 @@ async def update_file_detail_content(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="更新内容失败"
+        )
+
+
+@router.post("/create-text-note", summary="Create a text note (no file upload, user-authored Markdown)")
+async def create_text_note(
+    title: str = Body('', embed=True),
+    content: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    用户直接撰写 Markdown 文本笔记，无需上传文件。
+    创建 processing_stats + file_processing_details 记录后自动触发
+    auto-tagging / auto-naming / auto-classify 并行 LLM 任务。
+    """
+    username = current_user.username
+    display_title = title.strip() if title and title.strip() else 'Untitled Note'
+
+    try:
+        db_manager = DatabaseManager(get_database_config())
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to connect to database"
+            )
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO processing_stats
+            (timestamp, files_processed, files_failed, total_time,
+             total_file_processing_time, total_ai_time, task_name,
+             "user", total_tokens, total_price, upload_params,
+             final_report, rc_agent_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            datetime.now(),
+            1, 0, 0, 0, 0,
+            'Text Note',
+            username,
+            0, 0,
+            json.dumps({"text_note": True, "title": display_title}),
+            '',
+            'completed'
+        ))
+        processing_stats_id = cursor.fetchone()[0]
+
+        cursor.execute("""
+            INSERT INTO file_processing_details
+            (processing_stats_id, filename, file_type, file_size_mb,
+             processing_time, ai_time, content_length, status,
+             total_tokens, cost, content, created_at, task_id,
+             original_file_path, file_storage_type, oss_bucket)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            processing_stats_id,
+            display_title,
+            'text',
+            0,
+            0, 0,
+            len(content),
+            'completed',
+            0, 0,
+            content,
+            datetime.now(),
+            None,
+            None,
+            None,
+            None
+        ))
+        file_detail_id = cursor.fetchone()[0]
+
+        conn.commit()
+        conn.close()
+
+        info(f"Text note created: file_detail_id={file_detail_id}, title={display_title}",
+             source="api", user=username)
+
+        try:
+            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+        except Exception as e:
+            warning(f"Failed to trigger auto LLM tasks for text note: {str(e)}",
+                    source="api", user=username)
+
+        return {
+            "success": True,
+            "file_detail_id": file_detail_id,
+            "processing_stats_id": processing_stats_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"Failed to create text note: {str(e)}", source="api", user=username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create text note"
         )
 
 

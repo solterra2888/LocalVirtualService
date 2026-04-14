@@ -444,6 +444,7 @@ export const filesAPI = {
 
   // 获取原始文件信息
   getOriginalFileInfo: async (fileId: number): Promise<{
+    file_id?: number;
     filename: string;
     file_type: string;
     file_size_mb: number;
@@ -504,8 +505,13 @@ export const filesAPI = {
   },
 
   // 更新 file_processing_details 的 content（Content 标签页编辑后保存）
-  updateFileDetailContent: async (fileId: number, content: string): Promise<{ success: boolean; message: string }> => {
-    return api.patch<{ success: boolean; message: string }>(`/files/details/${fileId}/content`, { content });
+  updateFileDetailContent: async (fileId: number, content: string, triggerLlm: boolean = false): Promise<{ success: boolean; message: string }> => {
+    return api.patch<{ success: boolean; message: string }>(`/files/details/${fileId}/content`, { content, trigger_llm: triggerLlm });
+  },
+
+  // 创建文本笔记（无文件上传，用户直接撰写 Markdown）
+  createTextNote: async (title: string, content: string): Promise<{ success: boolean; file_detail_id: number; processing_stats_id: number }> => {
+    return api.post<{ success: boolean; file_detail_id: number; processing_stats_id: number }>('/files/create-text-note', { title, content });
   },
 
   // 获取支持的文件类型扩展名（与 backend/core/llama_service.py get_supported_extensions 一致）

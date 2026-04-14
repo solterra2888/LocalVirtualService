@@ -406,6 +406,9 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
               onTranscriptPersisted={async () => {
                 await onRefreshList();
               }}
+              onTextNoteContentSaved={async () => {
+                await onRefreshList();
+              }}
               onIBReportDetected={handleIBReportDetected}
             />
           </div>

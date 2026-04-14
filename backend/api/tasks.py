@@ -512,10 +512,15 @@ async def get_task_execution(
                ps.upload_params,
                (SELECT display_name FROM file_processing_details
                 WHERE processing_stats_id = ps.id
-                ORDER BY id ASC LIMIT 1) as first_display_name
+                ORDER BY id ASC LIMIT 1) as first_display_name,
+               (SELECT uef.folder_id FROM user_execution_folders uef
+                WHERE uef.processing_stats_id = ps.id AND uef.username = %s LIMIT 1) as folder_id,
+               (SELECT ff.name FROM user_execution_folders uef
+                JOIN file_folders ff ON ff.id = uef.folder_id
+                WHERE uef.processing_stats_id = ps.id AND uef.username = %s LIMIT 1) as folder_name
         FROM processing_stats ps
         WHERE ps.id = %s
-        """, (execution_id,))
+        """, (current_user.username, current_user.username, execution_id))
         
         stat = cursor.fetchone()
         if not stat:
@@ -567,6 +572,8 @@ async def get_task_execution(
             access_type=access_type,
             ticker_tags=ticker_tags_map.get(stat[0]),
             first_display_name=stat[18] if len(stat) > 18 else None,
+            folder_id=stat[19] if len(stat) > 19 else None,
+            folder_name=stat[20] if len(stat) > 20 else None,
         )
         
     finally:

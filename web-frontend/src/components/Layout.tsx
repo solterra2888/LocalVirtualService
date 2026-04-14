@@ -41,6 +41,7 @@ import UploadFilesModal from './UploadFilesModal';
 import UploadAudioModal from './UploadAudioModal';
 import UploadYouTubeLinkModal from './UploadYouTubeLinkModal';
 import UploadWebLinkModal from './UploadWebLinkModal';
+import CreateTextNoteModal from './CreateTextNoteModal';
 import { TaskProgressPopover } from './TaskProgressPopover';
 import { userAvatarLetter, USER_AVATAR_LETTER_BG } from '../utils/userAvatar';
 
@@ -85,6 +86,7 @@ const Layout: React.FC = () => {
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
   const [showUploadWebLinkModal, setShowUploadWebLinkModal] = useState(false);
+  const [showCreateTextNoteModal, setShowCreateTextNoteModal] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const openProfileModal = () => setProfileModalOpen(true);
 
@@ -440,6 +442,37 @@ const Layout: React.FC = () => {
           <Button
             type="text"
             size="large"
+            icon={<EditOutlined style={{ fontSize: '18px' }} />}
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowCreateTextNoteModal(true);
+            }}
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+              border: 'none',
+              borderRadius: '26px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>My Notes / Thoughts</span>
+          </Button>
+          <Button
+            type="text"
+            size="large"
             icon={<FileTextOutlined style={{ fontSize: '18px' }} />}
             onClick={() => {
               setShowUploadOptions(false);
@@ -589,6 +622,13 @@ const Layout: React.FC = () => {
       <UploadWebLinkModal
         visible={showUploadWebLinkModal}
         onCancel={() => setShowUploadWebLinkModal(false)}
+        themeMode={themeMode}
+      />
+
+      {/* Create Text Note Modal */}
+      <CreateTextNoteModal
+        visible={showCreateTextNoteModal}
+        onCancel={() => setShowCreateTextNoteModal(false)}
         themeMode={themeMode}
       />
 

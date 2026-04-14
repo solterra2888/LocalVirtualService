@@ -93,6 +93,7 @@ import TemplateSelector from '../components/TemplateSelector';
 import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 import OriginalPdfJsViewer from '../components/OriginalPdfJsViewer';
+import { TASK_EXECUTIONS_REFRESH_EVENT } from '../components/CreateTextNoteModal';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -272,6 +273,8 @@ interface TaskExecution {
     shared_to: Array<{ user_id: number; username: string; avatar_url?: string | null }>;
   } | null;
   ticker_tags?: string[] | null;
+  folder_id?: number | null;
+  folder_name?: string | null;
   first_display_name?: string | null;
 }
 
@@ -423,7 +426,7 @@ const FilesPageInner: React.FC = () => {
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
   const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
   const [contentDetailLoading, setContentDetailLoading] = useState(false);
-  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube' | 'web'>('all');
+  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube' | 'web' | 'text'>('all');
   const [searchType, setSearchType] = useState<'file_name' | 'content' | 'ticker'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
   const [tickerFilter, setTickerFilter] = useState<string | undefined>(undefined);
@@ -942,6 +945,19 @@ const FilesPageInner: React.FC = () => {
   useEffect(() => {
     loadTaskExecutionsFuncRef.current = loadTaskExecutionsFunc;
   }, [loadTaskExecutionsFunc]);
+
+  // 浮动菜单「My Notes / Thoughts」保存成功后刷新左侧列表（CreateTextNoteModal 派发事件）
+  useEffect(() => {
+    const onRefresh = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ resetTypeFilter?: boolean }>).detail;
+      if (detail?.resetTypeFilter) {
+        setFileTypeFilter('all');
+      }
+      loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+    };
+    window.addEventListener(TASK_EXECUTIONS_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(TASK_EXECUTIONS_REFRESH_EVENT, onRefresh);
+  }, []);
 
   // Refresh executions when folder filter changes (after ref update to avoid stale closure)
   const isFolderMountRef = useRef(true);
@@ -2937,6 +2953,7 @@ const FilesPageInner: React.FC = () => {
     if (tab === 'all') return true;
     if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t);
     if (tab === 'web') return t === 'web';
+    if (tab === 'text') return t === 'text';
     return t === tab;
   };
   const filteredByType = taskExecutions.filter(exec => matchesFileType(exec.first_file_type, fileTypeFilter));
@@ -2979,6 +2996,7 @@ const FilesPageInner: React.FC = () => {
     { key: 'audio', label: 'Audio', icon: <SoundOutlined /> },
     { key: 'youtube', label: 'YouTube', icon: <VideoCameraOutlined /> },
     { key: 'web', label: 'Web', icon: <GlobalOutlined /> },
+    { key: 'text', label: 'Text', icon: <EditOutlined /> },
   ];
 
   // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple, YouTube=red)
@@ -2991,6 +3009,7 @@ const FilesPageInner: React.FC = () => {
     if (['youtube'].includes(t)) return { color: 'red', text: 'YouTube' };
     if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
     if (['web'].includes(t)) return { color: 'cyan', text: 'Web' };
+    if (['text'].includes(t)) return { color: 'geekblue', text: 'Text' };
     return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
   };
 
@@ -3021,6 +3040,9 @@ const FilesPageInner: React.FC = () => {
     }
     if (['web'].includes(t)) {
       return { tooltip: 'Web Clip', icon: <GlobalOutlined />, color: '#13c2c2' };
+    }
+    if (['text'].includes(t)) {
+      return { tooltip: 'Text Note', icon: <EditOutlined />, color: '#2f54eb' };
     }
     const label = (firstFileType || 'File').toUpperCase();
     return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };
@@ -3683,6 +3705,16 @@ const FilesPageInner: React.FC = () => {
                             message.error('Failed to refresh Markdown content');
                           }
                         }}
+                        onTextNoteContentSaved={async () => {
+                          if (!selectedExecutionForView) return;
+                          try {
+                            const details = await tasksAPI.getTaskExecutionDetails(selectedExecutionForView.id);
+                            setContentDetailData(details);
+                            loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
+                          } catch {
+                            message.error('Failed to refresh Markdown content');
+                          }
+                        }}
                         onIBReportDetected={setIbReportDataForReview}
                       />
                     </div>
@@ -3822,6 +3854,7 @@ const FilesPageInner: React.FC = () => {
                                     ),
                                   };
                                 });
+                                loadTaskExecutionsFuncRef.current(false, true, false).catch(() => {});
                               }}
                               selectedFileForView={selectedFileForView}
                             />
@@ -4443,6 +4476,15 @@ export const ExecutionDetailsPanel: React.FC<{
           <Descriptions.Item label="Document Name">{execution.first_display_name || execution.first_filename || '-'}</Descriptions.Item>
           <Descriptions.Item label="Document Type">
             {execution.first_file_type ? <Tag color="blue">{execution.first_file_type.toUpperCase()}</Tag> : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Folder Type">
+            <Tooltip title="Automatic folder assignment from auto-classify (classify_file_content_task). Shows Uncategorized when the model did not match any of your folders.">
+              {execution.folder_name ? (
+                <Tag color="geekblue">{execution.folder_name}</Tag>
+              ) : (
+                <span style={{ color: themeColors.textMuted }}>Uncategorized</span>
+              )}
+            </Tooltip>
           </Descriptions.Item>
           <Descriptions.Item label="Time">{new Date(execution.created_at).toLocaleString()}</Descriptions.Item>
           <Descriptions.Item label="Processing Time">{execution.total_time.toFixed(2)}秒</Descriptions.Item>
@@ -5314,6 +5356,129 @@ const ContentMarkdownView: React.FC<{
   );
 };
 
+/** text 类型：Original 面板直接渲染 Markdown，支持 Edit 编辑保存 */
+const OriginalTextNotePanel: React.FC<{
+  fileId: number;
+  content: string;
+  filename: string;
+  themeColors: any;
+  isDark: boolean;
+  onContentUpdated: (newContent: string) => void;
+  /** 保存成功后通知父级，便于同步 Content 标签页等 */
+  onSaved?: () => void | Promise<void>;
+}> = ({ fileId, content, filename, themeColors, isDark, onContentUpdated, onSaved }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setEditContent(content);
+    }
+  }, [content, isEditing]);
+
+  const handleStartEdit = () => {
+    setEditContent(content);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent(content);
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await filesAPI.updateFileDetailContent(fileId, editContent);
+      onContentUpdated(editContent);
+      await onSaved?.();
+      setIsEditing(false);
+      message.success('Content saved');
+    } catch {
+      message.error('Failed to save content');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '16px 20px',
+          color: themeColors.text,
+        }}
+      >
+        <Input.TextArea
+          value={editContent}
+          onChange={(e) => setEditContent(e.target.value)}
+          placeholder="Markdown content..."
+          style={{
+            flex: 1,
+            minHeight: 280,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            fontSize: 13,
+            lineHeight: 1.6,
+            background: themeColors.codeBlockBg,
+            borderColor: themeColors.cardBorder,
+            color: themeColors.text,
+          }}
+          className={isDark ? 'files-content-textarea-dark' : ''}
+        />
+        <Space style={{ marginTop: 12 }}>
+          <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
+            Save
+          </Button>
+          <Button onClick={handleCancelEdit} disabled={saving}>
+            Cancel
+          </Button>
+        </Space>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="files-detail-content-markdown"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        padding: '16px 20px',
+        color: themeColors.text,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 12,
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: 14, color: themeColors.text }}>{filename}</span>
+        <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
+          Edit
+        </Button>
+      </div>
+      {content.trim() ? (
+        <MarkdownRenderer content={content} variant={isDark ? 'dark' : 'light'} />
+      ) : (
+        <div style={{ color: themeColors.textSecondary, fontSize: 14 }}>
+          Empty note. Click Edit to add content.
+        </div>
+      )}
+    </div>
+  );
+};
+
 // 原文内容查看组件（仅支持单文件，不再显示文件列表）
 export const OriginalContentView: React.FC<{
   execution: TaskExecution;
@@ -5324,8 +5489,10 @@ export const OriginalContentView: React.FC<{
   onFileInfoLoaded?: (info: { filename?: string; file_type?: string }) => void;
   /** 转写保存后刷新 Markdown 等（Original 会在内部自行重新拉取 getOriginalFileInfo） */
   onTranscriptPersisted?: () => void | Promise<void>;
+  /** text 笔记在 Original 中保存后，同步右侧 Content 等 */
+  onTextNoteContentSaved?: () => void | Promise<void>;
   onIBReportDetected?: (data: IBReportData | null) => void;
-}> = ({ execution, themeColors, isDark, onFileSelect, onFileInfoLoaded, onTranscriptPersisted, onIBReportDetected }) => {
+}> = ({ execution, themeColors, isDark, onFileSelect, selectedFile, onFileInfoLoaded, onTranscriptPersisted, onTextNoteContentSaved, onIBReportDetected }) => {
   const { isMobile } = useDeviceDetection();
   const [loading, setLoading] = useState(true);
   const [fileContent, setFileContent] = useState<any>(null);
@@ -5760,6 +5927,37 @@ export const OriginalContentView: React.FC<{
               themeColors={themeColors}
               isDark={isDark}
               onTranscriptPersisted={handleTranscriptPersisted}
+            />
+          );
+        } else if (fileType === 'text') {
+          const raw = fileContent.content;
+          const textContent = raw == null ? '' : typeof raw === 'string' ? raw : String(raw);
+          const fromApi = Number(fileContent.file_id);
+          const fromSelection = Number(selectedFile?.id);
+          const resolvedFileId =
+            Number.isFinite(fromApi) && fromApi > 0
+              ? fromApi
+              : Number.isFinite(fromSelection) && fromSelection > 0
+                ? fromSelection
+                : 0;
+          if (!resolvedFileId) {
+            return (
+              <div style={{ padding: 24, color: themeColors.textMuted }}>
+                Cannot edit: missing file id. Try reopening this source.
+              </div>
+            );
+          }
+          return (
+            <OriginalTextNotePanel
+              fileId={resolvedFileId}
+              content={textContent}
+              filename={fileContent.filename || 'Text Note'}
+              themeColors={themeColors}
+              isDark={isDark}
+              onContentUpdated={(newContent) => {
+                setFileContent((prev: any) => (prev ? { ...prev, content: newContent } : prev));
+              }}
+              onSaved={onTextNoteContentSaved}
             />
           );
         } else if (fileType === 'web') {
