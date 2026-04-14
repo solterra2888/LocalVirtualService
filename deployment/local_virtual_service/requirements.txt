@@ -1,0 +1,12 @@
+# Local Virtual Service - YouTube Transcription Worker
+celery>=5.3
+redis>=5.0
+psycopg2-binary>=2.9
+python-dotenv>=1.0
+requests>=2.31
+feedparser>=6.0
+python-dateutil>=2.8
+youtube-transcript-api>=1.0.0
+yt-dlp>=2024.0
+oss2>=2.18
+dashscope>=1.20
