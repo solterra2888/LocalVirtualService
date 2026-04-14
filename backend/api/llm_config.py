@@ -394,53 +394,26 @@ async def get_usage_stats(
     range: str = "30d",
     current_user: TokenData = Depends(get_current_admin_user)
 ):
-    """获取使用统计（从数据库）"""
+    """获取使用统计（来自 llm_provider_configs 上的累计字段；明细监控见 llm_prompt_usage_logs）"""
     try:
-        # 解析时间范围
-        days = 30
-        if range.endswith('d'):
-            try:
-                days = int(range[:-1])
-            except ValueError:
-                days = 30
-        
-        # 获取数据库连接
+        logger.debug("LLM usage stats range=%s (provider_config aggregates are not time-windowed)", range)
         db_config = get_database_config()
         db_manager = DatabaseManager(db_config)
-        
-        # 从数据库获取统计数据
-        db_stats = db_manager.get_llm_usage_stats(provider_id=None, days=days)
-        
+
         stats_list = []
-        for row in db_stats:
+        providers = db_manager.get_llm_provider_configs(enabled_only=True)
+        for provider_row in providers:
             stats = UsageStats(
-                provider=row[0],  # provider_id
-                totalRequests=int(row[1]) if row[1] else 0,  # total_requests
-                successRate=float(row[3]) if row[3] else 0.0,  # success_rate
-                avgResponseTime=float(row[4]) / 1000 if row[4] else 0.0,  # avg_response_time (转换为秒)
-                totalTokens=int(row[5]) if row[5] else 0,  # total_tokens
-                totalCost=float(row[6]) if row[6] else 0.0,  # total_cost
-                currency=row[7] if row[7] else "RMB"  # currency
+                provider=provider_row[1],  # provider_id
+                totalRequests=provider_row[19] if provider_row[19] else 0,
+                successRate=100.0,
+                avgResponseTime=0.0,
+                totalTokens=provider_row[20] if provider_row[20] else 0,
+                totalCost=float(provider_row[21]) if provider_row[21] else 0.0,
+                currency="RMB"
             )
             stats_list.append(stats)
-        
-        # 如果数据库中没有统计数据，返回提供商的基本信息
-        if not stats_list:
-            logger.info("数据库中没有使用统计数据，返回空统计")
-            # 从配置表获取已启用的提供商
-            providers = db_manager.get_llm_provider_configs(enabled_only=True)
-            for provider_row in providers:
-                stats = UsageStats(
-                    provider=provider_row[1],  # provider_id
-                    totalRequests=provider_row[19] if provider_row[19] else 0,  # total_requests from config
-                    successRate=100.0,
-                    avgResponseTime=0.0,
-                    totalTokens=provider_row[20] if provider_row[20] else 0,  # total_tokens from config
-                    totalCost=float(provider_row[21]) if provider_row[21] else 0.0,  # total_cost from config
-                    currency="RMB"
-                )
-                stats_list.append(stats)
-        
+
         return stats_list
         
     except Exception as e:

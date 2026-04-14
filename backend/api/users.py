@@ -18,7 +18,7 @@ from backend.auth.jwt_utils import get_current_user, get_current_admin_user, get
 from backend.auth.user_auth import UserAuth
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
-from backend.utils.avatar import resolve_avatar_url
+from backend.utils.avatar import coerce_avatar_for_storage, resolve_avatar_url
 from backend.services.oss_service import OSSService
 
 router = APIRouter()
@@ -146,7 +146,8 @@ async def update_my_profile(
             raise HTTPException(status_code=400, detail="用户名已被使用")
         update_data['username'] = request.username
     if request.avatar_url is not None:
-        update_data['avatar_url'] = request.avatar_url
+        # 避免把 7 天过期的签名 URL 写入 DB（前端保存资料时常带上传接口返回的 signed_url）
+        update_data['avatar_url'] = coerce_avatar_for_storage(request.avatar_url)
 
     if update_data:
         success = user_auth.update_user(current_user.user_id, **update_data)

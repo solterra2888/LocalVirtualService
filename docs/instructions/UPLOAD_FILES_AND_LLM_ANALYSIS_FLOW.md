@@ -1,8 +1,8 @@
 # Upload Files 模块 & LLM 分析流程说明
 
-> 最后更新：2026-04-13
+> 最后更新：2026-04-14
 
-本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、音频、YouTube、网页链接）的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
+本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、网页链接）的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
 
 ---
 
@@ -10,7 +10,7 @@
 
 1. [总体架构](#1-总体架构)
 2. [文件上传与内容提取](#2-文件上传与内容提取)
-   - 2.1 [文档类（PDF / Word / Excel / CSV / 图片）](#21-文档类pdf--word--excel--csv--图片)
+   - 2.1 [文档类（PDF / Word / Excel / CSV / 图片）](#21-文档类pdf--word--excel--csv--图片)（内文含 **交易报告** 小节）
    - 2.2 [音频文件](#22-音频文件)
    - 2.3 [YouTube 链接](#23-youtube-链接)
    - 2.4 [网页链接（Web Link）](#24-网页链接web-link)
@@ -121,6 +121,25 @@ OSS Key → 下载到临时文件
 ```
 
 > **图片**：快速模式仅生成占位文本，OCR 能力需使用 LlamaParse 模式。
+
+#### 交易报告（IB Activity Statement CSV）
+
+**交易报告**指 Interactive Brokers 导出的 **活动账单 / Activity Statement**（`.csv`）。与普通 CSV 表格不同：系统在 **Quick Process（本地快速模式）** 下会识别该格式，将原始 CSV 解析为 **单行 JSON 字符串** 写入 `file_processing_details.content`，供前端识别为「IB 活动报告」并展示专用视图（含 **复盘** Tab 等）。实现位于 `backend/services/trading_report_extractor.py`，由 `QuickParseService._parse_csv()` 调用。
+
+| 项目 | 说明 |
+|------|------|
+| **上传入口** | 与普通文档相同：`POST /api/files/upload-and-process-document` 或 `POST /api/files/process`（文件扩展名为 `.csv`） |
+| **识别条件** | 原始文本前若干字符内同时包含：`Interactive Brokers` 或 `BrokerName`，以及 `Activity Statement` 或中文 `活动账单` / `活动报告`（见 `is_ib_trading_report()`） |
+| **解析路径** | 仅当 `processing_mode = 'quick'` 时走结构化提取：`extract_tables_from_content()` → `to_structured_content()`。输出 JSON 含 `_type: "ib_trading_report"`、`tables`、`orders`、`markdown` 等字段，与前端 `IBReportData` / `isIBReportContent()` 约定一致 |
+| **LlamaParse 模式** | 若 `processing_mode = 'llamaparse'`，CSV 走 LlamaCloud 解析，结果为普通 Markdown/文本，**不会**生成上述 JSON，前端无法识别为交易报告专用内容；需使用 Quick Process 才能启用交易报告链路 |
+| **默认行为** | 前端 `UploadFilesModal` 默认 `processing_mode: 'quick'`，一般上传即可命中结构化路径；若用户手动切换为 LlamaParse，IB CSV 将失去结构化语义 |
+
+**与其他流程的关系：**
+
+- **存储**：仍写入 `file_processing_details.content`（值为 JSON 字符串），`file_type` 仍为 `'document'`（与普通 CSV 一致）。
+- **并行 LLM**：`content` 非空后仍会触发自动打标签 / 自动命名 / 自动归类（与其它文档相同）；送入模板的 `file_content` 即为该 JSON 字符串（或截断后的片段）。
+- **用户主动分析**：可走 `POST /api/files/document/analyze`，行为与普通文档一致。
+- **复盘与图表**：文件详情侧「复盘」、K 线、成交标注等见专项说明：[TRADE_REVIEW_MODULE.md](./TRADE_REVIEW_MODULE.md)。
 
 #### 解析结果存储
 
@@ -609,16 +628,19 @@ POST /api/llm-prompt-templates/templates/test
    - YouTube：存原始视频 URL。  
    - Web Link：存原始网页 URL。
 
-6. **自动打标签/命名/归类的幂等保护**  
+6. **IB 交易报告 CSV 与解析模式**  
+   结构化交易报告仅在 **Quick Process** 下生成；使用 **LlamaParse** 上传同一文件会得到普通文本，前端不会显示 IB 专用视图与复盘 Tab。需要结构化能力时勿将 `processing_mode` 改为 `llamaparse`。
+
+7. **自动打标签/命名/归类的幂等保护**  
    - 打标签：若 `file_tags` 表中已有该 `file_id` 的记录，且非 `force=True`，则跳过，不重复调用 LLM。  
    - 自动命名：若 `file_processing_details.display_name` 已有值，且非 `force=True`，则跳过。  
    - 自动归类：若 `user_execution_folders` 表中已有该 `(username, processing_stats_id)` 的记录，且非 `force=True`，则跳过。  
    - 手动通过管理 API 触发时可使用 `force=True` 覆盖。
 
-7. **`transcribe_youtube_file_asr_task` 缺少自动触发**  
+8. **`transcribe_youtube_file_asr_task` 缺少自动触发**  
    单文件补充 ASR 转写任务完成后**不会**自动触发打标签/命名/归类。若需要该行为，需在任务末尾补充调用 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify`。
 
-8. **三类 LLM 任务对 content 的截断规则**  
+9. **三类 LLM 任务对 content 的截断规则**  
    - 用户主动分析（`analyze_document_task` / `analyze_audio_task`）：不截断，传入完整 `content`。  
    - 自动打标签（`tag_file_content`）：截断至 `AUTO_TAG_CONTENT_MAX_CHARS`（默认 6000 字符）。  
    - 自动命名（`name_file_content`）：截断至 `AUTO_NAME_CONTENT_MAX_CHARS`（默认 3000 字符）。
@@ -637,7 +659,8 @@ POST /api/llm-prompt-templates/templates/test
 | `backend/tasks/classify_tasks.py` | `classify_file_content_task` Celery 任务 |
 | `backend/workers/file_worker.py` | `FileProcessingWorker`，核心解析调度器 |
 | `backend/core/llama_service.py` | LlamaParse 云端解析服务 |
-| `backend/core/quick_parse_service.py` | 本地快速解析服务 |
+| `backend/core/quick_parse_service.py` | 本地快速解析服务（含 CSV → IB 交易报告结构化） |
+| `backend/services/trading_report_extractor.py` | IB Activity Statement CSV → `ib_trading_report` JSON |
 | `backend/core/asr_service.py` | Fun-ASR 音频转写服务 |
 | `backend/services/youtube_service.py` | YouTube 字幕/音频下载服务 |
 | `backend/services/web_scraper_service.py` | 网页抓取服务 |
