@@ -543,7 +543,7 @@ async def create_subscription(
                 task = fetch_youtube_subscription_task.apply_async(
                     args=[subscription_id, None, True],  # force_fetch=True
                     countdown=0,
-                    queue='data_fetching'  # 使用 data_fetching 队列
+                    queue='data_fetching'
                 )
                 logger.info(f"Celery task scheduled: fetch_youtube_subscription (task_id={task.id})")
         

@@ -60,8 +60,9 @@ task_routes = {
     'fetch_ipo_calendar': {'queue': 'data_fetching'},  # 🔥 新增：IPO日历数据获取
     # 订阅相关任务（data_fetching队列）
     'fetch_twitter_subscription': {'queue': 'data_fetching'},  # Twitter订阅内容获取
-    'fetch_youtube_subscription': {'queue': 'youtube_fetching'},  # YouTube订阅内容获取（远程 Worker）
-    'fetch_all_youtube_subscriptions': {'queue': 'youtube_fetching'},  # YouTube批量订阅获取（远程 Worker）
+    'fetch_youtube_subscription': {'queue': 'youtube_fetching'},  # YouTube订阅内容获取（远程 Worker）；创建订阅时由 API 显式 override 到 data_fetching
+    'fetch_all_youtube_subscriptions': {'queue': 'youtube_fetching'},  # YouTube批量订阅获取（远程 Worker，Scheduler 定时调用）
+    'fetch_youtube_transcripts_batch': {'queue': 'youtube_fetching'},  # YouTube transcript 字幕拉取（远程 Worker，住宅 IP）
     'transcribe_youtube_feed_task': {'queue': 'youtube_transcription'},  # YouTube Feed ASR 转写（本地虚拟机 Worker）
     'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},  # Upload YouTube Link ASR 转写（本地虚拟机 Worker）
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},

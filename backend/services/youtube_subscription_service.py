@@ -861,6 +861,8 @@ class YouTubeSubscriptionService:
             videos_existing = 0
             videos_failed = 0
             
+            new_video_items = []
+
             for raw_video in raw_videos:
                 try:
                     content_db_id, is_new = content_service.save_content(
@@ -871,12 +873,13 @@ class YouTubeSubscriptionService:
 
                     if is_new:
                         videos_new += 1
-                        # 仅对新视频拉取 transcript
                         video_id_str = raw_video.get('id', '')
                         video_url = f"https://www.youtube.com/watch?v={video_id_str}"
-                        YouTubeSubscriptionService._fetch_and_store_transcript(
-                            content_db_id, video_id_str, video_url, content_service
-                        )
+                        new_video_items.append({
+                            "content_db_id": content_db_id,
+                            "video_id": video_id_str,
+                            "video_url": video_url,
+                        })
                     else:
                         videos_existing += 1
 
@@ -886,6 +889,18 @@ class YouTubeSubscriptionService:
                            source="youtube_subscription")
                     videos_failed += 1
                     continue
+
+            if new_video_items:
+                try:
+                    from backend.tasks.subscription_tasks import fetch_youtube_transcripts_batch_task
+                    fetch_youtube_transcripts_batch_task.apply_async(
+                        args=[new_video_items],
+                        queue='youtube_fetching',
+                    )
+                    info(f"Transcript 拉取任务已派发到家用服务器: {len(new_video_items)} 个视频",
+                         source="youtube_subscription")
+                except Exception as e:
+                    warning(f"派发 transcript 任务失败: {str(e)}", source="youtube_subscription")
 
             info(f"保存完成: new={videos_new}, existing={videos_existing}, failed={videos_failed}",
                  source="youtube_subscription")
@@ -1016,6 +1031,7 @@ class YouTubeSubscriptionService:
                     videos_new = 0
                     videos_existing = 0
                     user_ids = channel_info['user_ids']
+                    new_video_items = []
                     
                     for raw_video in raw_videos:
                         try:
@@ -1027,12 +1043,13 @@ class YouTubeSubscriptionService:
 
                             if is_new:
                                 videos_new += 1
-                                # 仅对新视频拉取 transcript
                                 video_id_str = raw_video.get('id', '')
                                 video_url = f"https://www.youtube.com/watch?v={video_id_str}"
-                                YouTubeSubscriptionService._fetch_and_store_transcript(
-                                    content_db_id, video_id_str, video_url, content_service
-                                )
+                                new_video_items.append({
+                                    "content_db_id": content_db_id,
+                                    "video_id": video_id_str,
+                                    "video_url": video_url,
+                                })
                             else:
                                 videos_existing += 1
 
@@ -1041,6 +1058,18 @@ class YouTubeSubscriptionService:
                             warning(f"保存视频失败: video_id={video_id_str}, error={str(e)}",
                                    source="youtube_subscription")
                             continue
+
+                    if new_video_items:
+                        try:
+                            from backend.tasks.subscription_tasks import fetch_youtube_transcripts_batch_task
+                            fetch_youtube_transcripts_batch_task.apply_async(
+                                args=[new_video_items],
+                                queue='youtube_fetching',
+                            )
+                            info(f"Transcript 拉取任务已派发到家用服务器: {len(new_video_items)} 个视频",
+                                 source="youtube_subscription")
+                        except Exception as e:
+                            warning(f"派发 transcript 任务失败: {str(e)}", source="youtube_subscription")
                     
                     total_videos_fetched += len(raw_videos)
                     total_videos_new += videos_new

@@ -393,3 +393,81 @@ def fetch_all_youtube_subscriptions_task(self) -> Dict[str, Any]:
                 'videos_new': 0,
                 'videos_existing': 0,
             }
+
+
+@app.task(
+    name='fetch_youtube_transcripts_batch',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def fetch_youtube_transcripts_batch_task(
+    self,
+    video_items: list,
+) -> Dict[str, Any]:
+    """
+    批量为 YouTube 视频拉取 transcript（Celery 任务）。
+
+    路由到 youtube_fetching 队列，由家用服务器的远程 Worker 执行，
+    以使用住宅 IP 绕过 YouTube 对云厂商 IP 的封锁。
+
+    Args:
+        video_items: [{"content_db_id": int, "video_id": str, "video_url": str}, ...]
+    """
+    try:
+        logger.info(
+            f"[Celery Task] Starting transcript batch fetch for {len(video_items)} videos"
+        )
+
+        from backend.services.youtube_service import YouTubeService
+        from backend.services.subscription_content_service import SubscriptionContentService
+
+        content_service = SubscriptionContentService()
+        success_count = 0
+        fail_count = 0
+
+        for item in video_items:
+            content_db_id = item["content_db_id"]
+            video_id = item["video_id"]
+            video_url = item["video_url"]
+            try:
+                result = YouTubeService.fetch_transcript(video_url)
+                full_text = YouTubeService.get_full_text(result)
+                content_service.update_transcript(content_db_id, full_text, result)
+                success_count += 1
+                logger.info(
+                    f"[Celery Task] Transcript OK: content_db_id={content_db_id}, "
+                    f"video_id={video_id}, language={result.get('language')}"
+                )
+            except Exception as e:
+                fail_count += 1
+                logger.warning(
+                    f"[Celery Task] Transcript failed for video_id={video_id}: {e}"
+                )
+
+        logger.info(
+            f"[Celery Task] Transcript batch done: success={success_count}, "
+            f"failed={fail_count}"
+        )
+        return {
+            "success": True,
+            "total": len(video_items),
+            "transcripts_ok": success_count,
+            "transcripts_failed": fail_count,
+        }
+
+    except Exception as exc:
+        logger.error(
+            f"[Celery Task] Transcript batch failed: {str(exc)}", exc_info=True
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        return {
+            "success": False,
+            "message": str(exc),
+            "total": len(video_items),
+            "transcripts_ok": 0,
+            "transcripts_failed": len(video_items),
+        }
