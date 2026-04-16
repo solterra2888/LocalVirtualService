@@ -150,3 +150,12 @@ tail -f ~/local_virtual_service/logs/worker.log
 'transcribe_youtube_feed_task': {'queue': 'youtube_transcription'},
 'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},
 ```
+
+# 前台运行(setup.sh只需要执行一次 后续都是这个)
+bash /opt/local_virtual_service/start.sh
+
+# 后台运行
+nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
+
+# 脚本错误处理(如果执行时出现\r 之类的报错)
+执行 dos2unix 脚本名称 (作用: 把windows上编辑后的脚本引入的换行问题, 解决换行符不一致情况, 把换行符转换成unix格式)
