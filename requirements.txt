@@ -7,6 +7,10 @@ requests>=2.31
 feedparser>=6.0
 python-dateutil>=2.8
 youtube-transcript-api>=1.0.0
-yt-dlp>=2024.0
+yt-dlp>=2024.08.06
+# 为 yt-dlp 提供 TLS 指纹伪装能力（impersonation），绕过 YouTube 字幕 CDN 的 429 限流。
+# 注意版本上限: yt-dlp 的 bridge (yt_dlp.networking._curlcffi) 只支持 0.10.x~0.14.x
+# 和 0.5.10，超出范围会报 ImportError 导致 impersonation 不可用。
+curl-cffi>=0.10,<0.15
 oss2>=2.18
 dashscope>=1.20
