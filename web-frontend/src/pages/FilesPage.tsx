@@ -666,6 +666,7 @@ const FilesPageInner: React.FC = () => {
         ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
         ...(searchType === 'ticker' && tickerFilter ? { ticker: tickerFilter } : {}),
         ...(selectedFolderId ? { folder_id: selectedFolderId } : {}),
+        ...(fileTypeFilter !== 'all' ? { file_type_tab: fileTypeFilter } : {}),
       });
       
       if (append) {
@@ -728,7 +729,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId, fileTypeFilter]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -959,16 +960,16 @@ const FilesPageInner: React.FC = () => {
     return () => window.removeEventListener(TASK_EXECUTIONS_REFRESH_EVENT, onRefresh);
   }, []);
 
-  // Refresh executions when folder filter changes (after ref update to avoid stale closure)
-  const isFolderMountRef = useRef(true);
+  // Refresh executions when folder or file-type filter changes (server-side pagination must match filters)
+  const isFolderOrTypeMountRef = useRef(true);
   useEffect(() => {
-    if (isFolderMountRef.current) { isFolderMountRef.current = false; return; }
+    if (isFolderOrTypeMountRef.current) { isFolderOrTypeMountRef.current = false; return; }
     const t = setTimeout(() => {
       loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
     }, 50);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFolderId]);
+  }, [selectedFolderId, fileTypeFilter]);
 
   /** Watchlist 等外链：`/files?execution=<processing_stats_id>` 打开并选中对应来源任务，并重置筛选以便列表能显示该条 */
   useEffect(() => {
@@ -2947,11 +2948,15 @@ const FilesPageInner: React.FC = () => {
     </Modal>
   );
 
-  // 按 file_type 筛选列表（image 包含 jpg/jpeg/png/gif/bmp/image）
+  // 按 file_type 筛选列表（与 getFileTypeIconDisplay / 服务端 file_type_tab 一致；image 含多后缀；audio 含 mime）
   const matchesFileType = (firstFileType: string | undefined, tab: typeof fileTypeFilter): boolean => {
-    const t = firstFileType?.toLowerCase() || '';
+    const raw = firstFileType || '';
+    const t = raw.toLowerCase();
     if (tab === 'all') return true;
-    if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t);
+    if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t) || t.startsWith('image/');
+    if (tab === 'audio') return t === 'audio' || t.startsWith('audio/');
+    if (tab === 'doc') return ['doc', 'docx', 'word'].includes(t) || t.includes('word') || t.includes('msword');
+    if (tab === 'excel') return ['excel', 'xlsx', 'xls', 'csv'].includes(t) || t.includes('excel') || t.includes('spreadsheet');
     if (tab === 'web') return t === 'web';
     if (tab === 'text') return t === 'text';
     return t === tab;

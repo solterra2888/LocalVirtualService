@@ -12,8 +12,10 @@ import sys
 import tempfile
 import time
 from datetime import datetime
+from typing import Optional
 
 from celery import current_task
+from celery.exceptions import SoftTimeLimitExceeded
 
 from .celery_app import app
 from .services import (
@@ -23,9 +25,28 @@ from .services import (
     YouTubeCaptionService,
     YouTubeFeedService,
     build_ydl_opts,
+    probe_youtube_duration,
 )
 
 log = logging.getLogger("worker")
+
+
+# 长视频阈值（秒）：超过此值的 ASR 任务会被转发到 youtube_transcription_long 队列，
+# 由独立 worker 处理，避免阻塞短视频。默认 30 分钟。
+_LONG_VIDEO_THRESHOLD = int(os.getenv("ASR_LONG_VIDEO_THRESHOLD_SECONDS", "1800"))
+_SHORT_QUEUE = "youtube_transcription"
+_LONG_QUEUE = "youtube_transcription_long"
+
+# 长视频任务专属的 Celery 超时（覆盖 celery_app.py 里 2h 的全局默认值）。
+# Fun-ASR 允许 ≤12h 音频，默认给 6h 硬上限、5.5h 软上限，足以覆盖 10h+ 的直播回放。
+_LONG_TASK_HARD_LIMIT = int(os.getenv("ASR_LONG_TASK_TIME_LIMIT_SECONDS", "21600"))
+_LONG_TASK_SOFT_LIMIT = int(os.getenv("ASR_LONG_TASK_SOFT_TIME_LIMIT_SECONDS", "19800"))
+
+# 重试策略：瞬时错误（超时/429/网络/OSS 5xx）最多重试此次数，并走指数退避。
+# 永久错误（视频已删除/私有/年龄限制/无人声）不重试。
+_MAX_RETRIES = int(os.getenv("ASR_MAX_RETRIES", "3"))
+_RETRY_BACKOFF_BASE = int(os.getenv("ASR_RETRY_BACKOFF_BASE_SECONDS", "60"))
+_RETRY_BACKOFF_MAX = int(os.getenv("ASR_RETRY_BACKOFF_MAX_SECONDS", "600"))
 
 
 # =====================================================================
@@ -216,6 +237,69 @@ def _classify_caption_error(err: Exception) -> tuple:
     return msg.split("\n")[0][:120], True
 
 
+def _ytdlp_caption_fallback_enabled() -> bool:
+    """是否启用 yt-dlp 作为 youtube-transcript-api 的字幕 fallback。"""
+    return os.getenv("CAPTION_YTDLP_FALLBACK_ENABLED", "true").strip().lower() in \
+        ("1", "true", "yes", "on")
+
+
+def _fetch_transcript_with_fallback(video_url: str) -> dict:
+    """
+    统一的字幕拉取入口：transcript-api → yt-dlp 双路径。
+
+    两条路径走的是**不同的 YouTube endpoint**（/api/timedtext vs player endpoint），
+    被独立限流。当 IP 在 transcript-api 上被封禁时 yt-dlp 路径通常仍可用。
+
+    返回字典:
+      success:     最终是否拿到字幕
+      result:      成功时的字幕数据 (与 fetch_transcript 同结构)
+      source:      'API' 或 'yt-dlp'，表示最终由哪条路径拿到（失败时为 None）
+      should_asr:  失败时是否应降级到 ASR（永久失败如私有/直播未开始则 False）
+      api_reason:  transcript-api 的失败原因（未调用时为 None）
+      yt_reason:   yt-dlp 的失败原因（未调用时为 None）
+    """
+    api_reason: Optional[str] = None
+    api_should_asr: bool = True
+
+    # ── Stage 1: transcript-api（快） ──────────────────────────
+    try:
+        result = YouTubeCaptionService.fetch_transcript(video_url)
+        return {"success": True, "result": result, "source": "API",
+                "should_asr": False, "api_reason": None, "yt_reason": None}
+    except ImportError:
+        api_reason = "transcript-api 库未安装"
+    except Exception as e:
+        api_reason, api_should_asr = _classify_caption_error(e)
+
+    # 永久失败（直播未开始/私有/首播等）→ yt-dlp 也无能为力，直接返回
+    if not api_should_asr:
+        return {"success": False, "result": None, "source": None,
+                "should_asr": False, "api_reason": api_reason, "yt_reason": None}
+
+    # ── Stage 2: yt-dlp fallback（慢 2-5s，但走不同 endpoint） ──
+    if not _ytdlp_caption_fallback_enabled():
+        return {"success": False, "result": None, "source": None,
+                "should_asr": True, "api_reason": api_reason,
+                "yt_reason": "fallback 未启用"}
+
+    try:
+        result = YouTubeCaptionService.fetch_transcript_via_ytdlp(video_url)
+        return {"success": True, "result": result, "source": "yt-dlp",
+                "should_asr": False, "api_reason": api_reason, "yt_reason": None}
+    except Exception as e:
+        yt_reason = str(e).split("\n")[0][:120]
+        return {"success": False, "result": None, "source": None,
+                "should_asr": True, "api_reason": api_reason, "yt_reason": yt_reason}
+
+
+def _format_caption_failure_reason(outcome: dict) -> str:
+    """把 outcome 里的 api_reason / yt_reason 格式化成一行日志文字。"""
+    api_r, yt_r = outcome.get("api_reason"), outcome.get("yt_reason")
+    if api_r and yt_r:
+        return f"API={api_r} | yt-dlp={yt_r}"
+    return api_r or yt_r or "unknown"
+
+
 def _fetch_caption(content_db_id: int, raw_video: dict, store: ContentStore) -> tuple:
     """
     为新视频尝试拉取字幕 (不抛异常)。
@@ -224,22 +308,25 @@ def _fetch_caption(content_db_id: int, raw_video: dict, store: ContentStore) -> 
     vid = raw_video.get("id", "")
     title = raw_video.get("snippet", {}).get("title", "")
     url = f"https://www.youtube.com/watch?v={vid}"
-    try:
-        result = YouTubeCaptionService.fetch_transcript(url)
+
+    outcome = _fetch_transcript_with_fallback(url)
+
+    if outcome["success"]:
+        result = outcome["result"]
         full_text = YouTubeCaptionService.get_full_text(result)
         store.update_transcript(content_db_id, full_text, result)
-        char_count = len(full_text)
-        log.info("  ✓ 字幕获取成功: video=%s lang=%s 字数=%d「%s」",
-                 vid, result.get("language"), char_count, title[:40])
+        source_type = "自动生成" if result.get("is_generated") else "人工字幕"
+        via = outcome["source"]
+        extra = f" (API→{outcome['api_reason']})" if via == "yt-dlp" and outcome["api_reason"] else ""
+        log.info("  ✓ 字幕获取成功[%s]: video=%s lang=%s(%s) 字数=%d「%s」%s",
+                 via, vid, result.get("language"), source_type,
+                 len(full_text), title[:40], extra)
         return True, False
-    except ImportError as e:
-        log.warning("youtube-transcript-api 不可用 (解释器: %s): %s", sys.executable, e)
-        return False, True
-    except Exception as e:
-        reason, should_asr = _classify_caption_error(e)
-        tag = "→ ASR" if should_asr else "跳过"
-        log.warning("  ✗ 字幕获取失败: video=%s 原因=%s [%s]「%s」", vid, reason, tag, title[:40])
-        return False, should_asr
+
+    reason = _format_caption_failure_reason(outcome)
+    tag = "→ ASR" if outcome["should_asr"] else "跳过"
+    log.warning("  ✗ 字幕获取失败: video=%s 原因=%s [%s]「%s」", vid, reason, tag, title[:40])
+    return False, outcome["should_asr"]
 
 
 def _dispatch_asr_fallback(asr_pending: list):
@@ -269,31 +356,45 @@ def fetch_youtube_transcripts_batch(self, video_items: list):
     store = ContentStore()
     log.info("── 批量字幕拉取开始: %d 个视频 ──", len(video_items))
     ok = fail = 0
+    ok_via_api = ok_via_ytdlp = 0
     asr_pending = []
     for i, item in enumerate(video_items):
         vid = item["video_id"]
         url = item["video_url"]
         cid = item["content_db_id"]
-        try:
-            result = YouTubeCaptionService.fetch_transcript(url)
+
+        outcome = _fetch_transcript_with_fallback(url)
+
+        if outcome["success"]:
+            result = outcome["result"]
             full_text = YouTubeCaptionService.get_full_text(result)
             store.update_transcript(cid, full_text, result)
             ok += 1
-            log.info("  [%d/%d] ✓ video=%s lang=%s 字数=%d",
-                     i + 1, len(video_items), vid, result.get("language"), len(full_text))
-        except Exception as e:
+            source = "自动生成" if result.get("is_generated") else "人工字幕"
+            via = outcome["source"]
+            if via == "yt-dlp":
+                ok_via_ytdlp += 1
+            else:
+                ok_via_api += 1
+            extra = f" (API→{outcome['api_reason']})" if via == "yt-dlp" and outcome["api_reason"] else ""
+            log.info("  [%d/%d] ✓[%s] video=%s lang=%s(%s) 字数=%d%s",
+                     i + 1, len(video_items), via, vid,
+                     result.get("language"), source, len(full_text), extra)
+        else:
             fail += 1
-            reason, should_asr = _classify_caption_error(e)
-            tag = "→ ASR" if should_asr else "跳过"
+            reason = _format_caption_failure_reason(outcome)
+            tag = "→ ASR" if outcome["should_asr"] else "跳过"
             log.warning("  [%d/%d] ✗ video=%s 原因=%s [%s]",
                         i + 1, len(video_items), vid, reason, tag)
-            if should_asr:
+            if outcome["should_asr"]:
                 asr_pending.append(item)
 
     _dispatch_asr_fallback(asr_pending)
-    log.info("── 批量字幕完成: 成功=%d 失败=%d ASR派发=%d / 总计=%d ──",
-             ok, fail, len(asr_pending), len(video_items))
-    return {"success": True, "total": len(video_items), "transcripts_ok": ok,
+    log.info("── 批量字幕完成: 成功=%d(API=%d,yt-dlp=%d) 失败=%d ASR派发=%d / 总计=%d ──",
+             ok, ok_via_api, ok_via_ytdlp, fail, len(asr_pending), len(video_items))
+    return {"success": True, "total": len(video_items),
+            "transcripts_ok": ok, "transcripts_ok_via_api": ok_via_api,
+            "transcripts_ok_via_ytdlp": ok_via_ytdlp,
             "transcripts_failed": fail, "asr_dispatched": len(asr_pending)}
 
 
@@ -315,13 +416,114 @@ def _progress(status="processing", progress=0, msg=None, url="", total=1, failed
         pass
 
 
-@app.task(bind=True, name="transcribe_youtube_feed_task", queue="youtube_transcription")
-def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video_id: str):
-    """对 Feed 中无字幕的 YouTube 视频, 下载音频 → Fun-ASR 转录 → 写回 DB"""
+def _current_routing_key(task) -> str:
+    """取当前任务消费时所在的 routing_key（== 队列名），失败时返回短队列名。"""
+    try:
+        info = getattr(task.request, "delivery_info", None) or {}
+        return info.get("routing_key") or _SHORT_QUEUE
+    except Exception:
+        return _SHORT_QUEUE
+
+
+def _classify_asr_failure(err: Exception) -> tuple:
+    """
+    将 ASR 流水线抛出的异常归类为 (简短描述, 是否可重试)。
+    永久性错误不应重试，立即标记 failed；瞬时错误走指数退避。
+    """
+    if isinstance(err, SoftTimeLimitExceeded):
+        return "处理超时 (soft time limit)", True
+
+    msg = str(err)
+    low = msg.lower()
+
+    # ── 永久失败（视频层面）─────────────────────────────
+    if "video is not available" in low or "video unavailable" in low:
+        return "视频不可用", False
+    if "private video" in low:
+        return "私有视频", False
+    if "sign in to confirm" in low or "age-restricted" in low or "age restricted" in low:
+        return "年龄限制", False
+    if "members-only" in low or "members only content" in low:
+        return "会员专属", False
+    if "removed by the uploader" in low or "account has been terminated" in low:
+        return "视频已删除", False
+    if "asr_response_have_no_words" in low or "asr 未返回结果" in low:
+        return "ASR 无识别结果（视频无人声）", False
+
+    # ── 永久失败（配置/权限层面，需人工介入，不应自动重试）──
+    if "accessdenied" in low or ("403" in msg and "oss" in low):
+        return "OSS 权限拒绝 (需检查 ACL)", False
+    if "oss 未配置" in msg or "asr 未配置" in low:
+        return "服务未配置", False
+    # curl-cffi impersonate 配置错误是永久的配置问题，重试无意义
+    if "impersonate target" in low and "not available" in low:
+        return "impersonate 配置错误 (检查 curl-cffi 版本/YTDLP_IMPERSONATE 值)", False
+
+    # ── 瞬时失败（网络/限流/外部服务抖动）────────────────
+    if "429" in msg or "too many requests" in low:
+        return "请求过多 (429)", True
+    if "503" in msg or "service unavailable" in low:
+        return "服务暂不可用 (503)", True
+    if "502" in msg or "bad gateway" in low:
+        return "网关错误 (502)", True
+    if "timeout" in low or "timed out" in low or "read timed out" in low:
+        return "网络超时", True
+    if "connection reset" in low or "connection aborted" in low:
+        return "连接被重置", True
+    if "yt-dlp 未生成音频文件" in msg:
+        return "yt-dlp 下载未产出文件", True
+
+    # ── 默认策略：未分类异常走重试（保守策略，避免漏过可恢复错误）──
+    short = msg.split("\n")[0][:100]
+    return short, True
+
+
+def _compute_retry_countdown(retry_count: int) -> int:
+    """指数退避，最大不超过 _RETRY_BACKOFF_MAX。
+    retry_count=0 → 60s, =1 → 120s, =2 → 240s, 封顶 600s。
+    """
+    countdown = _RETRY_BACKOFF_BASE * (2 ** retry_count)
+    return min(countdown, _RETRY_BACKOFF_MAX)
+
+
+@app.task(bind=True, name="transcribe_youtube_feed_task", queue=_SHORT_QUEUE,
+          max_retries=_MAX_RETRIES)
+def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video_id: str,
+                                 _skip_duration_check: bool = False):
+    """对 Feed 中无字幕的 YouTube 视频, 下载音频 → Fun-ASR 转录 → 写回 DB
+
+    若当前在短队列且探测到视频超过 `_LONG_VIDEO_THRESHOLD`，会自动转发到长视频队列，
+    避免大文件阻塞短视频处理。`_skip_duration_check=True` 用于长队列 worker 消费时跳过二次检测。
+    """
     task_id = self.request.id
     temp_dir = None
+
+    current_queue = _current_routing_key(self)
+    if not _skip_duration_check and current_queue == _SHORT_QUEUE:
+        duration = probe_youtube_duration(video_url)
+        if duration and duration > _LONG_VIDEO_THRESHOLD:
+            log.info(
+                "── 长视频检测: content=%d video=%s 时长=%dm%02ds 超过阈值%dm → 转发长视频队列 ──",
+                content_db_id, video_id,
+                duration // 60, duration % 60,
+                _LONG_VIDEO_THRESHOLD // 60,
+            )
+            try:
+                transcribe_youtube_feed_task.apply_async(
+                    args=[content_db_id, video_url, video_id],
+                    kwargs={"_skip_duration_check": True},
+                    queue=_LONG_QUEUE,
+                    time_limit=_LONG_TASK_HARD_LIMIT,
+                    soft_time_limit=_LONG_TASK_SOFT_LIMIT,
+                )
+                return {"task_id": task_id, "status": "rerouted_to_long",
+                        "content_db_id": content_db_id, "duration_seconds": duration}
+            except Exception as e:
+                log.warning("转发长视频队列失败，继续在短队列处理: %s", e)
+
     try:
-        log.info("── Feed ASR 开始: content=%d video=%s url=%s ──", content_db_id, video_id, video_url)
+        log.info("── Feed ASR 开始: content=%d video=%s url=%s queue=%s ──",
+                 content_db_id, video_id, video_url, current_queue)
         import yt_dlp
 
         log.info("  [1/5] yt-dlp 下载音频...")
@@ -374,16 +576,34 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         return {"task_id": task_id, "status": "completed", "content_db_id": content_db_id}
 
     except Exception as e:
-        err = f"Feed ASR 失败: {e}"
-        log.error("── %s content=%d video=%s ──", err, content_db_id, video_id)
+        # 先清理临时目录，避免重试前残留占用磁盘
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            temp_dir = None
+
+        reason, retriable = _classify_asr_failure(e)
+        retries_done = self.request.retries
+        tag = "可重试" if retriable else "永久"
+        log.error("── Feed ASR 失败[%s]: reason=%s content=%d video=%s (尝试 %d/%d) ──",
+                  tag, reason, content_db_id, video_id, retries_done + 1, _MAX_RETRIES + 1)
+
+        if retriable and retries_done < _MAX_RETRIES:
+            countdown = _compute_retry_countdown(retries_done)
+            log.info("  → %ds 后重试 (第 %d 次)", countdown, retries_done + 2)
+            _progress(status="processing", msg=f"Retrying in {countdown}s: {reason}", url=video_url)
+            raise self.retry(exc=e, countdown=countdown)
+
+        err = f"Feed ASR 失败: {reason}"
         _progress(status="failed", msg=err, url=video_url, failed=1)
-        return {"task_id": task_id, "status": "failed", "error": err}
+        return {"task_id": task_id, "status": "failed", "error": err,
+                "permanent": not retriable, "retries": retries_done}
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-@app.task(bind=True, name="transcribe_youtube_file_asr_task", queue="youtube_transcription")
+@app.task(bind=True, name="transcribe_youtube_file_asr_task", queue="youtube_transcription",
+          max_retries=_MAX_RETRIES)
 def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video_id: str,
                                      max_duration_seconds: int = 0):
     """对 Upload YouTube Link 中无字幕的视频, 下载 → Fun-ASR → 写回 file_processing_details"""
@@ -443,11 +663,28 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         return {"task_id": task_id, "status": "completed", "file_id": file_id, "content_length": len(full_text)}
 
     except Exception as e:
-        err = f"File ASR 失败: {e}"
-        log.error("── %s file_id=%d video=%s ──", err, file_id, video_id)
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            temp_dir = None
+
+        reason, retriable = _classify_asr_failure(e)
+        retries_done = self.request.retries
+        tag = "可重试" if retriable else "永久"
+        log.error("── File ASR 失败[%s]: reason=%s file_id=%d video=%s (尝试 %d/%d) ──",
+                  tag, reason, file_id, video_id, retries_done + 1, _MAX_RETRIES + 1)
+
+        if retriable and retries_done < _MAX_RETRIES:
+            countdown = _compute_retry_countdown(retries_done)
+            log.info("  → %ds 后重试 (第 %d 次)", countdown, retries_done + 2)
+            store.update_file_status(file_id, "processing")
+            _progress(status="processing", msg=f"Retrying in {countdown}s: {reason}", url=youtube_url)
+            raise self.retry(exc=e, countdown=countdown)
+
+        err = f"File ASR 失败: {reason}"
         store.update_file_status(file_id, "failed")
         _progress(status="failed", msg=err, url=youtube_url, failed=1)
-        return {"task_id": task_id, "status": "failed", "error": err}
+        return {"task_id": task_id, "status": "failed", "error": err,
+                "permanent": not retriable, "retries": retries_done}
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)

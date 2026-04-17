@@ -24,6 +24,64 @@ from backend.utils.avatar import resolve_avatar_url
 router = APIRouter()
 
 
+def _first_file_type_lower_sql() -> str:
+    """First file's file_type for this execution, lowercased (for filtering)."""
+    return (
+        "(SELECT LOWER(TRIM(COALESCE(file_type, ''))) FROM file_processing_details "
+        "WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1)"
+    )
+
+
+def _first_file_type_raw_sql() -> str:
+    """First file's file_type as stored (for ILIKE mime types)."""
+    return (
+        "(SELECT TRIM(COALESCE(file_type, '')) FROM file_processing_details "
+        "WHERE processing_stats_id = ps.id ORDER BY id ASC LIMIT 1)"
+    )
+
+
+def _append_first_file_type_tab_filter(
+    where_conditions: list,
+    params: list,
+    file_type_tab: Optional[str],
+) -> None:
+    """
+    Filter executions by the first file's type (same buckets as FilesPage Search).
+
+    Must be applied in SQL so pagination returns the correct page (client-only filter
+    would hide matches that are not in the current page).
+    """
+    if not file_type_tab or not str(file_type_tab).strip():
+        return
+    tab = str(file_type_tab).strip().lower()
+    if tab == "all":
+        return
+
+    fts = _first_file_type_lower_sql()
+    fts_raw = _first_file_type_raw_sql()
+
+    if tab == "image":
+        where_conditions.append(f"{fts} IN ('image', 'jpg', 'jpeg', 'png', 'gif', 'bmp')")
+    elif tab == "audio":
+        where_conditions.append(
+            f"({fts} = 'audio' OR {fts_raw} ILIKE 'audio/%')"
+        )
+    elif tab == "web":
+        where_conditions.append(f"{fts} = 'web'")
+    elif tab == "text":
+        where_conditions.append(f"{fts} = 'text'")
+    elif tab == "doc":
+        where_conditions.append(f"{fts} IN ('doc', 'docx', 'word')")
+    elif tab == "excel":
+        where_conditions.append(f"{fts} IN ('excel', 'xlsx', 'xls', 'csv')")
+    elif tab in ("pdf", "youtube"):
+        where_conditions.append(f"{fts} = %s")
+        params.append(tab)
+    else:
+        where_conditions.append(f"{fts} = %s")
+        params.append(tab)
+
+
 def _fetch_ticker_tags_for_processing_stats_ids(cursor, ps_ids: List) -> Dict[Any, List[str]]:
     """按 processing_stats_id 聚合 file_tags.ticker（jsonb 数组），去重并保持顺序。"""
     if not ps_ids:
@@ -289,7 +347,11 @@ async def get_task_executions(
     search_type: Optional[str] = Query(None, description="搜索类型: file_name 或 content"),
     q: Optional[str] = Query(None, description="搜索关键词"),
     ticker: Optional[str] = Query(None, description="按ticker筛选（精确匹配file_tags中的ticker数组元素）"),
-    folder_id: Optional[str] = Query(None, description="按文件夹筛选: 数字=指定文件夹, 'uncategorized'=未分类, 不传=全部")
+    folder_id: Optional[str] = Query(None, description="按文件夹筛选: 数字=指定文件夹, 'uncategorized'=未分类, 不传=全部"),
+    file_type_tab: Optional[str] = Query(
+        None,
+        description="按首文件类型筛选: all, pdf, doc, excel, image, audio, youtube, web, text（与 Sources 搜索栏一致）",
+    ),
 ):
     """
     获取任务执行历史
@@ -300,6 +362,7 @@ async def get_task_executions(
     - **q**: 搜索关键词，与 search_type 配合使用
     - **ticker**: 按股票代码筛选，匹配file_tags中包含该ticker的执行记录
     - **folder_id**: 按文件夹筛选，数字=指定文件夹ID，'uncategorized'=未分类文件
+    - **file_type_tab**: 按首文件类型筛选（与分页一起在服务端完成，避免仅客户端筛选导致漏项）
     """
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
@@ -365,6 +428,8 @@ async def get_task_executions(
                     params.extend([current_user.username, fid])
                 except ValueError:
                     pass
+
+        _append_first_file_type_tab_filter(where_conditions, params, file_type_tab)
 
         where_clause = ("WHERE " + " AND ".join(where_conditions)) if where_conditions else ""
         

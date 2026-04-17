@@ -18,6 +18,11 @@ for candidate in [_here.parent / ".env", _here / ".env", Path.cwd() / ".env"]:
 
 broker_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# 可调超时 / 结果保留（短队列/默认；长队列在 tasks.py 里按任务覆盖）
+_task_time_limit = int(os.getenv("TASK_TIME_LIMIT_SECONDS", "7200"))
+_task_soft_time_limit = int(os.getenv("TASK_SOFT_TIME_LIMIT_SECONDS", "6600"))
+_result_expires = int(os.getenv("RESULT_EXPIRES_SECONDS", "3600"))
+
 app = Celery("universal_glance")
 app.conf.update(
     broker_url=broker_url,
@@ -27,14 +32,14 @@ app.conf.update(
     accept_content=["json"],
     result_serializer="json",
     task_ignore_result=False,
-    result_expires=3600,
+    result_expires=_result_expires,
     timezone="Asia/Shanghai",
     enable_utc=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     worker_max_tasks_per_child=50,
-    task_time_limit=7200,
-    task_soft_time_limit=6600,
+    task_time_limit=_task_time_limit,
+    task_soft_time_limit=_task_soft_time_limit,
 )
 
 # 自动发现当前包里的 tasks 模块
