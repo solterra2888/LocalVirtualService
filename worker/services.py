@@ -1142,15 +1142,31 @@ class _YdlLogger:
         self._log.debug(msg)
 
 
-def probe_youtube_duration(video_url: str, timeout: int = 10) -> Optional[int]:
+def probe_youtube_metadata(video_url: str, timeout: int = 10) -> Dict[str, Any]:
     """
-    用 yt-dlp 仅获取视频元信息（不下载），返回视频时长（秒）。
-    失败或超时时返回 None，调用方应回退到默认处理路径。
+    用 yt-dlp 仅获取视频元信息（不下载），返回探测到的元信息字典。
+
+    返回结构:
+        {
+            'ok':          True/False   — 探测是否成功
+            'duration':    int|None     — 视频时长秒数，直播或未知为 None
+            'is_live':     bool         — 当前是否在直播
+            'live_status': str          — yt-dlp 原生字段:
+                                          'not_live' | 'is_live' | 'is_upcoming'
+                                          | 'was_live' | 'post_live' | None
+            'title':       str|None
+            'error':       str|None     — 探测失败时的原因
+        }
     """
+    empty = {
+        "ok": False, "duration": None, "is_live": False,
+        "live_status": None, "title": None, "error": None,
+    }
     try:
         import yt_dlp  # noqa: F401
     except ImportError:
-        return None
+        empty["error"] = "yt-dlp 未安装"
+        return empty
 
     opts: dict = {
         "quiet": True,
@@ -1179,11 +1195,43 @@ def probe_youtube_duration(video_url: str, timeout: int = 10) -> Optional[int]:
         import yt_dlp
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
-        duration = info.get("duration") if isinstance(info, dict) else None
-        return int(duration) if duration else None
+        if not isinstance(info, dict):
+            empty["error"] = "yt-dlp 未返回 info dict"
+            return empty
+        duration_raw = info.get("duration")
+        return {
+            "ok": True,
+            "duration": int(duration_raw) if duration_raw else None,
+            "is_live": bool(info.get("is_live")),
+            "live_status": info.get("live_status"),
+            "title": info.get("title"),
+            "error": None,
+        }
     except Exception as e:
-        log.debug("probe_youtube_duration 失败 url=%s: %s", video_url, e)
-        return None
+        log.debug("probe_youtube_metadata 失败 url=%s: %s", video_url, e)
+        empty["error"] = str(e).split("\n")[0][:120]
+        return empty
+
+
+def probe_youtube_duration(video_url: str, timeout: int = 10) -> Optional[int]:
+    """向后兼容: 仅返回视频时长 (秒)。直播 / 未知 / 探测失败均返回 None。"""
+    return probe_youtube_metadata(video_url, timeout).get("duration")
+
+
+def _reject_live_filter(info_dict, *, incomplete: bool = False) -> Optional[str]:
+    """
+    yt-dlp 的 match_filter: 直播 / 首播未开始 / 流式视频 返回一个非 None 字符串
+    就会被 yt-dlp 直接跳过下载（不会无限等流）。这是防 worker 卡死的兜底保险。
+    """
+    live_status = info_dict.get("live_status")
+    if info_dict.get("is_live") or live_status == "is_live":
+        return "跳过直播视频 (yt-dlp 会无限等流)"
+    if live_status == "is_upcoming":
+        return "跳过未开始的首播 / 直播"
+    if info_dict.get("live_status") == "post_live":
+        # post_live: 直播刚结束但回放还没生成完，下载会卡
+        return "跳过 post_live (回放未完成)"
+    return None
 
 
 def build_ydl_opts(out_template: str) -> dict:
@@ -1203,6 +1251,8 @@ def build_ydl_opts(out_template: str) -> dict:
             "http": lambda n: 2 ** n,
             "extractor": lambda n: 2 ** n,
         },
+        # 直播防护: 直播/首播未开始/post_live 都直接跳过, 避免 yt-dlp 无限等流
+        "match_filter": _reject_live_filter,
     }
     node = _find_binary("node", ["/usr/local/bin/node", "/usr/bin/node"])
     if node:
