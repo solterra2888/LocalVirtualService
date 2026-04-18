@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Space, ConfigProvider, theme as antdTheme, Typography, Button, Select, InputNumber, message, Spin, Input } from 'antd';
-import { FileTextOutlined, ReloadOutlined, ClearOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Space, ConfigProvider, theme as antdTheme, Typography, Button, Select, InputNumber, message, Spin, Input, Tabs } from 'antd';
+import { FileTextOutlined, ReloadOutlined, ClearOutlined, DownloadOutlined, DashboardOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { readLog, clearLog, LogType } from '../services/logs';
+import MonitoringPanel from '../components/MonitoringPanel';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -139,104 +140,117 @@ const SystemLogsPage: React.FC = () => {
             system logs
           </Title>
           <Text style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            View and manage system log files (only visible to administrators)
+            View and manage system log files & runtime queues (admin only)
           </Text>
         </div>
 
-        <Card
-          style={{
-            ...cardStyle,
-            overflow: 'hidden',
-          }}
-          bodyStyle={{
-            padding: '20px 24px',
-          }}
-        >
-          {/* 控制栏 */}
-          <div style={{ marginBottom: 16 }}>
-            <Space wrap>
-              <span style={{ color: colors.text }}>Log Type:</span>
-              <Select
-                style={{ width: 200 }}
-                value={selectedLogType}
-                onChange={setSelectedLogType}
-                options={[
-                  { label: 'App 日志 (app.log)', value: 'app' },
-                  { label: 'Celery Worker 日志 (celery_worker.log)', value: 'celery_worker' },
-                ]}
-              />
-              
-              <span style={{ color: colors.text, marginLeft: 16 }}>Read Lines:</span>
-              <InputNumber
-                style={{ width: 120 }}
-                value={linesToRead}
-                onChange={setLinesToRead}
-                min={0}
-                placeholder="All"
-              />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                (0 or leave empty to read all)
-              </Text>
+        <Tabs
+          defaultActiveKey="logs"
+          items={[
+            {
+              key: 'logs',
+              label: <Space><FileTextOutlined />日志文件</Space>,
+              children: (
+                <Card
+                  style={{ ...cardStyle, overflow: 'hidden' }}
+                  bodyStyle={{ padding: '20px 24px' }}
+                >
+                  {/* 控制栏 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <Space wrap>
+                      <span style={{ color: colors.text }}>Log Type:</span>
+                      <Select
+                        style={{ width: 200 }}
+                        value={selectedLogType}
+                        onChange={setSelectedLogType}
+                        options={[
+                          { label: 'App 日志 (app.log)', value: 'app' },
+                          { label: 'Celery Worker 日志 (celery_worker.log)', value: 'celery_worker' },
+                        ]}
+                      />
 
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={loadLogContent}
-                loading={loading}
-              >
-                Refresh
-              </Button>
+                      <span style={{ color: colors.text, marginLeft: 16 }}>Read Lines:</span>
+                      <InputNumber
+                        style={{ width: 120 }}
+                        value={linesToRead}
+                        onChange={setLinesToRead}
+                        min={0}
+                        placeholder="All"
+                      />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        (0 or leave empty to read all)
+                      </Text>
 
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={handleDownloadLog}
-                disabled={!logContent}
-              >
-                Download
-              </Button>
+                      <Button
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        onClick={loadLogContent}
+                        loading={loading}
+                      >
+                        Refresh
+                      </Button>
 
-              <Button
-                danger
-                icon={<ClearOutlined />}
-                onClick={handleClearLog}
-                disabled={loading}
-              >
-                Clear Log
-              </Button>
-            </Space>
-          </div>
+                      <Button
+                        icon={<DownloadOutlined />}
+                        onClick={handleDownloadLog}
+                        disabled={!logContent}
+                      >
+                        Download
+                      </Button>
 
-          {/* 日志信息 */}
-          {logInfo && (
-            <div style={{ marginBottom: 12 }}>
-              <Space>
-                <Text type="secondary">
-                  Total Lines: <strong>{logInfo.lines}</strong>
-                </Text>
-                <Text type="secondary">
-                  File Size: <strong>{logInfo.size_kb.toFixed(2)} KB</strong>
-                </Text>
-              </Space>
-            </div>
-          )}
+                      <Button
+                        danger
+                        icon={<ClearOutlined />}
+                        onClick={handleClearLog}
+                        disabled={loading}
+                      >
+                        Clear Log
+                      </Button>
+                    </Space>
+                  </div>
 
-          {/* 日志内容 */}
-          <Spin spinning={loading}>
-            <TextArea
-              value={logContent}
-              readOnly
-              style={{
-                fontFamily: 'Monaco, Consolas, "Courier New", monospace',
-                fontSize: 12,
-                backgroundColor: colors.codeBlockBg,
-                color: colors.text,
-                border: `1px solid ${colors.cardBorder}`,
-              }}
-              rows={30}
-              placeholder="The log content will be displayed here..."
-            />
-          </Spin>
-        </Card>
+                  {/* 日志信息 */}
+                  {logInfo && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Space>
+                        <Text type="secondary">
+                          Total Lines: <strong>{logInfo.lines}</strong>
+                        </Text>
+                        <Text type="secondary">
+                          File Size: <strong>{logInfo.size_kb.toFixed(2)} KB</strong>
+                        </Text>
+                      </Space>
+                    </div>
+                  )}
+
+                  {/* 日志内容 */}
+                  <Spin spinning={loading}>
+                    <TextArea
+                      value={logContent}
+                      readOnly
+                      style={{
+                        fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                        fontSize: 12,
+                        backgroundColor: colors.codeBlockBg,
+                        color: colors.text,
+                        border: `1px solid ${colors.cardBorder}`,
+                      }}
+                      rows={30}
+                      placeholder="The log content will be displayed here..."
+                    />
+                  </Spin>
+                </Card>
+              ),
+            },
+            {
+              key: 'monitoring',
+              label: <Space><DashboardOutlined />Redis 队列 & Worker</Space>,
+              children: (
+                <MonitoringPanel isDark={isDark} colors={colors} cardStyle={cardStyle} />
+              ),
+            },
+          ]}
+        />
       </div>
     </ConfigProvider>
   );

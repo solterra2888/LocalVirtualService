@@ -25,7 +25,7 @@ from .services import (
     YouTubeCaptionService,
     YouTubeFeedService,
     build_ydl_opts,
-    probe_youtube_duration,
+    probe_youtube_metadata,
 )
 
 log = logging.getLogger("worker")
@@ -41,6 +41,12 @@ _LONG_QUEUE = "youtube_transcription_long"
 # Fun-ASR 允许 ≤12h 音频，默认给 6h 硬上限、5.5h 软上限，足以覆盖 10h+ 的直播回放。
 _LONG_TASK_HARD_LIMIT = int(os.getenv("ASR_LONG_TASK_TIME_LIMIT_SECONDS", "21600"))
 _LONG_TASK_SOFT_LIMIT = int(os.getenv("ASR_LONG_TASK_SOFT_TIME_LIMIT_SECONDS", "19800"))
+
+# Fun-ASR 异步轮询最长等待时间（分钟），长/短队列分别配置。
+# 短队列复用 ASRService 默认值（读 ASR_POLL_TIMEOUT_MINUTES，5 min）；
+# 长队列在此处显式传入，避免大文件只跑 5 min 就被本地判定超时、
+# 触发"重下载 500MB+ 音频 → 重新上传 OSS → 重新提交 ASR"的浪费。
+_ASR_POLL_TIMEOUT_LONG_MIN = float(os.getenv("ASR_POLL_TIMEOUT_MINUTES_LONG", "60"))
 
 # 重试策略：瞬时错误（超时/429/网络/OSS 5xx）最多重试此次数，并走指数退避。
 # 永久错误（视频已删除/私有/年龄限制/无人声）不重试。
@@ -431,7 +437,10 @@ def _classify_asr_failure(err: Exception) -> tuple:
     永久性错误不应重试，立即标记 failed；瞬时错误走指数退避。
     """
     if isinstance(err, SoftTimeLimitExceeded):
-        return "处理超时 (soft time limit)", True
+        # 软超时绝大多数是「直播流 / 异常大文件 / yt-dlp 卡死」这类重试也治不好的
+        # 场景。反复重试只会让同一个视频占用 worker 数小时。标记永久失败, 直接
+        # 放弃该视频, 避免卡住整个 worker 池。
+        return "处理超时 (soft time limit, 可能是直播或异常大文件)", False
 
     msg = str(err)
     low = msg.lower()
@@ -499,8 +508,31 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
     temp_dir = None
 
     current_queue = _current_routing_key(self)
+
+    # ── 预探测: 获取元信息 (is_live / live_status / duration) ──────────────
+    # 目的有两个:
+    #   1) 直播类视频直接永久失败, 避免 yt-dlp 无限等流卡死 worker 10+ 小时
+    #   2) 顺便拿到时长用于长短队列路由 (以前用 probe_youtube_duration 做)
+    # 注意: 只在短队列+首次进入时 probe; 长队列二次消费跳过, 不浪费时间
     if not _skip_duration_check and current_queue == _SHORT_QUEUE:
-        duration = probe_youtube_duration(video_url)
+        meta = probe_youtube_metadata(video_url)
+        live_status = meta.get("live_status")
+
+        # ── P0 修复: 直播 / 首播未开始 / post_live 直接永久失败 ──
+        if meta.get("is_live") or live_status in ("is_live", "is_upcoming", "post_live"):
+            err_msg = f"直播视频无法转录 (live_status={live_status or 'is_live'})"
+            log.warning(
+                "── 直播跳过: content=%d video=%s live_status=%s「%s」──",
+                content_db_id, video_id, live_status or "is_live",
+                (meta.get("title") or "")[:40],
+            )
+            _progress(status="failed", msg=err_msg, url=video_url, failed=1)
+            return {"task_id": task_id, "status": "failed", "error": err_msg,
+                    "permanent": True, "reason": "is_live",
+                    "content_db_id": content_db_id}
+
+        # ── 长视频路由: 超阈值转发到长队列 ──
+        duration = meta.get("duration")
         if duration and duration > _LONG_VIDEO_THRESHOLD:
             log.info(
                 "── 长视频检测: content=%d video=%s 时长=%dm%02ds 超过阈值%dm → 转发长视频队列 ──",
@@ -554,7 +586,10 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         log.info("  [4/5] 提交 Fun-ASR 转录...")
         _progress(progress=55, msg="Submitting to Fun-ASR...", url=video_url)
         asr = ASRService()
-        result = asr.transcribe(up["audio_url"])
+        if current_queue == _LONG_QUEUE:
+            result = asr.transcribe(up["audio_url"], timeout_min=_ASR_POLL_TIMEOUT_LONG_MIN)
+        else:
+            result = asr.transcribe(up["audio_url"])
         if not result["success"]:
             raise ValueError(f"ASR 失败: {result['error']}")
         if not result.get("transcriptions"):
