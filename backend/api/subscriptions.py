@@ -1158,6 +1158,85 @@ async def mark_content_as_read(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/contents/{content_db_id}/transcript")
+async def get_subscription_content_transcript(
+    content_db_id: int,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    按需返回单条订阅内容的字幕/转写正文（不在列表接口中批量返回，减轻负载）。
+    数据来自 subscription_content.transcript / transcript_data。
+    """
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT channel_type, transcript, transcript_data
+            FROM subscription_content
+            WHERE id = %s AND %s = ANY(user_ids)
+            """,
+            (content_db_id, user_id),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        channel_type, transcript_col, transcript_data_col = row[0], row[1], row[2]
+
+        if channel_type != "youtube":
+            raise HTTPException(status_code=400, detail="Transcript is only available for YouTube content")
+
+        raw_text = (transcript_col or "").strip() if transcript_col else ""
+
+        td: Any = transcript_data_col
+        if isinstance(td, str) and td.strip():
+            try:
+                td = json.loads(td)
+            except json.JSONDecodeError:
+                td = None
+        elif td is not None and not isinstance(td, dict):
+            td = None
+
+        language: Optional[str] = None
+        source: Optional[str] = None
+        if isinstance(td, dict):
+            language = td.get("language")
+            source = td.get("source")
+
+        if raw_text:
+            return {
+                "transcript": raw_text,
+                "language": language,
+                "source": source,
+            }
+
+        if isinstance(td, dict):
+            from backend.services.youtube_service import YouTubeService
+
+            merged = YouTubeService.get_full_text(td)
+            if merged and merged.strip():
+                return {
+                    "transcript": merged.strip(),
+                    "language": language,
+                    "source": source,
+                }
+
+        raise HTTPException(status_code=404, detail="Transcript not available for this content")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching transcript for content {content_db_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/contents/tweet/{tweet_id}")
 async def get_tweet_by_id(
     tweet_id: str,

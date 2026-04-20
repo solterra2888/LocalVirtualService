@@ -121,6 +121,13 @@ export interface SubscriptionContentsResponse {
   offset: number;
 }
 
+/** GET /subscriptions/contents/:id/transcript */
+export interface SubscriptionContentTranscriptPayload {
+  transcript: string;
+  language?: string | null;
+  source?: string | null;
+}
+
 // 订阅管理 API
 export const subscriptionsAPI = {
   /**
@@ -333,6 +340,26 @@ export const subscriptionsAPI = {
   /**
    * 触发 YouTube 视频 Fun-ASR 转写（针对无字幕视频）
    */
+  /**
+   * 按需加载单条内容的字幕/转写全文（列表仅返回 has_transcript）
+   */
+  async getSubscriptionContentTranscript(
+    contentDbId: number
+  ): Promise<ApiResponse<SubscriptionContentTranscriptPayload>> {
+    try {
+      const data = await api.get<SubscriptionContentTranscriptPayload>(
+        `/subscriptions/contents/${contentDbId}/transcript`
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('Failed to load subscription content transcript:', error);
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to load transcript',
+      };
+    }
+  },
+
   async triggerYouTubeASR(contentDbId: number): Promise<{
     success: boolean;
     task_id?: string;

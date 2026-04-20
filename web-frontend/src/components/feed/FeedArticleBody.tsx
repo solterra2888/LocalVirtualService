@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   App,
   Avatar,
   Button,
   Divider,
+  Modal,
   Space,
+  Spin,
   Tag,
   Tooltip,
   Typography,
@@ -32,6 +34,9 @@ import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
 import { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
 
 const { Text } = Typography;
+
+/** Collapsed YouTube description panel height (~4 lines at 14px / 1.5 line-height). */
+const YOUTUBE_DESCRIPTION_COLLAPSED_MAX_HEIGHT_PX = 88;
 
 export interface FeedArticleBodyProps {
   selectedContent: SubscriptionContent | null;
@@ -61,7 +66,60 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const [asrProgress, setAsrProgress] = useState(0);
   const [asrStatus, setAsrStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
 
+  const youtubeDescOuterRef = useRef<HTMLDivElement>(null);
+  const youtubeDescInnerRef = useRef<HTMLDivElement>(null);
+  const [youtubeDescExpanded, setYoutubeDescExpanded] = useState(false);
+  const [youtubeDescOverflows, setYoutubeDescOverflows] = useState(false);
+
+  const transcriptCacheRef = useRef<Map<number, string>>(new Map());
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
+  const [transcriptModalLoading, setTranscriptModalLoading] = useState(false);
+  const [transcriptModalText, setTranscriptModalText] = useState('');
+
   const { addTask, tasks } = useFileProcessing();
+
+  const openTranscriptModal = async () => {
+    if (!selectedContent?.id) return;
+    const cid = selectedContent.id;
+    setTranscriptModalOpen(true);
+    const cached = transcriptCacheRef.current.get(cid);
+    if (cached !== undefined) {
+      setTranscriptModalText(cached);
+      setTranscriptModalLoading(false);
+      return;
+    }
+    setTranscriptModalText('');
+    setTranscriptModalLoading(true);
+    const res = await subscriptionsAPI.getSubscriptionContentTranscript(cid);
+    if (res.success && res.data?.transcript) {
+      transcriptCacheRef.current.set(cid, res.data.transcript);
+      setTranscriptModalText(res.data.transcript);
+    } else {
+      message.error(res.error || 'Failed to load transcript');
+    }
+    setTranscriptModalLoading(false);
+  };
+
+  useEffect(() => {
+    setYoutubeDescExpanded(false);
+    setTranscriptModalOpen(false);
+  }, [selectedContent?.id]);
+
+  useLayoutEffect(() => {
+    if (selectedContent?.channel_type !== 'youtube') {
+      setYoutubeDescOverflows(false);
+      return;
+    }
+    const outer = youtubeDescOuterRef.current;
+    const inner = youtubeDescInnerRef.current;
+    if (!outer || !inner) {
+      setYoutubeDescOverflows(false);
+      return;
+    }
+    if (!youtubeDescExpanded) {
+      setYoutubeDescOverflows(inner.scrollHeight > outer.clientHeight + 1);
+    }
+  }, [selectedContent?.channel_type, selectedContent?.content, selectedContent?.id, youtubeDescExpanded]);
 
   useEffect(() => {
     const loadOriginalTweet = async () => {
@@ -321,11 +379,31 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         </Text>
       )}
 
-      {selectedContent.channel_type === 'youtube' && (
-        <div style={{ marginTop: 0 }}>
-          <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap' }}>
-            {selectedContent.content}
-          </Text>
+      {selectedContent.channel_type === 'youtube' && !!selectedContent.content?.trim() && (
+        <div style={{ marginTop: 8 }}>
+          <div
+            ref={youtubeDescOuterRef}
+            style={{
+              maxHeight: youtubeDescExpanded ? 'none' : YOUTUBE_DESCRIPTION_COLLAPSED_MAX_HEIGHT_PX,
+              overflow: youtubeDescExpanded ? 'visible' : 'hidden',
+            }}
+          >
+            <div ref={youtubeDescInnerRef}>
+              <Text style={{ color: themeColors.textSecondary, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {selectedContent.content}
+              </Text>
+            </div>
+          </div>
+          {(youtubeDescOverflows || youtubeDescExpanded) && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setYoutubeDescExpanded((v) => !v)}
+              style={{ padding: 0, height: 'auto', marginTop: 4 }}
+            >
+              {youtubeDescExpanded ? 'Less' : 'More'}
+            </Button>
+          )}
         </div>
       )}
       {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && (
@@ -463,15 +541,22 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 padding: '10px 16px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap',
                 backgroundColor: isDark ? 'rgba(82, 196, 26, 0.08)' : '#f6ffed',
                 border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.25)' : '#b7eb8f'}`,
               }}
             >
-              <CheckOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-              <Text style={{ color: themeColors.text, fontSize: 13 }}>
-                Transcript available
-              </Text>
+              <Space align="center" size={8}>
+                <CheckOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+                <Text style={{ color: themeColors.text, fontSize: 13 }}>
+                  Transcript available
+                </Text>
+              </Space>
+              <Button size="small" type="primary" ghost onClick={openTranscriptModal} style={{ fontSize: 12, borderRadius: 6 }}>
+                View transcript
+              </Button>
             </div>
           ) : (
             <div
@@ -519,6 +604,35 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
               )}
             </div>
           )}
+          <Modal
+            title="Transcript"
+            open={transcriptModalOpen}
+            onCancel={() => setTranscriptModalOpen(false)}
+            footer={null}
+            width={720}
+            destroyOnClose
+            bodyStyle={{ maxHeight: 'min(70vh, 640px)', overflow: 'auto', paddingTop: 8 }}
+          >
+            {transcriptModalLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+                <Spin />
+              </div>
+            ) : (
+              <Text
+                style={{
+                  color: themeColors.text,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  display: 'block',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                }}
+              >
+                {transcriptModalText || '—'}
+              </Text>
+            )}
+          </Modal>
         </>
       )}
     </Space>
