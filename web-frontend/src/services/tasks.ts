@@ -111,8 +111,6 @@ export interface PaginationParams {
   q?: string;
   ticker?: string;
   folder_id?: string;
-  /** Sources 左侧类型图标筛选，与 FilesPage Search 一致；由服务端与分页一起过滤 */
-  file_type_tab?: string;
 }
 
 export const tasksAPI = {
