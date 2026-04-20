@@ -64,8 +64,9 @@ def _append_first_file_type_tab_filter(
         where_conditions.append(f"{fts} IN ('image', 'jpg', 'jpeg', 'png', 'gif', 'bmp')")
     elif tab == "audio":
         where_conditions.append(
-            f"({fts} = 'audio' OR {fts_raw} ILIKE 'audio/%')"
+            f"({fts} = 'audio' OR {fts_raw} ILIKE %s)"
         )
+        params.append("audio/%")
     elif tab == "web":
         where_conditions.append(f"{fts} = 'web'")
     elif tab == "text":
