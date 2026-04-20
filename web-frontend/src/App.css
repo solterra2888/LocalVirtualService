@@ -789,33 +789,37 @@
   border-bottom-color: rgba(255, 255, 255, 0.06);
 }
 
-/* Sources 筛选：与手机端 MobileSources 同一套 Compact + Segmented + 输入/AutoComplete 外观 */
+/* Sources Search：纵向 Segmented + 输入/AutoComplete（与旧横向 Compact 视觉区分） */
 .files-page-layout .files-list-search-bar {
-  padding: 6px 10px 8px;
+  padding: 6px 10px 10px;
   border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
   background: var(--files-panel-bg, #fff);
 }
 
-.files-page-layout .files-list-search-compact {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-
-.files-page-layout .files-list-search-compact.ant-space-compact {
+/* Sources Search：Title/Content/Ticker 与填写栏上下分层，避免横向 Compact 过于拥挤 */
+.files-page-layout .files-list-search-stack {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
+  min-width: 0;
+  padding: 10px 10px 10px;
   border-radius: 8px;
-  overflow: hidden;
   border: 1px solid var(--files-sources-search-border, var(--files-panel-border, #e5e7eb));
   background: var(--files-sources-search-bg, var(--files-panel-bg, #fff));
+  box-sizing: border-box;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.files-page-layout .files-list-search-compact.ant-space-compact:focus-within {
+.files-page-layout .files-list-search-stack:focus-within {
   border-color: var(--ant-color-primary, #1677ff);
   box-shadow: 0 0 0 2px var(--ant-control-outline, rgba(5, 145, 255, 0.1));
+}
+
+.files-page-layout .files-list-search-mode-row,
+.files-page-layout .files-list-search-field-row {
+  width: 100%;
+  min-width: 0;
 }
 
 .files-page-layout .files-list-search-segmented.ant-segmented {
@@ -849,49 +853,51 @@
   min-width: 0;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-segmented.ant-segmented {
-  border-radius: 0;
+.files-page-layout .files-list-search-stack .files-list-search-segmented.ant-segmented {
+  width: 100%;
+  border-radius: 6px;
   border: none;
   box-shadow: none;
   font-size: 12px;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-segmented.ant-segmented .ant-segmented-group {
-  border-radius: 0;
+.files-page-layout .files-list-search-stack .files-list-search-segmented.ant-segmented .ant-segmented-group {
+  border-radius: 6px;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper {
-  border-radius: 0;
-  border: 0;
-  border-left: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06)));
+.files-page-layout .files-list-search-stack .files-list-search-input.ant-input-affix-wrapper {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06)));
   box-shadow: none;
   font-size: 12px;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper .ant-input {
+.files-page-layout .files-list-search-stack .files-list-search-input.ant-input-affix-wrapper .ant-input {
   font-size: 12px;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper .ant-input-prefix .anticon {
+.files-page-layout .files-list-search-stack .files-list-search-input.ant-input-affix-wrapper .ant-input-prefix .anticon {
   font-size: 12px;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper:focus,
-.files-page-layout .files-list-search-compact .files-list-search-input.ant-input-affix-wrapper-focused {
+.files-page-layout .files-list-search-stack .files-list-search-input.ant-input-affix-wrapper:focus,
+.files-page-layout .files-list-search-stack .files-list-search-input.ant-input-affix-wrapper-focused {
+  border-color: var(--ant-color-primary, #1677ff);
   box-shadow: none;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-segmented-three.ant-segmented .ant-segmented-item {
-  padding: 0 6px;
+.files-page-layout .files-list-search-stack .files-list-search-segmented-three.ant-segmented .ant-segmented-item {
+  padding: 0 8px;
   font-size: 11px;
   min-width: 0;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-segmented-three.ant-segmented .ant-segmented-item-label {
+.files-page-layout .files-list-search-stack .files-list-search-segmented-three.ant-segmented .ant-segmented-item-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 72px;
+  max-width: none;
 }
 
 /* Dark：Sources 搜索条 Title / Content / Ticker（与 upload-files-modal--dark 一致）
@@ -922,27 +928,28 @@
   font-weight: 600;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete {
-  flex: 1;
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete {
+  width: 100%;
+  display: block;
   min-width: 0;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selector {
-  border-radius: 0 !important;
-  border: 0 !important;
-  border-left: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06))) !important;
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete .ant-select-selector {
+  border-radius: 6px !important;
+  border: 1px solid var(--files-sources-search-border, var(--ant-color-split, rgba(5, 5, 5, 0.06))) !important;
   box-shadow: none !important;
   font-size: 12px !important;
-  min-height: 24px !important;
+  min-height: 28px !important;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-search-input,
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-placeholder {
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-search-input,
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete .ant-select-selection-placeholder {
   font-size: 12px !important;
 }
 
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete.ant-select-focused .ant-select-selector,
-.files-page-layout .files-list-search-compact .files-list-search-ticker.ant-select-auto-complete .ant-select-selector:focus {
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete.ant-select-focused .ant-select-selector,
+.files-page-layout .files-list-search-stack .files-list-search-ticker.ant-select-auto-complete .ant-select-selector:focus {
+  border-color: var(--ant-color-primary, #1677ff) !important;
   box-shadow: none !important;
 }
 

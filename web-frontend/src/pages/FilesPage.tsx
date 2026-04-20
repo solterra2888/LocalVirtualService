@@ -426,7 +426,6 @@ const FilesPageInner: React.FC = () => {
   const [originalFileInfoForTabs, setOriginalFileInfoForTabs] = useState<{ filename?: string; file_type?: string } | null>(null);
   const [contentDetailData, setContentDetailData] = useState<TaskExecutionDetail | null>(null);
   const [contentDetailLoading, setContentDetailLoading] = useState(false);
-  const [fileTypeFilter, setFileTypeFilter] = useState<'all' | 'pdf' | 'doc' | 'excel' | 'image' | 'audio' | 'youtube' | 'web' | 'text'>('all');
   const [searchType, setSearchType] = useState<'file_name' | 'content' | 'ticker'>('file_name');
   const [searchQuery, setSearchQuery] = useState('');
   const [tickerFilter, setTickerFilter] = useState<string | undefined>(undefined);
@@ -666,7 +665,6 @@ const FilesPageInner: React.FC = () => {
         ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
         ...(searchType === 'ticker' && tickerFilter ? { ticker: tickerFilter } : {}),
         ...(selectedFolderId ? { folder_id: selectedFolderId } : {}),
-        ...(fileTypeFilter !== 'all' ? { file_type_tab: fileTypeFilter } : {}),
       });
       
       if (append) {
@@ -729,7 +727,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId, fileTypeFilter]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -950,26 +948,22 @@ const FilesPageInner: React.FC = () => {
   // 浮动菜单「My Notes / Thoughts」保存成功后刷新左侧列表（CreateTextNoteModal 派发事件）
   useEffect(() => {
     const onRefresh = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ resetTypeFilter?: boolean }>).detail;
-      if (detail?.resetTypeFilter) {
-        setFileTypeFilter('all');
-      }
       loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
     };
     window.addEventListener(TASK_EXECUTIONS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(TASK_EXECUTIONS_REFRESH_EVENT, onRefresh);
   }, []);
 
-  // Refresh executions when folder or file-type filter changes (server-side pagination must match filters)
-  const isFolderOrTypeMountRef = useRef(true);
+  // Refresh executions when folder filter changes (server-side pagination must match filters)
+  const isFolderMountRef = useRef(true);
   useEffect(() => {
-    if (isFolderOrTypeMountRef.current) { isFolderOrTypeMountRef.current = false; return; }
+    if (isFolderMountRef.current) { isFolderMountRef.current = false; return; }
     const t = setTimeout(() => {
       loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
     }, 50);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFolderId, fileTypeFilter]);
+  }, [selectedFolderId]);
 
   /** Watchlist 等外链：`/files?execution=<processing_stats_id>` 打开并选中对应来源任务，并重置筛选以便列表能显示该条 */
   useEffect(() => {
@@ -979,7 +973,6 @@ const FilesPageInner: React.FC = () => {
       try {
         const execution = await tasksAPI.getTaskExecution(executionFromUrl);
         if (cancelled) return;
-        setFileTypeFilter('all');
         setSearchQuery('');
         setTickerFilter(undefined);
         setSearchType('file_name');
@@ -2948,36 +2941,20 @@ const FilesPageInner: React.FC = () => {
     </Modal>
   );
 
-  // 按 file_type 筛选列表（与 getFileTypeIconDisplay / 服务端 file_type_tab 一致；image 含多后缀；audio 含 mime）
-  const matchesFileType = (firstFileType: string | undefined, tab: typeof fileTypeFilter): boolean => {
-    const raw = firstFileType || '';
-    const t = raw.toLowerCase();
-    if (tab === 'all') return true;
-    if (tab === 'image') return ['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t) || t.startsWith('image/');
-    if (tab === 'audio') return t === 'audio' || t.startsWith('audio/');
-    if (tab === 'doc') return ['doc', 'docx', 'word'].includes(t) || t.includes('word') || t.includes('msword');
-    if (tab === 'excel') return ['excel', 'xlsx', 'xls', 'csv'].includes(t) || t.includes('excel') || t.includes('spreadsheet');
-    if (tab === 'web') return t === 'web';
-    if (tab === 'text') return t === 'text';
-    return t === tab;
-  };
-  const filteredByType = taskExecutions.filter(exec => matchesFileType(exec.first_file_type, fileTypeFilter));
   const filteredExecutions = searchType === 'file_name' && searchQuery.trim()
-    ? filteredByType.filter(exec => (exec.first_display_name || exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
-    : filteredByType;
+    ? taskExecutions.filter(exec => (exec.first_display_name || exec.first_filename || '').toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : taskExecutions;
 
   const hasActiveSourcesSearch =
     (searchType !== 'ticker' && searchQuery.trim().length > 0) ||
     (searchType === 'ticker' && Boolean(tickerFilter));
 
-  /** 类型筛选已并入 Search 面板：任一非默认即视为面板内有筛选 */
-  const hasAnySearchPanelFilter = hasActiveSourcesSearch || fileTypeFilter !== 'all';
+  const hasAnySearchPanelFilter = hasActiveSourcesSearch;
 
   const clearSourcesSearchFilters = () => {
     setSearchQuery('');
     setTickerFilter(undefined);
     setTickerSearchOptions([]);
-    setFileTypeFilter('all');
   };
 
   const folderFilterSummary = useMemo(() => {
@@ -2986,37 +2963,6 @@ const FilesPageInner: React.FC = () => {
     const f = folders.find(x => String(x.id) === selectedFolderId);
     return f ? f.name : selectedFolderId;
   }, [selectedFolderId, folders]);
-
-  /** 筛选栏图标：中性色，与 `.files-list-type-tab` 文字色一致（无类型专色） */
-  const FILE_TYPE_TABS: {
-    key: typeof fileTypeFilter;
-    label: string;
-    icon: React.ReactElement;
-  }[] = [
-    { key: 'all', label: 'All types', icon: <AppstoreOutlined /> },
-    { key: 'pdf', label: 'PDF', icon: <FilePdfOutlined /> },
-    { key: 'doc', label: 'Word', icon: <FileWordOutlined /> },
-    { key: 'excel', label: 'Excel', icon: <FileExcelOutlined /> },
-    { key: 'image', label: 'Image', icon: <FileImageOutlined /> },
-    { key: 'audio', label: 'Audio', icon: <SoundOutlined /> },
-    { key: 'youtube', label: 'YouTube', icon: <VideoCameraOutlined /> },
-    { key: 'web', label: 'Web', icon: <GlobalOutlined /> },
-    { key: 'text', label: 'Text', icon: <EditOutlined /> },
-  ];
-
-  // File list card: file type tag colors (Word=blue, Excel=green, PDF=red, Audio=purple, YouTube=red)
-  const getFileTypeTagConfig = (firstFileType: string | undefined): { color: string; text: string } => {
-    const t = (firstFileType || '').toLowerCase();
-    if (['pdf'].includes(t)) return { color: 'red', text: 'PDF' };
-    if (['doc', 'docx', 'word'].includes(t)) return { color: 'blue', text: 'Word' };
-    if (['excel', 'xlsx', 'xls'].includes(t)) return { color: 'green', text: 'Excel' };
-    if (['audio'].includes(t)) return { color: 'purple', text: 'Audio' };
-    if (['youtube'].includes(t)) return { color: 'red', text: 'YouTube' };
-    if (['image', 'jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(t)) return { color: 'default', text: 'Image' };
-    if (['web'].includes(t)) return { color: 'cyan', text: 'Web' };
-    if (['text'].includes(t)) return { color: 'geekblue', text: 'Text' };
-    return { color: 'default', text: (firstFileType || 'File').toUpperCase() };
-  };
 
   /** 与移动端 Sources 卡片一致：彩色类型图标 + 文案状态（非 Tag） */
   const getFileTypeIconDisplay = (firstFileType: string | undefined): {
@@ -3262,34 +3208,14 @@ const FilesPageInner: React.FC = () => {
                     <span
                       className="files-folder-panel-summary files-search-filter-preview"
                       style={{ color: themeColors.textSecondary }}
-                      title={
-                        [
-                          fileTypeFilter !== 'all' ? `Type: ${FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}` : '',
-                          hasActiveSourcesSearch
-                            ? (searchType === 'ticker' ? `Ticker: ${tickerFilter}` : `${searchType === 'file_name' ? 'Title' : 'Content'}: ${searchQuery.trim()}`)
-                            : '',
-                        ].filter(Boolean).join(' · ')
-                      }
+                      title={searchType === 'ticker' ? `Ticker: ${tickerFilter}` : `${searchType === 'file_name' ? 'Title' : 'Content'}: ${searchQuery.trim()}`}
                     >
-                      {fileTypeFilter !== 'all' && (
-                        <>
-                          Type:{' '}
-                          <span className="files-search-filter-preview-value">
-                            {FILE_TYPE_TABS.find(t => t.key === fileTypeFilter)?.label}
-                          </span>
-                          {(hasActiveSourcesSearch) ? <span style={{ opacity: 0.45 }}> · </span> : null}
-                        </>
-                      )}
-                      {hasActiveSourcesSearch && (
-                        <>
-                          {searchType === 'file_name' && 'Title: '}
-                          {searchType === 'content' && 'Content: '}
-                          {searchType === 'ticker' && 'Ticker: '}
-                          <span className="files-search-filter-preview-value">
-                            {searchType === 'ticker' ? tickerFilter : (searchQuery.trim() || '…')}
-                          </span>
-                        </>
-                      )}
+                      {searchType === 'file_name' && 'Title: '}
+                      {searchType === 'content' && 'Content: '}
+                      {searchType === 'ticker' && 'Ticker: '}
+                      <span className="files-search-filter-preview-value">
+                        {searchType === 'ticker' ? tickerFilter : (searchQuery.trim() || '…')}
+                      </span>
                     </span>
                   )}
                   {searchPanelExpanded ? (
@@ -3323,90 +3249,81 @@ const FilesPageInner: React.FC = () => {
                 } as React.CSSProperties
               }
             >
-              <div className="files-list-type-tabs files-list-type-tabs--in-search" aria-label="File type">
-                {FILE_TYPE_TABS.map(({ key, label, icon }) => (
-                  <Tooltip key={key} title={label}>
-                    <button
-                      type="button"
-                      className={`files-list-type-tab ${fileTypeFilter === key ? 'is-active' : ''}`}
-                      onClick={() => setFileTypeFilter(key)}
-                      aria-label={label}
-                    >
-                      <span className="files-list-type-tab-icon">{icon}</span>
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
-              <Space.Compact block className="files-list-search-compact">
-                <Segmented
-                  size="small"
-                  className="files-list-search-segmented files-list-search-segmented-three"
-                  value={searchType}
-                  onChange={(v) => {
-                    const next = v as 'file_name' | 'content' | 'ticker';
-                    setSearchType(next);
-                    if (next === 'ticker') {
-                      setSearchQuery('');
-                    } else {
-                      setTickerFilter(undefined);
-                      setTickerSearchOptions([]);
-                    }
-                  }}
-                  options={[
-                    { label: 'Title', value: 'file_name' },
-                    { label: 'Content', value: 'content' },
-                    { label: 'Ticker', value: 'ticker' },
-                  ]}
-                />
-                {searchType === 'ticker' ? (
-                  <AutoComplete
+              <div className="files-list-search-stack">
+                <div className="files-list-search-mode-row">
+                  <Segmented
+                    block
                     size="small"
-                    placeholder="Search ticker..."
-                    options={tickerSearchOptions}
-                    value={tickerFilter}
-                    onSearch={(text) => {
-                      if (tickerSearchTimerRef.current) clearTimeout(tickerSearchTimerRef.current);
-                      if (!text.trim()) {
-                        setTickerSearchOptions([]);
-                        return;
-                      }
-                      tickerSearchTimerRef.current = setTimeout(() => {
-                        fileTagsService
-                          .getDistinctTickers(text.trim())
-                          .then((results) => {
-                            setTickerSearchOptions(
-                              results.map((r) => ({
-                                value: r.ticker,
-                                label: `${r.ticker} (${r.file_count})`,
-                              })),
-                            );
-                          })
-                          .catch(() => {});
-                      }, 300);
-                    }}
-                    onSelect={(val: string) => setTickerFilter(val)}
-                    onChange={(val: string) => {
-                      if (!val) {
+                    className="files-list-search-segmented files-list-search-segmented-three"
+                    value={searchType}
+                    onChange={(v) => {
+                      const next = v as 'file_name' | 'content' | 'ticker';
+                      setSearchType(next);
+                      if (next === 'ticker') {
+                        setSearchQuery('');
+                      } else {
                         setTickerFilter(undefined);
                         setTickerSearchOptions([]);
                       }
                     }}
-                    allowClear
-                    className="files-list-search-input files-list-search-ticker"
-                    classNames={{ popup: { root: 'files-list-ticker-autocomplete-popup' } }}
+                    options={[
+                      { label: 'Title', value: 'file_name' },
+                      { label: 'Content', value: 'content' },
+                      { label: 'Ticker', value: 'ticker' },
+                    ]}
                   />
-                ) : (
-                  <Input
-                    size="small"
-                    placeholder={searchType === 'file_name' ? 'Search by title' : 'Search in content'}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    allowClear
-                    className="files-list-search-input"
-                    prefix={<SearchOutlined style={{ color: themeColors.textSecondary }} />}
-                  />
-                )}
-              </Space.Compact>
+                </div>
+                <div className="files-list-search-field-row">
+                  {searchType === 'ticker' ? (
+                    <AutoComplete
+                      size="small"
+                      placeholder="Search ticker..."
+                      options={tickerSearchOptions}
+                      value={tickerFilter}
+                      onSearch={(text) => {
+                        if (tickerSearchTimerRef.current) clearTimeout(tickerSearchTimerRef.current);
+                        if (!text.trim()) {
+                          setTickerSearchOptions([]);
+                          return;
+                        }
+                        tickerSearchTimerRef.current = setTimeout(() => {
+                          fileTagsService
+                            .getDistinctTickers(text.trim())
+                            .then((results) => {
+                              setTickerSearchOptions(
+                                results.map((r) => ({
+                                  value: r.ticker,
+                                  label: `${r.ticker} (${r.file_count})`,
+                                })),
+                              );
+                            })
+                            .catch(() => {});
+                        }, 300);
+                      }}
+                      onSelect={(val: string) => setTickerFilter(val)}
+                      onChange={(val: string) => {
+                        if (!val) {
+                          setTickerFilter(undefined);
+                          setTickerSearchOptions([]);
+                        }
+                      }}
+                      allowClear
+                      className="files-list-search-input files-list-search-ticker"
+                      classNames={{ popup: { root: 'files-list-ticker-autocomplete-popup' } }}
+                    />
+                  ) : (
+                    <Input
+                      size="small"
+                      placeholder={searchType === 'file_name' ? 'Search by title' : 'Search in content'}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      allowClear
+                      className="files-list-search-input"
+                      prefix={<SearchOutlined style={{ color: themeColors.textSecondary }} />}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
             </div>
               )}
@@ -3670,7 +3587,7 @@ const FilesPageInner: React.FC = () => {
               {filteredExecutions.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '48px 20px', color: themeColors.textMuted }}>
                   <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
-                  <div>{taskExecutions.length === 0 ? 'no file records' : `no ${fileTypeFilter} files`}</div>
+                  <div>{taskExecutions.length === 0 ? 'no file records' : 'no files match the current filter'}</div>
                 </div>
               )}
               {loadingMoreExecutions && (
