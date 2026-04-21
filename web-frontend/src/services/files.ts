@@ -200,19 +200,43 @@ export const filesAPI = {
     return api.upload('/files/upload-audio', formData);
   },
 
-  // 上传 YouTube 链接并异步处理
+  // 上传 YouTube 链接并异步处理 (新路径: 返回 file_id / processing_stats_id,
+  // 实际处理在本地家用 Worker 上执行)
   uploadYouTubeLink: async (youtubeUrl: string): Promise<{
     task_id: string;
     video_id: string;
     message: string;
+    file_id?: number;
+    processing_stats_id?: number;
   }> => {
     return api.post<{
       task_id: string;
       video_id: string;
       message: string;
+      file_id?: number;
+      processing_stats_id?: number;
     }>('/files/upload-youtube', {
       youtube_url: youtubeUrl
     });
+  },
+
+  // 轮询 Upload YouTube Link 的实际处理进度 (按 file_id 查数据库, 跨任务链可见真实终态)
+  getUploadYouTubeStatus: async (fileId: number): Promise<{
+    file_id: number;
+    task_id: string | null;
+    filename: string;
+    youtube_url: string;
+    status: 'processing' | 'completed' | 'failed';
+    progress: number;
+    content_length: number;
+    total_time: number | null;
+    rc_agent_status: string | null;
+    caption_source: string | null;
+    finalize_reason: string | null;
+    asr_used: boolean;
+    message: string;
+  }> => {
+    return api.get(`/files/upload-youtube/status/${fileId}`);
   },
 
   // 提交 Web Link 并异步抓取处理

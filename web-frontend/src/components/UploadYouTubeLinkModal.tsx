@@ -59,11 +59,12 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
 
       const taskId = response.task_id;
       const videoId = response.video_id || 'unknown';
+      // 新路径: 后端立即建好 file_processing_details, 返回 file_id.
+      // 若存在 file_id → 直接按 file_id 轮询数据库, 跨字幕→ASR 链路都能拿到真实终态.
+      const fileId = response.file_id;
 
-      // 添加任务到全局 context
       addTask(taskId, `YouTube_${videoId}`, 'youtube');
 
-      // 初始状态
       updateTaskStatus(taskId, {
         status: 'processing',
         progress: 10,
@@ -76,15 +77,60 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
 
       message.info('YouTube processing started. Fetching transcript (or falling back to Fun-ASR)...');
 
-      // 轮询任务状态
       const pollInterval = setInterval(async () => {
         try {
+          // 优先使用 file_id 轮询数据库真实状态;
+          // 回退路径 (YOUTUBE_UPLOAD_USE_LOCAL=false) 没有 file_id, 继续走 Celery task 轮询.
+          if (fileId) {
+            const st = await filesAPI.getUploadYouTubeStatus(fileId);
+            if (st.status === 'processing') {
+              updateTaskStatus(taskId, {
+                status: 'processing',
+                progress: st.progress,
+                current_file: url,
+                files_processed: 0,
+                files_failed: 0,
+                total_files: 1,
+                logs: [],
+              });
+            } else if (st.status === 'completed') {
+              clearInterval(pollInterval);
+              updateTaskStatus(taskId, {
+                status: 'completed',
+                progress: 100,
+                current_file: url,
+                files_processed: 1,
+                files_failed: 0,
+                total_files: 1,
+                logs: [],
+              });
+              const via = st.caption_source === 'asr'
+                ? 'Fun-ASR'
+                : st.caption_source === 'caption_ytdlp'
+                  ? 'yt-dlp caption'
+                  : 'YouTube caption';
+              message.success(`YouTube transcript ready (${via})!`);
+            } else if (st.status === 'failed') {
+              clearInterval(pollInterval);
+              updateTaskStatus(taskId, {
+                status: 'failed',
+                progress: 0,
+                current_file: url,
+                files_processed: 0,
+                files_failed: 1,
+                total_files: 1,
+                logs: [],
+              });
+              message.error(`Processing failed: ${st.finalize_reason || st.message}`);
+            }
+            return;
+          }
+
+          // 回退路径: 沿用旧的 task_id 轮询
           const statusResult = await filesAPI.getTaskStatus(taskId);
-          
           const taskStatus = statusResult.status;
-          
+
           if (taskStatus === 'pending' || taskStatus === 'processing') {
-            // 更新进度
             updateTaskStatus(taskId, {
               status: taskStatus,
               progress: statusResult.progress || 0,
@@ -95,7 +141,6 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
               logs: statusResult.logs || [],
             });
           } else if (taskStatus === 'completed') {
-            // 任务完成
             clearInterval(pollInterval);
             updateTaskStatus(taskId, {
               status: 'completed',
@@ -108,7 +153,6 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
             });
             message.success('YouTube transcript fetched successfully!');
           } else if (taskStatus === 'failed') {
-            // 任务失败
             clearInterval(pollInterval);
             const errorMsg = statusResult.message || 'Task failed';
             updateTaskStatus(taskId, {
@@ -125,12 +169,12 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
         } catch (pollError: any) {
           console.error('Error polling task status:', pollError);
         }
-      }, 2000); // 每 2 秒轮询一次
+      }, 2000);
 
-      // 设置超时（最多 5 分钟，YouTube 处理通常很快）
+      // 超时提高到 15 分钟 (ASR 长视频需要更多时间)
       setTimeout(() => {
         clearInterval(pollInterval);
-      }, 300000);
+      }, 900000);
 
     } catch (error: any) {
       const errorMessage = getErrorMessage(error, 'Failed to process YouTube link');

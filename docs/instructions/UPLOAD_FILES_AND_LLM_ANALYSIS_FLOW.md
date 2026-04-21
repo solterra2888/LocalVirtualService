@@ -189,23 +189,46 @@ POST /api/files/upload-audio
 
 ### 2.3 YouTube 链接
 
-#### 流程
+> **架构说明（2026-04 优化）**：YouTube 字幕拉取与音频下载 / ASR 均涉及访问 YouTube，远程服务器 IP 会被频繁封禁。该功能已下沉到家用 `local_virtual_service` Worker（复用 Feed 订阅的同一套 Worker）。远程只做「同步建记录 → 派单 → 收尾」。`YOUTUBE_UPLOAD_USE_LOCAL=false` 可回滚到远程旧实现作为紧急出口。
+
+#### 流程（新路径，默认）
 
 ```
-POST /api/files/upload-youtube
+POST /api/files/upload-youtube                                 (远程 FastAPI)
+    ├─ 同步 INSERT processing_stats (rc_agent_status='processing')
+    ├─ 同步 INSERT file_processing_details (status='processing')
+    ├─ send_task('fetch_youtube_file_transcript_task')
+    │       → 本地 youtube_fetching 队列
+    └─ 立即返回 { task_id, file_id, processing_stats_id, video_id }
+                    │
+                    ▼
+local_virtual_service Worker (家用, 可直连 YouTube)
     │
-    └─ Celery: upload_and_process_youtube_task
-            ├─ YouTubeService.extract_video_id()
-            │
-            ├─ 路径 A：有字幕
-            │       ├─ YouTubeService.fetch_transcript()
-            │       ├─ YouTubeService.get_full_text() → content（全文）
-            │       └─ asr_with_diarization = 字幕结构 JSON
-            │
-            └─ 路径 B：无字幕（下载音频转写）
-                    ├─ yt-dlp + ffmpeg 下载音频 (_build_ydl_opts)
-                    ├─ OSSService 上传音频
-                    └─ Fun-ASR 转写（同 2.2 音频流程）
+    ├─ fetch_youtube_file_transcript_task  (youtube_fetching)
+    │       ├─ _fetch_transcript_with_fallback()
+    │       │       ├─ youtube-transcript-api → 成功
+    │       │       └─ yt-dlp caption 兜底   → 成功
+    │       │
+    │       ├─ 成功 → ContentStore.update_file_transcript()
+    │       │         → signal_upload_file_ready(outcome='completed')
+    │       │
+    │       ├─ 永久失败 (直播 / 私有) → signal_upload_file_ready(outcome='failed')
+    │       │
+    │       └─ 无字幕且可 ASR → send_task('transcribe_youtube_file_asr_task')
+    │                           (不 signal, 终态由 ASR 任务负责)
+    │
+    └─ transcribe_youtube_file_asr_task    (youtube_transcription)
+            ├─ probe_youtube_metadata()   (直播 → 永久 failed)
+            ├─ 长视频 → 转发 youtube_transcription_long 队列
+            ├─ yt-dlp 下载音频 → OSS → Fun-ASR
+            ├─ ContentStore.update_file_asr()
+            └─ signal_upload_file_ready(outcome=success/failed)
+                    │
+                    ▼
+finalize_youtube_file_task  (远程 file_processing 队列)
+    ├─ UPDATE processing_stats SET rc_agent_status, total_time, upload_params
+    └─ outcome='completed' 时并行触发:
+            trigger_auto_tagging / trigger_auto_naming / trigger_auto_classify
 ```
 
 #### 关键字段
@@ -214,10 +237,17 @@ POST /api/files/upload-youtube
 |------|------|
 | `file_type` | `'youtube'` |
 | `original_file_path` | YouTube 视频 URL |
+| `status` | `'processing'` → `'completed'` / `'failed'`（由本地 Worker 写入）|
 | `content` | 字幕/转写全文 |
-| `asr_with_diarization` | 结构化字幕/转写 JSON |
+| `asr_with_diarization` | 字幕结构 JSON（字幕路径）或 Fun-ASR 结构化 JSON（ASR 路径）|
+| `processing_stats.upload_params.caption_source` | `caption_api` / `caption_ytdlp` / `asr` / `asr_live_skip` ... |
+| `processing_stats.upload_params.asr_used` | `true/false` |
 
-转写完成后还会自动触发 **自动打标签**（`trigger_auto_tagging`）和 **自动命名**（`trigger_auto_naming`）。
+#### 前端轮询
+
+返回的 `file_id` 优先用于轮询 `GET /api/files/upload-youtube/status/{file_id}`，可跨「字幕→ASR」整条链路拿到真实终态；没有 `file_id`（回滚路径）时降级到 `GET /api/files/tasks/{task_id}/status`。
+
+完成后的自动打标签 / 自动命名 / 自动归类由远程 `finalize_youtube_file_task` 统一触发，**无论字幕路径还是 ASR 路径都会触发**（修复了旧版遗漏）。
 
 ---
 
@@ -508,13 +538,13 @@ classify_file_content_task(file_id, username, force=False)
 | `upload_and_transcribe_audio_task`（音频转写） | ASR 写入 `content` 后 | 同上（传 `file_detail_id`） |
 | `scrape_and_process_web_link_task`（网页抓取） | HTML 转纯文本写入 `content` 后 | 同上 |
 | `process_web_clip_task`（Chrome 剪藏） | 去标签写入 `content` 后 | 同上 |
-| `upload_and_process_youtube_task`（YouTube） | 字幕/ASR 写入 `content` 后 | 同上 |
+| `finalize_youtube_file_task`（YouTube 链接，由本地 Worker 回调） | 字幕/ASR 写入 `content` 后，仅 outcome='completed' 触发 | 同上 |
 | `analyze_document_task`（用户触发文档分析） | LLM 分析报告写入后 | 同上 |
 | `analyze_audio_task`（用户触发音频分析） | LLM 分析报告写入后 | 同上 |
 | `reparse_document_task`（重新解析） | 重新解析写入 `content` 后 | 同上 |
 | `POST /api/files/create-text-note`（**同步 HTTP**，非 Celery） | 插入 `file_processing_details` 并写入 `content` 后，在 API 内直接调用 | 同上 |
 
-> **例外：** `transcribe_youtube_file_asr_task`（单文件补充 ASR 转写）完成后**不触发**自动打标签/命名/归类，属于已知遗漏。
+> **已修复（2026-04）：** Upload YouTube Link 的字幕路径、ASR 路径、以及 `POST /api/files/{file_id}/transcribe-asr` 手动重转，最终都会通过本地 Worker 回调远程 `finalize_youtube_file_task`，触发 auto-tag / auto-name / auto-classify。原先「`transcribe_youtube_file_asr_task` 完成后不触发」的已知遗漏已随之修复。
 
 ---
 
@@ -625,7 +655,7 @@ POST /api/llm-prompt-templates/templates/test
 | 上传并解析文档 | `POST /api/files/upload-and-process-document` | `upload_and_process_document_task` |
 | 批量解析已上传文件 | `POST /api/files/process` | `process_files_task` |
 | 上传音频并转写（ASR） | `POST /api/files/upload-audio` | `upload_and_transcribe_audio_task` |
-| 上传 YouTube 链接 | `POST /api/files/upload-youtube` | `upload_and_process_youtube_task` |
+| 上传 YouTube 链接 | `POST /api/files/upload-youtube` | 默认：本地 `fetch_youtube_file_transcript_task` → 必要时 `transcribe_youtube_file_asr_task` → 远程 `finalize_youtube_file_task`；`YOUTUBE_UPLOAD_USE_LOCAL=false` 回滚到远程 `upload_and_process_youtube_task` |
 | 上传网页链接 | `POST /api/files/upload-web-link` | `scrape_and_process_web_link_task` |
 | 上传 Chrome 剪藏 | `POST /api/files/upload-web-clip` | `process_web_clip_task` |
 | 创建文本笔记（无上传文件） | `POST /api/files/create-text-note` | —（同步 API，成功后 API 内触发并行 LLM 任务） |
@@ -694,8 +724,8 @@ POST /api/llm-prompt-templates/templates/test
    - 自动归类：若 `user_execution_folders` 表中已有该 `(username, processing_stats_id)` 的记录，且非 `force=True`，则跳过。  
    - 手动通过管理 API 触发时可使用 `force=True` 覆盖。
 
-8. **`transcribe_youtube_file_asr_task` 缺少自动触发**  
-   单文件补充 ASR 转写任务完成后**不会**自动触发打标签/命名/归类。若需要该行为，需在任务末尾补充调用 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify`。
+8. ~~`transcribe_youtube_file_asr_task` 缺少自动触发~~（**已于 2026-04 修复**）  
+   所有 Upload YouTube Link 的终态都通过本地 Worker 派发远程 `finalize_youtube_file_task`（queue=`file_processing`）统一处理，在 `outcome='completed'` 时触发 `trigger_auto_tagging / trigger_auto_naming / trigger_auto_classify`。字幕路径、yt-dlp 兜底路径、Fun-ASR 路径、以及手动 `POST /api/files/{file_id}/transcribe-asr` 都走同一条回调。
 
 9. **并行自动任务对 content 的截断规则**  
    - 用户主动分析（`analyze_document_task` / `analyze_audio_task`）：不截断，传入完整 `content`。  

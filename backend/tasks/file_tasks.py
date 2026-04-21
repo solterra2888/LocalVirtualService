@@ -2871,195 +2871,141 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
                 pass
 
 
-@app.task(bind=True, name='transcribe_youtube_file_asr_task', queue='file_processing')
-def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video_id: str,
-                                     max_duration_seconds: int = 0):
+# NOTE (2026-04):
+# 远程版 `transcribe_youtube_file_asr_task` 已删除.
+# 该任务名的真正实现在 local_virtual_service
+# (deployment/local_virtual_service/worker/tasks.py), 由
+# celery_config.py 的 CELERY_TASK_ROUTES 统一路由到 `youtube_transcription`
+# 队列, 所以远程不应再保留逃逸到 `file_processing` 队列的死实现
+# (避免与本地版本漂移). 若仍有显式指定 `queue='file_processing'` 投递此
+# 任务的遗留调用点, 请改为默认路由或显式 `queue='youtube_transcription'`.
+
+
+# =====================================================================
+# Upload YouTube Link 完成回调（远程）
+# 本地 Worker 写完 file_processing_details.content 后, 派发此任务:
+#   1. 更新 processing_stats 终态 (rc_agent_status / total_time / upload_params)
+#   2. outcome='completed' 时并行触发 auto-tag / auto-name / auto-classify
+# 这一步也修复了 UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md §8 记录的遗漏
+# (transcribe_youtube_file_asr_task 完成后不触发 auto-*).
+# =====================================================================
+
+@app.task(bind=True, name='finalize_youtube_file_task', queue='file_processing')
+def finalize_youtube_file_task(self, file_id: int, username: str,
+                                outcome: str, meta: dict = None):
     """
-    对 Upload YouTube Links 中已保存（无字幕）的视频，触发 Fun-ASR 转写。
+    由 local_virtual_service 的 Upload YouTube Link 任务链回调.
 
     Args:
-        file_id:              file_processing_details 表主键
-        youtube_url:          YouTube 视频完整 URL
-        video_id:             YouTube video ID
-        max_duration_seconds: 只转写前 N 秒（0 = 完整视频，暂未使用）
+        file_id:  file_processing_details 主键
+        username: 文件所属用户, 用于 auto-classify 查询文件夹列表
+        outcome:  'completed' | 'failed'
+        meta:     {
+                    source: 'caption_api' | 'caption_ytdlp' | 'asr',
+                    length: int,                 # 内容字数
+                    elapsed_seconds: float,      # 本地处理总耗时
+                    reason: str,                 # 失败原因 (仅 outcome='failed')
+                  }
     """
-    import shutil, tempfile
     from backend.database.db_manager import DatabaseManager
 
+    meta = meta or {}
     task_id = self.request.id
-    temp_dir = None
+    source = meta.get('source')
+    length = meta.get('length')
+    reason = meta.get('reason')
+    elapsed = float(meta.get('elapsed_seconds') or 0)
 
-    def update_progress(status='processing', progress=0, log_message=None):
-        try:
-            meta = {
-                'status': status,
-                'progress': progress,
-                'current_file': youtube_url,
-                'files_processed': 0,
-                'files_failed': 0,
-                'total_files': 1,
-                'logs': [],
-            }
-            if log_message:
-                meta['logs'].append({
-                    'timestamp': datetime.now().isoformat(),
-                    'level': 'info',
-                    'message': log_message,
-                })
-            current_task.update_state(state='PROGRESS', meta=meta)
-        except Exception:
-            pass
+    info(
+        f"finalize_youtube_file_task 开始: file_id={file_id} outcome={outcome} "
+        f"source={source} length={length} reason={reason}",
+        source="youtube_file_finalize",
+    )
 
     try:
-        info(f"transcribe_youtube_file_asr_task 开始: file_id={file_id}, task_id={task_id}",
-             source="youtube_file_asr")
-        update_progress(progress=10, log_message=f'Starting Fun-ASR for file_id={file_id}...')
-
         db_manager = DatabaseManager(get_database_config())
-
-        # 标记数据库记录为 processing
-        try:
-            with db_manager.get_connection_context() as conn:
-                conn.cursor().execute(
-                    "UPDATE file_processing_details SET status='processing' WHERE id=%s",
-                    (file_id,)
-                )
-        except Exception as e:
-            warning(f"DB status update failed: {e}", source="youtube_file_asr")
-
-        # ── 下载音频 ─────────────────────────────────────────────────────
-        try:
-            import yt_dlp
-        except ImportError:
-            raise ImportError("yt-dlp 未安装，请执行: pip install yt-dlp")
-
-        update_progress(progress=15, log_message='Downloading YouTube audio via yt-dlp...')
-        temp_dir = tempfile.mkdtemp(prefix='yt_file_asr_')
-        out_template = os.path.join(temp_dir, f'youtube_{video_id}.%(ext)s')
-        ydl_opts = _build_ydl_opts(out_template)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([youtube_url])
-
-        downloaded = [os.path.join(temp_dir, f)
-                      for f in os.listdir(temp_dir) if f.startswith(f'youtube_{video_id}')]
-        if not downloaded:
-            raise FileNotFoundError(f"yt-dlp failed to produce audio for {video_id}")
-        temp_audio_path = downloaded[0]
-        size_mb = os.path.getsize(temp_audio_path) / 1024 / 1024
-        update_progress(progress=40, log_message=f'Audio downloaded: {size_mb:.1f} MB')
-
-        # ── 上传 OSS ──────────────────────────────────────────────────────
-        from backend.services.oss_service import OSSService
-        oss_service = OSSService()
-        if not oss_service.is_configured():
-            raise ValueError("OSS 服务未配置")
-        update_progress(progress=50, log_message='Uploading audio to OSS...')
-        upload_res = oss_service.upload_audio_file(
-            file_path=temp_audio_path,
-            filename=os.path.basename(temp_audio_path),
-            username='system'
-        )
-        if not upload_res['success']:
-            raise Exception(f"OSS upload failed: {upload_res.get('error')}")
-        use_asr_public = os.getenv('OSS_ASR_PUBLIC_READ', '').strip().lower() in ('1', 'true', 'yes')
-        if use_asr_public and upload_res.get('public_url'):
-            audio_url = upload_res['public_url']
-        else:
-            audio_url = upload_res.get('signed_url') or upload_res.get('public_url')
-        if not audio_url:
-            raise ValueError(
-                "OSS 未返回可访问 URL。若桶为私有，请设置 OSS_ASR_PUBLIC_READ=true 以便 Fun-ASR 通过公网 URL 下载。"
-            )
-        update_progress(progress=58, log_message='Uploaded to OSS, submitting to Fun-ASR...')
-
-        # ── 提交 Fun-ASR ──────────────────────────────────────────────────
-        from backend.services.asr_service import ASRService
-        asr_service = ASRService()
-        if not asr_service.is_configured():
-            raise ValueError("ASR 服务未配置（缺少 DASHSCOPE_API_KEY）")
-        submit_res = asr_service.submit_transcription_task(
-            audio_url=audio_url, language_hints=['zh', 'en'], diarization_enabled=True
-        )
-        if not submit_res['success']:
-            raise ValueError(f"Fun-ASR submit failed: {submit_res['error']}")
-        asr_task_id = submit_res['task_id']
-        update_progress(progress=63, log_message=f'Fun-ASR task submitted: {asr_task_id}')
-
-        # ── 等待结果 ──────────────────────────────────────────────────────
-        update_progress(progress=65, log_message='Waiting for Fun-ASR results...')
-        transcription_result = asr_service.get_transcription_results(asr_task_id)
-        if not transcription_result['success']:
-            raise ValueError(f"Fun-ASR failed: {transcription_result['error']}")
-        if not transcription_result.get('transcriptions'):
-            raise ValueError(
-                "Fun-ASR 未返回有效转写结果（可能因文件下载失败等）。请重试或检查 OSS/网络。"
-            )
-        update_progress(progress=83, log_message='ASR complete, processing results...')
-
-        # ── 格式化 ────────────────────────────────────────────────────────
-        from backend.api.files import _build_asr_structured_data
-        text_parts = []
-        for trans_data in transcription_result['transcriptions']:
-            fmt = asr_service.format_transcription_result(
-                trans_data, include_timestamps=True, include_speaker=True, timestamped_only=True
-            )
-            if fmt:
-                text_parts.append(fmt)
-        full_text = '\n'.join(text_parts)
-        asr_structured = _build_asr_structured_data(transcription_result['transcriptions'])
-
-        # ── 更新数据库 ────────────────────────────────────────────────────
-        update_progress(progress=88, log_message='Saving ASR transcript to database...')
+        stats_id = None
         with db_manager.get_connection_context() as conn:
-            conn.cursor().execute("""
-                UPDATE file_processing_details
-                SET content = %s, asr_with_diarization = %s,
-                    content_length = %s, status = 'completed'
-                WHERE id = %s
-            """, (full_text,
-                  json.dumps(asr_structured) if asr_structured else None,
-                  len(full_text), file_id))
-        info(f"Fun-ASR 转写完成并保存: file_id={file_id}", source="youtube_file_asr")
+            cur = conn.cursor()
 
-        update_progress(status='completed', progress=100,
-                       log_message='ASR transcription completed!')
+            # 1. 反查 processing_stats_id (Upload Link 场景下一对一)
+            cur.execute(
+                "SELECT processing_stats_id FROM file_processing_details WHERE id=%s",
+                (file_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                warning(
+                    f"finalize: file_processing_details.id={file_id} 不存在",
+                    source="youtube_file_finalize",
+                )
+                return {
+                    'task_id': task_id,
+                    'status': 'skipped',
+                    'reason': 'file_not_found',
+                }
+            stats_id = row[0]
+
+            # 2. 幂等: 仅当 processing_stats 还未终态时才更新
+            rc_status = 'completed' if outcome == 'completed' else 'failed'
+            upload_params_patch = json.dumps({
+                'caption_source': source,
+                'asr_used': source == 'asr',
+                'final_length': length,
+                'finalized_at': datetime.now().isoformat(),
+                'finalize_reason': reason,
+            })
+
+            cur.execute(
+                """
+                UPDATE processing_stats
+                SET rc_agent_status=%s,
+                    total_time = CASE WHEN %s > 0 THEN %s ELSE total_time END,
+                    total_file_processing_time = CASE WHEN %s > 0
+                        THEN %s ELSE total_file_processing_time END,
+                    upload_params = COALESCE(upload_params, '{}'::jsonb)
+                                    || %s::jsonb
+                WHERE id = %s
+                  AND rc_agent_status NOT IN ('completed', 'failed')
+                """,
+                (rc_status, elapsed, elapsed, elapsed, elapsed,
+                 upload_params_patch, stats_id),
+            )
+
+        # 3. 仅 completed 分支触发并行 LLM
+        if outcome == 'completed':
+            try:
+                trigger_auto_tagging([file_id], username, delay=2)
+                trigger_auto_naming([file_id], username, delay=2)
+                trigger_auto_classify([file_id], username, delay=2)
+                info(
+                    f"finalize: 已触发 auto-tag/name/classify file_id={file_id} "
+                    f"source={source}",
+                    source="youtube_file_finalize",
+                )
+            except Exception as e:
+                error(
+                    f"finalize: 触发 auto-* 失败 file_id={file_id} error={e}",
+                    source="youtube_file_finalize",
+                )
+
         return {
             'task_id': task_id,
-            'status': 'completed',
+            'status': 'ok',
             'file_id': file_id,
-            'video_id': video_id,
-            'content_length': len(full_text),
+            'stats_id': stats_id,
+            'outcome': outcome,
+            'source': source,
         }
 
     except Exception as e:
-        error_msg = f"YouTube File ASR 失败: {str(e)}"
-        error(f"{error_msg}, file_id={file_id}", source="youtube_file_asr")
-        try:
-            with db_manager.get_connection_context() as conn:
-                conn.cursor().execute(
-                    "UPDATE file_processing_details SET status='failed' WHERE id=%s", (file_id,)
-                )
-        except Exception:
-            pass
-        try:
-            current_task.update_state(
-                state='PROGRESS',
-                meta={
-                    'status': 'failed', 'progress': 0,
-                    'current_file': youtube_url,
-                    'files_processed': 0, 'files_failed': 1, 'total_files': 1,
-                    'error': error_msg,
-                    'logs': [{'timestamp': datetime.now().isoformat(),
-                               'level': 'error', 'message': error_msg}]
-                }
-            )
-        except Exception:
-            pass
-        return {'task_id': task_id, 'status': 'failed', 'error': error_msg}
-
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
+        error(
+            f"finalize_youtube_file_task 异常: file_id={file_id} error={e}",
+            source="youtube_file_finalize",
+        )
+        return {
+            'task_id': task_id,
+            'status': 'error',
+            'file_id': file_id,
+            'error': str(e),
+        }

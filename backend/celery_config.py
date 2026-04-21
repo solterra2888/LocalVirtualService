@@ -65,6 +65,9 @@ task_routes = {
     'fetch_youtube_transcripts_batch': {'queue': 'youtube_fetching'},  # YouTube transcript 字幕拉取（远程 Worker，住宅 IP）
     'transcribe_youtube_feed_task': {'queue': 'youtube_transcription'},  # YouTube Feed ASR 转写（本地虚拟机 Worker）
     'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},  # Upload YouTube Link ASR 转写（本地虚拟机 Worker）
+    # Upload YouTube Link 能力下沉：字幕拉取在本地，完成回调在远程
+    'fetch_youtube_file_transcript_task': {'queue': 'youtube_fetching'},  # Upload YouTube Link 字幕抓取（本地虚拟机 Worker）
+    'finalize_youtube_file_task': {'queue': 'file_processing'},  # Upload YouTube Link 完成回调（远程 Worker，触发 auto-tag/name/classify）
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},

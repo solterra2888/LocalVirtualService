@@ -539,13 +539,38 @@ async def create_subscription(
             else:
                 # ✅ 情况3：没有内容，从 RSS 获取
                 logger.info(f"No existing content for YouTube channel {request.channel_identifier}. Triggering RSS fetch.")
-                
-                task = fetch_youtube_subscription_task.apply_async(
-                    args=[subscription_id, None, True],  # force_fetch=True
-                    countdown=0,
-                    queue='data_fetching'
-                )
-                logger.info(f"Celery task scheduled: fetch_youtube_subscription (task_id={task.id})")
+
+                # 灰度开关: 是否把新订阅首抓下沉到 local_virtual_service.
+                # 远程服务器无法直接访问 YouTube, 默认路径应走本地家用 Worker;
+                # 保留 False 分支仅作为紧急回滚出口.
+                import os as _os
+                _use_local = _os.getenv('YOUTUBE_SUBSCRIPTION_USE_LOCAL', 'true') \
+                    .strip().lower() in ('1', 'true', 'yes', 'on')
+
+                if _use_local:
+                    # 走 celery_config.py 默认路由 → youtube_fetching → 本地 Worker
+                    # 本地版 fetch_youtube_subscription 会一次性完成:
+                    #   RSS → 字幕 fallback → 必要时派发 ASR → 更新订阅统计
+                    from celery import current_app as _celery_app
+                    task = _celery_app.send_task(
+                        'fetch_youtube_subscription',
+                        args=[subscription_id, None, True],  # force_fetch=True
+                        countdown=0,
+                    )
+                    logger.info(
+                        f"Local worker task scheduled: fetch_youtube_subscription "
+                        f"(task_id={task.id})"
+                    )
+                else:
+                    task = fetch_youtube_subscription_task.apply_async(
+                        args=[subscription_id, None, True],  # force_fetch=True
+                        countdown=0,
+                        queue='data_fetching',
+                    )
+                    logger.info(
+                        f"Remote legacy task scheduled: fetch_youtube_subscription "
+                        f"(task_id={task.id})"
+                    )
         
         # News：已有文章时把新用户并入 user_ids（与 Twitter/YouTube 复用逻辑一致）
         elif request.enabled and request.channel_type == 'news':

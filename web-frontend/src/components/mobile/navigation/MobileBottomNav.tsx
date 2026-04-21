@@ -4,7 +4,7 @@ import { FileTextOutlined, ProfileOutlined, ReadOutlined, StockOutlined } from '
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏：Sources、Feeds、Reports、Watchlist
+ * 移动端底部导航栏：Sources、Feeds、Reports（Watchlist 入口与 PC 一致可暂时隐藏）
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
@@ -31,7 +31,7 @@ const MobileBottomNav: React.FC = () => {
       icon: <StockOutlined />,
       label: 'Watchlist',
     },
-  ];
+  ].filter(item => item.key !== '/dashboard'); // 与 PC NavBar 一致暂时隐藏（未成熟）
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`);

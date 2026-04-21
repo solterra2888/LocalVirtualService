@@ -116,12 +116,12 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：Source 首位，Feeds 第二，其余日常业务入口 + Add Content
+  // 主导航：Sources 首位，Feeds 第二，其余日常业务入口 + Add Content
   const menuItems = [
     {
       key: '/files',
       icon: <FileTextOutlined />,
-      label: 'Source',
+      label: 'Sources',
     },
     {
       key: '/feeds',
@@ -162,6 +162,8 @@ const Layout: React.FC = () => {
   ].filter(item => {
     // 暂时屏蔽 Investment Tracking，该模块仍未开发
     if (item.key === '/projects') return false;
+    // 暂时屏蔽 Watchlist、News、UG Data：功能未成熟；路由与页面代码保留
+    if (item.key === '/dashboard' || item.key === '/news' || item.key === 'ug-data') return false;
     if (item.children) return item.children.length > 0;
     return true;
   });

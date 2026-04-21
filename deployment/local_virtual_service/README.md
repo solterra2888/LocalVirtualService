@@ -145,15 +145,23 @@ flowchart TD
 | 队列 | 任务 | Worker | 说明 |
 |------|------|--------|------|
 | `youtube_fetching` | `fetch_all_youtube_subscriptions` | Main (concurrency=2) | 批量获取订阅频道视频 |
-| `youtube_fetching` | `fetch_youtube_subscription` | Main | 获取单个订阅视频 |
+| `youtube_fetching` | `fetch_youtube_subscription` | Main | 获取单个订阅视频（含**新订阅首抓**，由 `/api/subscriptions` 在 `YOUTUBE_SUBSCRIPTION_USE_LOCAL=true` 时派发到此队列，失败累加 `consecutive_failures`） |
 | `youtube_fetching` | `fetch_youtube_transcripts_batch` | Main | 批量拉取字幕，失败自动派发 ASR |
+| `youtube_fetching` | `fetch_youtube_file_transcript_task` | Main | **Upload YouTube Link** 字幕抓取（由 `/api/files/upload-youtube` 在 `YOUTUBE_UPLOAD_USE_LOCAL=true` 时派发）；落库到 `file_processing_details.content / asr_with_diarization`，无字幕或被封时自动派发 `transcribe_youtube_file_asr_task` |
 | `youtube_transcription` | `transcribe_youtube_feed_task` | Main | Feed 短视频 Fun-ASR 转录（进入后探测时长，>30min 自动转发长队列）|
-| `youtube_transcription` | `transcribe_youtube_file_asr_task` | Main | 用户上传链接视频 Fun-ASR 转录 |
-| `youtube_transcription_long` | `transcribe_youtube_feed_task` | Long (concurrency=1) | 长视频专用，防止大文件阻塞主 worker |
+| `youtube_transcription` | `transcribe_youtube_file_asr_task` | Main | 用户上传链接视频 Fun-ASR 转录（**与 Feed 对齐**：支持直播永久失败 + 长视频自动路由 + 成功/永久失败回调远程 `finalize_youtube_file_task`）|
+| `youtube_transcription_long` | `transcribe_youtube_feed_task` / `transcribe_youtube_file_asr_task` | Long (concurrency=1) | 长视频专用，防止大文件阻塞主 worker |
+
+### 远程回调任务（Upload Link 链路）
+
+Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `ContentStore.signal_upload_file_ready` 把 `finalize_youtube_file_task` 消息投递到远程 `file_processing` 队列。远程回调负责：
+
+1. 更新 `processing_stats.rc_agent_status / total_time / upload_params`；
+2. 仅在 `outcome='completed'` 时触发 auto-tag / auto-name / auto-classify。
 
 ### 长视频自动路由
 
-`transcribe_youtube_feed_task` 在主 worker 执行时会调用 `yt-dlp` 仅拉取元信息（不下载）探测时长，超过阈值立即 re-queue 到 `youtube_transcription_long`，长视频 worker 单独慢慢处理。
+`transcribe_youtube_feed_task` 在主 worker 执行时会调用 `yt-dlp` 仅拉取元信息（不下载）探测时长，超过阈值立即 re-queue 到 `youtube_transcription_long`，长视频 worker 单独慢慢处理。`transcribe_youtube_file_asr_task` 采用完全一致的 probe + 转发策略。
 
 | 场景 | 举例 | 走向 |
 |------|------|------|
@@ -416,12 +424,24 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 ## 服务器端配置
 
-需要在服务器的 `backend/celery_config.py` 中将 ASR 任务路由到 `youtube_transcription` 队列（已更新）：
+需要在服务器的 `backend/celery_config.py` 中将 YouTube 相关任务路由到对应队列（已更新）：
 
 ```python
+'fetch_youtube_subscription': {'queue': 'youtube_fetching'},
+'fetch_all_youtube_subscriptions': {'queue': 'youtube_fetching'},
+'fetch_youtube_transcripts_batch': {'queue': 'youtube_fetching'},
+'fetch_youtube_file_transcript_task': {'queue': 'youtube_fetching'},   # Upload Link 字幕抓取
 'transcribe_youtube_feed_task': {'queue': 'youtube_transcription'},
 'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},
+'finalize_youtube_file_task': {'queue': 'file_processing'},            # Upload Link 完成回调（远程）
 ```
+
+### 灰度开关（服务器端环境变量）
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `YOUTUBE_UPLOAD_USE_LOCAL` | `true` | `/api/files/upload-youtube` 是否走新本地路径。`false` 走远程遗留 `upload_and_process_youtube_task`（紧急回滚用）|
+| `YOUTUBE_SUBSCRIPTION_USE_LOCAL` | `true` | 新订阅首抓是否走本地队列。`false` 走远程遗留派发器（自动再派到本地）|
 
 ---
 

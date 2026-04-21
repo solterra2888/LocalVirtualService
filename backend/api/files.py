@@ -4026,19 +4026,23 @@ async def upload_youtube_link(
     current_user = Depends(get_current_user)
 ):
     """
-    上传 YouTube 链接并异步处理
-    
+    上传 YouTube 链接并异步处理.
+
+    新路径 (默认, YOUTUBE_UPLOAD_USE_LOCAL=true):
+      1. 同步 INSERT processing_stats + file_processing_details (status='processing')
+      2. 派发 `fetch_youtube_file_transcript_task` 到本地家用 Worker
+      3. 立即返回 file_id / task_id, 前端轮询 file_processing_details.status
+      本地 Worker 完成字幕/ASR 后, 调用远程 `finalize_youtube_file_task`
+      更新 processing_stats 并触发 auto-tag / auto-name / auto-classify.
+
+    回滚路径 (YOUTUBE_UPLOAD_USE_LOCAL=false):
+      走远程 `upload_and_process_youtube_task` 旧实现 (已废弃, 仅保留作为紧急出口).
+
     请求参数:
     - youtube_url: YouTube 视频链接（必填）
-    
-    返回:
-    - task_id: Celery 任务 ID
-    - video_id: YouTube 视频 ID
-    - message: 提示消息
     """
     from backend.services.youtube_service import YouTubeService
-    from backend.tasks.file_tasks import upload_and_process_youtube_task
-    
+
     try:
         youtube_url = request.get('youtube_url')
         if not youtube_url:
@@ -4046,35 +4050,114 @@ async def upload_youtube_link(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing required parameter: youtube_url"
             )
-        
+
         username = current_user.username if hasattr(current_user, 'username') else 'guest'
-        
-        # 验证 YouTube URL 格式
+
         video_id = YouTubeService.extract_video_id(youtube_url)
         if not video_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid YouTube URL. Please provide a valid YouTube video link."
             )
-        
-        info(f"Received YouTube link: url={youtube_url}, video_id={video_id}, user={username}", 
+
+        info(f"Received YouTube link: url={youtube_url}, video_id={video_id}, user={username}",
              source="api")
-        
-        # 启动异步任务
+
+        use_local = os.getenv('YOUTUBE_UPLOAD_USE_LOCAL', 'true') \
+            .strip().lower() in ('1', 'true', 'yes', 'on')
+
+        if use_local:
+            # ── 新路径: 同步建记录 + 派发本地 Worker ──────────────────
+            filename = f"YouTube_{video_id}"
+            now_iso = datetime.now().isoformat()
+
+            db_manager = DatabaseManager(get_database_config())
+            with db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO processing_stats (
+                        timestamp, files_processed, files_failed,
+                        "user", task_name, total_time,
+                        total_file_processing_time, total_ai_time,
+                        total_tokens, total_price, upload_params,
+                        final_report, rc_agent_status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    now_iso, 1, 0, username,
+                    'YouTube Processing', 0, 0, 0, 0, 0,
+                    json.dumps({
+                        "youtube_url": youtube_url,
+                        "video_id": video_id,
+                        "dispatch_target": "local_virtual_service",
+                    }),
+                    '', 'processing',
+                ))
+                stats_id = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    INSERT INTO file_processing_details (
+                        processing_stats_id, filename, file_type,
+                        file_size_mb, status, content, asr_with_diarization,
+                        created_at, task_id, original_file_path,
+                        processing_time, content_length
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    stats_id, filename, 'youtube', 0, 'processing',
+                    '', None, datetime.now(), None, youtube_url, 0, 0,
+                ))
+                file_id = cursor.fetchone()[0]
+
+            # 派发到本地: 不指定 queue, 交由 celery_config 的默认路由
+            # (fetch_youtube_file_transcript_task → youtube_fetching)
+            from celery import current_app as _celery_app
+            task = _celery_app.send_task(
+                'fetch_youtube_file_transcript_task',
+                args=(file_id, youtube_url, video_id, username),
+                countdown=0,
+            )
+
+            # 用 task_id 关联 file_processing_details (便于旧版前端按 task_id 轮询)
+            try:
+                with db_manager.get_connection_context() as conn:
+                    conn.cursor().execute(
+                        "UPDATE file_processing_details SET task_id=%s WHERE id=%s",
+                        (task.id, file_id),
+                    )
+            except Exception:
+                pass
+
+            info(
+                f"YouTube local pipeline dispatched: task_id={task.id} file_id={file_id} "
+                f"stats_id={stats_id} video_id={video_id}",
+                source="api",
+            )
+
+            return {
+                "task_id": task.id,
+                "file_id": file_id,
+                "processing_stats_id": stats_id,
+                "video_id": video_id,
+                "message": "YouTube processing started on local worker. Poll /api/files/details/{file_id}.",
+            }
+
+        # ── 回滚路径: 远程旧流水线 ───────────────────────────────
+        from backend.tasks.file_tasks import upload_and_process_youtube_task
         task = upload_and_process_youtube_task.apply_async(
             args=(youtube_url, username),
-            queue='file_processing'
+            queue='file_processing',
         )
-        
-        info(f"YouTube processing task started: task_id={task.id}, video_id={video_id}", 
-             source="api")
-        
+        info(
+            f"YouTube remote legacy pipeline dispatched: task_id={task.id} video_id={video_id}",
+            source="api",
+        )
         return {
             "task_id": task.id,
             "video_id": video_id,
-            "message": "YouTube processing started. You can track the progress in the task status."
+            "message": "YouTube processing started. You can track the progress in the task status.",
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -4083,6 +4166,101 @@ async def upload_youtube_link(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process YouTube link: {str(e)}"
         )
+
+@router.get(
+    "/upload-youtube/status/{file_id}",
+    summary="Poll Upload YouTube Link processing status",
+)
+async def get_upload_youtube_status(
+    file_id: int,
+    current_user = Depends(get_current_user),
+):
+    """
+    Upload YouTube Link 新路径的轮询入口.
+
+    前端拿到 `POST /files/upload-youtube` 返回的 `file_id` 后,
+    用此接口查询最新状态. 与 `/tasks/{task_id}/status` 的区别:
+      - 本接口直接查数据库 (file_processing_details + processing_stats),
+        跨越本地→远程 → ASR 回调整个链路都能给出正确终态.
+      - 不依赖 Celery task 状态, 也就能正确处理「字幕任务派发 ASR 后
+        自身已 SUCCESS, 但内容其实还在生成」的情况.
+    """
+    try:
+        db_manager = DatabaseManager(get_database_config())
+        with db_manager.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT fpd.status,
+                       fpd.content_length,
+                       fpd.filename,
+                       fpd.task_id,
+                       fpd.original_file_path,
+                       ps.rc_agent_status,
+                       ps.total_time,
+                       ps.upload_params
+                FROM file_processing_details fpd
+                LEFT JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
+                WHERE fpd.id = %s AND ps."user" = %s
+                """,
+                (file_id, current_user.username),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        (file_status, content_length, filename, task_id, original_path,
+         rc_agent_status, total_time, upload_params) = row
+
+        # 统一把 file_status 翻译成前端三态: processing / completed / failed
+        if file_status == "completed":
+            ui_status = "completed"
+            progress = 100
+        elif file_status == "failed":
+            ui_status = "failed"
+            progress = 0
+        else:
+            ui_status = "processing"
+            # 无法精确给出进度, 给一个非零值让前端进度条动起来
+            progress = 50 if (content_length or 0) == 0 else 80
+
+        # 提取本地 worker 写入的元信息 (source / reason / asr_used ...) 供前端展示
+        caption_source = None
+        finalize_reason = None
+        asr_used = False
+        if isinstance(upload_params, dict):
+            caption_source = upload_params.get("caption_source")
+            finalize_reason = upload_params.get("finalize_reason")
+            asr_used = bool(upload_params.get("asr_used"))
+
+        return {
+            "file_id": file_id,
+            "task_id": task_id,
+            "filename": filename,
+            "youtube_url": original_path,
+            "status": ui_status,
+            "progress": progress,
+            "content_length": content_length or 0,
+            "total_time": total_time,
+            "rc_agent_status": rc_agent_status,
+            "caption_source": caption_source,
+            "finalize_reason": finalize_reason,
+            "asr_used": asr_used,
+            "message": (
+                f"Failed: {finalize_reason}" if ui_status == "failed" and finalize_reason
+                else "Done" if ui_status == "completed"
+                else "Processing on local worker..."
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"get_upload_youtube_status failed: {e}",
+              source="api", file_id=file_id)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 class FileASRRequest(BaseModel):
     max_duration_seconds: int = 0  # 0 = 完整视频；>0 = 只转写前 N 秒
@@ -4126,14 +4304,26 @@ async def trigger_file_youtube_asr(
         from backend.services.youtube_service import YouTubeService
         video_id = YouTubeService.extract_video_id(youtube_url) or f"file{file_id}"
 
-        from backend.tasks.file_tasks import transcribe_youtube_file_asr_task
-        task = transcribe_youtube_file_asr_task.apply_async(
-            args=(file_id, youtube_url, video_id, max(0, body.max_duration_seconds)),
-            queue='file_processing'
+        username = current_user.username if hasattr(current_user, 'username') else 'guest'
+
+        # 直接派发到本地 Worker (local_virtual_service) 的 youtube_transcription 队列.
+        # 本地版 transcribe_youtube_file_asr_task 签名:
+        #   (file_id, youtube_url, video_id, username, max_duration_seconds,
+        #    _skip_duration_check=False)
+        # 完成后会回调远程 `finalize_youtube_file_task`.
+        from celery import current_app as _celery_app
+        task = _celery_app.send_task(
+            'transcribe_youtube_file_asr_task',
+            args=(file_id, youtube_url, video_id, username,
+                  max(0, body.max_duration_seconds)),
+            queue='youtube_transcription',
         )
 
-        info(f"YouTube File ASR task dispatched: file_id={file_id}, video_id={video_id}, task_id={task.id}",
-             source="api")
+        info(
+            f"YouTube File ASR task dispatched to local worker: file_id={file_id}, "
+            f"video_id={video_id}, task_id={task.id}",
+            source="api",
+        )
 
         return {
             "task_id": task.id,
