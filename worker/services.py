@@ -885,6 +885,85 @@ class ContentStore:
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Upload YouTube Link 专用：字幕抓取结果写回 file_processing_details
+    # ------------------------------------------------------------------
+
+    def get_file_status(self, file_id: int) -> Optional[str]:
+        """读取 file_processing_details 的当前 status，用于幂等保护。"""
+        try:
+            with self.db.connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT status FROM file_processing_details WHERE id=%s",
+                    (file_id,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            log.warning("get_file_status 失败: file_id=%s error=%s", file_id, e)
+            return None
+
+    def update_file_transcript(self, file_id: int, content: str,
+                               transcript_data: Dict[str, Any],
+                               status: str = "completed") -> None:
+        """
+        Upload YouTube Link 走字幕路径时写回:
+          content                = 字幕全文（纯文本）
+          asr_with_diarization   = 字幕结构化 JSON（复用此字段承载 caption JSON，
+                                   与远程旧实现一致，前端 OriginalPanel 已有兼容）
+        """
+        with self.db.connection() as conn:
+            conn.cursor().execute("""
+                UPDATE file_processing_details
+                SET content=%s, asr_with_diarization=%s,
+                    content_length=%s, status=%s
+                WHERE id=%s
+            """, (
+                content,
+                Json(transcript_data) if transcript_data is not None else None,
+                len(content or ""), status, file_id,
+            ))
+
+    def signal_upload_file_ready(self, file_id: int, username: str,
+                                 outcome: str, **meta) -> None:
+        """
+        通知远程 `finalize_youtube_file_task`: Upload Link 的字幕/ASR 已写入终态。
+
+        outcome: 'completed' | 'failed'
+        meta:    任意附加信息（source / length / reason / elapsed_seconds ...）
+
+        注意: 本地 Worker 不依赖远程代码包，通过 Celery 任务名跨集群派发。
+        """
+        try:
+            from .celery_app import app
+            app.send_task(
+                "finalize_youtube_file_task",
+                args=(file_id, username, outcome, meta or {}),
+                queue="file_processing",
+            )
+            log.info("signal_upload_file_ready → finalize: file_id=%d outcome=%s",
+                     file_id, outcome)
+        except Exception as e:
+            # 失败不影响当前任务: file_processing_details.content 已写入,
+            # 用户仍可通过 /api/file-tags/retag 等接口手动补偿 auto-* 行为.
+            log.error("signal_upload_file_ready 派发失败: file_id=%d outcome=%s error=%s",
+                      file_id, outcome, e)
+
+    def increment_subscription_failures(self, sub_id: int) -> None:
+        """订阅抓取失败时累加 consecutive_failures (与远程旧实现对齐)。"""
+        try:
+            with self.db.connection() as conn:
+                conn.cursor().execute(
+                    "UPDATE subscription_list "
+                    "SET consecutive_failures=consecutive_failures+1 "
+                    "WHERE id=%s",
+                    (sub_id,),
+                )
+        except Exception as e:
+            log.warning("increment_subscription_failures 失败: sub_id=%s error=%s",
+                        sub_id, e)
+
     def get_youtube_subscriptions(self, enabled_only: bool = True) -> List[Dict[str, Any]]:
         with self.db.connection() as conn:
             cur = conn.cursor()

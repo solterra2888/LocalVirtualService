@@ -85,7 +85,14 @@ def fetch_youtube_subscription(self, subscription_id=None, user_id=None, force_f
 
     log.info("── 获取单个订阅: sub=%s channel=%s (%s) ──", sub_id, ch_name, ch_ident)
 
-    raw_videos = YouTubeFeedService.fetch_channel_videos(ch_ident, max_items)
+    try:
+        raw_videos = YouTubeFeedService.fetch_channel_videos(ch_ident, max_items)
+    except Exception as e:
+        log.error("  RSS 抓取失败: sub=%s channel=%s error=%s", sub_id, ch_name, e)
+        store.increment_subscription_failures(sub_id)
+        return {"success": False, "message": f"RSS fetch failed: {e}",
+                "videos_new": 0, "videos_existing": 0}
+
     if not raw_videos:
         log.info("  频道无新视频")
         return {"success": True, "videos_new": 0, "videos_existing": 0}
@@ -405,6 +412,144 @@ def fetch_youtube_transcripts_batch(self, video_items: list):
 
 
 # =====================================================================
+# Upload YouTube Link 字幕拉取 (youtube_fetching 队列)
+#
+# 由远程 `/api/files/upload-youtube` 在同步建完 file_processing_details 行后
+# 派发, 与 Feed 字幕拉取完全复用 `_fetch_transcript_with_fallback` 逻辑
+# (transcript-api → yt-dlp 两路径), 但落库目标不同:
+#   Feed   → subscription_content.transcript
+#   Upload → file_processing_details.content + asr_with_diarization
+#
+# 失败且可降级时, 会自动派发 `transcribe_youtube_file_asr_task` 到
+# youtube_transcription 队列 (由同一家庭 Worker 消费).
+# 终态 (completed / 永久 failed) 会通过 signal_upload_file_ready 回调远程
+# `finalize_youtube_file_task`, 触发 auto-tag / auto-name / auto-classify.
+# =====================================================================
+
+@app.task(bind=True, name="fetch_youtube_file_transcript_task",
+          queue="youtube_fetching", max_retries=_MAX_RETRIES)
+def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
+                                        video_id: str, username: str = "guest"):
+    """
+    对 Upload YouTube Link 中的视频拉字幕, 失败则派发 file ASR.
+
+    Args:
+        file_id:     file_processing_details 主键 (远程 API 已预先 INSERT)
+        youtube_url: 原始 YouTube URL (存在 file_processing_details.original_file_path)
+        video_id:    YouTube video_id (用于日志、临时文件命名)
+        username:    文件所属用户, 透传给后续 ASR 任务与 finalize 回调
+    """
+    task_id = self.request.id
+    store = ContentStore()
+    task_start = time.time()
+
+    # ── 幂等保护: 已完成的 file_id 直接返回 ──────────────────────────
+    try:
+        current_status = store.get_file_status(file_id)
+    except Exception:
+        current_status = None
+    if current_status == "completed":
+        log.info("── Upload Caption 跳过: file_id=%d 已完成 ──", file_id)
+        return {"task_id": task_id, "status": "skipped",
+                "reason": "already_completed", "file_id": file_id}
+
+    log.info("── Upload Caption 开始: file_id=%d video=%s url=%s ──",
+             file_id, video_id, youtube_url)
+    store.update_file_status(file_id, "processing")
+    _progress(progress=10, msg="Fetching YouTube transcript...", url=youtube_url)
+
+    outcome = _fetch_transcript_with_fallback(youtube_url)
+
+    # ── 成功: 写回 file_processing_details + 回调远程 ──────────────────
+    if outcome["success"]:
+        result = outcome["result"]
+        full_text = YouTubeCaptionService.get_full_text(result)
+        store.update_file_transcript(file_id, full_text, result, status="completed")
+
+        via = outcome["source"]  # 'API' 或 'yt-dlp'
+        source_tag = "caption_api" if via == "API" else "caption_ytdlp"
+        source_type = "自动生成" if result.get("is_generated") else "人工字幕"
+        extra = (f" (API→{outcome['api_reason']})"
+                 if via == "yt-dlp" and outcome["api_reason"] else "")
+        elapsed = round(time.time() - task_start, 2)
+        log.info(
+            "── Upload Caption 完成[%s]: file_id=%d lang=%s(%s) 字数=%d%s ──",
+            via, file_id, result.get("language"), source_type,
+            len(full_text), extra,
+        )
+        _progress(status="completed", progress=100,
+                  msg=f"Caption fetched via {via}", url=youtube_url)
+
+        store.signal_upload_file_ready(
+            file_id, username, "completed",
+            source=source_tag,
+            length=len(full_text),
+            language=result.get("language"),
+            is_generated=bool(result.get("is_generated")),
+            elapsed_seconds=elapsed,
+        )
+        return {
+            "task_id": task_id, "status": "completed", "file_id": file_id,
+            "source": source_tag, "length": len(full_text),
+        }
+
+    # ── 永久失败 (直播 / 私有 / 首播未开始 ...): 不降级 ASR ─────────────
+    if not outcome["should_asr"]:
+        reason = _format_caption_failure_reason(outcome)
+        elapsed = round(time.time() - task_start, 2)
+        log.warning(
+            "── Upload Caption 永久失败: file_id=%d video=%s 原因=%s ──",
+            file_id, video_id, reason,
+        )
+        store.update_file_status(file_id, "failed")
+        _progress(status="failed", msg=f"Caption failed (permanent): {reason}",
+                  url=youtube_url, failed=1)
+        store.signal_upload_file_ready(
+            file_id, username, "failed",
+            source="caption_permanent_fail",
+            reason=reason,
+            elapsed_seconds=elapsed,
+        )
+        return {"task_id": task_id, "status": "failed", "permanent": True,
+                "reason": reason, "file_id": file_id}
+
+    # ── 可降级: 派发 ASR 任务 (不 signal, 终态由 ASR 任务负责 signal) ──
+    reason = _format_caption_failure_reason(outcome)
+    log.info(
+        "── Upload Caption 降级 ASR: file_id=%d video=%s 原因=%s ──",
+        file_id, video_id, reason,
+    )
+    _progress(progress=40,
+              msg=f"Caption unavailable ({reason}), switching to Fun-ASR...",
+              url=youtube_url)
+    try:
+        self.app.send_task(
+            "transcribe_youtube_file_asr_task",
+            args=(file_id, youtube_url, video_id, username, 0),
+            queue="youtube_transcription",
+        )
+        log.info("  → File ASR 任务已派发: file_id=%d video=%s", file_id, video_id)
+    except Exception as e:
+        # 派发失败 = 永久失败, 必须 signal, 否则远程 processing_stats 卡在 processing
+        elapsed = round(time.time() - task_start, 2)
+        log.error("  ASR 派发失败: file_id=%d error=%s", file_id, e)
+        store.update_file_status(file_id, "failed")
+        _progress(status="failed", msg=f"ASR dispatch failed: {e}",
+                  url=youtube_url, failed=1)
+        store.signal_upload_file_ready(
+            file_id, username, "failed",
+            source="asr_dispatch_fail",
+            reason=f"ASR dispatch failed: {e}",
+            elapsed_seconds=elapsed,
+        )
+        return {"task_id": task_id, "status": "failed", "permanent": True,
+                "reason": f"ASR dispatch failed: {e}", "file_id": file_id}
+
+    return {"task_id": task_id, "status": "asr_dispatched",
+            "reason": reason, "file_id": file_id}
+
+
+# =====================================================================
 # YouTube ASR 转录 (youtube_transcription 队列)
 # =====================================================================
 
@@ -640,13 +785,86 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
 @app.task(bind=True, name="transcribe_youtube_file_asr_task", queue="youtube_transcription",
           max_retries=_MAX_RETRIES)
 def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video_id: str,
-                                     max_duration_seconds: int = 0):
-    """对 Upload YouTube Link 中无字幕的视频, 下载 → Fun-ASR → 写回 file_processing_details"""
+                                     username: str = "guest",
+                                     max_duration_seconds: int = 0,
+                                     _skip_duration_check: bool = False):
+    """对 Upload YouTube Link 中无字幕的视频, 下载 → Fun-ASR → 写回 file_processing_details.
+
+    Args:
+        file_id:              file_processing_details 主键
+        youtube_url:          YouTube 完整 URL
+        video_id:             YouTube video_id
+        username:             文件所属用户, 用于终态 signal 的 finalize 任务
+        max_duration_seconds: 预留参数 (0 = 完整视频), 当前未使用
+        _skip_duration_check: 长队列二次消费时置 True, 跳过元信息 probe
+
+    与 Feed 侧一致, 本任务:
+      - 短队列首次进入 → probe 元信息, 直播永久失败, 长视频转发长队列
+      - 成功 / 永久失败 均通过 `signal_upload_file_ready` 回调远程
+        `finalize_youtube_file_task`, 触发 auto-tag / auto-name / auto-classify
+    """
     task_id = self.request.id
     temp_dir = None
     store = ContentStore()
+    task_start = time.time()
+
+    current_queue = _current_routing_key(self)
+
+    # ── 预探测: 直播永久失败 + 长视频路由 ────────────────────────────
+    # 与 Feed 的 transcribe_youtube_feed_task 完全对齐, 只在短队列首次进入时做.
+    if not _skip_duration_check and current_queue == _SHORT_QUEUE:
+        try:
+            meta = probe_youtube_metadata(youtube_url) or {}
+        except Exception as e:
+            log.warning("probe_youtube_metadata 失败, 继续走默认路径: %s", e)
+            meta = {}
+        live_status = meta.get("live_status")
+
+        if meta.get("is_live") or live_status in ("is_live", "is_upcoming", "post_live"):
+            err_msg = f"直播视频无法转录 (live_status={live_status or 'is_live'})"
+            log.warning(
+                "── Upload ASR 直播跳过: file_id=%d video=%s live_status=%s「%s」──",
+                file_id, video_id, live_status or "is_live",
+                (meta.get("title") or "")[:40],
+            )
+            store.update_file_status(file_id, "failed")
+            _progress(status="failed", msg=err_msg, url=youtube_url, failed=1)
+            elapsed = round(time.time() - task_start, 2)
+            store.signal_upload_file_ready(
+                file_id, username, "failed",
+                source="asr_live_skip",
+                reason=err_msg,
+                elapsed_seconds=elapsed,
+            )
+            return {"task_id": task_id, "status": "failed", "error": err_msg,
+                    "permanent": True, "reason": "is_live", "file_id": file_id}
+
+        duration = meta.get("duration")
+        if duration and duration > _LONG_VIDEO_THRESHOLD:
+            log.info(
+                "── Upload ASR 长视频检测: file_id=%d video=%s 时长=%dm%02ds 超过阈值%dm → 转发长视频队列 ──",
+                file_id, video_id,
+                duration // 60, duration % 60,
+                _LONG_VIDEO_THRESHOLD // 60,
+            )
+            try:
+                transcribe_youtube_file_asr_task.apply_async(
+                    args=[file_id, youtube_url, video_id, username, max_duration_seconds],
+                    kwargs={"_skip_duration_check": True},
+                    queue=_LONG_QUEUE,
+                    time_limit=_LONG_TASK_HARD_LIMIT,
+                    soft_time_limit=_LONG_TASK_SOFT_LIMIT,
+                )
+                return {"task_id": task_id, "status": "rerouted_to_long",
+                        "file_id": file_id, "duration_seconds": duration}
+            except Exception as e:
+                log.warning("转发长视频队列失败，继续在短队列处理: %s", e)
+
     try:
-        log.info("── File ASR 开始: file_id=%d video=%s url=%s ──", file_id, video_id, youtube_url)
+        log.info(
+            "── Upload ASR 开始: file_id=%d video=%s url=%s queue=%s ──",
+            file_id, video_id, youtube_url, current_queue,
+        )
         store.update_file_status(file_id, "processing")
         import yt_dlp
 
@@ -678,7 +896,10 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         log.info("  [4/5] 提交 Fun-ASR 转录...")
         _progress(progress=60, msg="Submitting Fun-ASR...", url=youtube_url)
         asr = ASRService()
-        result = asr.transcribe(up["audio_url"])
+        if current_queue == _LONG_QUEUE:
+            result = asr.transcribe(up["audio_url"], timeout_min=_ASR_POLL_TIMEOUT_LONG_MIN)
+        else:
+            result = asr.transcribe(up["audio_url"])
         if not result["success"]:
             raise ValueError(f"ASR: {result['error']}")
         if not result.get("transcriptions"):
@@ -693,9 +914,19 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         store.update_file_asr(file_id, full_text, asr_struct)
         _progress(status="completed", progress=100, msg="Done!", url=youtube_url)
 
-        log.info("── File ASR 完成: file_id=%d video=%s 字数=%d ──",
-                 file_id, video_id, len(full_text))
-        return {"task_id": task_id, "status": "completed", "file_id": file_id, "content_length": len(full_text)}
+        elapsed = round(time.time() - task_start, 2)
+        log.info(
+            "── Upload ASR 完成: file_id=%d video=%s 字数=%d 耗时=%.1fs ──",
+            file_id, video_id, len(full_text), elapsed,
+        )
+        store.signal_upload_file_ready(
+            file_id, username, "completed",
+            source="asr",
+            length=len(full_text),
+            elapsed_seconds=elapsed,
+        )
+        return {"task_id": task_id, "status": "completed", "file_id": file_id,
+                "content_length": len(full_text)}
 
     except Exception as e:
         if temp_dir and os.path.exists(temp_dir):
@@ -705,21 +936,34 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
         reason, retriable = _classify_asr_failure(e)
         retries_done = self.request.retries
         tag = "可重试" if retriable else "永久"
-        log.error("── File ASR 失败[%s]: reason=%s file_id=%d video=%s (尝试 %d/%d) ──",
-                  tag, reason, file_id, video_id, retries_done + 1, _MAX_RETRIES + 1)
+        log.error(
+            "── Upload ASR 失败[%s]: reason=%s file_id=%d video=%s (尝试 %d/%d) ──",
+            tag, reason, file_id, video_id, retries_done + 1, _MAX_RETRIES + 1,
+        )
 
         if retriable and retries_done < _MAX_RETRIES:
             countdown = _compute_retry_countdown(retries_done)
             log.info("  → %ds 后重试 (第 %d 次)", countdown, retries_done + 2)
             store.update_file_status(file_id, "processing")
             _progress(status="processing", msg=f"Retrying in {countdown}s: {reason}", url=youtube_url)
+            # 重试不触发 signal, 终态由最终成功/永久失败分支负责
             raise self.retry(exc=e, countdown=countdown)
 
-        err = f"File ASR 失败: {reason}"
+        err = f"Upload ASR 失败: {reason}"
         store.update_file_status(file_id, "failed")
         _progress(status="failed", msg=err, url=youtube_url, failed=1)
+        elapsed = round(time.time() - task_start, 2)
+        store.signal_upload_file_ready(
+            file_id, username, "failed",
+            source="asr",
+            reason=reason,
+            retries=retries_done,
+            permanent=not retriable,
+            elapsed_seconds=elapsed,
+        )
         return {"task_id": task_id, "status": "failed", "error": err,
-                "permanent": not retriable, "retries": retries_done}
+                "permanent": not retriable, "retries": retries_done,
+                "file_id": file_id}
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
