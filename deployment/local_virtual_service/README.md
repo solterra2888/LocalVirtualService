@@ -2,65 +2,105 @@
 
 将 YouTube 视频获取、字幕拉取、yt-dlp 音频下载和 Fun-ASR 语音识别打包为**独立可部署的 Celery Worker**，部署在家庭网络虚拟机上，解决远程服务器无法直接访问 YouTube 的问题。
 
+### 覆盖的业务入口
+
+| 入口 | 触发方 | 主任务 | 落库目标 |
+|------|--------|--------|----------|
+| **YouTube Feed 订阅**（批量） | 远程 `Celery Beat` | `fetch_all_youtube_subscriptions` → `transcribe_youtube_feed_task` | `subscription_content.transcript / transcript_data` |
+| **YouTube Feed 订阅**（单频道/新订阅首抓） | 远程 `/api/subscriptions` | `fetch_youtube_subscription` → `transcribe_youtube_feed_task` | 同上 |
+| **Upload YouTube Link**（用户上传单条链接） | 远程 `/api/files/upload-youtube` | `fetch_youtube_file_transcript_task` → 必要时 `transcribe_youtube_file_asr_task` → 远程 `finalize_youtube_file_task` | `file_processing_details.content / asr_with_diarization` |
+| **手动重转 ASR** | 远程 `POST /api/files/{file_id}/transcribe-asr` | `transcribe_youtube_file_asr_task` → 远程 `finalize_youtube_file_task` | 同上 |
+
+> Upload Link 的终态（成功 / 永久失败）会回调远程 `finalize_youtube_file_task`（queue=`file_processing`），更新 `processing_stats.rc_agent_status`、`total_time`、`upload_params`，并在 `outcome='completed'` 时触发 auto-tag / auto-name / auto-classify。
+
 ## 架构
 
 ```
-┌──────────────────────────────────────────────────┐
-│              远程服务器 (your-server-ip)              │
-│  ┌──────────┐   ┌────────┐   ┌─────────────┐    │
-│  │ Web API   │   │ Redis  │   │  PostgreSQL │    │
-│  │ Scheduler │   │ Broker │   │   Database  │    │
-│  └─────┬─────┘   └───┬────┘   └──────┬──────┘    │
-│        │  dispatch    │               │           │
-└────────┼─────────────┼───────────────┼───────────┘
-         │             │               │
-   ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─  公网
-         │             │               │
-┌────────┼─────────────┼───────────────┼───────────┐
-│        ▼             ▼               ▼           │
-│  ┌────────────────────────────────────────────┐  │
-│  │         YouTube Transcription Worker       │  │
-│  │                                            │  │
-│  │  ① youtube_fetching 队列                  │  │
-│  │      (Main Worker, concurrency=2)          │  │
-│  │      ├ RSS / Data API v3 获取视频列表      │  │
-│  │      ├ Stage1: youtube-transcript-api 字幕 │  │
-│  │      ├ Stage2: yt-dlp 字幕回退（独立限流） │  │
-│  │      └ 两路均失败 → 标记 asr_pending       │  │
-│  │                        │                   │  │
-│  │                        ▼ 派发 ASR 任务      │  │
-│  │  ② youtube_transcription 队列（短视频）    │  │
-│  │      (Main Worker, concurrency=2)          │  │
-│  │      ├ 探测元信息（时长 / 直播状态）        │  │
-│  │      ├ 直播 / 首播未开始 → 永久跳过         │  │
-│  │      ├ 时长 ≤ 30min:                       │  │
-│  │      │   下载音频 → OSS 上传 → Fun-ASR      │  │
-│  │      │   ASR 轮询上限: 5 min               │  │
-│  │      │   失败重试: 最多 1 次 (退避 120s)    │  │
-│  │      │   结果写回数据库 ✓                   │  │
-│  │      └ 时长 > 30min → 转发 ───────────┐   │  │
-│  │                                        ▼   │  │
-│  │  ③ youtube_transcription_long 队列    │   │  │
-│  │      (Long Worker, concurrency=1)      │   │  │
-│  │      ├ 下载音频（400–600 MB 量级）     │   │  │
-│  │      ├ OSS 上传                        │   │  │
-│  │      ├ Fun-ASR 提交                    │   │  │
-│  │      │   ASR 轮询上限: 60 min          │   │  │
-│  │      │   失败重试: 最多 1 次 (退避 120s)│  │  │
-│  │      └ 结果写回数据库 ✓ ◄──────────────┘   │  │
-│  └────────────────────────────────────────────┘  │
-│             家庭虚拟机 (可访问 YouTube)             │
-└───────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     远程服务器 (your-server-ip)                    │
+│                                                                 │
+│  ┌──────────────┐      ┌────────┐      ┌──────────────────┐    │
+│  │ Web API       │     │ Redis  │     │   PostgreSQL      │    │
+│  │ Scheduler     │     │ Broker │     │   Database        │    │
+│  │               │     │        │     │                   │    │
+│  │ ┌───────────┐ │     │        │     │ subscription_*    │    │
+│  │ │ /upload-  │ │ ──► │        │     │ file_processing_* │    │
+│  │ │  youtube  │ │     │        │     │ processing_stats  │    │
+│  │ └───────────┘ │     │        │     └──────────────────┘    │
+│  │ ┌───────────┐ │     │        │                               │
+│  │ │ Beat /    │ │ ──► │        │      ▲                        │
+│  │ │ fetch_all │ │     │        │      │ finalize_youtube_file_│
+│  │ └───────────┘ │     │        │      │ task (file_processing)│
+│  │               │     │        │      │                        │
+│  │ file_processing ◄───┼────────┼──────┘                        │
+│  └──────────────┘      └───┬────┘                               │
+└──────────────────────────┼──────────────────────────────────────┘
+                            │  shared broker / shared DB
+   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  公网
+                            │
+┌──────────────────────────┼──────────────────────────────────────┐
+│                          ▼                                       │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │         YouTube Transcription Worker (家庭虚拟机)            │ │
+│  │                                                            │ │
+│  │  ① youtube_fetching 队列                                  │ │
+│  │      (Main Worker, concurrency=2)                          │ │
+│  │      Feed 侧:                                              │ │
+│  │        ├ fetch_all_youtube_subscriptions  (批量)            │ │
+│  │        ├ fetch_youtube_subscription        (单频道/首抓)    │ │
+│  │        └ fetch_youtube_transcripts_batch   (补抓)          │ │
+│  │      Upload Link 侧:                                       │ │
+│  │        └ fetch_youtube_file_transcript_task ◄── /upload-youtube│
+│  │      共用逻辑:                                              │ │
+│  │        ├ Stage1: youtube-transcript-api 字幕               │ │
+│  │        ├ Stage2: yt-dlp 字幕回退（独立限流）                │ │
+│  │        └ 两路均失败 → 标记 asr_pending                      │ │
+│  │                        │                                   │ │
+│  │                        ▼ 派发 ASR 任务                      │ │
+│  │  ② youtube_transcription 队列（短视频）                     │ │
+│  │      (Main Worker, concurrency=2)                          │ │
+│  │      ├ transcribe_youtube_feed_task         (→ subscription_content) │
+│  │      ├ transcribe_youtube_file_asr_task     (→ file_processing_details) │
+│  │      ├ 探测元信息（时长 / 直播状态）                        │ │
+│  │      ├ 直播 / 首播未开始 → 永久跳过                         │ │
+│  │      ├ 时长 ≤ 30min:                                       │ │
+│  │      │   下载音频 → OSS 上传 → Fun-ASR                      │ │
+│  │      │   ASR 轮询上限: 5 min                               │ │
+│  │      │   失败重试: 最多 1 次 (退避 120s)                    │ │
+│  │      │   结果写回数据库 ✓                                   │ │
+│  │      │   Upload Link 路径 → signal finalize ──────────────┐│ │
+│  │      └ 时长 > 30min → 转发 ───────────┐                    ││ │
+│  │                                        ▼                    ││ │
+│  │  ③ youtube_transcription_long 队列    │                    ││ │
+│  │      (Long Worker, concurrency=1)      │                    ││ │
+│  │      ├ 下载音频（400–600 MB 量级）     │                    ││ │
+│  │      ├ OSS 上传 → Fun-ASR              │                    ││ │
+│  │      │   ASR 轮询上限: 60 min          │                    ││ │
+│  │      │   失败重试: 最多 1 次 (退避 120s)│                    ││ │
+│  │      └ 结果写回数据库 ✓ ◄──────────────┘                    ││ │
+│  │           Upload Link 路径 → signal finalize ──────────────┘│ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                    家庭虚拟机 (可访问 YouTube)                     │
+└─────────────────────────────────────────────────────────────────┘
 
 ASR 轮询超时对比：
   短队列 youtube_transcription      → ASR_POLL_TIMEOUT_MINUTES      = 5 min
   长队列 youtube_transcription_long → ASR_POLL_TIMEOUT_MINUTES_LONG = 60 min
   （由 tasks.py 根据当前队列名动态选择，传给 ASRService.transcribe()）
+
+Upload Link 的 finalize 回调:
+  本地 Worker 成功/永久失败后 → send_task('finalize_youtube_file_task', queue='file_processing')
+  远程消费该任务 → UPDATE processing_stats + 触发 auto-tag/name/classify
 ```
 
 ## 流程
 
-从远程服务器派发一条 `fetch_all_youtube_subscriptions` 任务，到最终 transcript 写回数据库，整个处理链路如下：
+本 Worker 同时服务两条业务链路，字幕降级 / ASR / 长短队列路由的逻辑是共享的，区别只在**落库目标**与**完成回调**：
+
+- **Feed 订阅链路**：`fetch_all_youtube_subscriptions` / `fetch_youtube_subscription` → 字幕 fallback → 必要时 `transcribe_youtube_feed_task` → 写 `subscription_content`。
+- **Upload YouTube Link 链路**：`fetch_youtube_file_transcript_task` → 字幕 fallback → 必要时 `transcribe_youtube_file_asr_task` → 写 `file_processing_details` → 回调远程 `finalize_youtube_file_task` 触发 auto-tag/name/classify。
+
+### Feed 订阅链路
 
 ```mermaid
 flowchart TD
@@ -120,22 +160,81 @@ flowchart TD
     class SHORT_DL,SHORT_UP,SHORT_ASR,SHORT_SAVE,SHORT_RETRY short;
 ```
 
+### Upload YouTube Link 链路
+
+```mermaid
+flowchart TD
+    U([用户提交 YouTube Link]) --> UP[POST /api/files/upload-youtube<br/>远程 FastAPI]
+    UP --> SYNC["同步 INSERT<br/>processing_stats (rc_agent_status=pending)<br/>file_processing_details (status=processing)"]
+    SYNC --> RESP[返回 file_id + processing_stats_id<br/>前端开始轮询 /upload-youtube/status/:file_id]
+    SYNC --> DISP["📡 send_task('fetch_youtube_file_transcript_task',<br/>queue='youtube_fetching')"]
+
+    DISP --> FETCH[本地 Worker: fetch_youtube_file_transcript_task]
+    FETCH --> IDEMP{状态幂等<br/>content 已有?}
+    IDEMP -->|是| DONE_CAP[直接 signal completed]
+    IDEMP -->|否| CAP["Stage1: youtube-transcript-api<br/>Stage2: yt-dlp 回退"]
+
+    CAP -->|✓ 字幕成功| WRITE1[update file_processing_details<br/>content + asr_with_diarization<br/>status=completed]
+    WRITE1 --> SIG1["signal_upload_file_ready<br/>outcome='completed'"]
+
+    CAP -->|✗ 永久跳过<br/>私有/会员/直播| SIG_PERM["signal outcome='skipped_permanent'"]
+    CAP -->|✗ 需要 ASR| ASRDISP["📡 派发 transcribe_youtube_file_asr_task<br/>queue: youtube_transcription"]
+
+    ASRDISP --> ASRTASK[本地 Worker: transcribe_youtube_file_asr_task]
+    ASRTASK --> METAU["探测元信息<br/>时长 / 直播状态"]
+    METAU -->|is_live / is_upcoming| SIG_LIVE["signal outcome='skipped_live'"]
+    METAU -->|时长 > 30min| REROUTEU[转发至 youtube_transcription_long]
+    METAU -->|时长 ≤ 30min| DLU[yt-dlp 下载 → OSS → Fun-ASR]
+    REROUTEU --> DLU
+
+    DLU -->|✓ 成功| WRITE2[update file_processing_details<br/>status=completed]
+    WRITE2 --> SIG_OK["signal outcome='completed'"]
+    DLU -->|✗ 永久失败| SIG_FAIL["signal outcome='failed'<br/>update status=failed"]
+
+    SIG1 --> CB
+    SIG_PERM --> CB
+    SIG_LIVE --> CB
+    SIG_OK --> CB
+    SIG_FAIL --> CB
+    DONE_CAP --> CB
+    CB["📡 远程: finalize_youtube_file_task<br/>queue: file_processing"] --> UPDATE[UPDATE processing_stats<br/>rc_agent_status / total_time / upload_params]
+    UPDATE --> AUTO{outcome='completed'?}
+    AUTO -->|是| TAG[触发 auto-tag / auto-name / auto-classify]
+    AUTO -->|否| END_FAIL[标记失败, 不触发 LLM 后处理]
+
+    classDef ok fill:#d1fae5,stroke:#065f46,color:#064e3b;
+    classDef fail fill:#fee2e2,stroke:#991b1b,color:#7f1d1d;
+    classDef skip fill:#f3f4f6,stroke:#6b7280,color:#374151;
+    classDef remote fill:#ede9fe,stroke:#6d28d9,color:#4c1d95;
+    classDef local fill:#ecfeff,stroke:#0e7490,color:#164e63;
+    class WRITE1,WRITE2,SIG_OK,SIG1,TAG ok;
+    class SIG_FAIL,END_FAIL fail;
+    class SIG_PERM,SIG_LIVE,DONE_CAP skip;
+    class UP,SYNC,RESP,CB,UPDATE,AUTO remote;
+    class FETCH,CAP,ASRDISP,ASRTASK,METAU,DLU,REROUTEU,IDEMP local;
+```
+
 ### 各阶段对应的关键日志
 
 | 阶段 | 所在队列 | 日志特征 |
 |------|---------|---------|
-| 批量任务开始 / 结束 | `youtube_fetching` | `══ 批量获取开始/完成 ══` |
-| 单频道 RSS 拉取 | `youtube_fetching` | `── [N/M] 频道: xxx ──`、`RSS 返回 N 个视频` |
-| RSS fallback | `youtube_fetching` | `RSS 失败, 尝试 Data API v3 fallback` |
-| 新视频字幕抓取 | `youtube_fetching` | `[新] video=xxx「title」`、`✓ 字幕获取成功: lang=xx` |
-| 字幕失败分类 | `youtube_fetching` | `✗ 字幕获取失败: 原因=xxx [→ ASR / 跳过]` |
-| ASR 降级派发 | `youtube_fetching` | `📡 派发 ASR 转录: N 个视频`、`→ ASR 任务已派发: video=xxx` |
-| 元信息探测 + 直播检测 | `youtube_transcription` | `── 直播跳过: content=x video=x live_status=x ──` |
-| 长视频路由 | `youtube_transcription` | `── 长视频检测: content=x video=x 时长=Xm → 转发长视频队列 ──` |
-| 音频下载 → OSS → ASR（短队列）| `youtube_transcription` | `── Feed ASR 开始/完成 ──`、`[1/5]`~`[5/5]`、`ASR 任务提交: task_id=xxx` |
-| 音频下载 → OSS → ASR（长队列）| `youtube_transcription_long` | 同上，超时标注为 `(60.0 min)` 而非 `(5.0 min)` |
-| 重试 | 任意 ASR 队列 | `── Feed ASR 失败[可重试]: reason=xxx (尝试 N/2) ──`、`→ 120s 后重试` |
-| 最终失败 | 任意 ASR 队列 | `── Feed ASR 失败[永久]: reason=xxx ──` |
+| **[Feed]** 批量任务开始 / 结束 | `youtube_fetching` | `══ 批量获取开始/完成 ══` |
+| **[Feed]** 单频道 RSS 拉取 | `youtube_fetching` | `── [N/M] 频道: xxx ──`、`RSS 返回 N 个视频` |
+| **[Feed]** RSS fallback | `youtube_fetching` | `RSS 失败, 尝试 Data API v3 fallback` |
+| **[Feed]** 新视频字幕抓取 | `youtube_fetching` | `[新] video=xxx「title」`、`✓ 字幕获取成功: lang=xx` |
+| **[Feed]** 字幕失败分类 | `youtube_fetching` | `✗ 字幕获取失败: 原因=xxx [→ ASR / 跳过]` |
+| **[Feed]** ASR 降级派发 | `youtube_fetching` | `📡 派发 ASR 转录: N 个视频`、`→ ASR 任务已派发: video=xxx` |
+| **[Upload]** 单链接字幕抓取开始 / 完成 | `youtube_fetching` | `── Upload Caption 开始: file_id=x video=x url=… ──`、`── Upload Caption 完成[api/ytdlp]: file_id=x lang=… 字数=… ──` |
+| **[Upload]** 幂等短路 | `youtube_fetching` | `── Upload Caption 跳过: file_id=x 已完成 ──` |
+| **[Upload]** 字幕永久失败 | `youtube_fetching` | `── Upload Caption 永久失败: file_id=x video=x 原因=… ──` |
+| **[Upload]** ASR 降级派发 | `youtube_fetching` | `── Upload Caption 降级 ASR: file_id=x video=x 原因=… ──`、`→ File ASR 任务已派发: file_id=x video=x` |
+| **[Upload]** 终态回调远程 | `youtube_fetching` / `youtube_transcription*` | `signal_upload_file_ready → finalize: file_id=x outcome=completed/failed/skipped_live/skipped_permanent` |
+| 元信息探测 + 直播检测 | `youtube_transcription` | `── 直播跳过: content=x video=x live_status=x ──` / `── Upload ASR 直播跳过: file_id=x ──` |
+| 长视频路由 | `youtube_transcription` | `── 长视频检测: … → 转发长视频队列 ──` / `── Upload ASR 长视频检测: file_id=x 时长=Xm 超过阈值 → 转发长视频队列 ──` |
+| 音频下载 → OSS → ASR（短队列）| `youtube_transcription` | `── Feed ASR 开始/完成 ──` / `── Upload ASR 开始: file_id=x queue=youtube_transcription ──`、`[1/5]`~`[5/5]`、`ASR 任务提交: task_id=xxx` |
+| 音频下载 → OSS → ASR（长队列）| `youtube_transcription_long` | 同上，`queue=youtube_transcription_long`，超时标注 `(60.0 min)` 而非 `(5.0 min)` |
+| 重试 | 任意 ASR 队列 | `── Feed ASR 失败[可重试]: reason=xxx (尝试 N/2) ──` / `── Upload ASR 失败[可重试]: reason=xxx file_id=x (尝试 N/2) ──`、`→ 120s 后重试` |
+| 最终失败 | 任意 ASR 队列 | `── Feed ASR 失败[永久]: reason=xxx ──` / `── Upload ASR 失败[永久]: reason=xxx file_id=x ──` |
 
 > `youtube_fetching` 和 `youtube_transcription` 由同一个 Main Worker（concurrency=2）消费，字幕抓取和短视频 ASR 会并行交错出现在日志里。
 > `youtube_transcription_long` 由独立的 Long Worker（concurrency=1）串行处理，不会阻塞短视频。
@@ -249,6 +348,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 ## 字幕获取与 ASR 自动降级
 
+> 本节描述的降级链路被 **Feed 订阅**和 **Upload YouTube Link** 两条业务共用，唯一区别是落库表：Feed 写 `subscription_content.transcript / transcript_data`，Upload 写 `file_processing_details.content / asr_with_diarization` 并额外回调远程 `finalize_youtube_file_task`。
+
 字幕获取有两条独立路径，失败后再降级到 ASR，最大化成功率：
 
 ```
@@ -340,8 +441,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `WORKER_MAIN_CONCURRENCY` | `2` | 主 worker 并发数（短视频 + 抓取），家用 2C4G 稳定值 |
-| `WORKER_LONG_CONCURRENCY` | `1` | 长视频 worker 并发数，大文件堆积时可升到 2 |
+| `WORKER_MAIN_CONCURRENCY` | `2` | 主 worker 并发数（短视频 + 抓取），家用 2C4G 稳定值。**注意**：同一个主 worker 现在同时承载 Feed 批量字幕、Feed 单频道、Upload Link 字幕、Feed/Upload 短视频 ASR 四类任务，若 Upload Link 流量大、Feed 批量任务被饿死时，可升到 3–4 |
+| `WORKER_LONG_CONCURRENCY` | `1` | 长视频 worker 并发数，Feed 长视频与 Upload Link 长视频共享此池；大文件堆积时可升到 2 |
 | `WORKER_MAIN_MAX_TASKS_PER_CHILD` | `20` | 子进程处理 N 个任务后重启（防内存泄漏）|
 | `WORKER_LONG_MAX_TASKS_PER_CHILD` | `10` | 同上，长 worker 任务更重，更频繁重启 |
 | `WORKER_LOG_LEVEL` | `info` | celery 日志级别：debug / info / warning / error |
@@ -414,6 +515,7 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | 场景 | 建议调整 |
 |------|---------|
 | CPU 利用率低，想提升吞吐 | `WORKER_MAIN_CONCURRENCY` 调到 3-4 |
+| Upload Link 用户并发多、Feed 批量任务被饿死 | `WORKER_MAIN_CONCURRENCY` 调到 3-4；必要时为 Upload 单独建专属 worker 只消费 `youtube_fetching` |
 | 长视频积压严重 | `WORKER_LONG_CONCURRENCY` 调到 2 |
 | 网络经常抖动 | `YTDLP_SOCKET_TIMEOUT_SECONDS` 60+，`YOUTUBE_FEED_TIMEOUT_SECONDS` 10+ |
 | YouTube 风控严重 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` 60，配合 `YOUTUBE_COOKIES_FILE` |
