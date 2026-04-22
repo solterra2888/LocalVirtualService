@@ -4,10 +4,12 @@
 与主项目共享 Redis broker 和 PostgreSQL，但不依赖主项目代码。
 """
 
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 from celery import Celery
+from celery.signals import after_setup_logger
 
 # 加载 .env（优先项目根目录，其次当前目录）
 _here = Path(__file__).resolve().parent
@@ -44,3 +46,12 @@ app.conf.update(
 
 # 自动发现当前包里的 tasks 模块
 app.autodiscover_tasks(["worker"])
+
+
+@after_setup_logger.connect
+def _suppress_gossip_noise(logger, **kwargs):
+    # 本地 VM 与远程服务器共享同一 Redis Broker，两端时钟存在约 17s 偏差，
+    # 导致 gossip 模块对每个远程 worker 的心跳几乎都判定为 "missed heartbeat"
+    # 并以 INFO 级别刷屏，对实际运维无参考价值。将其提升到 WARNING 以静默该噪音，
+    # 同时保留 WARNING+ 级别的真实告警（如 Substantial drift）。
+    logging.getLogger("celery.worker.consumer.gossip").setLevel(logging.WARNING)
