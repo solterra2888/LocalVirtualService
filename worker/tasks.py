@@ -86,9 +86,9 @@ def fetch_youtube_subscription(self, subscription_id=None, user_id=None, force_f
     log.info("── 获取单个订阅: sub=%s channel=%s (%s) ──", sub_id, ch_name, ch_ident)
 
     try:
-        raw_videos = YouTubeFeedService.fetch_channel_videos(ch_ident, max_items)
+        raw_videos, video_source = YouTubeFeedService.fetch_channel_videos(ch_ident, max_items)
     except Exception as e:
-        log.error("  RSS 抓取失败: sub=%s channel=%s error=%s", sub_id, ch_name, e)
+        log.error("  视频列表抓取失败: sub=%s channel=%s error=%s", sub_id, ch_name, e)
         store.increment_subscription_failures(sub_id)
         return {"success": False, "message": f"RSS fetch failed: {e}",
                 "videos_new": 0, "videos_existing": 0}
@@ -97,7 +97,8 @@ def fetch_youtube_subscription(self, subscription_id=None, user_id=None, force_f
         log.info("  频道无新视频")
         return {"success": True, "videos_new": 0, "videos_existing": 0}
 
-    log.info("  RSS 返回 %d 个视频", len(raw_videos))
+    source_label = "RSS" if video_source == "rss" else "Data API v3"
+    log.info("  %s 返回 %d 个视频", source_label, len(raw_videos))
     videos_new = videos_existing = caption_ok = 0
     asr_pending = []
     for rv in raw_videos:
@@ -164,12 +165,13 @@ def fetch_all_youtube_subscriptions(self):
         ch_name = info["channel_name"] or cid
         try:
             log.info("── [%d/%d] 频道: %s (%s) ──", idx + 1, len(items), ch_name, cid)
-            raw_videos = YouTubeFeedService.fetch_channel_videos(cid, info["max_items"])
+            raw_videos, video_source = YouTubeFeedService.fetch_channel_videos(cid, info["max_items"])
             if not raw_videos:
                 log.warning("  频道 %s 未获取到视频", ch_name)
                 continue
 
-            log.info("  RSS 返回 %d 个视频", len(raw_videos))
+            source_label = "RSS" if video_source == "rss" else "Data API v3"
+            log.info("  %s 返回 %d 个视频", source_label, len(raw_videos))
             vnew = vexist = vcaption = 0
             ch_asr_pending = []
             for rv in raw_videos:
