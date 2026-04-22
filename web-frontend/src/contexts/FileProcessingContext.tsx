@@ -7,6 +7,8 @@ export interface TaskInfo {
   taskId: string;
   fileName: string;
   fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text';
+  /** YouTube Upload Link 专用：后端 file_processing_details.id，用于 DB 侧轮询以替代 Celery 轮询 */
+  fileId?: number;
   status: TaskStatusResponse;
   startTime: number;
 }
@@ -14,7 +16,7 @@ export interface TaskInfo {
 interface FileProcessingContextType {
   // 新增：多任务管理
   tasks: Map<string, TaskInfo>;
-  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text') => void;
+  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text', fileId?: number) => void;
   updateTaskStatus: (taskId: string, status: Partial<TaskStatusResponse> & { status: string; progress: number; files_processed: number; total_files: number; logs: Array<{ timestamp: string; level: string; message: string; }> }) => void;
   removeTask: (taskId: string) => void;
   clearAllTasks: () => void;
@@ -132,13 +134,14 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   // 新增：添加任务
-  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text') => {
+  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text', fileId?: number) => {
     setTasks(prev => {
       const newTasks = new Map(prev);
       newTasks.set(taskId, {
         taskId,
         fileName,
         fileType,
+        fileId,
         status: {
           task_id: taskId,
           status: 'pending',
@@ -306,6 +309,39 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
         if (task.status.status === 'completed' || task.status.status === 'failed') continue;
 
         try {
+          // YouTube Upload Link 任务（有 fileId）：改用 DB 侧轮询
+          // 原因：Celery caption 任务在派发 ASR 后即标记 SUCCESS，若直接读 Celery 状态
+          // 会误判为完成（NavBar 消失、列表刷新过早），而 DB 轮询能真实反映全链路进度。
+          if (task.fileType === 'youtube' && task.fileId) {
+            const st = await filesAPI.getUploadYouTubeStatus(task.fileId);
+            // 仅当 rc_agent_status 也已终态（finalize 已执行）才上报完成；
+            // 否则继续上报 processing，避免列表在 rc_agent_status 更新前刷新。
+            const rcFinalized = !!st.rc_agent_status && st.rc_agent_status !== 'processing';
+            if ((st.status === 'completed' || st.status === 'failed') && rcFinalized) {
+              updateTaskStatus(taskId, {
+                status: st.status,
+                progress: st.status === 'completed' ? 100 : 0,
+                current_file: st.youtube_url,
+                files_processed: st.status === 'completed' ? 1 : 0,
+                files_failed: st.status === 'failed' ? 1 : 0,
+                total_files: 1,
+                logs: [],
+              });
+            } else {
+              updateTaskStatus(taskId, {
+                status: 'processing',
+                progress: st.progress,
+                current_file: st.youtube_url,
+                files_processed: 0,
+                files_failed: 0,
+                total_files: 1,
+                logs: [],
+              });
+            }
+            continue;
+          }
+
+          // 其他任务走 Celery 轮询
           const status = await filesAPI.getTaskStatus(taskId);
           if (status.asr_fallback_notice && !asrFallbackNoticeShownRef.current.has(taskId)) {
             asrFallbackNoticeShownRef.current.add(taskId);

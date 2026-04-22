@@ -107,7 +107,7 @@ flowchart TD
     A([Celery Beat / API 触发]) --> B[fetch_all_youtube_subscriptions<br/>queue: youtube_fetching]
     B --> C[遍历订阅频道]
     C --> D[RSS 获取视频列表]
-    D -->|RSS 404/500| E[Data API v3 fallback]
+    D -->|RSS 404/500| E["Data API v3 fallback<br/>主 Key → 备用 Key（配额耗尽时自动切换）"]
     D -->|成功| F[视频列表 N 条]
     E --> F
     F --> G{逐条判断}
@@ -219,8 +219,8 @@ flowchart TD
 | 阶段 | 所在队列 | 日志特征 |
 |------|---------|---------|
 | **[Feed]** 批量任务开始 / 结束 | `youtube_fetching` | `══ 批量获取开始/完成 ══` |
-| **[Feed]** 单频道 RSS 拉取 | `youtube_fetching` | `── [N/M] 频道: xxx ──`、`RSS 返回 N 个视频` |
-| **[Feed]** RSS fallback | `youtube_fetching` | `RSS 失败, 尝试 Data API v3 fallback` |
+| **[Feed]** 单频道视频列表拉取 | `youtube_fetching` | `── [N/M] 频道: xxx ──`、`RSS 返回 N 个视频` 或 `Data API v3 返回 N 个视频` |
+| **[Feed]** RSS → Data API v3 切换 | `youtube_fetching` | `RSS 失败, 尝试 Data API v3 fallback`；配额耗尽时追加 `Data API v3 Key #1 配额已用尽，切换备用 Key` |
 | **[Feed]** 新视频字幕抓取 | `youtube_fetching` | `[新] video=xxx「title」`、`✓ 字幕获取成功: lang=xx` |
 | **[Feed]** 字幕失败分类 | `youtube_fetching` | `✗ 字幕获取失败: 原因=xxx [→ ASR / 跳过]` |
 | **[Feed]** ASR 降级派发 | `youtube_fetching` | `📡 派发 ASR 转录: N 个视频`、`→ ASR 任务已派发: video=xxx` |
@@ -431,7 +431,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | PostgreSQL | `DB_HOST` 等 | 是 | 数据存储 |
 | 阿里云 OSS | `OSS_ACCESS_KEY_ID` 等 | ASR 时 | 音频中转 |
 | DashScope | `DASHSCOPE_API_KEY` | ASR 时 | Fun-ASR 引擎 |
-| YouTube Data API | `YOUTUBE_DATA_API_KEY` | 否 | RSS 失败时回退 |
+| YouTube Data API（主 Key） | `YOUTUBE_DATA_API_KEY` | 强烈建议 | RSS 成功率极低，Data API v3 已成为主力获取路径 |
+| YouTube Data API（备用 Key） | `YOUTUBE_DATA_API_KEY_BACKUP` | 否 | 主 Key 配额（10,000 units/天）耗尽时自动切换；每个 Key 约可查询 100 个频道/天 |
 
 ## 可调环境变量
 
@@ -492,7 +493,7 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | `YTDLP_FRAGMENT_RETRIES` | `5` | yt-dlp 分片下载重试次数 |
 | `YTDLP_IMPERSONATE` | `auto` | TLS 指纹伪装（**需装 `curl-cffi`**）。推荐 `auto`（yt-dlp 自选可用 target）；也支持 `chrome`/`safari`/`edge`/`firefox`（不可用时自动降级为 auto），或 `false` 禁用 |
 | `YOUTUBE_FEED_TIMEOUT_SECONDS` | `5` | RSS / Data API 单次请求超时 |
-| `YOUTUBE_FEED_MAX_RETRIES` | `3` | RSS 失败多少次后 fallback 到 Data API |
+| `YOUTUBE_FEED_MAX_RETRIES` | `2` | RSS **5xx 瞬时错误**的最大尝试次数（含首次），即重试 1 次。**404 不重试**——YouTube RSS 对部分频道/IP 固定返回 404，重试无效且浪费时间，直接 fallback 到 Data API v3 |
 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` | `30` | youtube-transcript-api 硬超时 |
 | `CAPTION_YTDLP_FALLBACK_ENABLED` | `true` | transcript-api 失败时是否用 yt-dlp 再试一次 |
 | `CAPTION_YTDLP_TIMEOUT_SECONDS` | `60` | yt-dlp 拉字幕总超时（元信息 + 字幕下载）|
@@ -506,6 +507,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `YOUTUBE_DATA_API_KEY` | — | YouTube Data API v3 主 Key（RSS 成功率极低，此 Key 已成为主力；强烈建议配置）|
+| `YOUTUBE_DATA_API_KEY_BACKUP` | — | YouTube Data API v3 备用 Key，主 Key HTTP 403（配额耗尽）时自动切换；日志中可见 `Data API v3 Key #1 配额已用尽，切换备用 Key` |
 | `YOUTUBE_PROXY` / `HTTPS_PROXY` | — | yt-dlp / RSS / 探测时长 统一走此代理 |
 | `YOUTUBE_COOKIES_FILE` | — | 用于绕过 YouTube 的风控 |
 | `YOUTUBE_PO_TOKEN` + `YOUTUBE_VISITOR_DATA` | — | yt-dlp PO token 机制 |
@@ -519,6 +522,7 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | 长视频积压严重 | `WORKER_LONG_CONCURRENCY` 调到 2 |
 | 网络经常抖动 | `YTDLP_SOCKET_TIMEOUT_SECONDS` 60+，`YOUTUBE_FEED_TIMEOUT_SECONDS` 10+ |
 | YouTube 风控严重 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` 60，配合 `YOUTUBE_COOKIES_FILE` |
+| RSS 持续 404 / Data API v3 配额告急 | 配置 `YOUTUBE_DATA_API_KEY_BACKUP`；或降低批量抓取频率（每个 Key 约可查 100 频道/天）|
 | 长视频 Fun-ASR 排队严重（>1h）| `ASR_POLL_TIMEOUT_MINUTES_LONG` 调到 90-120 |
 | 短视频 Fun-ASR 超时 | `ASR_POLL_TIMEOUT_MINUTES` 调到 10-15 |
 | 想临时禁用重试排错 | `ASR_MAX_RETRIES=0` |

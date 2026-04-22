@@ -63,7 +63,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
       // 若存在 file_id → 直接按 file_id 轮询数据库, 跨字幕→ASR 链路都能拿到真实终态.
       const fileId = response.file_id;
 
-      addTask(taskId, `YouTube_${videoId}`, 'youtube');
+      addTask(taskId, `YouTube_${videoId}`, 'youtube', fileId ?? undefined);
 
       updateTaskStatus(taskId, {
         status: 'processing',
@@ -83,7 +83,11 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
           // 回退路径 (YOUTUBE_UPLOAD_USE_LOCAL=false) 没有 file_id, 继续走 Celery task 轮询.
           if (fileId) {
             const st = await filesAPI.getUploadYouTubeStatus(fileId);
-            if (st.status === 'processing') {
+            // 仅当 rc_agent_status 也已终态（finalize 已执行）才视为真正完成；
+            // 否则继续以 processing 上报，确保列表刷新在 rc_agent_status 更新后触发。
+            const rcFinalized = !!st.rc_agent_status && st.rc_agent_status !== 'processing';
+
+            if (st.status === 'processing' || ((st.status === 'completed' || st.status === 'failed') && !rcFinalized)) {
               updateTaskStatus(taskId, {
                 status: 'processing',
                 progress: st.progress,
@@ -93,7 +97,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
                 total_files: 1,
                 logs: [],
               });
-            } else if (st.status === 'completed') {
+            } else if (st.status === 'completed' && rcFinalized) {
               clearInterval(pollInterval);
               updateTaskStatus(taskId, {
                 status: 'completed',
@@ -110,7 +114,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
                   ? 'yt-dlp caption'
                   : 'YouTube caption';
               message.success(`YouTube transcript ready (${via})!`);
-            } else if (st.status === 'failed') {
+            } else if (st.status === 'failed' && rcFinalized) {
               clearInterval(pollInterval);
               updateTaskStatus(taskId, {
                 status: 'failed',

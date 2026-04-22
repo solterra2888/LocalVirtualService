@@ -379,9 +379,14 @@ def _get_proxies() -> Optional[Dict[str, str]]:
     return None
 
 
-def _get_youtube_api_key() -> Optional[str]:
-    key = os.getenv("YOUTUBE_DATA_API_KEY", "").strip()
-    return key or None
+def _get_youtube_api_keys() -> List[str]:
+    """返回所有配置的 YouTube Data API v3 Key（主 Key 优先，BACKUP 兜底）。"""
+    keys = []
+    for env_var in ("YOUTUBE_DATA_API_KEY", "YOUTUBE_DATA_API_KEY_BACKUP"):
+        k = os.getenv(env_var, "").strip()
+        if k:
+            keys.append(k)
+    return keys
 
 
 def _normalize_channel_id(raw: Optional[str]) -> Optional[str]:
@@ -403,28 +408,49 @@ class YouTubeFeedService:
     RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     RSS_USER = "https://www.youtube.com/feeds/videos.xml?user={username}"
     API_BASE = "https://www.googleapis.com/youtube/v3"
-    # RSS 失败重试次数（超过后 fallback 到 Data API v3）
-    MAX_RETRIES = int(os.getenv("YOUTUBE_FEED_MAX_RETRIES", "3"))
+    # RSS 5xx 瞬时错误重试次数（超过后 fallback 到 Data API v3）。
+    # 注意: 404 不在重试范围内（YouTube RSS 对某些频道/IP 直接 404，重试无效）。
+    # 默认 2 = 共 2 次尝试 / 1 次重试。
+    MAX_RETRIES = int(os.getenv("YOUTUBE_FEED_MAX_RETRIES", "2"))
 
     # ── RSS ─────────────────────────────────────────────────────
 
     @classmethod
-    def fetch_channel_videos(cls, channel_identifier: str, max_items: int = 15) -> List[Dict[str, Any]]:
+    def fetch_channel_videos(cls, channel_identifier: str, max_items: int = 15) -> tuple:
+        """获取频道视频列表，返回 (videos, source)。
+        source 为 'rss' | 'api_v3' | '' (空串表示两路均失败)。
+        """
         ident = channel_identifier.strip().lstrip("@")
         is_cid = len(ident) >= 20 and ident.startswith("UC")
 
         videos = cls._fetch_via_rss(ident, max_items, is_cid)
         if videos:
-            return videos
+            return videos, "rss"
 
-        api_key = _get_youtube_api_key()
-        if not api_key:
+        if not is_cid:
+            return [], ""
+
+        api_keys = _get_youtube_api_keys()
+        if not api_keys:
             log.warning("RSS 未获取到视频且未配置 YOUTUBE_DATA_API_KEY (channel=%s)", ident)
-            return []
-        if is_cid:
-            log.info("RSS 失败, 尝试 Data API v3 fallback (channel=%s)", ident)
-            return cls._fetch_via_api(ident, max_items, api_key)
-        return []
+            return [], ""
+
+        log.info("RSS 失败, 尝试 Data API v3 fallback (channel=%s)", ident)
+        for i, api_key in enumerate(api_keys):
+            # _fetch_via_api 返回 None 表示该 Key 配额已耗尽（HTTP 403），
+            # 返回 [] 表示 API 正常但频道无视频或请求失败。
+            api_videos = cls._fetch_via_api(ident, max_items, api_key)
+            if api_videos is not None:
+                return api_videos, "api_v3" if api_videos else ""
+            # 当前 Key 配额耗尽，若还有备用 Key 则切换
+            if i < len(api_keys) - 1:
+                log.warning(
+                    "Data API v3 Key #%d 配额已用尽，切换备用 Key (channel=%s)",
+                    i + 1, ident,
+                )
+
+        log.error("所有 Data API v3 Key 配额均已用尽 (channel=%s)", ident)
+        return [], ""
 
     @classmethod
     def _fetch_via_rss(cls, ident: str, max_items: int, is_cid: bool) -> List[Dict[str, Any]]:
@@ -436,7 +462,9 @@ class YouTubeFeedService:
             try:
                 resp = requests.get(rss_url, headers={"User-Agent": "feedparser/6.0"},
                                     timeout=cls.REQUEST_TIMEOUT, proxies=proxies)
-                if resp.status_code in (404, 500, 502, 503, 504) and attempt < cls.MAX_RETRIES - 1:
+                # 404 不重试——YouTube RSS 对某些频道/IP 固定返回 404，重试无效；
+                # 5xx 属于瞬时错误，在剩余次数内可重试。
+                if resp.status_code in (500, 502, 503, 504) and attempt < cls.MAX_RETRIES - 1:
                     log.warning("RSS HTTP %d, 重试 %d/%d: %s", resp.status_code, attempt + 1, cls.MAX_RETRIES, rss_url)
                     time.sleep(1.0 * (attempt + 1))
                     continue
@@ -446,7 +474,7 @@ class YouTubeFeedService:
                 if attempt < cls.MAX_RETRIES - 1:
                     retryable = False
                     if isinstance(e, requests.HTTPError) and e.response is not None:
-                        retryable = e.response.status_code in (404, 500, 502, 503, 504)
+                        retryable = e.response.status_code in (500, 502, 503, 504)
                     if retryable:
                         time.sleep(1.0 * (attempt + 1))
                         continue
@@ -501,7 +529,13 @@ class YouTubeFeedService:
     # ── YouTube Data API v3 ─────────────────────────────────────
 
     @classmethod
-    def _fetch_via_api(cls, channel_id: str, max_items: int, api_key: str) -> List[Dict[str, Any]]:
+    def _fetch_via_api(cls, channel_id: str, max_items: int, api_key: str) -> Optional[List[Dict[str, Any]]]:
+        """调用 YouTube Data API v3 获取频道视频。
+        返回值语义:
+          None      — HTTP 403，该 Key 配额已耗尽，调用方应切换到备用 Key
+          []        — API 正常响应但无结果，或其他非配额类错误
+          [...]     — 成功
+        """
         proxies = _get_proxies()
         headers = {"Accept": "application/json"}
         timeout = 10
@@ -510,8 +544,11 @@ class YouTubeFeedService:
                              params={"part": "contentDetails", "id": channel_id, "key": api_key},
                              headers=headers, timeout=timeout, proxies=proxies)
             if r.status_code == 403:
-                log.warning("YouTube Data API 配额已用尽")
-                return []
+                log.warning(
+                    "YouTube Data API 配额已用尽 (key=...%s channel=%s)",
+                    api_key[-6:], channel_id,
+                )
+                return None
             r.raise_for_status()
             items = r.json().get("items", [])
             if not items:

@@ -2963,8 +2963,8 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     total_time = CASE WHEN %s > 0 THEN %s ELSE total_time END,
                     total_file_processing_time = CASE WHEN %s > 0
                         THEN %s ELSE total_file_processing_time END,
-                    upload_params = COALESCE(upload_params, '{}'::jsonb)
-                                    || %s::jsonb
+                    upload_params = (COALESCE(upload_params, '{}')::jsonb
+                                    || %s::jsonb)::text
                 WHERE id = %s
                   AND rc_agent_status NOT IN ('completed', 'failed')
                 """,
