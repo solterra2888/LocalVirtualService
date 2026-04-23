@@ -352,8 +352,14 @@ def fetch_youtube_subscription_task(
     bind=True,
     max_retries=2,
     default_retry_delay=120,
-    time_limit=600,
-    soft_time_limit=540,
+    # 本任务实际在 HK 家用 Worker 上执行（concurrency=1 + Webshare 住宅代理），
+    # 单次批量要串行跑 ~20 个频道 × ~15 个视频，每次 transcript-api 经过 Webshare
+    # 的延迟在 5–30s 之间，叠加偶发 ASR fallback，整批耗时可达 30–60 min。
+    # Celery 会把 @task 装饰器上的 time_limit 写进消息头并压过远端 worker 的默认值，
+    # 旧值 600/540 在 concurrency=2 的直连时代刚够用，现在必爆（worker 被 SIGKILL
+    # 强杀 → 剩余频道全部丢失）。放宽到 70min/60min，给串行 + 代理留足裕量。
+    time_limit=4200,     # 70 min 硬超时
+    soft_time_limit=3600,  # 60 min 软超时
 )
 def fetch_all_youtube_subscriptions_task(self) -> Dict[str, Any]:
     """
@@ -400,8 +406,11 @@ def fetch_all_youtube_subscriptions_task(self) -> Dict[str, Any]:
     bind=True,
     max_retries=2,
     default_retry_delay=30,
-    time_limit=600,
-    soft_time_limit=540,
+    # 同 fetch_all_youtube_subscriptions_task：在 HK 家用 Worker 上按 concurrency=1
+    # 串行处理 video_items，每项经过 Webshare 会放大到 5–30s。把 time_limit 拉到
+    # 40min，让一次能消化 ~150 个视频的批量补抓请求。
+    time_limit=2400,     # 40 min 硬超时
+    soft_time_limit=2100,  # 35 min 软超时
 )
 def fetch_youtube_transcripts_batch_task(
     self,

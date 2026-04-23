@@ -49,8 +49,16 @@ class CaptionFetchError(Exception):
 class YouTubeCaptionService:
     """通过 youtube-transcript-api 获取 YouTube 字幕"""
 
-    # 单次字幕拉取的硬超时（秒）。IP 质量差时可适度放大。
-    _TIMEOUT = int(os.getenv("YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS", "30"))
+    # 单次字幕拉取的硬超时（秒）。
+    # 默认 60s 考虑了 Webshare Rotating Residential 的典型场景：
+    #   - WebshareProxyConfig.retries_when_blocked=10，触发 IP 旋转最多 10 次
+    #   - 每次新 IP 要重建 TCP + TLS，再加 YouTube /watch 元数据 + /api/timedtext 两跳
+    #   - 单次完整重试成本 ~3–5s × 10 次 ≈ 30–50s
+    # 30s 在旧的直连场景够用，切到 Webshare 后偶发视频会在单视频级别被硬超时砍掉
+    # （日志里表现为 "transcript-api 硬超时[via=webshare]"），然后掉到 yt-dlp 直连
+    # 又撞 429。抬到 60s 可以把这一类偶发视频留在 transcript-api 路径内消化。
+    # 若仍频繁出现该类超时，可通过 env 调大到 90s。
+    _TIMEOUT = int(os.getenv("YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS", "60"))
 
     # Webshare 住宅代理配置缓存。约定:
     #   "__unset__" : 还没读过环境变量
