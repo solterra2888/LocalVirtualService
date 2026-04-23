@@ -105,6 +105,25 @@ class YouTubeCaptionService:
         pwd = os.getenv("WEBSHARE_PROXY_PASSWORD", "").strip()
         if not user or not pwd:
             YouTubeCaptionService._PROXY_CONFIG_CACHE = None
+            # 静默返回 None 曾经把人坑惨——运维看不到任何"我没启用 Webshare"的提示，
+            # 表面上一切正常，直到 YouTube 开始 429 才知道代理压根没开。
+            # 这里必打一行 WARNING，让启动日志一眼能分辨当前是哪种模式:
+            #   ℹ Webshare 未配置 ...  → 走直连，HK IP 被封时必挂
+            #   ✓ 已启用 Webshare ...  → 走旋转住宅代理
+            if not YouTubeCaptionService._PROXY_LOG_DONE:
+                missing = []
+                if not user:
+                    missing.append("WEBSHARE_PROXY_USERNAME")
+                if not pwd:
+                    missing.append("WEBSHARE_PROXY_PASSWORD")
+                log.warning(
+                    "ℹ Webshare 未配置（缺 %s），youtube-transcript-api 将走【直连】。"
+                    "若本机 IP 已被 YouTube 风控，会频繁出现 IpBlocked/429。"
+                    "要启用 Webshare Rotating Residential，请在 .env 里配好 "
+                    "WEBSHARE_PROXY_USERNAME / WEBSHARE_PROXY_PASSWORD 后重启 worker。",
+                    " + ".join(missing),
+                )
+                YouTubeCaptionService._PROXY_LOG_DONE = True
             return None
 
         try:
