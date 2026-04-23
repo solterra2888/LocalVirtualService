@@ -385,6 +385,56 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 当出口 IP 在 transcript-api 上被封时，yt-dlp 路径通常仍可用，能显著降低 ASR 调用率。可通过 `CAPTION_YTDLP_FALLBACK_ENABLED=false` 禁用 fallback。
 
+### 启用 Webshare 住宅代理给 transcript-api（IP 被封时的根治方案）
+
+当出口 IP 被 YouTube **批量封禁** transcript-api（典型表现：同一频道里几乎所有视频都拿不到字幕，全部降级到 ASR，OSS 上行被打爆），yt-dlp fallback 只能缓解；要根治需要让 transcript-api 走旋转住宅代理。本服务**只代理这一条链路**，所以单视频流量极小（5–50 KB），按 Webshare 最低档 $3.50/月/1 GB 套餐，足够每天处理几千条视频。
+
+#### 设计边界（重要）
+
+| 链路 | 流量级别 | 是否走 Webshare |
+|------|---------|----------------|
+| `youtube-transcript-api` → `/api/timedtext` | KB | ✅ 走 |
+| `yt-dlp` 字幕 fallback → `/watch` + `/player_api` | 几百 KB | ❌ 不走 |
+| `yt-dlp` 音频下载 | **MB ~ 数百 MB** | ❌ 不走（这正是关键） |
+| `oss2` SDK 上传到阿里云 OSS | 与音频同量级 | ❌ 不走 |
+| `dashscope` 提交 Fun-ASR | KB | ❌ 不走 |
+
+代理范围**写死在代码里**（`YouTubeCaptionService._get_webshare_proxy_config()` 只把 `WebshareProxyConfig` 对象传给 `YouTubeTranscriptApi`），所以**只要不手动 `export HTTPS_PROXY=...`，就不会有任何额外计费流量泄漏**。
+
+#### 启用步骤
+
+1. 在 [Webshare Dashboard](https://dashboard.webshare.io/) 注册并购买 **Rotating Residential** 套餐（最小 1 GB / $3.50/月即可，**不要**买 "Proxy Server" 或 "Static Residential"）。
+2. 在 [Proxy Settings](https://dashboard.webshare.io/proxy/settings) 复制 Proxy Username / Password。
+3. 编辑家庭 VM 上的 `~/local_virtual_service/.env`，添加：
+   ```bash
+   WEBSHARE_PROXY_USERNAME=<your-username>
+   WEBSHARE_PROXY_PASSWORD=<your-password>
+   # 出口国家白名单（逗号分隔），HK/CN 服务器推荐 jp,tw,sg；可省略 = 全球池
+   WEBSHARE_FILTER_IP_LOCATIONS=jp,tw,us
+   ```
+4. 重启 worker：
+   ```bash
+   pkill -f "celery -A worker.celery_app"
+   sleep 2 && nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
+   ```
+5. 确认日志里出现一行启动提示：
+   ```
+   ✓ youtube-transcript-api 已启用 Webshare 住宅代理 (locations=['jp','tw','us'])
+   ```
+
+不填这两个变量则维持原来的直连行为，零流量、零成本，可以随时切回。
+
+#### 何时不需要
+
+- 出口 IP 干净、字幕成功率 > 80%：完全不需要，开了反而增加每条视频几百毫秒延迟；
+- 已经迁移到日本/新加坡的小众机房 VPS：先观察一周，没被 ban 就别开。
+
+#### 何时强烈建议开
+
+- 日志里出现 `✗ 字幕获取失败: 原因=IpBlocked`、`RequestBlocked`、`Too Many Requests` 占比 > 30%；
+- ASR 队列莫名暴涨、OSS 上行被打满（你正在经历的情况）；
+- 同一频道连续 5+ 条视频都是 `[→ ASR]`，但视频本身明明有字幕（手动在 YouTube 网页上能看到）。
+
 ## 日志输出示例
 
 前台运行时日志直接输出到终端，后台运行时写入 `logs/worker.log`。
@@ -442,8 +492,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `WORKER_MAIN_CONCURRENCY` | `2` | 主 worker 并发数（短视频 + 抓取），家用 2C4G 稳定值。**注意**：同一个主 worker 现在同时承载 Feed 批量字幕、Feed 单频道、Upload Link 字幕、Feed/Upload 短视频 ASR 四类任务，若 Upload Link 流量大、Feed 批量任务被饿死时，可升到 3–4 |
-| `WORKER_LONG_CONCURRENCY` | `1` | 长视频 worker 并发数，Feed 长视频与 Upload Link 长视频共享此池；大文件堆积时可升到 2 |
+| `WORKER_MAIN_CONCURRENCY` | `1` | 主 worker 并发数（短视频 + 抓取）。**默认从 2 降到 1** —— 家用宽带上行通常 10–50 Mbps，并发 2 时两条 OSS 上传会互抢带宽（日志里能看到 0.8 MB 文件传 5 分钟、`ReadTimeout` 等典型症状）。串行更稳。迁移到云 VPS 或上行 ≥100 Mbps 后可调回 2–4 |
+| `WORKER_LONG_CONCURRENCY` | `1` | 长视频 worker 并发数。家庭网络下不要升到 2，单条长视频就能吃满整个上行 |
 | `WORKER_MAIN_MAX_TASKS_PER_CHILD` | `20` | 子进程处理 N 个任务后重启（防内存泄漏）|
 | `WORKER_LONG_MAX_TASKS_PER_CHILD` | `10` | 同上，长 worker 任务更重，更频繁重启 |
 | `WORKER_LOG_LEVEL` | `info` | celery 日志级别：debug / info / warning / error |
@@ -509,9 +559,12 @@ tail -f /opt/local_virtual_service/logs/worker.log
 |------|--------|------|
 | `YOUTUBE_DATA_API_KEY` | — | YouTube Data API v3 主 Key（RSS 成功率极低，此 Key 已成为主力；强烈建议配置）|
 | `YOUTUBE_DATA_API_KEY_BACKUP` | — | YouTube Data API v3 备用 Key，主 Key HTTP 403（配额耗尽）时自动切换；日志中可见 `Data API v3 Key #1 配额已用尽，切换备用 Key` |
-| `YOUTUBE_PROXY` / `HTTPS_PROXY` | — | yt-dlp / RSS / 探测时长 统一走此代理 |
+| `YOUTUBE_PROXY` / `HTTPS_PROXY` | — | yt-dlp / RSS / 探测时长 统一走此代理 (**注意**：此变量**不会**作用于 youtube-transcript-api，那条链路独立用 `WEBSHARE_*` 配置) |
 | `YOUTUBE_COOKIES_FILE` | — | 用于绕过 YouTube 的风控 |
 | `YOUTUBE_PO_TOKEN` + `YOUTUBE_VISITOR_DATA` | — | yt-dlp PO token 机制 |
+| `WEBSHARE_PROXY_USERNAME` | — | Webshare Rotating Residential 用户名，**仅作用于 youtube-transcript-api** |
+| `WEBSHARE_PROXY_PASSWORD` | — | Webshare Rotating Residential 密码，与上一条配对生效；缺一个 = 走直连 |
+| `WEBSHARE_FILTER_IP_LOCATIONS` | — | 限定代理出口国家，逗号分隔的 ISO-3166 二字码（如 `jp,tw,us`）。留空 = 全球池 |
 
 ### 常见调参场景
 
@@ -522,6 +575,8 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | 长视频积压严重 | `WORKER_LONG_CONCURRENCY` 调到 2 |
 | 网络经常抖动 | `YTDLP_SOCKET_TIMEOUT_SECONDS` 60+，`YOUTUBE_FEED_TIMEOUT_SECONDS` 10+ |
 | YouTube 风控严重 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` 60，配合 `YOUTUBE_COOKIES_FILE` |
+| transcript-api 出口 IP 被批量封 | 配置 `WEBSHARE_PROXY_USERNAME` / `WEBSHARE_PROXY_PASSWORD`（详见上文 [Webshare 一节](#启用-webshare-住宅代理给-transcript-api-ip-被封时的根治方案)）|
+| 家用宽带上行 < 50 Mbps，OSS 频繁 ReadTimeout | `WORKER_MAIN_CONCURRENCY=1` 串行处理，避免两个 OSS 上传互抢带宽 |
 | RSS 持续 404 / Data API v3 配额告急 | 配置 `YOUTUBE_DATA_API_KEY_BACKUP`；或降低批量抓取频率（每个 Key 约可查 100 频道/天）|
 | 长视频 Fun-ASR 排队严重（>1h）| `ASR_POLL_TIMEOUT_MINUTES_LONG` 调到 90-120 |
 | 短视频 Fun-ASR 超时 | `ASR_POLL_TIMEOUT_MINUTES` 调到 10-15 |
