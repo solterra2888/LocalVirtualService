@@ -33,6 +33,19 @@ log = logging.getLogger("worker")
 # YouTubeCaptionService
 # ---------------------------------------------------------------------------
 
+class CaptionFetchError(Exception):
+    """
+    包裹 youtube-transcript-api 抛出的原始异常，额外带上:
+      - original_class : 原始异常类名（如 IpBlocked / YouTubeRequestFailed / TooManyRequests）
+      - via            : 'webshare' 或 'direct'，标注这次调用走的是哪条链路
+    这样 tasks 侧归类时能看出 "429 是谁返的"（YouTube 还是 Webshare）。
+    """
+    def __init__(self, message: str, original_class: str, via: str):
+        super().__init__(message)
+        self.original_class = original_class
+        self.via = via
+
+
 class YouTubeCaptionService:
     """通过 youtube-transcript-api 获取 YouTube 字幕"""
 
@@ -47,6 +60,7 @@ class YouTubeCaptionService:
     # 所以 yt-dlp 的音频下载和 OSS 上传不会产生 Webshare 流量计费。
     _PROXY_CONFIG_CACHE: Any = "__unset__"
     _PROXY_LOG_DONE: bool = False
+    _PROXY_PROBE_DONE: bool = False
 
     @staticmethod
     def extract_video_id(url: str) -> Optional[str]:
@@ -110,12 +124,134 @@ class YouTubeCaptionService:
 
         YouTubeCaptionService._PROXY_CONFIG_CACHE = cfg
         if not YouTubeCaptionService._PROXY_LOG_DONE:
+            locations_applied = kwargs.get("filter_ip_locations") or "global"
             log.info(
                 "✓ youtube-transcript-api 已启用 Webshare 住宅代理 (locations=%s)",
-                kwargs.get("filter_ip_locations") or "global",
+                locations_applied,
             )
+            if locations_applied == "global":
+                log.warning(
+                    "  ⚠  Webshare 使用的是全球池，里面包含大量被 YouTube 风控过的住宅 IP "
+                    "(巴西/印度/东南亚等)，会有相当比例仍然 429。"
+                    "强烈建议在 .env 里设置 WEBSHARE_FILTER_IP_LOCATIONS=jp,tw,us "
+                    "（或 jp,tw,sg,kr 等 YouTube 可直连的干净区域）再重启 worker。"
+                )
             YouTubeCaptionService._PROXY_LOG_DONE = True
+
+        # 首次加载后跑一次自检，用 Webshare 通道打 ipify 把 exit IP 打印出来，
+        # 让运维一眼看出代理有没有真的生效以及拿到了哪个国家/地区的 IP。
+        if not YouTubeCaptionService._PROXY_PROBE_DONE:
+            YouTubeCaptionService._probe_webshare_exit(cfg)
+            YouTubeCaptionService._PROXY_PROBE_DONE = True
+
         return cfg
+
+    @staticmethod
+    def _probe_webshare_exit(cfg: Any) -> None:
+        """
+        通过 Webshare 代理打一个公共 echo-IP 服务，把出口 IP 打印出来。
+        这是用来证明 "代理真的在工作 + 真的是 Rotating Residential" 的最直接手段:
+          - exit_ip ≠ 本机公网 IP   → 代理链路 OK
+          - exit_ip == 本机公网 IP  → 代理配置传了但没生效（严重 bug）
+          - 407/401 认证失败        → 用户名密码错，或买的不是 Rotating Residential
+                                      （`-rotate` 后缀只有 Rotating Residential 识别）
+          - 连接超时                → Webshare 入口从本机不可达，查防火墙/DNS
+          - 连续 N 次都是同一 exit_ip → 你买的是 Static Residential，不是 Rotating
+
+        **复用 WebshareProxyConfig.url 属性**，保证自检走的 URL 跟真实业务请求
+        字节级一致（同样带 `-rotate` 后缀、同样的 location codes 编码），不会
+        因为格式拼错误报。
+
+        永远不会抛异常，失败只会打 warning，不影响主流程。
+        可通过 WEBSHARE_STARTUP_PROBE=false 关闭（不建议）。
+        """
+        if os.getenv("WEBSHARE_STARTUP_PROBE", "true").strip().lower() \
+                not in ("1", "true", "yes", "on"):
+            return
+
+        # 直接拿库构造好的 URL；cfg.url 形如:
+        #   http://USER[-JP-TW-US]-rotate:PASS@p.webshare.io:80/
+        # 这里的 `-rotate` 后缀就是 Rotating Residential 的触发标记，
+        # 只有 Rotating Residential 套餐会识别并每次换 IP。
+        try:
+            proxy_url = cfg.url
+        except Exception as e:
+            log.warning("⚠ 无法从 WebshareProxyConfig 读取 .url 属性 (库版本过旧?): %s", e)
+            return
+
+        # 脱敏打印 URL 格式，让运维一眼看出是不是 Rotating Residential 的典型形态
+        # （必须带 `-rotate`，走 p.webshare.io）
+        import re as _re
+        masked_url = _re.sub(r":[^:@/]+@", ":***@", proxy_url)
+        log.info("  Webshare 代理 URL 形态: %s", masked_url)
+        if "-rotate" not in masked_url:
+            log.warning(
+                "  ⚠ 代理 URL 缺少 '-rotate' 后缀，这不是 Rotating Residential 的标准形态！"
+                "请升级 youtube-transcript-api >= 1.0.3"
+            )
+        if "p.webshare.io" not in masked_url:
+            log.warning(
+                "  ⚠ 代理入口不是 p.webshare.io，这不是 Rotating Residential 的网关。"
+                "请确认你在 Webshare Dashboard 买的是 'Rotating Residential'，"
+                "不是 'Proxy Server' 或 'Static Residential'。"
+            )
+
+        target_urls = [
+            "https://api.ipify.org?format=json",
+            "https://ifconfig.me/ip",  # 备选，ipify 有时被滥用导致 429
+        ]
+        timeout_s = int(os.getenv("WEBSHARE_STARTUP_PROBE_TIMEOUT", "10"))
+
+        for url in target_urls:
+            t0 = time.time()
+            try:
+                resp = requests.get(
+                    url,
+                    proxies={"http": proxy_url, "https": proxy_url},
+                    timeout=timeout_s,
+                    headers={"User-Agent": "local-virtual-service/webshare-probe"},
+                )
+                elapsed_ms = int((time.time() - t0) * 1000)
+                if resp.status_code == 200:
+                    body = resp.text.strip()
+                    # 兼容 JSON 和纯文本两种响应
+                    exit_ip = body
+                    if body.startswith("{"):
+                        try:
+                            exit_ip = json.loads(body).get("ip", body)
+                        except Exception:
+                            pass
+                    log.info(
+                        "✓ Webshare 自检通过: exit_ip=%s 延迟=%dms (via %s)",
+                        exit_ip, elapsed_ms, url,
+                    )
+                    return
+                log.warning(
+                    "⚠ Webshare 自检返回 HTTP %d: %s  (url=%s, %dms)",
+                    resp.status_code, resp.text[:120].replace("\n", " "),
+                    url, elapsed_ms,
+                )
+                if resp.status_code in (401, 407):
+                    log.warning(
+                        "  → 407/401 = 代理认证失败。请检查 WEBSHARE_PROXY_USERNAME / "
+                        "WEBSHARE_PROXY_PASSWORD 是否与 Webshare Dashboard 中一致，"
+                        "以及套餐类型是否为 'Rotating Residential'（不能是 Proxy Server 或 Static Residential）"
+                    )
+                    return  # 认证错不必再试下一个 url
+            except requests.exceptions.ProxyError as e:
+                log.warning("⚠ Webshare 自检代理层错误 (url=%s): %s", url, str(e)[:200])
+            except requests.exceptions.ConnectTimeout:
+                log.warning(
+                    "⚠ Webshare 自检连接超时: p.webshare.io:80 在 %ds 内建不起 TCP。"
+                    "检查本机能否直连 p.webshare.io（家庭网络可能有防火墙/限制）",
+                    timeout_s,
+                )
+                return
+            except Exception as e:
+                log.warning(
+                    "⚠ Webshare 自检失败 (url=%s): %s: %s",
+                    url, type(e).__name__, str(e)[:200],
+                )
 
     @staticmethod
     def fetch_transcript(video_url: str, languages: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -131,6 +267,7 @@ class YouTubeCaptionService:
         import concurrent.futures
 
         proxy_config = YouTubeCaptionService._get_webshare_proxy_config()
+        via = "webshare" if proxy_config is not None else "direct"
 
         def _do_fetch():
             # 仅这一条链路（/api/timedtext）走 Webshare；
@@ -139,35 +276,53 @@ class YouTubeCaptionService:
                 api = YouTubeTranscriptApi(proxy_config=proxy_config)
             else:
                 api = YouTubeTranscriptApi()
-            tl = api.list(video_id)
-            transcript = None
-            lang_used = None
-            for lang in languages:
-                try:
-                    transcript = tl.find_transcript([lang])
-                    lang_used = lang
-                    break
-                except Exception:
-                    continue
-            if transcript is None:
-                for t in tl:
-                    transcript = t
-                    lang_used = t.language_code
-                    break
-            if transcript is None:
-                raise Exception("No transcript available")
-            data = transcript.fetch()
-            return {
-                "video_id": video_id,
-                "video_url": video_url,
-                "language": lang_used,
-                "is_generated": getattr(transcript, "is_generated", False),
-                "transcript": [{"text": e.text, "start": e.start, "duration": e.duration} for e in data],
-            }
+            try:
+                tl = api.list(video_id)
+                transcript = None
+                lang_used = None
+                for lang in languages:
+                    try:
+                        transcript = tl.find_transcript([lang])
+                        lang_used = lang
+                        break
+                    except Exception:
+                        continue
+                if transcript is None:
+                    for t in tl:
+                        transcript = t
+                        lang_used = t.language_code
+                        break
+                if transcript is None:
+                    raise Exception("No transcript available")
+                data = transcript.fetch()
+                return {
+                    "video_id": video_id,
+                    "video_url": video_url,
+                    "language": lang_used,
+                    "is_generated": getattr(transcript, "is_generated", False),
+                    "transcript": [{"text": e.text, "start": e.start, "duration": e.duration} for e in data],
+                }
+            except CaptionFetchError:
+                raise
+            except Exception as e:
+                # 把原始异常类名 + via 标注上去，tasks 侧归类时能看出
+                # 是 YouTube 直连 429 还是 Webshare 通道 429。
+                raise CaptionFetchError(
+                    str(e),
+                    original_class=type(e).__name__,
+                    via=via,
+                ) from e
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_do_fetch)
-            return future.result(timeout=YouTubeCaptionService._TIMEOUT)
+            try:
+                return future.result(timeout=YouTubeCaptionService._TIMEOUT)
+            except concurrent.futures.TimeoutError as e:
+                raise CaptionFetchError(
+                    f"transcript-api 调用超过 {YouTubeCaptionService._TIMEOUT}s 硬超时",
+                    original_class="TimeoutError",
+                    via=via,
+                ) from e
 
     @staticmethod
     def get_full_text(transcript_data: Dict[str, Any]) -> str:

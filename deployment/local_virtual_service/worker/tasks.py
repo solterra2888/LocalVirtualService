@@ -233,10 +233,30 @@ def fetch_all_youtube_subscriptions(self):
 
 
 def _classify_caption_error(err: Exception) -> tuple:
-    """将 youtube-transcript-api 的冗长异常归类为 (简短描述, 是否应尝试ASR)"""
+    """
+    将 youtube-transcript-api 的冗长异常归类为 (简短描述, 是否应尝试ASR)。
+
+    会额外利用 CaptionFetchError 带来的诊断信息（原始异常类名 + via 模式），
+    让日志能看出: "429 是通过 Webshare 拿到的还是直连拿到的"。
+    """
+    from .services import CaptionFetchError
+
     msg = str(err)
+    # 原始异常类名（如 IpBlocked / YouTubeRequestFailed / TooManyRequests / TimeoutError）
+    orig_cls = getattr(err, "original_class", None) or type(err).__name__
+    via = getattr(err, "via", None)  # 'webshare' / 'direct' / None
+    via_tag = f"[via={via}]" if via else ""
+    # transcript-api 1.0+ 的新异常类，见
+    # https://github.com/jdepoix/youtube-transcript-api#working-around-ip-bans
+    if orig_cls in ("IpBlocked", "RequestBlocked", "YouTubeRequestFailed"):
+        return f"IP 被 YouTube 封锁 ({orig_cls}){via_tag}", True
+    if orig_cls in ("TooManyRequests",):
+        return f"请求过于频繁 (429/{orig_cls}){via_tag}", True
+    if orig_cls in ("TimeoutError",):
+        return f"transcript-api 硬超时{via_tag}", True
+
     if "blocking requests from your IP" in msg:
-        return "IP 被 YouTube 封锁", True
+        return f"IP 被 YouTube 封锁{via_tag}", True
     if "unplayable" in msg.lower():
         if "live event will begin" in msg:
             return "直播未开始", False
@@ -248,8 +268,10 @@ def _classify_caption_error(err: Exception) -> tuple:
     if "No transcript" in msg or "disabled" in msg.lower():
         return "该视频无字幕", True
     if "Too Many Requests" in msg or "429" in msg:
-        return "请求过于频繁 (429)", True
-    return msg.split("\n")[0][:120], True
+        return f"请求过于频繁 (429){via_tag}", True
+    # 兜底：把异常类名暴露出来，避免丢关键诊断信息
+    short = msg.split("\n")[0][:100]
+    return f"{orig_cls}: {short}{via_tag}", True
 
 
 def _ytdlp_caption_fallback_enabled() -> bool:
