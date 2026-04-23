@@ -161,7 +161,8 @@ const TradeReviewChart: React.FC<TradeReviewChartProps> = ({
     const chart = chartRef.current;
     const series = candlestickSeriesRef.current;
     const timeScale = chart.timeScale();
-    const containerWidth = chartContainerRef.current?.clientWidth || 800;
+        const cw = chartContainerRef.current?.clientWidth ?? 0;
+        const containerWidth = cw > 0 ? cw : 320;
     const leftAxisWidth = 10;
     const rightAxisWidth = 50;
     const plotAreaStartX = leftAxisWidth;
@@ -365,8 +366,15 @@ const TradeReviewChart: React.FC<TradeReviewChartProps> = ({
 
     window.addEventListener('resize', handleResize);
 
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && chartContainerRef.current) {
+      resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
     return () => {
       if (timerId) clearTimeout(timerId);
+      resizeObserver?.disconnect();
       window.removeEventListener('resize', handleResize);
       chartInteractionCleanupRef.current?.();
       chartInteractionCleanupRef.current = null;

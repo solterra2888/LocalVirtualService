@@ -3,6 +3,9 @@ import { Card, Spin, Empty, Tag } from 'antd';
 import { IBReportData } from './IBTradingReportView';
 import TradeReviewChart, { TradeMarker } from './TradeReviewChart';
 import { dashboardAPI } from '../services/dashboard';
+import { isStockAssetClass } from '../utils/ibReportStockAssetClass';
+
+export { isStockAssetClass };
 
 interface PriceDataPoint {
   date: string;
@@ -87,7 +90,7 @@ function getMtmStockRows(tables: IBReportData['tables']): Record<string, string>
   if (!legacy?.length) return [];
   return legacy.filter((r) => {
     const cat = (r['Asset Category'] || r['资产分类'] || '').trim();
-    return cat === 'Stocks' || cat === '股票';
+    return isStockAssetClass(cat);
   });
 }
 
@@ -104,30 +107,6 @@ function buildMtmPlBySymbol(tables: IBReportData['tables']): Map<string, { commi
   }
   return map;
 }
-
-/**
- * 复盘仅展示股票：EODHD 无法覆盖期权/期货/外汇/基金等，按 IB「资产分类」过滤。
- * 先排除明确非股票，再匹配股票关键词；未知分类保守排除。
- */
-export function isStockAssetClass(raw: string | undefined): boolean {
-  const s = (raw || '').trim();
-  if (!s) return false;
-
-  if (
-    /期权|期货|外汇|基金|债券|结构性|权证|涡轮|商品|金属|能源|指数|利差|货币|现货金|差价/i.test(s) ||
-    /\b(OPT|FOP|FUT|FX|BOND|FUND|CFD|CMDTY|FOR|BAG|COIN|CRYPTO|CMD|IOPT)\b/i.test(s)
-  ) {
-    return false;
-  }
-  // IB 外汇/现金类常见写法（与股票 STK 区分）
-  if (/\bCASH\b/i.test(s) && !/股票/i.test(s)) return false;
-
-  if (/股票|正股|普通股/i.test(s)) return true;
-  if (/\b(STK|STOCK|EQUITY|EQUITIES)\b/i.test(s)) return true;
-
-  return false;
-}
-
 
 function groupOrdersByTicker(orders: Record<string, string>[]): TickerGroup[] {
   const map = new Map<string, TickerGroup>();

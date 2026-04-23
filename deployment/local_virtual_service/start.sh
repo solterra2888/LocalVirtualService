@@ -35,7 +35,10 @@ fi
 export PYTHONPATH="$SCRIPT_DIR"
 
 # Worker 资源（可通过 .env 覆盖，未配置时使用这里的默认）
-: "${WORKER_MAIN_CONCURRENCY:=2}"
+# 默认 MAIN_CONCURRENCY=1：家用宽带上行普遍只有 10–50 Mbps，2 个并发任务
+# 同时往 OSS 上传音频会互相挤压带宽（在日志里表现为 ReadTimeout / 上传卡几分钟），
+# 反而比串行还慢。带宽充足或迁移到云 VPS 后可重新调到 2–4。
+: "${WORKER_MAIN_CONCURRENCY:=1}"
 : "${WORKER_LONG_CONCURRENCY:=1}"
 : "${WORKER_MAIN_MAX_TASKS_PER_CHILD:=20}"
 : "${WORKER_LONG_MAX_TASKS_PER_CHILD:=10}"

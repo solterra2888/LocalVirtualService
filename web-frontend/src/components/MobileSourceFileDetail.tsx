@@ -71,15 +71,14 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
 
   const handleIBReportDetected = useCallback((data: IBReportData | null) => {
     setIbReportDataForReview(data);
-    if (data) {
-      setDetailTab(t => (t === 'original' || t === 'analysis' ? 'review' : t));
-    } else {
+    // 与桌面一致：不自动跳到 Trade Review。Original 应展示活动报表的 Overview / MTM / Trades（IBTradingReportView）。
+    if (!data) {
       setDetailTab(t => (t === 'review' ? 'original' : t));
     }
   }, []);
 
   /**
-   * Original 仅在「Original」Tab 挂载时才拉取；此处预取 execution details，便于一进入详情就识别活动报告并展示复盘 Tab。
+   * 预取 execution details，用于尽早识别活动报告、显示「Trade Review」分段入口；不切换当前 Tab，避免挡掉 Original 内的报表 Tabs。
    */
   useEffect(() => {
     let cancelled = false;

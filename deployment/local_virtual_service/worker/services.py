@@ -39,6 +39,15 @@ class YouTubeCaptionService:
     # 单次字幕拉取的硬超时（秒）。IP 质量差时可适度放大。
     _TIMEOUT = int(os.getenv("YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS", "30"))
 
+    # Webshare 住宅代理配置缓存。约定:
+    #   "__unset__" : 还没读过环境变量
+    #   None        : 未启用 / 不可用，走直连
+    #   <object>    : 已经构造好的 WebshareProxyConfig 实例
+    # 这里**只**用于 youtube-transcript-api，不会被传给 yt-dlp / oss2 / dashscope，
+    # 所以 yt-dlp 的音频下载和 OSS 上传不会产生 Webshare 流量计费。
+    _PROXY_CONFIG_CACHE: Any = "__unset__"
+    _PROXY_LOG_DONE: bool = False
+
     @staticmethod
     def extract_video_id(url: str) -> Optional[str]:
         patterns = [
@@ -50,6 +59,63 @@ class YouTubeCaptionService:
             if m:
                 return m.group(1)
         return None
+
+    @staticmethod
+    def _get_webshare_proxy_config():
+        """
+        读取 Webshare 住宅代理配置（仅给 youtube-transcript-api 用）。
+
+        约定通过环境变量启用:
+            WEBSHARE_PROXY_USERNAME / WEBSHARE_PROXY_PASSWORD
+        可选:
+            WEBSHARE_FILTER_IP_LOCATIONS  逗号分隔的 ISO-3166 国家码 (如 "jp,tw,us")
+                                          只在该列表的国家里轮换出口 IP，可降低延迟。
+                                          留空则使用 Webshare 全球池。
+
+        缺一不可：用户名 / 密码任意一个为空都视为禁用，函数返回 None，
+        调用方继续走直连——这样既不会因为忘配密码而误用代理，也保证
+        本机 IP 没被 ban 时能继续零成本工作。
+        """
+        if YouTubeCaptionService._PROXY_CONFIG_CACHE != "__unset__":
+            return YouTubeCaptionService._PROXY_CONFIG_CACHE
+
+        user = os.getenv("WEBSHARE_PROXY_USERNAME", "").strip()
+        pwd = os.getenv("WEBSHARE_PROXY_PASSWORD", "").strip()
+        if not user or not pwd:
+            YouTubeCaptionService._PROXY_CONFIG_CACHE = None
+            return None
+
+        try:
+            from youtube_transcript_api.proxies import WebshareProxyConfig
+        except ImportError:
+            log.warning(
+                "youtube-transcript-api 版本过低，缺失 WebshareProxyConfig 支持；"
+                "Webshare 代理被忽略，走直连。请升级到 >= 1.0.0 (pip install -U youtube-transcript-api)"
+            )
+            YouTubeCaptionService._PROXY_CONFIG_CACHE = None
+            return None
+
+        kwargs: Dict[str, Any] = {"proxy_username": user, "proxy_password": pwd}
+        locations_raw = os.getenv("WEBSHARE_FILTER_IP_LOCATIONS", "").strip()
+        if locations_raw:
+            loc_list = [x.strip().lower() for x in locations_raw.split(",") if x.strip()]
+            if loc_list:
+                kwargs["filter_ip_locations"] = loc_list
+
+        try:
+            cfg = WebshareProxyConfig(**kwargs)
+        except TypeError:
+            # 老版本可能不认 filter_ip_locations，降级成只用账号
+            cfg = WebshareProxyConfig(proxy_username=user, proxy_password=pwd)
+
+        YouTubeCaptionService._PROXY_CONFIG_CACHE = cfg
+        if not YouTubeCaptionService._PROXY_LOG_DONE:
+            log.info(
+                "✓ youtube-transcript-api 已启用 Webshare 住宅代理 (locations=%s)",
+                kwargs.get("filter_ip_locations") or "global",
+            )
+            YouTubeCaptionService._PROXY_LOG_DONE = True
+        return cfg
 
     @staticmethod
     def fetch_transcript(video_url: str, languages: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -64,8 +130,15 @@ class YouTubeCaptionService:
 
         import concurrent.futures
 
+        proxy_config = YouTubeCaptionService._get_webshare_proxy_config()
+
         def _do_fetch():
-            api = YouTubeTranscriptApi()
+            # 仅这一条链路（/api/timedtext）走 Webshare；
+            # 其它任何 yt-dlp / OSS / DashScope 调用都不受影响。
+            if proxy_config is not None:
+                api = YouTubeTranscriptApi(proxy_config=proxy_config)
+            else:
+                api = YouTubeTranscriptApi()
             tl = api.list(video_id)
             transcript = None
             lang_used = None
