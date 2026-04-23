@@ -544,7 +544,7 @@ tail -f /opt/local_virtual_service/logs/worker.log
 | `YTDLP_IMPERSONATE` | `auto` | TLS 指纹伪装（**需装 `curl-cffi`**）。推荐 `auto`（yt-dlp 自选可用 target）；也支持 `chrome`/`safari`/`edge`/`firefox`（不可用时自动降级为 auto），或 `false` 禁用 |
 | `YOUTUBE_FEED_TIMEOUT_SECONDS` | `5` | RSS / Data API 单次请求超时 |
 | `YOUTUBE_FEED_MAX_RETRIES` | `2` | RSS **5xx 瞬时错误**的最大尝试次数（含首次），即重试 1 次。**404 不重试**——YouTube RSS 对部分频道/IP 固定返回 404，重试无效且浪费时间，直接 fallback 到 Data API v3 |
-| `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` | `30` | youtube-transcript-api 硬超时 |
+| `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` | `60` | youtube-transcript-api 硬超时。启用 Webshare 后每次请求最多触发 10 次 IP 旋转重试，默认值已预留该开销；纯直连场景可降回 `30` |
 | `CAPTION_YTDLP_FALLBACK_ENABLED` | `true` | transcript-api 失败时是否用 yt-dlp 再试一次 |
 | `CAPTION_YTDLP_TIMEOUT_SECONDS` | `60` | yt-dlp 拉字幕总超时（元信息 + 字幕下载）|
 | `CAPTION_YTDLP_SLEEP_SUBTITLES_SECONDS` | `0.5` | 每次字幕下载前睡眠秒数（yt-dlp `--sleep-subtitles`）|
@@ -596,6 +596,20 @@ tail -f /opt/local_virtual_service/logs/worker.log
 'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},
 'finalize_youtube_file_task': {'queue': 'file_processing'},            # Upload Link 完成回调（远程）
 ```
+
+### ⚠ 远端 Worker 的 task time_limit 实际受主项目 stub 控制
+
+Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消息头**随任务发到远端 Worker，
+**压过**本地 `celery_app.py` 里配置的 `TASK_TIME_LIMIT_SECONDS` 默认值。因此跑在 HK 家用 Worker 上的
+下面两个任务，实际生效的是**主项目** `backend/tasks/subscription_tasks.py` 里装饰器上的数字：
+
+| 任务名 | 主项目 stub 位置 | 当前 time_limit / soft | 为什么这么大 |
+|--------|------------------|------------------------|--------------|
+| `fetch_all_youtube_subscriptions` | `fetch_all_youtube_subscriptions_task` | 4200 / 3600（70 / 60 min）| concurrency=1 + Webshare 串行处理 20 频道 × ~15 视频，实测整批 30–60 min |
+| `fetch_youtube_transcripts_batch` | `fetch_youtube_transcripts_batch_task` | 2400 / 2100（40 / 35 min）| 补抓 ~150 视频，每项 Webshare 路径 5–30s |
+
+下次若在 HK 日志里看到 `Soft time limit (XXXs) exceeded for fetch_all_youtube_subscriptions`
+然后 worker 被 `SIGKILL`，第一时间检查**主项目**这两个装饰器而不是 HK 的 `.env`。
 
 ### 灰度开关（服务器端环境变量）
 
