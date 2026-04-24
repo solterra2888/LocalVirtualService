@@ -177,6 +177,9 @@ class ContentTaggingService:
                 tag_data['industry_en'] = ''
             if 'concepts' not in tag_data:
                 tag_data['concepts'] = []
+            # summary → reasoning 字段统一（模板已将 reasoning 改为 summary）
+            if 'summary' in tag_data and 'reasoning' not in tag_data:
+                tag_data['reasoning'] = tag_data['summary']
             
         except json.JSONDecodeError as e:
             self.log(f"解析AI返回的JSON失败: {str(e)}", level="error")
@@ -438,7 +441,10 @@ class ContentTaggingService:
                 update_fields.append("confidence = %s")
                 params.append(updates['confidence'])
             
-            if 'reasoning' in updates:
+            if 'summary' in updates:
+                update_fields.append("reasoning = %s")
+                params.append(updates['summary'])
+            elif 'reasoning' in updates:
                 update_fields.append("reasoning = %s")
                 params.append(updates['reasoning'])
             

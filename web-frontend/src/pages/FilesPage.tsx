@@ -4572,7 +4572,7 @@ export const ExecutionDetailsPanel: React.FC<{
               </Descriptions.Item>
             )}
             {fileTags.reasoning && (
-              <Descriptions.Item label="Reasoning">
+              <Descriptions.Item label="Summary">
                 <div style={{ 
                   maxHeight: 120, 
                   overflowY: 'auto',
