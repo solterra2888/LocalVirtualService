@@ -4214,12 +4214,17 @@ async def get_upload_youtube_status(
          rc_agent_status, total_time, upload_params) = row
 
         # 统一把 file_status 翻译成前端三态: processing / completed / failed
+        # asr_pending 是 Caption 任务刚派发 ASR 时写入的中间状态，前端据此弹等待提示
+        asr_triggered = file_status == "asr_pending"
         if file_status == "completed":
             ui_status = "completed"
             progress = 100
         elif file_status == "failed":
             ui_status = "failed"
             progress = 0
+        elif file_status == "asr_pending":
+            ui_status = "processing"
+            progress = 40  # 与 HK worker 的 _progress(progress=40) 保持一致
         else:
             ui_status = "processing"
             # 无法精确给出进度, 给一个非零值让前端进度条动起来
@@ -4247,9 +4252,11 @@ async def get_upload_youtube_status(
             "caption_source": caption_source,
             "finalize_reason": finalize_reason,
             "asr_used": asr_used,
+            "asr_triggered": asr_triggered,
             "message": (
                 f"Failed: {finalize_reason}" if ui_status == "failed" and finalize_reason
                 else "Done" if ui_status == "completed"
+                else "Running Fun-ASR transcription..." if asr_triggered
                 else "Processing on local worker..."
             ),
         }

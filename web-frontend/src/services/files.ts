@@ -234,6 +234,8 @@ export const filesAPI = {
     caption_source: string | null;
     finalize_reason: string | null;
     asr_used: boolean;
+    /** 视频无字幕、ASR 已触发时为 true（DB 状态 asr_pending），前端据此弹等待提示 */
+    asr_triggered: boolean;
     message: string;
   }> => {
     return api.get(`/files/upload-youtube/status/${fileId}`);

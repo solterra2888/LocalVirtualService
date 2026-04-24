@@ -546,6 +546,9 @@ def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
     _progress(progress=40,
               msg=f"Caption unavailable ({reason}), switching to Fun-ASR...",
               url=youtube_url)
+    # 在 dispatch ASR 之前写入 "asr_pending" 中间状态，让前端轮询
+    # 能区分"字幕抓取中"和"ASR 已触发"，从而弹出等待时间提示。
+    store.update_file_status(file_id, "asr_pending")
     try:
         # 派发到 priority ASR 队列：本任务是 Upload Link 链路的下半场，
         # 必须和上半场（fetch_youtube_file_transcript_task）一样不被批量

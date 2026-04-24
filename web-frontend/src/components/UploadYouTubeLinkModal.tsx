@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Modal, Input, Button, message, Space, ConfigProvider, theme as antdTheme, Alert } from 'antd';
-import { LinkOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import React, { useState, useRef } from 'react';
+import { Modal, Input, Button, message, Space, ConfigProvider, theme as antdTheme, Alert, Typography } from 'antd';
+import { LinkOutlined, PlayCircleOutlined, SoundOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
@@ -16,6 +16,8 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
   const isDark = themeMode === 'dark';
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [asrModalOpen, setAsrModalOpen] = useState(false);
+  const asrNotifiedRef = useRef(false); // 每次上传只弹一次
   const { addTask, updateTaskStatus } = useFileProcessing();
 
   // 验证 YouTube URL 格式
@@ -45,6 +47,9 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
 
     setIsProcessing(true);
     const url = youtubeUrl.trim();
+
+    // 重置 ASR 通知标记（每次上传独立）
+    asrNotifiedRef.current = false;
 
     // 关闭 Modal
     handleClose();
@@ -86,6 +91,12 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
             // 仅当 rc_agent_status 也已终态（finalize 已执行）才视为真正完成；
             // 否则继续以 processing 上报，确保列表刷新在 rc_agent_status 更新后触发。
             const rcFinalized = !!st.rc_agent_status && st.rc_agent_status !== 'processing';
+
+            // ASR 已触发（无字幕，已切换 Fun-ASR）→ 弹一次等待提示
+            if (st.asr_triggered && !asrNotifiedRef.current) {
+              asrNotifiedRef.current = true;
+              setAsrModalOpen(true);
+            }
 
             if (st.status === 'processing' || ((st.status === 'completed' || st.status === 'failed') && !rcFinalized)) {
               updateTaskStatus(taskId, {
@@ -192,6 +203,8 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
     setIsProcessing(false);
     onCancel();
   };
+
+  const handleAsrModalClose = () => setAsrModalOpen(false);
 
   const modalStyles = getModalStyles(themeMode);
 
@@ -315,6 +328,50 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
               Start Processing
             </Button>
           </div>
+        </div>
+      </Modal>
+      {/* ASR 等待提示弹窗 —— 仅在视频无字幕、Fun-ASR 已触发时弹出一次 */}
+      <Modal
+        open={asrModalOpen}
+        onCancel={handleAsrModalClose}
+        onOk={handleAsrModalClose}
+        okText="Got it"
+        cancelButtonProps={{ style: { display: 'none' } }}
+        width={460}
+        centered
+        title={
+          <Space>
+            <SoundOutlined style={{ color: '#faad14', fontSize: 18 }} />
+            <span>ASR Transcription Started</span>
+          </Space>
+        }
+        maskStyle={{
+          background: isDark ? 'rgba(0,0,0,0.6)' : undefined,
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        styles={modalStyles}
+      >
+        <div style={{ padding: '8px 0 4px' }}>
+          <Alert
+            type="warning"
+            showIcon
+            icon={<ClockCircleOutlined />}
+            message="No subtitles available — switching to Fun-ASR"
+            description={
+              <Typography.Text style={{ color: isDark ? '#94a3b8' : undefined }}>
+                This video doesn't have a caption track. Fun-ASR is now transcribing the audio.
+                <br /><br />
+                <strong>Estimated wait:</strong> 5–30 minutes depending on video length.
+                <br /><br />
+                You can close this tab — we'll update the file automatically when transcription is complete.
+              </Typography.Text>
+            }
+            style={{
+              background: isDark ? '#2d2000' : '#fffbe6',
+              border: `1px solid ${isDark ? '#614700' : '#ffe58f'}`,
+            }}
+          />
         </div>
       </Modal>
     </ConfigProvider>
