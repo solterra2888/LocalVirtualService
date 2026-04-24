@@ -44,7 +44,7 @@
 │  │         YouTube Transcription Worker (家庭虚拟机)            │ │
 │  │                                                            │ │
 │  │  ① youtube_fetching 队列                                  │ │
-│  │      (Main Worker, concurrency=2)                          │ │
+│  │      (Main Worker, concurrency=1)                          │ │
 │  │      Feed 侧:                                              │ │
 │  │        ├ fetch_all_youtube_subscriptions  (批量)            │ │
 │  │        ├ fetch_youtube_subscription        (单频道/首抓)    │ │
@@ -58,7 +58,7 @@
 │  │                        │                                   │ │
 │  │                        ▼ 派发 ASR 任务                      │ │
 │  │  ② youtube_transcription 队列（短视频）                     │ │
-│  │      (Main Worker, concurrency=2)                          │ │
+│  │      (Main Worker, concurrency=1)                          │ │
 │  │      ├ transcribe_youtube_feed_task         (→ subscription_content) │
 │  │      ├ transcribe_youtube_file_asr_task     (→ file_processing_details) │
 │  │      ├ 探测元信息（时长 / 直播状态）                        │ │
@@ -236,14 +236,14 @@ flowchart TD
 | 重试 | 任意 ASR 队列 | `── Feed ASR 失败[可重试]: reason=xxx (尝试 N/2) ──` / `── Upload ASR 失败[可重试]: reason=xxx file_id=x (尝试 N/2) ──`、`→ 120s 后重试` |
 | 最终失败 | 任意 ASR 队列 | `── Feed ASR 失败[永久]: reason=xxx ──` / `── Upload ASR 失败[永久]: reason=xxx file_id=x ──` |
 
-> `youtube_fetching` 和 `youtube_transcription` 由同一个 Main Worker（concurrency=2）消费，字幕抓取和短视频 ASR 会并行交错出现在日志里。
+> `youtube_fetching` 和 `youtube_transcription` 由同一个 Main Worker（concurrency=1）消费，字幕抓取和短视频 ASR 串行出现在日志里。
 > `youtube_transcription_long` 由独立的 Long Worker（concurrency=1）串行处理，不会阻塞短视频。
 
 ## 消费的队列
 
 | 队列 | 任务 | Worker | 说明 |
 |------|------|--------|------|
-| `youtube_fetching` | `fetch_all_youtube_subscriptions` | Main (concurrency=2) | 批量获取订阅频道视频 |
+| `youtube_fetching` | `fetch_all_youtube_subscriptions` | Main (concurrency=1) | 批量获取订阅频道视频 |
 | `youtube_fetching` | `fetch_youtube_subscription` | Main | 获取单个订阅视频（含**新订阅首抓**，由 `/api/subscriptions` 在 `YOUTUBE_SUBSCRIPTION_USE_LOCAL=true` 时派发到此队列，失败累加 `consecutive_failures`） |
 | `youtube_fetching` | `fetch_youtube_transcripts_batch` | Main | 批量拉取字幕，失败自动派发 ASR |
 | `youtube_fetching` | `fetch_youtube_file_transcript_task` | Main | **Upload YouTube Link** 字幕抓取（由 `/api/files/upload-youtube` 在 `YOUTUBE_UPLOAD_USE_LOCAL=true` 时派发）；落库到 `file_processing_details.content / asr_with_diarization`，无字幕或被封时自动派发 `transcribe_youtube_file_asr_task` |
