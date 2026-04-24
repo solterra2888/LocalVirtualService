@@ -469,7 +469,7 @@ class TwitterSubscriptionService:
         return media_urls
     
     def save_tweet_to_db(self, conn, cursor, tweet: Dict[str, Any], 
-                        user_ids: List[int], subscription_ids: List[int]) -> bool:
+                        user_ids: List[int], subscription_ids: List[int]) -> Tuple[Optional[int], bool]:
         """
         保存推文到数据库（使用适配器模式和统一的内容服务）
         
@@ -481,7 +481,9 @@ class TwitterSubscriptionService:
             subscription_ids: 订阅ID列表（保留参数兼容性，实际不使用）
             
         Returns:
-            是否成功保存（True=新增，False=已存在）
+            (content_id, is_new):
+                - content_id: subscription_content.id (失败时为 None)
+                - is_new: 是否本次新插入 (False=已存在或失败)
         """
         try:
             # 使用统一的内容服务保存（会自动使用 TwitterAdapter 标准化数据）
@@ -498,11 +500,11 @@ class TwitterSubscriptionService:
                 author=tweet.get('author', {}).get('username', '')
             )
             
-            return is_new
+            return content_id, is_new
             
         except Exception as e:
             logger.error("保存推文失败", tweet_id=tweet.get('id'), exception=str(e))
-            return False
+            return None, False
     
     def fetch_and_store_tweets(self, subscription_id: Optional[int] = None,
                               user_id: Optional[int] = None,
@@ -560,6 +562,9 @@ class TwitterSubscriptionService:
             author_results = {}
             
             total_api_calls_saved = 0
+            
+            # 收集本次真正新插入的 subscription_content.id, 供循环结束后触发 Feeds 自动打标
+            all_new_content_ids: List[int] = []
             
             for author, author_subs in aggregated.items():
                 try:
@@ -635,8 +640,13 @@ class TwitterSubscriptionService:
                                 existing_count += 1
                                 continue
                             
-                            if self.save_tweet_to_db(conn, cursor, tweet, user_ids, subscription_ids):
+                            new_content_id, is_new = self.save_tweet_to_db(
+                                conn, cursor, tweet, user_ids, subscription_ids
+                            )
+                            if is_new:
                                 new_count += 1
+                                if new_content_id is not None:
+                                    all_new_content_ids.append(new_content_id)
                             else:
                                 existing_count += 1
                     
@@ -702,6 +712,22 @@ class TwitterSubscriptionService:
             }
             
             logger.info("推文获取并存储完成", **{k: v for k, v in result.items() if k != 'author_results'})
+            
+            # 触发 Feeds 自动打标 (仅对本次真正新插入的内容生效; 失败静默)
+            # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §6.4
+            if all_new_content_ids:
+                try:
+                    from backend.tasks.file_tasks import trigger_auto_feed_tagging
+                    trigger_auto_feed_tagging(all_new_content_ids, delay=2)
+                    logger.info(
+                        "已派发 Feeds 自动打标",
+                        new_content_count=len(all_new_content_ids),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "派发 Feeds 自动打标失败 (不影响推文抓取结果)",
+                        exception=str(e),
+                    )
             
             return result
             

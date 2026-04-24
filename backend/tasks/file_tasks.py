@@ -33,6 +33,12 @@ def get_classify_task():
     return classify_file_content_task
 
 
+def get_feed_tagging_task():
+    """延迟导入 Feeds 自动打标任务 (避免循环依赖)"""
+    from backend.tasks.feed_tagging_tasks import tag_feed_content_task
+    return tag_feed_content_task
+
+
 def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
     """
     触发自动打标签任务
@@ -137,6 +143,50 @@ def trigger_auto_classify(file_detail_ids, username=None, delay=2):
             info(f"已触发自动归类任务: file_id={file_id}, delay={delay}s", source="auto_classify")
         except Exception as e:
             error(f"触发自动归类任务失败: file_id={file_id}, error={str(e)}", source="auto_classify")
+
+
+def trigger_auto_feed_tagging(content_ids, username=None, delay=2):
+    """
+    触发 Feeds (subscription_content) 自动打标 + 摘要任务.
+
+    与 trigger_auto_tagging 并列的姊妹函数, 但目标表与服务不同:
+      - trigger_auto_tagging       → file_processing_details → ContentTaggingService
+      - trigger_auto_feed_tagging  → subscription_content    → FeedContentTaggingService
+
+    设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §6.3
+
+    Args:
+        content_ids: subscription_content.id 列表或单个 ID
+        username: 触发用户 (仅用于日志)
+        delay: countdown 秒, 确保 DB 事务已提交
+    """
+    auto_feed_enabled = os.getenv('AUTO_FEED_TAG_ENABLED', 'true').lower() == 'true'
+    if not auto_feed_enabled:
+        info("Feeds 自动打标功能已禁用", source="feed_auto_tagging")
+        return
+
+    if not isinstance(content_ids, list):
+        content_ids = [content_ids]
+    if not content_ids:
+        return
+
+    tag_task = get_feed_tagging_task()
+
+    for cid in content_ids:
+        try:
+            tag_task.apply_async(
+                args=(cid, username),
+                countdown=delay,
+            )
+            info(
+                f"已触发 Feeds 自动打标: content_id={cid}, delay={delay}s",
+                source="feed_auto_tagging",
+            )
+        except Exception as e:
+            error(
+                f"触发 Feeds 打标任务失败: content_id={cid}, error={e}",
+                source="feed_auto_tagging",
+            )
 
 
 @app.task(bind=True, name='process_files_async', queue='file_processing')

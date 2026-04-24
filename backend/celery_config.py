@@ -71,6 +71,9 @@ task_routes = {
     'fetch_youtube_file_transcript_task': {'queue': 'youtube_priority'},          # Upload Link 字幕抓取
     'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription_priority'},  # Upload Link ASR 转写
     'finalize_youtube_file_task': {'queue': 'file_processing'},  # Upload YouTube Link 完成回调（远程 Worker，触发 auto-tag/name/classify）
+    'finalize_youtube_feed_task': {'queue': 'file_processing'},  # YouTube Feed 字幕落库回调（家用 Worker → 远程，触发 auto-feed-tagging）
+    'tag_feed_content': {'queue': 'file_processing'},            # Feeds 单条内容自动打标 + 摘要
+    'batch_tag_feed_content': {'queue': 'file_processing'},      # Feeds 批量打标派发器
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},

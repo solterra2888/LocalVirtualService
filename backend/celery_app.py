@@ -76,6 +76,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入数据清理任务模块失败: {e}")
 
+try:
+    from backend.tasks import feed_tagging_tasks
+    print(f"✅ 成功导入 Feeds 打标任务模块: {feed_tagging_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Feeds 打标任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

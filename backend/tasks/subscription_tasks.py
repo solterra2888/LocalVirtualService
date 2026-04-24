@@ -480,3 +480,54 @@ def fetch_youtube_transcripts_batch_task(
             "transcripts_ok": 0,
             "transcripts_failed": len(video_items),
         }
+
+
+@app.task(
+    name='finalize_youtube_feed_task',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    time_limit=120,
+    soft_time_limit=90,
+)
+def finalize_youtube_feed_task(
+    self,
+    subscription_content_id: int,
+) -> Dict[str, Any]:
+    """
+    YouTube Feed 字幕落库后的"终态回调"任务.
+
+    与 Upload YouTube Link 的 finalize_youtube_file_task 架构对称:
+      - 家用 Worker 在写完 subscription_content.transcript 后,
+        通过 Celery send_task 把本任务派发到远程 file_processing 队列.
+      - 本任务作为统一入口, 仅负责触发 auto-feed-tagging; 未来可扩展
+        auto-name / auto-classify / notify-user.
+
+    设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §3.3 §6.5
+
+    Args:
+        subscription_content_id: subscription_content.id
+
+    Returns:
+        {'ok': bool, 'content_id': int}
+    """
+    try:
+        logger.info(
+            f"[finalize_feed] content_id={subscription_content_id} "
+            f"triggering auto-feed-tagging"
+        )
+        # 延迟导入避免在 worker 启动阶段触发循环引用
+        from backend.tasks.file_tasks import trigger_auto_feed_tagging
+
+        trigger_auto_feed_tagging([subscription_content_id], delay=2)
+        return {'ok': True, 'content_id': subscription_content_id}
+
+    except Exception as exc:
+        logger.error(
+            f"[finalize_feed] content_id={subscription_content_id} failed: {exc}",
+            exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        # 打标失败不影响字幕已落库的事实, 静默返回
+        return {'ok': False, 'content_id': subscription_content_id, 'error': str(exc)}
