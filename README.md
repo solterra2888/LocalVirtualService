@@ -41,44 +41,45 @@
 ┌──────────────────────────┼──────────────────────────────────────┐
 │                          ▼                                       │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │         YouTube Transcription Worker (家庭虚拟机)            │ │
+│  │         YouTube Transcription Worker (家庭虚拟机, 4 个进程)   │ │
 │  │                                                            │ │
-│  │  ① youtube_fetching 队列                                  │ │
-│  │      (Main Worker, concurrency=1)                          │ │
-│  │      Feed 侧:                                              │ │
-│  │        ├ fetch_all_youtube_subscriptions  (批量)            │ │
-│  │        ├ fetch_youtube_subscription        (单频道/首抓)    │ │
-│  │        └ fetch_youtube_transcripts_batch   (补抓)          │ │
-│  │      Upload Link 侧:                                       │ │
-│  │        └ fetch_youtube_file_transcript_task ◄── /upload-youtube│
-│  │      共用逻辑:                                              │ │
-│  │        ├ Stage1: youtube-transcript-api 字幕               │ │
-│  │        ├ Stage2: yt-dlp 字幕回退（独立限流）                │ │
-│  │        └ 两路均失败 → 标记 asr_pending                      │ │
+│  │  ⓪ youtube_priority 队列  ★ Upload Link 用户上传专用 ★      │ │
+│  │      (Priority Transcript Worker, concurrency=1)           │ │
+│  │      └ fetch_youtube_file_transcript_task ◄── /upload-youtube │
+│  │           ├ Stage1: youtube-transcript-api 字幕             │ │
+│  │           ├ Stage2: yt-dlp 字幕回退                         │ │
+│  │           └ 两路均失败 → 派发 ASR 到 ⓪'                     │ │
 │  │                        │                                   │ │
 │  │                        ▼ 派发 ASR 任务                      │ │
-│  │  ② youtube_transcription 队列（短视频）                     │ │
-│  │      (Main Worker, concurrency=1)                          │ │
-│  │      ├ transcribe_youtube_feed_task         (→ subscription_content) │
-│  │      ├ transcribe_youtube_file_asr_task     (→ file_processing_details) │
-│  │      ├ 探测元信息（时长 / 直播状态）                        │ │
-│  │      ├ 直播 / 首播未开始 → 永久跳过                         │ │
-│  │      ├ 时长 ≤ 30min:                                       │ │
-│  │      │   下载音频 → OSS 上传 → Fun-ASR                      │ │
-│  │      │   ASR 轮询上限: 5 min                               │ │
-│  │      │   失败重试: 最多 1 次 (退避 120s)                    │ │
-│  │      │   结果写回数据库 ✓                                   │ │
-│  │      │   Upload Link 路径 → signal finalize ──────────────┐│ │
-│  │      └ 时长 > 30min → 转发 ───────────┐                    ││ │
-│  │                                        ▼                    ││ │
-│  │  ③ youtube_transcription_long 队列    │                    ││ │
-│  │      (Long Worker, concurrency=1)      │                    ││ │
-│  │      ├ 下载音频（400–600 MB 量级）     │                    ││ │
-│  │      ├ OSS 上传 → Fun-ASR              │                    ││ │
-│  │      │   ASR 轮询上限: 60 min          │                    ││ │
-│  │      │   失败重试: 最多 1 次 (退避 120s)│                    ││ │
-│  │      └ 结果写回数据库 ✓ ◄──────────────┘                    ││ │
-│  │           Upload Link 路径 → signal finalize ──────────────┘│ │
+│  │  ⓪' youtube_transcription_priority 队列                    │ │
+│  │      (Priority ASR Worker, concurrency=1)                  │ │
+│  │      └ transcribe_youtube_file_asr_task                    │ │
+│  │           ├ 探测元信息（直播 → 永久失败）                    │ │
+│  │           ├ 时长 > 30min → 转发到 ③                         │ │
+│  │           └ 时长 ≤ 30min → 下载 → OSS → Fun-ASR             │ │
+│  │           Upload Link 路径 → signal finalize ──────────────┐│ │
+│  │                                                            ││ │
+│  │  ── 上面 ⓪/⓪' 与下面 ①/② 由独立 worker 进程消费，──         ││ │
+│  │  ── 批量 Feed 任务卡住不会阻塞用户上传 ★                    ││ │
+│  │                                                            ││ │
+│  │  ① youtube_fetching 队列  (Feed 批量专用)                   ││ │
+│  │      (Main Worker, concurrency=1)                          ││ │
+│  │      ├ fetch_all_youtube_subscriptions  (批量, 30–60min)    ││ │
+│  │      ├ fetch_youtube_subscription        (单频道/首抓)      ││ │
+│  │      └ fetch_youtube_transcripts_batch   (补抓)            ││ │
+│  │           ├ Stage1/Stage2 同上                              ││ │
+│  │           └ 失败 → 派发 ASR 到 ②                            ││ │
+│  │                        │                                   ││ │
+│  │                        ▼ 派发 ASR 任务                      ││ │
+│  │  ② youtube_transcription 队列（Feed 短视频 ASR）            ││ │
+│  │      (Main Worker, concurrency=1)                          ││ │
+│  │      └ transcribe_youtube_feed_task → subscription_content ││ │
+│  │           └ 时长 > 30min → 转发到 ③                         ││ │
+│  │                                                            ││ │
+│  │  ③ youtube_transcription_long 队列 (长视频 ASR, 共享)       ││ │
+│  │      (Long Worker, concurrency=1) ◄────────────────────────┘│ │
+│  │      ├ 下载音频（400–600 MB） → OSS → Fun-ASR               │ │
+│  │      └ Upload Link 路径 → signal finalize ─────────────────┘│ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                    家庭虚拟机 (可访问 YouTube)                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -236,20 +237,55 @@ flowchart TD
 | 重试 | 任意 ASR 队列 | `── Feed ASR 失败[可重试]: reason=xxx (尝试 N/2) ──` / `── Upload ASR 失败[可重试]: reason=xxx file_id=x (尝试 N/2) ──`、`→ 120s 后重试` |
 | 最终失败 | 任意 ASR 队列 | `── Feed ASR 失败[永久]: reason=xxx ──` / `── Upload ASR 失败[永久]: reason=xxx file_id=x ──` |
 
-> `youtube_fetching` 和 `youtube_transcription` 由同一个 Main Worker（concurrency=1）消费，字幕抓取和短视频 ASR 串行出现在日志里。
-> `youtube_transcription_long` 由独立的 Long Worker（concurrency=1）串行处理，不会阻塞短视频。
+> ⓪/⓪' 队列由独立的 Priority Worker 消费，Main Worker（消费 ①/②）即使在跑批量 Feed 任务（30–60 min），用户上传依然能秒级开始处理。
+> ① 和 ② 由同一个 Main Worker（concurrency=1）消费，Feed 链路的字幕抓取和短视频 ASR 串行出现在日志里。
+> ③ 由独立的 Long Worker（concurrency=1）串行处理，不会阻塞短视频。
 
 ## 消费的队列
 
 | 队列 | 任务 | Worker | 说明 |
 |------|------|--------|------|
-| `youtube_fetching` | `fetch_all_youtube_subscriptions` | Main (concurrency=1) | 批量获取订阅频道视频 |
+| `youtube_priority` ★ | `fetch_youtube_file_transcript_task` | **Priority Transcript** (concurrency=1) | **Upload YouTube Link** 字幕抓取（由 `/api/files/upload-youtube` 在 `YOUTUBE_UPLOAD_USE_LOCAL=true` 时派发）；落库到 `file_processing_details.content / asr_with_diarization`，无字幕或被封时自动派发 `transcribe_youtube_file_asr_task` 到 `youtube_transcription_priority` |
+| `youtube_transcription_priority` ★ | `transcribe_youtube_file_asr_task` | **Priority ASR** (concurrency=1) | **Upload YouTube Link** Fun-ASR 转录（同时由 `POST /api/files/{file_id}/transcribe-asr` 手动重转触发）；进入后探测时长，>30min 自动转发到 `youtube_transcription_long`；成功/永久失败回调远程 `finalize_youtube_file_task` |
+| `youtube_fetching` | `fetch_all_youtube_subscriptions` | Main (concurrency=1) | 批量获取订阅频道视频（实测 30–60 min 串行）|
 | `youtube_fetching` | `fetch_youtube_subscription` | Main | 获取单个订阅视频（含**新订阅首抓**，由 `/api/subscriptions` 在 `YOUTUBE_SUBSCRIPTION_USE_LOCAL=true` 时派发到此队列，失败累加 `consecutive_failures`） |
 | `youtube_fetching` | `fetch_youtube_transcripts_batch` | Main | 批量拉取字幕，失败自动派发 ASR |
-| `youtube_fetching` | `fetch_youtube_file_transcript_task` | Main | **Upload YouTube Link** 字幕抓取（由 `/api/files/upload-youtube` 在 `YOUTUBE_UPLOAD_USE_LOCAL=true` 时派发）；落库到 `file_processing_details.content / asr_with_diarization`，无字幕或被封时自动派发 `transcribe_youtube_file_asr_task` |
 | `youtube_transcription` | `transcribe_youtube_feed_task` | Main | Feed 短视频 Fun-ASR 转录（进入后探测时长，>30min 自动转发长队列）|
-| `youtube_transcription` | `transcribe_youtube_file_asr_task` | Main | 用户上传链接视频 Fun-ASR 转录（**与 Feed 对齐**：支持直播永久失败 + 长视频自动路由 + 成功/永久失败回调远程 `finalize_youtube_file_task`）|
 | `youtube_transcription_long` | `transcribe_youtube_feed_task` / `transcribe_youtube_file_asr_task` | Long (concurrency=1) | 长视频专用，防止大文件阻塞主 worker |
+
+> ★ 标记的两个 priority 队列是**用户上传插队队列**，详见下方"上传插队队列（priority queues）"一节。
+
+### 上传插队队列（priority queues）
+
+**问题背景**：HK Worker 跑 `concurrency=1`（家用上行带宽不足以支撑并发音频上传）。在切到 Webshare 之前，单条字幕抓取也有 5–15s 延迟；批量 `fetch_all_youtube_subscriptions` 串行处理 27 个订阅时，整批耗时 30–60 min。**用户在这期间从前端 upload-youtube 提交一条单视频，会被串到批量任务后面排队**，体验极差。
+
+**解决方案（v2026-04 起默认）**：把"用户主动上传链路"和"后台 Feed 批量链路"用**独立的队列 + 独立的 worker 进程**完全隔离开。
+
+| 维度 | Upload Link 链路（用户）| Feed 批量链路（定时任务） |
+|------|------------------------|---------------------------|
+| 字幕抓取队列 | `youtube_priority` | `youtube_fetching` |
+| ASR 队列 | `youtube_transcription_priority` | `youtube_transcription` |
+| 入口 | `/api/files/upload-youtube`、`/api/files/{file_id}/transcribe-asr` | Celery Beat、`/api/subscriptions` |
+| 消费 worker | Priority Transcript / Priority ASR | Main Worker |
+| 受批量任务影响 | ✗ 完全独立，秒级响应 | — |
+
+**派发路径**（路由生效顺序）：
+1. `apply_async(queue=...)` 显式参数（最高优先级）
+2. `backend/celery_config.py` 的 `CELERY_TASK_ROUTES`（已配置 `fetch_youtube_file_transcript_task → youtube_priority`、`transcribe_youtube_file_asr_task → youtube_transcription_priority`）
+3. `@app.task(queue=...)` 装饰器默认（兜底）
+
+所以**不需要在调用方手动 `queue=...`**，路由表已经处理。HK 端 `tasks.py` 内部 fetch 任务派发 ASR 时显式写了 `queue="youtube_transcription_priority"`，避免依赖远端的路由表。
+
+**长视频例外**：`transcribe_youtube_file_asr_task` 探测到时长 > 30min 时，会通过 `apply_async(queue=_LONG_QUEUE)` 转发到 `youtube_transcription_long`，由 Long Worker 处理。**长视频不会有独立的 priority 长队列**，因为 30min+ 的视频本来就要跑 30–60 min ASR，用户对"长视频要等"有合理预期。
+
+**带宽考量**：当 Priority ASR 和 Main Worker 的 ASR 同时下载音频 + 上传 OSS 时，会短暂挤占家用上行。如果观察到上行被打满（OSS upload ReadTimeout 频率上升），可以通过环境变量临时关掉 priority ASR：
+
+```bash
+# 关掉 priority ASR worker（字幕抓取插队仍然保留）
+WORKER_PRIORITY_ASR_CONCURRENCY=0 bash start.sh
+```
+
+关掉后用户上传的 ASR 会派发到 `youtube_transcription_priority` 但**没有 worker 消费**，会在队列里堆积。所以这个关闭只是临时止血手段，正确做法是要么扩容上行带宽，要么把 priority ASR 直接合并到 main worker（改 `start.sh` 让 main worker 同时订阅这个队列）。
 
 ### 远程回调任务（Upload Link 链路）
 
