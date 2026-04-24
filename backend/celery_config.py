@@ -64,9 +64,12 @@ task_routes = {
     'fetch_all_youtube_subscriptions': {'queue': 'youtube_fetching'},  # YouTube批量订阅获取（远程 Worker，Scheduler 定时调用）
     'fetch_youtube_transcripts_batch': {'queue': 'youtube_fetching'},  # YouTube transcript 字幕拉取（远程 Worker，住宅 IP）
     'transcribe_youtube_feed_task': {'queue': 'youtube_transcription'},  # YouTube Feed ASR 转写（本地虚拟机 Worker）
-    'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription'},  # Upload YouTube Link ASR 转写（本地虚拟机 Worker）
-    # Upload YouTube Link 能力下沉：字幕拉取在本地，完成回调在远程
-    'fetch_youtube_file_transcript_task': {'queue': 'youtube_fetching'},  # Upload YouTube Link 字幕抓取（本地虚拟机 Worker）
+    # Upload Link 链路单独走 priority 队列，让用户上传不被批量 Feed 任务阻塞
+    # （HK Worker concurrency=1，批量任务实测要 30–60 min 串行处理，期间用户上传
+    # 必须能"插队"到独立 worker。详见 deployment/local_virtual_service/README.md
+    # 「上传插队队列」一节）。
+    'fetch_youtube_file_transcript_task': {'queue': 'youtube_priority'},          # Upload Link 字幕抓取
+    'transcribe_youtube_file_asr_task': {'queue': 'youtube_transcription_priority'},  # Upload Link ASR 转写
     'finalize_youtube_file_task': {'queue': 'file_processing'},  # Upload YouTube Link 完成回调（远程 Worker，触发 auto-tag/name/classify）
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},

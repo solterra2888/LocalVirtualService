@@ -451,7 +451,7 @@ def fetch_youtube_transcripts_batch(self, video_items: list):
 # =====================================================================
 
 @app.task(bind=True, name="fetch_youtube_file_transcript_task",
-          queue="youtube_fetching", max_retries=_MAX_RETRIES)
+          queue="youtube_priority", max_retries=_MAX_RETRIES)
 def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
                                         video_id: str, username: str = "guest"):
     """
@@ -547,12 +547,15 @@ def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
               msg=f"Caption unavailable ({reason}), switching to Fun-ASR...",
               url=youtube_url)
     try:
+        # 派发到 priority ASR 队列：本任务是 Upload Link 链路的下半场，
+        # 必须和上半场（fetch_youtube_file_transcript_task）一样不被批量
+        # Feed 任务挤压。priority 队列由专属 worker 消费。
         self.app.send_task(
             "transcribe_youtube_file_asr_task",
             args=(file_id, youtube_url, video_id, username, 0),
-            queue="youtube_transcription",
+            queue="youtube_transcription_priority",
         )
-        log.info("  → File ASR 任务已派发: file_id=%d video=%s", file_id, video_id)
+        log.info("  → File ASR 任务已派发到 priority 队列: file_id=%d video=%s", file_id, video_id)
     except Exception as e:
         # 派发失败 = 永久失败, 必须 signal, 否则远程 processing_stats 卡在 processing
         elapsed = round(time.time() - task_start, 2)
@@ -806,8 +809,8 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-@app.task(bind=True, name="transcribe_youtube_file_asr_task", queue="youtube_transcription",
-          max_retries=_MAX_RETRIES)
+@app.task(bind=True, name="transcribe_youtube_file_asr_task",
+          queue="youtube_transcription_priority", max_retries=_MAX_RETRIES)
 def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video_id: str,
                                      username: str = "guest",
                                      max_duration_seconds: int = 0,

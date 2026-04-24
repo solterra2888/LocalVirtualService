@@ -4306,7 +4306,9 @@ async def trigger_file_youtube_asr(
 
         username = current_user.username if hasattr(current_user, 'username') else 'guest'
 
-        # 直接派发到本地 Worker (local_virtual_service) 的 youtube_transcription 队列.
+        # 直接派发到本地 Worker 的 priority ASR 队列。
+        # 本接口是用户手动触发"重新转录"，属于交互链路，要求和 upload-youtube
+        # 走同一个 priority worker，不受批量 Feed 任务阻塞。
         # 本地版 transcribe_youtube_file_asr_task 签名:
         #   (file_id, youtube_url, video_id, username, max_duration_seconds,
         #    _skip_duration_check=False)
@@ -4316,7 +4318,7 @@ async def trigger_file_youtube_asr(
             'transcribe_youtube_file_asr_task',
             args=(file_id, youtube_url, video_id, username,
                   max(0, body.max_duration_seconds)),
-            queue='youtube_transcription',
+            queue='youtube_transcription_priority',
         )
 
         info(
