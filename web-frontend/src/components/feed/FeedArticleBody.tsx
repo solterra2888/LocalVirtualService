@@ -15,9 +15,9 @@ import dayjs from 'dayjs';
 import {
   AlignLeftOutlined,
   BulbOutlined,
-  CheckOutlined,
   CommentOutlined,
   EyeOutlined,
+  FileTextOutlined,
   LikeOutlined,
   LinkOutlined,
   MessageOutlined,
@@ -425,8 +425,11 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           style={{
             borderRadius: 10,
             padding: '12px 16px',
-            background: isDark ? 'rgba(82, 196, 26, 0.06)' : '#f6ffed',
-            border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.22)' : '#b7eb8f'}`,
+            background: isDark
+              ? 'rgba(33, 150, 243, 0.07)'
+              : themeColors.boxMuted,
+            border: `1px solid ${themeColors.cardBorder}`,
+            borderLeft: `3px solid ${themeColors.selectedBorder}`,
           }}
         >
           <div
@@ -440,7 +443,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             }}
           >
             <Space size={6} align="center">
-              <RobotOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+              <RobotOutlined style={{ color: themeColors.selectedBorder, fontSize: 14 }} />
               <Text strong style={{ color: themeColors.text, fontSize: 13 }}>
                 AI Summary
               </Text>
@@ -459,23 +462,38 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 </Tooltip>
               )}
             </Space>
-            <Tooltip
-              title={
-                tagsHasContent
-                  ? 'Re-generate AI tags + summary (costs LLM tokens)'
-                  : 'Generate AI tags + summary (costs LLM tokens)'
-              }
-            >
-              <Button
-                size="small"
-                icon={<SyncOutlined spin={retagButtonLoading} />}
-                loading={retagButtonLoading}
-                onClick={handleRetag}
-                style={{ fontSize: 12, borderRadius: 6 }}
+            <Space size={8} align="center" wrap style={{ flexShrink: 0 }}>
+              {selectedContent.channel_type === 'youtube' && selectedContent.has_transcript && (
+                <Tooltip title="Open full video transcript in a window">
+                  <Button
+                    size="small"
+                    type="default"
+                    icon={<FileTextOutlined />}
+                    onClick={openTranscriptModal}
+                    style={{ fontSize: 12, borderRadius: 6 }}
+                  >
+                    Transcript
+                  </Button>
+                </Tooltip>
+              )}
+              <Tooltip
+                title={
+                  tagsHasContent
+                    ? 'Re-generate AI tags + summary (costs LLM tokens)'
+                    : 'Generate AI tags + summary (costs LLM tokens)'
+                }
               >
-                {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
-              </Button>
-            </Tooltip>
+                <Button
+                  size="small"
+                  icon={<SyncOutlined spin={retagButtonLoading} />}
+                  loading={retagButtonLoading}
+                  onClick={handleRetag}
+                  style={{ fontSize: 12, borderRadius: 6 }}
+                >
+                  {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
+                </Button>
+              </Tooltip>
+            </Space>
           </div>
 
           {tagsHasContent ? (
@@ -620,6 +638,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           style={{
             position: 'relative',
             width: '100%',
+            marginTop: showAiTagsPanel ? 20 : 0,
             paddingTop: '56.25%',
             borderRadius: 12,
             overflow: 'hidden',
@@ -804,76 +823,54 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
 
       {selectedContent.channel_type === 'youtube' && (
         <>
-          <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
-          {selectedContent.has_transcript ? (
-            <div
-              style={{
-                borderRadius: 8,
-                padding: '10px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-                backgroundColor: isDark ? 'rgba(82, 196, 26, 0.08)' : '#f6ffed',
-                border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.25)' : '#b7eb8f'}`,
-              }}
-            >
-              <Space align="center" size={8}>
-                <CheckOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-                <Text style={{ color: themeColors.text, fontSize: 13 }}>
-                  Transcript available
-                </Text>
-              </Space>
-              <Button size="small" type="primary" ghost onClick={openTranscriptModal} style={{ fontSize: 12, borderRadius: 6 }}>
-                View transcript
-              </Button>
-            </div>
-          ) : (
-            <div
-              style={{
-                border: `1px dashed ${themeColors.cardBorder}`,
-                borderRadius: 8,
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <Space>
-                <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
-                <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                  {asrStatus === 'processing'
-                    ? `Transcribing… ${asrProgress}%`
-                    : asrStatus === 'completed'
-                    ? 'Transcription complete — please refresh'
-                    : asrStatus === 'failed'
-                    ? 'Transcription failed'
-                    : 'No transcript available'}
-                </Text>
-                {asrStatus === 'failed' && (
-                  <Tag color="red" style={{ fontSize: 11 }}>
-                    Failed
-                  </Tag>
+          {!selectedContent.has_transcript && (
+            <>
+              <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
+              <div
+                style={{
+                  border: `1px dashed ${themeColors.cardBorder}`,
+                  borderRadius: 8,
+                  padding: '12px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Space>
+                  <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                    {asrStatus === 'processing'
+                      ? `Transcribing… ${asrProgress}%`
+                      : asrStatus === 'completed'
+                      ? 'Transcription complete — please refresh'
+                      : asrStatus === 'failed'
+                      ? 'Transcription failed'
+                      : 'No transcript available'}
+                  </Text>
+                  {asrStatus === 'failed' && (
+                    <Tag color="red" style={{ fontSize: 11 }}>
+                      Failed
+                    </Tag>
+                  )}
+                </Space>
+                {asrStatus !== 'completed' && (
+                  <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={asrStatus === 'processing'}
+                      disabled={asrStatus === 'processing'}
+                      onClick={handleTriggerASR}
+                      style={{ fontSize: 12, borderRadius: 6 }}
+                    >
+                      {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
+                    </Button>
+                  </Tooltip>
                 )}
-              </Space>
-              {asrStatus !== 'completed' && (
-                <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={asrStatus === 'processing'}
-                    disabled={asrStatus === 'processing'}
-                    onClick={handleTriggerASR}
-                    style={{ fontSize: 12, borderRadius: 6 }}
-                  >
-                    {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
-                  </Button>
-                </Tooltip>
-              )}
-            </div>
+              </div>
+            </>
           )}
           <Modal
             title="Transcript"

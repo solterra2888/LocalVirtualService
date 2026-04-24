@@ -21,10 +21,10 @@ import {
   Dropdown,
   Switch,
   Tag,
+  Checkbox,
 } from 'antd';
 import {
   PlusOutlined,
-  ReloadOutlined,
   RetweetOutlined,
   MessageOutlined,
   CheckOutlined,
@@ -37,6 +37,8 @@ import {
   EyeOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
+  CheckSquareOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -104,6 +106,11 @@ const FeedReaderPageInner: React.FC = () => {
   // 🔍 过滤器：Active / Disabled
   const [subscriptionFilter, setSubscriptionFilter] = useState<'active' | 'disabled'>('active');
   const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
+
+  // ☑️ Batch mode
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelectedIds, setBatchSelectedIds] = useState<Set<number>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const statusFilteredSubscriptions = useMemo(
     () =>
@@ -587,6 +594,62 @@ const FeedReaderPageInner: React.FC = () => {
     }
   };
 
+  // ☑️ Batch handlers
+  const handleEnterBatchMode = () => {
+    setBatchMode(true);
+    setBatchSelectedIds(new Set());
+  };
+
+  const handleExitBatchMode = () => {
+    setBatchMode(false);
+    setBatchSelectedIds(new Set());
+  };
+
+  const handleToggleBatchItem = (id: number) => {
+    setBatchSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchSelectAll = () => {
+    if (batchSelectedIds.size === visibleSubscriptions.length) {
+      setBatchSelectedIds(new Set());
+    } else {
+      setBatchSelectedIds(new Set(visibleSubscriptions.map((s) => s.id)));
+    }
+  };
+
+  const handleBatchUpdateEnabled = async (enabled: boolean) => {
+    if (batchSelectedIds.size === 0) {
+      message.warning('No subscriptions selected');
+      return;
+    }
+    setBatchLoading(true);
+    try {
+      const ids = Array.from(batchSelectedIds);
+      const results = await Promise.allSettled(
+        ids.map((id) => subscriptionsAPI.updateSubscription(id, { enabled }))
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      const succeeded = ids.length - failed;
+      const actionText = enabled ? 'activated' : 'disabled';
+      if (failed === 0) {
+        message.success(`${succeeded} subscription(s) ${actionText}`);
+      } else {
+        message.warning(`${succeeded} ${actionText}, ${failed} failed`);
+      }
+      handleExitBatchMode();
+      await loadSubscriptions();
+    } catch (error) {
+      message.error('Failed to update subscriptions');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   return (
     <Layout
       className="feed-page-layout"
@@ -604,47 +667,61 @@ const FeedReaderPageInner: React.FC = () => {
           style={{
             backgroundColor: themeColors.cardBg,
             borderRight: `1px solid ${themeColors.cardBorder}`,
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           <div
             className="feed-page-layout__sider-head"
             style={{ padding: '16px 12px', borderBottom: `1px solid ${themeColors.cardBorder}` }}
           >
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            {/* 第一行：标题 + Active / Disable / Batch */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text strong style={{ color: themeColors.textSecondary, fontSize: 12 }}>
                 MY FEEDS ({visibleSubscriptions.length})
               </Text>
-              <Space size="small">
-                <Tooltip title="Add Feed">
-                  <Button
-                    type="primary"
-                    size="small"
-                    shape="circle"
-                    icon={<PlusOutlined style={{ fontSize: 12 }} />}
-                    onClick={handleAddSubscription}
-                    style={{ fontSize: 12 }}
-                  />
+              <div
+                className="feed-list-status-tabs"
+                role="group"
+                aria-label="Subscription status"
+              >
+                <Tooltip title={`Active (${subscriptions.filter((s) => s.enabled).length})`}>
+                  <button
+                    type="button"
+                    className={`feed-list-type-tab feed-list-status-tab ${subscriptionFilter === 'active' ? 'is-active' : ''}`}
+                    onClick={() => setSubscriptionFilter('active')}
+                    aria-label="Active subscriptions"
+                    aria-pressed={subscriptionFilter === 'active'}
+                  >
+                    <span className="feed-list-type-tab-icon"><PlayCircleOutlined /></span>
+                  </button>
                 </Tooltip>
-                <Tooltip title="refresh">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ReloadOutlined style={{ fontSize: 12 }} />}
-                    onClick={loadSubscriptions}
-                    loading={loading}
-                    style={{
-                      color: themeColors.textSecondary,
-                      fontSize: 12,
-                      width: 24,
-                      height: 24,
-                      minWidth: 24,
-                      padding: 0,
-                    }}
-                  />
+                <Tooltip title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}>
+                  <button
+                    type="button"
+                    className={`feed-list-type-tab feed-list-status-tab ${subscriptionFilter === 'disabled' ? 'is-active' : ''}`}
+                    onClick={() => setSubscriptionFilter('disabled')}
+                    aria-label="Disabled subscriptions"
+                    aria-pressed={subscriptionFilter === 'disabled'}
+                  >
+                    <span className="feed-list-type-tab-icon"><PauseCircleOutlined /></span>
+                  </button>
                 </Tooltip>
-              </Space>
-            </Space>
+                <Tooltip title={batchMode ? 'Exit batch mode' : 'Batch select'}>
+                  <button
+                    type="button"
+                    className={`feed-list-type-tab feed-list-status-tab ${batchMode ? 'is-active' : ''}`}
+                    onClick={batchMode ? handleExitBatchMode : handleEnterBatchMode}
+                    aria-label="Batch select"
+                    aria-pressed={batchMode}
+                  >
+                    <span className="feed-list-type-tab-icon"><CheckSquareOutlined /></span>
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
 
+            {/* 第二行：频道类型 tabs + Add Feed 按钮 */}
             <div className="feed-list-filter-row">
               <div className="feed-list-type-tabs">
                 {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
@@ -660,46 +737,17 @@ const FeedReaderPageInner: React.FC = () => {
                   </Tooltip>
                 ))}
               </div>
-              <div
-                className="feed-list-status-tabs"
-                role="group"
-                aria-label="Subscription status"
-              >
-                <Tooltip
-                  title={`Active (${subscriptions.filter((s) => s.enabled).length})`}
+              <Tooltip title="Add Feed">
+                <button
+                  type="button"
+                  className="feed-list-type-tab"
+                  onClick={handleAddSubscription}
+                  aria-label="Add Feed"
+                  style={{ color: '#2196F3' }}
                 >
-                  <button
-                    type="button"
-                    className={`feed-list-type-tab feed-list-status-tab ${
-                      subscriptionFilter === 'active' ? 'is-active' : ''
-                    }`}
-                    onClick={() => setSubscriptionFilter('active')}
-                    aria-label="Active subscriptions"
-                    aria-pressed={subscriptionFilter === 'active'}
-                  >
-                    <span className="feed-list-type-tab-icon">
-                      <PlayCircleOutlined />
-                    </span>
-                  </button>
-                </Tooltip>
-                <Tooltip
-                  title={`Disabled (${subscriptions.filter((s) => !s.enabled).length})`}
-                >
-                  <button
-                    type="button"
-                    className={`feed-list-type-tab feed-list-status-tab ${
-                      subscriptionFilter === 'disabled' ? 'is-active' : ''
-                    }`}
-                    onClick={() => setSubscriptionFilter('disabled')}
-                    aria-label="Disabled subscriptions"
-                    aria-pressed={subscriptionFilter === 'disabled'}
-                  >
-                    <span className="feed-list-type-tab-icon">
-                      <PauseCircleOutlined />
-                    </span>
-                  </button>
-                </Tooltip>
-              </div>
+                  <span className="feed-list-type-tab-icon"><PlusOutlined /></span>
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -760,6 +808,8 @@ const FeedReaderPageInner: React.FC = () => {
                     : undefined;
                 const unreadCount = subscription.unread_count ?? 0;
                 const hasUnread = unreadCount > 0;
+                const isChecked = batchSelectedIds.has(subscription.id);
+                const isSelected = selectedSubscription?.id === subscription.id;
                 return (
                 <List.Item
                   key={subscription.id}
@@ -767,41 +817,62 @@ const FeedReaderPageInner: React.FC = () => {
                     padding: '12px 16px',
                     cursor: 'pointer',
                     backgroundColor:
-                      selectedSubscription?.id === subscription.id
-                        ? themeColors.selectedItemBg
-                        : 'transparent',
-                    borderLeft:
-                      selectedSubscription?.id === subscription.id
+                      batchMode
+                        ? isChecked
+                          ? isDark ? 'rgba(33,150,243,0.15)' : 'rgba(33,150,243,0.08)'
+                          : 'transparent'
+                        : isSelected
+                          ? themeColors.selectedItemBg
+                          : 'transparent',
+                    borderLeft: batchMode
+                      ? isChecked
+                        ? '3px solid #2196F3'
+                        : '3px solid transparent'
+                      : isSelected
                         ? `3px solid ${themeColors.selectedBorder}`
                         : '3px solid transparent',
                     position: 'relative',
-                    /* 为右上角未读角标 + 更多按钮留出空间，避免与标题重叠 */
-                    paddingRight: hasUnread ? 56 : 44,
-                    // 🎨 禁用订阅的视觉效果
+                    paddingLeft: batchMode ? 12 : 16,
+                    paddingRight: batchMode ? 12 : hasUnread ? 56 : 44,
                     opacity: subscription.enabled ? 1 : 0.5,
                     filter: subscription.enabled ? 'none' : 'grayscale(30%)',
                   }}
+                  onClick={() => {
+                    if (batchMode) {
+                      handleToggleBatchItem(subscription.id);
+                    } else {
+                      handleSelectSubscription(subscription);
+                    }
+                  }}
                   onMouseEnter={(e) => {
-                    if (selectedSubscription?.id !== subscription.id) {
+                    if (!batchMode && !isSelected) {
                       e.currentTarget.style.backgroundColor = themeColors.hoverBg;
                     }
-                    // 禁用订阅悬停时稍微提亮
                     if (!subscription.enabled) {
                       e.currentTarget.style.opacity = '0.7';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (selectedSubscription?.id !== subscription.id) {
+                    if (!batchMode && !isSelected) {
                       e.currentTarget.style.backgroundColor = 'transparent';
                     }
-                    // 恢复禁用订阅的透明度
                     if (!subscription.enabled) {
                       e.currentTarget.style.opacity = '0.5';
                     }
                   }}
                 >
+                  {/* ☑️ Batch mode checkbox */}
+                  {batchMode && (
+                    <Checkbox
+                      checked={isChecked}
+                      onChange={() => handleToggleBatchItem(subscription.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginRight: 10, flexShrink: 0 }}
+                    />
+                  )}
+
                   {/* 未读数量：右上角、10px 字体，不遮挡 More 按钮 */}
-                  {hasUnread && (
+                  {!batchMode && hasUnread && (
                     <span
                       style={{
                         position: 'absolute',
@@ -821,10 +892,7 @@ const FeedReaderPageInner: React.FC = () => {
                       {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}
-                  <div
-                    onClick={() => handleSelectSubscription(subscription)}
-                    style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}
-                  >
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <List.Item.Meta
                       avatar={
                         <Avatar
@@ -878,68 +946,136 @@ const FeedReaderPageInner: React.FC = () => {
                     />
                   </div>
                   
-                  {/* 🎨 操作菜单按钮 */}
-                  <Dropdown
-                    menu={{
-                      items: [
-                        {
-                          key: 'toggle',
-                          label: subscription.enabled ? 'Disable' : 'Enable',
-                          icon: subscription.enabled ? <EyeInvisibleOutlined /> : <EyeOutlined />,
-                          onClick: () => handleToggleEnabled(subscription),
-                        },
-                        {
-                          key: 'edit',
-                          label: 'Edit',
-                          icon: <EditOutlined />,
-                          onClick: () => handleEditSubscription(subscription),
-                        },
-                        {
-                          type: 'divider',
-                        },
-                        {
-                          key: 'delete',
-                          label: 'Delete',
-                          icon: <DeleteOutlined />,
-                          danger: true,
-                          onClick: () => {
-                            modal.confirm({
-                              title: 'Delete Subscription',
-                              content: `Are you sure you want to delete @${subscription.channel_identifier}?`,
-                              okText: 'Delete',
-                              okType: 'danger',
-                              cancelText: 'Cancel',
-                              centered: true,
-                              styles: getModalStyles(themeMode),
-                              onOk: () => handleDeleteSubscription(subscription),
-                            });
+                  {/* 🎨 操作菜单按钮（仅非 batch 模式显示）*/}
+                  {!batchMode && (
+                    <Dropdown
+                      menu={{
+                        items: [
+                          {
+                            key: 'toggle',
+                            label: subscription.enabled ? 'Disable' : 'Enable',
+                            icon: subscription.enabled ? <EyeInvisibleOutlined /> : <EyeOutlined />,
+                            onClick: () => handleToggleEnabled(subscription),
                           },
-                        },
-                      ],
-                    }}
-                    trigger={['click']}
-                    placement="bottomRight"
-                  >
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<MoreOutlined />}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        position: 'absolute',
-                        right: 8,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        color: themeColors.textSecondary,
+                          {
+                            key: 'edit',
+                            label: 'Edit',
+                            icon: <EditOutlined />,
+                            onClick: () => handleEditSubscription(subscription),
+                          },
+                          {
+                            type: 'divider',
+                          },
+                          {
+                            key: 'delete',
+                            label: 'Delete',
+                            icon: <DeleteOutlined />,
+                            danger: true,
+                            onClick: () => {
+                              modal.confirm({
+                                title: 'Delete Subscription',
+                                content: `Are you sure you want to delete @${subscription.channel_identifier}?`,
+                                okText: 'Delete',
+                                okType: 'danger',
+                                cancelText: 'Cancel',
+                                centered: true,
+                                styles: getModalStyles(themeMode),
+                                onOk: () => handleDeleteSubscription(subscription),
+                              });
+                            },
+                          },
+                        ],
                       }}
-                    />
-                  </Dropdown>
+                      trigger={['click']}
+                      placement="bottomRight"
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<MoreOutlined />}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          color: themeColors.textSecondary,
+                        }}
+                      />
+                    </Dropdown>
+                  )}
                 </List.Item>
                 );
                 }}
             />
           )}
           </div>
+
+          {/* ☑️ Batch action toolbar */}
+          {batchMode && (
+            <div
+              style={{
+                borderTop: `1px solid ${themeColors.cardBorder}`,
+                backgroundColor: isDark ? 'rgba(33,150,243,0.08)' : 'rgba(33,150,243,0.05)',
+                padding: '10px 12px',
+                flexShrink: 0,
+              }}
+            >
+              {/* Select-all row */}
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                <Checkbox
+                  indeterminate={
+                    batchSelectedIds.size > 0 &&
+                    batchSelectedIds.size < visibleSubscriptions.length
+                  }
+                  checked={
+                    visibleSubscriptions.length > 0 &&
+                    batchSelectedIds.size === visibleSubscriptions.length
+                  }
+                  onChange={handleBatchSelectAll}
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                  {batchSelectedIds.size > 0
+                    ? `${batchSelectedIds.size} / ${visibleSubscriptions.length} selected`
+                    : 'Select all'}
+                </Text>
+              </div>
+              {/* Action buttons */}
+              <Space size={6} style={{ width: '100%' }}>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  loading={batchLoading}
+                  disabled={batchSelectedIds.size === 0}
+                  onClick={() => handleBatchUpdateEnabled(true)}
+                  style={{ fontSize: 11, height: 26 }}
+                >
+                  Activate
+                </Button>
+                <Button
+                  size="small"
+                  icon={<PauseCircleOutlined />}
+                  loading={batchLoading}
+                  disabled={batchSelectedIds.size === 0}
+                  onClick={() => handleBatchUpdateEnabled(false)}
+                  style={{ fontSize: 11, height: 26, color: themeColors.textSecondary }}
+                >
+                  Disable
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<CloseOutlined />}
+                  onClick={handleExitBatchMode}
+                  style={{ fontSize: 11, height: 26, color: themeColors.textSecondary, marginLeft: 'auto' }}
+                >
+                  Cancel
+                </Button>
+              </Space>
+            </div>
+          )}
         </Sider>
 
         {/* 中间内容列表 */}
