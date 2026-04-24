@@ -1135,6 +1135,36 @@ class ContentStore:
                 (transcript, Json(transcript_data), content_db_id),
             )
 
+        # ── Feeds 自动打标: 通知远程主站"字幕已落库, 可以触发 auto-feed-tagging" ──
+        # 与 signal_upload_file_ready 的跨集群回调模式一致.
+        # 远程 backend/tasks/subscription_tasks.py::finalize_youtube_feed_task 消费.
+        # 失败静默 — 打标是增值能力, 不应阻断字幕入库主流程.
+        self._signal_feed_transcript_ready(content_db_id)
+
+    def _signal_feed_transcript_ready(self, content_db_id: int) -> None:
+        """
+        通知远程 finalize_youtube_feed_task: YouTube Feed 字幕已写入.
+
+        主 repo 对标任务: backend/tasks/subscription_tasks.py::finalize_youtube_feed_task
+        设计文档:        docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §3.3 §6.5
+        """
+        try:
+            from .celery_app import app
+            app.send_task(
+                "finalize_youtube_feed_task",
+                args=(content_db_id,),
+                queue="file_processing",
+            )
+            log.info(
+                "signal_feed_transcript_ready → finalize_youtube_feed_task: content=%d",
+                content_db_id,
+            )
+        except Exception as e:
+            log.warning(
+                "signal_feed_transcript_ready 派发失败 (不阻断主流程): content=%d error=%s",
+                content_db_id, e,
+            )
+
     def update_file_asr(self, file_id: int, full_text: str,
                         asr_structured: Optional[Dict[str, Any]], status: str = "completed") -> None:
         with self.db.connection() as conn:
