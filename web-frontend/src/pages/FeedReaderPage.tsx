@@ -20,6 +20,7 @@ import {
   Spin,
   Dropdown,
   Switch,
+  Tag,
 } from 'antd';
 import {
   PlusOutlined,
@@ -1162,6 +1163,61 @@ const FeedReaderPageInner: React.FC = () => {
                               </Tooltip>
                             )}
                           </Space>
+
+                          {/* Phase 3: AI 标签 chips (仅有 tags 且非"未分类"时渲染, 节省视觉空间) */}
+                          {content.tags
+                            && content.tags.sector !== '未分类'
+                            && content.tags.sector_en !== 'Uncategorized'
+                            && (content.tags.tickers?.length || content.tags.sector) && (
+                              <Space size={[4, 4]} wrap style={{ marginTop: 4 }}>
+                                {content.tags.sector && (
+                                  <Tag
+                                    color="blue"
+                                    style={{
+                                      fontSize: 10,
+                                      lineHeight: '14px',
+                                      padding: '0 5px',
+                                      margin: 0,
+                                    }}
+                                  >
+                                    {content.tags.sector}
+                                  </Tag>
+                                )}
+                                {content.tags.tickers && content.tags.tickers.length > 0 && (
+                                  <>
+                                    {content.tags.tickers.slice(0, 2).map((t) => (
+                                      <Tag
+                                        key={t}
+                                        color="magenta"
+                                        style={{
+                                          fontSize: 10,
+                                          lineHeight: '14px',
+                                          padding: '0 5px',
+                                          margin: 0,
+                                        }}
+                                      >
+                                        {t}
+                                      </Tag>
+                                    ))}
+                                    {content.tags.tickers.length > 2 && (
+                                      <Tooltip title={content.tags.tickers.slice(2).join(', ')}>
+                                        <Tag
+                                          style={{
+                                            fontSize: 10,
+                                            lineHeight: '14px',
+                                            padding: '0 5px',
+                                            margin: 0,
+                                            cursor: 'default',
+                                          }}
+                                        >
+                                          +{content.tags.tickers.length - 2}
+                                        </Tag>
+                                      </Tooltip>
+                                    )}
+                                  </>
+                                )}
+                              </Space>
+                            )}
                         </div>
                       </List.Item>
                     );
@@ -1227,6 +1283,14 @@ const FeedReaderPageInner: React.FC = () => {
                   );
                   setContents((prev) =>
                     prev.map((c) => (c.id === contentId ? { ...c, has_transcript: true } : c))
+                  );
+                }}
+                onTagsUpdated={(contentId, tags) => {
+                  setSelectedContent((prev) =>
+                    prev && prev.id === contentId ? { ...prev, tags } : prev
+                  );
+                  setContents((prev) =>
+                    prev.map((c) => (c.id === contentId ? { ...c, tags } : c))
                   );
                 }}
               />

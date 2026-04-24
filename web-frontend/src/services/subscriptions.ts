@@ -76,6 +76,37 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
+/**
+ * Feeds 单条内容的 AI 自动打标 + 摘要 (Phase 3).
+ *
+ * 由 /api/subscriptions/{id}/contents 返回时作为 SubscriptionContent.tags 字段携带,
+ * 未打标 → null. 手动获取单条详情走 /api/subscriptions/contents/{id}/tags.
+ *
+ * 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
+ */
+export interface SubscriptionContentTagsLite {
+  sector: string;
+  sector_en?: string;
+  industry: string;
+  industry_en?: string;
+  tickers: string[];
+  concepts: string[];
+  summary?: string | null;
+  confidence?: number | null;
+  tagged_at?: string | null;
+}
+
+export interface SubscriptionContentTagsFull extends SubscriptionContentTagsLite {
+  id: number;
+  subscription_content_id: number;
+  reasoning?: string | null;
+  channel_type: string;
+  additional_tags?: Record<string, any>;
+  tagged_by?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface SubscriptionContent {
   id: number;
   channel_type: string;
@@ -112,6 +143,25 @@ export interface SubscriptionContent {
   has_transcript?: boolean;
   // RSS/News 特定字段
   categories?: string[];
+  // Phase 3 新增: AI 自动打标 + 摘要 (未打标为 null, 避免前端把 undefined 当已打标处理)
+  tags?: SubscriptionContentTagsLite | null;
+}
+
+export interface FeedTaggingTaskStatus {
+  task_id: string;
+  status: string;
+  message?: string;
+  content_id?: number;
+}
+
+export interface FeedDistinctTickerItem {
+  ticker: string;
+  content_count: number;
+}
+
+export interface FeedDistinctConceptItem {
+  concept: string;
+  content_count: number;
 }
 
 export interface SubscriptionContentsResponse {
@@ -404,6 +454,173 @@ export const subscriptionsAPI = {
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to mark as read',
+      };
+    }
+  },
+
+  // ─── Feeds 自动打标 + 摘要 (Phase 3) ──────────────────────────────
+  // 服务端: backend/api/subscription_content_tags.py
+  // 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §7 §8
+
+  /**
+   * 获取单条 feed content 的完整 AI 标签 (含 reasoning / additional_tags 等).
+   *
+   * 注意: 列表接口 `/subscriptions/{id}/contents` 返回的 tags 字段是
+   * SubscriptionContentTagsLite (精简版), 不需要独立 fetch. 只有详情视图
+   * 需要 reasoning / ai_metadata 时才调这个.
+   */
+  async getContentTags(
+    contentId: number
+  ): Promise<ApiResponse<SubscriptionContentTagsFull>> {
+    try {
+      const data = await api.get<SubscriptionContentTagsFull>(
+        `/subscriptions/contents/${contentId}/tags`
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to load content tags',
+      };
+    }
+  },
+
+  /**
+   * 异步重新为单条 feed content 打标 + 生成摘要.
+   * 默认 force=true (手动触发即重跑), 返回 task_id 供前端轮询进度.
+   */
+  async retagContent(
+    contentId: number,
+    options?: { force?: boolean; additionalContext?: string }
+  ): Promise<ApiResponse<FeedTaggingTaskStatus>> {
+    try {
+      const data = await api.post<FeedTaggingTaskStatus>(
+        `/subscriptions/contents/${contentId}/retag`,
+        {
+          force: options?.force ?? true,
+          additional_context: options?.additionalContext ?? '',
+        }
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to re-tag content',
+      };
+    }
+  },
+
+  /**
+   * 手动编辑 feed content 的 AI 标签 (sector/industry/tickers/concepts/summary/etc).
+   */
+  async updateContentTags(
+    contentId: number,
+    updates: Partial<SubscriptionContentTagsLite & {
+      reasoning?: string;
+      additional_tags?: Record<string, any>;
+    }>
+  ): Promise<ApiResponse<SubscriptionContentTagsFull>> {
+    try {
+      const data = await api.put<SubscriptionContentTagsFull>(
+        `/subscriptions/contents/${contentId}/tags`,
+        updates
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to update content tags',
+      };
+    }
+  },
+
+  /**
+   * 删除某条内容的 AI 标签 (下次 retag 时会重新生成).
+   */
+  async deleteContentTags(contentId: number): Promise<ApiResponse> {
+    try {
+      const data = await api.delete(`/subscriptions/contents/${contentId}/tags`);
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to delete content tags',
+      };
+    }
+  },
+
+  /**
+   * 批量重新打标 (派发一串 tag_feed_content_task, countdown 梯度派发).
+   */
+  async batchRetagContents(
+    contentIds: number[],
+    force: boolean = true
+  ): Promise<
+    ApiResponse<{ task_id: string; status: string; total: number; message?: string }>
+  > {
+    try {
+      const data = await api.post<{
+        task_id: string;
+        status: string;
+        total: number;
+        message?: string;
+      }>('/subscriptions/contents/batch-retag', {
+        content_ids: contentIds,
+        force,
+      });
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to batch re-tag',
+      };
+    }
+  },
+
+  /**
+   * 获取 feed 标签里所有去重 ticker (前端筛选自动补全用).
+   */
+  async getDistinctFeedTickers(params?: {
+    search?: string;
+    channelType?: string;
+  }): Promise<ApiResponse<FeedDistinctTickerItem[]>> {
+    try {
+      const qs: Record<string, string> = {};
+      if (params?.search) qs.search = params.search;
+      if (params?.channelType) qs.channel_type = params.channelType;
+      const data = await api.get<FeedDistinctTickerItem[]>(
+        '/subscriptions/contents/tags/distinct-tickers',
+        qs
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to load distinct tickers',
+      };
+    }
+  },
+
+  /**
+   * 获取 feed 标签里所有去重 concept.
+   */
+  async getDistinctFeedConcepts(params?: {
+    search?: string;
+    channelType?: string;
+  }): Promise<ApiResponse<FeedDistinctConceptItem[]>> {
+    try {
+      const qs: Record<string, string> = {};
+      if (params?.search) qs.search = params.search;
+      if (params?.channelType) qs.channel_type = params.channelType;
+      const data = await api.get<FeedDistinctConceptItem[]>(
+        '/subscriptions/contents/tags/distinct-concepts',
+        qs
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to load distinct concepts',
       };
     }
   },

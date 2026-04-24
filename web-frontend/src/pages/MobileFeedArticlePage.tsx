@@ -125,6 +125,10 @@ const MobileFeedArticlePage: React.FC = () => {
               setContents((prev) => prev.map((c) => (c.id === id ? { ...c, has_transcript: true } : c)));
               loadSubscriptions();
             }}
+            onTagsUpdated={(id, tags) => {
+              setContent((prev) => (prev && prev.id === id ? { ...prev, tags } : prev));
+              setContents((prev) => prev.map((c) => (c.id === id ? { ...c, tags } : c)));
+            }}
           />
         ) : (
           <Empty description="No content" />

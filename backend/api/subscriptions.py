@@ -983,55 +983,61 @@ async def get_subscription_contents(
         
         # 构建查询条件：按 author_identifier 而不是 subscription_id
         # 这样同一作者的所有内容对所有订阅者可见
+        # 注意: 引入 LEFT JOIN 后所有列必须加 sc. 前缀以避免歧义
         where_conditions = [
-            "channel_type = %s",
-            "author_identifier = %s",
-            "%s = ANY(user_ids)"
+            "sc.channel_type = %s",
+            "sc.author_identifier = %s",
+            "%s = ANY(sc.user_ids)"
         ]
         params = [channel_type, channel_identifier, user_id]
         
         if only_unread:
             where_conditions.append(
-                f"(read_status->>'{user_id}' IS NULL OR (read_status->>'{user_id}')::jsonb->>'is_read' = 'false')"
+                f"(sc.read_status->>'{user_id}' IS NULL OR (sc.read_status->>'{user_id}')::jsonb->>'is_read' = 'false')"
             )
         
         where_clause = " AND ".join(where_conditions)
         
-        # 查询内容
+        # 查询内容 (LEFT JOIN subscription_content_tags 带出 AI 标签 + 摘要,
+        # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §7)
         query = f"""
             SELECT 
-                id,
-                channel_type,
-                content_id,
-                title,
-                content,
-                author_name,
-                author_identifier,
-                url,
-                media_urls,
-                published_at,
-                fetched_at,
-                engagement_count,
-                view_count,
-                metadata,
-                read_status,
-                is_retweet,
-                retweeted_author,
-                retweeted_content,
-                retweeted_url,
-                is_quote,
-                quoted_author,
-                quoted_content,
-                quoted_url,
-                is_reply,
-                in_reply_to_id,
-                in_reply_to_username,
-                in_reply_to_user_id,
-                heat_level,
-                ((transcript IS NOT NULL AND transcript != '') OR transcript_data IS NOT NULL) AS has_transcript
-            FROM subscription_content
+                sc.id,
+                sc.channel_type,
+                sc.content_id,
+                sc.title,
+                sc.content,
+                sc.author_name,
+                sc.author_identifier,
+                sc.url,
+                sc.media_urls,
+                sc.published_at,
+                sc.fetched_at,
+                sc.engagement_count,
+                sc.view_count,
+                sc.metadata,
+                sc.read_status,
+                sc.is_retweet,
+                sc.retweeted_author,
+                sc.retweeted_content,
+                sc.retweeted_url,
+                sc.is_quote,
+                sc.quoted_author,
+                sc.quoted_content,
+                sc.quoted_url,
+                sc.is_reply,
+                sc.in_reply_to_id,
+                sc.in_reply_to_username,
+                sc.in_reply_to_user_id,
+                sc.heat_level,
+                ((sc.transcript IS NOT NULL AND sc.transcript != '') OR sc.transcript_data IS NOT NULL) AS has_transcript,
+                sct.sector, sct.sector_en, sct.industry, sct.industry_en,
+                sct.ticker, sct.concepts, sct.summary, sct.confidence,
+                sct.tagged_at
+            FROM subscription_content sc
+            LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
             WHERE {where_clause}
-            ORDER BY published_at DESC
+            ORDER BY sc.published_at DESC
             LIMIT %s OFFSET %s
         """
         
@@ -1039,10 +1045,10 @@ async def get_subscription_contents(
         cursor.execute(query, params)
         rows = cursor.fetchall()
         
-        # 获取总数
+        # 获取总数 (count 查询用同样的别名, 保持 where_clause 一致)
         count_query = f"""
             SELECT COUNT(*)
-            FROM subscription_content
+            FROM subscription_content sc
             WHERE {where_clause}
         """
         cursor.execute(count_query, params[:-2])  # 不包括 limit 和 offset
@@ -1052,6 +1058,27 @@ async def get_subscription_contents(
         contents = []
         for row in rows:
             user_read_status = row[14].get(str(user_id), {}) if row[14] else {}
+            
+            # AI 标签 (LEFT JOIN 结果, 未打标 → None)
+            # 列序: [29]sector [30]sector_en [31]industry [32]industry_en
+            #       [33]ticker [34]concepts [35]summary [36]confidence [37]tagged_at
+            tags_payload = None
+            if row[29] is not None:
+                tickers_raw = row[33]
+                tickers = tickers_raw if isinstance(tickers_raw, list) else (tickers_raw or [])
+                concepts_raw = row[34]
+                concepts = concepts_raw if isinstance(concepts_raw, list) else (concepts_raw or [])
+                tags_payload = {
+                    'sector': row[29],
+                    'sector_en': row[30] or '',
+                    'industry': row[31],
+                    'industry_en': row[32] or '',
+                    'tickers': tickers,
+                    'concepts': concepts,
+                    'summary': row[35],
+                    'confidence': row[36],
+                    'tagged_at': row[37].isoformat() if row[37] else None,
+                }
             
             contents.append({
                 'id': row[0],
@@ -1088,6 +1115,8 @@ async def get_subscription_contents(
                 'heat_level': row[27],
                 # YouTube: 仅返回是否有 transcript（不返回正文，减轻加载）
                 'has_transcript': bool(row[28]) if row[28] is not None else False,
+                # Phase 3 新增: Feeds 自动打标 + 摘要 (LEFT JOIN 结果, 未打标为 null)
+                'tags': tags_payload,
             })
         
         cursor.close()

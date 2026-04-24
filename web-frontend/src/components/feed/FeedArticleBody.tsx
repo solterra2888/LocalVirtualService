@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   App,
   Avatar,
@@ -14,6 +14,7 @@ import {
 import dayjs from 'dayjs';
 import {
   AlignLeftOutlined,
+  BulbOutlined,
   CheckOutlined,
   CommentOutlined,
   EyeOutlined,
@@ -22,16 +23,22 @@ import {
   MessageOutlined,
   ReadOutlined,
   RetweetOutlined,
+  RobotOutlined,
+  SyncOutlined,
   TwitterOutlined,
   YoutubeOutlined,
 } from '@ant-design/icons';
+import { api } from '../../services/api';
 import { getNewsSourceColor } from './feedChannelConfig';
 import { useFileProcessing } from '../../contexts/FileProcessingContext';
 import FeedTweetContent from './FeedTweetContent';
 import type { FeedThemeColors } from './feedTheme';
-import type { SubscriptionContent } from '../../services/subscriptions';
+import type {
+  SubscriptionContent,
+  SubscriptionContentTagsLite,
+} from '../../services/subscriptions';
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
-import { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
+import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
 
 const { Text } = Typography;
 
@@ -45,6 +52,26 @@ export interface FeedArticleBodyProps {
   themeMode: 'light' | 'dark';
   /** When set, syncs transcript flag into parent (e.g. PC list selection) */
   onTranscriptReady?: (contentId: number) => void;
+  /**
+   * Phase 3: when AI tags are (re-)generated, parent can sync the lite payload
+   * into its list state so the tag chips in the list column refresh without
+   * a full reload.
+   */
+  onTagsUpdated?: (contentId: number, tags: SubscriptionContentTagsLite) => void;
+}
+
+/** Channels that participate in auto-tagging (see FEEDS_AUTO_TAGGING_PLAN.md §1). */
+const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube']);
+
+interface CeleryTaskStatusResponse {
+  task_id: string;
+  state: string;
+  ready: boolean;
+  successful?: boolean | null;
+  failed?: boolean | null;
+  info?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
 }
 
 /**
@@ -56,6 +83,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   isDark,
   themeMode,
   onTranscriptReady,
+  onTagsUpdated,
 }) => {
   const { message } = App.useApp();
   const tweetContainerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +93,19 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const [asrTaskId, setAsrTaskId] = useState<string | null>(null);
   const [asrProgress, setAsrProgress] = useState(0);
   const [asrStatus, setAsrStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
+
+  // Phase 3: AI 自动打标 + 摘要 (LEFT JOIN 在列表接口已返回 tags; 这里的 state
+  // 只是 retag 完成后本地覆盖, 避免等父组件 reload)
+  const [localTags, setLocalTags] = useState<SubscriptionContentTagsLite | null>(null);
+  const [retagStatus, setRetagStatus] =
+    useState<'idle' | 'dispatching' | 'polling' | 'completed' | 'failed'>('idle');
+  const retagPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRetagPoll = useCallback(() => {
+    if (retagPollTimerRef.current) {
+      clearTimeout(retagPollTimerRef.current);
+      retagPollTimerRef.current = null;
+    }
+  }, []);
 
   const youtubeDescOuterRef = useRef<HTMLDivElement>(null);
   const youtubeDescInnerRef = useRef<HTMLDivElement>(null);
@@ -238,11 +279,111 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     setAsrStatus('idle');
     setAsrProgress(0);
     setAsrTaskId(null);
-  }, [selectedContent?.id]);
+    // 切换内容时清理 AI 打标本地状态 (使用父 selectedContent.tags 重新渲染)
+    setLocalTags(null);
+    setRetagStatus('idle');
+    clearRetagPoll();
+  }, [selectedContent?.id, clearRetagPoll]);
+
+  // 组件卸载时清理轮询定时器, 防止 setState on unmounted.
+  useEffect(() => {
+    return () => {
+      clearRetagPoll();
+    };
+  }, [clearRetagPoll]);
+
+  const displayTags = localTags ?? selectedContent?.tags ?? null;
+
+  /** Poll Celery task status after dispatch; on success, fetch full tags row. */
+  const pollRetagStatus = useCallback(
+    (taskId: string, contentId: number, attempt: number) => {
+      const MAX_ATTEMPTS = 30; // ~60s total (2s each)
+      if (attempt >= MAX_ATTEMPTS) {
+        setRetagStatus('failed');
+        message.error('Re-tagging timed out — check logs or retry');
+        return;
+      }
+      retagPollTimerRef.current = setTimeout(async () => {
+        try {
+          const status = await api.get<CeleryTaskStatusResponse>(
+            `/subscriptions/tasks/${taskId}/status`
+          );
+          if (status.ready && status.successful) {
+            // Refresh the lite tags payload for immediate UI feedback
+            const tagsRes = await subscriptionsAPI.getContentTags(contentId);
+            if (tagsRes.success && tagsRes.data) {
+              const lite: SubscriptionContentTagsLite = {
+                sector: tagsRes.data.sector,
+                sector_en: tagsRes.data.sector_en,
+                industry: tagsRes.data.industry,
+                industry_en: tagsRes.data.industry_en,
+                tickers: tagsRes.data.tickers || [],
+                concepts: tagsRes.data.concepts || [],
+                summary: tagsRes.data.summary,
+                confidence: tagsRes.data.confidence,
+                tagged_at: tagsRes.data.tagged_at,
+              };
+              setLocalTags(lite);
+              onTagsUpdated?.(contentId, lite);
+              setRetagStatus('completed');
+              message.success('AI 标签已更新');
+            } else {
+              setRetagStatus('failed');
+              message.error(tagsRes.error || 'Failed to refresh tags');
+            }
+            return;
+          }
+          if (status.ready && status.failed) {
+            setRetagStatus('failed');
+            const err = status.error || 'Unknown error';
+            message.error(`Re-tagging failed: ${err}`);
+            return;
+          }
+          pollRetagStatus(taskId, contentId, attempt + 1);
+        } catch (e: any) {
+          setRetagStatus('failed');
+          message.error(e?.response?.data?.detail || 'Failed to poll retag status');
+        }
+      }, 2000);
+    },
+    [message, onTagsUpdated]
+  );
+
+  const handleRetag = useCallback(async () => {
+    if (!selectedContent || retagStatus === 'dispatching' || retagStatus === 'polling') {
+      return;
+    }
+    const contentId = selectedContent.id;
+    setRetagStatus('dispatching');
+    try {
+      const res = await subscriptionsAPI.retagContent(contentId, { force: true });
+      if (!res.success || !res.data?.task_id) {
+        setRetagStatus('failed');
+        message.error(res.error || 'Failed to dispatch re-tagging');
+        return;
+      }
+      message.info('Re-tagging dispatched, polling status...');
+      setRetagStatus('polling');
+      pollRetagStatus(res.data.task_id, contentId, 0);
+    } catch (e: any) {
+      setRetagStatus('failed');
+      message.error(e?.response?.data?.detail || 'Failed to dispatch re-tagging');
+    }
+  }, [selectedContent, retagStatus, message, pollRetagStatus]);
 
   if (!selectedContent) {
     return null;
   }
+
+  const channelType = selectedContent.channel_type;
+  const showAiTagsPanel = AUTO_TAG_CHANNELS.has(channelType);
+  const tagsHasContent = !!displayTags;
+  const confidence = displayTags?.confidence ?? null;
+  const isLowConfidence = confidence !== null && confidence < 0.5;
+  const isUncategorized =
+    displayTags?.sector === '未分类' || displayTags?.sector_en === 'Uncategorized';
+  const retagButtonLoading =
+    retagStatus === 'dispatching' || retagStatus === 'polling';
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -277,6 +418,136 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           </div>
         </Space>
       </div>
+
+      {/* ── Phase 3: AI 摘要 + 标签 (仅 twitter/youtube, News 另有独立分析管线) ── */}
+      {showAiTagsPanel && (
+        <div
+          style={{
+            borderRadius: 10,
+            padding: '12px 16px',
+            background: isDark ? 'rgba(82, 196, 26, 0.06)' : '#f6ffed',
+            border: `1px solid ${isDark ? 'rgba(82, 196, 26, 0.22)' : '#b7eb8f'}`,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+              marginBottom: tagsHasContent ? 8 : 0,
+            }}
+          >
+            <Space size={6} align="center">
+              <RobotOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+              <Text strong style={{ color: themeColors.text, fontSize: 13 }}>
+                AI Summary
+              </Text>
+              {displayTags?.tagged_at && (
+                <Tooltip title={dayjs(displayTags.tagged_at).format('YYYY-MM-DD HH:mm:ss')}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    · {dayjs(displayTags.tagged_at).fromNow()}
+                  </Text>
+                </Tooltip>
+              )}
+              {isLowConfidence && (
+                <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
+                  <Tag color="warning" style={{ fontSize: 10, lineHeight: '14px', padding: '0 5px', margin: 0 }}>
+                    low conf.
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
+            <Tooltip
+              title={
+                tagsHasContent
+                  ? 'Re-generate AI tags + summary (costs LLM tokens)'
+                  : 'Generate AI tags + summary (costs LLM tokens)'
+              }
+            >
+              <Button
+                size="small"
+                icon={<SyncOutlined spin={retagButtonLoading} />}
+                loading={retagButtonLoading}
+                onClick={handleRetag}
+                style={{ fontSize: 12, borderRadius: 6 }}
+              >
+                {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
+              </Button>
+            </Tooltip>
+          </div>
+
+          {tagsHasContent ? (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {displayTags?.summary && (
+                <Text
+                  style={{
+                    color: themeColors.text,
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                    display: 'block',
+                  }}
+                >
+                  {displayTags.summary}
+                </Text>
+              )}
+
+              {/* 行业 / 子行业 badges (未分类样式灰化) */}
+              {!isUncategorized && displayTags && (
+                <Space size={[4, 4]} wrap>
+                  <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+                    {displayTags.sector}
+                    {displayTags.sector_en ? ` / ${displayTags.sector_en}` : ''}
+                  </Tag>
+                  {displayTags.industry && displayTags.industry !== displayTags.sector && (
+                    <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>
+                      {displayTags.industry}
+                      {displayTags.industry_en ? ` / ${displayTags.industry_en}` : ''}
+                    </Tag>
+                  )}
+                </Space>
+              )}
+              {isUncategorized && (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  未分类 (内容不聚焦任何具体行业)
+                </Text>
+              )}
+
+              {/* Tickers (复用 ReportTickerTags 组件) */}
+              {displayTags && displayTags.tickers && displayTags.tickers.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>Tickers:</Text>
+                  <ReportTickerTags
+                    tickers={displayTags.tickers}
+                    tagColor="magenta"
+                    tagStyle={PC_INFO_TAGS_TAG_STYLE}
+                    maxVisible={6}
+                  />
+                </div>
+              )}
+
+              {/* Concepts (chips) */}
+              {displayTags && displayTags.concepts && displayTags.concepts.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                    <BulbOutlined /> Concepts:
+                  </Text>
+                  {displayTags.concepts.map((c) => (
+                    <Tag key={c} style={{ fontSize: 11, margin: 0 }}>{c}</Tag>
+                  ))}
+                </div>
+              )}
+            </Space>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {retagButtonLoading
+                ? 'AI is analyzing this content...'
+                : '暂无 AI 标签 — 点击 "Tag with AI" 生成标签与摘要'}
+            </Text>
+          )}
+        </div>
+      )}
 
       {selectedContent.channel_type === 'news' && selectedContent.title && (
         <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block', marginTop: 8 }}>

@@ -1,0 +1,74 @@
+# -*- coding: utf-8 -*-
+"""
+Feeds 内容标签 (subscription_content_tags) 相关 Pydantic Schema
+
+对标 backend/schemas/file_tags.py, 字段对齐 + 额外 summary 字段.
+详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
+"""
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class SubscriptionContentTagsUpdate(BaseModel):
+    """手动编辑 subscription_content_tags 的请求体 (所有字段可选)."""
+
+    sector: Optional[str] = Field(None, description="行业分类 (中文)")
+    sector_en: Optional[str] = Field(None, description="行业分类 (英文, GICS)")
+    industry: Optional[str] = Field(None, description="子行业分类 (中文)")
+    industry_en: Optional[str] = Field(None, description="子行业分类 (英文, GICS)")
+    tickers: Optional[List[str]] = Field(None, description="股票代码列表")
+    concepts: Optional[List[str]] = Field(None, description="投资概念列表")
+    confidence: Optional[float] = Field(None, ge=0, le=1, description="置信度 (0-1)")
+    reasoning: Optional[str] = Field(None, description="推理说明")
+    summary: Optional[str] = Field(None, description="50-200 字短摘要")
+    additional_tags: Optional[Dict[str, Any]] = Field(None, description="扩展标签 (merge 写入)")
+
+
+class SubscriptionContentTagsResponse(BaseModel):
+    """单条 subscription_content_tags 响应体."""
+
+    id: int
+    subscription_content_id: int
+    sector: str
+    sector_en: Optional[str] = None
+    industry: str
+    industry_en: Optional[str] = None
+    tickers: List[str] = Field(default_factory=list)
+    concepts: List[str] = Field(default_factory=list)
+    additional_tags: Dict[str, Any] = Field(default_factory=dict)
+    confidence: Optional[float] = None
+    reasoning: Optional[str] = None
+    summary: Optional[str] = None
+    channel_type: str
+    tagged_by: Optional[int] = None
+    tagged_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RetagFeedRequest(BaseModel):
+    """重新打标单条 feed content."""
+
+    force: bool = Field(default=True, description="是否强制重跑 (默认 True: 手动触发即重跑)")
+    additional_context: Optional[str] = Field(default="", description="额外上下文")
+
+
+class BatchRetagFeedRequest(BaseModel):
+    """批量重新打标."""
+
+    content_ids: List[int] = Field(..., description="subscription_content.id 列表")
+    force: bool = Field(default=True, description="是否强制重跑")
+
+
+class FeedTaggingTaskStatus(BaseModel):
+    """派发 tag_feed_content_task 后返回的任务状态载体."""
+
+    task_id: str
+    status: str = "pending"
+    message: Optional[str] = None
+    content_id: Optional[int] = None
