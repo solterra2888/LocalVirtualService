@@ -377,6 +377,48 @@ Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `Co
 - **完全独立** — 不依赖 `backend/` 目录，可单独复制部署
 - **零冗余** — 仅包含 YouTube/ASR 相关代码，不加载其他 40+ 任务
 - **任务名兼容** — 任务名称与主项目一致，服务器 dispatch 后本 Worker 直接消费
+- **共享数据库时区契约** — 见下方 [时区契约](#时区契约-必读)，本 Worker 直写远程 PostgreSQL，必须遵守与主项目一致的 UTC 落库约定
+
+## 时区契约（必读）
+
+> ⚠️ 本节是历史 BUG 的总结，**改动 `worker/db.py` 或 `worker/services.py` 任何与时间相关的逻辑前请先阅读**。
+
+### 部署事实
+
+- 远程主服务器、家用虚拟机、共享 PostgreSQL 实例 **全部部署在 HK (UTC+8)**。
+- PostgreSQL 实例的服务器默认 `TimeZone = 'Asia/Shanghai'`。
+- `subscription_content.fetched_at` / `published_at` 等列均为 `timestamp WITHOUT time zone`（裸时间戳，不含时区元数据）。
+
+### 全系统统一约定（与 `backend/utils/datetime_utils.py` 对齐）
+
+| 层 | 约定 |
+|----|------|
+| **数据库列里的数值** | 一律视为 **UTC 时刻** |
+| **psycopg2 连接 session** | 强制 `SET TimeZone='UTC'` |
+| **Python 写入** | 优先 aware UTC `datetime`；naive datetime 视为 HK 本地 |
+| **前端读取** | 把 naive ISO 字符串当作 UTC 解析，再用 `dayjs.tz` 转用户时区 |
+
+### 本 Worker 的双重保险
+
+1. **连接层**：`worker/db.py` 的 `psycopg2.connect()` 必须传 `options='-c TimeZone=UTC'`，否则 `CURRENT_TIMESTAMP::timestamp` 会落入 HK 本地数值。
+2. **应用层**：`worker/db.py` 模块导入时立即注册 `_utc_datetime_adapter`，把所有 naive datetime（视作 HK 本地）转成 UTC naive 后落库，给任何遗漏的 `datetime.now()` / 第三方库返回值兜底。
+3. **代码层**：所有 `datetime.now()` 必须替换为 `datetime.now(timezone.utc)`，`dateutil.parse(...)` 后无 tzinfo 的结果要显式 `replace(tzinfo=timezone.utc)`（YouTube API 文档保证 `publishedAt` 为 UTC）。
+
+### 历史 BUG（v2026-04 修复）
+
+| 现象 | 根因 | 修复 |
+|------|------|------|
+| YouTube Feed 在 Daily 模块显示 `APR 26 02:01 AM`（实际应为 `APR 25 06:01 PM`），DB 里 `fetched_at = 19:42`、`published_at = 18:01` 均为 HK 本地数值 | `worker/db.py` 缺 `TimeZone=UTC` 选项；adapter 未注册 | 见上方双重保险；并跑 `backend/database/migrations/fix_youtube_subscription_content_utc.sql` 修正历史行（2,976 行 youtube 中 318 行 fetched_at + 5 行 published_at -8h） |
+
+诊断方法：当用户上报"时间差 8h / 显示成明天"时，先 SQL 查列值，再用 `NOW() AT TIME ZONE 'UTC'` 比较。任何 `fetched_at > NOW() UTC` 的行 100% 是 HK 本地误存。
+
+### 修改清单（如果时区契约再次回归）
+
+- 必查 `psycopg2.connect()` 调用是否带 `options='-c TimeZone=UTC'`
+- 必查模块顶部是否 `install_psycopg2_utc_adapter()` 立即生效
+- 必查 `datetime.now()`、`datetime.utcnow()`、`datetime.fromtimestamp(...)` 等裸调用
+- 必查 dateutil/feedparser/第三方解析返回值的 tzinfo 状态
+- 详细背景见主仓库 `docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.5.5
 
 ## 快速部署
 
@@ -441,6 +483,8 @@ sleep 2 && nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_s
 # 确认新进程已就绪
 ps aux | grep "celery -A worker.celery_app" | grep -v grep
 ```
+
+> 📌 **改动 `worker/db.py` 或 `worker/services.py` 后必须在家用 VM 上重启 worker** — 仅在主仓库改代码、重启远程服务**不够**，因为这两个文件运行在家用 VM 进程里。完整部署：在 `guanhetech` 根目录推 subtree → 家用 VM `git pull` → 上面的 `pkill + start.sh`。
 
 
 ## 查看日志

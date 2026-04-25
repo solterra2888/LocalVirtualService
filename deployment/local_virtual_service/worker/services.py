@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 from urllib import request as urllib_request
@@ -1051,8 +1051,13 @@ class ContentStore:
         if published:
             from dateutil import parser as dp
             published_dt = dp.parse(published)
+            # 时区契约: 缺失 tz 的 ISO 字符串视为 UTC (YouTube API 文档保证 publishedAt 为 UTC).
+            # 与家用 Worker db.py 适配器约定 (naive=HK) 不同, 此处显式贴 UTC tz 防误判.
+            if published_dt.tzinfo is None:
+                published_dt = published_dt.replace(tzinfo=timezone.utc)
         else:
-            published_dt = datetime.now()
+            # 时区契约: fallback 必须为 UTC-aware, 切勿使用 datetime.now() (HK 本地裸时间).
+            published_dt = datetime.now(timezone.utc)
 
         view = int(st.get("viewCount", 0) or 0)
         like = int(st.get("likeCount", 0) or 0)

@@ -392,6 +392,39 @@ def install_psycopg2_utc_adapter() -> None:
 
 ---
 
+### 7.5.5 ⚠️ 家用虚拟机 Worker 的独立写入路径（已修复）
+
+**症状**: YouTube Feed 'Why Americans Can't Buy Cheap Chinese EVs' 在 HK 当地 25 日 22:42 时,
+前端 Daily 显示 `APR 26 02:01 AM` (跨日的"明天"). 数据库 `subscription_content`:
+- `fetched_at = 2026-04-25 19:42:40` (HK 数值, 应为 UTC 11:42)
+- `published_at = 2026-04-25 18:01:18` (HK 数值, 应为 UTC 10:01)
+
+**根因**: 家用虚拟机部署的 **独立 Celery Worker** (`deployment/local_virtual_service/worker/`)
+拥有自己的 `db.py`, 完全 **绕过** 主仓库的所有时区契约:
+
+1. `psycopg2.connect()` 没有传入 `options='-c TimeZone=UTC'` → 连接 session 落入服务器
+   默认时区 `Asia/Shanghai`. `CURRENT_TIMESTAMP::timestamp` 写入 `timestamp without time zone`
+   列时, 数值是 HK 本地 (而非 UTC).
+2. 没有注册 `psycopg2` UTC 适配器 → `dateutil.parse('...Z')` 返回的 aware UTC datetime,
+   被 postgres 用 HK session 转换成 HK 本地后丢掉 tzinfo, 写入 +8h 的偏移值.
+3. `_normalize_youtube` 的 fallback `published_dt = datetime.now()` 也是 HK 本地裸时间.
+
+YouTube `subscription_content` 全部 2,976 行均由家用 Worker 写入, 因此**全表都受影响**.
+News / Twitter 走主仓库路径, 不受影响.
+
+**修复**:
+
+| 文件 | 修改 |
+|------|------|
+| `deployment/local_virtual_service/worker/db.py` | 新增 `options='-c TimeZone=UTC'`; 注册 `_utc_datetime_adapter` (HK→UTC) |
+| `deployment/local_virtual_service/worker/services.py` | `dateutil.parse` 后兜底贴 `tzinfo=timezone.utc`; fallback 改 `datetime.now(timezone.utc)` |
+| `backend/database/migrations/fix_youtube_subscription_content_utc.sql` | 修正 `channel_type='youtube'` 中 `fetched_at/published_at > NOW UTC` 的行 -8h |
+
+**部署提醒**: ⚠️ 家用 Worker 需要单独重新部署 (rsync 或 git pull + 重启 systemd 服务).
+仅修改主仓库代码 + 重启远程服务**不够**.
+
+---
+
 ## 八、相关文件索引
 
 - `backend/utils/datetime_utils.py` — 后端时区工具库 + psycopg2 UTC 适配器 + UtcDateTime
@@ -399,7 +432,10 @@ def install_psycopg2_utc_adapter() -> None:
 - `backend/database/db_manager.py` — 连接 `SET TimeZone='UTC'`
 - `backend/database/migrations/fix_file_processing_details_utc.sql` — Phase 1 迁移
 - `backend/database/migrations/fix_all_naive_timestamps_to_utc.sql` — Phase 2 迁移
+- `backend/database/migrations/fix_youtube_subscription_content_utc.sql` — Phase 3 迁移 (家用 Worker)
 - `backend/schemas/*.py` — datetime 字段统一改 UtcDateTime
+- `deployment/local_virtual_service/worker/db.py` — 家用 Worker 的连接层 (UTC adapter + TimeZone=UTC)
+- `deployment/local_virtual_service/worker/services.py` — 家用 Worker 的内联 YouTube adapter (UTC fallback)
 - `web-frontend/src/utils/datetime.ts` — 前端时区工具库
 - `web-frontend/src/contexts/DashboardSettingsContext.tsx` — 用户时区偏好状态管理
 - `docs/instructions/DAILY_MODULE.md` §13 — 时区契约完整版（含禁用/推荐对照表、schema 演进 TODO）
