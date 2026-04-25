@@ -1402,14 +1402,17 @@ class SchedulerService:
         try:
             logger.info("分发 Twitter 作者摘要 Celery 任务", params=params)
 
-            from datetime import date, timedelta, datetime
+            from datetime import datetime
             from backend.tasks.report_tasks import generate_all_author_summaries_task
+            from backend.utils.datetime_utils import yesterday_in_tz
 
             report_date_str = params.get('report_date')
             if report_date_str:
                 report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
             else:
-                report_date = date.today() - timedelta(days=1)
+                # 服务器在 HK (UTC+8); 用 UTC 算昨天保持全局确定性,
+                # 调度器若需"按某用户时区生成", 应在 task params 里显式传 report_date.
+                report_date = yesterday_in_tz(params.get('tz'))
 
             chain_daily_reports = params.get('chain_daily_reports', True)
 
@@ -1448,14 +1451,16 @@ class SchedulerService:
         try:
             logger.info("分发 YouTube 频道摘要 Celery 任务", params=params)
 
-            from datetime import date, timedelta, datetime
+            from datetime import datetime
             from backend.tasks.report_tasks import generate_all_yt_author_summaries_task
+            from backend.utils.datetime_utils import yesterday_in_tz
 
             report_date_str = params.get('report_date')
             if report_date_str:
                 report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
             else:
-                report_date = date.today() - timedelta(days=1)
+                # 服务器在 HK (UTC+8); 用 UTC 算昨天保持全局确定性.
+                report_date = yesterday_in_tz(params.get('tz'))
 
             chain_daily_reports = params.get('chain_daily_reports', True)
 

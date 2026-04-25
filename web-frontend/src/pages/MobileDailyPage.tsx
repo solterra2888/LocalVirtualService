@@ -25,21 +25,12 @@ import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
+import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
 
 const { Title, Text } = Typography;
 
 const PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 350;
-
-const formatDateKey = (iso: string) => iso.slice(0, 10);
-const formatDateLabel = (iso: string) => {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  } catch {
-    return iso;
-  }
-};
 
 interface DateGroup {
   dateKey: string;
@@ -47,14 +38,16 @@ interface DateGroup {
   items: DailyFeedItem[];
 }
 
-const groupByDate = (items: DailyFeedItem[]): DateGroup[] => {
+// 日期分组按用户时区算"自然日", 与卡片显示时间口径一致.
+// 服务器在 HK (UTC+8); 美国用户用 server local 会错位 1 天.
+const groupByDate = (items: DailyFeedItem[], tz: string): DateGroup[] => {
   const groups: DateGroup[] = [];
   const map = new Map<string, DateGroup>();
   for (const it of items) {
-    const key = formatDateKey(it.published_at);
+    const key = dateKeyInTz(it.published_at, tz);
     let g = map.get(key);
     if (!g) {
-      g = { dateKey: key, dateLabel: formatDateLabel(it.published_at), items: [] };
+      g = { dateKey: key, dateLabel: formatDateLabel(it.published_at, tz), items: [] };
       map.set(key, g);
       groups.push(g);
     }
@@ -64,7 +57,7 @@ const groupByDate = (items: DailyFeedItem[]): DateGroup[] => {
 };
 
 const MobileDailyPage: React.FC = () => {
-  const { themeMode } = useDashboardSettings();
+  const { themeMode, userTimezone } = useDashboardSettings();
   const navigate = useNavigate();
   const colors = DAILY_THEME_COLORS[themeMode];
 
@@ -239,7 +232,7 @@ const MobileDailyPage: React.FC = () => {
     setPresetModalOpen(false);
   }, []);
 
-  const grouped = useMemo(() => groupByDate(items), [items]);
+  const grouped = useMemo(() => groupByDate(items, userTimezone), [items, userTimezone]);
   const statsMap = useMemo(() => {
     const map = new Map<DailySourceSubtype, number>();
     for (const s of stats) map.set(s.source_subtype, s.count);

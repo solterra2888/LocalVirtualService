@@ -1,17 +1,40 @@
 /**
  * Daily 模块 — 来源徽章 (Source Badge).
  *
- * 显示在卡片右上角的小芯片, 标识每条卡片的数据来源 (DOC / WEB / X / YT / NEWS …).
- * 设计参考 AI Notes Daily 的 Manage 视图右侧 GDOC / WEB 标签, 颜色与配色对齐
- * 当前系统的浅 / 深主题.
+ * 显示在卡片右上角及筛选 chip 行中，带品牌图标标识每条卡片的数据来源。
+ * 设计参考 Feeds 模块导航栏的频道类型筛选 (TwitterOutlined / YoutubeOutlined / ReadOutlined)，
+ * 还原 Twitter、YouTube 和各类新闻媒体的品牌标签。
  *
- * 配色与 label 在 sourceBadgeConfig.ts 中, 共 9 种.
+ * 配色与 label 在 sourceBadgeConfig.ts 中，共 9 种。
  */
 
 import React from 'react';
 import { Tooltip } from 'antd';
+import {
+  TwitterOutlined,
+  YoutubeOutlined,
+  ReadOutlined,
+  GlobalOutlined,
+  FileTextOutlined,
+  PictureOutlined,
+  AudioOutlined,
+  EditOutlined,
+} from '@ant-design/icons';
 import type { DailySourceSubtype } from '../../services/daily';
 import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
+
+/** 品牌 / 类型图标映射 — 参考 Feeds 模块的 feedChannelConfig */
+const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
+  twitter:      <TwitterOutlined />,
+  youtube_feed: <YoutubeOutlined />,
+  youtube:      <YoutubeOutlined />,
+  news:         <ReadOutlined />,
+  web:          <GlobalOutlined />,
+  document:     <FileTextOutlined />,
+  image:        <PictureOutlined />,
+  audio:        <AudioOutlined />,
+  text:         <EditOutlined />,
+};
 
 interface SourceBadgeProps {
   subtype: DailySourceSubtype;
@@ -22,7 +45,7 @@ interface SourceBadgeProps {
   clickable?: boolean;
   /** 是否处于"已选中"高亮状态 (筛选 chip 用) */
   active?: boolean;
-  /** 计数后缀, 例如 "DOC · 27", 用于过滤栏 */
+  /** 计数后缀, 例如 "Twitter · 27", 用于过滤栏 */
   count?: number;
   onClick?: () => void;
   style?: React.CSSProperties;
@@ -44,23 +67,22 @@ const SourceBadge: React.FC<SourceBadgeProps> = ({
   const config = SOURCE_BADGE_STYLES[subtype];
   if (!config) return null;
   const palette = themeMode === 'dark' ? config.dark : config.light;
+  const icon = SUBTYPE_ICONS[subtype];
 
-  // 卡片徽章（非 clickable）始终显示前景色半透明边框，保证 chip 形状可辨。
-  // 过滤 chip（clickable）激活时显示实色边框，未激活时隐藏边框（靠背景色区分）。
   const borderStyle = active
     ? `1.5px solid ${palette.fg}`
     : clickable
     ? '1px solid transparent'
-    : `1px solid ${palette.fg}40`; // 25 % 透明前景色 — 卡片徽章的轮廓线
+    : `1px solid ${palette.fg}40`;
 
   const baseStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 4,
+    gap: compact ? 3 : 4,
     padding: compact ? '1px 6px' : '2px 8px',
     fontSize: compact ? 10 : 11,
     fontWeight: 600,
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
     lineHeight: 1.4,
     borderRadius: 4,
     background: palette.bg,
@@ -90,6 +112,11 @@ const SourceBadge: React.FC<SourceBadgeProps> = ({
       }
       style={baseStyle}
     >
+      {icon && (
+        <span style={{ fontSize: compact ? 10 : 11, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
+          {icon}
+        </span>
+      )}
       {config.label}
       {typeof count === 'number' && (
         <span

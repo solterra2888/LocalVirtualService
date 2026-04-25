@@ -11,6 +11,8 @@ import { ClockCircleOutlined } from '@ant-design/icons';
 import type { DailyFeedItem } from '../../services/daily';
 import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
+import { formatTime as fmtTimeInTz } from '../../utils/datetime';
+import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 
 interface DailyCardProps {
   item: DailyFeedItem;
@@ -19,20 +21,9 @@ interface DailyCardProps {
   onTickerClick?: (ticker: string) => void;
 }
 
-const formatTime = (iso: string): string => {
-  try {
-    const d = new Date(iso);
-    const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-    const day = String(d.getDate()).padStart(2, '0');
-    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return `${month} ${day} ${time}`;
-  } catch {
-    return iso;
-  }
-};
-
 const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTickerClick }) => {
   const colors = DAILY_THEME_COLORS[themeMode];
+  const { userTimezone } = useDashboardSettings();
   const [hover, setHover] = React.useState(false);
 
   const summaryOrSnippet = item.summary || item.snippet;
@@ -187,7 +178,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
             <span style={{ opacity: 0.5 }}>·</span>
           </>
         )}
-        <span>{formatTime(item.published_at)}</span>
+        <span>{fmtTimeInTz(item.published_at, userTimezone)}</span>
         {item.reading_time_min ? (
           <>
             <span style={{ opacity: 0.5 }}>·</span>

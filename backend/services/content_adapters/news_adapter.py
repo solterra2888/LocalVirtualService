@@ -6,6 +6,7 @@ News 内容适配器 - 将 EODHD API 新闻数据标准化为 subscription_conte
 from typing import Dict, Any, List
 from datetime import datetime
 from urllib.parse import urlparse
+from backend.utils.datetime_utils import utcnow
 from .base_adapter import BaseContentAdapter
 
 
@@ -87,10 +88,11 @@ class NewsAdapter(BaseContentAdapter):
 
         # 解析发布时间
         date_str = raw_data.get('date', '')
+        # 服务器在 HK (UTC+8); fallback 必须用 UTC 与系统契约对齐.
         try:
-            published_at = self.parse_datetime(date_str) if date_str else datetime.now()
+            published_at = self.parse_datetime(date_str) if date_str else utcnow()
         except Exception:
-            published_at = datetime.now()
+            published_at = utcnow()
 
         # 情感数据
         sentiment = raw_data.get('sentiment') or {}

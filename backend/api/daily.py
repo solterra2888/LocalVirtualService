@@ -402,10 +402,10 @@ def _row_to_item(
         # 兜底用 reasoning（Upload 旧数据）或内容前 220 字
         snippet_text = _truncate(reasoning) or _truncate(content_snippet)
 
-    # 确保 published_at 带时区，Pydantic 序列化为 isoformat
-    pub: datetime = published_at
-    if pub and pub.tzinfo is None:
-        pub = pub.replace(tzinfo=timezone.utc)
+    # 全系统契约: DB 中 naive timestamp 一律视为 UTC (db_manager 已在连接上 SET TIME ZONE 'UTC').
+    # 此处把 naive → aware UTC, Pydantic 会序列化为 ISO 8601 (...Z), 前端再按用户时区渲染.
+    from backend.utils.datetime_utils import ensure_utc
+    pub = ensure_utc(published_at)
 
     return DailyFeedItem(
         id=composite_id,

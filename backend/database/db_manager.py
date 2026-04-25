@@ -37,7 +37,11 @@ class DatabaseManager:
                     user=self.db_conn_params.get('db_user', ''),
                     password=self.db_conn_params.get('db_password', ''),
                     connect_timeout=30,  # 增加连接超时到30秒
-                    options='-c statement_timeout=600000',  # 设置10分钟语句超时
+                    # 系统级时区契约: 全部 timestamp 列以 UTC 解释 / 写入.
+                    # 服务器实际部署在 HK (UTC+8); 不显式 SET TIME ZONE 会导致 NOW()
+                    # 默认值与 Python naive datetime 写入 naive 列时相差 8h.
+                    # 详见 backend/utils/datetime_utils.py 与 docs/instructions/DAILY_MODULE.md "时区契约" 一节.
+                    options='-c statement_timeout=600000 -c TimeZone=UTC',
                     keepalives_idle=30,  # 30秒后开始发送keepalive
                     keepalives_interval=5,  # 每5秒发送一次keepalive
                     keepalives_count=6  # 最多发送6次keepalive

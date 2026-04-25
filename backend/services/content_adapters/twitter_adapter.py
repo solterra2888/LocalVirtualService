@@ -5,6 +5,7 @@ Twitter 内容适配器
 
 from typing import Dict, Any, List
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from .base_adapter import BaseContentAdapter
 
 
@@ -63,7 +64,8 @@ class TwitterAdapter(BaseContentAdapter):
         
         # 解析发布时间
         created_at_str = raw_data.get('createdAt', '')
-        published_at = self.parse_datetime(created_at_str) if created_at_str else datetime.now()
+        # 服务器在 HK (UTC+8); fallback 必须用 UTC 与上游 (Twitter API 返回 UTC) 对齐.
+        published_at = self.parse_datetime(created_at_str) if created_at_str else utcnow()
         
         # 计算互动数
         like_count = raw_data.get('likeCount', 0) or 0

@@ -5,6 +5,7 @@ YouTube 内容适配器
 
 from typing import Dict, Any, List
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from .base_adapter import BaseContentAdapter
 
 
@@ -67,7 +68,8 @@ class YouTubeAdapter(BaseContentAdapter):
         
         # 解析发布时间
         published_at_str = snippet.get('publishedAt', '')
-        published_at = self.parse_datetime(published_at_str) if published_at_str else datetime.now()
+        # 服务器在 HK (UTC+8); fallback 必须用 UTC, 否则与正常路径 (YouTube 返回 UTC) 不一致.
+        published_at = self.parse_datetime(published_at_str) if published_at_str else utcnow()
         
         # 统计数据
         view_count = int(statistics.get('viewCount', 0) or 0)

@@ -5,6 +5,7 @@ RSS 内容适配器
 
 from typing import Dict, Any, List
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from .base_adapter import BaseContentAdapter
 
 
@@ -56,10 +57,11 @@ class RSSAdapter(BaseContentAdapter):
         
         # 解析发布时间
         published_str = raw_data.get('published') or raw_data.get('pubDate') or raw_data.get('updated', '')
+        # 服务器在 HK (UTC+8); fallback 必须用 UTC 与系统契约对齐.
         try:
-            published_at = self.parse_datetime(published_str) if published_str else datetime.now()
-        except:
-            published_at = datetime.now()
+            published_at = self.parse_datetime(published_str) if published_str else utcnow()
+        except Exception:
+            published_at = utcnow()
         
         # RSS 通常没有互动数据
         engagement_count = 0
