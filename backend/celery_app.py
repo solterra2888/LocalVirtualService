@@ -6,6 +6,12 @@ from celery import Celery
 from celery.signals import worker_init, worker_shutdown, task_prerun, task_postrun, task_failure, task_retry
 import os
 
+# ─── 全系统时区契约: Celery worker 启动前注册 psycopg2 UTC 适配器 ───
+# 与 backend/main.py 同步; 任何 naive datetime 写入 PG 自动转 UTC.
+# 详见 backend/utils/datetime_utils.py.
+from backend.utils.datetime_utils import install_psycopg2_utc_adapter
+install_psycopg2_utc_adapter()
+
 # 创建Celery应用
 app = Celery('universal_glance')
 

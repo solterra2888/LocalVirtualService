@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class FileTagsBase(BaseModel):
     """文件标签基础Schema"""
@@ -50,9 +52,9 @@ class FileTagsResponse(BaseModel):
     confidence: Optional[float]
     reasoning: Optional[str]
     tagged_by: Optional[int]
-    tagged_at: Optional[datetime]
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
+    tagged_at: Optional[UtcDateTime]
+    created_at: Optional[UtcDateTime]
+    updated_at: Optional[UtcDateTime]
 
     class Config:
         from_attributes = True

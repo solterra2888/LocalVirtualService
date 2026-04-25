@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow, utc_today
 from backend.utils.logger import get_logger
 from backend.services.economic_events_service import EconomicEventsService
 from config.settings import config
@@ -77,7 +78,7 @@ class MarketWeeklyService:
         try:
             # 1. 计算周度时间范围
             week_start, week_end = self._calculate_week_range(period)
-            generated_at = datetime.utcnow().isoformat() + 'Z'
+            generated_at = utcnow().isoformat().replace('+00:00', 'Z')
             
             logger.info(f"Report period: {week_start} to {week_end}")
             
@@ -215,7 +216,7 @@ class MarketWeeklyService:
             except Exception as e:
                 logger.error(f"Error querying week range from database: {str(e)}, using fallback")
                 # 使用fallback逻辑（不依赖数据库）
-                today = datetime.utcnow().date()
+                today = utc_today()
                 
                 # 找到最近的周五
                 days_since_friday = (today.weekday() - 4) % 7
@@ -237,7 +238,7 @@ class MarketWeeklyService:
                 logger.info(f"Using fallback logic: week_start={week_start_date}, week_end={week_end_date}")
         else:
             # TODO: 支持特定日期范围
-            today = datetime.utcnow().date()
+            today = utc_today()
             days_since_friday = (today.weekday() - 4) % 7
             if days_since_friday == 0:
                 last_friday = today
@@ -1251,7 +1252,7 @@ class MarketWeeklyService:
                 logger.debug(f"[Batch OHLC] Fetching data {i+1}/{total}: {symbol}")
                 
                 # 获取历史数据
-                end_date = datetime.utcnow()
+                end_date = utcnow()
                 start_date = end_date - timedelta(days=days)
                 
                 conn = self.db_manager.get_connection()
@@ -1492,7 +1493,7 @@ class MarketWeeklyService:
         
         try:
             # 1. 获取历史数据
-            end_date = datetime.utcnow()
+            end_date = utcnow()
             start_date = end_date - timedelta(days=days)
             
             conn = self.db_manager.get_connection()

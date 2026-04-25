@@ -9,6 +9,7 @@ import os
 import json
 from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 
 # 统一的环境变量加载
 from backend.utils.env_loader import load_project_env
@@ -758,7 +759,7 @@ class FileProcessingWorker:
                         ai_info.get('total_tokens', 0) if ai_info else 0,
                         ai_info.get('total_price', 0) if ai_info else 0,
                         result.get('content', ''),
-                        datetime.now(),
+                        utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
                         self.task_id,
                         result['original_file'],
                         storage_type,
@@ -806,7 +807,7 @@ class FileProcessingWorker:
                             0,
                             0,
                             failed_file.get('error', ''),
-                            datetime.now(),
+                            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
                             self.task_id
                         ))
                 except Exception as e:

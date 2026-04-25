@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from celery import current_task
 from backend.celery_app import app
 from backend.workers.file_worker import FileProcessingWorker
@@ -1507,7 +1508,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             0,
             0,
             final_report_text,
-            datetime.now(),
+            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
             task_id,
             object_name,
             json.dumps(asr_structured_data) if asr_structured_data else None,
@@ -1744,7 +1745,7 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
             0,  # total_tokens
             0,  # cost
             '',  # content（尚未解析）
-            datetime.now(),
+            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
             self.request.id,  # task_id
             oss_object_name,  # original_file_path（OSS object_name）
             'oss',  # file_storage_type
@@ -2124,7 +2125,7 @@ def scrape_and_process_web_link_task(self, url, username):
             0, 0, 0,
             'processing',
             0, 0, '',
-            datetime.now(),
+            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
             self.request.id,
             oss_object_name,
             'oss',
@@ -2242,7 +2243,7 @@ def scrape_and_process_web_link_task(self, url, username):
                         0, 0, 0,
                         'failed',
                         0, 0, '',
-                        datetime.now(),
+                        utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
                         self.request.id,
                         str(e),
                     ))
@@ -2506,7 +2507,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 """, (
                     stats_id, filename, 'youtube', 0, db_status,
                     full_text, asr_json,
-                    datetime.now(), task_id, youtube_url,
+                    utcnow(), task_id, youtube_url,  # created_at: aware UTC -> adapter -> naive UTC
                     elapsed_seconds, len(full_text)
                 ))
                 file_id = cursor.fetchone()[0]

@@ -23,7 +23,14 @@ from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import install_psycopg2_utc_adapter
 from config.settings import config
+
+# ─── 全系统时区契约: 进程启动时立即注册 psycopg2 UTC 适配器 ───
+# 任何 naive datetime (含历史代码 datetime.now()) 写入 PG 时自动转 UTC.
+# 必须在任何 DB 连接之前 (这里 import 阶段就执行).
+# 详见 backend/utils/datetime_utils.py 与 docs/instructions/DAILY_MODULE.md §13.
+install_psycopg2_utc_adapter()
 
 # API 进程启动时间（Unix 秒），供前端判断「整站重启」后清理 localStorage 中的 Celery 任务条
 APP_BOOT_UNIX = time.time()

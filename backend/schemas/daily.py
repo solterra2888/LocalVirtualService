@@ -14,6 +14,8 @@ Daily 模块把两条数据链路（Upload Files + Feeds 订阅）合并成同�
 """
 
 from datetime import datetime
+
+from backend.utils.datetime_utils import UtcDateTime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -70,7 +72,7 @@ class DailyFeedItem(BaseModel):
     concepts: List[str] = Field(default_factory=list, description="投资主题/概念")
     confidence: Optional[float] = Field(None, description="LLM 置信度 0-1")
 
-    published_at: datetime = Field(..., description="发布/创建时间，用于排序与日期分组")
+    published_at: UtcDateTime = Field(..., description="发布/创建时间 (UTC), 序列化时带 +00:00")
     reading_time_min: Optional[int] = Field(None, description="预估阅读时长（分钟）")
 
     navigate: DailyNavigate = Field(..., description="点击跳转目标")

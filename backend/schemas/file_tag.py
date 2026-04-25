@@ -4,6 +4,8 @@
 """
 
 from datetime import datetime
+
+from backend.utils.datetime_utils import UtcDateTime
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -30,9 +32,9 @@ class FileTagResponse(FileTagBase):
     id: int = Field(..., description="标签ID")
     file_id: int = Field(..., description="文件ID")
     tagged_by: Optional[int] = Field(None, description="标签创建者用户ID")
-    tagged_at: datetime = Field(..., description="标签创建时间")
-    created_at: datetime = Field(..., description="记录创建时间")
-    updated_at: datetime = Field(..., description="记录更新时间")
+    tagged_at: UtcDateTime = Field(..., description="标签创建时间")
+    created_at: UtcDateTime = Field(..., description="记录创建时间")
+    updated_at: UtcDateTime = Field(..., description="记录更新时间")
     
     class Config:
         from_attributes = True
@@ -63,7 +65,7 @@ class FileWithTag(BaseModel):
     file_path: str = Field(..., description="文件路径")
     file_size: int = Field(..., description="文件大小")
     file_type: str = Field(..., description="文件类型")
-    created_at: datetime = Field(..., description="文件创建时间")
+    created_at: UtcDateTime = Field(..., description="文件创建时间")
     tag: Optional[FileTagResponse] = Field(None, description="文件标签")
     
     class Config:

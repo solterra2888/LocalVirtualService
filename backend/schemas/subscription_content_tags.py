@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class SubscriptionContentTagsUpdate(BaseModel):
     """手动编辑 subscription_content_tags 的请求体 (所有字段可选)."""
@@ -43,9 +45,9 @@ class SubscriptionContentTagsResponse(BaseModel):
     summary: Optional[str] = None
     channel_type: str
     tagged_by: Optional[int] = None
-    tagged_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    tagged_at: Optional[UtcDateTime] = None
+    created_at: Optional[UtcDateTime] = None
+    updated_at: Optional[UtcDateTime] = None
 
     class Config:
         from_attributes = True

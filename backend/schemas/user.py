@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class UserLoginRequest(BaseModel):
     """用户登录请求模型"""
@@ -35,8 +37,8 @@ class UserResponse(BaseModel):
     id: int
     username: str
     is_admin: bool
-    created_at: datetime
-    last_login: Optional[datetime] = None
+    created_at: UtcDateTime
+    last_login: Optional[UtcDateTime] = None
     avatar_url: Optional[str] = None
     
     class Config:

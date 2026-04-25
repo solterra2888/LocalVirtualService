@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class TaskTypeCreateRequest(BaseModel):
     """RC Agent创建请求模型"""
@@ -32,7 +34,7 @@ class TaskTypeResponse(BaseModel):
     name: str
     token: str
     creator: str
-    created_at: Optional[datetime] = None
+    created_at: Optional[UtcDateTime] = None
     remarks: Optional[str] = None
     input_fields: List[Dict[str, Any]]
     is_default: bool = False
@@ -47,7 +49,7 @@ class TaskExecutionResponse(BaseModel):
     id: str
     username: str
     task_name: str
-    created_at: datetime
+    created_at: UtcDateTime
     files_processed: int
     files_failed: int
     total_time: float
@@ -79,7 +81,7 @@ class TaskExecutionResponse(BaseModel):
 
 class TaskLogResponse(BaseModel):
     """任务日志响应模型"""
-    timestamp: datetime
+    timestamp: UtcDateTime
     level: str
     message: str
 

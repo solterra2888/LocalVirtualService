@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class DimensionOperators(BaseModel):
     """各维度内部逻辑操作符配置"""
@@ -161,9 +163,9 @@ class PresetResponse(BaseModel):
     is_favorite: bool
     sort_order: int
     usage_count: int
-    last_used_at: Optional[datetime]
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
+    last_used_at: Optional[UtcDateTime]
+    created_at: Optional[UtcDateTime]
+    updated_at: Optional[UtcDateTime]
     
     class Config:
         orm_mode = True

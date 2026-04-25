@@ -3,6 +3,8 @@ Unified Theme System Schemas
 统一主题系统的数据模型定义
 """
 from datetime import datetime
+
+from backend.utils.datetime_utils import UtcDateTime, utcnow as _utcnow_aware
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from enum import Enum
@@ -96,9 +98,9 @@ class ThemeMasterData(ThemeMasterDataBase):
     """主题主数据完整模型"""
     id: int
     usage_count: int = 0
-    last_used_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
+    last_used_at: Optional[UtcDateTime] = None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     
@@ -157,10 +159,10 @@ class NewsThemeUnified(NewsThemeUnifiedBase):
     weight: float = 1.0
     is_verified: bool = False
     verified_by: Optional[int] = None
-    verified_at: Optional[datetime] = None
+    verified_at: Optional[UtcDateTime] = None
     verification_note: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -232,8 +234,8 @@ class ThemeTrending(BaseModel):
     avg_confidence: Optional[float] = None
     avg_quality: Optional[float] = None
     source_distribution: Dict[str, int] = Field(default_factory=dict)
-    latest_news_date: Optional[datetime] = None
-    earliest_news_date: Optional[datetime] = None
+    latest_news_date: Optional[UtcDateTime] = None
+    earliest_news_date: Optional[UtcDateTime] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -242,8 +244,8 @@ class ThemeAggregationStats(BaseModel):
     """主题聚合统计"""
     theme_name: str
     period_type: PeriodType
-    period_start: datetime
-    period_end: datetime
+    period_start: UtcDateTime
+    period_end: UtcDateTime
     news_count: int = 0
     avg_confidence: Optional[float] = None
     avg_quality: Optional[float] = None
@@ -322,7 +324,7 @@ class ThemeTrendingResponse(BaseModel):
     items: List[ThemeTrending]
     total: int
     period: str = Field(default="90d", description="统计周期")
-    updated_at: datetime = Field(default_factory=datetime.now)
+    updated_at: UtcDateTime = Field(default_factory=_utcnow_aware)
 
 
 # ============================================================

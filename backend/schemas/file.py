@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 class FileType(str, Enum):
     """文件类型枚举"""
@@ -59,7 +61,7 @@ class FileUploadResponse(BaseModel):
     file_path: str
     file_size: int
     file_type: FileType
-    upload_time: datetime
+    upload_time: UtcDateTime
 
 
 class FileProcessRequest(BaseModel):
@@ -99,12 +101,14 @@ class FileDetailResponse(BaseModel):
     total_tokens: Optional[int] = None
     cost: Optional[float] = None
     error_message: Optional[str] = None
-    created_at: datetime
+    # 全系统时区契约: 使用 UtcDateTime, 序列化时自动带 UTC tz (...+00:00)
+    # 详见 backend/utils/datetime_utils.py 与 docs/instructions/DAILY_MODULE.md §13
+    created_at: UtcDateTime
     original_file_path: Optional[str] = None
     access_type: Optional[str] = None
     shared_by: Optional[str] = None
     display_name: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
 

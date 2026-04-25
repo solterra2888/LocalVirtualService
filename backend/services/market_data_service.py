@@ -940,7 +940,8 @@ class MarketDataService:
             logger.warning("保留天数必须大于0，已忽略删除操作")
             return 0
         
-        cutoff_date = (datetime.utcnow().date() - timedelta(days=retain_days)).strftime('%Y-%m-%d')
+        from backend.utils.datetime_utils import utc_today
+        cutoff_date = (utc_today() - timedelta(days=retain_days)).strftime('%Y-%m-%d')
         
         conn = None
         cursor = None

@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
 
+from backend.utils.datetime_utils import UtcDateTime
+
 
 # ==================== 枚举类型 ====================
 
@@ -140,8 +142,8 @@ class ProjectResponse(ProjectBase):
     project_code: str
     owner_id: int
     created_by: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     
     # 扩展信息（可选）
     member_count: Optional[int] = None
@@ -187,10 +189,10 @@ class MemberResponse(MemberBase):
     username: Optional[str] = None  # 关联查询获取
     status: MemberStatus
     invited_by: Optional[int] = None
-    invited_at: Optional[datetime] = None
-    joined_at: datetime
-    created_at: datetime
-    updated_at: datetime
+    invited_at: Optional[UtcDateTime] = None
+    joined_at: UtcDateTime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     
     class Config:
         from_attributes = True
@@ -231,8 +233,8 @@ class MilestoneResponse(MilestoneBase):
     project_id: int
     created_by: int
     created_by_username: Optional[str] = None  # 关联查询获取
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     
     class Config:
         from_attributes = True
@@ -266,8 +268,8 @@ class NewsTrackingResponse(NewsTrackingBase):
     news_id: int
     added_by: int
     added_by_username: Optional[str] = None
-    added_at: datetime
-    updated_at: datetime
+    added_at: UtcDateTime
+    updated_at: UtcDateTime
     
     # 新闻详情（可选，从news表关联查询）
     news_title: Optional[str] = None
@@ -303,7 +305,7 @@ class ProjectFileResponse(ProjectFileBase):
     file_size: Optional[int] = None
     uploaded_by: int
     uploaded_by_username: Optional[str] = None
-    uploaded_at: datetime
+    uploaded_at: UtcDateTime
     
     class Config:
         from_attributes = True
@@ -320,7 +322,7 @@ class ProjectStatistics(BaseModel):
     total_files: int = 0
     total_milestones: int = 0
     latest_milestone_date: Optional[date] = None
-    latest_news_added_at: Optional[datetime] = None
+    latest_news_added_at: Optional[UtcDateTime] = None
 
 
 class ProjectActivity(BaseModel):
@@ -329,7 +331,7 @@ class ProjectActivity(BaseModel):
     description: str = Field(..., description="活动描述")
     user_id: int
     username: Optional[str] = None
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 class ProjectDashboard(BaseModel):

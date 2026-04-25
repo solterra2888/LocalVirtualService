@@ -14,6 +14,7 @@ from passlib.context import CryptContext
 from backend.schemas.user import TokenData
 from backend.auth.user_auth import UserAuth
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from config.settings import config
 
 # 密码加密上下文
@@ -41,10 +42,11 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """创建访问令牌"""
     to_encode = data.copy()
+    # JWT exp 标准是 UTC 时间戳, 用 utcnow() (aware UTC) 替代 deprecated datetime.utcnow().
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

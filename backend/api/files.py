@@ -8,6 +8,7 @@ import uuid
 import json
 import time
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from typing import List, Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Body, Form, Header
@@ -629,7 +630,7 @@ async def upload_files(
                         0,  # total_tokens
                         0,  # cost
                         '',  # content
-                        datetime.now(),
+                        utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
                         None,  # task_id (仅上传没有task_id)
                         uploaded_file.file_path,  # original_file_path (OSS: object_name, Local: /uploads/xxx)
                         storage_type,  # 新增：存储类型
@@ -1710,7 +1711,7 @@ async def create_text_note(
             'completed',
             0, 0,
             content,
-            datetime.now(),
+            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
             None,
             None,
             None,
@@ -2970,7 +2971,7 @@ a {{ color: #1677ff; }}
             0, 0, 0,
             'processing',
             0, 0, '',
-            datetime.now(),
+            utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
             '',
             oss_object_name,
             'oss',
@@ -3249,7 +3250,7 @@ async def transcribe_audio(
                     0,
                     0,
                     content_for_db,  # 仅保存带时间戳的转写结果，每段一行
-                    datetime.now(),
+                    utcnow(),  # created_at (aware UTC; psycopg2 adapter -> naive UTC)
                     result.get("task_id"),
                     audio_url,
                     json.dumps(asr_structured_data) if asr_structured_data else None
@@ -4105,7 +4106,7 @@ async def upload_youtube_link(
                     RETURNING id
                 """, (
                     stats_id, filename, 'youtube', 0, 'processing',
-                    '', None, datetime.now(), None, youtube_url, 0, 0,
+                    '', None, utcnow(), None, youtube_url, 0, 0,  # created_at: aware UTC -> adapter -> naive UTC
                 ))
                 file_id = cursor.fetchone()[0]
 
