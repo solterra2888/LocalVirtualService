@@ -1,0 +1,48 @@
+/** Daily 模块共享主题色 (与 Feed/Sources 视觉风格保持一致, 但卡片密度更紧凑) */
+
+export const DAILY_THEME_COLORS = {
+  light: {
+    pageBg: '#fafafa',
+    cardBg: '#ffffff',
+    cardBorder: '#f0f0f0',
+    cardHoverBorder: '#1890ff',
+    cardHoverBg: '#fafcff',
+    text: 'rgba(0, 0, 0, 0.88)',
+    textSecondary: 'rgba(0, 0, 0, 0.65)',
+    textMuted: 'rgba(0, 0, 0, 0.45)',
+    divider: '#f0f0f0',
+    dateAnchorBg: '#fff5e6',
+    dateAnchorText: '#ad6800',
+    dateLine: 'rgba(173, 104, 0, 0.35)',
+    summaryText: 'rgba(0, 0, 0, 0.78)',
+    tickerBg: '#e6f4ff',
+    tickerFg: '#0958d9',
+    conceptBg: '#f5f5f5',
+    conceptFg: '#595959',
+    inputBg: '#ffffff',
+    sectionHeader: '#fff5e6',
+  },
+  dark: {
+    pageBg: '#1a202c',
+    cardBg: '#212936',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
+    cardHoverBorder: '#1890ff',
+    cardHoverBg: '#252e3d',
+    text: '#e0e6f1',
+    textSecondary: 'rgba(224, 230, 241, 0.78)',
+    textMuted: 'rgba(224, 230, 241, 0.50)',
+    divider: 'rgba(255, 255, 255, 0.08)',
+    dateAnchorBg: 'rgba(250, 173, 20, 0.12)',
+    dateAnchorText: '#ffd666',
+    dateLine: 'rgba(250, 173, 20, 0.35)',
+    summaryText: 'rgba(224, 230, 241, 0.85)',
+    tickerBg: 'rgba(24, 144, 255, 0.18)',
+    tickerFg: '#69b1ff',
+    conceptBg: 'rgba(255, 255, 255, 0.06)',
+    conceptFg: 'rgba(224, 230, 241, 0.75)',
+    inputBg: '#1a2234',
+    sectionHeader: 'rgba(250, 173, 20, 0.10)',
+  },
+} as const;
+
+export type DailyThemeColors = (typeof DAILY_THEME_COLORS)[keyof typeof DAILY_THEME_COLORS];

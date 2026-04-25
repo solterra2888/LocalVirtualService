@@ -56,6 +56,51 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
     ├─ GET /api/subscriptions/contents/{id}/transcript     （YouTube 字幕全文懒加载）
     ├─ POST /api/subscriptions/contents/{id}/mark-read     （标记已读/未读）
     └─ POST /api/subscriptions/contents/{id}/transcribe    （YouTube 手动重转 ASR）
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    LLM 调用层（三条独立链路）                      │
+└──────────────────────────────────────────────────────────────────┘
+    │
+    ├─ ① Feed 内容打标 & 摘要（FeedContentTaggingService）
+    │   触发：用户手动 / 批量重打标 API（不自动触发）
+    │   输入：subscription_content.content / transcript（Twitter / YouTube）
+    │   模型：LocalLLMAnalysisService → prompt template: content_tag_feeds_v1
+    │   输出：subscription_content_tags
+    │         (sector / industry / tickers / concepts / summary / confidence)
+    │   Celery：tag_feed_content / batch_tag_feed_content  (queue: file_processing)
+    │   API：/api/subscriptions/contents/{id}/tags 系列
+    │
+    ├─ ② Twitter Daily Report（两阶段）
+    │   调度：task_scheduling 类型 twitter_author_summary（阶段A完后链式触发阶段B）
+    │   API：POST /reports/twitter-daily/generate（手动触发）
+    │   │
+    │   ├─ 阶段 A：TwitterAuthorSummaryService（全局作者摘要预生成）
+    │   │   每作者 + 每天只调一次 LLM（所有订阅该作者的用户共用结果）
+    │   │   模板：twitter_daily_phase1_default
+    │   │   输入：当日该作者的全部 tweets（最多 30 条/chunk）
+    │   │   输出：twitter_author_daily_summaries 表
+    │   │
+    │   └─ 阶段 B：TwitterDailyReportService（用户综合报告）
+    │       读取阶段 A 预计算摘要 → 全局引用重编号 → Phase 2 综合分析
+    │       模板：twitter_daily_phase2_default（用户可通过偏好自定义）
+    │       输出：twitter_daily_reports 表
+    │       API：GET /reports/twitter-daily/{date}
+    │
+    └─ ③ YouTube Daily Report（两阶段，结构同 Twitter）
+        调度：task_scheduling 类型 youtube_author_summary（阶段A完后链式触发阶段B）
+        API：POST /reports/youtube-daily/generate（手动触发）
+        │
+        ├─ 阶段 A：YouTubeAuthorSummaryService（全局频道摘要预生成）
+        │   每频道 + 每天只调一次 LLM（所有订阅该频道的用户共用结果）
+        │   模板：youtube_daily_phase1_default
+        │   输入：当日该频道新视频标题 + transcript（最多 10 条/chunk）
+        │   输出：youtube_author_daily_summaries 表
+        │
+        └─ 阶段 B：YouTubeDailyReportService（用户综合报告）
+            读取阶段 A 预计算摘要 → Phase 2 综合分析
+            输出：youtube_daily_reports 表
+            API：GET /reports/youtube-daily/{date}
 ```
 
 ## 2. 数据库表结构
@@ -352,7 +397,98 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 
 **如果将来要让 Feeds YouTube 字幕成功后自动打标/分类**，需要在 `subscription_content_service.update_transcript` 成功分支派发类似 `finalize_youtube_file_task` 的回调，并把 `subscription_content` 的 id 适配到 `content_tagging_service`/`content_classify_service`（当前两者只读 `file_processing_details`）。
 
-## 10. 配置与环境变量
+## 10. LLM 调用详解
+
+Feeds 模块涉及 **三条** 独立的 LLM 链路，相互解耦，均不在抓取时自动触发。
+
+### 10.1 Feed 内容打标 & 摘要
+
+| 维度 | 说明 |
+|------|------|
+| 服务 | `backend/services/feed_content_tagging_service.py` → `FeedContentTaggingService` |
+| LLM 底层 | `LocalLLMAnalysisService`（统一调用层，支持多 provider 路由）|
+| Prompt 模板 | `content_tag_feeds_v1`（可通过 `AUTO_FEED_TAG_TEMPLATE_CODE` env 灰度切换）|
+| 支持渠道 | `twitter` / `youtube`（news/rss 本轮不做，直接短路）|
+| 输入拼装 | Twitter：`content` + 引用/转推树；YouTube：`title + transcript`，两者均有最小长度门槛与最大字符截断 |
+| 输出字段 | `sector` / `sector_en` / `industry` / `industry_en` / `tickers[]` / `concepts[]` / `summary` / `confidence` / `reasoning` |
+| 存储表 | `subscription_content_tags`（UPSERT on `subscription_content_id`）|
+| Celery 任务 | `tag_feed_content`（单条）/ `batch_tag_feed_content`（批量梯度派发）均在 `file_processing` 队列 |
+| 触发方式 | 用户在前端手动触发 / 运维批量回填；**不自动随抓取触发** |
+| 幂等 | 默认已有标签则跳过，`force=True` 可强制重跑 |
+| 环境变量 | `AUTO_FEED_TAG_ENABLED`（开关，默认 true）/ `AUTO_FEED_TAG_CHANNELS`（白名单，默认 twitter,youtube）/ `AUTO_FEED_TAG_MAX_CHARS`（最大输入字符，默认 6000）/ `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` / `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` |
+| API | `GET/POST/PATCH/DELETE /api/subscriptions/contents/{id}/tags`（见 `backend/api/subscription_content_tags.py`）|
+
+### 10.2 Twitter Daily Report
+
+两阶段解耦架构，目标是「同一作者同一天只调 LLM 一次，结果全局共享」。
+
+**阶段 A — TwitterAuthorSummaryService**（全局，per-author）
+
+| 维度 | 说明 |
+|------|------|
+| 服务 | `backend/services/twitter_author_summary_service.py` |
+| LLM 底层 | `backend/core/llm_framework::llm_service` |
+| Prompt 模板 | `twitter_daily_phase1_default` |
+| 输入 | 当日该作者所有 tweets（最多 `MAX_TWEETS_PER_AUTHOR_CHUNK=30` 条/chunk），从 `subscription_content` 拉取 |
+| 输出 | `twitter_author_daily_summaries` 表（每作者每天一行，所有订阅该作者的用户共用）|
+| Token 上限 | `MAX_TOKENS_OUTPUT_PHASE1=2000` |
+| 模板变更检测 | 若 prompt 模板 `updated_at` 晚于已有摘要 `updated_at`，则重新生成 |
+
+**阶段 B — TwitterDailyReportService**（per-user，自动链式触发）
+
+| 维度 | 说明 |
+|------|------|
+| 服务 | `backend/services/twitter_daily_report_service.py` |
+| LLM 底层 | `backend/core/llm_framework::llm_service` |
+| Prompt 模板 | `twitter_daily_phase2_default`（用户可通过 `TemplatePreferenceService` 自定义 `twitter_phase2` 偏好）|
+| 输入 | 当日所有作者的阶段 A 摘要（引用编号重整为 `[T-001]` 格式）；缺失时自动 fallback 到即时生成并缓存 |
+| 输出 | `twitter_daily_reports` 表（每用户每天一行）|
+| Token 上限 | `MAX_TOKENS_OUTPUT_PHASE2=4000` |
+
+**调度与 API：**
+- 调度：`task_scheduling` 类型 `twitter_author_summary`，阶段 A 执行完后自动链式触发当日各用户的阶段 B
+- 手动触发：`POST /reports/twitter-daily/generate`
+- 读取：`GET /reports/twitter-daily/latest` / `GET /reports/twitter-daily/{date}`
+
+### 10.3 YouTube Daily Report
+
+结构与 Twitter Daily Report 完全对称，关键参数如下。
+
+**阶段 A — YouTubeAuthorSummaryService**（全局，per-channel）
+
+| 维度 | 说明 |
+|------|------|
+| 服务 | `backend/services/youtube_author_summary_service.py` |
+| Prompt 模板 | `youtube_daily_phase1_default` |
+| 输入 | 当日该频道新视频（最多 `MAX_VIDEOS_PER_CHANNEL_CHUNK=10` 条/chunk），`title + transcript`（无字幕则跳过该视频）|
+| 输出 | `youtube_author_daily_summaries` 表（所有订阅该频道的用户共用）|
+| Token 上限 | `MAX_TOKENS_OUTPUT_PHASE1=3000` |
+
+**阶段 B — YouTubeDailyReportService**（per-user，自动链式触发）
+
+| 维度 | 说明 |
+|------|------|
+| 服务 | `backend/services/youtube_daily_report_service.py` |
+| 输入 | 当日所有频道的阶段 A 摘要 |
+| 输出 | `youtube_daily_reports` 表（每用户每天一行）|
+
+**调度与 API：**
+- 调度：`task_scheduling` 类型 `youtube_author_summary`，阶段 A 完后自动链式触发阶段 B
+- 手动触发：`POST /reports/youtube-daily/generate`
+- 读取：`GET /reports/youtube-daily/latest` / `GET /reports/youtube-daily/{date}`
+
+### 10.4 三条链路对比
+
+| 维度 | ① Feed 内容打标 | ② Twitter Daily Report | ③ YouTube Daily Report |
+|------|----------------|------------------------|------------------------|
+| 粒度 | 单条内容 | 每用户每天 | 每用户每天 |
+| 触发 | 手动/批量 | 定时（阶段A→B链式）| 定时（阶段A→B链式）|
+| LLM 调用次数 | 每条内容 1 次 | 每作者每天 1 次（阶段A全局共享）→ 每用户 1 次（阶段B）| 每频道每天 1 次（阶段A全局共享）→ 每用户 1 次（阶段B）|
+| 存储目标 | `subscription_content_tags` | `twitter_author_daily_summaries` + `twitter_daily_reports` | `youtube_author_daily_summaries` + `youtube_daily_reports` |
+| 与订阅内容关系 | 直接标注内容本身 | 汇总内容后二次分析 | 汇总内容后二次分析 |
+| 依赖字幕 | YouTube 链路依赖 `transcript` 存在 | 否（仅用 tweet 文本）| 是（无 transcript 的视频会跳过）|
+
+## 11. 配置与环境变量
 
 | 变量 | 位置 | 默认 | 说明 |
 |------|------|------|------|
@@ -368,7 +504,7 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_BUCKET_NAME` / `OSS_ENDPOINT` / `OSS_ASR_PUBLIC_READ` | 两端共用 | — | 音频中转 |
 | 其他 local `.env` 可调项（Worker 并发、task_time_limit、yt-dlp 超时/重试、curl-cffi impersonation 等）| | | **完整清单见 local README 第 "可调环境变量" 一节** |
 
-## 11. 常见运维场景速查
+## 12. 常见运维场景速查
 
 | 场景 | 排查方向 |
 |------|---------|
@@ -381,7 +517,7 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 | 未读数不对 | 检查 DB 里 `update_subscription_unread_count` 触发器是否存在；或手动 `UPDATE subscription_list SET unread_count = ...` 重算 |
 | News 订阅新增后无内容 | News 依赖定时 `news_feed` 任务，不走单订阅首抓；确认 `task_scheduling` 里 `news_feed` 是否启用并在正常 tick |
 
-## 12. 相关文档索引
+## 13. 相关文档索引
 
 - **[`deployment/local_virtual_service/README.md`](../../deployment/local_virtual_service/README.md)** — YouTube Feed 与 Upload Link 的家用 Worker 权威文档（队列架构、字幕/ASR 降级、Webshare、长视频路由、全部 `.env`）
 - `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md` — 对比：用户上传链路

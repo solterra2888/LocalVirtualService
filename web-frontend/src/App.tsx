@@ -15,6 +15,8 @@ import EconomicEventsPage from './pages/EconomicEventsPage';
 import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
 import FilesPage from './pages/FilesPage';
 import MobileSourcesPage from './pages/MobileSourcesPage';
+import DailyPage from './pages/DailyPage';
+import MobileDailyPage from './pages/MobileDailyPage';
 import TasksPage from './pages/TasksPage';
 import UsersPage from './pages/UsersPage';
 import NewsPage from './pages/NewsPage';
@@ -93,7 +95,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
   
   if (!adminUser?.is_admin) {
-    return <Navigate to="/files" replace />;
+    return <Navigate to="/daily" replace />;
   }
   
   return <>{children}</>;
@@ -105,6 +107,7 @@ const AppContent: React.FC = () => {
   const LayoutComponent = isMobile ? MobileLayout : Layout;
   const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
   const FilesComponent = isMobile ? MobileSourcesPage : FilesPage;
+  const DailyComponent = isMobile ? MobileDailyPage : DailyPage;
 
   return (
     <div className="App">
@@ -121,7 +124,9 @@ const AppContent: React.FC = () => {
             </PrivateRoute>
           }
         >
-          <Route index element={<Navigate to="/files" replace />} />
+          {/* Daily 聚合视图 = 登录后首屏: 把 Upload Files 与 Feeds 订阅按时间轴合并 */}
+          <Route index element={<Navigate to="/daily" replace />} />
+          <Route path="daily" element={<DailyComponent />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
           <Route path="markets/economic-events" element={<EconomicEventsPage />} />
@@ -186,7 +191,7 @@ const AppContent: React.FC = () => {
         </Route>
         
         {/* 404页面 */}
-        <Route path="*" element={<Navigate to="/files" replace />} />
+        <Route path="*" element={<Navigate to="/daily" replace />} />
       </Routes>
     </div>
   );

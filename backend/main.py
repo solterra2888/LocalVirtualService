@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily
 from backend.database.db_manager import DatabaseManager
 from backend.processors.task_manager import TaskManager
 from backend.auth.jwt_utils import get_current_user
@@ -108,6 +108,9 @@ app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["订
 # 但通过独立 APIRouter 与 schema 解耦; 设计文档 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md)
 app.include_router(subscription_content_tags.router, prefix="/api/subscriptions", tags=["订阅内容标签"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
+# Daily 聚合视图: 把 Upload Files + Feeds 订阅合并成首页时间轴信息流 (/daily 默认页)
+# 详见 backend/api/daily.py 与 docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md
+app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
 # 图表事件API

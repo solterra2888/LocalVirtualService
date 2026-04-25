@@ -27,6 +27,7 @@ import {
   EditOutlined,
   ProfileOutlined,
   GlobalOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -116,8 +117,13 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：Sources 首位，Feeds 第二，其余日常业务入口 + Add Content
+  // 主导航：Daily 首位（登录后默认页，聚合视图），Sources 第二，Feeds 第三
   const menuItems = [
+    {
+      key: '/daily',
+      icon: <ThunderboltOutlined />,
+      label: 'Daily',
+    },
     {
       key: '/files',
       icon: <FileTextOutlined />,

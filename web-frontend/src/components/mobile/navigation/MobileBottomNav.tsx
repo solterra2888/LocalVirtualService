@@ -1,16 +1,22 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FileTextOutlined, ProfileOutlined, ReadOutlined, StockOutlined } from '@ant-design/icons';
+import { FileTextOutlined, ProfileOutlined, ReadOutlined, StockOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏：Sources、Feeds、Reports（Watchlist 入口与 PC 一致可暂时隐藏）
+ * 移动端底部导航栏：Daily（登录默认页, 聚合视图）、Sources、Feeds、Reports
+ * Watchlist 入口与 PC 一致暂时隐藏
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const navItems = [
+    {
+      key: '/daily',
+      icon: <ThunderboltOutlined />,
+      label: 'Daily',
+    },
     {
       key: '/files',
       icon: <FileTextOutlined />,

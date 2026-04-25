@@ -1,0 +1,165 @@
+/**
+ * Daily 聚合视图 service.
+ *
+ * 把 Upload Files (file_processing_details + file_tags) 与 Feeds 订阅
+ * (subscription_content + subscription_content_tags) 合并成同一时间轴卡片流，
+ * 作为登录后的默认落地页 (/daily)。
+ *
+ * 后端: backend/api/daily.py — endpoints: GET /api/daily/feed, GET /api/daily/stats
+ * 设计参考: AI Notes Daily 的 "Summaries" 页面
+ */
+
+import { api } from './api';
+
+// 与 backend/schemas/daily.py 严格对齐
+export type DailySource = 'upload' | 'feed';
+
+export type DailySourceSubtype =
+  | 'document'   // PDF / Word / Excel / CSV (Upload)
+  | 'image'      // Image (Upload)
+  | 'audio'      // Audio (Upload)
+  | 'youtube'    // Upload YouTube Link
+  | 'web'        // Upload Web Link
+  | 'text'       // My Notes / Thoughts (Upload)
+  | 'twitter'    // Feed Twitter/X
+  | 'news'       // Feed News
+  | 'youtube_feed'; // Feed YouTube Subscription
+
+export type DailyNavigateType = 'execution' | 'feed_article' | 'external_url';
+
+export interface DailyNavigate {
+  type: DailyNavigateType;
+  execution_id?: number | null;     // Upload → processing_stats.id
+  subscription_id?: number | null;  // Feed → subscription_list.id
+  content_id?: number | null;       // Feed → subscription_content.id
+  external_url?: string | null;     // 原始外链
+}
+
+export interface DailyFeedItem {
+  id: string;                  // 复合 ID: upload_<id> 或 feed_<id>
+  source: DailySource;
+  source_subtype: DailySourceSubtype;
+  title: string;
+  summary: string | null;
+  snippet: string | null;
+  author_name: string | null;
+  author_identifier: string | null;
+  sector: string | null;
+  industry: string | null;
+  tickers: string[];
+  concepts: string[];
+  confidence: number | null;
+  published_at: string;        // ISO 8601
+  reading_time_min: number | null;
+  navigate: DailyNavigate;
+}
+
+export interface DailyFeedResponse {
+  items: DailyFeedItem[];
+  total: number;
+  has_more: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface DailySourceCount {
+  source_subtype: DailySourceSubtype;
+  count: number;
+}
+
+export interface DailyStatsResponse {
+  total: number;
+  by_source: DailySourceCount[];
+}
+
+export interface DailyFeedQuery {
+  date_from?: string;             // ISO 8601
+  date_to?: string;               // ISO 8601
+  source_subtypes?: DailySourceSubtype[];
+  q?: string;
+  tickers?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * 构造 FastAPI 兼容的查询字符串.
+ *
+ * axios 默认把数组序列化为 ?source_subtypes[]=a&source_subtypes[]=b（带方括号），
+ * 但 FastAPI Query(List[str]) 要求重复 key 不带括号：?source_subtypes=a&source_subtypes=b.
+ * 因此这里手动用 URLSearchParams 构造，而不是直接传 params 对象给 axios.
+ */
+function buildQueryString(query: DailyFeedQuery): string {
+  const params = new URLSearchParams();
+  if (query.q)         params.append('q', query.q);
+  if (query.date_from) params.append('date_from', query.date_from);
+  if (query.date_to)   params.append('date_to', query.date_to);
+  if (query.limit  !== undefined) params.append('limit',  String(query.limit));
+  if (query.offset !== undefined) params.append('offset', String(query.offset));
+  query.source_subtypes?.forEach(st => params.append('source_subtypes', st));
+  query.tickers?.forEach(t => params.append('tickers', t));
+  return params.toString();
+}
+
+/**
+ * 拉取聚合信息流（按 published_at 倒序）。
+ * 前端按 published_at 的 YYYY-MM-DD 分组渲染卡片。
+ */
+export async function listDailyFeed(query: DailyFeedQuery = {}): Promise<DailyFeedResponse> {
+  const qs = buildQueryString(query);
+  return api.get<DailyFeedResponse>(`/daily/feed?${qs}`);
+}
+
+/**
+ * 顶部统计：返回当前过滤条件下每个来源子类型的卡片数。
+ */
+export async function getDailyStats(
+  query: Omit<DailyFeedQuery, 'source_subtypes' | 'limit' | 'offset'> = {}
+): Promise<DailyStatsResponse> {
+  const qs = buildQueryString(query);
+  return api.get<DailyStatsResponse>(`/daily/stats?${qs}`);
+}
+
+/**
+ * 已知所有合法 source_subtype，前端过滤 chip 渲染顺序参考此数组。
+ */
+export const ALL_DAILY_SOURCE_SUBTYPES: DailySourceSubtype[] = [
+  'document',
+  'image',
+  'audio',
+  'youtube',
+  'web',
+  'text',
+  'twitter',
+  'news',
+  'youtube_feed',
+];
+
+// ─── Preset (per-user) ─────────────────────────────────────────────
+//
+// 每个用户可在 Daily 页面通过齿轮入口配置一份 preset, 限制信息流只展示
+// 选中的 source_subtype。语义约定:
+//   - source_subtypes = []   → 未设置 / 等同于"展示全部"
+//   - source_subtypes = [..] → 仅展示这些子类型 (chip 行也只显示这些)
+//
+// 后端: backend/api/daily.py — endpoints: GET/PUT /api/daily/preset
+
+export interface DailyPresetResponse {
+  source_subtypes: DailySourceSubtype[];
+}
+
+export interface DailyPresetUpdate {
+  source_subtypes: DailySourceSubtype[];
+}
+
+/** 读取当前用户的 Daily preset; 未设置时返回 source_subtypes: []. */
+export async function getDailyPreset(): Promise<DailyPresetResponse> {
+  return api.get<DailyPresetResponse>('/daily/preset');
+}
+
+/** 保存当前用户的 Daily preset; 传空数组等同清除 preset. */
+export async function updateDailyPreset(
+  payload: DailyPresetUpdate
+): Promise<DailyPresetResponse> {
+  return api.put<DailyPresetResponse>('/daily/preset', payload);
+}
