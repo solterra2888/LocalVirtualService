@@ -140,12 +140,12 @@ const DailyPresetModal: React.FC<DailyPresetModalProps> = ({
                 cursor: 'pointer',
                 background: selected.has(sub)
                   ? (themeMode === 'dark'
-                      ? 'rgba(24, 144, 255, 0.10)'
-                      : '#f0f7ff')
+                      ? 'rgba(33, 150, 243, 0.12)'
+                      : '#e8f4ff')
                   : 'transparent',
                 border: `1px solid ${
                   selected.has(sub)
-                    ? (themeMode === 'dark' ? '#3a6cb1' : '#91caff')
+                    ? (themeMode === 'dark' ? 'rgba(33, 150, 243, 0.35)' : '#91caff')
                     : colors.cardBorder
                 }`,
                 transition: 'all 0.15s',
@@ -198,7 +198,7 @@ const DailyPresetModal: React.FC<DailyPresetModalProps> = ({
         style={{
           marginTop: 8,
           padding: '8px 12px',
-          background: themeMode === 'dark' ? 'rgba(255,255,255,0.04)' : '#fafafa',
+          background: themeMode === 'dark' ? 'rgba(255,255,255,0.04)' : '#f5f5f5',
           border: `1px dashed ${colors.cardBorder}`,
           borderRadius: 4,
           fontSize: 12,

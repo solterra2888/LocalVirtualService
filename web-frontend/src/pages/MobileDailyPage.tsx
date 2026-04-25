@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Input, Spin, Typography, message } from 'antd';
+import { App, Button, ConfigProvider, Empty, Input, Spin, Typography, message, theme as antdTheme } from 'antd';
 import { SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -56,7 +56,7 @@ const groupByDate = (items: DailyFeedItem[], tz: string): DateGroup[] => {
   return groups;
 };
 
-const MobileDailyPage: React.FC = () => {
+const MobileDailyPageInner: React.FC = () => {
   const { themeMode, userTimezone } = useDashboardSettings();
   const navigate = useNavigate();
   const colors = DAILY_THEME_COLORS[themeMode];
@@ -280,7 +280,7 @@ const MobileDailyPage: React.FC = () => {
             onClick={() => setPresetModalOpen(true)}
             icon={
               <SettingOutlined
-                style={{ fontSize: 16, color: presetActive ? '#1890ff' : colors.textMuted }}
+                style={{ fontSize: 16, color: presetActive ? colors.accent : colors.textMuted }}
               />
             }
           />
@@ -407,6 +407,38 @@ const MobileDailyPage: React.FC = () => {
         onCancel={() => setPresetModalOpen(false)}
       />
     </div>
+  );
+};
+
+const MobileDailyPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const themeColors = DAILY_THEME_COLORS[themeMode];
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: themeColors.cardBg,
+            colorBgElevated: themeColors.cardBg,
+            colorBorderSecondary: themeColors.cardBorder,
+            colorPrimary: '#2196F3',
+            colorText: themeColors.text,
+            colorTextSecondary: themeColors.textSecondary,
+            colorFillQuaternary: themeColors.inputBg,
+            colorBgLayout: themeColors.pageBg,
+            borderRadius: 8,
+            borderRadiusLG: 12,
+          },
+        }),
+      }}
+    >
+      <App>
+        <MobileDailyPageInner />
+      </App>
+    </ConfigProvider>
   );
 };
 

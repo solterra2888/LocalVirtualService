@@ -1525,14 +1525,14 @@ const FeedReaderPageInner: React.FC = () => {
                           extra={
                             channelType === 'twitter'
                               ? 'With or without @ (e.g. @elonmusk or elonmusk)'
-                              : 'YouTube channel username (e.g., @markets or markets)'
+                              : 'Recommended: paste the @handle from youtube.com/@xxx (e.g., @markets → Bloomberg Television). You can also paste a UC… channel ID. Bare names without @ use the legacy username and may resolve to a different channel.'
                           }
                         >
                           <Input
                             placeholder={
                               channelType === 'twitter'
                                 ? '@elonmusk or elonmusk'
-                                : 'e.g., creativeplanning'
+                                : '@markets or UCIALMKvObZNtJ6AmdCLP7Lg'
                             }
                           />
                         </Form.Item>

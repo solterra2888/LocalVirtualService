@@ -317,12 +317,15 @@ async def create_subscription(
                 normalize_youtube_channel_id,
             )
             
-            # 去除 @ 前缀
-            clean_identifier = request.channel_identifier.lstrip('@')
-            
-            logger.info(f"验证YouTube频道 | identifier={clean_identifier}")
+            # ⚠️ 注意：把原始输入（带 @ 与否）原样传给 service，
+            # service 会按 had_at_prefix 决定走 @handle 页面解析还是 ?user= RSS。
+            # 见 youtube_subscription_service.validate_youtube_channel 文档。
+            raw_identifier = request.channel_identifier.strip()
+            clean_identifier = raw_identifier.lstrip('@')
+
+            logger.info(f"验证YouTube频道 | identifier={raw_identifier}")
             youtube_service = YouTubeSubscriptionService()
-            validation_result = youtube_service.validate_youtube_channel(clean_identifier)
+            validation_result = youtube_service.validate_youtube_channel(raw_identifier)
             
             if not validation_result['exists']:
                 error_msg = validation_result.get('error', 'Channel not found')

@@ -123,23 +123,24 @@ class YouTubeSubscriptionService:
                 
                 if response.status_code == 200:
                     html = response.text
-                    
-                    # 尝试多种正则模式提取 channel_id
+
+                    # 提取 channel_id：必须严格匹配 UC + 22 字符，且优先使用「当前页面」字段，
+                    # 避免误匹配到侧栏推荐 / 相关视频 / 评论作者的 channelId（YouTube 页面里
+                    # 第一处出现的 "channelId":"..." 经常不是当前频道）。
+                    # 优先级：canonical link > externalId > og:url > meta itemprop
                     patterns = [
-                        r'"channelId":"([^"]+)"',
-                        r'"browse_id":"([^"]+)"',
-                        r'<link rel="canonical" href="https://www\.youtube\.com/channel/([^"]+)"',
-                        r'content="https://www\.youtube\.com/channel/([^"]+)"',
+                        r'<link\s+rel="canonical"\s+href="https://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})"',
+                        r'"externalId":"(UC[A-Za-z0-9_-]{22})"',
+                        r'<meta\s+property="og:url"\s+content="https://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})"',
+                        r'<meta\s+itemprop="(?:identifier|channelId)"\s+content="(UC[A-Za-z0-9_-]{22})"',
                     ]
-                    
+
                     for pattern in patterns:
                         match = re.search(pattern, html)
                         if match:
                             channel_id = match.group(1)
-                            # 验证 channel_id 格式（通常是 UC 开头的24字符）
-                            if len(channel_id) >= 20 and channel_id.startswith('UC'):
-                                info(f"成功提取 channel_id: {channel_id}", source="youtube_subscription")
-                                return channel_id
+                            info(f"成功提取 channel_id: {channel_id}", source="youtube_subscription")
+                            return channel_id
                 
             except Exception as e:
                 warning(f"从 {url_template} 提取 channel_id 失败: {str(e)}", source="youtube_subscription")
@@ -153,10 +154,20 @@ class YouTubeSubscriptionService:
     def validate_youtube_channel(channel_identifier: str) -> Dict[str, Any]:
         """
         验证 YouTube 频道是否存在
-        
+
+        ⚠️ 重要：YouTube 的旧 RSS endpoint `?user=<x>` 是基于注册时的 legacy username，
+        与当前的 `@handle` 是两套完全不同的体系。同一个字符串在两个 endpoint 里
+        可能指向完全不同的频道。例如：
+            - `?user=markets`      → 一个无关的小频道 (UCxPf25VbKZx_xF942Lh3jYQ)
+            - `youtube.com/@markets` → Bloomberg Television (UCIALMKvObZNtJ6AmdCLP7Lg)
+        因此：
+            - 用户输入 `@xxx` (前缀有 @) → **优先**走页面解析（@handle 路径），
+              不能用 `?user=` RSS，否则会订阅到错误频道。
+            - 没带 @ 的裸字符串 → 兼容老逻辑（先 ?user= RSS，再 fallback 页面解析）。
+
         Args:
-            channel_identifier: YouTube 用户名或频道ID
-            
+            channel_identifier: YouTube 用户名 / handle (`@xxx`) / 频道ID (`UC...`)
+
         Returns:
             验证结果字典：
             {
@@ -167,9 +178,14 @@ class YouTubeSubscriptionService:
                 'error': str (if exists=False)
             }
         """
+        original_input = (channel_identifier or '').strip()
+        had_at_prefix = original_input.startswith('@')
         username = YouTubeSubscriptionService.clean_username(channel_identifier)
-        
-        info(f"验证 YouTube 频道: identifier={username}", source="youtube_subscription")
+
+        info(
+            f"验证 YouTube 频道: identifier={username}, had_at_prefix={had_at_prefix}",
+            source="youtube_subscription",
+        )
 
         PROXY_HINT = (
             "服务器无法访问 YouTube，请在 .env 中配置 YOUTUBE_PROXY，"
@@ -182,6 +198,29 @@ class YouTubeSubscriptionService:
                 warning(PROXY_HINT, source="youtube_subscription")
                 return True
             return False
+
+        def _try_via_page_then_channel_rss() -> Optional[Dict[str, Any]]:
+            """先抓 @handle 页面拿真实 channel_id，再用 channel_id RSS 取信息。"""
+            try:
+                channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
+            except Exception:
+                warning(PROXY_HINT, source="youtube_subscription")
+                return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
+
+            if not channel_id:
+                return None
+
+            rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=channel_id)
+            result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
+            if _check_unreachable(result):
+                return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
+            if result['exists']:
+                result['channel_id'] = channel_id
+                return result
+            api_result = YouTubeSubscriptionService._validate_channel_via_data_api(channel_id)
+            if api_result:
+                return api_result
+            return None
 
         # 尝试1：如果看起来像 channel_id（UC开头），直接用 channel_id RSS
         if len(username) >= 20 and username.startswith('UC'):
@@ -196,8 +235,24 @@ class YouTubeSubscriptionService:
             api_result = YouTubeSubscriptionService._validate_channel_via_data_api(username)
             if api_result:
                 return api_result
-        
-        # 尝试2：用用户名格式的 RSS
+
+        # 尝试2：带 @ 前缀的输入 → 直接走页面解析（避免 ?user= 路由错误频道）
+        if had_at_prefix:
+            page_result = _try_via_page_then_channel_rss()
+            if page_result is not None:
+                if page_result.get('network_unreachable'):
+                    return page_result
+                if page_result.get('exists'):
+                    return page_result
+            # @handle 解析失败时不再 fallback 到 ?user=（语义不同），直接报错
+            error_msg = (
+                f"YouTube handle '@{username}' not found. "
+                "请确认 https://www.youtube.com/@{username} 能正常访问。"
+            ).format(username=username)
+            error(error_msg, source="youtube_subscription")
+            return {'exists': False, 'error': error_msg}
+
+        # 尝试3：裸字符串（无 @）→ 先用 ?user= RSS（老逻辑，兼容历史订阅）
         rss_url = YouTubeSubscriptionService.RSS_BY_USER.format(username=username)
         result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
 
@@ -215,27 +270,15 @@ class YouTubeSubscriptionService:
                 if channel_id:
                     result['channel_id'] = channel_id
             return result
-        
-        # 尝试3：从页面提取 channel_id，然后用 channel_id RSS
-        try:
-            channel_id = YouTubeSubscriptionService.extract_channel_id_from_page(username)
-        except Exception:
-            # extract_channel_id_from_page 在网络不可达时会 raise
-            warning(PROXY_HINT, source="youtube_subscription")
-            return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
 
-        if channel_id:
-            rss_url = YouTubeSubscriptionService.RSS_BY_CHANNEL_ID.format(channel_id=channel_id)
-            result = YouTubeSubscriptionService._parse_rss_feed(rss_url)
-            if _check_unreachable(result):
-                return {'exists': False, 'network_unreachable': True, 'error': PROXY_HINT}
-            if result['exists']:
-                result['channel_id'] = channel_id
-                return result
-            api_result = YouTubeSubscriptionService._validate_channel_via_data_api(channel_id)
-            if api_result:
-                return api_result
-        
+        # 尝试4：?user= 失败 → fallback 到页面解析
+        page_result = _try_via_page_then_channel_rss()
+        if page_result is not None:
+            if page_result.get('network_unreachable'):
+                return page_result
+            if page_result.get('exists'):
+                return page_result
+
         # 所有尝试都失败
         error_msg = (
             f"YouTube channel '{username}' not found or RSS feed unavailable. "
