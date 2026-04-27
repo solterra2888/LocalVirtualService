@@ -174,7 +174,8 @@ class LLMPromptTemplateService:
                        t.temperature, t.max_tokens, t.version,
                        t.created_by, t.created_at, t.updated_at,
                        c.category_name, c.icon as category_icon,
-                       u.username as created_by_name
+                       u.username as created_by_name,
+                       t.module_code, c.category_code
                 FROM llm_prompt_templates t
                 LEFT JOIN llm_prompt_categories c ON t.category_id = c.id
                 LEFT JOIN users u ON t.created_by = u.id
@@ -239,7 +240,9 @@ class LLMPromptTemplateService:
                     'updated_at': row[18].isoformat() if row[18] else None,
                     'category_name': row[19],
                     'category_icon': row[20],
-                    'created_by_name': row[21]
+                    'created_by_name': row[21],
+                    'module_code': row[22],
+                    'category_code': row[23],
                 })
             
             cursor.close()
@@ -445,13 +448,13 @@ class LLMPromptTemplateService:
             
             query = """
                 INSERT INTO llm_prompt_templates (
-                    template_code, template_name, category_id, system_prompt,
+                    template_code, template_name, category_id, module_code, system_prompt,
                     user_prompt_template, variables, output_format,
                     recommended_provider, recommended_model, temperature, max_tokens,
                     scope, created_by, is_public, is_active, is_default,
                     description, tags, example_input, example_output
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
             """
@@ -460,6 +463,7 @@ class LLMPromptTemplateService:
                 template_data['template_code'],
                 template_data['template_name'],
                 template_data['category_id'],
+                template_data.get('module_code'),
                 template_data.get('system_prompt'),
                 template_data['user_prompt_template'],
                 json.dumps(template_data.get('variables', {})),
@@ -560,6 +564,7 @@ class LLMPromptTemplateService:
             
             field_mapping = {
                 'template_name': 'template_name',
+                'module_code': 'module_code',
                 'system_prompt': 'system_prompt',
                 'user_prompt_template': 'user_prompt_template',
                 'description': 'description',

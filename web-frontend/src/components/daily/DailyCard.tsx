@@ -76,7 +76,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
           {item.title}
         </h3>
         <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <SourceBadge subtype={item.source_subtype} themeMode={themeMode} />
+          <SourceBadge subtype={item.source_subtype} themeMode={themeMode} iconOnly />
         </div>
       </div>
 

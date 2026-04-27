@@ -40,6 +40,15 @@ class WebLinkRequest(BaseModel):
         default=None,
         description="对应模板的变量字典"
     )
+    # PR-5: file_tagging picker
+    auto_tag_template_id: Optional[int] = Field(
+        None,
+        description="上传时选择的 file_tagging 模板 ID, 抓取完成后自动触发 trigger_auto_tagging"
+    )
+    auto_tag_template_variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="对应 file_tagging 模板的变量字典"
+    )
 
 
 class ProcessingStatus(str, Enum):

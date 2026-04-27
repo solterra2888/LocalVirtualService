@@ -23,16 +23,28 @@ from backend.utils.logger import info, error, warning
     retry_backoff_max=120,  # 最大退避时间2分钟
     retry_jitter=True  # 添加随机抖动避免雪崩
 )
-def tag_file_content_task(self, file_id, username=None, additional_context="", force=False):
+def tag_file_content_task(
+    self,
+    file_id,
+    username=None,
+    additional_context="",
+    force=False,
+    template_id=None,
+    template_variables=None,
+):
     """
     为文件内容自动打标签的Celery任务
-    
+
     Args:
         file_id: file_processing_details.id
         username: 用户名（可选）
         additional_context: 额外的上下文信息
         force: 是否强制重新打标签（即使已有标签）
-        
+        template_id: 运行时指定的模板 ID (PR-5);
+            - 调用方 (上传弹窗 / Re-tag API) 显式选择的模板
+            - 优先级最高: runtime > user_template_preferences[file_tagging] > content_tag_v1
+        template_variables: 运行时模板变量 (PR-5); 与 additional_context 合并
+
     Returns:
         打标签结果
     """
@@ -110,13 +122,44 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
         # 获取数据库连接
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
-        
-        # 创建打标签服务
+
+        # PR-5: 用 LLMTemplateResolver 解析模板 (runtime > preference > default)
+        # 失败时降级到默认模板, 不阻断打标流程
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id = get_user_id_by_username(username)
+        resolved_template_id = None
+        resolved_template_code = None
+        try:
+            from backend.services.llm_template_resolver import (
+                LLMTemplateResolver, ResolveError,
+            )
+            resolver = LLMTemplateResolver()
+            resolved = resolver.resolve(
+                module_code='file_tagging',
+                user_id=user_id,
+                runtime_template_id=template_id,
+            )
+            resolved_template_id = resolved.template_id
+            resolved_template_code = resolved.template_code
+            info(
+                f"file_tagging 模板解析: source={resolved.source} "
+                f"template_id={resolved.template_id} code={resolved.template_code}",
+                source="celery_tagging",
+            )
+        except Exception as e:
+            warning(
+                f"模板解析失败, 降级到默认模板: {e}",
+                source="celery_tagging",
+            )
+
+        # 创建打标签服务 (传入解析后的模板)
         tagging_service = ContentTaggingService(
             db_manager=db_manager,
-            log_callback=update_progress
+            log_callback=update_progress,
+            template_id=resolved_template_id,
+            template_code=resolved_template_code,
         )
-        
+
         update_progress(progress=10, log_message="正在读取文件内容...")
         
         # 获取文件信息
@@ -169,6 +212,22 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
             log_message="正在调用AI分析文件内容..."
         )
         
+        # PR-4: user_id 已在上方解析(供 LLMTemplateResolver 使用), 这里直接复用
+        # PR-5: 把运行时 template_variables 合并进 additional_context (若有)
+        merged_context = additional_context or ""
+        if template_variables:
+            extras = []
+            for k, v in template_variables.items():
+                if k in ("file_content",):  # file_content 由 service 注入, 跳过
+                    continue
+                if v is None or v == "":
+                    continue
+                extras.append(f"{k}: {v}")
+            if extras:
+                merged_context = (
+                    (merged_context + "\n" if merged_context else "") + "\n".join(extras)
+                )
+
         # 执行打标签（异步）
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -176,8 +235,9 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
             result = loop.run_until_complete(
                 tagging_service.tag_file_content(
                     file_id=file_id,
-                    additional_context=additional_context,
-                    force=force
+                    additional_context=merged_context,
+                    force=force,
+                    user_id=user_id,
                 )
             )
         finally:
@@ -190,7 +250,14 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
                 progress=100,
                 log_message=result.get('message', '已跳过')
             )
-            return result
+            # PR-4 R3 修复: 与 classify_tasks 对齐, 显式标记 status='skipped'
+            # (避免调用方需根据 'skipped' bool 字段判断状态)
+            return {
+                'status': 'skipped',
+                'file_id': file_id,
+                'filename': filename,
+                **result,
+            }
         
         update_progress(
             status="completed",
@@ -240,15 +307,20 @@ def tag_file_content_task(self, file_id, username=None, additional_context="", f
     name='batch_tag_files',
     queue='file_processing'
 )
-def batch_tag_files_task(self, file_ids, username=None, force=False):
+def batch_tag_files_task(
+    self, file_ids, username=None, force=False,
+    template_id=None, template_variables=None,
+):
     """
     批量为文件打标签
-    
+
     Args:
         file_ids: 文件ID列表
         username: 用户名
         force: 是否强制重新打标签
-        
+        template_id: 运行时指定的 file_tagging 模板 ID (PR-5); 应用到所有文件
+        template_variables: 模板变量 (PR-5)
+
     Returns:
         批量处理结果
     """
@@ -283,8 +355,13 @@ def batch_tag_files_task(self, file_ids, username=None, force=False):
             )
             
             # 异步调用单个文件打标签任务
+            # PR-5: 把 template_id / variables 透传给单文件任务
             task_result = tag_file_content_task.apply_async(
                 args=(file_id, username, "", force),
+                kwargs={
+                    'template_id': template_id,
+                    'template_variables': template_variables,
+                },
                 countdown=1  # 延迟1秒，避免并发过高
             )
             

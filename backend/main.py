@@ -93,6 +93,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# PR-F: LLM per-user × per-provider 限速命中时, 转 HTTP 429 + Retry-After 头.
+# 让前端可以根据 retry_after_seconds 友好提示用户 "请 N 秒后重试".
+from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi import Request  # noqa: E402
+from backend.core.llm_rate_limiter import LLMRateLimitExceeded  # noqa: E402
+
+
+@app.exception_handler(LLMRateLimitExceeded)
+async def llm_rate_limit_handler(request: Request, exc: LLMRateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": (
+                f"You're triggering AI too quickly. Please wait {exc.retry_after_seconds}s "
+                f"before retrying ({exc.current}/{exc.limit} per minute on {exc.provider})."
+            ),
+            "retry_after_seconds": exc.retry_after_seconds,
+            "current": exc.current,
+            "limit": exc.limit,
+            "provider": exc.provider,
+        },
+        headers={"Retry-After": str(exc.retry_after_seconds)},
+    )
+
 # 注册路由
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(files.router, prefix="/api/files", tags=["文件处理"])

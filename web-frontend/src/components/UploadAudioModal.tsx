@@ -43,6 +43,8 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
   const isDark = themeMode === 'dark';
   const [audioFile, setAudioFile] = useState<AudioFile | null>(null);
   const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  // PR-5: file_tagging picker (与 analyze 并列, 选了用自定义模板代替默认 content_tag_v1)
+  const [tagPicker, setTagPicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const { addTask, updateTaskStatus } = useFileProcessing();
 
   const formatFileSize = (bytes: number): string => {
@@ -107,11 +109,15 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
     const audioAnalyzeOptions = {
       auto_analyze_template_id: analyzePicker.templateId ?? null,
       auto_analyze_template_variables: analyzePicker.templateVariables || {},
+      // PR-5: file_tagging picker
+      auto_tag_template_id: tagPicker.templateId ?? null,
+      auto_tag_template_variables: tagPicker.templateVariables || {},
     };
 
     onCancel();
     setAudioFile(null);
     setAnalyzePicker({});
+    setTagPicker({});
 
     (async () => {
       try {
@@ -230,6 +236,7 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
   const handleClose = () => {
     setAudioFile(null);
     setAnalyzePicker({});
+    setTagPicker({});
     onCancel();
   };
 
@@ -363,12 +370,28 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
             </div>
           )}
 
-          {/* AI 分析模板 (可选, 默认 audio_analysis_v1) */}
+          {/* PR-A: 音频专属 audio_analysis 模块 (从 file_analysis 拆出) */}
           <div style={{ marginTop: '16px' }}>
             <UploadAnalysisTemplatePicker
               value={analyzePicker}
               onChange={setAnalyzePicker}
               mode="audio-default"
+              moduleCode="audio_analysis"
+              label="Audio Analysis Template"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+            />
+          </div>
+
+          {/* file_tagging 用户私有模板 */}
+          <div style={{ marginTop: '16px' }}>
+            <UploadAnalysisTemplatePicker
+              value={tagPicker}
+              onChange={setTagPicker}
+              mode="optional"
+              moduleCode="file_tagging"
+              label="AI Tagging Template"
+              hint="Optional. Toggle on to use your own tagging template (sector / industry / tickers / concepts)."
               textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
             />

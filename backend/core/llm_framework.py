@@ -1014,7 +1014,39 @@ class LLMService:
         # 4. 调用LLM
         import time
         start_time = time.time()
-        
+
+        # PR-F: per-user × per-provider 限速 (Redis 固定 1 分钟窗口).
+        # 仅当带 user_id 时生效; 系统调用 (聚合 / 后台批处理) 免限速.
+        # Redis 不可达时 fail-open, 不阻塞业务.
+        if user_id:
+            from backend.core.llm_rate_limiter import (
+                LLMRateLimiter,
+                LLMRateLimitExceeded,
+            )
+            try:
+                LLMRateLimiter.instance().check_and_consume(
+                    user_id=user_id,
+                    provider=provider or "default",
+                )
+            except LLMRateLimitExceeded:
+                # 失败提前记录 usage_log, 然后向上抛供 API 转 429
+                response_time_ms = int((time.time() - start_time) * 1000)
+                LLMPromptTemplateService().log_template_usage(
+                    template_id=rendered.template_id,
+                    user_id=user_id,
+                    rendered_prompt=f"System: {rendered.system_prompt}\n\nUser: {rendered.user_prompt}",
+                    variables_data=rendered.variables_used,
+                    response_content="",
+                    provider=provider or "unknown",
+                    model=model or "unknown",
+                    tokens_used=0,
+                    cost=0.0,
+                    response_time_ms=response_time_ms,
+                    success=False,
+                    error_message="rate_limit_exceeded",
+                )
+                raise
+
         try:
             response = await self.chat_completion(
                 messages, 

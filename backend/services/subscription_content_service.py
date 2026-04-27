@@ -359,15 +359,84 @@ class SubscriptionContentService:
                     # YouTube: 仅返回是否有 transcript（不返回正文）
                     'has_transcript': bool(row[33]) if row[33] is not None else False,
                 })
-            
+
+            # PR-7: 叠加 per-user 个性化 summary 覆盖
+            # 每条 content 的字段:
+            #   summary_source : 'personalized' | 'global' | 'none'
+            #   personalized_* : 当前用户的个性化数据 (仅当 summary_source='personalized')
+            self._attach_personalized_summaries(cursor, user_id, contents)
+
             return contents
-            
+
         except Exception as e:
             logger.error(f"Failed to get user content: {str(e)}")
             raise
         finally:
             cursor.close()
             conn.close()
+
+    def _attach_personalized_summaries(self, cursor, user_id: int, contents: List[Dict[str, Any]]) -> None:
+        """
+        PR-7: 批量附加 per-user 个性化 summary 到 contents 列表 (in-place 修改).
+
+        - 对每条 content, 如果 (content_id, user_id) 在 subscription_content_user_summaries 有行,
+          标记 summary_source='personalized' 并附上 personalized_summary / reasoning / template_id.
+        - 否则 summary_source='global' (前端可后续用 LEFT JOIN subscription_content_tags 拿全局 summary).
+        - 不查询 subscription_content_tags (避免重复 JOIN 增大 SELECT 列数), 全局 summary 在
+          /tags 端点单独获取或 daily 聚合查询里另行处理.
+
+        本方法 swallow 任何查询异常: 最差情况下所有 contents 退化为 summary_source='global',
+        不阻断 feed 列表加载.
+        """
+        if not contents:
+            return
+        try:
+            content_ids = [c['id'] for c in contents if c.get('id')]
+            if not content_ids:
+                for c in contents:
+                    c['summary_source'] = 'global'
+                return
+
+            cursor.execute(
+                """
+                SELECT subscription_content_id, id, template_id, summary, reasoning,
+                       custom_concepts, ai_metadata, tagged_at, updated_at
+                FROM subscription_content_user_summaries
+                WHERE subscription_content_id = ANY(%s) AND user_id = %s
+                """,
+                (content_ids, user_id),
+            )
+            rows = cursor.fetchall()
+            override_map: Dict[int, Dict[str, Any]] = {}
+            for r in rows:
+                override_map[r[0]] = {
+                    'summary_id': r[1],
+                    'template_id': r[2],
+                    'summary': r[3],
+                    'reasoning': r[4],
+                    'custom_concepts': r[5] if isinstance(r[5], list) else (r[5] or []),
+                    'ai_metadata': r[6] if r[6] else {},
+                    'tagged_at': r[7].isoformat() if r[7] else None,
+                    'updated_at': r[8].isoformat() if r[8] else None,
+                }
+
+            for c in contents:
+                ovr = override_map.get(c['id'])
+                if ovr:
+                    c['summary_source'] = 'personalized'
+                    c['personalized_summary'] = ovr['summary']
+                    c['personalized_reasoning'] = ovr['reasoning']
+                    c['personalized_template_id'] = ovr['template_id']
+                    c['personalized_summary_id'] = ovr['summary_id']
+                    c['personalized_tagged_at'] = ovr['tagged_at']
+                else:
+                    c['summary_source'] = 'global'
+        except Exception as e:
+            logger.warning(
+                f"Failed to attach personalized summaries (will fallback to global): {e}"
+            )
+            for c in contents:
+                c.setdefault('summary_source', 'global')
     
     def update_transcript(
         self,

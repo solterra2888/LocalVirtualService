@@ -39,6 +39,8 @@ export interface PromptTemplate {
   category_id: number;
   category_code?: string;
   category_name?: string;
+  /** PR-5 (2026-04-27): 业务模块绑定字段, 与 user_template_preferences.module_code 对齐 */
+  module_code?: string;
   description?: string;
   scope: 'system' | 'user' | 'shared';
   is_active: boolean;
@@ -73,6 +75,8 @@ export interface TemplateCreateData {
   template_code: string;
   template_name: string;
   category_id: number;
+  /** PR-5: 业务模块代码; 与 user_template_preferences.module_code 对齐 */
+  module_code?: string;
   system_prompt?: string;
   user_prompt_template: string;
   variables?: Record<string, VariableDefinition>;
@@ -91,6 +95,8 @@ export interface TemplateCreateData {
 
 export interface TemplateUpdateData {
   template_name?: string;
+  /** PR-5: 允许 admin 编辑时修正 module_code */
+  module_code?: string;
   system_prompt?: string;
   user_prompt_template?: string;
   variables?: Record<string, VariableDefinition>;
@@ -158,6 +164,49 @@ export interface ModuleInfo {
   description: string;
   configurable: boolean;
   default_template_code: string | null;
+}
+
+/**
+ * Phase 2 (PR-C) My Templates 列表项 — 一个 module 一项.
+ * - kind='user_owned': 该用户在该 USER_OWNED 模块下的私有模板, 可编辑可重置
+ * - kind='system_fixed': 系统级模板, 普通用户只读, admin 通过 /system-templates 编辑
+ */
+export interface MyTemplateItem {
+  module_code: string;
+  module_name: string;
+  module_description: string;
+  kind: 'user_owned' | 'system_fixed';
+  configurable: boolean;
+
+  template_id: number;
+  template_code: string;
+  template_name: string;
+  scope: 'system' | 'user' | 'shared';
+  is_active: boolean;
+
+  system_prompt: string | null;
+  user_prompt_template: string;
+  variables: Record<string, VariableDefinition>;
+  output_format: OutputFormat;
+  recommended_provider: string | null;
+  recommended_model: string | null;
+  temperature: number;
+  max_tokens: number;
+  description: string | null;
+
+  parent_template_id: number | null;
+  updated_at: string | null;
+}
+
+export interface UpdateMyTemplatePayload {
+  system_prompt?: string;
+  user_prompt_template?: string;
+  variables?: Record<string, VariableDefinition>;
+  output_format?: OutputFormat;
+  recommended_provider?: string;
+  recommended_model?: string;
+  temperature?: number;
+  max_tokens?: number;
 }
 
 // ==================== API服务 ====================
@@ -354,6 +403,64 @@ class PromptTemplateService {
 
   async deletePreference(moduleCode: string): Promise<{ success: boolean }> {
     const response = await api.delete(`/llm/prompts/preferences/${moduleCode}`);
+    return response.data;
+  }
+
+  // === Phase 2 (PR-C): My Templates 双态模型 ===
+
+  /**
+   * 列出当前用户的所有 module → 1 模板; USER_OWNED 给私有模板, SYSTEM_FIXED 给只读默认.
+   */
+  async listMyTemplates(): Promise<MyTemplateItem[]> {
+    const response = await api.get('/llm/prompts/my-templates');
+    return response.data.items || [];
+  }
+
+  async getMyTemplate(moduleCode: string): Promise<MyTemplateItem> {
+    const response = await api.get(`/llm/prompts/my-templates/${moduleCode}`);
+    return response.data.item;
+  }
+
+  /**
+   * 编辑当前用户在指定 USER_OWNED 模块下的私有模板内容.
+   * SYSTEM_FIXED 模块会返回 403, 走 /system-templates 由 admin 操作.
+   */
+  async updateMyTemplate(
+    moduleCode: string,
+    payload: UpdateMyTemplatePayload,
+  ): Promise<{ success: boolean; item: MyTemplateItem }> {
+    const response = await api.put(`/llm/prompts/my-templates/${moduleCode}`, payload);
+    return response.data;
+  }
+
+  /**
+   * 重置当前用户在指定 USER_OWNED 模块下的私有模板, 内容回到 system default (覆盖, 无历史).
+   */
+  async resetMyTemplate(
+    moduleCode: string,
+  ): Promise<{ success: boolean; item: MyTemplateItem }> {
+    const response = await api.post(`/llm/prompts/my-templates/${moduleCode}/reset`);
+    return response.data;
+  }
+
+  // === Phase 2 (PR-C): Admin → System Templates ===
+
+  /**
+   * [Admin] 列出所有 system-scope 模板 (用于 System Templates Tab).
+   */
+  async listSystemTemplates(): Promise<PromptTemplate[]> {
+    const response = await api.get('/llm/prompts/system-templates');
+    return response.data.templates || [];
+  }
+
+  /**
+   * [Admin] 编辑 system-scope 模板内容.
+   */
+  async updateSystemTemplate(
+    templateId: number,
+    payload: UpdateMyTemplatePayload,
+  ): Promise<{ success: boolean; template: PromptTemplateDetail }> {
+    const response = await api.put(`/llm/prompts/system-templates/${templateId}`, payload);
     return response.data;
   }
 }

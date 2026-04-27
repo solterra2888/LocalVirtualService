@@ -113,7 +113,8 @@ class ContentClassifyService:
         self,
         file_id: int,
         username: str,
-        force: bool = False
+        force: bool = False,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         根据文件内容自动归类到用户文件夹
@@ -178,10 +179,12 @@ class ContentClassifyService:
         }
 
         self.log(f"正在调用AI自动归类: {filename}, 候选文件夹: [{folder_list_str}]")
+        # PR-4 修复: 透传 user_id 让 llm_prompt_usage_logs 能正确归属
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=content,
             file_name=filename,
-            custom_variables=variables
+            custom_variables=variables,
+            user_id=user_id,
         )
 
         raw_result = (analysis_result.get('report_content') or '').strip()

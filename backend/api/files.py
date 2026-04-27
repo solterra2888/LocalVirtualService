@@ -1624,8 +1624,9 @@ async def update_file_detail_content(
                 detail="Failed to connect to database"
             )
         cursor = conn.cursor()
+        # PR-4 R2 修复: 同时拉 file_type, 用于 trigger_auto_analyze 决策 (audio/youtube 走 audio_analysis_v1 fallback)
         cursor.execute("""
-            SELECT fpd.id, fpd.processing_stats_id
+            SELECT fpd.id, fpd.processing_stats_id, fpd.file_type
             FROM file_processing_details fpd
             WHERE fpd.id = %s
         """, (file_id,))
@@ -1637,6 +1638,7 @@ async def update_file_detail_content(
                 detail="File not found"
             )
         processing_stats_id = row[1]
+        file_type = row[2]
         cursor.execute("""
             SELECT "user" FROM processing_stats WHERE id = %s
         """, (processing_stats_id,))
@@ -1668,6 +1670,18 @@ async def update_file_detail_content(
                 trigger_auto_tagging(int(file_id), username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
                 trigger_auto_naming(int(file_id), username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                 trigger_auto_classify(int(file_id), username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+                # PR-4 R2 修复: 与 create-text-note / process_*_task 4 路并行触发对齐.
+                # 文档/网页/text: 用户未在 Settings 设 file_analysis 偏好则跳过 (trigger_auto_analyze 内部判断);
+                # 音频/YouTube: 兜底走 audio_analysis_v1.
+                trigger_auto_analyze(
+                    file_detail_id=int(file_id),
+                    execution_id=processing_stats_id,
+                    file_type=file_type or 'document',
+                    template_id=None,
+                    template_variables=None,
+                    username=username,
+                    delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                )
             except Exception as e:
                 warning(f"Failed to trigger auto LLM tasks after content update: {str(e)}",
                         source="api", file_id=file_id)
@@ -1689,6 +1703,8 @@ async def create_text_note(
     content: str = Body(..., embed=True),
     auto_analyze_template_id: Optional[int] = Body(None, embed=True),
     auto_analyze_template_variables: Optional[Dict[str, Any]] = Body(None, embed=True),
+    auto_tag_template_id: Optional[int] = Body(None, embed=True),
+    auto_tag_template_variables: Optional[Dict[str, Any]] = Body(None, embed=True),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1762,7 +1778,12 @@ async def create_text_note(
              source="api", user=username)
 
         try:
-            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            trigger_auto_tagging(
+                file_detail_id, username,
+                delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
+                template_id=auto_tag_template_id,
+                template_variables=auto_tag_template_variables,
+            )
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
             trigger_auto_analyze(
@@ -2637,6 +2658,9 @@ async def upload_audio(
     file: UploadFile = File(...),
     auto_analyze_template_id: Optional[int] = Form(None),
     auto_analyze_template_variables: str = Form('{}'),  # JSON string
+    # PR-5: 上传弹窗 file_tagging picker
+    auto_tag_template_id: Optional[int] = Form(None),
+    auto_tag_template_variables: str = Form('{}'),  # JSON string
     current_user=Depends(get_current_user)
 ):
     """
@@ -2725,6 +2749,12 @@ async def upload_audio(
         except json.JSONDecodeError:
             audio_template_vars = {}
 
+        # PR-5: 解析 file_tagging picker 的模板变量
+        try:
+            audio_tag_template_vars = json.loads(auto_tag_template_variables) if auto_tag_template_variables else {}
+        except json.JSONDecodeError:
+            audio_tag_template_vars = {}
+
         # 提交异步任务到 Celery
         task = upload_and_transcribe_audio_task.apply_async(
             args=[temp_file_path, file.filename, current_user.username],
@@ -2734,6 +2764,9 @@ async def upload_audio(
                 'diarization_enabled': True,
                 'auto_analyze_template_id': auto_analyze_template_id,
                 'auto_analyze_template_variables': audio_template_vars,
+                # PR-5: file_tagging picker 透传到 Celery 任务
+                'auto_tag_template_id': auto_tag_template_id,
+                'auto_tag_template_variables': audio_tag_template_vars,
             },
             queue='file_processing'
         )
@@ -2772,6 +2805,9 @@ async def upload_and_process_document(
     template_variables: str = Form('{}'),  # JSON string
     custom_inputs: str = Form('{}'),  # JSON string
     params: str = Form('{}'),  # JSON string (sector, industry, ticker, etc.)
+    # PR-5: 上传弹窗用户选择的 file_tagging 模板 (可选)
+    auto_tag_template_id: Optional[int] = Form(None),
+    auto_tag_template_variables: str = Form('{}'),  # JSON string
     current_user=Depends(get_current_user)
 ):
     """
@@ -2831,6 +2867,8 @@ async def upload_and_process_document(
             custom_inputs_dict = json.loads(custom_inputs) if custom_inputs else {}
             params_dict = json.loads(params) if params else {}
             _strip_llamaindex_key_from_client_params(params_dict)
+            # PR-5: 上传弹窗 file_tagging picker 的模板变量
+            auto_tag_template_vars = json.loads(auto_tag_template_variables) if auto_tag_template_variables else {}
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2862,9 +2900,13 @@ async def upload_and_process_document(
             'analysis_mode': analysis_mode,
             'task_type': task_type or 'local_llm_template',
             'template_id': template_id,
-            'template_variables': template_vars
+            'template_variables': template_vars,
+            # PR-5: file_tagging picker 选择的模板, 透传到 Celery 任务,
+            # 由 upload_and_process_document_task 末尾的 trigger_auto_tagging 使用.
+            'auto_tag_template_id': auto_tag_template_id,
+            'auto_tag_template_variables': auto_tag_template_vars,
         }
-        
+
         # 提交异步任务到 Celery
         task = upload_and_process_document_task.apply_async(
             args=[temp_file_path, file.filename, current_user.username],
@@ -3108,6 +3150,9 @@ async def upload_web_link(
             kwargs={
                 'auto_analyze_template_id': request.auto_analyze_template_id,
                 'auto_analyze_template_variables': request.auto_analyze_template_variables or {},
+                # PR-5: file_tagging picker
+                'auto_tag_template_id': request.auto_tag_template_id,
+                'auto_tag_template_variables': request.auto_tag_template_variables or {},
             },
             queue='file_processing'
         )
@@ -4122,6 +4167,16 @@ async def upload_youtube_link(
         if not isinstance(auto_analyze_template_variables, dict):
             auto_analyze_template_variables = {}
 
+        # PR-5: file_tagging picker 选择的模板, 同样持久化到 upload_params
+        auto_tag_template_id = request.get('auto_tag_template_id')
+        auto_tag_template_variables = request.get('auto_tag_template_variables') or {}
+        try:
+            auto_tag_template_id = int(auto_tag_template_id) if auto_tag_template_id else None
+        except (TypeError, ValueError):
+            auto_tag_template_id = None
+        if not isinstance(auto_tag_template_variables, dict):
+            auto_tag_template_variables = {}
+
         username = current_user.username if hasattr(current_user, 'username') else 'guest'
 
         video_id = YouTubeService.extract_video_id(youtube_url)
@@ -4165,6 +4220,9 @@ async def upload_youtube_link(
                         # 持久化, finalize_youtube_file_task 会读出来触发 trigger_auto_analyze
                         "auto_analyze_template_id": auto_analyze_template_id,
                         "auto_analyze_template_variables": auto_analyze_template_variables,
+                        # PR-5: file_tagging picker 透传 (finalize 时读出供 trigger_auto_tagging)
+                        "auto_tag_template_id": auto_tag_template_id,
+                        "auto_tag_template_variables": auto_tag_template_variables,
                     }),
                     '', 'processing',
                 ))

@@ -88,6 +88,13 @@ try:
 except ImportError as e:
     print(f"❌ 导入 Feeds 打标任务模块失败: {e}")
 
+# PR-6: Feeds per-user 个性化 summary 任务
+try:
+    from backend.tasks import feed_summary_tasks
+    print(f"✅ 成功导入 Feeds 个性化 summary 任务模块: {feed_summary_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Feeds 个性化 summary 任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

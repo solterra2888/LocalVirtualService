@@ -104,7 +104,9 @@ class DatabaseManager:
                 task_name TEXT DEFAULT 'default',
                 "user" TEXT DEFAULT 'guest',
                 final_report TEXT DEFAULT '',
-                rc_agent_status TEXT DEFAULT 'pending'
+                rc_agent_status TEXT DEFAULT 'pending',
+                llm_model VARCHAR(255),
+                llm_provider VARCHAR(255)
             )
             """)
             
@@ -125,7 +127,9 @@ class DatabaseManager:
                 content TEXT DEFAULT '',
                 error_message TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                task_id TEXT DEFAULT ''
+                task_id TEXT DEFAULT '',
+                file_storage_type VARCHAR(10) DEFAULT 'local',
+                oss_bucket VARCHAR(100)
             )
             """)
             
@@ -412,7 +416,10 @@ class DatabaseManager:
                 ('task_name', 'TEXT DEFAULT \'default\''),
                 ('"user"', 'TEXT DEFAULT \'guest\''),  # user是PostgreSQL关键字，需要引号
                 ('log_content', 'TEXT DEFAULT \'\''),
-                ('final_report', 'TEXT DEFAULT \'\'')
+                ('final_report', 'TEXT DEFAULT \'\''),
+                # PR-2: LLM 元数据列（与 fix_processing_stats_llm_columns.sql 对齐）
+                ('llm_model', 'VARCHAR(255)'),
+                ('llm_provider', 'VARCHAR(255)')
             ]
             
             # 添加缺失的列
@@ -463,7 +470,9 @@ class DatabaseManager:
                     content TEXT DEFAULT '',
                     error_message TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    task_id TEXT DEFAULT ''
+                    task_id TEXT DEFAULT '',
+                    file_storage_type VARCHAR(10) DEFAULT 'local',
+                    oss_bucket VARCHAR(100)
                 )
                 """)
                 print("file_processing_details表创建成功")

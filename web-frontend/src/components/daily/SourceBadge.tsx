@@ -41,6 +41,8 @@ interface SourceBadgeProps {
   themeMode: 'light' | 'dark';
   /** 紧凑模式: 字号小一号 (列表稠密时使用) */
   compact?: boolean;
+  /** 纯图标模式: 只显示图标, 隐藏文字 (卡片右上角使用) */
+  iconOnly?: boolean;
   /** 是否可点击 (用于来源筛选 chip), 默认 false */
   clickable?: boolean;
   /** 是否处于"已选中"高亮状态 (筛选 chip 用) */
@@ -57,6 +59,7 @@ const SourceBadge: React.FC<SourceBadgeProps> = ({
   subtype,
   themeMode,
   compact,
+  iconOnly,
   clickable,
   active,
   count,
@@ -75,25 +78,39 @@ const SourceBadge: React.FC<SourceBadgeProps> = ({
     ? '1px solid transparent'
     : `1px solid ${palette.fg}40`;
 
-  const baseStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: compact ? 3 : 4,
-    padding: compact ? '1px 6px' : '2px 8px',
-    fontSize: compact ? 10 : 11,
-    fontWeight: 600,
-    letterSpacing: 0.3,
-    lineHeight: 1.4,
-    borderRadius: 4,
-    background: palette.bg,
-    color: palette.fg,
-    cursor: clickable ? 'pointer' : 'default',
-    userSelect: 'none',
-    border: borderStyle,
-    transition: 'all 0.15s',
-    whiteSpace: 'nowrap',
-    ...style,
-  };
+  const iconSize = compact ? 10 : 11;
+
+  const baseStyle: React.CSSProperties = iconOnly
+    ? {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: iconSize,
+        color: palette.fg,
+        cursor: clickable ? 'pointer' : 'default',
+        userSelect: 'none',
+        flexShrink: 0,
+        ...style,
+      }
+    : {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: compact ? 3 : 4,
+        padding: compact ? '1px 6px' : '2px 8px',
+        fontSize: iconSize,
+        fontWeight: 600,
+        letterSpacing: 0.3,
+        lineHeight: 1.4,
+        borderRadius: 4,
+        background: palette.bg,
+        color: palette.fg,
+        cursor: clickable ? 'pointer' : 'default',
+        userSelect: 'none',
+        border: borderStyle,
+        transition: 'all 0.15s',
+        whiteSpace: 'nowrap',
+        ...style,
+      };
 
   const inner = (
     <span
@@ -113,17 +130,17 @@ const SourceBadge: React.FC<SourceBadgeProps> = ({
       style={baseStyle}
     >
       {icon && (
-        <span style={{ fontSize: compact ? 10 : 11, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
+        <span style={{ fontSize: iconSize, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
           {icon}
         </span>
       )}
-      {config.label}
-      {typeof count === 'number' && (
+      {!iconOnly && config.label}
+      {!iconOnly && typeof count === 'number' && (
         <span
           style={{
             opacity: 0.75,
             fontWeight: 500,
-            fontSize: compact ? 10 : 11,
+            fontSize: iconSize,
           }}
         >
           · {count}

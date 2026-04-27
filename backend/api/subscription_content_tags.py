@@ -404,3 +404,190 @@ def batch_retag_contents(
     except Exception as e:
         logger.error(f"派发批量 feed 打标失败: {e}")
         raise HTTPException(status_code=500, detail=f"派发批量打标失败: {e}")
+
+
+# ==========================================================================
+# Per-User Personalized Summaries (PR-7)
+#
+# 与 subscription_content_tags 全局共享层并存:
+#   subscription_content_tags             → 客观分类 + baseline summary (全局)
+#   subscription_content_user_summaries   → per-user 个性化 summary 覆盖
+# ==========================================================================
+
+from pydantic import BaseModel, Field  # noqa: E402  (放在末尾避免顶部 import 复杂化)
+
+
+class PersonalizeRequest(BaseModel):
+    """POST /contents/{id}/personalize 请求体."""
+    template_id: Optional[int] = Field(
+        default=None,
+        description="运行时指定的 feed_summary 模板 ID; 未传则走 user_template_preferences[feed_summary]",
+    )
+    template_variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="模板运行时变量 (合并到 LLM custom_variables)",
+    )
+    force: bool = Field(
+        default=False,
+        description="True 时即使已有同模板个性化也强制重生成",
+    )
+
+
+class PersonalizedSummaryResponse(BaseModel):
+    """GET /contents/{id}/personalized-summary 响应体."""
+    id: int
+    subscription_content_id: int
+    user_id: int
+    template_id: Optional[int]
+    summary: str
+    reasoning: Optional[str]
+    custom_concepts: List[Any]
+    ai_metadata: Dict[str, Any]
+    tagged_at: Optional[str]
+    updated_at: Optional[str]
+
+
+@router.post(
+    "/contents/{content_id}/personalize",
+    summary="(PR-7) 为当前用户生成个性化 feed summary (per-user 覆盖)",
+)
+def personalize_content_summary(
+    content_id: int,
+    request: Optional[PersonalizeRequest] = None,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    异步生成个性化 summary. 与全局 retag 不同: 每用户独立, 不影响其他用户视图.
+
+    模板解析优先级 (LLMTemplateResolver):
+        runtime template_id (本请求体)  >
+        user_template_preferences[feed_summary]  >
+        系统默认 (无 → 抛 ResolveError, 即必须先在 Settings 设偏好)
+    """
+    from backend.tasks.feed_summary_tasks import personalize_feed_summary_task
+
+    req = request or PersonalizeRequest()
+
+    # 校验内容存在 + 用户有权访问
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    try:
+        cursor = conn.cursor()
+        content_row = _assert_content_exists_and_accessible(
+            cursor, content_id, current_user.user_id
+        )
+    finally:
+        conn.close()
+
+    try:
+        task = personalize_feed_summary_task.apply_async(
+            args=(content_id, current_user.user_id),
+            kwargs={
+                "template_id": req.template_id,
+                "template_variables": req.template_variables,
+                "force": req.force,
+            },
+            countdown=1,
+        )
+        logger.info(
+            f"已派发 feed summary 个性化: content_id={content_id} "
+            f"user_id={current_user.user_id} template_id={req.template_id} "
+            f"task_id={task.id}"
+        )
+        return {
+            "task_id": task.id,
+            "status": "pending",
+            "content_id": content_id,
+            "user_id": current_user.user_id,
+            "title": content_row.get("title") or content_row.get("author_name"),
+            "message": "个性化 summary 任务已派发, 请轮询 task_id 或刷新内容列表查看结果",
+        }
+    except Exception as e:
+        logger.error(f"派发 feed summary 个性化任务失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"派发个性化任务失败: {e}",
+        )
+
+
+@router.get(
+    "/contents/{content_id}/personalized-summary",
+    summary="(PR-7) 获取当前用户对该 feed 的个性化 summary (404 表示无个性化)",
+)
+def get_personalized_summary(
+    content_id: int,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """读取 subscription_content_user_summaries; 不存在返回 404."""
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    try:
+        cursor = conn.cursor()
+        _assert_content_exists_and_accessible(cursor, content_id, current_user.user_id)
+        cursor.execute(
+            """
+            SELECT id, subscription_content_id, user_id, template_id,
+                   summary, reasoning, custom_concepts, ai_metadata,
+                   tagged_at, updated_at
+            FROM subscription_content_user_summaries
+            WHERE subscription_content_id = %s AND user_id = %s
+            """,
+            (content_id, current_user.user_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail="No personalized summary; falling back to global summary",
+            )
+        return {
+            "id": row[0],
+            "subscription_content_id": row[1],
+            "user_id": row[2],
+            "template_id": row[3],
+            "summary": row[4],
+            "reasoning": row[5],
+            "custom_concepts": row[6] if isinstance(row[6], list) else (row[6] or []),
+            "ai_metadata": row[7] if row[7] else {},
+            "tagged_at": row[8].isoformat() if row[8] else None,
+            "updated_at": row[9].isoformat() if row[9] else None,
+        }
+    finally:
+        conn.close()
+
+
+@router.delete(
+    "/contents/{content_id}/personalized-summary",
+    summary="(PR-7) 取消当前用户对该 feed 的个性化 (回退到全局 summary)",
+)
+def delete_personalized_summary(
+    content_id: int,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    from backend.services.feed_summary_personalization_service import (
+        FeedSummaryPersonalizationService,
+    )
+
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    try:
+        cursor = conn.cursor()
+        _assert_content_exists_and_accessible(cursor, content_id, current_user.user_id)
+    finally:
+        conn.close()
+
+    service = FeedSummaryPersonalizationService(db_manager=db)
+    deleted = service.delete_for_user(content_id, current_user.user_id)
+    if deleted:
+        logger.info(
+            f"已删除 feed summary 个性化: content_id={content_id} "
+            f"user_id={current_user.user_id}"
+        )
+        return {"success": True, "deleted": True}
+    return {"success": True, "deleted": False, "message": "无个性化 summary 可删"}

@@ -148,6 +148,10 @@ def classify_file_content_task(self, file_id, username=None, force=False):
             log_message="正在调用AI分析文件内容并归类..."
         )
 
+        # PR-4 修复: username → user_id, 让 LLM usage_log 能正确归属用户
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id = get_user_id_by_username(username)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -155,7 +159,8 @@ def classify_file_content_task(self, file_id, username=None, force=False):
                 classify_service.classify_file_content(
                     file_id=file_id,
                     username=username,
-                    force=force
+                    force=force,
+                    user_id=user_id,
                 )
             )
         finally:

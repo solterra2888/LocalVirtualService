@@ -19,20 +19,68 @@ class TemplatePreferenceService:
     """用户模板偏好管理服务"""
 
     # 模块 → 系统默认模板 code 映射
+    # PR-3 (2026-04-27): 扩展为统一 SYSTEM_DEFAULTS, 同时保留旧 MODULE_REGISTRY 的
+    # default_template_code 字段; LLMTemplateResolver 优先读 SYSTEM_DEFAULTS,
+    # 缺失则回退到 MODULE_REGISTRY[*].default_template_code.
+    # PR-A (2026-04-27): 新增 audio_analysis / youtube_summary 模块 + feed_summary
+    # 默认模板; 把 file_naming / file_classify / news_summary / feed_tagging 从
+    # configurable 转 SYSTEM_ONLY (hybrid 模型 D4=B).
     SYSTEM_DEFAULTS: Dict[str, str] = {
+        # —— Daily Reports ——
+        'twitter_phase1': 'twitter_daily_phase1_default',
         'twitter_phase2': 'twitter_daily_phase2_default',
+        'youtube_phase1': 'youtube_daily_phase1_default',
         'youtube_phase2': 'youtube_daily_phase2_default',
+        # —— File 模块 ——
+        'file_tagging':   'content_tag_v1',
+        'file_naming':    'auto_name_v1',           # SYSTEM_ONLY (PR-A)
+        'file_classify':  'auto_classify_v1',       # SYSTEM_ONLY (PR-A)
+        'file_analysis':  'file_analysis_v1',       # PR-A: 单一通用模板 (孤儿 3 个已 archive)
+        'audio_analysis': 'audio_analysis_v1',      # PR-A: 从 file_analysis 拆出
+        # —— Feed 模块 ——
+        'feed_tagging':   'content_tag_feeds_v1',   # SYSTEM_ONLY (PR-A, hybrid: 全局 tag)
+        'feed_summary':   'feed_summary_v1',        # PR-A 种子: per-user Twitter feed 摘要
+        'youtube_summary': 'youtube_summary_v1',    # PR-A 新增: per-video per-user 摘要
+        # —— News 模块 ——
+        'news_summary':       'news_summary_v1',     # SYSTEM_ONLY (PR-A)
+        'news_classification': 'news_classification',
+        # —— Theme 模块 ——
+        'theme_description':  'theme_description_generator_v1',
     }
 
-    # 固定使用系统模板的模块，不允许用户配置
-    SYSTEM_ONLY_MODULES = frozenset({'twitter_phase1', 'youtube_phase1'})
+    # 固定使用系统模板的模块，不允许用户配置 (Phase 2 双态模型: SYSTEM_FIXED)
+    # PR-A (2026-04-27): 在 D4=B hybrid 决策下扩大集合, 把 tag 类与系统级
+    # 命名/归类/分类全部锁为系统模板, 仅 admin 可改 prompt 内容.
+    SYSTEM_ONLY_MODULES = frozenset({
+        'twitter_phase1',
+        'youtube_phase1',
+        'news_classification',  # 系统级新闻分类维度
+        'news_summary',         # PR-A: 新闻摘要为全局共享
+        'theme_description',    # 系统级主题描述生成
+        'file_naming',          # PR-A: 文件自动命名为系统级
+        'file_classify',        # PR-A: 文件自动归类为系统级
+        'feed_tagging',         # PR-A: feed tag 全局共享 (hybrid 决策)
+    })
 
-    # 所有可注册模块的元信息（用于前端展示）
+    # 用户可拥有私有模板的模块 (Phase 2: USER_OWNED, 每用户每模块 1 行)
+    # 派生属性: MODULE_REGISTRY 中 configurable=True 的模块 = USER_OWNED_MODULES
+    USER_OWNED_MODULES = frozenset({
+        'twitter_phase2',
+        'youtube_phase2',
+        'file_analysis',
+        'audio_analysis',       # PR-A 新增
+        'file_tagging',
+        'feed_summary',
+        'youtube_summary',      # PR-A 新增
+    })
+
+    # 所有可注册模块的元信息（用于前端展示与 LLMTemplateResolver）
     MODULE_REGISTRY: List[Dict[str, Any]] = [
+        # —— Daily Reports —————————————————————————————————————————————————
         {
             'module_code': 'twitter_phase1',
             'module_name': 'Twitter 作者摘要',
-            'description': '按作者汇总当日推文（Phase 1，全局共享）',
+            'description': '按作者汇总当日推文（Phase 1，全局共享，不可定制）',
             'configurable': False,
             'default_template_code': 'twitter_daily_phase1_default',
         },
@@ -46,7 +94,7 @@ class TemplatePreferenceService:
         {
             'module_code': 'youtube_phase1',
             'module_name': 'YouTube 频道摘要',
-            'description': '按频道汇总当日视频（Phase 1，全局共享）',
+            'description': '按频道汇总当日视频（Phase 1，全局共享，不可定制）',
             'configurable': False,
             'default_template_code': 'youtube_daily_phase1_default',
         },
@@ -57,12 +105,93 @@ class TemplatePreferenceService:
             'configurable': True,
             'default_template_code': 'youtube_daily_phase2_default',
         },
+        # —— File 模块 ——————————————————————————————————————————————————————
         {
             'module_code': 'file_analysis',
-            'module_name': '文件内容分析',
-            'description': '使用 LLM 模板分析上传的文件内容',
+            'module_name': '文件内容分析 (通用)',
+            'description': '使用 LLM 模板深度分析上传的文档/网页/文本内容（per-user）',
             'configurable': True,
-            'default_template_code': None,
+            'default_template_code': 'file_analysis_v1',
+        },
+        {
+            # PR-A 新增: audio_analysis 从 file_analysis 模块拆出, 独立 per-user
+            'module_code': 'audio_analysis',
+            'module_name': '音频内容分析',
+            'description': '对上传音频/YouTube 转写内容做结构化分析（per-user）',
+            'configurable': True,
+            'default_template_code': 'audio_analysis_v1',
+        },
+        {
+            'module_code': 'file_tagging',
+            'module_name': '文件自动打标',
+            'description': '为上传的文件提取行业分类、ticker、概念等结构化标签（per-user）',
+            'configurable': True,
+            'default_template_code': 'content_tag_v1',
+        },
+        {
+            # PR-A: 转 SYSTEM_ONLY, 仅 admin 可调
+            'module_code': 'file_naming',
+            'module_name': '文件自动命名',
+            'description': '基于内容为文件生成简洁的展示名（系统级）',
+            'configurable': False,
+            'default_template_code': 'auto_name_v1',
+        },
+        {
+            # PR-A: 转 SYSTEM_ONLY, 仅 admin 可调
+            'module_code': 'file_classify',
+            'module_name': '文件自动归类',
+            'description': '把文件归入用户预定义的文件夹中最匹配的一个（系统级）',
+            'configurable': False,
+            'default_template_code': 'auto_classify_v1',
+        },
+        # —— Feed 模块 ——————————————————————————————————————————————————————
+        {
+            # PR-A: 转 SYSTEM_ONLY (hybrid: tag 全局共享, 仅 admin 可调)
+            'module_code': 'feed_tagging',
+            'module_name': 'Feed 内容打标',
+            'description': '为 Twitter / YouTube feed 单条内容生成标签（全局共享，仅 admin 可调）',
+            'configurable': False,
+            'default_template_code': 'content_tag_feeds_v1',
+        },
+        {
+            # PR-A: 已 seed feed_summary_v1 系统默认模板
+            'module_code': 'feed_summary',
+            'module_name': 'Feed 个性化摘要 (Twitter)',
+            'description': '用户主动 Re-summarize Twitter feed 单条内容（per-user 视图）',
+            'configurable': True,
+            'default_template_code': 'feed_summary_v1',
+        },
+        {
+            # PR-A 新增: per-video per-user 摘要 (区别于 feed_summary 偏 Twitter)
+            'module_code': 'youtube_summary',
+            'module_name': 'YouTube 视频个性化摘要',
+            'description': '对单条 YouTube 视频生成 per-user 摘要（per-video，懒触发）',
+            'configurable': True,
+            'default_template_code': 'youtube_summary_v1',
+        },
+        # —— News 模块 ——————————————————————————————————————————————————————
+        {
+            # PR-A: 转 SYSTEM_ONLY, 全局共享, 仅 admin 可调
+            'module_code': 'news_summary',
+            'module_name': '新闻摘要',
+            'description': '对单条新闻生成核心要点 + 市场影响摘要（系统级）',
+            'configurable': False,
+            'default_template_code': 'news_summary_v1',
+        },
+        {
+            'module_code': 'news_classification',
+            'module_name': '新闻分类维度',
+            'description': '提取新闻的主题/事件/影响范围/紧急度等结构化分类（系统级）',
+            'configurable': False,
+            'default_template_code': 'news_classification',
+        },
+        # —— Theme 模块 ——————————————————————————————————————————————————————
+        {
+            'module_code': 'theme_description',
+            'module_name': '主题描述生成',
+            'description': '为投资主题生成描述文本（用于向量检索）（系统级）',
+            'configurable': False,
+            'default_template_code': 'theme_description_generator_v1',
         },
     ]
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from backend.services.llm_prompt_template_service import LLMPromptTemplateService
 from backend.services.template_preference_service import TemplatePreferenceService
+from backend.services.user_template_seeder_service import UserTemplateSeederService
 from backend.core.prompt_renderer import PromptRenderer
 from backend.core.llm_framework import llm_service, LLMMessage
 from backend.auth.jwt_utils import get_current_user, get_current_admin_user
@@ -57,6 +58,7 @@ class TemplateCreate(BaseModel):
     template_code: str = Field(..., description="模板代码，唯一标识")
     template_name: str = Field(..., description="模板名称")
     category_id: int = Field(..., description="所属分类ID")
+    module_code: Optional[str] = Field(None, description="业务模块代码（与 user_template_preferences.module_code 对齐）")
     system_prompt: Optional[str] = Field(None, description="系统提示词")
     user_prompt_template: str = Field(..., description="用户提示词模板")
     variables: Dict[str, VariableDefinition] = Field(default_factory=dict, description="变量定义")
@@ -74,6 +76,7 @@ class TemplateCreate(BaseModel):
 
 class TemplateUpdate(BaseModel):
     template_name: Optional[str] = None
+    module_code: Optional[str] = None
     system_prompt: Optional[str] = None
     user_prompt_template: Optional[str] = None
     variables: Optional[Dict[str, VariableDefinition]] = None
@@ -96,6 +99,8 @@ class TemplateResponse(BaseModel):
     template_name: str
     category_id: Optional[int]
     category_name: Optional[str]
+    category_code: Optional[str] = None
+    module_code: Optional[str] = None
     description: Optional[str]
     scope: str
     is_active: bool
@@ -256,16 +261,26 @@ async def get_variables_library(
         raise HTTPException(status_code=500, detail=f"获取变量库失败: {str(e)}")
 
 
-@router.post("/templates", summary="创建新模板")
+@router.post("/templates", summary="[DEPRECATED] 创建新模板 (Phase 2 仅 admin 可用)")
 async def create_template(
     template_data: TemplateCreate,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """创建新模板"""
+    """创建新模板.
+
+    PR-C (2026-04-27): 在 Phase 2 双态模型下, 普通用户不应再创建任意 user-scope 模板;
+    每用户每 USER_OWNED 模块通过懒 seed 自动获得唯一一行私有模板, 编辑入口
+    走 PUT /my-templates/{module_code}. 此接口保留仅供 admin 创建/调整 system 模板使用.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Phase 2 双态模型下普通用户不再支持自由创建模板; "
+                "请通过 PUT /llm/prompts/my-templates/{module_code} 编辑你的私有模板."
+            ),
+        )
     try:
-        # 系统模板只能由管理员创建
-        if template_data.scope == 'system' and not current_user.is_admin:
-            raise HTTPException(status_code=403, detail="只有管理员可以创建系统模板")
         
         service = LLMPromptTemplateService()
         
@@ -690,4 +705,319 @@ async def delete_preference(
     except Exception as e:
         logger.error(f"Failed to delete preference: {str(e)}")
         raise HTTPException(status_code=500, detail=f"重置偏好失败: {str(e)}")
+
+
+# ==================== PR-C: My Templates (Phase 2 双态模型) ====================
+# 新模型: 每用户每 USER_OWNED 模块 1 行私有模板; SYSTEM_FIXED 模块全局共享.
+# 这一组接口替代了原 "Create Template / 模板偏好" 复合工作流, 给前端
+# 提供"双 Tab + 直接编辑"的简化入口.
+
+class MyTemplateItem(BaseModel):
+    """My Templates 列表项 (一个 module 一项)."""
+
+    module_code: str
+    module_name: str
+    module_description: str
+    kind: str = Field(..., description="'user_owned' | 'system_fixed'")
+    configurable: bool
+
+    template_id: int
+    template_code: str
+    template_name: str
+    scope: str
+    is_active: bool
+
+    system_prompt: Optional[str]
+    user_prompt_template: str
+    variables: Dict[str, Any]
+    output_format: Dict[str, Any]
+    recommended_provider: Optional[str]
+    recommended_model: Optional[str]
+    temperature: float
+    max_tokens: int
+    description: Optional[str]
+
+    parent_template_id: Optional[int] = Field(
+        None, description="USER_OWNED 模板 clone 自的 system 模板 id"
+    )
+    updated_at: Optional[str]
+
+
+class UpdateMyTemplateRequest(BaseModel):
+    """编辑用户私有模板 (PUT /my-templates/{module_code}). 仅允许编辑 prompt 内容与 LLM 配置."""
+
+    system_prompt: Optional[str] = None
+    user_prompt_template: Optional[str] = None
+    variables: Optional[Dict[str, VariableDefinition]] = None
+    output_format: Optional[OutputFormatSchema] = None
+    recommended_provider: Optional[str] = None
+    recommended_model: Optional[str] = None
+    temperature: Optional[float] = Field(None, ge=0, le=2)
+    max_tokens: Optional[int] = Field(None, ge=1)
+
+
+def _resolve_module_or_404(module_code: str) -> Dict[str, Any]:
+    pref = TemplatePreferenceService()
+    for m in pref.MODULE_REGISTRY:
+        if m["module_code"] == module_code:
+            return m
+    raise HTTPException(status_code=404, detail=f"unknown module_code: {module_code}")
+
+
+def _build_my_template_item(
+    module: Dict[str, Any],
+    template: Dict[str, Any],
+    pref: TemplatePreferenceService,
+) -> MyTemplateItem:
+    is_user_owned = module["module_code"] in pref.USER_OWNED_MODULES
+    return MyTemplateItem(
+        module_code=module["module_code"],
+        module_name=module["module_name"],
+        module_description=module["description"],
+        kind="user_owned" if is_user_owned else "system_fixed",
+        configurable=module.get("configurable", False),
+        template_id=template["id"],
+        template_code=template["template_code"],
+        template_name=template["template_name"],
+        scope=template["scope"],
+        is_active=bool(template.get("is_active", True)),
+        system_prompt=template.get("system_prompt"),
+        user_prompt_template=template.get("user_prompt_template", ""),
+        variables=template.get("variables", {}) or {},
+        output_format=template.get("output_format", {}) or {},
+        recommended_provider=template.get("recommended_provider"),
+        recommended_model=template.get("recommended_model"),
+        temperature=float(template.get("temperature") or 0.7),
+        max_tokens=int(template.get("max_tokens") or 2000),
+        description=template.get("description"),
+        parent_template_id=template.get("parent_template_id"),
+        updated_at=template.get("updated_at"),
+    )
+
+
+@router.get("/my-templates", summary="列出当前用户的所有模板 (USER_OWNED + SYSTEM_FIXED)")
+async def list_my_templates(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """返回每个 module 的 1 项, 包括用户私有模板 + 系统级只读模板.
+
+    USER_OWNED 模块如缺私有模板会触发懒 seed.
+    """
+    try:
+        pref = TemplatePreferenceService()
+        seeder = UserTemplateSeederService(preference_service=pref)
+        tpl_service = LLMPromptTemplateService()
+
+        items: List[MyTemplateItem] = []
+        for module in pref.MODULE_REGISTRY:
+            module_code = module["module_code"]
+            try:
+                if module_code in pref.USER_OWNED_MODULES:
+                    template = seeder.ensure_user_template(current_user.user_id, module_code)
+                else:
+                    default_code = pref.SYSTEM_DEFAULTS.get(module_code) or module.get("default_template_code")
+                    if not default_code:
+                        continue
+                    template = tpl_service.get_template_by_code(default_code)
+                    if not template:
+                        continue
+                items.append(_build_my_template_item(module, template, pref))
+            except Exception as inner_e:
+                logger.warning(f"list_my_templates: skip module {module_code}: {inner_e}")
+
+        return {"success": True, "items": [item.dict() for item in items]}
+    except Exception as e:
+        logger.error(f"Failed to list my-templates: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取我的模板列表失败: {str(e)}")
+
+
+@router.get("/my-templates/{module_code}", summary="获取当前用户在指定模块的当前模板")
+async def get_my_template(
+    module_code: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """USER_OWNED → 返回用户私有模板 (缺则懒 seed); SYSTEM_FIXED → 返回 system default."""
+    try:
+        pref = TemplatePreferenceService()
+        module = _resolve_module_or_404(module_code)
+
+        if module_code in pref.USER_OWNED_MODULES:
+            seeder = UserTemplateSeederService(preference_service=pref)
+            template = seeder.ensure_user_template(current_user.user_id, module_code)
+        else:
+            tpl_service = LLMPromptTemplateService()
+            default_code = pref.SYSTEM_DEFAULTS.get(module_code) or module.get("default_template_code")
+            if not default_code:
+                raise HTTPException(status_code=404, detail=f"module '{module_code}' has no system default")
+            template = tpl_service.get_template_by_code(default_code)
+            if not template:
+                raise HTTPException(status_code=404, detail=f"system default template not found")
+
+        return {"success": True, "item": _build_my_template_item(module, template, pref).dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get my-template '{module_code}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取模板失败: {str(e)}")
+
+
+@router.put("/my-templates/{module_code}", summary="编辑当前用户在指定模块的私有模板")
+async def update_my_template(
+    module_code: str,
+    body: UpdateMyTemplateRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """更新用户私有模板的 prompt / 变量 / LLM 配置.
+
+    SYSTEM_FIXED 模块禁止 (走 admin 系统模板编辑入口).
+    """
+    pref = TemplatePreferenceService()
+    module = _resolve_module_or_404(module_code)
+    if module_code not in pref.USER_OWNED_MODULES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"module '{module_code}' is system-fixed; only admin can edit via /system-templates",
+        )
+
+    try:
+        seeder = UserTemplateSeederService(preference_service=pref)
+        owned = seeder.ensure_user_template(current_user.user_id, module_code)
+
+        updates: Dict[str, Any] = {}
+        if body.system_prompt is not None:
+            updates["system_prompt"] = body.system_prompt
+        if body.user_prompt_template is not None:
+            updates["user_prompt_template"] = body.user_prompt_template
+        if body.variables is not None:
+            updates["variables"] = {k: v.dict() for k, v in body.variables.items()}
+        if body.output_format is not None:
+            updates["output_format"] = body.output_format.dict()
+        if body.recommended_provider is not None:
+            updates["recommended_provider"] = body.recommended_provider
+        if body.recommended_model is not None:
+            updates["recommended_model"] = body.recommended_model
+        if body.temperature is not None:
+            updates["temperature"] = body.temperature
+        if body.max_tokens is not None:
+            updates["max_tokens"] = body.max_tokens
+
+        if not updates:
+            return {"success": True, "message": "无需更新"}
+
+        tpl_service = LLMPromptTemplateService()
+        ok = tpl_service.update_template(owned["id"], updates, user_id=current_user.user_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="模板更新失败")
+
+        # 取最新
+        latest = tpl_service.get_template(owned["id"])
+        return {
+            "success": True,
+            "item": _build_my_template_item(module, latest, pref).dict(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update my-template '{module_code}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"模板更新失败: {str(e)}")
+
+
+@router.post("/my-templates/{module_code}/reset", summary="重置用户私有模板为系统默认 (覆盖, 无历史)")
+async def reset_my_template(
+    module_code: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """覆盖式重置: prompt / 变量 / LLM 配置全部回到 system default;
+    template_id 不变, 用户其他引用关系不会断."""
+    pref = TemplatePreferenceService()
+    module = _resolve_module_or_404(module_code)
+    if module_code not in pref.USER_OWNED_MODULES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"module '{module_code}' is system-fixed; reset not applicable",
+        )
+
+    try:
+        seeder = UserTemplateSeederService(preference_service=pref)
+        latest = seeder.reset_module(current_user.user_id, module_code)
+        return {
+            "success": True,
+            "message": "已重置为系统默认",
+            "item": _build_my_template_item(module, latest, pref).dict(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to reset my-template '{module_code}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重置失败: {str(e)}")
+
+
+# ==================== PR-C: Admin → System Templates ====================
+# 管理员独立路径, 编辑系统级模板 (SYSTEM_FIXED 模块的全局共享 prompt).
+# 普通用户不可见这套接口.
+
+
+def _require_admin(current_user: TokenData) -> None:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="仅管理员可操作系统级模板")
+
+
+@router.get("/system-templates", summary="[Admin] 列出所有 system-scope 模板")
+async def admin_list_system_templates(
+    current_user: TokenData = Depends(get_current_user)
+):
+    _require_admin(current_user)
+    try:
+        tpl_service = LLMPromptTemplateService()
+        templates = tpl_service.list_templates(scope="system", active_only=True)
+        return {"success": True, "templates": templates}
+    except Exception as e:
+        logger.error(f"Failed to list system templates: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取系统模板列表失败: {str(e)}")
+
+
+@router.put("/system-templates/{template_id}", summary="[Admin] 编辑 system-scope 模板内容")
+async def admin_update_system_template(
+    template_id: int,
+    body: UpdateMyTemplateRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """允许 admin 编辑 system 模板的 prompt / 变量 / LLM 配置 (复用 UpdateMyTemplateRequest 字段集)."""
+    _require_admin(current_user)
+    try:
+        tpl_service = LLMPromptTemplateService()
+        target = tpl_service.get_template(template_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="模板不存在")
+        if target.get("scope") != "system":
+            raise HTTPException(
+                status_code=400,
+                detail="此接口仅用于 system-scope 模板; 用户私有模板请走 /my-templates",
+            )
+
+        updates: Dict[str, Any] = {}
+        for key in (
+            "system_prompt", "user_prompt_template",
+            "recommended_provider", "recommended_model",
+            "temperature", "max_tokens",
+        ):
+            val = getattr(body, key, None)
+            if val is not None:
+                updates[key] = val
+        if body.variables is not None:
+            updates["variables"] = {k: v.dict() for k, v in body.variables.items()}
+        if body.output_format is not None:
+            updates["output_format"] = body.output_format.dict()
+
+        if not updates:
+            return {"success": True, "message": "无需更新"}
+
+        ok = tpl_service.update_template(template_id, updates, user_id=current_user.user_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="系统模板更新失败")
+
+        return {"success": True, "template": tpl_service.get_template(template_id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update system template {template_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新系统模板失败: {str(e)}")
 

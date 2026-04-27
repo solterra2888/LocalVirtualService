@@ -1,72 +1,75 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Card, 
-  Button, 
-  Input, 
-  Select, 
-  message, 
-  Row, 
-  Col, 
-  Typography, 
-  Space,
-  Divider,
-  Tag,
-  Spin,
-  Modal,
-  Form,
-  InputNumber,
-  Switch,
-  Tooltip,
-  Empty,
-  Drawer,
+/**
+ * Prompt Templates Page — Phase 2 双态模型 (PR-C)
+ *
+ * 顶部 Tab:
+ *   1. My Templates (所有用户)
+ *      - 13 张卡片 (一 module 一张):
+ *        7 张 USER_OWNED  → 可编辑 / 可重置 (POST .../reset)
+ *        6 张 SYSTEM_FIXED → 只读 (admin 在 System Templates Tab 编辑)
+ *      - 编辑只改 prompt 内容 + LLM 配置, 不再有 template_code / scope / module 选择
+ *
+ *   2. System Templates (仅 admin)
+ *      - 列出所有 system-scope 模板, 包括各 module 的"默认 + 子变体"
+ *        (例如 news_summary_v1 + news_cctv_summary_v1 都属于 news_summary module)
+ *      - 编辑入口与 My Templates 共用同一组字段集
+ *
+ * 取消项 (相对旧版):
+ *   - Create Template 按钮
+ *   - Target Module / scope / template_code / category 表单字段
+ *   - 用户偏好 (preference) 表 — 由"用户私有模板"取代
+ *   - Set as Default Modal
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
+import {
   Alert,
-  Statistic,
-  Collapse,
-  ConfigProvider,
-  theme as antdTheme,
-  Grid,
+  Button,
+  Card,
+  Col,
+  Drawer,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Tabs,
+  Tag,
+  Tooltip,
+  Typography,
 } from 'antd';
-import { 
-  PlusOutlined,
+import {
   EditOutlined,
-  DeleteOutlined,
-  ExperimentOutlined,
-  StarFilled,
-  StarOutlined,
-  FileTextOutlined,
-  DownloadOutlined,
-  SearchOutlined,
-  ThunderboltOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  EyeOutlined,
-  LockOutlined,
+  ReloadOutlined,
   RobotOutlined,
-  UserOutlined,
+  LockOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import promptTemplateService, {
-  PromptCategory,
+  MyTemplateItem,
+  PromptTemplate,
   PromptTemplateDetail,
-  TemplateCreateData,
-  TestTemplateResponse,
-  ModuleInfo,
+  UpdateMyTemplatePayload,
 } from '../services/promptTemplateService';
-import VariableHelper from '../components/VariableHelper';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
-import { getModalStyles } from '../utils/modalStyles';
 
 const { Title, Paragraph, Text } = Typography;
+const { TextArea } = Input;
 
-const THEME_COLORS = {
+const THEME = {
   light: {
     pageBg: '#f5f5f5',
     cardBg: '#fff',
     cardBorder: '#f0f0f0',
     text: 'rgba(0, 0, 0, 0.88)',
     textSecondary: 'rgba(0, 0, 0, 0.45)',
-    codeBlockBg: '#f5f5f5',
-    selectedBorder: '#1890ff',
+    codeBg: '#f5f5f5',
+    accent: '#1890ff',
   },
   dark: {
     pageBg: '#1E202B',
@@ -74,1276 +77,495 @@ const THEME_COLORS = {
     cardBorder: 'rgba(255, 255, 255, 0.06)',
     text: '#FFFFFF',
     textSecondary: '#A0A3AD',
-    codeBlockBg: '#1E202B',
-    selectedBorder: '#2196F3',
-    inputBg: '#1E202B',
-    hoverBg: 'rgba(255, 255, 255, 0.06)',
+    codeBg: '#0f1420',
+    accent: '#60a5fa',
   },
 } as const;
 
-const listRowHoverBg = (isDark: boolean, colors: (typeof THEME_COLORS)[keyof typeof THEME_COLORS]) =>
-  isDark ? ('hoverBg' in colors && colors.hoverBg ? colors.hoverBg : 'rgba(255, 255, 255, 0.06)') : 'rgba(0, 0, 0, 0.02)';
-
-const CARD_STYLE_BEHANCE = {
-  borderRadius: 12,
-  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
-  border: '1px solid rgba(255, 255, 255, 0.06)',
-};
-const CARD_STYLE_BEHANCE_DARK = {
-  borderRadius: 12,
-  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-  border: '1px solid rgba(255, 255, 255, 0.06)',
+const PROVIDER_MODELS: Record<string, string[]> = {
+  qwen: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext', 'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
+  doubao: ['doubao-seed-1-6-250615'],
+  glm: ['glm-4.6', 'glm-4', 'glm-4-flash'],
 };
 
-const EDITOR_FORM_CONTROL = { height: 32, fontSize: 14 };
-const EDITOR_FORM_TEXTAREA = { fontSize: 14 };
-
-const { Option } = Select;
-const { TextArea } = Input;
-const { Panel } = Collapse;
-const { useBreakpoint } = Grid;
-
-const PROVIDER_MODEL_MAPPING: Record<string, string[]> = {
-  'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext',
-           'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
-  'doubao': ['doubao-seed-1-6-250615'],
-  'glm': ['glm-4.6', 'glm-4', 'glm-4-flash']
-};
-
-/**
- * System templates whose template_code is hardcoded in backend services.
- * These must never be deleted — only their prompt content and LLM config
- * can be edited by admins.
- */
-const MODULE_TO_CATEGORY: Record<string, string> = {
-  twitter_phase2: 'report_generation',
-  youtube_phase2: 'report_generation',
-  file_analysis: 'file_analysis',
-};
-
-const CODE_BOUND_TEMPLATES = new Set([
-  'news_summary_v1',
-  'news_classification',
-  'news_cctv_summary_v1',
-  'theme_description_generator_v1',
-  'twitter_daily_phase1_default',
-  'twitter_daily_phase2_default',
-  'youtube_daily_phase1_default',
-  'youtube_daily_phase2_default',
-  'audio_analysis_v1',
-  'content_tag_v1',
-  'auto_name_v1',
-]);
+interface EditableForm {
+  system_prompt: string;
+  user_prompt_template: string;
+  recommended_provider: string;
+  recommended_model: string;
+  temperature: number;
+  max_tokens: number;
+}
 
 const PromptTemplatesPage: React.FC = () => {
   const { user } = useAuthStore();
+  const isAdmin = !!user?.is_admin;
   const { themeMode } = useDashboardSettings();
-  const isAdmin = user?.is_admin || false;
-  const isDark = themeMode === 'dark';
-  const colors = THEME_COLORS[themeMode];
-  const screens = useBreakpoint();
-  const isLgUp = !!screens?.lg;
-  
-  const [categories, setCategories] = useState<PromptCategory[]>([]);
-  const [templates, setTemplates] = useState<PromptTemplateDetail[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplateDetail | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [searchText, setSearchText] = useState<string>('');
-  const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [currentScope, setCurrentScope] = useState<string>('user');
+  const colors = THEME[themeMode];
 
-  const [isEditorVisible, setIsEditorVisible] = useState<boolean>(false);
-  const [isTestVisible, setIsTestVisible] = useState<boolean>(false);
-  const [editingTemplate, setEditingTemplate] = useState<PromptTemplateDetail | null>(null);
-  const [testing, setTesting] = useState<boolean>(false);
-  const [testResult, setTestResult] = useState<TestTemplateResponse | null>(null);
-  const [currentEditingCategoryId, setCurrentEditingCategoryId] = useState<number | undefined>();
-  const [selectedModuleCode, setSelectedModuleCode] = useState<string | undefined>();
+  // ── State: My Templates ────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<'my' | 'system'>('my');
+  const [myItems, setMyItems] = useState<MyTemplateItem[]>([]);
+  const [myLoading, setMyLoading] = useState(false);
 
-  const [modules, setModules] = useState<ModuleInfo[]>([]);
+  // ── State: System Templates (admin only) ───────────────────────────────
+  const [sysItems, setSysItems] = useState<PromptTemplate[]>([]);
+  const [sysLoading, setSysLoading] = useState(false);
 
-  // 「设为我的默认」弹窗状态
-  const [setDefaultModalTemplate, setSetDefaultModalTemplate] = useState<PromptTemplateDetail | null>(null);
-  const [setDefaultModuleCode, setSetDefaultModuleCode] = useState<string | undefined>();
-  const [settingDefault, setSettingDefault] = useState(false);
+  // ── State: Editor Drawer ───────────────────────────────────────────────
+  type EditingTarget =
+    | { kind: 'my'; item: MyTemplateItem }
+    | { kind: 'system'; template: PromptTemplateDetail };
+  const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form] = Form.useForm<EditableForm>();
+  const watchedProvider = Form.useWatch('recommended_provider', form);
 
-  const [form] = Form.useForm();
-  const [testForm] = Form.useForm();
+  const availableModels = useMemo(
+    () => PROVIDER_MODELS[watchedProvider || ''] || [],
+    [watchedProvider],
+  );
 
-  // ── Data loading ──────────────────────────────────────────────────────
-
-  const loadTemplates = useCallback(async () => {
-    try {
-      const params: any = {};
-      if (searchText) params.search = searchText;
-
-      const templatesData = await promptTemplateService.listTemplates(params);
-      const detailedTemplates = await Promise.all(
-        templatesData.map(async (template) => {
-          try {
-            return await promptTemplateService.getTemplate(template.id);
-          } catch (error) {
-            console.warn(`Failed to load details for template ${template.id}:`, error);
-            return {
-              ...template,
-              user_prompt_template: '',
-              variables: {},
-              output_format: { type: 'text' },
-              tags: [],
-              example_input: {},
-              example_output: '',
-              is_public: false,
-              parent_template_id: undefined
-            } as PromptTemplateDetail;
-          }
-        })
-      );
-      setTemplates(detailedTemplates);
-    } catch (error: any) {
-      message.error('Failed to load templates: ' + (error.message || 'Unknown error'));
-    }
-  }, [searchText]);
-
-  // loadData 只负责加载分类和模块元数据（模板统一由 loadTemplates 负责）
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [categoriesData] = await Promise.all([
-        promptTemplateService.getCategories(),
-      ]);
-      setCategories(categoriesData);
-
-      try {
-        const modulesData = await promptTemplateService.getModules();
-        setModules(modulesData);
-      } catch { /* non-critical */ }
-    } catch (error: any) {
-      message.error('Failed to load data: ' + (error.message || 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
+  // ── Effects ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    loadMyTemplates();
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // searchText 变化时重新拉取模板（含清空搜索时恢复全量列表）
   useEffect(() => {
-    loadTemplates();
-  }, [searchText, loadTemplates]);
+    if (activeTab === 'system' && isAdmin) loadSystemTemplates();
+  }, [activeTab, isAdmin]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────
-
-  const handleProviderChange = (provider: string) => {
-    setSelectedProvider(provider);
-    const models = PROVIDER_MODEL_MAPPING[provider] || [];
-    setAvailableModels(models);
-    form.setFieldValue('recommended_model', undefined);
-    if (models.length > 0) {
-      form.setFieldValue('recommended_model', models[0]);
+  const loadMyTemplates = async () => {
+    setMyLoading(true);
+    try {
+      const items = await promptTemplateService.listMyTemplates();
+      setMyItems(items);
+    } catch (err: any) {
+      message.error(`加载模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
+    } finally {
+      setMyLoading(false);
     }
   };
 
-  const handleScopeChange = (scope: string) => {
-    setCurrentScope(scope);
-    if (scope === 'user') form.setFieldValue('is_public', false);
-    else if (scope === 'system') {
-      form.setFieldValue('is_public', true);
-      form.setFieldValue('admin_module_code', undefined);
-      setSelectedModuleCode(undefined);
+  const loadSystemTemplates = async () => {
+    setSysLoading(true);
+    try {
+      const items = await promptTemplateService.listSystemTemplates();
+      setSysItems(items);
+    } catch (err: any) {
+      message.error(`加载系统模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
+    } finally {
+      setSysLoading(false);
     }
   };
 
-  const handleCreateTemplate = () => {
-    setEditingTemplate(null);
-    setCurrentEditingCategoryId(undefined);
-    setSelectedModuleCode(undefined);
-    setSelectedProvider(undefined);
-    setAvailableModels([]);
-    setCurrentScope('user');
-    form.resetFields();
-    setIsEditorVisible(true);
+  // ── Edit My Template ───────────────────────────────────────────────────
+  const openEditMy = (item: MyTemplateItem) => {
+    setEditing({ kind: 'my', item });
+    form.setFieldsValue({
+      system_prompt: item.system_prompt || '',
+      user_prompt_template: item.user_prompt_template || '',
+      recommended_provider: item.recommended_provider || 'qwen',
+      recommended_model: item.recommended_model || '',
+      temperature: item.temperature ?? 0.7,
+      max_tokens: item.max_tokens ?? 2000,
+    });
+    setDrawerVisible(true);
   };
 
-  const handleEditTemplate = async (template: PromptTemplateDetail) => {
+  // ── Edit System Template (admin) ───────────────────────────────────────
+  const openEditSystem = async (template: PromptTemplate) => {
     try {
       const detail = await promptTemplateService.getTemplate(template.id);
-      setEditingTemplate(detail);
-      setCurrentEditingCategoryId(detail.category_id);
+      setEditing({ kind: 'system', template: detail });
+      form.setFieldsValue({
+        system_prompt: detail.system_prompt || '',
+        user_prompt_template: detail.user_prompt_template || '',
+        recommended_provider: detail.recommended_provider || 'qwen',
+        recommended_model: detail.recommended_model || '',
+        temperature: detail.temperature ?? 0.7,
+        max_tokens: detail.max_tokens ?? 2000,
+      });
+      setDrawerVisible(true);
+    } catch (err: any) {
+      message.error(`加载模板详情失败: ${err?.message || ''}`);
+    }
+  };
 
-      if (!isAdmin && detail.category_code) {
-        setSelectedModuleCode(detail.category_code);
-      }
-
-      setCurrentScope(detail.scope);
-
-      if (detail.recommended_provider) {
-        setSelectedProvider(detail.recommended_provider);
-        setAvailableModels(PROVIDER_MODEL_MAPPING[detail.recommended_provider] || []);
-      }
-
-      // 从 template_code 或 category_code 推断 module_code（user-scope 模板通用逻辑）
-      const inferredModuleCode = Object.keys(MODULE_TO_CATEGORY).find(mc =>
-        detail.template_code?.startsWith(`user_${mc}_`)
-      ) || (detail.scope === 'user' ? detail.category_code : undefined);
-
-      const formValues: any = {
-        template_name: detail.template_name,
-        template_code: detail.template_code,
-        category_id: detail.category_id,
-        description: detail.description,
-        system_prompt: detail.system_prompt,
-        user_prompt_template: detail.user_prompt_template,
-        recommended_provider: detail.recommended_provider,
-        recommended_model: detail.recommended_model,
-        temperature: detail.temperature,
-        max_tokens: detail.max_tokens,
-        scope: detail.scope,
-        is_public: detail.is_public,
-        is_active: detail.is_active,
-        tags: detail.tags
+  const handleSave = async (values: EditableForm) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const payload: UpdateMyTemplatePayload = {
+        system_prompt: values.system_prompt,
+        user_prompt_template: values.user_prompt_template,
+        recommended_provider: values.recommended_provider,
+        recommended_model: values.recommended_model,
+        temperature: values.temperature,
+        max_tokens: values.max_tokens,
       };
 
-      if (!isAdmin) {
-        // 非 Admin：回填 module_code 字段
-        formValues.module_code = inferredModuleCode;
-        setSelectedModuleCode(inferredModuleCode);
-        setCurrentEditingCategoryId(detail.category_id);
-      } else if (detail.scope === 'user') {
-        // Admin 编辑 user-scope：回填 admin_module_code 字段，同步 selectedModuleCode
-        formValues.admin_module_code = inferredModuleCode;
-        setSelectedModuleCode(inferredModuleCode);
-      }
-      form.setFieldsValue(formValues);
-
-      setIsEditorVisible(true);
-    } catch (error: any) {
-      message.error('Failed to load template details: ' + (error.message || 'Unknown error'));
-    }
-  };
-
-  const handleSaveTemplate = async (values: any) => {
-    try {
-      const payload = { ...values };
-
-      // admin_module_code 是表单专用字段，不传给后端模板接口
-      const resolvedModuleCode = payload.admin_module_code ?? selectedModuleCode;
-      delete payload.admin_module_code;
-
-      // user-scope 模板（admin 或非 admin）走统一逻辑：
-      //   - category 从 module 映射自动填充
-      //   - template_code 自动生成（如未手动填写）
-      //   - scope 锁定为 'user'，is_public 锁定为 false
-      const isUserScope = !isAdmin || payload.scope === 'user';
-      if (isUserScope) {
-        if (resolvedModuleCode && !payload.category_id) {
-          const catCode = MODULE_TO_CATEGORY[resolvedModuleCode] || resolvedModuleCode;
-          const matchedCat = categories.find(c => c.category_code === catCode);
-          if (matchedCat) {
-            payload.category_id = matchedCat.id;
-          } else {
-            message.error(`No matching category for module "${resolvedModuleCode}"`);
-            return;
-          }
-        }
-        if (!editingTemplate && !payload.template_code) {
-          payload.template_code = `user_${resolvedModuleCode}_${Date.now()}`;
-        }
-        if (!isAdmin) {
-          payload.scope = 'user';
-          payload.is_public = false;
-        }
-      }
-
-      if (editingTemplate) {
-        await promptTemplateService.updateTemplate(editingTemplate.id, payload);
-        message.success('Template updated successfully');
+      if (editing.kind === 'my') {
+        await promptTemplateService.updateMyTemplate(editing.item.module_code, payload);
+        message.success(`已更新 "${editing.item.module_name}" 模板`);
+        await loadMyTemplates();
       } else {
-        const result = await promptTemplateService.createTemplate(payload as TemplateCreateData);
-
-        // 创建成功后自动绑定模板偏好（user-scope 且有 module）
-        if (result?.template_id && resolvedModuleCode && isUserScope) {
-          try {
-            await promptTemplateService.setPreference(resolvedModuleCode, result.template_id);
-            message.success(`Template created and set as your default for "${modules.find(m => m.module_code === resolvedModuleCode)?.module_name || resolvedModuleCode}"`);
-          } catch (prefErr: any) {
-            message.success('Template created successfully');
-            message.warning(`Could not auto-set preference: ${prefErr?.response?.data?.detail || prefErr?.message || 'Unknown error'}`);
-          }
-        } else {
-          message.success('Template created successfully');
-        }
+        await promptTemplateService.updateSystemTemplate(editing.template.id, payload);
+        message.success(`已更新系统模板 "${editing.template.template_name}"`);
+        await loadSystemTemplates();
       }
-      setIsEditorVisible(false);
-      loadTemplates();
-    } catch (error: any) {
-      let errorMessage = 'Unknown error';
-      if (error.response?.data?.detail) errorMessage = error.response.data.detail;
-      else if (error.response?.data?.message) errorMessage = error.response.data.message;
-      else if (error.message) errorMessage = error.message;
-      else if (typeof error === 'string') errorMessage = error;
-      message.error(`Save failed: ${errorMessage}`);
+      setDrawerVisible(false);
+      setEditing(null);
+    } catch (err: any) {
+      message.error(`保存失败: ${err?.response?.data?.detail || err?.message || ''}`);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDeleteTemplate = (template: PromptTemplateDetail) => {
+  const handleReset = (item: MyTemplateItem) => {
     Modal.confirm({
-      title: 'Confirm Delete',
-      content: `Are you sure you want to delete template "${template.template_name}"?`,
-      okText: 'Delete',
+      title: '重置为系统默认?',
+      content: `这会用系统默认模板覆盖你在 "${item.module_name}" 的当前内容. 此操作不可恢复.`,
+      okText: '确认重置',
       okType: 'danger',
-      cancelText: 'Cancel',
+      cancelText: '取消',
       onOk: async () => {
         try {
-          await promptTemplateService.deleteTemplate(template.id);
-          message.success('Template deleted successfully');
-          loadTemplates();
-        } catch (error: any) {
-          message.error('Delete failed: ' + (error.message || 'Unknown error'));
+          await promptTemplateService.resetMyTemplate(item.module_code);
+          message.success(`"${item.module_name}" 已重置为系统默认`);
+          await loadMyTemplates();
+        } catch (err: any) {
+          message.error(`重置失败: ${err?.response?.data?.detail || err?.message || ''}`);
         }
-      }
+      },
     });
   };
 
-  const handleTestTemplate = async (template: PromptTemplateDetail) => {
-    try {
-      const detail = await promptTemplateService.getTemplate(template.id);
-      setSelectedTemplate(detail);
-      const defaultValues: any = {};
-      Object.entries(detail.variables || {}).forEach(([key, varDef]) => {
-        if (varDef.default !== undefined) defaultValues[key] = varDef.default;
-      });
-      testForm.setFieldsValue(defaultValues);
-      setTestResult(null);
-      setIsTestVisible(true);
-    } catch (error: any) {
-      message.error('Failed to load template details: ' + (error.message || 'Unknown error'));
-    }
-  };
-
-  const handleRunTest = async (values: any) => {
-    if (!selectedTemplate) return;
-    try {
-      setTesting(true);
-      const result = await promptTemplateService.testTemplate({
-        template_id: selectedTemplate.id,
-        variables: values
-      });
-      setTestResult(result);
-      if (result.success) message.success('Test successful');
-      else message.error('Test failed: ' + result.error);
-    } catch (error: any) {
-      message.error('Test failed: ' + (error.message || 'Unknown error'));
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const handleExportTemplate = async (template: PromptTemplateDetail) => {
-    try {
-      await promptTemplateService.downloadTemplateExport(template.id, template.template_code);
-      message.success('Export successful');
-    } catch (error: any) {
-      message.error('Export failed: ' + (error.message || 'Unknown error'));
-    }
-  };
-
-  // 推断模板关联的 module_code（非 Admin 创建的模板遵循 user_{moduleCode}_timestamp 命名规则）
-  const inferModuleCode = (template: PromptTemplateDetail): string | undefined => {
-    for (const mc of Object.keys(MODULE_TO_CATEGORY)) {
-      if (template.template_code?.startsWith(`user_${mc}_`)) return mc;
-    }
-    return undefined;
-  };
-
-  const handleOpenSetDefault = (template: PromptTemplateDetail) => {
-    const inferred = inferModuleCode(template);
-    setSetDefaultModalTemplate(template);
-    setSetDefaultModuleCode(inferred);
-  };
-
-  const handleConfirmSetDefault = async () => {
-    if (!setDefaultModalTemplate || !setDefaultModuleCode) return;
-    setSettingDefault(true);
-    try {
-      await promptTemplateService.setPreference(setDefaultModuleCode, setDefaultModalTemplate.id);
-      const moduleName = modules.find(m => m.module_code === setDefaultModuleCode)?.module_name || setDefaultModuleCode;
-      message.success(`"${setDefaultModalTemplate.template_name}" is now your default for "${moduleName}"`);
-      setSetDefaultModalTemplate(null);
-      setSetDefaultModuleCode(undefined);
-    } catch (err: any) {
-      message.error(`Failed to set preference: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`);
-    } finally {
-      setSettingDefault(false);
-    }
-  };
-
-  const handleVariableInsert = (variableText: string) => {
-    const userPromptField = form.getFieldInstance('user_prompt_template');
-    if (userPromptField) {
-      const textarea = userPromptField.resizableTextArea?.textArea;
-      if (textarea) {
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const currentValue = form.getFieldValue('user_prompt_template') || '';
-        const newValue = currentValue.slice(0, start) + variableText + currentValue.slice(end);
-        form.setFieldValue('user_prompt_template', newValue);
-        setTimeout(() => {
-          textarea.focus();
-          textarea.setSelectionRange(start + variableText.length, start + variableText.length);
-        }, 0);
-      }
-    }
-  };
-
-  const cardStyleBehance = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
-
-  // ── Permission helpers ────────────────────────────────────────────────
-
-  const isCodeBound = (template: PromptTemplateDetail): boolean =>
-    template.scope === 'system' && CODE_BOUND_TEMPLATES.has(template.template_code);
-
-  const canEditTemplate = (template: PromptTemplateDetail): boolean => {
-    if (isAdmin) return true;
-    if (template.scope === 'system') return false;
-    return template.created_by === user?.id;
-  };
-
-  const canDeleteTemplate = (template: PromptTemplateDetail): boolean => {
-    if (isCodeBound(template)) return false;
-    if (template.scope === 'system') return isAdmin;
-    if (isAdmin) return true;
-    return template.created_by === user?.id;
-  };
-
-  // ── Two-column list (system | user), aligned with Scheduler Management layout ──
-
-  const renderTemplateListItem = (
-    template: PromptTemplateDetail,
-    index: number,
-    columnLength: number
-  ) => {
-    const isSystem = template.scope === 'system';
-    const codeBound = isCodeBound(template);
-    const editable = canEditTemplate(template);
-    const deletable = canDeleteTemplate(template);
+  // ── Render: a single My Template card ──────────────────────────────────
+  const renderMyCard = (item: MyTemplateItem) => {
+    const isOwned = item.kind === 'user_owned';
+    const isReadonly = !isOwned && !isAdmin;
 
     return (
-      <div
-        key={template.id}
+      <Card
+        key={item.module_code}
+        size="small"
         style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 16,
-          padding: '16px 24px',
-          borderBottom: index < columnLength - 1 ? `1px solid ${colors.cardBorder}` : 'none',
-          backgroundColor: 'transparent',
-          transition: 'background-color 0.2s',
-          opacity: template.is_active ? 1 : 0.72,
+          background: colors.cardBg,
+          border: `1px solid ${colors.cardBorder}`,
+          borderRadius: 10,
+          height: '100%',
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = listRowHoverBg(isDark, colors);
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = 'transparent';
-        }}
+        bodyStyle={{ padding: 16 }}
       >
-        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{template.template_name}</span>
-            {template.is_default && <StarFilled style={{ color: '#faad14' }} />}
-            {codeBound ? (
-              <Tooltip title="Code-bound: this template is hardcoded in backend services and cannot be deleted">
-                <Tag color="blue" icon={<LockOutlined />}>Code-bound</Tag>
-              </Tooltip>
-            ) : isSystem ? (
-              <Tag color="orange">System</Tag>
-            ) : (
-              <Tag color="green">User</Tag>
-            )}
-            {!template.is_active && <Tag color="red">Inactive</Tag>}
-            {template.recommended_model && (
-              <Tag style={{ fontSize: 11 }}>{template.recommended_model}</Tag>
-            )}
-          </div>
-          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 6, lineHeight: 1.45 }}>
-            {template.description || 'No description'}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, fontSize: 12, color: colors.textSecondary }}>
-            <span>{template.category_name || '—'}</span>
-            <Tooltip title="Usage count">
-              <span>{template.usage_count ?? 0} uses</span>
-            </Tooltip>
-            {template.success_rate != null && (
-              <Tooltip title="Success rate">
-                <span style={{ color: template.success_rate >= 90 ? '#52c41a' : '#faad14' }}>
-                  {template.success_rate.toFixed(0)}%
-                </span>
-              </Tooltip>
-            )}
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <Tooltip title={editable ? 'Edit' : 'View'}>
-            <Button
-              type="text"
-              size="small"
-              icon={editable ? <EditOutlined /> : <EyeOutlined />}
-              onClick={() => handleEditTemplate(template)}
-              style={{ color: colors.textSecondary }}
-            />
-          </Tooltip>
-          <Tooltip title="Test">
-            <Button
-              type="text"
-              size="small"
-              icon={<ExperimentOutlined />}
-              onClick={() => handleTestTemplate(template)}
-              style={{ color: colors.textSecondary }}
-            />
-          </Tooltip>
-          <Tooltip title="Export">
-            <Button
-              type="text"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => handleExportTemplate(template)}
-              style={{ color: colors.textSecondary }}
-            />
-          </Tooltip>
-          {!isSystem && (
-            <Tooltip title="Set as my default for a module">
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Space style={{ justifyContent: 'space-between', width: '100%' }} align="start">
+            <div>
+              <Space size={6}>
+                <Text strong style={{ color: colors.text, fontSize: 15 }}>
+                  {item.module_name}
+                </Text>
+                {isOwned ? (
+                  <Tag color="blue" style={{ margin: 0 }}>我的</Tag>
+                ) : (
+                  <Tag icon={<LockOutlined />} color="default" style={{ margin: 0 }}>
+                    系统级 {isAdmin ? '' : '(只读)'}
+                  </Tag>
+                )}
+              </Space>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                {item.module_description}
+              </div>
+            </div>
+            <Space>
+              {isOwned && (
+                <Tooltip title="重置为系统默认">
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleReset(item)}
+                  />
+                </Tooltip>
+              )}
               <Button
-                type="text"
+                type="primary"
                 size="small"
-                icon={<StarOutlined style={{ color: '#faad14' }} />}
-                onClick={() => handleOpenSetDefault(template)}
-              />
-            </Tooltip>
-          )}
-          {deletable && (
-            <Tooltip title="Delete">
-              <Button
-                type="text"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDeleteTemplate(template)}
-              />
-            </Tooltip>
-          )}
-        </div>
-      </div>
-    );
-  };
+                icon={<EditOutlined />}
+                disabled={isReadonly}
+                onClick={() => openEditMy(item)}
+              >
+                {isReadonly ? '只读' : '编辑'}
+              </Button>
+            </Space>
+          </Space>
 
-  const renderTemplateLists = () => {
-    const filteredTemplates = templates.filter(t => {
-      if (searchText &&
-        !t.template_name.toLowerCase().includes(searchText.toLowerCase()) &&
-        !t.description?.toLowerCase().includes(searchText.toLowerCase())) {
-        return false;
-      }
-      return true;
-    });
-
-    const systemTemplates = filteredTemplates.filter(t => t.scope === 'system');
-    const userPromptTemplates = filteredTemplates.filter(t => t.scope === 'user' || t.scope === 'shared');
-
-    if (filteredTemplates.length === 0) {
-      return <Empty description="No templates found" style={{ padding: '60px 0' }} />;
-    }
-
-    const listShellStyle = {
-      ...cardStyleBehance,
-      marginBottom: 0,
-      overflow: 'hidden' as const,
-    };
-
-    const userColumnHeader = (
-      <div
-        style={{
-          padding: '14px 24px 10px',
-          borderBottom: `1px solid ${colors.cardBorder}`,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <UserOutlined style={{ color: isDark ? '#52c41a' : '#389e0d', fontSize: 16 }} />
-          <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>User prompt 类</span>
-        </div>
-        <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
-          个人或业务场景下的用户提示词模板，可设为模块默认
-        </Text>
-      </div>
-    );
-
-    const userColumnBody =
-      userPromptTemplates.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 User 模板" style={{ padding: '28px 16px' }} />
-      ) : (
-        userPromptTemplates.map((template, index) =>
-          renderTemplateListItem(template, index, userPromptTemplates.length)
-        )
-      );
-
-    // 非管理员看不到 System 模板：不展示左侧空列，仅单列 User prompt
-    if (!isAdmin) {
-      return (
-        <div style={listShellStyle}>
           <div
             style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 24,
-              padding: '20px 24px',
-              borderBottom: `1px solid ${colors.cardBorder}`,
+              background: colors.codeBg,
+              border: `1px solid ${colors.cardBorder}`,
+              borderRadius: 6,
+              padding: 8,
+              fontSize: 12,
+              color: colors.textSecondary,
+              maxHeight: 80,
+              overflow: 'hidden',
+              fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.4,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#52c41a' : '#389e0d' }}>{userPromptTemplates.length}</span>
-              <span style={{ fontSize: 13, color: colors.textSecondary }}>User prompt</span>
-            </div>
+            {(item.user_prompt_template || '').slice(0, 220)}
+            {item.user_prompt_template && item.user_prompt_template.length > 220 ? '…' : ''}
           </div>
-          <Row gutter={[0, 0]} style={{ margin: 0 }}>
-            <Col xs={24} style={{ padding: 0 }}>
-              {userColumnHeader}
-              <div style={{ padding: 0 }}>{userColumnBody}</div>
+
+          <Space size={4} wrap>
+            {item.recommended_provider && (
+              <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>
+                <RobotOutlined /> {item.recommended_provider}
+              </Tag>
+            )}
+            {item.recommended_model && (
+              <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>
+                {item.recommended_model}
+              </Tag>
+            )}
+            <Tag style={{ fontSize: 10, margin: 0 }}>Temp: {item.temperature}</Tag>
+            <Tag style={{ fontSize: 10, margin: 0 }}>Max: {item.max_tokens}</Tag>
+          </Space>
+        </Space>
+      </Card>
+    );
+  };
+
+  // ── Render: System Templates table-like list ──────────────────────────
+  const renderSystemList = () => {
+    if (sysLoading) return <Spin />;
+    if (!sysItems.length) return <Empty description="无系统模板" />;
+
+    return (
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        {sysItems.map((tpl) => (
+          <Card
+            key={tpl.id}
+            size="small"
+            style={{
+              background: colors.cardBg,
+              border: `1px solid ${colors.cardBorder}`,
+              borderRadius: 8,
+            }}
+            bodyStyle={{ padding: 14 }}
+          >
+            <Row align="middle" gutter={12}>
+              <Col flex="auto">
+                <Space size={6}>
+                  <Text strong style={{ color: colors.text }}>
+                    {tpl.template_name}
+                  </Text>
+                  <Tag color="geekblue">{tpl.template_code}</Tag>
+                  {tpl.module_code && <Tag color="cyan">{tpl.module_code}</Tag>}
+                </Space>
+                <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                  {tpl.description || '—'}
+                </div>
+              </Col>
+              <Col>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => openEditSystem(tpl)}
+                >
+                  编辑
+                </Button>
+              </Col>
+            </Row>
+          </Card>
+        ))}
+      </Space>
+    );
+  };
+
+  // ── Render: Editor Drawer ──────────────────────────────────────────────
+  const editingTitle = editing
+    ? editing.kind === 'my'
+      ? `编辑: ${editing.item.module_name}`
+      : `[Admin] 编辑系统模板: ${editing.template.template_name}`
+    : '';
+
+  const renderEditor = () => (
+    <Drawer
+      title={editingTitle}
+      width={720}
+      open={drawerVisible}
+      onClose={() => {
+        setDrawerVisible(false);
+        setEditing(null);
+      }}
+      destroyOnClose
+      footer={
+        <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+          <Button onClick={() => setDrawerVisible(false)}>取消</Button>
+          <Button type="primary" onClick={() => form.submit()} loading={saving}>
+            保存
+          </Button>
+        </Space>
+      }
+    >
+      {editing && (
+        <Form form={form} layout="vertical" onFinish={handleSave}>
+          {editing.kind === 'my' && (
+            <Alert
+              type="info"
+              showIcon
+              message={`你正在编辑你自己的 "${editing.item.module_name}" 私有模板。其他用户不会受影响。`}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          {editing.kind === 'system' && (
+            <Alert
+              type="warning"
+              showIcon
+              message={`你正在编辑系统模板 "${editing.template.template_name}"，所有未自定义的用户都会立即使用这份新内容。`}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Form.Item
+            label="System Prompt"
+            name="system_prompt"
+            extra="LLM 的 system 角色指令，定义助手身份与基调。"
+          >
+            <TextArea rows={4} placeholder="（可选）" />
+          </Form.Item>
+
+          <Form.Item
+            label="User Prompt Template"
+            name="user_prompt_template"
+            rules={[{ required: true, message: '不能为空' }]}
+            extra="支持 {{变量}} 占位符；用户调用时会被自动填充。"
+          >
+            <TextArea rows={12} />
+          </Form.Item>
+
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Provider" name="recommended_provider">
+                <Select
+                  options={Object.keys(PROVIDER_MODELS).map((k) => ({ label: k, value: k }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Model" name="recommended_model">
+                <Select
+                  options={availableModels.map((m) => ({ label: m, value: m }))}
+                  placeholder="选择 provider 后可选 model"
+                />
+              </Form.Item>
             </Col>
           </Row>
-        </div>
-      );
-    }
 
-    return (
-      <div style={listShellStyle}>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 24,
-            padding: '20px 24px',
-            borderBottom: `1px solid ${colors.cardBorder}`,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#2196F3' : '#1890ff' }}>{systemTemplates.length}</span>
-            <span style={{ fontSize: 13, color: colors.textSecondary }}>System prompt</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 24, fontWeight: 600, color: isDark ? '#52c41a' : '#389e0d' }}>{userPromptTemplates.length}</span>
-            <span style={{ fontSize: 13, color: colors.textSecondary }}>User prompt</span>
-          </div>
-        </div>
-
-        <Row gutter={[0, 0]} style={{ margin: 0 }}>
-          <Col xs={24} lg={12} style={{ padding: 0 }}>
-            <div
-              style={{
-                padding: '14px 24px 10px',
-                borderBottom: `1px solid ${colors.cardBorder}`,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <RobotOutlined style={{ color: isDark ? '#2196F3' : '#1890ff', fontSize: 16 }} />
-                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>System prompt 类</span>
-              </div>
-              <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
-                平台预置与全局生效的系统提示词模板（含代码绑定项）
-              </Text>
-            </div>
-            <div style={{ padding: 0 }}>
-              {systemTemplates.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 System 模板" style={{ padding: '28px 16px' }} />
-              ) : (
-                systemTemplates.map((template, index) =>
-                  renderTemplateListItem(template, index, systemTemplates.length)
-                )
-              )}
-            </div>
-          </Col>
-          <Col
-            xs={24}
-            lg={12}
-            style={{
-              padding: 0,
-              borderTop: isLgUp ? undefined : `1px solid ${colors.cardBorder}`,
-              borderLeft: isLgUp ? `1px solid ${colors.cardBorder}` : undefined,
-            }}
-          >
-            {userColumnHeader}
-            <div style={{ padding: 0 }}>{userColumnBody}</div>
-          </Col>
-        </Row>
-      </div>
-    );
-  };
-
-  // ── Editor modal ──────────────────────────────────────────────────────
-
-  const renderEditor = () => {
-    const isSystemEdit = editingTemplate?.scope === 'system';
-    const isReadOnly = editingTemplate ? !canEditTemplate(editingTemplate) : false;
-
-    return (
-      <Modal
-        title={
-          <Space>
-            {editingTemplate ? (isReadOnly ? 'View Template (Read-only)' : 'Edit Template') : 'Create Template'}
-            {isReadOnly && <Tag color="default">Read-only</Tag>}
-            {isSystemEdit && isAdmin && <Tag color="blue">System</Tag>}
-          </Space>
-        }
-        open={isEditorVisible}
-        onCancel={() => setIsEditorVisible(false)}
-        width={1200}
-        footer={null}
-        styles={getModalStyles(themeMode)}
-      >
-        <Row gutter={16}>
-          <Col span={16}>
-            {isReadOnly && (
-              <Alert
-                message="Read-only Mode"
-                description="System templates can only be edited by administrators."
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-              />
-            )}
-            <Form
-              form={form}
-              layout="vertical"
-              onFinish={handleSaveTemplate}
-              disabled={isReadOnly}
-            >
-              {isAdmin ? (
-                <>
-                  {/* Admin 始终显示 Scope 选择（编辑已有模板时只读） */}
-                  <Form.Item
-                    label={<Text style={{ fontSize: 14 }}>Visibility Scope</Text>}
-                    name="scope"
-                    initialValue="user"
-                    extra={
-                      currentScope === 'user'
-                        ? 'Private template — only visible to you. Use this for personal daily report styles.'
-                        : currentScope === 'system'
-                        ? 'System template — available to all users as a standard option.'
-                        : ''
-                    }
-                  >
-                    <Select
-                      style={EDITOR_FORM_CONTROL}
-                      onChange={handleScopeChange}
-                      disabled={!!editingTemplate}
-                    >
-                      <Option value="user">🔒 Private (Only Me)</Option>
-                      <Option value="system">🌟 System (All Users)</Option>
-                    </Select>
-                  </Form.Item>
-
-                  {currentScope === 'user' ? (
-                    <>
-                      {/* Admin user-scope：与非 Admin 一致——选 Module，auto 生成 template_code */}
-                      <Row gutter={12}>
-                        <Col span={12}>
-                          <Form.Item
-                            label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
-                            name="template_name"
-                            rules={[{ required: true, message: 'Please enter template name' }]}
-                          >
-                            <Input placeholder="e.g.: My Twitter Report Style" style={EDITOR_FORM_CONTROL} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item
-                            label={<Text style={{ fontSize: 14 }}>Target Module</Text>}
-                            name="admin_module_code"
-                            rules={[{ required: !editingTemplate, message: 'Please select a target module' }]}
-                            extra="Choose which feature this template is for"
-                          >
-                            <Select
-                              placeholder="Select target module"
-                              style={EDITOR_FORM_CONTROL}
-                              disabled={!!editingTemplate}
-                              onChange={(value: string) => {
-                                setSelectedModuleCode(value);
-                                const catCode = MODULE_TO_CATEGORY[value] || value;
-                                const matchedCat = categories.find(c => c.category_code === catCode);
-                                if (matchedCat) {
-                                  setCurrentEditingCategoryId(matchedCat.id);
-                                  form.setFieldValue('category_id', matchedCat.id);
-                                }
-                              }}
-                            >
-                              {modules.filter(m => m.configurable).map(m => (
-                                <Option key={m.module_code} value={m.module_code}>
-                                  {m.module_name}
-                                </Option>
-                              ))}
-                            </Select>
-                          </Form.Item>
-                        </Col>
-                      </Row>
-                    </>
-                  ) : (
-                    <>
-                      {/* Admin system-scope：完整控制——手动 Template Name + Template Code + Category */}
-                      <Row gutter={12}>
-                        <Col span={12}>
-                          <Form.Item
-                            label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
-                            name="template_name"
-                            rules={[{ required: true, message: 'Please enter template name' }]}
-                          >
-                            <Input placeholder="e.g.: News Summary Generation" style={EDITOR_FORM_CONTROL} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item
-                            label={<Text style={{ fontSize: 14 }}>Template Code</Text>}
-                            name="template_code"
-                            rules={[{ required: true, message: 'Please enter template code' }]}
-                          >
-                            <Input
-                              placeholder="e.g.: news_summary_v1"
-                              disabled={!!editingTemplate}
-                              style={EDITOR_FORM_CONTROL}
-                            />
-                          </Form.Item>
-                        </Col>
-                      </Row>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Category</Text>}
-                        name="category_id"
-                        rules={[{ required: true, message: 'Please select a category' }]}
-                      >
-                        <Select
-                          placeholder="Select category"
-                          style={EDITOR_FORM_CONTROL}
-                          onChange={(value: number) => setCurrentEditingCategoryId(value)}
-                        >
-                          {categories.map(cat => (
-                            <Option key={cat.id} value={cat.id}>
-                              {cat.icon} {cat.category_name}
-                            </Option>
-                          ))}
-                        </Select>
-                      </Form.Item>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  {/* Non-admin: Template Name + Target Module */}
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Template Name</Text>}
-                        name="template_name"
-                        rules={[{ required: true, message: 'Please enter template name' }]}
-                      >
-                        <Input placeholder="e.g.: My Twitter Report Style" style={EDITOR_FORM_CONTROL} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item
-                        label={<Text style={{ fontSize: 14 }}>Target Module</Text>}
-                        name="module_code"
-                        rules={[{ required: true, message: 'Please select a target module' }]}
-                        extra="Choose which feature this template is for"
-                      >
-                        <Select
-                          placeholder="Select target module"
-                          style={EDITOR_FORM_CONTROL}
-                          disabled={!!editingTemplate}
-                          onChange={(value: string) => {
-                            setSelectedModuleCode(value);
-                            const catCode = MODULE_TO_CATEGORY[value] || value;
-                            const matchedCat = categories.find(c => c.category_code === catCode);
-                            if (matchedCat) {
-                              setCurrentEditingCategoryId(matchedCat.id);
-                              form.setFieldValue('category_id', matchedCat.id);
-                            }
-                          }}
-                        >
-                          {modules
-                            .filter(m => m.configurable)
-                            .map(m => (
-                              <Option key={m.module_code} value={m.module_code}>
-                                {m.module_name}
-                              </Option>
-                            ))}
-                        </Select>
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                </>
-              )}
-
-              <Form.Item
-                label={<Text style={{ fontSize: 14 }}>Description</Text>}
-                name="description"
-              >
-                <TextArea
-                  rows={4}
-                  placeholder="Briefly describe the purpose of this template"
-                  style={EDITOR_FORM_TEXTAREA}
-                />
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Temperature" name="temperature">
+                <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
               </Form.Item>
-
-              <Form.Item
-                label={<Text style={{ fontSize: 14 }}>System Prompt (Optional)</Text>}
-                name="system_prompt"
-              >
-                <TextArea
-                  rows={6}
-                  placeholder="Define AI's role and behavior, e.g.: You are a professional financial analyst..."
-                  style={EDITOR_FORM_TEXTAREA}
-                />
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Max Tokens" name="max_tokens">
+                <InputNumber min={1} max={8000} step={100} style={{ width: '100%' }} />
               </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      )}
+    </Drawer>
+  );
 
-              <Form.Item
-                label={<Text style={{ fontSize: 14 }}>User Prompt Template</Text>}
-                name="user_prompt_template"
-                rules={[{ required: true, message: 'Please enter user prompt template' }]}
-                extra="Use {{variable_name}} format to define variables"
-              >
-                <TextArea
-                  rows={6}
-                  placeholder={'Please analyze the following news:\n\nTitle: {{title}}\nContent: {{content}}'}
-                  style={EDITOR_FORM_TEXTAREA}
-                />
-              </Form.Item>
-
-              <Divider style={{ fontSize: 14, margin: '12px 0' }}>Recommended Configuration (Required)</Divider>
-
-              <Row gutter={12}>
-                <Col span={12}>
-                  <Form.Item
-                    label={<Text style={{ fontSize: 14 }}>Recommended Provider <Text type="danger">*</Text></Text>}
-                    name="recommended_provider"
-                    rules={[{ required: true, message: 'Please select a provider' }]}
-                  >
-                    <Select placeholder="Select LLM provider" style={EDITOR_FORM_CONTROL} onChange={handleProviderChange}>
-                      <Option value="qwen">🔷 Qwen</Option>
-                      <Option value="doubao">🫘 Doubao</Option>
-                      <Option value="glm">🧠 GLM</Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    label={<Text style={{ fontSize: 14 }}>Recommended Model <Text type="danger">*</Text></Text>}
-                    name="recommended_model"
-                    rules={[{ required: true, message: 'Please select a model' }]}
-                    extra={selectedProvider ? `Available models for ${selectedProvider}` : 'Please select a provider first'}
-                  >
-                    <Select
-                      placeholder={selectedProvider ? 'Select model' : 'Select provider first'}
-                      style={EDITOR_FORM_CONTROL}
-                      disabled={!selectedProvider || availableModels.length === 0}
-                    >
-                      {availableModels.map(model => (
-                        <Option key={model} value={model}>{model}</Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={12}>
-                <Col span={12}>
-                  <Form.Item label={<Text style={{ fontSize: 14 }}>Temperature</Text>} name="temperature" initialValue={0.7}>
-                    <InputNumber min={0} max={2} step={0.1} style={{ width: '100%', ...EDITOR_FORM_CONTROL }} />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label={<Text style={{ fontSize: 14 }}>Max Tokens</Text>} name="max_tokens" initialValue={2000}>
-                    <InputNumber min={100} max={10000} step={100} style={{ width: '100%', ...EDITOR_FORM_CONTROL }} />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item label={<Text style={{ fontSize: 14 }}>Tags</Text>} name="tags">
-                <Select mode="tags" placeholder="Add tags, press Enter to confirm" style={EDITOR_FORM_CONTROL} />
-              </Form.Item>
-
-              <Form.Item
-                label={<Text style={{ fontSize: 14 }}>Active Status</Text>}
-                name="is_active"
-                valuePropName="checked"
-                initialValue={true}
-                extra="Inactive templates will not be usable"
-              >
-                <Switch size="small" checkedChildren="Active" unCheckedChildren="Inactive" />
-              </Form.Item>
-
-              <Form.Item style={{ marginBottom: 0 }}>
-                <Space size="small">
-                  {!isReadOnly && (
-                    <Button
-                      type="primary"
-                      htmlType="submit"
-                      size="small"
-                      style={{ borderRadius: 8, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) }}
-                    >
-                      Save
-                    </Button>
-                  )}
-                  <Button
-                    onClick={() => setIsEditorVisible(false)}
-                    size="small"
-                    style={{ borderRadius: 8, ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}) }}
-                  >
-                    {isReadOnly ? 'Close' : 'Cancel'}
-                  </Button>
-                </Space>
-              </Form.Item>
-            </Form>
-          </Col>
-
-          <Col span={8}>
-            <VariableHelper
-              categories={categories}
-              onVariableInsert={handleVariableInsert}
-              currentCategoryId={currentEditingCategoryId}
-              moduleCode={selectedModuleCode}
-            />
-          </Col>
-        </Row>
-      </Modal>
-    );
-  };
-
-  // ── Test drawer ───────────────────────────────────────────────────────
-
-  const renderTestPanel = () => {
-    if (!selectedTemplate) return null;
-    return (
-      <Drawer
-        title={`Test Template: ${selectedTemplate.template_name}`}
-        placement="right"
-        width={720}
-        open={isTestVisible}
-        onClose={() => setIsTestVisible(false)}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <Alert message="Test Instructions" description="Fill in test variable values, click run test to view LLM response effects" type="info" showIcon />
-
-          <Card title="Template Information" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
-            <Paragraph><Text strong>Template Code:</Text> {selectedTemplate.template_code}</Paragraph>
-            <Paragraph><Text strong>Recommended Provider:</Text> {selectedTemplate.recommended_provider || 'Not set'}</Paragraph>
-            <Paragraph><Text strong>Recommended Model:</Text> {selectedTemplate.recommended_model || 'Not set'}</Paragraph>
-          </Card>
-
-          <Form form={testForm} layout="vertical" onFinish={handleRunTest}>
-            <Card title="Test Variables" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
-              {Object.entries(selectedTemplate.variables || {}).map(([varName, varDef]) => (
-                <Form.Item
-                  key={varName}
-                  label={<Space><Text>{varName}</Text>{varDef.required && <Tag color="red">Required</Tag>}<Tag>{varDef.type}</Tag></Space>}
-                  name={varName}
-                  rules={[{ required: varDef.required, message: `${varName} is required` }]}
-                  extra={varDef.description}
-                >
-                  {varDef.type === 'string' ? <TextArea rows={3} placeholder={`Enter ${varName}`} />
-                    : varDef.type === 'integer' || varDef.type === 'float' ? <InputNumber style={{ width: '100%' }} />
-                    : varDef.type === 'boolean' ? <Switch />
-                    : <Input placeholder={`Enter ${varName}`} />}
-                </Form.Item>
-              ))}
-            </Card>
-            <Form.Item>
-              <Button
-                type="primary"
-                htmlType="submit"
-                icon={<ThunderboltOutlined />}
-                loading={testing}
-                block
-                style={{ borderRadius: 10, fontWeight: 500, height: 40, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) }}
-              >
-                Run Test
-              </Button>
-            </Form.Item>
-          </Form>
-
-          {testResult && (
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <Card
-                title={<Space><Text>Test Result</Text>{testResult.success ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}</Space>}
-                size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}
-              >
-                {testResult.success && (
-                  <Row gutter={16}>
-                    <Col span={8}><Statistic title="Tokens Used" value={testResult.tokens_used || 0} /></Col>
-                    <Col span={8}><Statistic title="Cost" value={testResult.cost || 0} precision={4} prefix="¥" /></Col>
-                    <Col span={8}><Statistic title="Response Time" value={testResult.response_time || 0} precision={2} suffix="s" /></Col>
-                  </Row>
-                )}
-                {testResult.error && <Alert message="Error" description={testResult.error} type="error" />}
-              </Card>
-
-              {testResult.rendered_prompt && (
-                <Collapse defaultActiveKey={['1']}>
-                  <Panel header="Rendered Prompt" key="1">
-                    {testResult.rendered_prompt.system_prompt && (
-                      <>
-                        <Text strong>System Prompt:</Text>
-                        <Paragraph>
-                          <pre style={{ background: colors.codeBlockBg, padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>
-                            {testResult.rendered_prompt.system_prompt}
-                          </pre>
-                        </Paragraph>
-                      </>
-                    )}
-                    <Text strong>User Prompt:</Text>
-                    <Paragraph>
-                      <pre style={{ background: colors.codeBlockBg, padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>
-                        {testResult.rendered_prompt.user_prompt}
-                      </pre>
-                    </Paragraph>
-                  </Panel>
-                </Collapse>
-              )}
-
-              {testResult.llm_response && (
-                <Card title="LLM Response" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
-                  <Paragraph>
-                    <pre style={{ background: colors.codeBlockBg, padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>
-                      {testResult.llm_response}
-                    </pre>
-                  </Paragraph>
-                </Card>
-              )}
-
-              {testResult.parsed_output && (
-                <Card title="Parsed Output" size="small" style={cardStyleBehance} bodyStyle={{ padding: '16px 20px' }}>
-                  <Paragraph>
-                    <pre style={{ background: colors.codeBlockBg, padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>
-                      {JSON.stringify(testResult.parsed_output, null, 2)}
-                    </pre>
-                  </Paragraph>
-                </Card>
-              )}
-            </Space>
-          )}
-        </Space>
-      </Drawer>
-    );
-  };
-
-  // ── Page layout ───────────────────────────────────────────────────────
+  // ── My Templates split: USER_OWNED first, SYSTEM_FIXED below ───────────
+  const ownedItems = myItems.filter((x) => x.kind === 'user_owned');
+  const systemItems = myItems.filter((x) => x.kind === 'system_fixed');
 
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        ...(isDark && {
-          token: {
-            colorBgContainer: colors.cardBg,
-            colorBgElevated: (colors as any).cardBg,
-            colorBorderSecondary: colors.cardBorder,
-            colorPrimary: '#2196F3',
-            colorText: colors.text,
-            colorTextSecondary: colors.textSecondary,
-            colorFillQuaternary: (colors as any).inputBg ?? '#1E202B',
-            colorBgLayout: (colors as any).pageBg,
-            borderRadius: 8,
-            borderRadiusLG: 12,
+    <div style={{ padding: 24, background: colors.pageBg, minHeight: '100vh' }}>
+      <Title level={3} style={{ color: colors.text, marginBottom: 4 }}>
+        Prompt Templates
+      </Title>
+      <Paragraph type="secondary" style={{ marginBottom: 20 }}>
+        每个功能模块对应你自己的一份私有模板（My Templates 中可编辑/重置）；
+        系统级模板对所有用户共享，仅管理员可改 prompt 内容。
+      </Paragraph>
+
+      <Tabs
+        activeKey={activeTab}
+        onChange={(k) => setActiveTab(k as 'my' | 'system')}
+        items={[
+          {
+            key: 'my',
+            label: (
+              <Space size={4}>
+                <ThunderboltOutlined /> My Templates
+              </Space>
+            ),
+            children: (
+              <Spin spinning={myLoading}>
+                <Title level={5} style={{ color: colors.text, marginTop: 4 }}>
+                  我的（可编辑）
+                </Title>
+                {!ownedItems.length && !myLoading && (
+                  <Empty description="未找到可编辑模板" />
+                )}
+                <Row gutter={[12, 12]}>
+                  {ownedItems.map((item) => (
+                    <Col xs={24} md={12} xl={8} key={item.module_code}>
+                      {renderMyCard(item)}
+                    </Col>
+                  ))}
+                </Row>
+
+                <Title level={5} style={{ color: colors.text, marginTop: 24 }}>
+                  系统级（{isAdmin ? '可在 System Templates Tab 编辑' : '只读'}）
+                </Title>
+                <Row gutter={[12, 12]}>
+                  {systemItems.map((item) => (
+                    <Col xs={24} md={12} xl={8} key={item.module_code}>
+                      {renderMyCard(item)}
+                    </Col>
+                  ))}
+                </Row>
+              </Spin>
+            ),
           },
-        }),
-      }}
-    >
-      <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-        <Title level={2} style={{ color: colors.text, marginTop: 0, marginBottom: 4 }}>
-          <FileTextOutlined /> Prompt Template Management
-        </Title>
-        <Paragraph type="secondary" style={{ color: colors.textSecondary, marginBottom: 20 }}>
-          {isAdmin
-            ? 'System prompt 与 User prompt 分栏列表展示 — 支持变量、版本与在线测试'
-            : '管理你的 User prompt 模板 — 支持变量、版本与在线测试'}
-        </Paragraph>
+          ...(isAdmin
+            ? [
+                {
+                  key: 'system' as const,
+                  label: (
+                    <Space size={4}>
+                      <LockOutlined /> System Templates (Admin)
+                    </Space>
+                  ),
+                  children: (
+                    <>
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="改动会立刻生效到所有未自定义对应模块的用户。请谨慎编辑。"
+                        style={{ marginBottom: 12 }}
+                      />
+                      {renderSystemList()}
+                    </>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
 
-        <Spin spinning={loading}>
-          {/* Toolbar */}
-          <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
-            <Col flex="auto">
-              <Input
-                placeholder="Search template name or description..."
-                prefix={<SearchOutlined />}
-                value={searchText}
-                onChange={e => setSearchText(e.target.value)}
-                allowClear
-                {...(isDark && { style: { backgroundColor: (colors as any).inputBg ?? '#1E202B' } })}
-              />
-            </Col>
-            <Col>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleCreateTemplate}
-                style={{
-                  borderRadius: 10,
-                  fontWeight: 500,
-                  height: 36,
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
-                }}
-              >
-                Create Template
-              </Button>
-            </Col>
-          </Row>
-
-          {/* Two-column template list */}
-          {renderTemplateLists()}
-        </Spin>
-
-        {renderEditor()}
-        {renderTestPanel()}
-
-        {/* 「设为我的默认」确认弹窗 */}
-        <Modal
-          title={<Space><StarOutlined style={{ color: '#faad14' }} />Set as My Default Template</Space>}
-          open={!!setDefaultModalTemplate}
-          onCancel={() => { setSetDefaultModalTemplate(null); setSetDefaultModuleCode(undefined); }}
-          onOk={handleConfirmSetDefault}
-          okText="Set as Default"
-          okButtonProps={{ loading: settingDefault, disabled: !setDefaultModuleCode }}
-          cancelText="Cancel"
-          styles={getModalStyles(themeMode)}
-          width={480}
-        >
-          {setDefaultModalTemplate && (
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <div>
-                <Text>Set <Text strong>"{setDefaultModalTemplate.template_name}"</Text> as your preferred template for:</Text>
-              </div>
-              <Select
-                style={{ width: '100%' }}
-                placeholder="Select module"
-                value={setDefaultModuleCode}
-                onChange={(v: string) => setSetDefaultModuleCode(v)}
-              >
-                {modules.filter(m => m.configurable).map(m => (
-                  <Option key={m.module_code} value={m.module_code}>
-                    {m.module_name}
-                    <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>— {m.description}</Text>
-                  </Option>
-                ))}
-              </Select>
-              <Alert
-                type="info"
-                showIcon
-                message="After setting, all your generated daily reports will use this template instead of the system default."
-              />
-            </Space>
-          )}
-        </Modal>
-      </div>
-    </ConfigProvider>
+      {renderEditor()}
+    </div>
   );
 };
 

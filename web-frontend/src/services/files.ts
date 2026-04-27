@@ -1,5 +1,24 @@
 import { api } from './api';
 
+/**
+ * 上传弹窗 (5 个) 共享的 picker 选项类型 (PR-5).
+ *
+ * - auto_analyze_template_*: AI 深度分析模板 (UploadAnalysisTemplatePicker default)
+ *   关联后端 trigger_auto_analyze (analyze_document/audio_task).
+ * - auto_tag_template_*    : 自动打标模板 (UploadAnalysisTemplatePicker moduleCode='file_tagging')
+ *   关联后端 trigger_auto_tagging (tag_file_content_task), 走 LLMTemplateResolver
+ *   解析最终模板 (runtime > preference > 默认 content_tag_v1).
+ *
+ * 5 个上传 API (upload-and-process-document / upload-audio / upload-youtube /
+ * upload-web-link / create-text-note) 都接受这个统一 options 对象.
+ */
+export interface UploadAnalyzeOptions {
+  auto_analyze_template_id?: number | null;
+  auto_analyze_template_variables?: Record<string, any>;
+  auto_tag_template_id?: number | null;
+  auto_tag_template_variables?: Record<string, any>;
+}
+
 // 文件类型定义
 export interface FileUploadResponse {
   filename: string;
@@ -194,13 +213,10 @@ export const filesAPI = {
   },
 
   // 上传音频文件到 OSS（异步，立即返回任务 ID）
-  // analyzeOptions: 上传弹窗中用户选择的 AI 分析模板, 上传完成后由后端自动触发 analyze_audio_task
+  // analyzeOptions: 上传弹窗中用户选择的模板 (analyze + tag), 上传完成后由后端自动触发对应任务
   uploadAudioFile: async (
     file: File,
-    analyzeOptions?: {
-      auto_analyze_template_id?: number | null;
-      auto_analyze_template_variables?: Record<string, any>;
-    }
+    analyzeOptions?: UploadAnalyzeOptions,
   ): Promise<{
     success: boolean;
     message: string;
@@ -223,6 +239,17 @@ export const filesAPI = {
       'auto_analyze_template_variables',
       JSON.stringify(analyzeOptions?.auto_analyze_template_variables || {})
     );
+    // PR-5: file_tagging picker
+    if (analyzeOptions?.auto_tag_template_id) {
+      formData.append(
+        'auto_tag_template_id',
+        analyzeOptions.auto_tag_template_id.toString()
+      );
+    }
+    formData.append(
+      'auto_tag_template_variables',
+      JSON.stringify(analyzeOptions?.auto_tag_template_variables || {})
+    );
 
     return api.upload('/files/upload-audio', formData);
   },
@@ -231,10 +258,7 @@ export const filesAPI = {
   // 实际处理在本地家用 Worker 上执行)
   uploadYouTubeLink: async (
     youtubeUrl: string,
-    analyzeOptions?: {
-      auto_analyze_template_id?: number | null;
-      auto_analyze_template_variables?: Record<string, any>;
-    }
+    analyzeOptions?: UploadAnalyzeOptions,
   ): Promise<{
     task_id: string;
     video_id: string;
@@ -253,6 +277,10 @@ export const filesAPI = {
       auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
       auto_analyze_template_variables:
         analyzeOptions?.auto_analyze_template_variables || {},
+      // PR-5: file_tagging picker
+      auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
+      auto_tag_template_variables:
+        analyzeOptions?.auto_tag_template_variables || {},
     });
   },
 
@@ -280,10 +308,7 @@ export const filesAPI = {
   // 提交 Web Link 并异步抓取处理
   uploadWebLink: async (
     url: string,
-    analyzeOptions?: {
-      auto_analyze_template_id?: number | null;
-      auto_analyze_template_variables?: Record<string, any>;
-    }
+    analyzeOptions?: UploadAnalyzeOptions,
   ): Promise<{
     task_id: string;
     url: string;
@@ -298,6 +323,10 @@ export const filesAPI = {
       auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
       auto_analyze_template_variables:
         analyzeOptions?.auto_analyze_template_variables || {},
+      // PR-5: file_tagging picker
+      auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
+      auto_tag_template_variables:
+        analyzeOptions?.auto_tag_template_variables || {},
     });
   },
 
@@ -311,6 +340,9 @@ export const filesAPI = {
       template_variables?: Record<string, any>;
       custom_inputs?: Record<string, any>;
       params?: Record<string, any>;
+      // PR-5: file_tagging picker (与 audio/youtube/web-link/text-note 入口对齐)
+      auto_tag_template_id?: number | null;
+      auto_tag_template_variables?: Record<string, any>;
     }
   ): Promise<{
     success: boolean;
@@ -334,7 +366,15 @@ export const filesAPI = {
     formData.append('template_variables', JSON.stringify(options.template_variables || {}));
     formData.append('custom_inputs', JSON.stringify(options.custom_inputs || {}));
     formData.append('params', JSON.stringify(options.params || {}));
-    
+    // PR-5: file_tagging picker 的两个新参数
+    if (options.auto_tag_template_id) {
+      formData.append('auto_tag_template_id', options.auto_tag_template_id.toString());
+    }
+    formData.append(
+      'auto_tag_template_variables',
+      JSON.stringify(options.auto_tag_template_variables || {})
+    );
+
     return api.upload('/files/upload-and-process-document', formData);
   },
 
@@ -583,14 +623,11 @@ export const filesAPI = {
   },
 
   // 创建文本笔记（无文件上传，用户直接撰写 Markdown）
-  // analyzeOptions: 用户在创建弹窗中可选择的 AI 分析模板, 后端在创建后自动触发 analyze_document_task
+  // analyzeOptions: 用户在创建弹窗中可选择的模板 (analyze + tag), 后端在创建后自动触发对应任务
   createTextNote: async (
     title: string,
     content: string,
-    analyzeOptions?: {
-      auto_analyze_template_id?: number | null;
-      auto_analyze_template_variables?: Record<string, any>;
-    }
+    analyzeOptions?: UploadAnalyzeOptions,
   ): Promise<{ success: boolean; file_detail_id: number; processing_stats_id: number }> => {
     return api.post<{ success: boolean; file_detail_id: number; processing_stats_id: number }>(
       '/files/create-text-note',
@@ -600,6 +637,10 @@ export const filesAPI = {
         auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
         auto_analyze_template_variables:
           analyzeOptions?.auto_analyze_template_variables || {},
+        // PR-5: file_tagging picker
+        auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
+        auto_tag_template_variables:
+          analyzeOptions?.auto_tag_template_variables || {},
       }
     );
   },

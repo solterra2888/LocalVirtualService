@@ -40,38 +40,56 @@ def get_feed_tagging_task():
     return tag_feed_content_task
 
 
-def trigger_auto_tagging(file_detail_ids, username=None, delay=2):
+def trigger_auto_tagging(
+    file_detail_ids,
+    username=None,
+    delay=2,
+    template_id=None,
+    template_variables=None,
+):
     """
     触发自动打标签任务
-    
+
     Args:
         file_detail_ids: 文件detail ID列表或单个ID
         username: 用户名
         delay: 延迟执行时间（秒），默认2秒，确保DB事务已提交
+        template_id: 上传弹窗用户选择的 file_tagging 模板 ID (PR-5);
+            未传时 task 内部会走 user_template_preferences[file_tagging] →
+            content_tag_v1 兜底.
+        template_variables: 运行时模板变量 (PR-5); 与默认模板的 additional_context 合并.
     """
     # 检查是否启用自动打标签
     auto_tag_enabled = os.getenv('AUTO_TAG_ENABLED', 'true').lower() == 'true'
     if not auto_tag_enabled:
         info("自动打标签功能已禁用", source="auto_tagging")
         return
-    
+
     # 确保是列表
     if not isinstance(file_detail_ids, list):
         file_detail_ids = [file_detail_ids]
-    
+
     if not file_detail_ids:
         return
-    
+
     tag_task = get_tagging_task()
-    
+
     # 异步调用每个文件的打标签任务
     for file_id in file_detail_ids:
         try:
             tag_task.apply_async(
                 args=(file_id, username),
-                countdown=delay
+                kwargs={
+                    'template_id': template_id,
+                    'template_variables': template_variables,
+                },
+                countdown=delay,
             )
-            info(f"已触发自动打标签任务: file_id={file_id}, delay={delay}s", source="auto_tagging")
+            info(
+                f"已触发自动打标签任务: file_id={file_id}, "
+                f"template_id={template_id}, delay={delay}s",
+                source="auto_tagging",
+            )
         except Exception as e:
             error(f"触发打标签任务失败: file_id={file_id}, error={str(e)}", source="auto_tagging")
 
@@ -528,7 +546,15 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                 
                 if file_ids:
                     info(f"触发自动打标签: {len(file_ids)} 个文件", source="celery_task")
-                    trigger_auto_tagging(file_ids, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+                    # PR-5: 从 task_info 取 file_tagging 模板, 透传给 trigger_auto_tagging
+                    auto_tag_template_id = task_info.get('auto_tag_template_id') if task_info else None
+                    auto_tag_template_vars = task_info.get('auto_tag_template_variables') if task_info else None
+                    trigger_auto_tagging(
+                        file_ids, username,
+                        delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
+                        template_id=auto_tag_template_id,
+                        template_variables=auto_tag_template_vars,
+                    )
                     trigger_auto_naming(file_ids, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                     trigger_auto_classify(file_ids, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         except Exception as e:
@@ -697,6 +723,10 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
             'processing_time': 0
         }]
 
+        # PR-4 修复: username → user_id, 让 LLM usage_log 能正确归属用户
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id_int = get_user_id_by_username(username)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -704,7 +734,7 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
                 llm_service.process_all_contents(
                     successful_results,
                     custom_variables=variables,
-                    user_id=None
+                    user_id=user_id_int,
                 )
             )
         finally:
@@ -1045,12 +1075,16 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        # PR-4 修复: username → user_id, 让 LLM usage_log 能正确归属用户
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id_int = get_user_id_by_username(username)
+
         try:
             final_report, file_ai_times = loop.run_until_complete(
                 llm_service.process_all_contents(
                     successful_results_for_llm,
                     custom_variables=variables,
-                    user_id=None
+                    user_id=user_id_int,
                 )
             )
         finally:
@@ -1493,7 +1527,9 @@ def reparse_document_task(self, file_id, params, username):
 def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, model='fun-asr',
                                       language_hints=None, diarization_enabled=True,
                                       auto_analyze_template_id=None,
-                                      auto_analyze_template_variables=None):
+                                      auto_analyze_template_variables=None,
+                                      auto_tag_template_id=None,
+                                      auto_tag_template_variables=None):
     """
     异步上传音频文件到 OSS 并进行语音识别
     
@@ -1772,7 +1808,13 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
 
         # 🏷️ 触发 4 路并行 LLM 任务: tag / name / classify / analyze
         try:
-            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+            # PR-5: 上传弹窗 file_tagging picker 选择的模板透传
+            trigger_auto_tagging(
+                file_detail_id, username,
+                delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
+                template_id=auto_tag_template_id,
+                template_variables=auto_tag_template_variables,
+            )
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
             trigger_auto_analyze(
@@ -2060,7 +2102,14 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
 
                 if file_ids:
                     info(f"触发自动打标签/命名/归类: {len(file_ids)} 个文件", source="celery_doc_upload")
-                    trigger_auto_tagging(file_ids, username=username, delay=2)
+                    # PR-5: 把 auto_tag_template_id 从 task_info 透传到 trigger_auto_tagging
+                    auto_tag_template_id = task_info.get('auto_tag_template_id') if task_info else None
+                    auto_tag_template_vars = task_info.get('auto_tag_template_variables') if task_info else None
+                    trigger_auto_tagging(
+                        file_ids, username=username, delay=2,
+                        template_id=auto_tag_template_id,
+                        template_variables=auto_tag_template_vars,
+                    )
                     trigger_auto_naming(file_ids, username=username, delay=2)
                     trigger_auto_classify(file_ids, username=username, delay=2)
 
@@ -2195,9 +2244,22 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
         info(f"Web Clip 文本提取完成: file_detail_id={file_detail_id}, content_length={len(plain_text)}",
              source="celery_web_clip")
 
+        # PR-4 R1 修复: 与 upload-web-link / upload-and-process-document 对齐, 4 路并行 LLM 全部触发.
+        # Chrome Extension 当前不传 template_id, trigger_auto_analyze 内部会:
+        #   - 若用户在 Settings 里设了 file_analysis 偏好 → 用偏好模板 (PR-3 ④ 接入后生效)
+        #   - 否则按文档/网页规则跳过 (与现状一致, 不会无意触发空 LLM 调用)
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+        trigger_auto_analyze(
+            file_detail_id=file_detail_id,
+            execution_id=processing_stats_id,
+            file_type='web',
+            template_id=None,
+            template_variables=None,
+            username=username,
+            delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+        )
 
         return {
             'status': 'completed',
@@ -2241,7 +2303,9 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
 @app.task(bind=True, name='scrape_and_process_web_link', queue='file_processing')
 def scrape_and_process_web_link_task(self, url, username,
                                       auto_analyze_template_id=None,
-                                      auto_analyze_template_variables=None):
+                                      auto_analyze_template_variables=None,
+                                      auto_tag_template_id=None,
+                                      auto_tag_template_variables=None):
     """
     服务端网页抓取：抓取 URL → Readability 提取正文 → 图片 base64 内嵌 → 上传 OSS → 写入 DB。
     替代 Chrome Extension 在浏览器端完成的全部工作。
@@ -2421,7 +2485,13 @@ def scrape_and_process_web_link_task(self, url, username,
         info(f"Web Link task completed: url={url}, file_detail_id={file_detail_id}, "
              f"content_length={len(plain_text)}", source="celery_web_link")
 
-        trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        # PR-5: file_tagging picker 透传
+        trigger_auto_tagging(
+            file_detail_id, username,
+            delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
+            template_id=auto_tag_template_id,
+            template_variables=auto_tag_template_variables,
+        )
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         trigger_auto_analyze(
@@ -3247,6 +3317,9 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
         # auto-analyze 上下文(从 upload_params 还原, 上传时由 API 写入)
         auto_analyze_template_id = None
         auto_analyze_template_variables = None
+        # PR-5: 同样持久化 file_tagging picker 选择, 用于触发 trigger_auto_tagging
+        auto_tag_template_id = None
+        auto_tag_template_variables = None
         with db_manager.get_connection_context() as conn:
             cur = conn.cursor()
 
@@ -3282,6 +3355,9 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     _params = {}
                 auto_analyze_template_id = _params.get('auto_analyze_template_id')
                 auto_analyze_template_variables = _params.get('auto_analyze_template_variables')
+                # PR-5: 读取 file_tagging picker 选择
+                auto_tag_template_id = _params.get('auto_tag_template_id')
+                auto_tag_template_variables = _params.get('auto_tag_template_variables')
             except Exception:
                 pass
 
@@ -3314,7 +3390,12 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
         # 3. 仅 completed 分支触发 4 路并行 LLM: tag / name / classify / analyze
         if outcome == 'completed':
             try:
-                trigger_auto_tagging([file_id], username, delay=2)
+                # PR-5: file_tagging picker 透传
+                trigger_auto_tagging(
+                    [file_id], username, delay=2,
+                    template_id=auto_tag_template_id,
+                    template_variables=auto_tag_template_variables,
+                )
                 trigger_auto_naming([file_id], username, delay=2)
                 trigger_auto_classify([file_id], username, delay=2)
                 trigger_auto_analyze(

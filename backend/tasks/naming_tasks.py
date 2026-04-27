@@ -152,13 +152,18 @@ def name_file_content_task(self, file_id, username=None, force=False):
             log_message="正在调用AI分析文件内容..."
         )
 
+        # PR-4 修复: username → user_id, 让 LLM usage_log 能正确归属用户
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id = get_user_id_by_username(username)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(
                 naming_service.name_file_content(
                     file_id=file_id,
-                    force=force
+                    force=force,
+                    user_id=user_id,
                 )
             )
         finally:
@@ -170,7 +175,13 @@ def name_file_content_task(self, file_id, username=None, force=False):
                 progress=100,
                 log_message=result.get('message', '已跳过')
             )
-            return result
+            # PR-4 R3 修复: 与 classify_tasks / tagging_tasks 对齐, 显式 status='skipped'
+            return {
+                'status': 'skipped',
+                'file_id': file_id,
+                'filename': filename,
+                **result,
+            }
 
         update_progress(
             status="completed",

@@ -100,6 +100,8 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
 
   // 上传完成后由后端自动并行触发的 AI 分析模板, None 表示跳过 analyze
   const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  // PR-5: file_tagging 模板, None 表示走默认 content_tag_v1 (或用户偏好)
+  const [tagPicker, setTagPicker] = useState<UploadAnalysisTemplatePickerValue>({});
 
   // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
   // AI分析功能已移除 - 改为在FilesPage右侧面板通过"Analyze Document"/"Analyze Audio"按钮触发
@@ -175,6 +177,9 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           ...params,
           use_ai_agent: false,
         },
+        // PR-5: file_tagging picker 选择, 上传完成后后端 trigger_auto_tagging
+        auto_tag_template_id: tagPicker.templateId,
+        auto_tag_template_variables: tagPicker.templateVariables || {},
       });
 
       addTask(response.task_id, file.name, 'document');
@@ -630,6 +635,19 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           value={analyzePicker}
           onChange={setAnalyzePicker}
           mode="optional"
+          textColor={colors.text}
+          textSecondaryColor={colors.textSecondary}
+        />
+
+        {/* PR-5: 自动打标模板 (可选, 选中后用自定义模板代替默认 content_tag_v1) */}
+        <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
+        <UploadAnalysisTemplatePicker
+          value={tagPicker}
+          onChange={setTagPicker}
+          mode="optional"
+          moduleCode="file_tagging"
+          label="AI Tagging Template"
+          hint="Optional. Toggle on to use your own tagging template (sector / industry / tickers / concepts)."
           textColor={colors.text}
           textSecondaryColor={colors.textSecondary}
         />

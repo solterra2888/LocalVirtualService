@@ -27,6 +27,8 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  // PR-5: file_tagging picker
+  const [tagPicker, setTagPicker] = useState<UploadAnalysisTemplatePickerValue>({});
 
   const handleSave = async () => {
     const trimmed = content.trim();
@@ -40,6 +42,9 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
       await filesAPI.createTextNote(title.trim(), trimmed, {
         auto_analyze_template_id: analyzePicker.templateId ?? null,
         auto_analyze_template_variables: analyzePicker.templateVariables || {},
+        // PR-5: file_tagging picker
+        auto_tag_template_id: tagPicker.templateId ?? null,
+        auto_tag_template_variables: tagPicker.templateVariables || {},
       });
       message.success(
         analyzePicker.templateId
@@ -65,6 +70,7 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
     setContent('');
     setSaving(false);
     setAnalyzePicker({});
+    setTagPicker({});
     onCancel();
   };
 
@@ -170,6 +176,21 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
               value={analyzePicker}
               onChange={setAnalyzePicker}
               mode="optional"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+              disabled={saving}
+            />
+          </div>
+
+          {/* PR-5: 自动打标模板 (可选, 选中后用自定义模板代替默认 content_tag_v1) */}
+          <div style={{ marginBottom: '16px' }}>
+            <UploadAnalysisTemplatePicker
+              value={tagPicker}
+              onChange={setTagPicker}
+              mode="optional"
+              moduleCode="file_tagging"
+              label="AI Tagging Template"
+              hint="Optional. Toggle on to use your own tagging template."
               textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
               disabled={saving}

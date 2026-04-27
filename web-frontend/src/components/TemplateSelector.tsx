@@ -18,7 +18,17 @@ const TEMPLATE_BOX_THEME = {
 } as const;
 
 interface TemplateSelectorProps {
-  categoryCode: string;
+  /**
+   * 按 category_code 过滤模板 (UI 分组用; 旧入口).
+   * categoryCode 与 moduleCode 至少传一个; 同时传时 moduleCode 优先.
+   */
+  categoryCode?: string;
+  /**
+   * PR-5 (2026-04-27): 按 module_code 过滤模板 (业务模块绑定).
+   * 与 user_template_preferences.module_code / MODULE_REGISTRY 对齐.
+   * 例如 'file_tagging' / 'feed_summary' / 'twitter_phase2'.
+   */
+  moduleCode?: string;
   value?: number;
   onChange?: (value: number, template?: any) => void;
   placeholder?: string;
@@ -38,6 +48,10 @@ interface Template {
   id: number;
   template_code: string;
   template_name: string;
+  category_code?: string;
+  category_name?: string;
+  /** PR-5: 模块绑定字段 */
+  module_code?: string;
   description?: string;
   recommended_provider?: string;
   recommended_model?: string;
@@ -49,6 +63,7 @@ interface Template {
 
 const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   categoryCode,
+  moduleCode,
   value,
   onChange,
   placeholder = 'Select Template',
@@ -65,10 +80,12 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
 
   useEffect(() => {
     loadTemplates();
-  }, [categoryCode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryCode, moduleCode]);
 
   const loadTemplates = async () => {
-    if (!categoryCode) return;
+    // moduleCode 与 categoryCode 至少要有一个
+    if (!moduleCode && !categoryCode) return;
 
     setLoading(true);
     try {
@@ -79,17 +96,22 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
         active_only: true,
       });
 
-      // 过滤出指定category的模板
-      const categoryTemplates = response.filter((t: any) => 
-        t.category_code === categoryCode || 
-        (t.category_name && t.category_name.includes('文件分析'))
-      );
+      // PR-5: 优先按 moduleCode 过滤 (业务模块); 否则回退到 categoryCode (UI 分组)
+      let filtered: Template[];
+      if (moduleCode) {
+        filtered = response.filter((t: any) => t.module_code === moduleCode);
+      } else {
+        filtered = response.filter((t: any) =>
+          t.category_code === categoryCode ||
+          (t.category_name && t.category_name.includes('文件分析'))
+        );
+      }
 
-      setTemplates(categoryTemplates);
+      setTemplates(filtered);
 
       // 如果有默认模板且当前未选择，自动选择默认模板 (上传弹窗中关闭此行为)
-      if (autoSelectDefault && !value && categoryTemplates.length > 0) {
-        const defaultTemplate = categoryTemplates.find((t: Template) => t.is_default);
+      if (autoSelectDefault && !value && filtered.length > 0) {
+        const defaultTemplate = filtered.find((t: Template) => t.is_default);
         if (defaultTemplate && onChange) {
           onChange(defaultTemplate.id, defaultTemplate);
         }

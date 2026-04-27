@@ -39,6 +39,10 @@ import type {
 } from '../../services/subscriptions';
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
 import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
+// PR-7: 个性化 summary picker
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from '../UploadAnalysisTemplatePicker';
 
 const { Text } = Typography;
 
@@ -106,6 +110,17 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
       retagPollTimerRef.current = null;
     }
   }, []);
+
+  // PR-7: per-user 个性化 summary 状态
+  // localPersonalized: 本地最新拿到的个性化 summary (覆盖父组件 selectedContent.personalized_summary)
+  const [localPersonalized, setLocalPersonalized] = useState<{
+    summary: string | null;
+    reasoning: string | null;
+    template_id: number | null;
+  } | null>(null);
+  const [personalizeModalOpen, setPersonalizeModalOpen] = useState(false);
+  const [personalizePicker, setPersonalizePicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  const [personalizeLoading, setPersonalizeLoading] = useState(false);
 
   const youtubeDescOuterRef = useRef<HTMLDivElement>(null);
   const youtubeDescInnerRef = useRef<HTMLDivElement>(null);
@@ -283,6 +298,11 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     setLocalTags(null);
     setRetagStatus('idle');
     clearRetagPoll();
+    // PR-7: 切换内容时清理个性化本地状态 (用父 selectedContent.personalized_* 字段)
+    setLocalPersonalized(null);
+    setPersonalizeModalOpen(false);
+    setPersonalizePicker({});
+    setPersonalizeLoading(false);
   }, [selectedContent?.id, clearRetagPoll]);
 
   // 组件卸载时清理轮询定时器, 防止 setState on unmounted.
@@ -371,6 +391,80 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     }
   }, [selectedContent, retagStatus, message, pollRetagStatus]);
 
+  // PR-7: 提交个性化任务. 派发后短暂轮询 (~1.5-3s 后) 拉最新 personalized_summary
+  // 来局部刷新 UI, 不阻塞用户操作.
+  const handlePersonalize = useCallback(async () => {
+    if (!selectedContent || personalizeLoading) return;
+    const contentId = selectedContent.id;
+    setPersonalizeLoading(true);
+    try {
+      const res = await subscriptionsAPI.personalizeContentSummary(contentId, {
+        templateId: personalizePicker.templateId ?? null,
+        templateVariables: personalizePicker.templateVariables,
+        force: true,
+      });
+      if (!res.success) {
+        message.error(res.error || 'Failed to dispatch personalization');
+        setPersonalizeLoading(false);
+        return;
+      }
+      message.info('Personalization dispatched, refreshing in a moment...');
+      setPersonalizeModalOpen(false);
+
+      // 简化轮询: 间隔 1.5s 拉一次, 最多 8 次 (~12s)
+      let attempt = 0;
+      const MAX = 8;
+      const tick = async () => {
+        attempt += 1;
+        try {
+          const data = await api.get<{
+            id: number;
+            template_id: number | null;
+            summary: string | null;
+            reasoning: string | null;
+          }>(`/subscriptions/contents/${contentId}/personalized-summary`);
+          if (data?.summary) {
+            setLocalPersonalized({
+              summary: data.summary,
+              reasoning: data.reasoning ?? null,
+              template_id: data.template_id ?? null,
+            });
+            setPersonalizeLoading(false);
+            message.success('Personalized summary ready');
+            return;
+          }
+        } catch (_) {
+          // 404 表示尚未生成 - 继续轮询
+        }
+        if (attempt < MAX) {
+          setTimeout(tick, 1500);
+        } else {
+          setPersonalizeLoading(false);
+          message.warning(
+            'Personalization is still processing. Refresh later to see the result.'
+          );
+        }
+      };
+      setTimeout(tick, 1500);
+    } catch (e: any) {
+      setPersonalizeLoading(false);
+      message.error(e?.response?.data?.detail || 'Failed to dispatch personalization');
+    }
+  }, [selectedContent, personalizeLoading, personalizePicker, message]);
+
+  // PR-7: 取消个性化, 回退到全局 summary
+  const handleRemovePersonalization = useCallback(async () => {
+    if (!selectedContent) return;
+    const res = await subscriptionsAPI.deletePersonalizedSummary(selectedContent.id);
+    if (res.success) {
+      setLocalPersonalized(null);
+      // 父组件 selectedContent.personalized_* 字段也置空
+      message.success('Reverted to global summary');
+    } else {
+      message.error(res.error || 'Failed to remove personalization');
+    }
+  }, [selectedContent, message]);
+
   if (!selectedContent) {
     return null;
   }
@@ -384,6 +478,19 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     displayTags?.sector === '未分类' || displayTags?.sector_en === 'Uncategorized';
   const retagButtonLoading =
     retagStatus === 'dispatching' || retagStatus === 'polling';
+
+  // PR-7: 个性化 summary 优先级
+  // 1. localPersonalized (用户刚生成, 本地 state)
+  // 2. selectedContent.personalized_summary (后端列表接口附加)
+  // 3. displayTags.summary (全局 baseline)
+  const personalizedSummary =
+    localPersonalized?.summary ?? selectedContent.personalized_summary ?? null;
+  const personalizedReasoning =
+    localPersonalized?.reasoning ?? selectedContent.personalized_reasoning ?? null;
+  const isPersonalized =
+    !!personalizedSummary ||
+    selectedContent.summary_source === 'personalized';
+  const effectiveSummary = personalizedSummary || displayTags?.summary || null;
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -493,12 +600,49 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                   {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
                 </Button>
               </Tooltip>
+              {/* PR-7: 个性化 summary 按钮 (per-user override, 不影响其他用户视图) */}
+              <Tooltip title="Generate a personalized summary using your own template (per-user, doesn't affect other subscribers).">
+                <Button
+                  size="small"
+                  icon={<RobotOutlined />}
+                  loading={personalizeLoading}
+                  onClick={() => {
+                    setPersonalizePicker({});
+                    setPersonalizeModalOpen(true);
+                  }}
+                  style={{ fontSize: 12, borderRadius: 6 }}
+                >
+                  {isPersonalized ? 'Re-personalize' : 'Personalize'}
+                </Button>
+              </Tooltip>
+              {isPersonalized && (
+                <Tooltip title="Remove personalized summary, revert to the global one.">
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    onClick={handleRemovePersonalization}
+                    style={{ fontSize: 12, padding: '0 6px' }}
+                  >
+                    Reset
+                  </Button>
+                </Tooltip>
+              )}
             </Space>
           </div>
 
           {tagsHasContent ? (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              {displayTags?.summary && (
+              {/* PR-7: 个性化徽标 (仅当用户有自己的 summary 覆盖时显示) */}
+              {isPersonalized && (
+                <Tag
+                  color="purple"
+                  style={{ fontSize: 10, lineHeight: '16px', padding: '0 6px', margin: 0 }}
+                >
+                  ✨ Personalized
+                </Tag>
+              )}
+              {effectiveSummary && (
                 <Text
                   style={{
                     color: themeColors.text,
@@ -507,7 +651,21 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                     display: 'block',
                   }}
                 >
-                  {displayTags.summary}
+                  {effectiveSummary}
+                </Text>
+              )}
+              {/* PR-7: 个性化模式下额外展示 reasoning (主观解读) */}
+              {isPersonalized && personalizedReasoning && (
+                <Text
+                  type="secondary"
+                  style={{
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    display: 'block',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  {personalizedReasoning}
                 </Text>
               )}
 
@@ -903,6 +1061,54 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           </Modal>
         </>
       )}
+
+      {/* PR-7: Personalize summary 模板选择 Modal */}
+      <Modal
+        title="Personalize this feed's summary"
+        open={personalizeModalOpen}
+        onCancel={() => {
+          if (!personalizeLoading) {
+            setPersonalizeModalOpen(false);
+          }
+        }}
+        onOk={handlePersonalize}
+        okText={isPersonalized ? 'Re-personalize' : 'Personalize'}
+        confirmLoading={personalizeLoading}
+        cancelText="Cancel"
+        width={620}
+        destroyOnClose
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+          Use your own template to generate a per-user summary for this content.
+          Other users still see the global summary unaffected.
+        </Text>
+        <UploadAnalysisTemplatePicker
+          value={personalizePicker}
+          onChange={setPersonalizePicker}
+          mode="optional"
+          moduleCode={
+            selectedContent?.channel_type === 'youtube'
+              ? 'youtube_summary'
+              : 'feed_summary'
+          }
+          label={
+            selectedContent?.channel_type === 'youtube'
+              ? 'YouTube Video Summary Template'
+              : 'Feed Summary Template'
+          }
+          hint={
+            selectedContent?.channel_type === 'youtube'
+              ? 'Toggle on to use your private youtube_summary template (Edit it in Prompt Templates → My Templates).'
+              : 'Toggle on to use your private feed_summary template (Edit it in Prompt Templates → My Templates).'
+          }
+          disabled={personalizeLoading}
+        />
+        {!personalizePicker.templateId && (
+          <Text type="warning" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+            ⚠ Toggle the switch above to enable personalized summary using your private template.
+          </Text>
+        )}
+      </Modal>
     </Space>
   );
 };

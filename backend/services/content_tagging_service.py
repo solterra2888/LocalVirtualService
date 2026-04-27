@@ -16,28 +16,44 @@ logger = get_logger("content_tagging_service")
 
 
 class ContentTaggingService:
-    """内容自动打标签服务"""
-    
-    # 使用 content_tag_v1 模板
-    TEMPLATE_CODE = 'content_tag_v1'
-    
+    """内容自动打标签服务
+
+    PR-5 (2026-04-27) 起:
+        构造函数接受 template_id / template_code 参数 (取代之前硬编码的
+        TEMPLATE_CODE = 'content_tag_v1'). 调用方 (tag_file_content_task)
+        通过 LLMTemplateResolver 解析得到最终模板后再实例化本服务,
+        从而支持: runtime template > user_template_preferences[file_tagging] >
+                  默认 content_tag_v1.
+    """
+
+    # 系统默认模板 (调用方未指定时兜底)
+    DEFAULT_TEMPLATE_CODE = 'content_tag_v1'
+
     def __init__(
-        self, 
+        self,
         db_manager: DatabaseManager,
-        log_callback: Optional[Callable] = None
+        log_callback: Optional[Callable] = None,
+        template_id: Optional[int] = None,
+        template_code: Optional[str] = None,
     ):
         """
-        初始化打标签服务
-        
+        初始化打标签服务.
+
         Args:
             db_manager: 数据库管理器
             log_callback: 日志回调函数
+            template_id: 显式指定的模板 ID; 优先级高于 template_code
+            template_code: 显式指定的模板 code; 默认 'content_tag_v1'
         """
         self.db_manager = db_manager
         self.log_callback = log_callback
+        # 选择模板: template_id > template_code > DEFAULT_TEMPLATE_CODE
+        self.template_id = template_id
+        self.template_code = template_code or (None if template_id else self.DEFAULT_TEMPLATE_CODE)
         self.llm_service = LocalLLMAnalysisService(
-            template_code=self.TEMPLATE_CODE,
-            log_callback=log_callback
+            template_id=self.template_id,
+            template_code=self.template_code,
+            log_callback=log_callback,
         )
     
     def log(self, message: str, level: str = "info", **kwargs):
@@ -88,7 +104,8 @@ class ContentTaggingService:
         self,
         file_id: int,
         additional_context: str = "",
-        force: bool = False
+        force: bool = False,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         为文件内容打标签
@@ -145,11 +162,13 @@ class ContentTaggingService:
         }
         
         # 4. 调用LLM分析
+        # PR-4 修复: 透传 user_id 让 llm_prompt_usage_logs 能正确归属
         self.log(f"正在调用AI打标签: {filename}")
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=content,
             file_name=filename,
-            custom_variables=variables
+            custom_variables=variables,
+            user_id=user_id,
         )
         
         # 5. 解析结果

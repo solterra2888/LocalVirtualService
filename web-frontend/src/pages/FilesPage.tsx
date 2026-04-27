@@ -94,6 +94,9 @@ import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 import OriginalPdfJsViewer from '../components/OriginalPdfJsViewer';
 import { TASK_EXECUTIONS_REFRESH_EVENT } from '../components/CreateTextNoteModal';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from '../components/UploadAnalysisTemplatePicker';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -4329,20 +4332,33 @@ export const ExecutionDetailsPanel: React.FC<{
     }
   };
 
-  const handleRetagFile = async () => {
+  // PR-5: Re-tag with template 模态框状态
+  const [retagModalOpen, setRetagModalOpen] = useState(false);
+  const [retagPicker, setRetagPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+
+  const handleRetagFile = async (
+    templateOverride?: { templateId?: number; templateVariables?: Record<string, any> }
+  ) => {
     if (!fileId) return;
-    
+
     try {
       // 记录当前的updated_at，用于判断标签是否已更新
       const previousUpdatedAt = fileTags?.updated_at;
-      
+
+      const body: any = { file_id: fileId, force: true };
+      // PR-5: 用户在 Re-tag with template 弹窗里选了自定义模板时透传
+      if (templateOverride?.templateId) {
+        body.template_id = templateOverride.templateId;
+        body.template_variables = templateOverride.templateVariables || {};
+      }
+
       const response = await fetch(`/api/file-tags/retag`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
-        body: JSON.stringify({ file_id: fileId, force: true })
+        body: JSON.stringify(body)
       });
       
       if (response.ok) {
@@ -4470,13 +4486,25 @@ export const ExecutionDetailsPanel: React.FC<{
               >
                 Edit
               </Button>
-              <Button 
-                type="link" 
-                size="small" 
+              <Button
+                type="link"
+                size="small"
                 icon={<ReloadOutlined />}
-                onClick={handleRetagFile}
+                onClick={() => handleRetagFile()}
               >
                 Retag
+              </Button>
+              {/* PR-5: Re-tag with custom template */}
+              <Button
+                type="link"
+                size="small"
+                icon={<RobotOutlined />}
+                onClick={() => {
+                  setRetagPicker({});
+                  setRetagModalOpen(true);
+                }}
+              >
+                Retag with template
               </Button>
             </Space>
           )
@@ -4743,6 +4771,37 @@ export const ExecutionDetailsPanel: React.FC<{
           </div>
         </div>
       )}
+
+      {/* PR-5: Re-tag with custom template 弹窗 */}
+      <Modal
+        title="Re-tag with Custom Template"
+        open={retagModalOpen}
+        onCancel={() => setRetagModalOpen(false)}
+        onOk={() => {
+          if (!retagPicker.templateId) {
+            message.warning('Please select a template first.');
+            return;
+          }
+          handleRetagFile({
+            templateId: retagPicker.templateId,
+            templateVariables: retagPicker.templateVariables,
+          });
+          setRetagModalOpen(false);
+        }}
+        okText="Re-tag"
+        cancelText="Cancel"
+        width={600}
+        destroyOnClose
+      >
+        <UploadAnalysisTemplatePicker
+          value={retagPicker}
+          onChange={setRetagPicker}
+          mode="optional"
+          moduleCode="file_tagging"
+          label="Re-tag Template"
+          hint="Toggle on to re-tag this file using your private file_tagging template."
+        />
+      </Modal>
     </div>
   );
 };

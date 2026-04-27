@@ -145,6 +145,19 @@ export interface SubscriptionContent {
   categories?: string[];
   // Phase 3 新增: AI 自动打标 + 摘要 (未打标为 null, 避免前端把 undefined 当已打标处理)
   tags?: SubscriptionContentTagsLite | null;
+
+  // PR-7 新增: per-user 个性化 summary 覆盖层
+  /**
+   * - 'personalized': 用户已生成自定义 summary, 前端用 personalized_summary 显示
+   * - 'global'      : 用户未个性化, 用 tags?.summary (全局 baseline)
+   * - 'none'        : 极少数情况下后端附加失败时的兜底
+   */
+  summary_source?: 'personalized' | 'global' | 'none';
+  personalized_summary?: string | null;
+  personalized_reasoning?: string | null;
+  personalized_template_id?: number | null;
+  personalized_summary_id?: number | null;
+  personalized_tagged_at?: string | null;
 }
 
 export interface FeedTaggingTaskStatus {
@@ -506,6 +519,62 @@ export const subscriptionsAPI = {
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to re-tag content',
+      };
+    }
+  },
+
+  // ─── PR-7: per-user 个性化 summary ─────────────────────────────────
+  /**
+   * 异步为当前用户生成 (或刷新) 该 feed 的个性化 summary.
+   *
+   * - 不影响其他用户视图 (subscription_content_user_summaries 单表 per-user)
+   * - 模板解析: runtime template_id > user_template_preferences[feed_summary] > 抛错
+   *   (feed_summary 无系统默认; 用户必须先在 Settings 设偏好或当场选模板)
+   * - 返回 task_id, 前端可轮询; 推荐做法是 1.5s 后刷新内容列表读最新 summary
+   */
+  async personalizeContentSummary(
+    contentId: number,
+    options?: {
+      templateId?: number | null;
+      templateVariables?: Record<string, any>;
+      force?: boolean;
+    }
+  ): Promise<ApiResponse<FeedTaggingTaskStatus>> {
+    try {
+      const data = await api.post<FeedTaggingTaskStatus>(
+        `/subscriptions/contents/${contentId}/personalize`,
+        {
+          template_id: options?.templateId ?? null,
+          template_variables: options?.templateVariables ?? null,
+          force: options?.force ?? false,
+        }
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error:
+          error.response?.data?.detail ||
+          'Failed to personalize content summary',
+      };
+    }
+  },
+
+  /** 取消当前用户对该 feed 的个性化 (回退到全局 summary) */
+  async deletePersonalizedSummary(
+    contentId: number
+  ): Promise<ApiResponse<{ success: boolean; deleted: boolean }>> {
+    try {
+      const data = await api.delete<{ success: boolean; deleted: boolean }>(
+        `/subscriptions/contents/${contentId}/personalized-summary`
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error:
+          error.response?.data?.detail ||
+          'Failed to remove personalized summary',
       };
     }
   },

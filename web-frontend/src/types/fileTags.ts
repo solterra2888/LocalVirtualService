@@ -37,11 +37,17 @@ export interface FileTagsUpdate {
 export interface RetagRequest {
   file_id: number;
   force?: boolean;
+  /** PR-5: 用户在 FilesPage Re-tag with template 入口选的模板 */
+  template_id?: number | null;
+  template_variables?: Record<string, any>;
 }
 
 export interface BatchRetagRequest {
   file_ids: number[];
   force?: boolean;
+  /** PR-5: 批量入口同样支持运行时模板覆盖 */
+  template_id?: number | null;
+  template_variables?: Record<string, any>;
 }
 
 export interface TaggingTaskStatus {

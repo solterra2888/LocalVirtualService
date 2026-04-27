@@ -399,24 +399,99 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 
 ## 10. LLM 调用详解
 
-Feeds 模块涉及 **三条** 独立的 LLM 链路，相互解耦，均不在抓取时自动触发。
+Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：3 条自动 / 调度触发 + 1 条用户主动个性化。
 
-### 10.1 Feed 内容打标 & 摘要
+### 10.1 Feed 内容打标 & 全局摘要（baseline）
 
 | 维度 | 说明 |
 |------|------|
 | 服务 | `backend/services/feed_content_tagging_service.py` → `FeedContentTaggingService` |
-| LLM 底层 | `LocalLLMAnalysisService`（统一调用层，支持多 provider 路由）|
-| Prompt 模板 | `content_tag_feeds_v1`（可通过 `AUTO_FEED_TAG_TEMPLATE_CODE` env 灰度切换）|
+| LLM 底层 | `LocalLLMAnalysisService`（重构后内部委托 `chat_completion_with_template`，自动写 usage_log）|
+| Prompt 模板 | `content_tag_feeds_v1`；module_code = `feed_tagging`，用户可在 Settings 设默认偏好 |
 | 支持渠道 | `twitter` / `youtube`（news/rss 本轮不做，直接短路）|
 | 输入拼装 | Twitter：`content` + 引用/转推树；YouTube：`title + transcript`，两者均有最小长度门槛与最大字符截断 |
 | 输出字段 | `sector` / `sector_en` / `industry` / `industry_en` / `tickers[]` / `concepts[]` / `summary` / `confidence` / `reasoning` |
-| 存储表 | `subscription_content_tags`（UPSERT on `subscription_content_id`）|
+| 存储表 | `subscription_content_tags`（UPSERT on `subscription_content_id`，**全局共享，跨用户复用**）|
 | Celery 任务 | `tag_feed_content`（单条）/ `batch_tag_feed_content`（批量梯度派发）均在 `file_processing` 队列 |
 | 触发方式 | 用户在前端手动触发 / 运维批量回填；**不自动随抓取触发** |
 | 幂等 | 默认已有标签则跳过，`force=True` 可强制重跑 |
 | 环境变量 | `AUTO_FEED_TAG_ENABLED`（开关，默认 true）/ `AUTO_FEED_TAG_CHANNELS`（白名单，默认 twitter,youtube）/ `AUTO_FEED_TAG_MAX_CHARS`（最大输入字符，默认 6000）/ `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` / `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` |
 | API | `GET/POST/PATCH/DELETE /api/subscriptions/contents/{id}/tags`（见 `backend/api/subscription_content_tags.py`）|
+
+### 10.1.X ⭐ Per-User 个性化 Summary（PR-6/PR-7 新增）
+
+> 来源：[LLM_REFACTOR_PLAN.md §5](./LLM_REFACTOR_PLAN.md#5-阶段-3feed-summary-个性化4-5-工作日)
+>
+> **设计目标**：在不破坏 Feeds 跨用户内容复用机制的前提下，让每个用户用自己的模板生成专属 summary。
+
+#### 双层模型
+
+```
+subscription_content_tags (全局共享, 1:1 with content)        ← 客观分类 + baseline summary
+subscription_content_user_summaries (per-user, 1:N with user) ← 主观字段覆盖
+```
+
+**关键设计**：客观字段（sector / industry / ticker）保持全局共享，避免不同用户对同一条 feed 标到不同行业导致跨用户筛选体验不一致。仅 summary / reasoning / custom_concepts 实现 per-user。
+
+#### 链路
+
+```
+用户在 FeedArticleBody 点 "Personalize" 按钮
+    ↓
+弹窗选 feed_summary 模板 (UploadAnalysisTemplatePicker moduleCode='feed_summary')
+    ↓
+POST /api/subscriptions/contents/{id}/personalize
+    ↓
+personalize_feed_summary_task (Celery, queue: file_processing)
+    ↓
+FeedSummaryPersonalizationService.generate_for_user(content_id, user_id, runtime_template_id)
+    ├─ LLMTemplateResolver: runtime > user_template_preferences[feed_summary] > 抛 ResolveError
+    │   (feed_summary 无系统默认; 必须用户主动选模板或先设偏好)
+    ├─ FeedContentTaggingService._build_tagging_text() (复用 channel adapter)
+    └─ LocalLLMAnalysisService → chat_completion_with_template → usage_log (含 user_id)
+    ↓
+UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
+    ↓
+前端轮询 GET /personalized-summary 拿结果, 局部刷新 + 显示 ✨ Personalized 徽标
+```
+
+#### API（PR-7 新增）
+
+| Method | Path | 作用 |
+|--------|------|------|
+| `POST` | `/api/subscriptions/contents/{content_id}/personalize` | 异步派发个性化任务 |
+| `GET` | `/api/subscriptions/contents/{content_id}/personalized-summary` | 读当前用户的 personalized 行（404 = 无个性化）|
+| `DELETE` | `/api/subscriptions/contents/{content_id}/personalized-summary` | 取消个性化（回退到全局）|
+
+#### 列表读取（自动叠加）
+
+`GET /api/subscriptions/{id}/contents` 现在每条返回新字段：
+
+```json
+{
+  "id": 1025739,
+  "title": "...",
+  "tags": { "sector": "...", "summary": "...(全局)" },
+  "summary_source": "personalized" | "global",
+  "personalized_summary": "...(用户自己生成的)",
+  "personalized_reasoning": "...(可选, 主观解读)",
+  "personalized_template_id": 99,
+  "personalized_summary_id": 7,
+  "personalized_tagged_at": "2026-04-27T15:30:00"
+}
+```
+
+实现：`backend/services/subscription_content_service.py::_attach_personalized_summaries`（叠加层模式，零破坏现有 SELECT）。
+
+#### 关键限制
+
+| 限制 | 说明 |
+|------|------|
+| `feed_summary` 无系统默认模板 | 防止"个性化"沦为"二次跑全局模板"；用户必须先在 PromptTemplatesPage 创建 `feed_summary` 模板，或在 Settings 设偏好 |
+| 仅覆盖主观字段 | 客观字段（sector/industry/ticker）从不 per-user，保护跨用户筛选一致性 |
+| 不影响其他用户视图 | 用户 A 的个性化 summary 仅 user_id=A 可见，B/C/... 看到的还是全局 baseline |
+| 成本可控 | 仅用户主动 "Re-summarize" 才触发，N 条收藏 ≠ N 条订阅 ×N 用户的爆炸 |
+| 环境变量 | `FEED_SUMMARY_PERSONALIZATION_ENABLED`（默认 true，紧急回滚开关）|
 
 ### 10.2 Twitter Daily Report
 

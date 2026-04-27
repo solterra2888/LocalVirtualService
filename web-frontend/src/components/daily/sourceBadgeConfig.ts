@@ -47,7 +47,7 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     dark: { bg: 'rgba(250, 140, 22, 0.20)', fg: '#ffc069' },
   },
   youtube: {
-    label: 'YouTube',
+    label: 'YT Link',
     fullName: 'YouTube Link (Upload)',
     light: { bg: '#fff1f0', fg: '#cf1322' },
     dark: { bg: 'rgba(245, 34, 45, 0.18)', fg: '#ff7875' },
@@ -79,7 +79,7 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     dark: { bg: 'rgba(212, 177, 6, 0.20)', fg: '#ffd666' },
   },
   youtube_feed: {
-    label: 'YouTube',
+    label: 'YT Feed',
     fullName: 'YouTube (Subscription)',
     light: { bg: '#fff1f0', fg: '#cf1322' },
     dark: { bg: 'rgba(245, 34, 45, 0.18)', fg: '#ff7875' },

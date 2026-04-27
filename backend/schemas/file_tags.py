@@ -71,12 +71,30 @@ class RetagRequest(BaseModel):
     """重新打标签请求Schema"""
     file_id: int = Field(..., description="文件ID")
     force: bool = Field(default=False, description="是否强制重新打标签（即使已有标签）")
+    # PR-5: 用户在 FilesPage Re-tag with template 入口选的模板
+    template_id: Optional[int] = Field(
+        default=None,
+        description="运行时指定的 file_tagging 模板 ID; 未传则走用户偏好或系统默认 content_tag_v1",
+    )
+    template_variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="对应模板的运行时变量字典",
+    )
 
 
 class BatchRetagRequest(BaseModel):
     """批量重新打标签请求Schema"""
     file_ids: List[int] = Field(..., description="文件ID列表")
     force: bool = Field(default=False, description="是否强制重新打标签")
+    # PR-5: 批量入口同样支持运行时模板覆盖
+    template_id: Optional[int] = Field(
+        default=None,
+        description="运行时指定的 file_tagging 模板 ID; 未传则走用户偏好或系统默认 content_tag_v1",
+    )
+    template_variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="对应模板的运行时变量字典",
+    )
 
 
 class TaggingTaskStatus(BaseModel):

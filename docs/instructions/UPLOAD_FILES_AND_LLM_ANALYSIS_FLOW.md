@@ -455,37 +455,56 @@ tag_file_content_task   name_file_content_task   classify_file_content_task   an
 
 ### 4.3 自动打标签（Auto Tagging）
 
-**Celery 任务：** `tag_file_content`（`tagging_tasks.py`，queue: `file_processing`）  
-**Prompt Template：** 固定使用 `content_tag_v1`  
+> ⭐ **PR-5 重构（2026-04-27）**：模板不再硬编码 `content_tag_v1`，改走 `LLMTemplateResolver` 三级 fallback。详见 [LLM_REFACTOR_PLAN.md §4](./LLM_REFACTOR_PLAN.md#4-阶段-2file-tag-用户自定义2-3-工作日)。
+
+**Celery 任务：** `tag_file_content`（`tagging_tasks.py`，queue: `file_processing`）
+**module_code：** `file_tagging`（向 `MODULE_REGISTRY` 注册）
+**Prompt Template：** 优先级 `runtime > user_template_preferences[file_tagging] > content_tag_v1`
 **服务：** `ContentTaggingService`（`backend/services/content_tagging_service.py`）
 
 ```
-tag_file_content_task(file_id, username, force=False)
+tag_file_content_task(file_id, username, force=False, template_id=None, template_variables=None)
     │
     ├─ 1. 检查 AUTO_TAG_ENABLED（force=True 时跳过检查）
     ├─ 2. 检查 content 长度 ≥ AUTO_TAG_MIN_CONTENT_LENGTH
     ├─ 3. 读取 file_processing_details.content
-    ├─ 4. 若非 force 且 file_tags 表已有记录 → 跳过（幂等保护）
-    ├─ 5. 截断 content 至 AUTO_TAG_CONTENT_MAX_CHARS 字符
     │
-    ├─ 6. ContentTaggingService.tag_file_content()
-    │       └─ LocalLLMAnalysisService(template_code='content_tag_v1')
-    │               └─ 详见 4.7 LLM 调用核心链路
+    ├─ 4. 【PR-5 新增】username → user_id (user_resolver.py LRU)
+    │     LLMTemplateResolver.resolve('file_tagging', user_id, runtime_template_id)
+    │       → ResolvedTemplate(template_id, source='runtime'|'preference'|'default')
     │
-    ├─ 7. 解析 LLM 返回 JSON：
-    │       必填：sector, industry, tickers
-    │       选填：sector_en, industry_en, concepts, confidence, reasoning
+    ├─ 5. 若非 force 且 file_tags 表已有记录 → 跳过（幂等保护）
+    ├─ 6. 截断 content 至 AUTO_TAG_CONTENT_MAX_CHARS 字符
     │
-    └─ 8. ContentTaggingService.save_tags(file_id, tags)
+    ├─ 7. ContentTaggingService(template_id=resolved.template_id).tag_file_content(user_id=user_id)
+    │       └─ LocalLLMAnalysisService → chat_completion_with_template
+    │             ├─ 写 llm_prompt_usage_logs (含 user_id 归属) ⭐ PR-4
+    │             └─ 详见 4.7 LLM 调用核心链路
+    │
+    ├─ 8. 解析 LLM 返回 JSON
+    │
+    └─ 9. ContentTaggingService.save_tags(file_id, tags)
             └─ INSERT INTO file_tags ... ON CONFLICT (file_id) DO UPDATE
-               写入字段：sector, sector_en, industry, industry_en,
-                         ticker(JSONB), concepts, additional_tags(JSON),
-                         confidence, reasoning, tagged_by, tagged_at
 ```
 
-**手动触发 API（非自动流程）：**
-- `POST /api/file-tags/retag` → 单文件重新打标签
-- `POST /api/file-tags/retag-batch` → 批量重新打标签
+**触发链路接 template_id：** 5 个上传 API 入参均增加 `auto_tag_template_id` / `auto_tag_template_variables`：
+- `POST /api/files/upload-and-process-document`
+- `POST /api/files/upload-audio`
+- `POST /api/files/upload-youtube`
+- `POST /api/files/upload-web-link`
+- `POST /api/files/create-text-note`
+
+参数沿调用链透传到 `trigger_auto_tagging` → `tag_file_content_task`。
+
+**手动触发 API：**
+- `POST /api/file-tags/retag` → 单文件重新打标签（**PR-5 增加 `template_id` 参数**）
+- `POST /api/file-tags/retag-batch` → 批量重新打标签（同上）
+
+**用户偏好层：** `user_template_preferences` 中 `module_code='file_tagging'` 的行作为该用户的默认模板。在 PromptTemplatesPage 设置后，所有该用户上传的文件（即使没在弹窗选模板）都用这个偏好。
+
+**前端入口：**
+- 5 个上传弹窗增加第二个 `<UploadAnalysisTemplatePicker moduleCode="file_tagging" />`
+- FilesPage 右侧 Tags 面板增加 "Retag with template" 按钮 + Modal
 
 ---
 

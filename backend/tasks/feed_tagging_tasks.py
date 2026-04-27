@@ -140,6 +140,10 @@ def tag_feed_content_task(
 
         update_progress(progress=15, log_message="读取 feed 内容...")
 
+        # PR-4 修复: username → user_id, 让 LLM usage_log 能正确归属用户
+        from backend.utils.user_resolver import get_user_id_by_username
+        user_id = get_user_id_by_username(username)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -148,6 +152,7 @@ def tag_feed_content_task(
                     content_id=content_id,
                     additional_context=additional_context,
                     force=force,
+                    tagged_by=user_id,
                 )
             )
         finally:

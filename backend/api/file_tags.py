@@ -343,13 +343,21 @@ def retag_file(
         conn.close()
         
         # 提交打标签任务
+        # PR-5: 用户主动 Re-tag 时透传 template_id / template_variables, 让 task 走指定模板
         username = current_user.username if current_user else None
         task = tag_file_content_task.apply_async(
             args=(request.file_id, username, "", request.force),
+            kwargs={
+                'template_id': request.template_id,
+                'template_variables': request.template_variables,
+            },
             countdown=1
         )
-        
-        logger.info(f"已提交重新打标签任务: file_id={request.file_id}, task_id={task.id}")
+
+        logger.info(
+            f"已提交重新打标签任务: file_id={request.file_id}, task_id={task.id}, "
+            f"template_id={request.template_id}"
+        )
         
         return {
             'task_id': task.id,
@@ -384,10 +392,15 @@ def retag_files_batch(
         raise HTTPException(status_code=400, detail="文件ID列表为空")
     
     username = current_user.username if current_user else None
-    
+
     # 提交批量打标签任务
+    # PR-5: 透传 template_id / variables (批量入口同样支持运行时模板覆盖)
     task = batch_tag_files_task.apply_async(
         args=(request.file_ids, username, request.force),
+        kwargs={
+            'template_id': request.template_id,
+            'template_variables': request.template_variables,
+        },
         countdown=1
     )
     

@@ -83,7 +83,8 @@ class ContentNamingService:
     async def name_file_content(
         self,
         file_id: int,
-        force: bool = False
+        force: bool = False,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         为文件内容生成智能文件名
@@ -134,10 +135,12 @@ class ContentNamingService:
         }
         
         self.log(f"正在调用AI自动命名: {filename}")
+        # PR-4 修复: 透传 user_id 让 llm_prompt_usage_logs 能正确归属
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=content,
             file_name=filename,
-            custom_variables=variables
+            custom_variables=variables,
+            user_id=user_id,
         )
         
         raw_name = analysis_result.get('report_content', '').strip()

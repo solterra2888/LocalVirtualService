@@ -305,6 +305,8 @@ class FeedContentTaggingService:
         # LocalLLMAnalysisService.analyze_file_content 会把 file_content 参数
         # 强制注入到 variables['file_content'] (覆盖 custom_variables 中的同名键),
         # 所以此处把 channel_type / additional_context 放 custom_variables 即可.
+        # PR-4 修复: 把 tagged_by (= 触发用户的 user_id) 透传给 LLM 调用层,
+        #            让 llm_prompt_usage_logs.user_id 能正确归属.
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=text,
             file_name=f"feed:{resolved_channel}:{content_id}",
@@ -312,6 +314,7 @@ class FeedContentTaggingService:
                 "channel_type": resolved_channel,
                 "additional_context": additional_context or "",
             },
+            user_id=tagged_by,
         )
 
         report_content = analysis_result.get("report_content", "") or ""
