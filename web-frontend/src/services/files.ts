@@ -48,6 +48,16 @@ export interface TaskStatusResponse {
   asr_fallback_notice?: boolean;
   /** 音频上传：已提交 Fun-ASR，等待结果（前端可弹窗提示耐心等待） */
   asr_wait_notice?: boolean;
+  /**
+   * 自动 AI 分析中间态.
+   * 由后端关联 file_processing_details.task_id → processing_stats.rc_agent_status 返回:
+   *   'analyzing'    Celery 主任务已结束, analyze_*_task 还在跑 (NavBar/右侧面板应保持 processing 中间态)
+   *   'completed'    AI 分析也已完成
+   *   'failed'       AI 分析失败
+   *   'processing'   主任务还在 LLM 阶段 (旧字段, 与 'analyzing' 区分: 'processing' = 主任务内部 LLM)
+   *   null/undefined 关联不上 (例如 audio 任务尚未把 task_id 关联到 file_processing_details)
+   */
+  rc_agent_status?: string | null;
 }
 
 export interface FileDetail {
@@ -184,7 +194,14 @@ export const filesAPI = {
   },
 
   // 上传音频文件到 OSS（异步，立即返回任务 ID）
-  uploadAudioFile: async (file: File): Promise<{
+  // analyzeOptions: 上传弹窗中用户选择的 AI 分析模板, 上传完成后由后端自动触发 analyze_audio_task
+  uploadAudioFile: async (
+    file: File,
+    analyzeOptions?: {
+      auto_analyze_template_id?: number | null;
+      auto_analyze_template_variables?: Record<string, any>;
+    }
+  ): Promise<{
     success: boolean;
     message: string;
     task_id: string;
@@ -196,13 +213,29 @@ export const filesAPI = {
   }> => {
     const formData = new FormData();
     formData.append('file', file);
-    
+    if (analyzeOptions?.auto_analyze_template_id) {
+      formData.append(
+        'auto_analyze_template_id',
+        analyzeOptions.auto_analyze_template_id.toString()
+      );
+    }
+    formData.append(
+      'auto_analyze_template_variables',
+      JSON.stringify(analyzeOptions?.auto_analyze_template_variables || {})
+    );
+
     return api.upload('/files/upload-audio', formData);
   },
 
   // 上传 YouTube 链接并异步处理 (新路径: 返回 file_id / processing_stats_id,
   // 实际处理在本地家用 Worker 上执行)
-  uploadYouTubeLink: async (youtubeUrl: string): Promise<{
+  uploadYouTubeLink: async (
+    youtubeUrl: string,
+    analyzeOptions?: {
+      auto_analyze_template_id?: number | null;
+      auto_analyze_template_variables?: Record<string, any>;
+    }
+  ): Promise<{
     task_id: string;
     video_id: string;
     message: string;
@@ -216,7 +249,10 @@ export const filesAPI = {
       file_id?: number;
       processing_stats_id?: number;
     }>('/files/upload-youtube', {
-      youtube_url: youtubeUrl
+      youtube_url: youtubeUrl,
+      auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
+      auto_analyze_template_variables:
+        analyzeOptions?.auto_analyze_template_variables || {},
     });
   },
 
@@ -242,7 +278,13 @@ export const filesAPI = {
   },
 
   // 提交 Web Link 并异步抓取处理
-  uploadWebLink: async (url: string): Promise<{
+  uploadWebLink: async (
+    url: string,
+    analyzeOptions?: {
+      auto_analyze_template_id?: number | null;
+      auto_analyze_template_variables?: Record<string, any>;
+    }
+  ): Promise<{
     task_id: string;
     url: string;
     message: string;
@@ -251,7 +293,12 @@ export const filesAPI = {
       task_id: string;
       url: string;
       message: string;
-    }>('/files/upload-web-link', { url });
+    }>('/files/upload-web-link', {
+      url,
+      auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
+      auto_analyze_template_variables:
+        analyzeOptions?.auto_analyze_template_variables || {},
+    });
   },
 
   // 上传文档并异步处理（推荐，避免 OSS 慢连接阻塞）
@@ -536,8 +583,25 @@ export const filesAPI = {
   },
 
   // 创建文本笔记（无文件上传，用户直接撰写 Markdown）
-  createTextNote: async (title: string, content: string): Promise<{ success: boolean; file_detail_id: number; processing_stats_id: number }> => {
-    return api.post<{ success: boolean; file_detail_id: number; processing_stats_id: number }>('/files/create-text-note', { title, content });
+  // analyzeOptions: 用户在创建弹窗中可选择的 AI 分析模板, 后端在创建后自动触发 analyze_document_task
+  createTextNote: async (
+    title: string,
+    content: string,
+    analyzeOptions?: {
+      auto_analyze_template_id?: number | null;
+      auto_analyze_template_variables?: Record<string, any>;
+    }
+  ): Promise<{ success: boolean; file_detail_id: number; processing_stats_id: number }> => {
+    return api.post<{ success: boolean; file_detail_id: number; processing_stats_id: number }>(
+      '/files/create-text-note',
+      {
+        title,
+        content,
+        auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
+        auto_analyze_template_variables:
+          analyzeOptions?.auto_analyze_template_variables || {},
+      }
+    );
   },
 
   // 获取支持的文件类型扩展名（与 backend/core/llama_service.py get_supported_extensions 一致）

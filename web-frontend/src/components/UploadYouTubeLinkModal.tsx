@@ -5,6 +5,9 @@ import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from './UploadAnalysisTemplatePicker';
 
 interface UploadYouTubeLinkModalProps {
   visible: boolean;
@@ -17,6 +20,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [asrModalOpen, setAsrModalOpen] = useState(false);
+  const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const asrNotifiedRef = useRef(false); // 每次上传只弹一次
   const { addTask, updateTaskStatus } = useFileProcessing();
 
@@ -47,6 +51,10 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
 
     setIsProcessing(true);
     const url = youtubeUrl.trim();
+    const youtubeAnalyzeOptions = {
+      auto_analyze_template_id: analyzePicker.templateId ?? null,
+      auto_analyze_template_variables: analyzePicker.templateVariables || {},
+    };
 
     // 重置 ASR 通知标记（每次上传独立）
     asrNotifiedRef.current = false;
@@ -55,8 +63,8 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
     handleClose();
 
     try {
-      // 调用 API
-      const response = await filesAPI.uploadYouTubeLink(url);
+      // 调用 API, 字幕/ASR 完成后由 finalize_youtube_file_task 自动并行触发 4 路 LLM
+      const response = await filesAPI.uploadYouTubeLink(url, youtubeAnalyzeOptions);
       
       if (!response.task_id) {
         throw new Error('No task ID returned');
@@ -201,6 +209,7 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
   const handleClose = () => {
     setYoutubeUrl('');
     setIsProcessing(false);
+    setAnalyzePicker({});
     onCancel();
   };
 
@@ -303,6 +312,18 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
               <li>https://youtu.be/VIDEO_ID</li>
               <li>https://www.youtube.com/shorts/VIDEO_ID</li>
             </ul>
+          </div>
+
+          {/* AI 分析模板 (可选, 默认 audio_analysis_v1) */}
+          <div style={{ marginBottom: '20px' }}>
+            <UploadAnalysisTemplatePicker
+              value={analyzePicker}
+              onChange={setAnalyzePicker}
+              mode="audio-default"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+              disabled={isProcessing}
+            />
           </div>
 
           {/* 底部按钮 */}

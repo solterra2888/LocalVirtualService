@@ -5,6 +5,9 @@ import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from './UploadAnalysisTemplatePicker';
 
 interface UploadWebLinkModalProps {
   visible: boolean;
@@ -17,6 +20,7 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
   const [webUrl, setWebUrl] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [scrapeBlockedOpen, setScrapeBlockedOpen] = useState(false);
+  const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const { addTask, updateTaskStatus } = useFileProcessing();
 
   const validateUrl = (url: string): boolean => {
@@ -50,11 +54,16 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
 
     setIsProcessing(true);
     const url = webUrl.trim();
+    const webAnalyzeOptions = {
+      auto_analyze_template_id: analyzePicker.templateId ?? null,
+      auto_analyze_template_variables: analyzePicker.templateVariables || {},
+    };
 
     handleClose();
 
     try {
-      const response = await filesAPI.uploadWebLink(url);
+      // 抓取完成后由后端自动并行触发 4 路 LLM (analyze 仅当用户选了模板)
+      const response = await filesAPI.uploadWebLink(url, webAnalyzeOptions);
 
       if (!response.task_id) {
         throw new Error('No task ID returned');
@@ -150,6 +159,7 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
   const handleClose = () => {
     setWebUrl('');
     setIsProcessing(false);
+    setAnalyzePicker({});
     onCancel();
   };
 
@@ -264,6 +274,18 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
               <li>Pages requiring login or authentication</li>
               <li>Pages with heavy anti-scraping protection</li>
             </ul>
+          </div>
+
+          {/* AI 分析模板 (可选, 选中后抓取完成自动触发 analyze_document_task) */}
+          <div style={{ marginBottom: '20px' }}>
+            <UploadAnalysisTemplatePicker
+              value={analyzePicker}
+              onChange={setAnalyzePicker}
+              mode="optional"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+              disabled={isProcessing}
+            />
           </div>
 
           <div

@@ -4,10 +4,12 @@ import React, { useState } from 'react';
 import { Modal, Upload, Button, Form, Select, message, Space, Divider, Input, Switch, InputNumber, Row, Col, Collapse, ConfigProvider, Segmented, theme as antdTheme, Typography, Tooltip } from 'antd';
 import { InboxOutlined, PlayCircleOutlined, DeleteOutlined, SettingOutlined, UploadOutlined, ThunderboltOutlined, CloudUploadOutlined, FilePdfOutlined, FileWordOutlined, FileExcelOutlined, FileImageOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
-import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from './UploadAnalysisTemplatePicker';
 
 const { Option } = Select;
 
@@ -82,7 +84,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
   themeMode,
   compactDocumentProcessing = false,
 }) => {
-  const navigate = useNavigate();
   const [form] = Form.useForm();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
@@ -96,6 +97,9 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
   
   // 文件相关状态：选中文件仅存本地，点击 Start Processing 时才上传
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // 上传完成后由后端自动并行触发的 AI 分析模板, None 表示跳过 analyze
+  const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
 
   // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
   // AI分析功能已移除 - 改为在FilesPage右侧面板通过"Analyze Document"/"Analyze Audio"按钮触发
@@ -159,21 +163,26 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
     resetAndClose();
 
     try {
-      // 调用新的异步端点：立即返回，后台上传到 OSS + 文档解析（不含AI分析）
+      // 调用新的异步端点: 立即返回, 后台上传到 OSS + 文档解析,
+      // 并在 content 写入完成后自动触发 4 路并行 LLM (含 analyze, 仅当用户选了模板).
       const response = await filesAPI.uploadAndProcessDocument(file, {
-        analysis_mode: 'local_llm', // 保留字段但不启用AI分析
-        task_type: 'document_upload', // 仅上传和解析
-        template_id: undefined, // 不使用模板
-        template_variables: {},
+        analysis_mode: 'local_llm',
+        task_type: 'document_upload',
+        template_id: analyzePicker.templateId, // 用户在 picker 选的模板, 上传完成后后端 trigger_auto_analyze
+        template_variables: analyzePicker.templateVariables || {},
         custom_inputs: {},
         params: {
           ...params,
-          use_ai_agent: false, // 明确禁用AI分析
+          use_ai_agent: false,
         },
       });
 
       addTask(response.task_id, file.name, 'document');
-      message.success('File upload and processing started. Use "Analyze Document" in the right panel for AI analysis.');
+      message.success(
+        analyzePicker.templateId
+          ? 'File upload started. AI analysis will run automatically once parsing completes.'
+          : 'File upload and processing started. Use "Analyze Document" in the right panel for AI analysis.'
+      );
     } catch (error: any) {
       const errorMessage = getErrorMessage(error, 'Failed to start upload and processing');
       message.error(errorMessage);
@@ -187,6 +196,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
 
   const resetAndClose = () => {
     setSelectedFile(null);
+    setAnalyzePicker({});
     setProcessingParams({
       processing_mode: 'quick',
       language: ['ch_sim', 'en'],
@@ -614,6 +624,16 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           )}
         </div>
 
+        {/* AI 分析模板 (可选, 选中后上传完成自动并行触发 analyze_document_task) */}
+        <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
+        <UploadAnalysisTemplatePicker
+          value={analyzePicker}
+          onChange={setAnalyzePicker}
+          mode="optional"
+          textColor={colors.text}
+          textSecondaryColor={colors.textSecondary}
+        />
+
         {/* 操作按钮（手机端 compact：不展示 Close，与右上角关闭重复） */}
         <div
           style={{
@@ -656,19 +676,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
               </Button>
             )}
 
-            {/* 始终显示 Go to Files Page 按钮 */}
-            <Button
-              onClick={() => {
-                onCancel();
-                navigate('/files');
-              }}
-              style={{
-                borderRadius: 8,
-                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
-              }}
-            >
-              Go to Files Page
-            </Button>
           </Space>
         </div>
       </Form>

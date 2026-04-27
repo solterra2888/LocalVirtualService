@@ -26,6 +26,10 @@ const getStatusIcon = (status: string, isDark?: boolean) => {
 };
 
 const getStatusText = (status: string, currentFile?: string, fileType?: string, progress?: number) => {
+  // 自动 AI 分析的中间态: NavBar 在主任务结束 + analyze_*_task 还在跑时显示
+  if (status === 'ai_processing') {
+    return 'AI analyzing…';
+  }
   if (fileType === 'youtube') {
     if (status === 'completed') return 'Completed';
     if (status === 'failed') return 'Failed';

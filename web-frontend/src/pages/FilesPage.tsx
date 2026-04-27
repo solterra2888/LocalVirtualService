@@ -2649,8 +2649,16 @@ const FilesPageInner: React.FC = () => {
           rcModal === 'completed'
         );
         
-        const isAudioAnalyzingModal = aiAnalysisExecution ? audioAnalyzingIds.has(aiAnalysisExecution.id) : false;
-        const isDocAnalyzingModal = aiAnalysisExecution ? docAnalyzingIds.has(aiAnalysisExecution.id) : false;
+        // 同时识别两种 analyzing 来源:
+        // 1) 用户在右侧面板手动 Re-analyze 时, FilesPage 把 id 加入 *AnalyzingIds
+        // 2) 自动并行链路 (trigger_auto_analyze) 写入 rc_agent_status='analyzing'
+        const rcAnalyzingModal = aiAnalysisExecution?.rc_agent_status === 'analyzing';
+        const isAudioAnalyzingModal = aiAnalysisExecution
+          ? audioAnalyzingIds.has(aiAnalysisExecution.id) || (isAudioModal && rcAnalyzingModal)
+          : false;
+        const isDocAnalyzingModal = aiAnalysisExecution
+          ? docAnalyzingIds.has(aiAnalysisExecution.id) || (!isAudioModal && rcAnalyzingModal)
+          : false;
         const isAnalyzingModal = isAudioAnalyzingModal || isDocAnalyzingModal;
 
         return (
@@ -3741,8 +3749,16 @@ const FilesPageInner: React.FC = () => {
                                   execution: { ...prev.execution, final_report: newContent }
                                 } : null);
                               }}
-                              audioAnalyzing={audioAnalyzingIds.has(selectedExecutionForView.id)}
-                              docAnalyzing={docAnalyzingIds.has(selectedExecutionForView.id)}
+                              audioAnalyzing={
+                                audioAnalyzingIds.has(selectedExecutionForView.id) ||
+                                (selectedExecutionForView.first_file_type === 'audio' &&
+                                  selectedExecutionForView.rc_agent_status === 'analyzing')
+                              }
+                              docAnalyzing={
+                                docAnalyzingIds.has(selectedExecutionForView.id) ||
+                                (selectedExecutionForView.first_file_type !== 'audio' &&
+                                  selectedExecutionForView.rc_agent_status === 'analyzing')
+                              }
                               audioTemplateId={audioTemplateId}
                             />
                           )}
@@ -7204,7 +7220,9 @@ export const AIAnalysisView: React.FC<{
           {canAnalyzeDoc && (
             <div style={{ maxWidth: '420px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'center' }}>
               <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px' }}>
-                Select a prompt template and click "Analyze" to start AI analysis
+                {execution.rc_agent_status === 'failed'
+                  ? 'The previous AI analysis failed. Pick a template and try again.'
+                  : 'Select a prompt template and click "Analyze" to start AI analysis. Tip: choose a template at upload time to run analysis automatically.'}
               </div>
               <TemplateSelector
                 categoryCode="file_analysis"

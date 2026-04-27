@@ -67,12 +67,35 @@ Daily 模块（前端 `/daily`，是登录后的**默认落地页**）是一个*
     │
     ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│              卡片点击导航（前端按 navigate.type 分支）              │
+│       卡片点击预览（DailyPreviewDrawer，就地抽屉，不离开页面）       │
 └──────────────────────────────────────────────────────────────────┘
+    ├─ 桌面 → 右侧 720px Drawer
+    └─ 移动 → bottom sheet (92vh)
+        │
+        ├─ 上半：标题 / 作者 / 时间 / X min read
+        ├─ 中段：AI Summary（缺失时降级提示并直接展开下方原文）
+        │        + sector / industry / tickers / concepts
+        ├─ 下半：原文区，按 source_subtype 分发到 9 种渲染器
+        │        (DailyOriginalView 内部 switch，详见 §7)
+        ├─ 顶栏：‹ Prev / Next › （键盘 ↑/↓ 或 J/K，桌面）
+        ├─ 顶栏：Open in Sources / Open in Feeds   ← 旧跳转路径作为深度入口保留
+        └─ 顶栏：Close（Esc）
+        │
+        ▼ 切换或打开抽屉时调用：
+        GET /api/daily/items/{id}    返回 DailyItemDetail
+            ├─ upload 子结构：file_processing_details.content + processing_stats.final_report
+            └─ feed   子结构：subscription_content + subscription_content_tags（与 Feeds 同形）
+
+【深度入口（顶栏 "Open in …" 才走，普通点击不再跳走）】
     ├─ execution     → /files?execution=<execution_id>          (Upload 详情)
     ├─ feed_article  桌面 → /feeds (state.dailyTarget)
     │               移动 → /feeds/article/:subId/:contentId    (深链)
     └─ external_url  → window.open(url)                         (兜底外链)
+
+【二进制 / 大资源懒加载（只在抽屉打开后按需取）】
+    ├─ image / audio / pdf / youtube(upload) → GET /api/files/original/{file_id}
+    │                                          (file_url + asr_with_diarization)
+    └─ youtube(feed) transcript               → GET /api/subscriptions/contents/{id}/transcript
 ```
 
 ## 2. 数据库表结构
@@ -156,6 +179,7 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
 | `GET` | `/stats` | **顶部统计**：当前过滤条件下每个 `source_subtype` 的卡片数（chip 行 count 用）|
 | `GET` | `/preset` | 读取当前用户的 Daily preset；无记录返回 `{ source_subtypes: [] }` |
 | `PUT` | `/preset` | UPSERT 当前用户的 Daily preset；空数组 = 清除（等同未设置）|
+| `GET` | `/items/{id}` | **卡片详情**（NEW，Drawer 预览用）：返回 `DailyItemDetail` = `DailyFeedItem` + 来源专属 `upload`/`feed` 子结构 |
 
 ### 4.1 `GET /api/daily/feed`
 
@@ -231,6 +255,59 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
 - PUT 端会**二次去重 + 过滤非法值**，并保留稳定顺序
 - **PUT 空数组 = 清除 preset**（等同未设置 / 展示全部）
 
+### 4.4 `GET /api/daily/items/{item_id}` （Drawer 预览用，NEW）
+
+- `item_id` 形如 `upload_<file_id>` 或 `feed_<content_id>`，与列表 `DailyFeedItem.id` 完全一致
+- 内部按前缀分发到 `file_processing_details` 或 `subscription_content` 的单条查询
+- **鉴权口径与列表 endpoint 一致**：upload 走 `processing_stats."user"`，feed 走 `%(user_id)s = ANY(sc.user_ids)`
+- 非法格式 → 400；不存在或无权 → 404 / 403
+
+**响应结构（`DailyItemDetail`，扩展自 `DailyFeedItem`）：**
+
+```json
+{
+  // —— 列表条目同形字段 ——
+  "id": "upload_123",
+  "source": "upload",
+  "source_subtype": "document",
+  "title": "...",
+  "summary": "AI 摘要 (可能为 null)",
+  "snippet": "无摘要时回退展示",
+  "tickers": ["NVDA.US"], "concepts": [...],
+  "sector": "...", "industry": "...",
+  "published_at": "...", "reading_time_min": 4,
+  "navigate": { "type": "execution | feed_article | external_url", ... },
+
+  // —— 来源专属子结构（二选一非空） ——
+  "upload": {
+    "file_id": 123,
+    "file_type_raw": "pdf",                  // 用于前端区分 PDF / image / audio / youtube …
+    "display_name": "...", "filename": "...",
+    "original_file_path": "...",             // OSS key / 本地路径 / 外链兜底
+    "content": "Markdown 正文 / OCR / 网页正文 / 笔记",
+    "final_report": "processing_stats.final_report (执行级 AI 报告)"
+  },
+  "feed": {
+    "content_db_id": 4567,
+    "channel_type": "twitter | youtube | news | rss",
+    "content_id": "tweet_id / video_id / news guid",
+    "title": "...", "content": "...",
+    "author_name": "...", "author_identifier": "...",
+    "url": "...", "media_urls": [...],
+    "metadata": { ... },                     // 平台特定 JSONB (Twitter 互动数 / YouTube 统计 / News 情感)
+    "categories": [...],                     // News / RSS tags
+    "is_retweet": false, "retweeted_author": null, ...,   // Twitter 特定
+    "has_transcript": true,                  // YouTube 是否能懒加载 transcript
+    "tags": { "sector": "...", "tickers": [...], "concepts": [...], "summary": "...", ... }
+  }
+}
+```
+
+**注意（不返回的字段）：**
+
+- 二进制 / 大资源（image / audio / pdf 的 `file_url` + audio / youtube 的 ASR JSON）**不在此返回**，前端打开抽屉后按需调 `GET /api/files/original/{file_id}` 懒加载（与现有 Sources 详情页同口径）
+- YouTube 的 transcript 同样懒加载 `GET /api/subscriptions/contents/{id}/transcript`，由抽屉里的 "Load transcript" 按钮触发
+
 ## 5. 关键 SQL 设计
 
 ### 5.1 字段对齐与 UNION ALL
@@ -285,8 +362,8 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 
 | 文件 | 职责 |
 |------|------|
-| `backend/api/daily.py` | 所有 Daily API 实现：UNION SQL 拼接、动态 WHERE、N+1 反查、行 → `DailyFeedItem` 转换、Preset CRUD |
-| `backend/schemas/daily.py` | Pydantic 模型：`DailyFeedItem` / `DailyNavigate` / `DailyFeedResponse` / `DailySourceCount` / `DailyStatsResponse` / `DailyPresetResponse` / `DailyPresetUpdate`，以及枚举 `SourceType` / `SourceSubtype` |
+| `backend/api/daily.py` | 所有 Daily API 实现：UNION SQL 拼接、动态 WHERE、N+1 反查、行 → `DailyFeedItem` 转换、Preset CRUD、`GET /items/{id}` 单条详情分发（`_fetch_upload_detail` / `_fetch_feed_detail`）|
+| `backend/schemas/daily.py` | Pydantic 模型：`DailyFeedItem` / `DailyNavigate` / `DailyFeedResponse` / `DailySourceCount` / `DailyStatsResponse` / `DailyPresetResponse` / `DailyPresetUpdate` / `DailyItemDetail` / `DailyItemDetailUpload` / `DailyItemDetailFeed`，以及枚举 `SourceType` / `SourceSubtype` |
 | `backend/database/migrations/create_user_daily_preferences.sql` | NEW：preset 表 |
 | `backend/database/migrations/add_summary_to_file_tags.sql` | NEW：补 `file_tags.summary` 字段，对齐 Feed 侧摘要 |
 | `backend/main.py` | 注册 `/api/daily` router |
@@ -297,14 +374,17 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 
 | 文件 | 作用 |
 |------|------|
-| `web-frontend/src/pages/DailyPage.tsx` | 桌面 `/daily` 主页面：标题区 + 搜索 + 来源 chip + 齿轮入口 + 卡片列表 + 无限滚动 |
-| `web-frontend/src/pages/MobileDailyPage.tsx` | 移动 `/daily`：单列紧凑布局 + 横向滚动 chip 行 + 同样的搜索 / 齿轮 / 无限滚动；Feed 跳转走深链 `/feeds/article/:sub/:cid` |
-| `web-frontend/src/services/daily.ts` | API 客户端：`listDailyFeed` / `getDailyStats` / `getDailyPreset` / `updateDailyPreset`；TS 类型与后端 Pydantic 严格对齐；`buildQueryString` 手工构造 FastAPI 兼容的多值 query（不带 `[]`）|
+| `web-frontend/src/pages/DailyPage.tsx` | 桌面 `/daily` 主页面：标题区 + 搜索 + 来源 chip + 齿轮入口 + 卡片列表 + 无限滚动；卡片点击 → 打开 `DailyPreviewDrawer`（不再 navigate）|
+| `web-frontend/src/pages/MobileDailyPage.tsx` | 移动 `/daily`：单列紧凑布局 + 横向滚动 chip 行 + 同样的搜索 / 齿轮 / 无限滚动；卡片点击 → 打开 `DailyPreviewDrawer`（`placement="bottom"`）|
+| `web-frontend/src/services/daily.ts` | API 客户端：`listDailyFeed` / `getDailyStats` / `getDailyPreset` / `updateDailyPreset` / `getDailyItemDetail`（NEW）；TS 类型与后端 Pydantic 严格对齐；`buildQueryString` 手工构造 FastAPI 兼容的多值 query（不带 `[]`）|
 | `web-frontend/src/components/daily/DailyCard.tsx` | 单条卡片渲染：右上角 `SourceBadge` + 标题 + 摘要 / snippet + tickers / concepts + 时间 + reading time |
 | `web-frontend/src/components/daily/SourceBadge.tsx` | 来源徽章：紧凑 / 可点击 / active 状态 / 计数后缀 / Tooltip |
 | `web-frontend/src/components/daily/sourceBadgeConfig.ts` | 9 种 subtype 的配色（浅 / 深主题各一组）+ 短代号 + 完整名称 + 显示顺序 |
 | `web-frontend/src/components/daily/dailyTheme.ts` | Daily 模块独立调色板（与 Sources / Feeds 风格一致但卡片密度更紧凑）|
 | `web-frontend/src/components/daily/DailyPresetModal.tsx` | Preset 配置弹窗：分组（Upload sources / Subscriptions）+ 复用 `SourceBadge` 做整块勾选 + Clear / Select all / Save |
+| `web-frontend/src/components/daily/DailyPreviewDrawer.tsx` | **NEW** 卡片点击预览抽屉：桌面右侧 720px / 移动 bottom sheet (92vh)；顶栏 Prev/Next + Open in Sources/Feeds + Close；中段 AI Summary（缺失降级提示）+ tickers / concepts；下半 dispatch 到 `DailyOriginalView`；键盘快捷键 Esc / ↑↓ / J K |
+| `web-frontend/src/components/daily/DailyOriginalView.tsx` | **NEW** 原文区分发器：按 9 种 `source_subtype` 路由到内置子组件（`DocumentOriginalView` / `ImageOriginalView` / `AudioOriginalView` / `YoutubeUploadOriginalView` / `WebOriginalView` / `TextNoteOriginalView` / `TwitterOriginalView` / `NewsOriginalView` / `YoutubeFeedOriginalView`）；按需懒加载 `/files/original/{id}` 与 `/subscriptions/contents/{id}/transcript`；只读，不复用 FeedArticleBody 的写入操作 |
+| `web-frontend/src/components/daily/dailyPreviewUtils.ts` | **NEW** 抽屉用小工具：`extractYouTubeId` / `flattenAsr`（兼容 sentences / transcript 两种 ASR JSON 形态）/ `formatTimestampMs` |
 | `web-frontend/src/App.tsx` | 路由：`<Route index>` → `Navigate to /daily`；`<Route path="daily">` 桌面 / 移动二选一组件挂载；admin 与 404 兜底也跳 `/daily` |
 | `web-frontend/src/components/Layout.tsx` | 桌面 NavBar 第一项 `Daily`（`ThunderboltOutlined` 图标）|
 | `web-frontend/src/components/mobile/navigation/MobileBottomNav.tsx` | 移动底部导航第一项 `Daily` |
@@ -317,6 +397,16 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 4. 用户滚动到底部 → IntersectionObserver 触发 `listDailyFeed({ offset: offsetRef.current })` 加载下一页
 5. 用户点 chip 收窄 → 重新计算 `effectiveSubtypes` → 重新加载第一页
 6. 用户点齿轮 → `DailyPresetModal` 打开 → 保存 → `updateDailyPreset(...)` → 同步 `presetSubtypes` + 清掉落在新 preset 之外的 stale chip 选择 → 重新加载第一页
+
+**卡片点击预览（Drawer）的调用序列：**
+
+1. `setPreviewItem(item)` → `<DailyPreviewDrawer>` 打开
+2. 抽屉立刻用列表已有的 `DailyFeedItem` 字段渲染 above-the-fold（标题 / 作者 / 时间 / 已有 summary / tickers），避免空白闪烁
+3. `getDailyItemDetail(item.id)` → 拿到 `DailyItemDetail`，刷新 AI Summary 与下半 Original 区
+4. 抽屉里的 `DailyOriginalView` 按 `source_subtype` 分发；image / audio / pdf / youtube(upload) 触发 `filesAPI.getOriginalFileInfo(file_id)` 懒加载 `file_url` 与 `asr_with_diarization`
+5. youtube(feed) "Load transcript" 按钮触发 `subscriptionsAPI.getSubscriptionContentTranscript(content_db_id)` 懒加载字幕
+6. 用户按 `↑/k` 或 `↓/j` → 父更新 `previewItem` → 第 3 步起重新拉新条目；`requestSeqRef` 防止过期请求覆盖最新选中
+7. 用户按 `Esc` 或点 `×` → `setPreviewItem(null)` 关闭；点顶栏 `Open in Sources/Feeds` → 走旧的 `navigate(...)` 深度入口
 
 ## 8. Preset 功能（核心交互）
 
@@ -372,9 +462,10 @@ NavBar 顺序统一调整为：`Daily → Sources → Feeds → ...`（详见 `L
 | 定时任务 | **零** | youtube/twitter/news_feed 三大类 | 无 |
 | Celery 任务 | **零** | `fetch_*_subscription` 系列 | `add_files_to_be_processed_task` 系列 |
 | 路由前缀 | `/api/daily` | `/api/subscriptions` | `/api/files` |
-| 跳转关系 | **跳出**到 `/files` 或 `/feeds` | 自身就是详情页 | 自身就是详情页 |
+| 跳转关系 | 默认**就地预览**（Drawer）；顶栏 "Open in …" 作为深度入口跳到 `/files` 或 `/feeds` | 自身就是详情页 | 自身就是详情页 |
 | 鉴权方式 | 同时按 `username`（Upload）和 `user_id`（Feed）| `user_id` | `username` |
 | 页面顺序 | 默认落地，NavBar 第一 | NavBar 第三 | NavBar 第二 |
+| 卡片交互 | 点击 → 就地 `DailyPreviewDrawer` 预览（顶栏 "Open in …" 才跳出）| 自身详情页 | 自身详情页 |
 
 **未来扩展空间：**
 

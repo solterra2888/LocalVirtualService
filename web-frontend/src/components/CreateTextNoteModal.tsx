@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { Modal, Input, Button, message, Space, ConfigProvider, theme as antdTheme } from 'antd';
 import { EditOutlined, SaveOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from './UploadAnalysisTemplatePicker';
 
 /** FilesPage 订阅此事件以刷新左侧 Sources 列表 */
 export const TASK_EXECUTIONS_REFRESH_EVENT = 'guanhe:task-executions-refresh';
@@ -19,11 +22,11 @@ interface CreateTextNoteModalProps {
 
 const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCancel, themeMode }) => {
   const isDark = themeMode === 'dark';
-  const navigate = useNavigate();
   const location = useLocation();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
 
   const handleSave = async () => {
     const trimmed = content.trim();
@@ -34,16 +37,21 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
 
     setSaving(true);
     try {
-      await filesAPI.createTextNote(title.trim(), trimmed);
-      message.success('Text note created! Auto-analysis will begin shortly.');
+      await filesAPI.createTextNote(title.trim(), trimmed, {
+        auto_analyze_template_id: analyzePicker.templateId ?? null,
+        auto_analyze_template_variables: analyzePicker.templateVariables || {},
+      });
+      message.success(
+        analyzePicker.templateId
+          ? 'Text note created! AI analysis will start shortly.'
+          : 'Text note created! Auto-analysis will begin shortly.'
+      );
       handleClose();
       const onFilesPage = /\/files\/?$/.test(location.pathname) || location.pathname.endsWith('/files');
       if (onFilesPage) {
         window.dispatchEvent(
           new CustomEvent(TASK_EXECUTIONS_REFRESH_EVENT, { detail: { resetTypeFilter: true } })
         );
-      } else {
-        navigate('/files');
       }
     } catch (error: any) {
       message.error(getErrorMessage(error, 'Failed to create text note'));
@@ -56,6 +64,7 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
     setTitle('');
     setContent('');
     setSaving(false);
+    setAnalyzePicker({});
     onCancel();
   };
 
@@ -153,6 +162,17 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
                 fontSize: '13px',
                 lineHeight: '1.6',
               }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <UploadAnalysisTemplatePicker
+              value={analyzePicker}
+              onChange={setAnalyzePicker}
+              mode="optional"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+              disabled={saving}
             />
           </div>
 

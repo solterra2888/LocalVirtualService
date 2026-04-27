@@ -17,7 +17,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, ConfigProvider, Empty, Input, Spin, Tooltip, Typography, message, theme as antdTheme } from 'antd';
 import { SearchOutlined, SettingOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import {
   ALL_DAILY_SOURCE_SUBTYPES,
@@ -31,6 +30,7 @@ import {
 import DailyCard from '../components/daily/DailyCard';
 import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
+import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
@@ -66,7 +66,6 @@ const groupByDate = (items: DailyFeedItem[], tz: string): DateGroup[] => {
 
 const DailyPageInner: React.FC = () => {
   const { themeMode, userTimezone } = useDashboardSettings();
-  const navigate = useNavigate();
   const colors = DAILY_THEME_COLORS[themeMode];
 
   // ─── 状态 ─────────────────────────────────────────────
@@ -86,6 +85,9 @@ const DailyPageInner: React.FC = () => {
   // []   = 用户未设置 preset, 等同 "展示全部" (与 backend 语义对齐)
   const [presetSubtypes, setPresetSubtypes] = useState<DailySourceSubtype[] | null>(null);
   const [presetModalOpen, setPresetModalOpen] = useState(false);
+
+  // 抽屉预览 (卡片点击不再跳出, 而是就地预览; 详见 docs §1)
+  const [previewItem, setPreviewItem] = useState<DailyFeedItem | null>(null);
 
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -219,33 +221,11 @@ const DailyPageInner: React.FC = () => {
   }, []); // 稳定，只挂载/卸载一次
 
   // ─── 卡片点击跳转 ────────────────────────────────────
-  const handleCardClick = useCallback(
-    (item: DailyFeedItem) => {
-      const nav = item.navigate;
-      if (nav.type === 'execution' && nav.execution_id) {
-        navigate(`/files?execution=${nav.execution_id}`);
-        return;
-      }
-      if (nav.type === 'feed_article' && nav.subscription_id && nav.content_id) {
-        // 桌面 FeedReaderPage 暂不支持深链 query 参数, 优先把 state 传过去, 失败兜底外链
-        navigate('/feeds', {
-          state: {
-            dailyTarget: {
-              subscriptionId: nav.subscription_id,
-              contentId: nav.content_id,
-            },
-          },
-        });
-        return;
-      }
-      if (nav.external_url) {
-        window.open(nav.external_url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      message.info('No navigation target available for this item');
-    },
-    [navigate]
-  );
+  // 卡片点击 → 在 Daily 页面内打开右侧抽屉预览, 不再跳出到 Sources/Feeds.
+  // 顶栏 "Open in Sources/Feeds" 按钮保留旧的跳转能力 (DailyPreviewDrawer 内部实现).
+  const handleCardClick = useCallback((item: DailyFeedItem) => {
+    setPreviewItem(item);
+  }, []);
 
   // ─── 来源 chip 切换 ──────────────────────────────────
   const toggleSubtype = useCallback((sub: DailySourceSubtype) => {
@@ -490,6 +470,16 @@ const DailyPageInner: React.FC = () => {
         themeMode={themeMode}
         onSaved={handlePresetSaved}
         onCancel={() => setPresetModalOpen(false)}
+      />
+
+      {/* 卡片点击预览抽屉 */}
+      <DailyPreviewDrawer
+        item={previewItem}
+        items={items}
+        themeMode={themeMode}
+        placement="right"
+        onClose={() => setPreviewItem(null)}
+        onNavigate={(next) => setPreviewItem(next)}
       />
     </div>
   );

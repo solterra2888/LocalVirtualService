@@ -32,6 +32,14 @@ class WebClipRequest(BaseModel):
 class WebLinkRequest(BaseModel):
     """Web Link 网页抓取请求"""
     url: str = Field(..., min_length=1, max_length=2000, description="目标网页 URL")
+    auto_analyze_template_id: Optional[int] = Field(
+        None,
+        description="上传时选择的 AI 分析模板 ID, 抓取完成后自动触发 analyze_document_task"
+    )
+    auto_analyze_template_variables: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="对应模板的变量字典"
+    )
 
 
 class ProcessingStatus(str, Enum):

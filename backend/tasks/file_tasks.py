@@ -146,6 +146,204 @@ def trigger_auto_classify(file_detail_ids, username=None, delay=2):
             error(f"触发自动归类任务失败: file_id={file_id}, error={str(e)}", source="auto_classify")
 
 
+def trigger_auto_analyze(
+    *,
+    file_detail_id,
+    execution_id,
+    file_type,
+    template_id=None,
+    template_variables=None,
+    username=None,
+    delay=2,
+):
+    """
+    content 写入完成后, 可选地自动投递 analyze_document/audio 任务.
+
+    与 trigger_auto_tagging / trigger_auto_naming / trigger_auto_classify 并列, 构成
+    Upload Sources 完成后的"4 路并行 LLM 任务"中的第 4 路.
+
+    Args:
+        file_detail_id: file_processing_details.id
+        execution_id:   processing_stats.id (analyze_*_task 必需)
+        file_type:      'document' / 'audio' / 'youtube' / 'web' / 'text' / ...
+        template_id:    用户在上传弹窗选择的 Prompt Template ID;
+                        - 文档/网页/文本笔记: 未选则跳过 (analyze_document 强依赖 template_id)
+                        - 音频/YouTube:       未选则降级为 audio_analysis_v1
+        template_variables: 可选的模板变量字典
+        username:       用户名 (analyze_*_task 必需)
+        delay:          countdown 秒, 与其他三路保持节奏一致
+
+    幂等保护:
+        - analyze 任务自身会 UPDATE processing_stats.rc_agent_status -> 'analyzing'/'success'/'failed';
+          不在此处做幂等,由调用方保证只在每次 content 写入完成后投递一次.
+        - 自动并行链路下用 skip_post_trigger=True 关掉 analyze 末尾的重复 trigger_auto_*.
+    """
+    auto_analyze_enabled = os.getenv('AUTO_ANALYZE_ENABLED', 'true').lower() == 'true'
+    if not auto_analyze_enabled:
+        info("自动 AI 分析功能已禁用", source="auto_analyze")
+        return
+
+    if not file_detail_id or not execution_id:
+        warning(
+            f"trigger_auto_analyze 缺少必要参数: file_detail_id={file_detail_id}, execution_id={execution_id}",
+            source="auto_analyze",
+        )
+        return
+
+    is_audio_like = file_type in ('audio', 'youtube')
+
+    # 音频/YouTube 未指定模板时降级为 audio_analysis_v1
+    resolved_template_id = template_id
+    if is_audio_like and not resolved_template_id:
+        try:
+            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+            ts = LLMPromptTemplateService()
+            tpl = ts.get_template_by_code('audio_analysis_v1')
+            if tpl:
+                resolved_template_id = tpl.get('id')
+            else:
+                warning(
+                    "audio_analysis_v1 模板不存在, 跳过自动 AI 分析",
+                    source="auto_analyze",
+                )
+                return
+        except Exception as e:
+            error(f"加载默认音频模板失败: {e}", source="auto_analyze")
+            return
+
+    # 文档/网页/文本笔记: 用户未选模板则不触发 (analyze_document_task 强依赖 template_id)
+    if not resolved_template_id:
+        info(
+            f"用户未选择 analyze 模板, 跳过自动 AI 分析: file_id={file_detail_id}, file_type={file_type}",
+            source="auto_analyze",
+        )
+        return
+
+    # 模板存在性校验 (避免投递了一个被删/被禁用的模板)
+    try:
+        from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+        ts = LLMPromptTemplateService()
+        tpl = ts.get_template(resolved_template_id)
+        if not tpl:
+            warning(
+                f"模板不存在或已禁用, 跳过自动 AI 分析: template_id={resolved_template_id}, file_id={file_detail_id}",
+                source="auto_analyze",
+            )
+            return
+    except Exception as e:
+        error(f"校验模板存在性失败: {e}", source="auto_analyze")
+        # 校验异常不阻断, 让 analyze 任务自身报错
+        pass
+
+    # 内容长度门槛 (避免空内容/极短内容浪费 LLM)
+    try:
+        min_length = int(os.getenv('AUTO_ANALYZE_MIN_CONTENT_LENGTH', '100'))
+    except ValueError:
+        min_length = 100
+    if min_length > 0:
+        try:
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(get_database_config())
+            with db_manager.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COALESCE(LENGTH(content), 0), COALESCE(asr_with_diarization::text, '') "
+                    "FROM file_processing_details WHERE id=%s",
+                    (file_detail_id,),
+                )
+                row = cur.fetchone()
+            content_len = int(row[0]) if row else 0
+            asr_present = bool(row[1]) if row else False
+            # 音频/YouTube 优先用 asr_with_diarization, 即使 content 短也允许
+            if not asr_present and content_len < min_length:
+                info(
+                    f"content 长度 {content_len} 低于 {min_length}, 跳过自动 AI 分析: file_id={file_detail_id}",
+                    source="auto_analyze",
+                )
+                return
+        except Exception as e:
+            warning(f"读取 content_length 失败, 仍继续投递 analyze: {e}", source="auto_analyze")
+
+    variables = template_variables or {}
+
+    # 投递前把 processing_stats.rc_agent_status 置为 'analyzing'.
+    # 这样:
+    #   1) FilesPage 右侧面板 / NavBar processing bar 都能识别"主任务已结束, AI 分析进行中"
+    #      的中间态, 避免出现"灰白等待空报告"或"过早消失"的体验断层;
+    #   2) 与 POST /api/files/{document,audio}/analyze 手动入口保持一致(那两个 API 也是
+    #      在投递前先写 'analyzing', 见 backend/api/files.py).
+    # 注意: 仅对当前不在 'analyzing' 的记录做更新, 避免把同一个 execution 已经在跑的
+    # 状态重复刷写; 同时对自动链路的 4 路并行不会有竞态(写入操作幂等).
+    try:
+        from backend.database.db_manager import DatabaseManager
+        db_manager = DatabaseManager(get_database_config())
+        with db_manager.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE processing_stats
+                SET rc_agent_status = 'analyzing'
+                WHERE id = %s
+                  AND COALESCE(rc_agent_status, '') <> 'analyzing'
+                """,
+                (execution_id,),
+            )
+            conn.commit()
+    except Exception as e:
+        warning(
+            f"trigger_auto_analyze 写入 rc_agent_status='analyzing' 失败 (不阻断投递): "
+            f"execution_id={execution_id}, error={e}",
+            source="auto_analyze",
+        )
+
+    try:
+        if is_audio_like:
+            analyze_audio_task.apply_async(
+                args=(execution_id, file_detail_id, resolved_template_id, variables, username),
+                kwargs={'skip_post_trigger': True},
+                countdown=delay,
+            )
+            info(
+                f"已触发自动 AI 分析(音频/YouTube): file_id={file_detail_id}, "
+                f"template_id={resolved_template_id}, delay={delay}s",
+                source="auto_analyze",
+            )
+        else:
+            analyze_document_task.apply_async(
+                args=(execution_id, file_detail_id, resolved_template_id, variables, username),
+                kwargs={'skip_post_trigger': True},
+                countdown=delay,
+            )
+            info(
+                f"已触发自动 AI 分析(文档/网页/文本): file_id={file_detail_id}, "
+                f"template_id={resolved_template_id}, delay={delay}s",
+                source="auto_analyze",
+            )
+    except Exception as e:
+        # 投递失败时把刚刚写入的 'analyzing' 回滚为 'failed', 让前端能看到错误终态而不是
+        # 永远停在 analyzing.
+        error(
+            f"投递自动 AI 分析任务失败: file_id={file_detail_id}, error={e}",
+            source="auto_analyze",
+        )
+        try:
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(get_database_config())
+            with db_manager.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE processing_stats
+                    SET rc_agent_status = 'failed'
+                    WHERE id = %s AND rc_agent_status = 'analyzing'
+                    """,
+                    (execution_id,),
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+
 def trigger_auto_feed_tagging(content_ids, username=None, delay=2):
     """
     触发 Feeds (subscription_content) 自动打标 + 摘要任务.
@@ -367,7 +565,8 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
 
 
 @app.task(bind=True, name='analyze_audio_async', queue='file_processing')
-def analyze_audio_task(self, execution_id, file_detail_id, template_id, template_variables, username):
+def analyze_audio_task(self, execution_id, file_detail_id, template_id, template_variables, username,
+                        skip_post_trigger=False):
     """
     异步音频AI分析任务
 
@@ -381,6 +580,9 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
         template_id: 模板ID
         template_variables: 额外模板变量
         username: 用户名
+        skip_post_trigger: True 时跳过末尾的 trigger_auto_tagging/naming/classify
+            （由 trigger_auto_analyze 自动并行链路调用时设为 True，避免重复入队；
+            content 不会在本任务内被改写，无 LlamaParse 兜底场景）
     """
     _last_progress = [0.0]
     _last_status = ['processing']
@@ -585,15 +787,18 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
             'logs': getattr(update_progress, 'logs', [])
         }
         info(f"音频分析任务 {self.request.id} 完成: {final_result}", source="celery_audio_analysis")
-        
-        # 🏷️ 触发自动打标签 + 自动命名任务
-        try:
-            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
-            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
-            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
-        except Exception as e:
-            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_analysis")
-        
+
+        # 🏷️ 触发自动打标签 + 自动命名 + 自动归类（仅在非自动并行链路调用下投递）
+        # 自动并行链路（trigger_auto_analyze → analyze_audio_task）已在 content 写入完成时
+        # 投过一次，传 skip_post_trigger=True 关掉这里的重复入队。
+        if not skip_post_trigger:
+            try:
+                trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+                trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+                trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            except Exception as e:
+                error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_analysis")
+
         return final_result
 
     except Exception as e:
@@ -630,7 +835,8 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
 
 
 @app.task(bind=True, name='analyze_document_async', queue='file_processing')
-def analyze_document_task(self, execution_id, file_detail_id, template_id, template_variables, username):
+def analyze_document_task(self, execution_id, file_detail_id, template_id, template_variables, username,
+                           skip_post_trigger=False):
     """
     异步文档AI分析任务
 
@@ -645,6 +851,10 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         template_id: 模板ID
         template_variables: 额外模板变量
         username: 用户名
+        skip_post_trigger: True 时跳过末尾的 trigger_auto_tagging/naming/classify
+            （由 trigger_auto_analyze 自动并行链路调用时设为 True，避免重复入队）。
+            注意：若本任务内部走了 LlamaParse 兜底解析（content 在任务内被新写入），
+            会强制覆盖该开关并触发 trigger_auto_*，确保新 content 仍能被打标签/命名/归类。
     """
     _last_progress = [0.0]
     _last_status = ['processing']
@@ -715,6 +925,10 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
         file_content_for_llm = content_text.strip() if content_text else ""
         doc_processing_time = 0
         temp_file_path = None  # 用于存储临时下载的文件路径
+        # 任务内是否走了 LlamaParse 兜底（content 在本任务内被新写入），
+        # 此种情况下末尾必须触发 trigger_auto_* 来给新 content 打标签/命名/归类，
+        # 即使调用方传入 skip_post_trigger=True 也强制覆盖。
+        content_was_filled_by_llama = False
 
         if not file_content_for_llm:
             if not original_file_path:
@@ -782,6 +996,8 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
             if successful_results:
                 file_content_for_llm = successful_results[0].get('content', '')
                 doc_processing_time = successful_results[0].get('processing_time', 0)
+                # 标记本任务内填充了 content：末尾必须触发 trigger_auto_*
+                content_was_filled_by_llama = True
                 update_progress(progress=55, log_message=f"文档解析完成，内容长度: {len(file_content_for_llm)} 字符")
 
                 # 更新 file_processing_details 的 content
@@ -928,15 +1144,19 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
             'logs': getattr(update_progress, 'logs', [])
         }
         info(f"文档分析任务 {self.request.id} 完成: {final_result}", source="celery_doc_analysis")
-        
-        # 🏷️ 触发自动打标签 + 自动命名任务
-        try:
-            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
-            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
-            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
-        except Exception as e:
-            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_analysis")
-        
+
+        # 🏷️ 触发自动打标签 + 自动命名 + 自动归类
+        # 触发条件：调用方未传 skip_post_trigger=True，或者本任务内部走了 LlamaParse 兜底
+        # （content 在本任务内新写入，必须给新 content 打标签/命名/归类）。
+        should_post_trigger = (not skip_post_trigger) or content_was_filled_by_llama
+        if should_post_trigger:
+            try:
+                trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+                trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+                trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            except Exception as e:
+                error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_analysis")
+
         return final_result
 
     except Exception as e:
@@ -1270,8 +1490,10 @@ def reparse_document_task(self, file_id, params, username):
 
 
 @app.task(bind=True, name='upload_and_transcribe_audio', queue='file_processing')
-def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, model='fun-asr', 
-                                      language_hints=None, diarization_enabled=True):
+def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, model='fun-asr',
+                                      language_hints=None, diarization_enabled=True,
+                                      auto_analyze_template_id=None,
+                                      auto_analyze_template_variables=None):
     """
     异步上传音频文件到 OSS 并进行语音识别
     
@@ -1284,6 +1506,9 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         model: ASR 模型名称
         language_hints: 语言提示列表
         diarization_enabled: 是否启用说话人分离
+        auto_analyze_template_id: 上传弹窗中用户选择的 AI 分析模板 ID
+            (None 时由 trigger_auto_analyze 兜底为 audio_analysis_v1)
+        auto_analyze_template_variables: 模板变量字典
     """
     _last_progress = [0.0]
     _last_status = ['processing']
@@ -1544,15 +1769,24 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
         }
         
         info(f"音频上传和转写任务 {self.request.id} 完成: {filename}", source="celery_audio_upload")
-        
-        # 🏷️ 触发自动打标签 + 自动命名任务
+
+        # 🏷️ 触发 4 路并行 LLM 任务: tag / name / classify / analyze
         try:
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            trigger_auto_analyze(
+                file_detail_id=file_detail_id,
+                execution_id=processing_stats_id,
+                file_type='audio',
+                template_id=auto_analyze_template_id,
+                template_variables=auto_analyze_template_variables,
+                username=username,
+                delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+            )
         except Exception as e:
-            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_upload")
-        
+            error(f"触发自动并行 LLM 任务失败: {str(e)}", source="celery_audio_upload")
+
         return final_result
         
     except Exception as e:
@@ -1805,31 +2039,48 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         except Exception as del_err:
             warning(f"清理临时文件失败: {del_err}", source="celery_doc_upload")
         
-        # 5. 触发自动打标签
+        # 5. 触发 4 路并行 LLM 任务: tag / name / classify / analyze
         try:
-            # 查询该任务创建的所有 file_processing_details ID
+            # 查询该任务创建的所有 file_processing_details ID 及其 processing_stats_id
             from backend.database.db_manager import DatabaseManager
             db_manager = DatabaseManager(db_conn_params)
             conn = db_manager.get_connection()
-            
+
             if conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id FROM file_processing_details
+                    SELECT id, processing_stats_id FROM file_processing_details
                     WHERE task_id = %s AND status = 'completed' AND content IS NOT NULL AND content != ''
                 """, (self.request.id,))
-                
-                file_ids = [row[0] for row in cursor.fetchall()]
+
+                rows = cursor.fetchall()
                 conn.close()
-                
+
+                file_ids = [row[0] for row in rows]
+
                 if file_ids:
                     info(f"触发自动打标签/命名/归类: {len(file_ids)} 个文件", source="celery_doc_upload")
                     trigger_auto_tagging(file_ids, username=username, delay=2)
                     trigger_auto_naming(file_ids, username=username, delay=2)
                     trigger_auto_classify(file_ids, username=username, delay=2)
+
+                    # analyze 走 trigger_auto_analyze: 用户在上传弹窗选了模板才触发,
+                    # 否则跳过 (文档分析强依赖 template_id, 没选就走 FilesPage 右侧 fallback)
+                    auto_template_id = task_info.get('template_id') if task_info else None
+                    auto_template_vars = task_info.get('template_variables') if task_info else None
+                    for fid, stats_id in rows:
+                        trigger_auto_analyze(
+                            file_detail_id=fid,
+                            execution_id=stats_id,
+                            file_type='document',
+                            template_id=auto_template_id,
+                            template_variables=auto_template_vars,
+                            username=username,
+                            delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                        )
         except Exception as e:
-            error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_upload")
-        
+            error(f"触发自动并行 LLM 任务失败: {str(e)}", source="celery_doc_upload")
+
         info(f"文档上传和处理任务完成 {self.request.id}, file={filename}", 
              source="celery_doc_upload")
         
@@ -1988,10 +2239,18 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
 
 
 @app.task(bind=True, name='scrape_and_process_web_link', queue='file_processing')
-def scrape_and_process_web_link_task(self, url, username):
+def scrape_and_process_web_link_task(self, url, username,
+                                      auto_analyze_template_id=None,
+                                      auto_analyze_template_variables=None):
     """
     服务端网页抓取：抓取 URL → Readability 提取正文 → 图片 base64 内嵌 → 上传 OSS → 写入 DB。
     替代 Chrome Extension 在浏览器端完成的全部工作。
+
+    Args:
+        url: 网页 URL
+        username: 用户名
+        auto_analyze_template_id: 上传弹窗中用户选择的 AI 分析模板 ID (None 则跳过 analyze)
+        auto_analyze_template_variables: 模板变量字典
     """
     import re as _re
     from backend.services.web_scraper_service import WebScraperService
@@ -2158,13 +2417,22 @@ def scrape_and_process_web_link_task(self, url, username):
             conn2.commit()
             conn2.close()
 
-        # ── 100%: 完成 + 自动打标签/命名/归类 ──
+        # ── 100%: 完成 + 4 路并行 LLM 任务: tag / name / classify / analyze ──
         info(f"Web Link task completed: url={url}, file_detail_id={file_detail_id}, "
              f"content_length={len(plain_text)}", source="celery_web_link")
 
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+        trigger_auto_analyze(
+            file_detail_id=file_detail_id,
+            execution_id=processing_stats_id,
+            file_type='web',
+            template_id=auto_analyze_template_id,
+            template_variables=auto_analyze_template_variables,
+            username=username,
+            delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+        )
 
         return {
             'status': 'completed',
@@ -2976,12 +3244,20 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
     try:
         db_manager = DatabaseManager(get_database_config())
         stats_id = None
+        # auto-analyze 上下文(从 upload_params 还原, 上传时由 API 写入)
+        auto_analyze_template_id = None
+        auto_analyze_template_variables = None
         with db_manager.get_connection_context() as conn:
             cur = conn.cursor()
 
-            # 1. 反查 processing_stats_id (Upload Link 场景下一对一)
+            # 1. 反查 processing_stats_id (Upload Link 场景下一对一) + 取 auto-analyze 上下文
             cur.execute(
-                "SELECT processing_stats_id FROM file_processing_details WHERE id=%s",
+                """
+                SELECT fpd.processing_stats_id, ps.upload_params
+                FROM file_processing_details fpd
+                LEFT JOIN processing_stats ps ON ps.id = fpd.processing_stats_id
+                WHERE fpd.id=%s
+                """,
                 (file_id,),
             )
             row = cur.fetchone()
@@ -2996,6 +3272,18 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     'reason': 'file_not_found',
                 }
             stats_id = row[0]
+            try:
+                _params_raw = row[1]
+                if isinstance(_params_raw, str):
+                    _params = json.loads(_params_raw) if _params_raw else {}
+                elif isinstance(_params_raw, dict):
+                    _params = _params_raw
+                else:
+                    _params = {}
+                auto_analyze_template_id = _params.get('auto_analyze_template_id')
+                auto_analyze_template_variables = _params.get('auto_analyze_template_variables')
+            except Exception:
+                pass
 
             # 2. 幂等: 仅当 processing_stats 还未终态时才更新
             rc_status = 'completed' if outcome == 'completed' else 'failed'
@@ -3023,15 +3311,24 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                  upload_params_patch, stats_id),
             )
 
-        # 3. 仅 completed 分支触发并行 LLM
+        # 3. 仅 completed 分支触发 4 路并行 LLM: tag / name / classify / analyze
         if outcome == 'completed':
             try:
                 trigger_auto_tagging([file_id], username, delay=2)
                 trigger_auto_naming([file_id], username, delay=2)
                 trigger_auto_classify([file_id], username, delay=2)
+                trigger_auto_analyze(
+                    file_detail_id=file_id,
+                    execution_id=stats_id,
+                    file_type='youtube',
+                    template_id=auto_analyze_template_id,
+                    template_variables=auto_analyze_template_variables,
+                    username=username,
+                    delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                )
                 info(
-                    f"finalize: 已触发 auto-tag/name/classify file_id={file_id} "
-                    f"source={source}",
+                    f"finalize: 已触发 auto-tag/name/classify/analyze file_id={file_id} "
+                    f"source={source} auto_analyze_template_id={auto_analyze_template_id}",
                     source="youtube_file_finalize",
                 )
             except Exception as e:

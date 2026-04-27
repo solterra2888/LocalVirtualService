@@ -163,3 +163,87 @@ export async function updateDailyPreset(
 ): Promise<DailyPresetResponse> {
   return api.put<DailyPresetResponse>('/daily/preset', payload);
 }
+
+// ─── Item detail (Drawer 预览用) ───────────────────────────────────
+//
+// 卡片点击后, 前端不再跳出到 Sources/Feeds, 而是在 Daily 内打开右侧抽屉预览.
+// 抽屉里上半部分摘要/标签/作者/时间复用 DailyFeedItem (列表已有), 下半部分
+// "原文区" 按 source_subtype 差异化呈现, 数据由本接口提供.
+//
+// 注意:
+//   - 二进制资源 (image/audio/pdf 的 file_url + audio/youtube 的 asr) 不在
+//     此返回, 由前端按需调 /api/files/original/{file_id} (复用 files 模块).
+//   - YouTube transcript 同样懒加载 /api/subscriptions/contents/{id}/transcript.
+//
+// 后端: backend/api/daily.py — endpoint: GET /api/daily/items/{id}
+
+export interface DailyItemDetailUpload {
+  file_id: number;
+  /** file_processing_details.file_type 原始值 (pdf/word/excel/csv/image/audio/youtube/web/text) */
+  file_type_raw: string | null;
+  display_name: string | null;
+  filename: string | null;
+  /** 本地路径 / OSS object key / 外链 URL (兜底); 预览资源直链请用 /api/files/original */
+  original_file_path: string | null;
+  /** Markdown 正文 / OCR 文本 / 网页正文 / 笔记 */
+  content: string | null;
+  /** processing_stats.final_report (执行级 AI 分析报告) */
+  final_report: string | null;
+}
+
+export interface DailyItemDetailFeedTags {
+  sector: string | null;
+  sector_en?: string | null;
+  industry: string | null;
+  industry_en?: string | null;
+  tickers: string[];
+  concepts: string[];
+  summary?: string | null;
+  confidence?: number | null;
+  tagged_at?: string | null;
+}
+
+export interface DailyItemDetailFeed {
+  content_db_id: number;
+  channel_type: string;             // twitter / youtube / news / rss
+  content_id: string | null;        // tweet_id / video_id / news guid
+  title: string | null;
+  content: string | null;           // 正文 (twitter 推文 / youtube 描述 / news 全文)
+  author_name: string | null;
+  author_identifier: string | null;
+  url: string | null;
+  media_urls: string[] | null;
+  metadata: Record<string, any> | null;
+  categories: string[] | null;
+
+  // Twitter 特定字段
+  is_retweet: boolean | null;
+  retweeted_author: string | null;
+  retweeted_content: string | null;
+  retweeted_url: string | null;
+  is_quote: boolean | null;
+  quoted_author: string | null;
+  quoted_content: string | null;
+  quoted_url: string | null;
+  is_reply: boolean | null;
+  in_reply_to_id: string | null;
+  in_reply_to_username: string | null;
+  in_reply_to_user_id: string | null;
+  heat_level: number | null;
+
+  /** YouTube 是否有 transcript; 正文需懒加载 /subscriptions/contents/:id/transcript */
+  has_transcript: boolean;
+
+  /** AI 标签 lite (与列表行 tags 同形, 未打标 = null) */
+  tags: DailyItemDetailFeedTags | null;
+}
+
+export interface DailyItemDetail extends DailyFeedItem {
+  upload: DailyItemDetailUpload | null;
+  feed: DailyItemDetailFeed | null;
+}
+
+/** 拉取单条卡片完整详情 (Drawer 预览主调用). */
+export async function getDailyItemDetail(itemId: string): Promise<DailyItemDetail> {
+  return api.get<DailyItemDetail>(`/daily/items/${encodeURIComponent(itemId)}`);
+}

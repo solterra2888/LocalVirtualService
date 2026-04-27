@@ -16,7 +16,7 @@ Daily 模块把两条数据链路（Upload Files + Feeds 订阅）合并成同�
 from datetime import datetime
 
 from backend.utils.datetime_utils import UtcDateTime
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -128,3 +128,120 @@ class DailyPresetUpdate(BaseModel):
         default_factory=list,
         description="勾选的 source_subtype 列表；传空数组表示清除 preset (展示全部)",
     )
+
+
+# ─── Item Detail (drawer 预览用) ──────────────────────────────────
+#
+# 卡片点击后, 前端不再跳出到 Sources/Feeds, 而是在 Daily 内打开右侧抽屉预览.
+# 抽屉里上半部分摘要/标签/作者/时间/跳转目标都来自 DailyFeedItem (列表已有);
+# 下半部分 "原文区" 需要按 source_subtype 差异化呈现:
+#   - upload  → file_processing_details.content + processing_stats.final_report
+#               (image/audio/youtube/pdf 二进制资源 + asr 仍走已有
+#                /api/files/original/{file_id}, 由前端按需懒加载)
+#   - feed    → 与 SubscriptionContent 列表行同形 (FeedArticleBody 复用)
+#               (youtube_feed transcript 仍走已有
+#                /api/subscriptions/contents/{id}/transcript, 由前端按需懒加载)
+#
+# 详见 docs/instructions/DAILY_MODULE.md §1 (改造后的卡片点击导航).
+
+
+class DailyItemDetailUpload(BaseModel):
+    """Upload 卡片点击后, 抽屉原文区所需的额外字段."""
+
+    file_id: int = Field(..., description="file_processing_details.id")
+    file_type_raw: Optional[str] = Field(
+        None,
+        description=(
+            "file_processing_details.file_type 原始值 (pdf/word/excel/csv/"
+            "image/audio/youtube/web/text), 用于前端区分 PDF / 图片 / 音频等"
+        ),
+    )
+    display_name: Optional[str] = Field(None, description="展示名 (优先 display_name, 兜底 filename)")
+    filename: Optional[str] = Field(None, description="原始 filename")
+    original_file_path: Optional[str] = Field(
+        None,
+        description=(
+            "原始路径 (本地路径 / OSS object key / 外部 URL 兜底)。"
+            "前端拼接预览资源时一般用 file_url, 这里仅作元信息展示."
+        ),
+    )
+    content: Optional[str] = Field(
+        None,
+        description="file_processing_details.content (Markdown 正文 / OCR 文本 / 网页正文 / 笔记)",
+    )
+    final_report: Optional[str] = Field(
+        None,
+        description="processing_stats.final_report (执行级 AI 分析报告; 多文件任务为整组报告)",
+    )
+
+
+class DailyItemDetailFeed(BaseModel):
+    """Feed 卡片点击后, 抽屉原文区所需的额外字段.
+
+    形态与 SubscriptionContent 列表行对齐, 方便前端复用 FeedArticleBody / FeedTweetContent.
+    Transcript (YouTube) 不在此返回, 走 GET /api/subscriptions/contents/{id}/transcript.
+    """
+
+    content_db_id: int = Field(..., description="subscription_content.id")
+    channel_type: str = Field(..., description="twitter / youtube / news / rss")
+    content_id: Optional[str] = Field(
+        None, description="平台原生 ID (Twitter tweet_id / YouTube video_id / news guid)"
+    )
+    title: Optional[str] = None
+    content: Optional[str] = Field(
+        None,
+        description="正文 (Twitter 推文文本 / YouTube 描述 / News 文章正文)",
+    )
+    author_name: Optional[str] = None
+    author_identifier: Optional[str] = None
+    url: Optional[str] = Field(None, description="原始外链 (View on Twitter / Read original)")
+    media_urls: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "平台特定 JSONB: Twitter (like_count/...) / YouTube (view_count/...) / "
+            "News (symbols/sentiment/...)"
+        ),
+    )
+    categories: Optional[List[str]] = Field(None, description="News 类别 / RSS tags")
+
+    # Twitter 特定
+    is_retweet: Optional[bool] = None
+    retweeted_author: Optional[str] = None
+    retweeted_content: Optional[str] = None
+    retweeted_url: Optional[str] = None
+    is_quote: Optional[bool] = None
+    quoted_author: Optional[str] = None
+    quoted_content: Optional[str] = None
+    quoted_url: Optional[str] = None
+    is_reply: Optional[bool] = None
+    in_reply_to_id: Optional[str] = None
+    in_reply_to_username: Optional[str] = None
+    in_reply_to_user_id: Optional[str] = None
+    heat_level: Optional[int] = None
+
+    # YouTube
+    has_transcript: bool = Field(
+        False, description="是否有可用 transcript / transcript_data, 前端按需懒加载正文"
+    )
+
+    # AI 标签 lite (与 subscription_content_tags LEFT JOIN 同形, 未打标 = None)
+    tags: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "AI 标签轻量结构: {sector, sector_en, industry, industry_en, "
+            "tickers[], concepts[], summary, confidence, tagged_at}"
+        ),
+    )
+
+
+class DailyItemDetail(DailyFeedItem):
+    """卡片完整详情 (列表 DailyFeedItem 字段 + 来源专属原文区字段).
+
+    upload / feed 二选一非空 (与 source 字段一致):
+      - source == 'upload' → upload 必非空, feed 为 None
+      - source == 'feed'   → feed   必非空, upload 为 None
+    """
+
+    upload: Optional[DailyItemDetailUpload] = None
+    feed: Optional[DailyItemDetailFeed] = None

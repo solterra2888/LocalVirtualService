@@ -19,7 +19,7 @@ const LoginPage: React.FC = () => {
     try {
       await login(values);
       message.success('Login successful!');
-      navigate('/files');
+      navigate('/daily');
     } catch (error) {
       message.error('Login failed, please check your username and password');
     }

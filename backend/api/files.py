@@ -55,7 +55,8 @@ from backend.tasks.file_tasks import (
     process_web_clip_task,
     trigger_auto_tagging,
     trigger_auto_naming,
-    trigger_auto_classify
+    trigger_auto_classify,
+    trigger_auto_analyze,
 )
 
 # 统一的环境变量加载
@@ -830,6 +831,34 @@ async def get_task_status(
     - **task_id**: Celery任务ID
     """
     try:
+        # 查询该 Celery task_id 关联的 processing_stats.rc_agent_status, 用于让前端 NavBar /
+        # 右侧 AI Analysis 面板感知"上传 Celery 主任务已完成, 但自动并行链路的 analyze_*_task
+        # 还在跑"的中间态. processing_stats.rc_agent_status 由 trigger_auto_analyze 在投递前
+        # 写为 'analyzing', analyze_*_task 完成后再写 'completed' / 'failed'.
+        rc_agent_status: Optional[str] = None
+        try:
+            from backend.database.db_manager import DatabaseManager
+            db_manager = DatabaseManager(get_database_config())
+            with db_manager.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT ps.rc_agent_status
+                    FROM file_processing_details fpd
+                    JOIN processing_stats ps ON ps.id = fpd.processing_stats_id
+                    WHERE fpd.task_id = %s
+                    ORDER BY fpd.id DESC
+                    LIMIT 1
+                    """,
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    rc_agent_status = row[0]
+        except Exception:
+            # 查询失败不阻塞 Celery 状态返回
+            rc_agent_status = None
+
         # 从Redis获取任务状态
         task_result = AsyncResult(task_id, app=celery_app)
         
@@ -842,7 +871,8 @@ async def get_task_status(
                 "current_file": None,
                 "files_processed": 0,
                 "total_files": 0,
-                "logs": []
+                "logs": [],
+                "rc_agent_status": rc_agent_status,
             }
         elif task_result.state == 'PROGRESS':
             info = task_result.info or {}
@@ -855,7 +885,8 @@ async def get_task_status(
                 "files_processed": info.get("files_processed", 0),
                 "files_failed": info.get("files_failed", 0),
                 "total_files": info.get("total_files", 0),
-                "logs": info.get("logs", [])
+                "logs": info.get("logs", []),
+                "rc_agent_status": rc_agent_status,
             }
             if info.get("asr_fallback_notice"):
                 out["asr_fallback_notice"] = True
@@ -874,7 +905,8 @@ async def get_task_status(
                     "files_processed": result.get("files_processed", 0),
                     "files_failed": result.get("files_failed", 1),
                     "total_files": result.get("total_files", 1),
-                    "logs": result.get("logs", [])
+                    "logs": result.get("logs", []),
+                    "rc_agent_status": rc_agent_status,
                 }
             return {
                 "task_id": task_id,
@@ -886,7 +918,8 @@ async def get_task_status(
                 "total_files": result.get("total_files", 0),
                 "processing_time": result.get("processing_time", 0),
                 "result": result,
-                "logs": result.get("logs", [])
+                "logs": result.get("logs", []),
+                "rc_agent_status": rc_agent_status,
             }
         else:  # FAILURE or other states
             # 尝试获取失败信息，如果获取失败则使用默认信息
@@ -910,7 +943,8 @@ async def get_task_status(
                 "files_processed": info.get("files_processed", 0),
                 "files_failed": info.get("files_failed", 0),
                 "total_files": info.get("total_files", 0),
-                "logs": info.get("logs", [])
+                "logs": info.get("logs", []),
+                "rc_agent_status": rc_agent_status,
             }
             
     except Exception as e:
@@ -1653,12 +1687,14 @@ async def update_file_detail_content(
 async def create_text_note(
     title: str = Body('', embed=True),
     content: str = Body(..., embed=True),
+    auto_analyze_template_id: Optional[int] = Body(None, embed=True),
+    auto_analyze_template_variables: Optional[Dict[str, Any]] = Body(None, embed=True),
     current_user: dict = Depends(get_current_user)
 ):
     """
     用户直接撰写 Markdown 文本笔记，无需上传文件。
     创建 processing_stats + file_processing_details 记录后自动触发
-    auto-tagging / auto-naming / auto-classify 并行 LLM 任务。
+    4 路并行 LLM 任务: tag / name / classify / analyze (analyze 仅当用户选了模板).
     """
     username = current_user.username
     display_title = title.strip() if title and title.strip() else 'Untitled Note'
@@ -1729,6 +1765,15 @@ async def create_text_note(
             trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            trigger_auto_analyze(
+                file_detail_id=file_detail_id,
+                execution_id=processing_stats_id,
+                file_type='text',
+                template_id=auto_analyze_template_id,
+                template_variables=auto_analyze_template_variables,
+                username=username,
+                delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+            )
         except Exception as e:
             warning(f"Failed to trigger auto LLM tasks for text note: {str(e)}",
                     source="api", user=username)
@@ -2590,6 +2635,8 @@ async def search_tickers(
 @router.post("/upload-audio", summary="Upload audio file and process asynchronously")
 async def upload_audio(
     file: UploadFile = File(...),
+    auto_analyze_template_id: Optional[int] = Form(None),
+    auto_analyze_template_variables: str = Form('{}'),  # JSON string
     current_user=Depends(get_current_user)
 ):
     """
@@ -2671,14 +2718,22 @@ async def upload_audio(
         
         info(f"Audio file saved to temporary directory: {file.filename} ({file_size / (1024 * 1024):.2f} MB)", 
              source="api", user=current_user.username)
-        
+
+        # 解析模板变量 JSON
+        try:
+            audio_template_vars = json.loads(auto_analyze_template_variables) if auto_analyze_template_variables else {}
+        except json.JSONDecodeError:
+            audio_template_vars = {}
+
         # 提交异步任务到 Celery
         task = upload_and_transcribe_audio_task.apply_async(
             args=[temp_file_path, file.filename, current_user.username],
             kwargs={
                 'model': 'fun-asr',
                 'language_hints': ['zh', 'en'],
-                'diarization_enabled': True
+                'diarization_enabled': True,
+                'auto_analyze_template_id': auto_analyze_template_id,
+                'auto_analyze_template_variables': audio_template_vars,
             },
             queue='file_processing'
         )
@@ -3050,10 +3105,15 @@ async def upload_web_link(
 
         task = scrape_and_process_web_link_task.apply_async(
             args=(url, username),
+            kwargs={
+                'auto_analyze_template_id': request.auto_analyze_template_id,
+                'auto_analyze_template_variables': request.auto_analyze_template_variables or {},
+            },
             queue='file_processing'
         )
 
-        info(f"Web Link task started: task_id={task.id}, url={url}", source="api")
+        info(f"Web Link task started: task_id={task.id}, url={url}, "
+             f"auto_analyze_template_id={request.auto_analyze_template_id}", source="api")
 
         return {
             "task_id": task.id,
@@ -4052,6 +4112,16 @@ async def upload_youtube_link(
                 detail="Missing required parameter: youtube_url"
             )
 
+        # 上传弹窗中可选的 AI 分析模板, finalize_youtube_file_task 会从 upload_params 读出来触发
+        auto_analyze_template_id = request.get('auto_analyze_template_id')
+        auto_analyze_template_variables = request.get('auto_analyze_template_variables') or {}
+        try:
+            auto_analyze_template_id = int(auto_analyze_template_id) if auto_analyze_template_id else None
+        except (TypeError, ValueError):
+            auto_analyze_template_id = None
+        if not isinstance(auto_analyze_template_variables, dict):
+            auto_analyze_template_variables = {}
+
         username = current_user.username if hasattr(current_user, 'username') else 'guest'
 
         video_id = YouTubeService.extract_video_id(youtube_url)
@@ -4061,7 +4131,8 @@ async def upload_youtube_link(
                 detail="Invalid YouTube URL. Please provide a valid YouTube video link."
             )
 
-        info(f"Received YouTube link: url={youtube_url}, video_id={video_id}, user={username}",
+        info(f"Received YouTube link: url={youtube_url}, video_id={video_id}, user={username}, "
+             f"auto_analyze_template_id={auto_analyze_template_id}",
              source="api")
 
         use_local = os.getenv('YOUTUBE_UPLOAD_USE_LOCAL', 'true') \
@@ -4091,6 +4162,9 @@ async def upload_youtube_link(
                         "youtube_url": youtube_url,
                         "video_id": video_id,
                         "dispatch_target": "local_virtual_service",
+                        # 持久化, finalize_youtube_file_task 会读出来触发 trigger_auto_analyze
+                        "auto_analyze_template_id": auto_analyze_template_id,
+                        "auto_analyze_template_variables": auto_analyze_template_variables,
                     }),
                     '', 'processing',
                 ))

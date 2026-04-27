@@ -28,6 +28,9 @@ from backend.database.db_manager import DatabaseManager
 from backend.schemas.daily import (
     DailyFeedItem,
     DailyFeedResponse,
+    DailyItemDetail,
+    DailyItemDetailFeed,
+    DailyItemDetailUpload,
     DailyNavigate,
     DailyPresetResponse,
     DailyPresetUpdate,
@@ -713,5 +716,341 @@ def update_daily_preset(
         conn.rollback()
         logger.error(f"[daily.update_daily_preset] 保存失败: {exc}")
         raise HTTPException(status_code=500, detail=f"保存失败: {exc}")
+    finally:
+        conn.close()
+
+
+# ─── 单卡片详情 (Drawer 预览用) ────────────────────────────────────
+#
+# 卡片点击 → 前端抽屉预览, 而不是跳出到 /files / /feeds (旧行为). 详情数据
+# 包含: 列表已有的 DailyFeedItem 字段 + 来源专属原文区字段:
+#   upload: file_processing_details.content + processing_stats.final_report
+#   feed:   subscription_content + subscription_content_tags 的列表行同形
+#
+# 二进制资源 (image/audio/pdf 的 file_url + audio/youtube 的 asr) 不在此返回,
+# 前端按需调 /api/files/original/{file_id} (已存在, 包含 OSS / 签名 URL 逻辑).
+# YouTube transcript 同样懒加载 /api/subscriptions/contents/{id}/transcript.
+#
+# 详见 docs/instructions/DAILY_MODULE.md §1 (改造后的卡片点击导航).
+
+
+_ITEM_ID_RE = re.compile(r"^(upload|feed)_(\d+)$")
+
+
+def _parse_item_id(item_id: str) -> tuple[str, int]:
+    """复合 ID 'upload_123' / 'feed_4567' → (source, int)。
+
+    非法格式抛 400 而不是 422 (路径参数, 业务级校验).
+    """
+    m = _ITEM_ID_RE.match(item_id or "")
+    if not m:
+        raise HTTPException(status_code=400, detail=f"非法的 item id: {item_id}")
+    return m.group(1), int(m.group(2))
+
+
+def _fetch_upload_detail(
+    cursor, file_id: int, current_user: TokenData
+) -> DailyItemDetail:
+    """根据 file_processing_details.id 装配 Upload 卡片完整详情.
+
+    鉴权: processing_stats."user" == 当前用户名 (与列表口径一致).
+    file_shares 共享场景留给 /api/files/original/{id} 二次校验, 这里不放行
+    防止外部用户列出他人的 Daily 详情.
+    """
+    cursor.execute(
+        """
+        SELECT
+            fpd.id,
+            fpd.file_type,
+            fpd.filename,
+            fpd.display_name,
+            fpd.original_file_path,
+            fpd.content,
+            COALESCE(fpd.content_length, 0)         AS content_length,
+            fpd.created_at,
+            fpd.processing_stats_id,
+            ps."user"                                AS owner_username,
+            ps.final_report,
+            ft.summary,
+            ft.reasoning,
+            ft.sector,
+            ft.industry,
+            ft.ticker,
+            ft.concepts,
+            ft.confidence
+        FROM file_processing_details fpd
+        JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
+        LEFT JOIN file_tags ft ON ft.file_id = fpd.id
+        WHERE fpd.id = %s
+        """,
+        (file_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Upload 文件不存在或已删除")
+
+    (
+        item_id,
+        file_type,
+        filename,
+        display_name,
+        original_file_path,
+        content,
+        content_length,
+        created_at,
+        processing_stats_id,
+        owner_username,
+        final_report,
+        summary,
+        reasoning,
+        sector,
+        industry,
+        ticker_raw,
+        concepts_raw,
+        confidence,
+    ) = row
+
+    if owner_username != current_user.username:
+        raise HTTPException(status_code=403, detail="无权访问该文件")
+
+    subtype = _UPLOAD_FILE_TYPE_MAP.get(file_type or "document", "document")
+    summary_text = summary or None
+    snippet_text = None
+    if not summary_text:
+        snippet_text = _truncate(reasoning) or _truncate(content)
+
+    title = display_name or filename or "Untitled"
+
+    from backend.utils.datetime_utils import ensure_utc
+    pub = ensure_utc(created_at)
+
+    navigate = DailyNavigate(
+        type="execution",
+        execution_id=processing_stats_id,
+    )
+
+    upload_payload = DailyItemDetailUpload(
+        file_id=item_id,
+        file_type_raw=file_type,
+        display_name=display_name,
+        filename=filename,
+        original_file_path=original_file_path,
+        content=content,
+        final_report=final_report,
+    )
+
+    return DailyItemDetail(
+        id=f"upload_{item_id}",
+        source="upload",
+        source_subtype=subtype,  # type: ignore[arg-type]
+        title=title,
+        summary=summary_text,
+        snippet=snippet_text,
+        author_name=None,
+        author_identifier=None,
+        sector=sector,
+        industry=industry,
+        tickers=_ensure_list(ticker_raw),
+        concepts=_ensure_list(concepts_raw),
+        confidence=float(confidence) if confidence is not None else None,
+        published_at=pub,
+        reading_time_min=_reading_time_min(content_length),
+        navigate=navigate,
+        upload=upload_payload,
+        feed=None,
+    )
+
+
+def _fetch_feed_detail(
+    cursor, content_db_id: int, current_user: TokenData
+) -> DailyItemDetail:
+    """根据 subscription_content.id 装配 Feed 卡片完整详情.
+
+    鉴权: user_id = ANY(sc.user_ids) (与列表口径 + Feeds 模块一致).
+    单查询 LEFT JOIN subscription_content_tags 取出 AI 标签轻量结构.
+    跳转目标 subscription_id 用 (channel_type, channel_identifier) 反查 subscription_list.
+    """
+    cursor.execute(
+        """
+        SELECT
+            sc.id, sc.channel_type, sc.content_id,
+            sc.title, sc.content,
+            sc.author_name, sc.author_identifier,
+            sc.url, sc.media_urls, sc.published_at,
+            sc.engagement_count, sc.view_count,
+            sc.metadata, sc.heat_level,
+            sc.is_retweet, sc.retweeted_author, sc.retweeted_content, sc.retweeted_url,
+            sc.is_quote,   sc.quoted_author,    sc.quoted_content,    sc.quoted_url,
+            sc.is_reply,   sc.in_reply_to_id,   sc.in_reply_to_username, sc.in_reply_to_user_id,
+            ((sc.transcript IS NOT NULL AND sc.transcript <> '') OR sc.transcript_data IS NOT NULL)
+                AS has_transcript,
+            COALESCE(LENGTH(sc.content), 0) + COALESCE(LENGTH(sc.transcript), 0) AS content_length,
+            sct.sector, sct.sector_en, sct.industry, sct.industry_en,
+            sct.ticker, sct.concepts, sct.summary, sct.confidence, sct.tagged_at
+        FROM subscription_content sc
+        LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
+        WHERE sc.id = %s AND %s = ANY(sc.user_ids)
+        """,
+        (content_db_id, current_user.user_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Feed 内容不存在或无权访问")
+
+    (
+        item_id, channel_type, content_id_raw,
+        title, content,
+        author_name, author_identifier,
+        url, media_urls, published_at,
+        _engagement_count, _view_count,
+        metadata, heat_level,
+        is_retweet, retweeted_author, retweeted_content, retweeted_url,
+        is_quote, quoted_author, quoted_content, quoted_url,
+        is_reply, in_reply_to_id, in_reply_to_username, in_reply_to_user_id,
+        has_transcript,
+        content_length,
+        sector, sector_en, industry, industry_en,
+        ticker_raw, concepts_raw, summary, confidence, tagged_at,
+    ) = row
+
+    subtype = _FEED_CHANNEL_TYPE_MAP.get(channel_type or "news", "news")
+    summary_text = summary or None
+    snippet_text = None
+    if not summary_text:
+        snippet_text = _truncate(content)
+
+    # 反查 subscription_id 用于跳转 (与列表 _resolve_subscription_ids 同口径)
+    sub_id_map = _resolve_subscription_ids(
+        cursor, current_user.user_id, [author_identifier] if author_identifier else []
+    )
+    sub_id = sub_id_map.get((channel_type, author_identifier))
+    if sub_id is not None:
+        navigate = DailyNavigate(
+            type="feed_article",
+            subscription_id=sub_id,
+            content_id=item_id,
+            external_url=url,
+        )
+    else:
+        navigate = DailyNavigate(
+            type="external_url" if url else "feed_article",
+            content_id=item_id,
+            external_url=url,
+        )
+
+    from backend.utils.datetime_utils import ensure_utc
+    pub = ensure_utc(published_at)
+
+    tickers = _ensure_list(ticker_raw)
+    concepts = _ensure_list(concepts_raw)
+
+    tags_payload = None
+    if sector is not None:
+        tags_payload = {
+            "sector": sector,
+            "sector_en": sector_en or "",
+            "industry": industry,
+            "industry_en": industry_en or "",
+            "tickers": tickers,
+            "concepts": concepts,
+            "summary": summary,
+            "confidence": float(confidence) if confidence is not None else None,
+            "tagged_at": tagged_at.isoformat() if tagged_at else None,
+        }
+
+    # News categories 在 metadata 之外, 这里当前 schema 不单列, FeedArticleBody
+    # 通过 selectedContent.categories 读, 我们尽量从 metadata.categories 兜底.
+    categories: Optional[List[str]] = None
+    if isinstance(metadata, dict):
+        cats = metadata.get("categories")
+        if isinstance(cats, list):
+            categories = [str(c) for c in cats if c]
+
+    feed_payload = DailyItemDetailFeed(
+        content_db_id=item_id,
+        channel_type=channel_type,
+        content_id=content_id_raw,
+        title=title,
+        content=content,
+        author_name=author_name,
+        author_identifier=author_identifier,
+        url=url,
+        media_urls=list(media_urls) if media_urls else None,
+        metadata=metadata if isinstance(metadata, dict) else None,
+        categories=categories,
+        is_retweet=is_retweet,
+        retweeted_author=retweeted_author,
+        retweeted_content=retweeted_content,
+        retweeted_url=retweeted_url,
+        is_quote=is_quote,
+        quoted_author=quoted_author,
+        quoted_content=quoted_content,
+        quoted_url=quoted_url,
+        is_reply=is_reply,
+        in_reply_to_id=in_reply_to_id,
+        in_reply_to_username=in_reply_to_username,
+        in_reply_to_user_id=in_reply_to_user_id,
+        heat_level=heat_level,
+        has_transcript=bool(has_transcript),
+        tags=tags_payload,
+    )
+
+    composed_title = title or author_name or author_identifier or "Untitled"
+
+    return DailyItemDetail(
+        id=f"feed_{item_id}",
+        source="feed",
+        source_subtype=subtype,  # type: ignore[arg-type]
+        title=composed_title,
+        summary=summary_text,
+        snippet=snippet_text,
+        author_name=author_name,
+        author_identifier=author_identifier,
+        sector=sector,
+        industry=industry,
+        tickers=tickers,
+        concepts=concepts,
+        confidence=float(confidence) if confidence is not None else None,
+        published_at=pub,
+        reading_time_min=_reading_time_min(content_length),
+        navigate=navigate,
+        upload=None,
+        feed=feed_payload,
+    )
+
+
+@router.get("/items/{item_id}", response_model=DailyItemDetail)
+def get_daily_item_detail(
+    item_id: str,
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """单条卡片完整详情 (Drawer 预览用).
+
+    item_id 形如 'upload_<file_id>' 或 'feed_<content_id>', 与列表
+    DailyFeedItem.id 完全一致. 内部按前缀分发到 file_processing_details
+    或 subscription_content 单条查询, 鉴权口径与列表 endpoint 一致.
+
+    返回结构: DailyFeedItem 列表字段 + 来源专属 upload/feed 子结构.
+    """
+    if current_user.user_id is None or not current_user.username:
+        raise HTTPException(status_code=401, detail="未授权")
+
+    source, numeric_id = _parse_item_id(item_id)
+
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    try:
+        cursor = conn.cursor()
+        if source == "upload":
+            return _fetch_upload_detail(cursor, numeric_id, current_user)
+        else:
+            return _fetch_feed_detail(cursor, numeric_id, current_user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[daily.get_daily_item_detail] 查询失败 ({item_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"查询失败: {exc}")
     finally:
         conn.close()

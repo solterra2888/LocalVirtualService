@@ -5,6 +5,9 @@ import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
+import UploadAnalysisTemplatePicker, {
+  UploadAnalysisTemplatePickerValue,
+} from './UploadAnalysisTemplatePicker';
 
 /** 未指定时与历史行为一致：允许 isAudioFile 所含全部格式（含视频容器） */
 export type UploadAudioModalVariant = 'audio' | 'video';
@@ -39,6 +42,7 @@ const { Dragger } = Upload;
 const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, themeMode, variant }) => {
   const isDark = themeMode === 'dark';
   const [audioFile, setAudioFile] = useState<AudioFile | null>(null);
+  const [analyzePicker, setAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const { addTask, updateTaskStatus } = useFileProcessing();
 
   const formatFileSize = (bytes: number): string => {
@@ -100,14 +104,22 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
     }
 
     const filename = audioFile.name;
+    const audioAnalyzeOptions = {
+      auto_analyze_template_id: analyzePicker.templateId ?? null,
+      auto_analyze_template_variables: analyzePicker.templateVariables || {},
+    };
 
     onCancel();
     setAudioFile(null);
+    setAnalyzePicker({});
 
     (async () => {
       try {
-        // 上传音频文件（立即返回任务 ID，不阻塞）
-        const uploadResult = await filesAPI.uploadAudioFile(audioFile.file);
+        // 上传音频文件（立即返回任务 ID，不阻塞）, ASR 完成后后端自动并行触发 4 路 LLM
+        const uploadResult = await filesAPI.uploadAudioFile(
+          audioFile.file,
+          audioAnalyzeOptions,
+        );
         if (!uploadResult.success || !uploadResult.task_id) {
           throw new Error(uploadResult.message || 'upload failed');
         }
@@ -151,7 +163,23 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
                 logs: statusResult.logs || [],
               });
             } else if (taskStatus === 'completed') {
-              // 任务完成
+              // Celery 主任务（ASR）完成. 但若用户在弹窗里选了 AI 分析模板, trigger_auto_analyze
+              // 已经把 processing_stats.rc_agent_status 翻成 'analyzing', 此时 NavBar 不应过早结束,
+              // 改成 'processing' 中间态显示 "AI analyzing…", 直到 rc_agent_status 变成
+              // 'completed' / 'failed' 才真正收尾.
+              const rc = statusResult.rc_agent_status;
+              if (rc === 'analyzing') {
+                updateTaskStatus(taskId, {
+                  status: 'ai_processing',
+                  progress: 95,
+                  current_file: filename,
+                  files_processed: 0,
+                  files_failed: 0,
+                  total_files: 1,
+                  logs: statusResult.logs || [],
+                });
+                return;
+              }
               clearInterval(pollInterval);
               updateTaskStatus(taskId, {
                 status: 'completed',
@@ -201,6 +229,7 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
 
   const handleClose = () => {
     setAudioFile(null);
+    setAnalyzePicker({});
     onCancel();
   };
 
@@ -333,6 +362,17 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
               </div>
             </div>
           )}
+
+          {/* AI 分析模板 (可选, 默认 audio_analysis_v1) */}
+          <div style={{ marginTop: '16px' }}>
+            <UploadAnalysisTemplatePicker
+              value={analyzePicker}
+              onChange={setAnalyzePicker}
+              mode="audio-default"
+              textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
+              textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
+            />
+          </div>
 
           {/* 底部按钮 */}
           <div style={{ 

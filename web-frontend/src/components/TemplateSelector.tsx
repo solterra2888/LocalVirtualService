@@ -27,6 +27,11 @@ interface TemplateSelectorProps {
   style?: React.CSSProperties;
   /** 选择模板后是否显示模板配置信息，默认 true */
   showConfigWhenSelected?: boolean;
+  /**
+   * 当未传入 value 且模板列表中存在 is_default 时是否自动选中, 默认 true.
+   * 上传弹窗里使用此组件时应传 false, 让用户显式选择 (不选则跳过 auto-analyze).
+   */
+  autoSelectDefault?: boolean;
 }
 
 interface Template {
@@ -51,6 +56,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   allowClear = true,
   style = {},
   showConfigWhenSelected = true,
+  autoSelectDefault = true,
 }) => {
   const { themeMode } = useDashboardSettings();
   const boxTheme = TEMPLATE_BOX_THEME[themeMode];
@@ -81,8 +87,8 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
 
       setTemplates(categoryTemplates);
 
-      // 如果有默认模板且当前未选择，自动选择默认模板
-      if (!value && categoryTemplates.length > 0) {
+      // 如果有默认模板且当前未选择，自动选择默认模板 (上传弹窗中关闭此行为)
+      if (autoSelectDefault && !value && categoryTemplates.length > 0) {
         const defaultTemplate = categoryTemplates.find((t: Template) => t.is_default);
         if (defaultTemplate && onChange) {
           onChange(defaultTemplate.id, defaultTemplate);

@@ -314,9 +314,11 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
           // 会误判为完成（NavBar 消失、列表刷新过早），而 DB 轮询能真实反映全链路进度。
           if (task.fileType === 'youtube' && task.fileId) {
             const st = await filesAPI.getUploadYouTubeStatus(task.fileId);
-            // 仅当 rc_agent_status 也已终态（finalize 已执行）才上报完成；
-            // 否则继续上报 processing，避免列表在 rc_agent_status 更新前刷新。
-            const rcFinalized = !!st.rc_agent_status && st.rc_agent_status !== 'processing';
+            // 主链路终态 (字幕/ASR/finalize 都跑完): rc_agent_status 不在 'processing' 也不在
+            // 'analyzing'. 'analyzing' 是 trigger_auto_analyze 投递自动 AI 分析后的中间态,
+            // 此时主任务事实已结束但 LLM 还在跑, NavBar 应保持 processing 中间态而非过早消失.
+            const rc = st.rc_agent_status;
+            const rcFinalized = !!rc && rc !== 'processing' && rc !== 'analyzing';
             if ((st.status === 'completed' || st.status === 'failed') && rcFinalized) {
               updateTaskStatus(taskId, {
                 status: st.status,
@@ -328,9 +330,10 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
                 logs: [],
               });
             } else {
+              const isAnalyzing = rc === 'analyzing';
               updateTaskStatus(taskId, {
-                status: 'processing',
-                progress: st.progress,
+                status: isAnalyzing ? 'ai_processing' : 'processing',
+                progress: isAnalyzing ? 95 : st.progress,
                 current_file: st.youtube_url,
                 files_processed: 0,
                 files_failed: 0,
@@ -360,6 +363,24 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
                 '已提交 Fun-ASR，大文件或长音频可能需要较长时间，请耐心等待。',
               okText: '知道了',
             });
+          }
+          // 自动 AI 分析中间态: Celery 主任务已 'completed', 但 trigger_auto_analyze 已投递
+          // analyze_*_task 把 rc_agent_status 翻成 'analyzing' (analyze_*_task 完成后会写
+          // 'completed' / 'failed'). 此时 NavBar 不应过早收掉, 而是把 status 切成 'ai_processing'
+          // 让 TaskProgressPopover 显示 "AI analyzing…", 等真正终态再走 completed/failed.
+          const rcFromTask = status.rc_agent_status;
+          const taskCompleted = status.status === 'completed';
+          if (taskCompleted && rcFromTask === 'analyzing') {
+            updateTaskStatus(taskId, {
+              ...status,
+              status: 'ai_processing',
+              progress: 95,
+              files_processed: status.files_processed || 0,
+              files_failed: status.files_failed || 0,
+              total_files: status.total_files || 1,
+              logs: status.logs || [],
+            });
+            continue;
           }
           updateTaskStatus(taskId, status);
         } catch (error: unknown) {
