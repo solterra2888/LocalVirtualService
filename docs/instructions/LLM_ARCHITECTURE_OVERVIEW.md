@@ -1,10 +1,8 @@
 # LLM 模型使用整体架构文档
 
-> 最后更新：2026-04-27（重构完成版）
+> 最后更新：2026-04-29（Phase 2 双态模板 + Upload/Feeds 产品化）
 >
-> ⚠️ **2026-04-27 大重构**：本文档基于 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)
-> 完成的 8-PR 重构，关键变化已在第 0 节标注。完整重构成果见
-> [LLM_REFACTOR_SUMMARY.md](./LLM_REFACTOR_SUMMARY.md)。
+> **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.9）。
 
 本文档梳理系统中所有模块对 LLM 大语言模型的完整调用架构、数据流向及各业务链路，供开发者快速理解整体 AI 能力设计。
 
@@ -12,13 +10,13 @@
 
 ## 目录
 
-0. [⭐ 重构后核心变化（2026-04-27）](#0--重构后核心变化2026-04-27)
+0. [⭐ 重构后核心变化](#0--重构后核心变化)
 1. [整体架构总览](#1-整体架构总览)
 2. [LLM 核心框架层](#2-llm-核心框架层)
 3. [Prompt 模板系统](#3-prompt-模板系统)
 4. [业务模块 LLM 链路](#4-业务模块-llm-链路)
    - 4.1 [Upload Files — 文件上传与分析](#41-upload-files--文件上传与分析)
-   - 4.2 [Feeds — 订阅内容打标](#42-feeds--订阅内容打标)
+   - 4.2 [Feeds — 打标与个性化摘要（Hybrid）](#42-feeds--打标与个性化摘要hybrid)
    - 4.3 [Twitter Daily Report](#43-twitter-daily-report)
    - 4.4 [YouTube Daily Report](#44-youtube-daily-report)
    - 4.5 [News Analysis — 新闻分析（暂弃用）](#45-news-analysis--新闻分析暂弃用)
@@ -29,9 +27,9 @@
 
 ---
 
-## 0. ⭐ 重构后核心变化（2026-04-27）
+## 0. ⭐ 重构后核心变化
 
-> 阅读建议：先看本节理解新模型，再看后续详细章节（部分流程图已被新机制取代）。
+> 阅读建议：先看本节理解 **双态模板** 与 **Resolver 优先级**，再看第 4 节各业务链路。
 
 ### 0.1 LLM 调用入口统一
 
@@ -43,86 +41,90 @@
                                         ✅ 完整 usage_log
 
 改造后：
-    所有路径 → LocalLLM (语义包装) → chat_completion_with_template (中央入口)
-                                        ✅ 写 usage_log
-                                        ✅ ConfigResolver
-                                        ✅ parse_output
+    LocalLLMAnalysisService（语义包装）内部委托 chat_completion_with_template
+        → ✅ usage_log（含 user_id）
+        → ✅ ConfigResolver
+        → ✅ parse_output（按模板 output_format）
 ```
 
-### 0.2 新增 LLMTemplateResolver — 三级 fallback
+### 0.2 LLMTemplateResolver — 优先级（Phase 2）
+
+**`user_template_preferences` 表在 Resolver 路径上已废弃**：USER_OWNED 模块下，每用户每 `module_code` 仅 **一行** `scope='user'` 的 `llm_prompt_templates` 记录；用户通过「我的模板」或上传弹窗侧栏编辑该行表达偏好。旧 preferences 表仍保留，仅供历史数据或兼容查询，**新代码不读**。
 
 ```
 LLMTemplateResolver.resolve(module_code, user_id, runtime_template_id?)
-        ↓
-   runtime_template_id  (调用方运行时显式传; 优先级最高)
-        ↓ 未传
-   user_template_preferences[user_id, module_code]  (用户偏好)
-        ↓ 未设
-   SYSTEM_DEFAULTS[module_code]  (代码常量, 兜底)
-        ↓ 未配
-   ResolveError
+
+1) runtime_template_id（若传入且模板存在且 active）     → source=runtime   （最高）
+2) USER_OWNED 模块 且 user_id 有效：
+      查 user-scope 模板；缺失则 UserTemplateSeederService 懒 seed
+      → source=user_owned
+3) SYSTEM_DEFAULTS[module_code] → DB 按 template_code 加载
+      → source=default
+
+SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模板 + admin 后台修改。
 ```
 
 文件：`backend/services/llm_template_resolver.py`
 
-### 0.3 MODULE_REGISTRY 扩展（5 → 13）
+### 0.3 双态模型：SYSTEM_FIXED vs USER_OWNED
 
-```
-[已有, 重构前]
-    twitter_phase1 / twitter_phase2 / youtube_phase1 / youtube_phase2 / file_analysis
+| 类型 | 含义 | 谁能改 prompt | DB |
+|------|------|---------------|-----|
+| **SYSTEM_FIXED** | 全站共享、客观一致 | 仅 Admin（`/llm/prompts/system-templates`） | `scope='system'` |
+| **USER_OWNED** | 每用户一份当前内容，重置=覆盖、无版本历史 | 用户（`/llm/prompts/my-templates/...`） | `scope='user'`，`(created_by, module_code)`  partial unique |
 
-[新增, 重构后]
-    file_tagging   - 文件自动打标 (默认 content_tag_v1)
-    file_naming    - 文件自动命名 (默认 auto_name_v1)
-    file_classify  - 文件自动归类 (默认 auto_classify_v1)
-    feed_tagging   - Feed 内容打标 (默认 content_tag_feeds_v1)
-    feed_summary   - Feed per-user 个性化摘要 (无系统默认, 用户必须自建)
-    news_summary   - 新闻摘要 (默认 news_summary_v1)
-    news_classification  - 新闻分类维度 (system_only)
-    theme_description    - 主题描述生成 (system_only)
-```
+**USER_OWNED 模块（7 个）**：`twitter_phase2`, `youtube_phase2`, `file_analysis`, `audio_analysis`, `file_tagging`, `feed_summary`, `youtube_summary`。
 
-文件：`backend/services/template_preference_service.py`
+**SYSTEM_FIXED 典型模块**：`feed_tagging`（Hybrid 决策：全局 tag）、`file_naming`, `file_classify`, `news_summary`, `twitter_phase1`, `youtube_phase1`, `news_classification`, `theme_description` 等。
 
-### 0.4 `llm_prompt_templates.module_code` 字段
+约束与种子迁移：`pr_a_template_classification_refactor.sql`（partial unique、归档孤儿模板、`audio_analysis` 拆模块、`feed_summary_v1` / `youtube_summary_v1` 种子）、`pr_b_seed_user_owned_templates.sql`（为新模型批量克隆用户私有模板）。
 
-新增 `module_code VARCHAR(64)` 列，与 `MODULE_REGISTRY` / `user_template_preferences.module_code` 对齐。前端 `TemplateSelector` / `UploadAnalysisTemplatePicker` 改为按 `moduleCode` 过滤模板。
+文件：`backend/services/template_preference_service.py`（`SYSTEM_ONLY_MODULES`, `USER_OWNED_MODULES`, `MODULE_REGISTRY`）
 
-迁移：`add_module_code_to_llm_prompt_templates.sql`（生产 23 模板全部赋值，0 NULL）
+### 0.4 `llm_prompt_templates.module_code`
 
-### 0.5 双层 Feed Summary 模型
+`module_code` 与 `MODULE_REGISTRY` 对齐；列表 API 返回 `module_code` / `category_code`，前端 `UploadAnalysisTemplatePicker` 按模块加载 **当前用户的私有模板** 或展示系统模块说明。
 
-```
-subscription_content_tags (全局共享, 不变)         ← 客观分类 + baseline summary
-subscription_content_user_summaries (PR-6 新表)   ← per-user 主观字段覆盖
+迁移：`add_module_code_to_llm_prompt_templates.sql`
 
-读取规则:
-    summary       = COALESCE(user_summaries.summary, tags.summary)
-    summary_source = 'personalized' | 'global'
-```
+### 0.5 Feeds：Hybrid（全局 Tag + Per-user 摘要）
 
-迁移：`create_subscription_content_user_summaries.sql`
+- **打标 `feed_tagging`**：走 **SYSTEM_FIXED** 模板（如 `content_tag_feeds_v1`），结果写入 **`subscription_content_tags`**，全站订阅者共用同一套客观标签/summary 基线。
+- **个性化摘要**：写入 **`subscription_content_user_summaries`**。按内容渠道选择 **USER_OWNED** 模块：
+  - Twitter 类 → `feed_summary`（系统种子 `feed_summary_v1`）
+  - YouTube 视频 → `youtube_summary`（系统种子 `youtube_summary_v1`，per-video、per-user）
 
-### 0.6 4 路触发链路对齐（修复历史不一致）
+读取侧仍可采用 `COALESCE(用户摘要, 全局 tags.summary)` 一类策略；路由逻辑见 `FeedSummaryPersonalizationService` 中 `_CHANNEL_TO_MODULE`。
 
-```
-改造前: process_web_clip / PATCH content / Web Link 触发不一致
-改造后: 所有 content 写入完成的链路都触发 4 路 (tag/name/classify/analyze)
-        每路都接 LLMTemplateResolver, 走 runtime > preference > default
-```
+### 0.6 上传弹窗：`auto_analyze_enabled` / `auto_tag_enabled`
 
-### 0.7 用户标识 user_id 透传
+除环境变量总开关（`AUTO_ANALYZE_ENABLED` / `AUTO_TAG_ENABLED`）外，各上传 API 接受 **每次请求** 布尔字段（默认 `true`）。若为 `false`，`trigger_auto_analyze` / `trigger_auto_tagging` **直接跳过**，不解析模板、不调 LLM（与「开关关闭」语义一致）。详见 `backend/api/files.py`、`backend/tasks/file_tasks.py`。
 
-`LocalLLMAnalysisService.analyze_file_content(user_id=...)` 全链路打通——所有 service / task 通过 `username → user_id` 转换 (`backend/utils/user_resolver.py`，LRU 缓存)，最终进入 `llm_prompt_usage_logs.user_id`，可追溯到具体用户。
+前端：`UploadAnalysisTemplatePicker` 的开关默认 **首次打开为 ON**；关闭弹窗时父组件应重置 picker state，避免 Ant Design Modal 子组件不卸载导致的状态残留。
 
-### 0.8 已清理的孤儿对象
+### 0.7 Prompt 管理 API 与 UI
+
+- **用户**：`GET/PUT /llm/prompts/my-templates`、`POST .../reset` — 仅 **USER_OWNED** 模块。
+- **管理员**：`GET/PUT /llm/prompts/system-templates/{template_id}` — **SYSTEM_FIXED** 系统行。
+- **`POST /llm/prompts/templates`（通用创建）**：对普通用户 Deprecated，仅 admin 用于维护 system 模板等场景。
+
+前端 **PromptTemplatesPage**：「我的模板」Tab 仅 7 张用户卡片；「系统模板 (Admin)」为管理员扁平列表（含「立即生效 / 仅作种子」标签说明）。**UploadAnalysisTemplatePicker** / **FilesPage** 侧栏：侧滑 **Drawer** 内编辑私有模板，**InsertVariablePopover** 支持向 prompt 插入 `{{变量}}`。
+
+### 0.8 4 路触发与用户标识
+
+文件 `content` 就绪后并行触发 tag / name / classify / analyze；其中 **analyze、tag** 在 USER_OWNED 模块上经 Resolver 取用户私有模板（**name/classify** 仍为 SYSTEM_FIXED）。`username → user_id`：`backend/utils/user_resolver.py`，保证 `llm_prompt_usage_logs.user_id` 可观测。
+
+### 0.9 LLMRateLimiter（PR-F，默认关闭）
+
+`LLMService.chat_completion_with_template` 可在传入 `user_id` 时做 **per-user × per-provider** 每分钟窗口限速（Redis INCR）。**仅当** 环境变量 **`LLM_USER_RATE_LIMIT_PER_MIN` 显式设为大于 0 的整数** 时生效；未设置或为 0 → 完全跳过（便于上线后先看 `llm_prompt_usage_logs` 再定阈值）。超限 → `LLMRateLimitExceeded` → FastAPI 429 + `Retry-After`。
+
+文件：`backend/core/llm_rate_limiter.py`
+
+### 0.10 已清理的孤儿对象（历史）
 
 | 对象 | 原因 | 清理 migration |
 |------|------|---------------|
-| `twitter_report_user_config` | Python 完全没引用，全部行 phase config 为空 | `cleanup_legacy_template_orphans.sql` |
-| `update_subscription_unread_count(int,int)` | 函数体引用已删除字段 | 同上 |
-| `refresh_all_unread_counts()` | 同上 | 同上 |
-| `trigger_update_unread_count_on_read()` | 同上 | 同上 |
+| `twitter_report_user_config` 等 | 无引用或引用已删字段 | `cleanup_legacy_template_orphans.sql` |
 
 ---
 
@@ -159,7 +161,8 @@ subscription_content_user_summaries (PR-6 新表)   ← per-user 主观字段覆
                                              │
                          ┌───────────────────▼───────────────────┐
                          │      Prompt Template 系统              │
-                         │  DB表: llm_prompt_templates            │
+                         │  DB: llm_prompt_templates            │
+                         │  LLMTemplateResolver（runtime→user→default）│
                          │  渲染: PromptRenderer ({{变量}} 替换)  │
                          │  配置: ConfigResolver (优先级仲裁)     │
                          └───────────────────────────────────────┘
@@ -222,29 +225,22 @@ chat_completion(messages, provider=X, model=Y)
                     └─ 全部失败 → 抛出异常
 ```
 
-### 2.5 两条 LLM 调用路径
+### 2.5 「两条路径」在产品语义上仍区分，在实现上已统一
 
-系统存在**两条并行的 LLM 调用路径**，各有分工：
+- **语义路径 A**：`LocalLLMAnalysisService.analyze_file_content()` — 面向「文件 / Feed 正文」类输入，参数里带 `template_id` 或由上游已解析好的模板。
+- **语义路径 B**：`llm_service.chat_completion_with_template()` — 面向日报、新闻分析等「结构化业务输入」。
+
+**实现上**：路径 A **内部直接调用**路径 B，因此 **usage_log、ConfigResolver、output_format 解析** 与路径 B 一致，不再存在「A 无日志」的分叉。
 
 ```
-路径 A：LocalLLMAnalysisService
-    适用场景：文件分析、内容打标（Upload Files 模块 + Feeds 打标）
-    特点：面向"文件内容"驱动，通过 template_id/code 加载模板
-    调用链：
-    LocalLLMAnalysisService.analyze_file_content()
-        → PromptRenderer.render(template_id/code, variables)
-        → ConfigResolver.resolve_config()
-        → llm_service.chat_completion(messages)
+LocalLLMAnalysisService.analyze_file_content(..., user_id=..., template_id=...)
+    → await llm_service.chat_completion_with_template(template_id=..., variables=..., user_id=...)
 
-路径 B：llm_service.chat_completion_with_template()
-    适用场景：业务报告生成（Twitter/YouTube Daily Report、News Analysis）
-    特点：面向"业务数据"驱动，统一走 LLMService 内部模板加载
-    调用链：
-    llm_service.chat_completion_with_template(template_code, variables, ...)
-        → PromptRenderer.render()
-        → ConfigResolver.resolve_config()
-        → llm_service.chat_completion(messages)
-        → 记录 llm_prompt_usage_logs
+TwitterAuthorSummaryService 等
+    → await llm_service.chat_completion_with_template(...)
+        →（可选）LLMRateLimiter.check_and_consume（当 user_id 非空且 env 打开时）
+        → PromptRenderer + ConfigResolver + chat_completion
+        → llm_prompt_usage_logs
 ```
 
 ### 2.6 Embedding 能力
@@ -277,6 +273,9 @@ investment_theme_embedding_service.py
 | `temperature` | 温度参数 |
 | `max_tokens` | 最大 token 数 |
 | `output_format` | 输出格式定义（json/text/object） |
+| `scope` | `system`（系统模板）/ `user`（用户私有，USER_OWNED 模块一人一轨）|
+| `module_code` | 与 `MODULE_REGISTRY` 对齐的业务模块键 |
+| `created_by` | 用户私有模板时为用户 ID |
 
 ### 3.2 渲染流程
 
@@ -326,8 +325,8 @@ queue: file_processing  queue: file_processing  queue: file_processing        qu
         │                   │                  │                                      │
         ▼                   ▼                  ▼                                      ▼
 LocalLLMAnalysisService LocalLLMAnalysisService LocalLLMAnalysisService        LocalLLMAnalysisService
-模板: content_tag_v1    模板: auto_name_v1  模板: auto_classify_v1             模板: 用户选择
-(固定)                  (固定)             (固定)                               (音频默认 audio_analysis_v1)
+模板: LLMTemplateResolver(file_tagging)   系统默认 auto_name_v1   系统默认 auto_classify_v1   Resolver: file_analysis 或 audio_analysis
+(USER_OWNED)             (SYSTEM_FIXED)                    (SYSTEM_FIXED)              (USER_OWNED；YouTube/音频走 audio_analysis)
         │                   │                  │                                      │
         ▼                   ▼                  ▼                                      ▼
   file_tags 表         display_name 字段   user_execution_folders 表        processing_stats.final_report
@@ -382,11 +381,10 @@ POST /api/files/create-text-note
 #### 4.1.3 用户主动分析（Re-analyze）
 
 ```
-FilesPage 右侧面板选择 Prompt Template
+FilesPage 右侧面板 / 中间弹窗 / Re-analyze：UploadAnalysisTemplatePicker（moduleCode=file_analysis 或 audio_analysis）
     → POST /api/files/document/analyze 或 /audio/analyze
     → analyze_document_task / analyze_audio_task (skip_post_trigger=False)
-    → LocalLLMAnalysisService
-    → 用户选择的模板（动态）
+    → LLMTemplateResolver → LocalLLMAnalysisService（默认使用当前用户对应模块的私有模板）
     → processing_stats.final_report 写入
     → 分析完成后再次触发 tag + name + classify（不递归 analyze）
 ```
@@ -394,24 +392,30 @@ FilesPage 右侧面板选择 Prompt Template
 #### 4.1.4 Auto Tag 详细流程
 
 ```
-tag_file_content_task(file_id, username, force=False)
+tag_file_content_task(file_id, username, force=False, template_id=None, ...)
     │
-    ├─ 检查 AUTO_TAG_ENABLED 开关
+    ├─ 若本次请求/上层链路传入 auto_tag_enabled=False → 直接跳过（不调 LLM）
+    ├─ 检查 AUTO_TAG_ENABLED 环境总开关
     ├─ 检查 content 长度 ≥ AUTO_TAG_MIN_CONTENT_LENGTH (默认 100)
     ├─ 幂等检查：file_tags 表已有记录且非 force → 跳过
     ├─ 截断 content 至 AUTO_TAG_CONTENT_MAX_CHARS (默认 6000 字符)
     │
-    ├─ ContentTaggingService → LocalLLMAnalysisService (template: content_tag_v1)
+    ├─ LLMTemplateResolver.resolve('file_tagging', user_id, runtime_template_id=template_id)
+    ├─ ContentTaggingService → LocalLLMAnalysisService（解析得到的 template_id）
     │       → LLM 返回 JSON：{ sector, industry, tickers, concepts, confidence, reasoning }
     │
     └─ 写入 file_tags 表 (ON CONFLICT file_id DO UPDATE)
 ```
 
+**说明**：上传 API 可将弹窗中 `file_tagging` 解析结果以 `template_id`（及变量）写入 Celery `task_info`，作为 Resolver 的 **runtime** 优先级；未传时则使用用户私有 `file_tagging` 模板或系统默认 `content_tag_v1`。
+
 ---
 
-### 4.2 Feeds — 订阅内容打标
+### 4.2 Feeds — 打标与个性化摘要（Hybrid）
 
-Feeds 模块的 LLM 打标**不随抓取自动触发**，需手动或批量触发。
+#### 4.2.1 全局打标（SYSTEM_FIXED：`feed_tagging`）
+
+Feeds 的 LLM 打标**不随抓取自动触发**，需手动或批量触发。
 
 ```
 【触发方式】
@@ -428,7 +432,8 @@ FeedContentTaggingService
     │   └─ YouTube: title + transcript（≥ AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE 字符）
     │   截断至 AUTO_FEED_TAG_MAX_CHARS (默认 6000 字符)
     │
-    ├─ LocalLLMAnalysisService (template: content_tag_feeds_v1)
+    ├─ LLMTemplateResolver('feed_tagging', user_id) → 系统模板 content_tag_feeds_v1（仅 admin 可调文案）
+    ├─ LocalLLMAnalysisService
     │       → LLM 返回 JSON：{
     │             sector / sector_en / industry / industry_en /
     │             tickers[] / concepts[] / summary / confidence / reasoning
@@ -436,6 +441,104 @@ FeedContentTaggingService
     │
     └─ 写入 subscription_content_tags 表 (UPSERT on subscription_content_id)
 ```
+
+#### 4.2.2 个性化摘要（USER_OWNED：`feed_summary` / `youtube_summary`） — PR-N 重构
+
+**原（PR-7）懒触发** → **现（PR-N）齿轮配置 + 全局打标完成后自动 fan-out**。
+
+由 `FeedSummaryPersonalizationService` 根据 **`channel_type`** 选择模块：
+
+- Twitter 类渠道 → **`feed_summary`**（种子模板 `feed_summary_v1`，每人一份可编辑私有行）
+- YouTube 视频 → **`youtube_summary`**（种子模板 `youtube_summary_v1`，per-video、per-user）
+
+模板解析：`LLMTemplateResolver.resolve(module_code, user_id, runtime_template_id?)`。结果写入 **`subscription_content_user_summaries`**，读取时可与 `subscription_content_tags.summary` 组合展示（例如用户无摘要时回退全局基线）。
+
+##### 数据流（PR-N）
+
+```
+抓取 feed → upsert subscription_content
+        ↓
+        tag_feed_content_task                                 (全局, 1 次)
+            写 subscription_content_tags  + baseline summary
+                ↓ 成功后 .apply_async (countdown=2s, 解耦不阻塞)
+        fan_out_personalize_summary_task                      (新增, 分发器)
+            ├─ 读 subscription_content (channel_type / user_ids / 长度)
+            ├─ JOIN  user_feed_summary_settings
+            │         WHERE channel_type=$ch AND enabled=TRUE
+            │           AND user_id = ANY(content.user_ids)
+            ├─ 长度门槛: max(env_min, user.min_length)
+            └─ for each eligible user (countdown 阶梯, 防雪崩):
+                  personalize_feed_summary_task.apply_async(content_id, user_id)
+                    ↓
+                    写 subscription_content_user_summaries
+                    (受 LLM_USER_RATE_LIMIT_PER_MIN 速率限制保护)
+```
+
+##### 用户控制：`user_feed_summary_settings`（PR-N1 新表）
+
+| 字段 | 说明 |
+|------|------|
+| `(user_id, channel_type)` UNIQUE | 每用户对每渠道一行 |
+| `channel_type` | `twitter` / `youtube` (CHECK 约束) |
+| `enabled` | **总开关**: FALSE 时 fan-out 跳过该用户 |
+| `template_id` | 用户选定的私有/系统模板; NULL 时由 `LLMTemplateResolver` 自动解析 |
+| `min_length` | 用户级长度门槛 (NULL 时走 env `AUTO_FEED_TAG_MIN_LENGTH_*`) |
+
+**API**：`GET / GET /:channel / PUT /:channel /api/feeds/summary-settings`
+
+##### 前端 UX（PR-N3 / N4）
+
+- **Feeds 页右上角齿轮 → `FeedSummarySettingsDrawer`**：按渠道独立开关 + 模板选择 + 长度门槛
+- 文章页 `FeedArticleBody` 中的「Personalize」按钮**降级为兜底**：
+  - 自动开关 ON + 已有 personalized → "Regenerate"（手动换模板重跑）
+  - 自动开关 ON + 还没生成 / 失败 → "Generate now"（手动触发，避免等下一次）
+  - 自动开关 OFF + 历史已有 personalized → "Generate"（一次性手动）
+  - 自动开关 OFF + 无历史 → 完全隐藏（引导用户去齿轮里开）
+
+##### 模板变量映射（PR-A 方案 B）
+
+服务层 `_build_template_variables(row, channel)` 按渠道注入到 `custom_variables`，模板可用占位符：
+
+| 渠道 | 占位符 |
+|------|--------|
+| Twitter | `{{channel_type}}` `{{author}}` `{{title}}` `{{text}}`（含转推/引用合并） |
+| YouTube | `{{channel_type}}` `{{channel}}` `{{title}}` `{{description}}` `{{transcript}}`（不含 title） |
+
+模板的 `variables` JSONB 元数据已对应回填，前端 `InsertVariablePopover` 会显示完整变量列表。**自动派发场景下用户不应也无需手动填这些字段**，所以 `FeedSummarySettingsDrawer` 与 personalize 弹窗均传 `showVariablesEditor={false}`。
+
+##### 成本守护
+
+| 层级 | 机制 |
+|------|------|
+| 全局 | env `FEED_SUMMARY_PERSONALIZATION_ENABLED`（fan-out 头一行检查） |
+| 用户级 | `user_feed_summary_settings.enabled = FALSE` 直接跳过 |
+| 内容级 | `max(env_min, user.min_length)` 长度门槛 |
+| 时序 | fan-out 内 `countdown = 2 + i*2` 阶梯派发 |
+| LLM 级 | 复用现有 `LLM_USER_RATE_LIMIT_PER_MIN`（per-user × per-provider，§7.4） |
+
+##### 失败兜底
+
+- `tag_feed_content_task` 失败 → 不派发 fan-out（只在 `result.skipped == false` 才派发）
+- `fan_out_personalize_summary_task` 失败 → 自身 autoretry 2 次，不影响 tag 主链
+- `personalize_feed_summary_task` 失败 → autoretry 3 次，最终失败时 `subscription_content_user_summaries` 无新行，前端兜底按钮自动出现 "Generate now" 让用户重试
+
+##### Daily 模块的消费方式（PR-D1 / PR-D2）
+
+`subscription_content_user_summaries` **不仅在 Feeds 文章页消费**，Daily 抽屉也已对接：
+
+| 数据 | 抽屉段位 | 字段来源 |
+|------|----------|----------|
+| 一段话摘要 + sector / industry / tickers / concepts | **AI Summary**（上段） | `subscription_content_tags.*` / `file_tags.*`（全局共享，打标产物） |
+| 长篇 LLM 报告 / per-user 个性化摘要 | **AI Analysis**（下段） | Upload: `processing_stats.final_report`；Feed: `subscription_content_user_summaries.summary`（带 "Personalized" 徽标） |
+| 原始内容（推文 / 视频字幕 / 文档正文 等） | **Original**（底段，可折叠） | `subscription_content.*` / `file_processing_details.*` |
+
+**显隐规则**：上下两段独立，缺失则该段静默隐藏；Original 段在 AI Analysis 段存在时**默认折叠**，否则展开（兜底体验）。
+
+实现路径：
+- 后端 `GET /api/daily/items/{id}` 在 `_fetch_feed_detail` 内 `LEFT JOIN subscription_content_user_summaries ... AND scus.user_id = $current_user`，新增字段 `personalized_summary` / `personalized_template_id` / `personalized_at`。
+- 前端 `DailyAIAnalysisSection.tsx`（PR-D2 新组件）在 `DailyPreviewDrawer` 内消费这些字段，提供 [复制] / [全屏阅读] 操作；Original 段用 antd `Collapse ghost` 包裹。
+
+> Daily 抽屉**不主动触发** `personalize_feed_summary_task` —— 该字段填充完全由 PR-N 的自动 fan-out 链路负责。如果某条 feed 在抽屉里没有 AI Analysis 段，常见原因：用户未在齿轮里开启该渠道 / 内容长度未到门槛 / fan-out 仍在排队。
 
 ---
 
@@ -483,7 +586,7 @@ FeedContentTaggingService
 │                                                                   │
 │  LLM: llm_service.chat_completion_with_template()                │
 │  模板: twitter_daily_phase2_default                               │
-│        (用户可通过 TemplatePreferenceService 自定义 phase2 偏好)  │
+│        (用户在「我的模板」维护 twitter_phase2 私有行)             │
 │  Max Tokens: MAX_TOKENS_OUTPUT_PHASE2=4000                        │
 │                                                                   │
 │  输出: twitter_daily_reports 表（每用户每天一行）                  │
@@ -606,13 +709,13 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 ## 5. LLM 调用路径对比
 
-| 维度 | Upload Files 自动任务 | Feeds 内容打标 | Twitter/YouTube Report | News Analysis |
+| 维度 | Upload Files 自动任务 | Feeds（打标 + 摘要） | Twitter/YouTube Report | News Analysis |
 |------|----------------------|----------------|------------------------|---------------|
 | **调用路径** | `LocalLLMAnalysisService` | `LocalLLMAnalysisService` | `llm_service.chat_completion_with_template` | `llm_service.chat_completion_with_template` |
-| **触发方式** | 文件 content 写入后自动 | 手动/批量触发 | 调度器定时触发（两阶段） | 调度器/API 触发 |
-| **模板固定/动态** | 固定（tag/name/classify） + 用户选择（analyze） | 固定（content_tag_feeds_v1） | 固定（phase1/phase2 default） + 用户可自定义 phase2 | 固定（news_summary_v1）+ 失败切换 |
+| **触发方式** | 文件 content 写入后自动 | Tag: 抓取后自动；**摘要: 全局 tag 完成后 fan-out 自动派发**（PR-N），失败/缺失时文章页兜底按钮可手动 Re-generate | 调度器定时触发（两阶段） | 调度器/API 触发 |
+| **模板固定/动态** | **Tag/Analyze：USER_OWNED（Resolver）**；Name/Classify：**SYSTEM_FIXED** | **Tag：SYSTEM_FIXED**（admin）；**摘要：USER_OWNED**（按渠道 feed_summary / youtube_summary，按用户开关 `user_feed_summary_settings.enabled` 决定是否自动派发） | Phase1 固定；Phase2 **USER_OWNED**（每用户私有模板） | 固定（news_summary_v1）+ 失败切换 |
 | **输入来源** | `file_processing_details.content` | `subscription_content.content` / `transcript` | `subscription_content` tweets / video transcripts | `news.content` |
-| **输出目标** | `file_tags` / `display_name` / `user_execution_folders` / `processing_stats.final_report` | `subscription_content_tags` | `twitter/youtube_author_daily_summaries` + `twitter/youtube_daily_reports` | `news.analysis_result` + `news_themes_unified` |
+| **输出目标** | `file_tags` / `display_name` / `user_execution_folders` / `processing_stats.final_report` | `subscription_content_tags` + **`subscription_content_user_summaries`（个性化摘要）** | `twitter/youtube_author_daily_summaries` + `twitter/youtube_daily_reports` | `news.analysis_result` + `news_themes_unified` |
 | **幂等保护** | ✅ 有（各自字段检查）| ✅ 有（force 参数） | ✅ 有（模板变更检测） | ✅ 有（is_analyzed） |
 | **Celery 队列** | `file_processing` | `file_processing` | 由 scheduler 派发 | `ai_processing` |
 | **使用 Embedding** | ❌ | ❌ | ❌ | ✅ Qwen text-embedding-v3 |
@@ -623,21 +726,24 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 模板 Code | 所属模块 | 输入变量 | 输出格式 | 调用服务 |
 |-----------|---------|----------|---------|---------|
-| `content_tag_v1` | Upload Files 自动打标 | `{{file_content}}` | JSON: sector/industry/tickers/concepts | `ContentTaggingService` |
-| `auto_name_v1` | Upload Files 自动命名 | `{{file_content}}` `{{file_type}}` `{{original_filename}}` | text (≤80字) | `ContentNamingService` |
-| `auto_classify_v1` | Upload Files 自动归类 | `{{file_content}}` `{{folder_list}}` `{{file_type}}` | text (文件夹名) | `ContentClassifyService` |
-| `audio_analysis_v1` | 音频/YouTube 深度分析（默认） | `{{file_content}}` | 分析报告 | `LocalLLMAnalysisService` |
-| `content_tag_feeds_v1` | Feeds 内容打标 | `{{content}}` | JSON: sector/industry/tickers/summary | `FeedContentTaggingService` |
+| `content_tag_v1` | `file_tagging`（系统默认种子；用户私有行由此克隆） | `{{file_content}}` | JSON: sector/industry/tickers/concepts | `ContentTaggingService` |
+| `auto_name_v1` | `file_naming`（SYSTEM_FIXED） | `{{file_content}}` `{{file_type}}` `{{original_filename}}` | text (≤80字) | `ContentNamingService` |
+| `auto_classify_v1` | `file_classify`（SYSTEM_FIXED） | `{{file_content}}` `{{folder_list}}` `{{file_type}}` | text (文件夹名) | `ContentClassifyService` |
+| `content_tag_feeds_v1` | `feed_tagging`（SYSTEM_FIXED） | `{{content}}` | JSON: sector/industry/tickers/summary | `FeedContentTaggingService` |
+| `file_analysis_v1` | `file_analysis`（通用文档分析默认） | `{{file_content}}` 等 | 分析报告 | `LocalLLMAnalysisService` |
+| `audio_analysis_v1` | `audio_analysis`（音频/YouTube 转写分析默认） | `{{file_content}}` | 分析报告 | `LocalLLMAnalysisService` |
+| `feed_summary_v1` | `feed_summary`（Twitter 类 Feed 个性化摘要种子） | 依模板 | 摘要文本 | `FeedSummaryPersonalizationService` |
+| `youtube_summary_v1` | `youtube_summary`（YouTube 单条 per-user 摘要种子） | 依模板 | 摘要文本 | `FeedSummaryPersonalizationService` |
 | `twitter_daily_phase1_default` | Twitter Report 阶段 A | tweets 文本 | 作者摘要文本 | `TwitterAuthorSummaryService` |
-| `twitter_daily_phase2_default` | Twitter Report 阶段 B | 阶段 A 摘要合集 | 综合报告 Markdown | `TwitterDailyReportService` |
+| `twitter_daily_phase2_default` | `twitter_phase2`（日报 Phase2，USER_OWNED 种子） | 阶段 A 摘要合集 | 综合报告 Markdown | `TwitterDailyReportService` |
 | `youtube_daily_phase1_default` | YouTube Report 阶段 A | 视频标题 + transcript | 频道摘要文本 | `YouTubeAuthorSummaryService` |
-| `youtube_daily_phase2_default` | YouTube Report 阶段 B | 阶段 A 摘要合集 | 综合报告 Markdown | `YouTubeDailyReportService` |
-| `news_summary_v1` | News Analysis（主模板） | `{{title}}` `{{content}}` `{{symbols}}` | 分析报告 | `NewsAnalysisService` |
+| `youtube_daily_phase2_default` | `youtube_phase2`（USER_OWNED 种子） | 阶段 A 摘要合集 | 综合报告 Markdown | `YouTubeDailyReportService` |
+| `news_summary_v1` | `news_summary`（SYSTEM_FIXED） | `{{title}}` `{{content}}` `{{symbols}}` | 分析报告 | `NewsAnalysisService` |
 | `news_summary_safe_v1` | News Analysis（保守模板，失败切换）| 同上 | 分析报告（更中性） | `NewsAnalysisService` |
-| `news_classification` | News Analysis 分类维度 | `{{title}}` `{{content}}` `{{symbols}}` | JSON 分类维度 | `NewsAnalysisService` |
-| 用户自定义模板 | 用户手动分析任意文件 | `{{file_content}}` + 自定义 | 用户定义 | `LocalLLMAnalysisService` |
+| `news_classification` | `news_classification`（SYSTEM_FIXED） | `{{title}}` `{{content}}` `{{symbols}}` | JSON 分类维度 | `NewsAnalysisService` |
+| 用户私有模板行 | USER_OWNED 模块（`scope=user`） | 依各模块 variables | 依模板 | 经 `LLMTemplateResolver` 的各类服务 |
 
-> 用户可通过 **PromptTemplatesPage** 管理和测试所有模板。
+用户在 **PromptTemplatesPage → 我的模板** 编辑 7 个 USER_OWNED 模块；管理员在 **系统模板 (Admin)** 或 `PUT /system-templates` 编辑 SYSTEM_FIXED 文案。
 
 ---
 
@@ -664,6 +770,11 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 ### 7.2 Auto Task 开关（Upload Files 模块）
 
+**两层语义**：
+
+1. **环境变量**（运维/全局）：下表各 `AUTO_*`，关则对应 Celery 路径整体不执行。
+2. **单次上传请求体**（用户弹窗）：`auto_analyze_enabled` / `auto_tag_enabled`（默认 `true`）。任一为 `false` 时，即使全局开关打开，**本次上传**也不会派发对应 `trigger_auto_analyze` / `trigger_auto_tagging` 的 LLM 工作。
+
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `AUTO_TAG_ENABLED` | `true` | 自动打标签总开关 |
@@ -674,15 +785,24 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `AUTO_NAME_CONTENT_MAX_CHARS` | `3000` | 命名 LLM 最大输入字符 |
 | `AUTO_CLASSIFY_CONTENT_MAX_CHARS` | `3000` | 归类 LLM 最大输入字符 |
 
-### 7.3 Feeds 打标开关
+### 7.3 Feeds 打标 / 个性化开关
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `AUTO_FEED_TAG_ENABLED` | `true` | Feeds 打标总开关 |
+| `AUTO_FEED_TAG_ENABLED` | `true` | Feeds **全局打标**总开关 |
 | `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube` | 参与打标的渠道白名单 |
 | `AUTO_FEED_TAG_MAX_CHARS` | `6000` | 最大输入字符 |
-| `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | — | Twitter 内容最小字符门槛 |
-| `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | — | YouTube 内容最小字符门槛 |
+| `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 内容最小字符门槛（fan-out 也复用） |
+| `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube 内容最小字符门槛（fan-out 也复用） |
+| `FEED_SUMMARY_PERSONALIZATION_ENABLED` | `true` | **(PR-N)** 个性化摘要 fan-out 总开关；关则任何用户都不自动派发 |
+
+> 用户级 enable 在 `user_feed_summary_settings.enabled`（前端齿轮配置），与 env 总开关是 AND 关系：env 关闭 → 整个集群停；env 开 + 用户关 → 仅该用户跳过。
+
+### 7.4 LLM 调用限速（可选，默认关闭）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LLM_USER_RATE_LIMIT_PER_MIN` | *未设置* | 仅当设为 **正整数** 时启用：每用户每 Provider 每分钟最大 `chat_completion_with_template` 次数（Redis）；`user_id=None` 的系统调用不计入。未设置或非正数 → 不限速。依赖 `REDIS_URL`。 |
 
 ---
 
@@ -695,10 +815,25 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `backend/core/llm_framework.py` | LLM 服务单例，Provider 实现，路由降级，全局 `llm_service` |
 | `backend/core/prompt_renderer.py` | Prompt 模板渲染器，`{{变量}}` 替换，输出格式解析 |
 | `backend/core/config_resolver.py` | 模型配置优先级仲裁（Provider→Template→Runtime） |
-| `backend/services/local_llm_analysis_service.py` | 面向文件内容的 LLM 分析服务（路径 A） |
+| `backend/core/llm_rate_limiter.py` | Per-user × per-provider 可选限速（§7.4） |
+| `backend/services/llm_template_resolver.py` | 统一模板解析：runtime → user_owned → system default |
+| `backend/services/user_template_seeder_service.py` | USER_OWNED 懒初始化 / 重置为系统种子 |
+| `backend/services/template_preference_service.py` | `MODULE_REGISTRY`、`SYSTEM_DEFAULTS`、模块类型判定 |
+| `backend/utils/user_resolver.py` | `username → user_id`（Celery / API 透传 usage_log） |
+| `backend/services/local_llm_analysis_service.py` | 面向文件/正文的分析入口（委托 `chat_completion_with_template`） |
 | `backend/services/llm_prompt_template_service.py` | 模板 CRUD + 调用日志记录 |
 | `backend/api/llm_config.py` | LLM 配置管理 Admin API，Provider 测试，调用日志查询 |
-| `backend/api/llm_prompt_templates.py` | 模板 CRUD + 预览测试 API |
+| `backend/api/llm_prompt_templates.py` | 通用模板 API；**`/my-templates`、`/system-templates`**（Phase 2） |
+
+### 前端（Prompt / Upload）
+
+| 文件 | 说明 |
+|------|------|
+| `web-frontend/src/pages/PromptTemplatesPage.tsx` | 我的模板 / 系统模板 (Admin)、编辑 Drawer |
+| `web-frontend/src/components/UploadAnalysisTemplatePicker.tsx` | 上传/文件页分析或打标：开关 + 侧栏编辑 Drawer |
+| `web-frontend/src/components/InsertVariablePopover.tsx` | 模板编辑器内插入 `{{变量}}` |
+| `web-frontend/src/services/promptTemplateService.ts` | `my-templates` / `system-templates` API 客户端 |
+| `web-frontend/src/components/feed/FeedArticleBody.tsx` | Feed 摘要：`feed_summary` / `youtube_summary` 动态 moduleCode |
 
 ### Upload Files 模块
 
@@ -716,12 +851,19 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 文件 | 说明 |
 |------|------|
-| `backend/services/feed_content_tagging_service.py` | Feeds 内容打标服务 |
+| `backend/services/feed_content_tagging_service.py` | Feeds **全局打标**（`feed_tagging`） |
+| `backend/services/feed_summary_personalization_service.py` | Feeds **个性化摘要**（`feed_summary` / `youtube_summary`） |
+| `backend/services/user_feed_summary_settings_service.py` | **(PR-N1)** 用户 × 渠道 个性化开关/模板/长度门槛 CRUD |
+| `backend/tasks/feed_tagging_tasks.py` | `tag_feed_content_task` (末尾链式触发 fan-out) |
+| `backend/tasks/feed_summary_tasks.py` | `personalize_feed_summary_task` + **(PR-N2)** `fan_out_personalize_summary_task` |
+| `backend/api/subscription_content_tags.py` | Feeds 打标 API + 兜底 personalize 触发 |
+| `backend/api/feed_summary_settings.py` | **(PR-N1)** GET/PUT `/api/feeds/summary-settings/{channel}` |
 | `backend/services/twitter_author_summary_service.py` | Twitter Report 阶段 A |
 | `backend/services/twitter_daily_report_service.py` | Twitter Report 阶段 B |
 | `backend/services/youtube_author_summary_service.py` | YouTube Report 阶段 A |
 | `backend/services/youtube_daily_report_service.py` | YouTube Report 阶段 B |
-| `backend/api/subscription_content_tags.py` | Feeds 打标 API |
+| `web-frontend/src/components/feed/FeedSummarySettingsDrawer.tsx` | **(PR-N3)** Feeds 页右上角齿轮 → 用户级个性化设置抽屉 |
+| `web-frontend/src/services/feedSummarySettings.ts` | **(PR-N3)** 设置 API 客户端 |
 
 ### News Analysis 模块
 
@@ -758,22 +900,23 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
                 │  FeedContentTaggingService   │
                 │  TwitterAuthorSummaryService │
                 │  YouTubeAuthorSummaryService │
+                │  FeedSummaryPersonalizationService    │
                 │  NewsAnalysisService 等      │
                 └────────────┬────────────────┘
                              │
               ┌──────────────┴──────────────────┐
               │                                 │
-  ┌───────────▼──────────┐     ┌────────────────▼──────────┐
-  │ LocalLLMAnalysis     │     │ llm_service               │
-  │ Service (路径 A)     │     │ .chat_completion_with     │
-  │                      │     │  _template() (路径 B)     │
-  └───────────┬──────────┘     └────────────────┬──────────┘
-              │                                 │
-              └──────────────┬──────────────────┘
-                             │
-                ┌────────────▼────────────────┐
+  ┌──────────────────────┐     ┌─────────────────────────────┐
+  │ LocalLLMAnalysis     │────►│ llm_service                 │
+  │ Service              │     │ .chat_completion_with_      │
+  │（内部委托）          │     │  template()                 │
+  └──────────────────────┘     └──────────────┬──────────────┘
+                                              │ 可选 LLMRateLimiter
+                                              ▼
+                ┌─────────────────────────────▼───┐
                 │  PromptRenderer              │
                 │  DB: llm_prompt_templates    │
+                │  （模板已由 LLMTemplateResolver 选中）│
                 │  → 渲染 system + user prompt │
                 └────────────┬────────────────┘
                              │

@@ -44,6 +44,8 @@ echo ""
 echo -e "${BLUE}🧹 清理相关进程...${NC}"
 dev_stop_by_pattern "npm start"          "Node.js (npm start)"
 dev_stop_by_pattern "uvicorn.*main:app"  "Python (uvicorn)"
+# 先停 supervisor (start_celery_worker_dev.sh) 否则它会立刻重启被杀的 worker
+dev_stop_by_pattern "start_celery_worker_dev.sh" "Celery Worker Supervisor"
 dev_stop_by_pattern "celery.*worker"     "Celery Worker"
 dev_stop_by_pattern "celery.*flower"     "Flower 监控"
 

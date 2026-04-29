@@ -415,8 +415,11 @@ const FilesPageInner: React.FC = () => {
   const [audioAnalyzingIds, setAudioAnalyzingIds] = useState<Set<string>>(new Set());
   const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
   const [aiAnalysisExecution, setAiAnalysisExecution] = useState<TaskExecution | null>(null);
-  const [modalSelectedTemplateId, setModalSelectedTemplateId] = useState<number | undefined>(undefined);
-  const [modalTemplateVariables, setModalTemplateVariables] = useState<Record<string, any>>({});
+  // Phase 2: 中间弹窗 Analyze 区用 picker value 替代旧 selectedTemplateId
+  const [modalAnalyzeDocPicker, setModalAnalyzeDocPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  // 保留 backward compat aliases (部分旧路径仍引用)
+  const modalSelectedTemplateId = modalAnalyzeDocPicker.templateId;
+  const modalTemplateVariables = modalAnalyzeDocPicker.templateVariables || {};
   const [audioTemplateId, setAudioTemplateId] = useState<number | undefined>(undefined);
   const [modalAudioTemplateVars, setModalAudioTemplateVars] = useState<Record<string, any>>({});
   
@@ -557,6 +560,7 @@ const FilesPageInner: React.FC = () => {
     setAnalysisMode('local_llm');
     setSelectedTemplateId(undefined);
     setTemplateVariables({});
+    setModalAnalyzeDocPicker({});
     
     // 重置处理参数为默认值
     setProcessingParams({
@@ -2718,36 +2722,28 @@ const FilesPageInner: React.FC = () => {
                   </div>
                 )}
                 {canAnalyzeDocModal && aiAnalysisExecution && (
-                  <div style={{ maxWidth: '420px', marginTop: '20px', textAlign: 'center' }}>
+                  <div style={{ maxWidth: '460px', marginTop: '20px', textAlign: 'left' }}>
                     <div style={{ marginBottom: '12px', color: '#999', fontSize: '13px' }}>
-                      Select a prompt template and click "Analyze" to start AI analysis
+                      Run AI analysis on this document using your private template.
                     </div>
-                    <TemplateSelector
-                      categoryCode="file_analysis"
-                      value={modalSelectedTemplateId}
-                      onChange={(value) => {
-                        setModalSelectedTemplateId(value);
-                        setModalTemplateVariables({});
-                      }}
-                      placeholder="Select analysis template"
-                      style={{ marginBottom: '16px', textAlign: 'left' }}
-                      showConfigWhenSelected={false}
+                    <UploadAnalysisTemplatePicker
+                      value={modalAnalyzeDocPicker}
+                      onChange={setModalAnalyzeDocPicker}
+                      mode="optional"
+                      moduleCode="file_analysis"
+                      label="Document Analysis Template"
+                      showVariablesEditor
                     />
-                    {modalSelectedTemplateId != null && (
-                      <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-                        <TemplateVariablesEditor
-                          templateId={modalSelectedTemplateId}
-                          values={modalTemplateVariables}
-                          onChange={(values) => setModalTemplateVariables(values ?? {})}
-                        />
-                      </div>
-                    )}
-                    <div style={{ marginTop: '16px' }}>
+                    <div style={{ marginTop: '16px', textAlign: 'center' }}>
                       <Button
                         type="primary"
                         icon={<RobotOutlined />}
-                        disabled={!modalSelectedTemplateId}
-                        onClick={() => modalSelectedTemplateId != null && handleAnalyzeDocument(aiAnalysisExecution, modalSelectedTemplateId, modalTemplateVariables)}
+                        disabled={!modalAnalyzeDocPicker.templateId || modalAnalyzeDocPicker.enabled === false}
+                        onClick={() => {
+                          if (modalAnalyzeDocPicker.templateId != null) {
+                            handleAnalyzeDocument(aiAnalysisExecution, modalAnalyzeDocPicker.templateId, modalAnalyzeDocPicker.templateVariables || {});
+                          }
+                        }}
                         style={{
                           height: '40px',
                           paddingInline: '24px',
@@ -7123,8 +7119,14 @@ export const AIAnalysisView: React.FC<{
   audioTemplateId,
   mobileCompactActions = false,
 }) => {
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
-  const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
+  // Phase 2: 用 UploadAnalysisTemplatePicker value 取代旧 selectedTemplateId + templateVariables
+  const [analyzeDocPicker, setAnalyzeDocPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  const [analyzeAudioPicker, setAnalyzeAudioPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  const [reAnalyzeDocPicker, setReAnalyzeDocPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  const [reAnalyzeAudioPicker, setReAnalyzeAudioPicker] = useState<UploadAnalysisTemplatePickerValue>({});
+  // 保留用于向下兼容已有逻辑 (部分地方直接用 selectedTemplateId)
+  const selectedTemplateId = analyzeDocPicker.templateId;
+  const templateVariables = analyzeDocPicker.templateVariables || {};
   const [audioTemplateVars, setAudioTemplateVars] = useState<Record<string, any>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -7134,11 +7136,8 @@ export const AIAnalysisView: React.FC<{
   const [reAnalyzeTemplateVars, setReAnalyzeTemplateVars] = useState<Record<string, any>>({});
   const [reAnalyzeAudioVars, setReAnalyzeAudioVars] = useState<Record<string, any>>({});
 
-  // 切换模板时清空可选参数，避免沿用上一模板的值
-  useEffect(() => {
-    setTemplateVariables({});
-  }, [selectedTemplateId]);
-
+  // Phase 2: 模板变量清空已由 UploadAnalysisTemplatePicker 内部处理 (切换 moduleCode 时 reset)
+  // 保留 reAnalyzeTemplateId effect 兼容音频那侧的 audio vars 逻辑
   useEffect(() => {
     setReAnalyzeTemplateVars({});
   }, [reAnalyzeTemplateId]);
@@ -7277,35 +7276,30 @@ export const AIAnalysisView: React.FC<{
             </div>
           )}
           {canAnalyzeDoc && (
-            <div style={{ maxWidth: '420px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'center' }}>
+            <div style={{ maxWidth: '460px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'left' }}>
               <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px' }}>
                 {execution.rc_agent_status === 'failed'
-                  ? 'The previous AI analysis failed. Pick a template and try again.'
-                  : 'Select a prompt template and click "Analyze" to start AI analysis. Tip: choose a template at upload time to run analysis automatically.'}
+                  ? 'The previous AI analysis failed. Use your private template to retry.'
+                  : 'Run AI analysis on this document using your private template.'}
               </div>
-              <TemplateSelector
-                categoryCode="file_analysis"
-                value={selectedTemplateId}
-                onChange={(value) => setSelectedTemplateId(value)}
-                placeholder="Select analysis template"
-                style={{ marginBottom: '16px', textAlign: 'left' }}
-                showConfigWhenSelected={false}
+              <UploadAnalysisTemplatePicker
+                value={analyzeDocPicker}
+                onChange={setAnalyzeDocPicker}
+                mode="optional"
+                moduleCode="file_analysis"
+                label="Document Analysis Template"
+                showVariablesEditor
               />
-              {selectedTemplateId != null && (
-                <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-                  <TemplateVariablesEditor
-                    templateId={selectedTemplateId}
-                    values={templateVariables}
-                    onChange={(values) => setTemplateVariables(values ?? {})}
-                  />
-                </div>
-              )}
-              <div style={{ marginTop: '16px' }}>
+              <div style={{ marginTop: '16px', textAlign: 'center' }}>
                 <Button
                   type="primary"
                   icon={<RobotOutlined />}
-                  disabled={!selectedTemplateId}
-                  onClick={() => selectedTemplateId != null && onAnalyzeDocument(execution, selectedTemplateId, templateVariables)}
+                  disabled={!analyzeDocPicker.templateId || analyzeDocPicker.enabled === false}
+                  onClick={() => {
+                    if (analyzeDocPicker.templateId != null) {
+                      onAnalyzeDocument?.(execution, analyzeDocPicker.templateId, analyzeDocPicker.templateVariables || {});
+                    }
+                  }}
                   style={{
                     height: '40px',
                     paddingInline: mobileCompactActions ? '16px' : '24px',
@@ -7443,6 +7437,7 @@ export const AIAnalysisView: React.FC<{
             setReAnalyzeModalVisible(false);
             setReAnalyzeTemplateId(undefined);
             setReAnalyzeTemplateVars({});
+            setReAnalyzeDocPicker({});
             setReAnalyzeAudioVars({});
           }}
         >
@@ -7480,6 +7475,7 @@ export const AIAnalysisView: React.FC<{
                   setReAnalyzeModalVisible(false);
                   setReAnalyzeTemplateId(undefined);
                   setReAnalyzeTemplateVars({});
+                  setReAnalyzeDocPicker({});
                   setReAnalyzeAudioVars({});
                 }}
               />
@@ -7488,35 +7484,26 @@ export const AIAnalysisView: React.FC<{
               {canReAnalyzeDoc && (
                 <div style={{ marginBottom: canReAnalyzeAudio ? 24 : 0 }}>
                   <div style={{ marginBottom: 12, color: themeColors.textSecondary, fontSize: 13 }}>
-                    Select a prompt template and click "Re-analyze" to run a new analysis
+                    Re-run AI analysis on this document using your private template.
                   </div>
-                  <TemplateSelector
-                    categoryCode="file_analysis"
-                    value={reAnalyzeTemplateId}
-                    onChange={(value) => setReAnalyzeTemplateId(value)}
-                    placeholder="Select analysis template"
-                    style={{ marginBottom: 16, textAlign: 'left' }}
-                    showConfigWhenSelected={false}
+                  <UploadAnalysisTemplatePicker
+                    value={reAnalyzeDocPicker}
+                    onChange={setReAnalyzeDocPicker}
+                    mode="optional"
+                    moduleCode="file_analysis"
+                    label="Document Analysis Template"
+                    showVariablesEditor
                   />
-                  {reAnalyzeTemplateId != null && (
-                    <div style={{ marginBottom: 16 }}>
-                      <TemplateVariablesEditor
-                        templateId={reAnalyzeTemplateId}
-                        values={reAnalyzeTemplateVars}
-                        onChange={(values) => setReAnalyzeTemplateVars(values ?? {})}
-                      />
-                    </div>
-                  )}
                   <Button
                     type="primary"
                     icon={<RobotOutlined />}
-                    disabled={!reAnalyzeTemplateId}
+                    disabled={!reAnalyzeDocPicker.templateId || reAnalyzeDocPicker.enabled === false}
+                    style={{ marginTop: 16 }}
                     onClick={() => {
-                      if (reAnalyzeTemplateId != null && onAnalyzeDocument) {
-                        onAnalyzeDocument(execution, reAnalyzeTemplateId, reAnalyzeTemplateVars);
+                      if (reAnalyzeDocPicker.templateId != null && onAnalyzeDocument) {
+                        onAnalyzeDocument(execution, reAnalyzeDocPicker.templateId, reAnalyzeDocPicker.templateVariables || {});
                         setReAnalyzeModalVisible(false);
-                        setReAnalyzeTemplateId(undefined);
-                        setReAnalyzeTemplateVars({});
+                        setReAnalyzeDocPicker({});
                       }
                     }}
                   >

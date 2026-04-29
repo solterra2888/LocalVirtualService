@@ -40,6 +40,8 @@ class WebLinkRequest(BaseModel):
         default=None,
         description="对应模板的变量字典"
     )
+    # 方案 A: 上传弹窗 AI Analysis 开关 (False 时跳过整条分析链路)
+    auto_analyze_enabled: bool = Field(True, description="上传弹窗 AI Analysis 开关")
     # PR-5: file_tagging picker
     auto_tag_template_id: Optional[int] = Field(
         None,
@@ -49,6 +51,8 @@ class WebLinkRequest(BaseModel):
         default=None,
         description="对应 file_tagging 模板的变量字典"
     )
+    # 方案 A: 上传弹窗 AI Tagging 开关 (False 时跳过整条打标链路)
+    auto_tag_enabled: bool = Field(True, description="上传弹窗 AI Tagging 开关")
 
 
 class ProcessingStatus(str, Enum):

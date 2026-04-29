@@ -234,6 +234,24 @@ class DailyItemDetailFeed(BaseModel):
         ),
     )
 
+    # PR-D1: per-user 个性化摘要 (subscription_content_user_summaries)
+    # 抽屉前端 "AI 深度分析" 段消费; None = 该用户对本条 feed 还没生成个性化.
+    personalized_summary: Optional[str] = Field(
+        None,
+        description=(
+            "subscription_content_user_summaries.summary, per-user 个性化摘要正文; "
+            "由 personalize_feed_summary_task 写入 (用户开启自动 fan-out 后随 tag 完成自动生成)"
+        ),
+    )
+    personalized_template_id: Optional[int] = Field(
+        None,
+        description="生成时使用的 llm_prompt_templates.id (feed_summary / youtube_summary 模块)",
+    )
+    personalized_at: Optional[str] = Field(
+        None,
+        description="ISO 8601 时间戳 (subscription_content_user_summaries.tagged_at)",
+    )
+
 
 class DailyItemDetail(DailyFeedItem):
     """卡片完整详情 (列表 DailyFeedItem 字段 + 来源专属原文区字段).

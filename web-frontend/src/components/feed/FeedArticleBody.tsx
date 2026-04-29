@@ -43,6 +43,12 @@ import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
 import UploadAnalysisTemplatePicker, {
   UploadAnalysisTemplatePickerValue,
 } from '../UploadAnalysisTemplatePicker';
+// PR-N4: 读取用户对各渠道的自动个性化开关, 用于决定 "Generate / Regenerate" 兜底按钮可见性
+import {
+  feedSummarySettingsAPI,
+  FeedSummaryChannel,
+  FeedSummarySettingItem,
+} from '../../services/feedSummarySettings';
 
 const { Text } = Typography;
 
@@ -121,6 +127,37 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const [personalizeModalOpen, setPersonalizeModalOpen] = useState(false);
   const [personalizePicker, setPersonalizePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const [personalizeLoading, setPersonalizeLoading] = useState(false);
+
+  // PR-N4: 用户对各渠道自动个性化的开关 (组件挂载时拉一次, 全生命周期内复用)
+  const [feedSummarySettings, setFeedSummarySettings] = useState<
+    Record<FeedSummaryChannel, FeedSummarySettingItem | null>
+  >({
+    twitter: null,
+    youtube: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    feedSummarySettingsAPI
+      .list()
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<FeedSummaryChannel, FeedSummarySettingItem | null> = {
+          twitter: null,
+          youtube: null,
+        };
+        for (const it of res.items || []) {
+          map[it.channel_type] = it;
+        }
+        setFeedSummarySettings(map);
+      })
+      .catch((err) => {
+        // 失败时退化为全 null, 按钮按"未开启自动 + 无个性化"逻辑隐藏 / 显示 Generate
+        console.warn('Failed to load feed summary settings', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const youtubeDescOuterRef = useRef<HTMLDivElement>(null);
   const youtubeDescInnerRef = useRef<HTMLDivElement>(null);
@@ -492,6 +529,27 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     selectedContent.summary_source === 'personalized';
   const effectiveSummary = personalizedSummary || displayTags?.summary || null;
 
+  // PR-N4: 兜底按钮可见性
+  // 自动个性化开关 ON  → 全局打标完成后会自动跑; 用户主要看自动结果, 仅在 (a) 还没生成 / 失败  (b) 手动想换模板重跑 时露出按钮.
+  // 自动个性化开关 OFF → 默认隐藏; 仅当历史已有 personalized 记录时让用户能 Re-generate.
+  const channelSetting =
+    channelType === 'twitter' || channelType === 'youtube'
+      ? feedSummarySettings[channelType as FeedSummaryChannel]
+      : null;
+  const autoSummaryEnabled = !!channelSetting?.enabled;
+  const showPersonalizeButton =
+    showAiTagsPanel && (autoSummaryEnabled || isPersonalized);
+  const personalizeButtonLabel = isPersonalized
+    ? 'Regenerate'
+    : autoSummaryEnabled
+    ? 'Generate now'
+    : 'Generate';
+  const personalizeButtonTooltip = autoSummaryEnabled
+    ? (isPersonalized
+        ? 'Regenerate this feed\'s personalized summary using your current template.'
+        : 'Auto personalization is on but this content has no per-user summary yet — generate it now.')
+    : 'Generate a personalized summary for this content (one-off, auto personalization is off).';
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
@@ -600,21 +658,29 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                   {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
                 </Button>
               </Tooltip>
-              {/* PR-7: 个性化 summary 按钮 (per-user override, 不影响其他用户视图) */}
-              <Tooltip title="Generate a personalized summary using your own template (per-user, doesn't affect other subscribers).">
-                <Button
-                  size="small"
-                  icon={<RobotOutlined />}
-                  loading={personalizeLoading}
-                  onClick={() => {
-                    setPersonalizePicker({});
-                    setPersonalizeModalOpen(true);
-                  }}
-                  style={{ fontSize: 12, borderRadius: 6 }}
-                >
-                  {isPersonalized ? 'Re-personalize' : 'Personalize'}
-                </Button>
-              </Tooltip>
+              {/*
+                PR-N4: 个性化 summary 按钮降级为兜底.
+                - 自动开关已开 → 全局打标完成后由 fan_out_personalize_summary_task 自动跑
+                  按钮仅在 "还没结果 / 想手动重跑" 时露出, 文案 Generate now / Regenerate
+                - 开关已关 + 历史曾有 personalized 记录 → 仍可 Regenerate (不强迫用户去开总开关)
+                - 开关已关 + 无历史 → 完全隐藏 (引导用户去齿轮里开)
+              */}
+              {showPersonalizeButton && (
+                <Tooltip title={personalizeButtonTooltip}>
+                  <Button
+                    size="small"
+                    icon={<RobotOutlined />}
+                    loading={personalizeLoading}
+                    onClick={() => {
+                      setPersonalizePicker({});
+                      setPersonalizeModalOpen(true);
+                    }}
+                    style={{ fontSize: 12, borderRadius: 6 }}
+                  >
+                    {personalizeButtonLabel}
+                  </Button>
+                </Tooltip>
+              )}
               {isPersonalized && (
                 <Tooltip title="Remove personalized summary, revert to the global one.">
                   <Button
@@ -1062,9 +1128,13 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         </>
       )}
 
-      {/* PR-7: Personalize summary 模板选择 Modal */}
+      {/*
+        PR-N4: Personalize summary 弹窗 (兜底).
+        主流程改为齿轮里设开关 + Celery fan-out 自动跑;
+        本弹窗仅用于手动 Generate / Regenerate 单条 feed.
+      */}
       <Modal
-        title="Personalize this feed's summary"
+        title={isPersonalized ? 'Regenerate personalized summary' : 'Generate personalized summary'}
         open={personalizeModalOpen}
         onCancel={() => {
           if (!personalizeLoading) {
@@ -1072,15 +1142,16 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           }
         }}
         onOk={handlePersonalize}
-        okText={isPersonalized ? 'Re-personalize' : 'Personalize'}
+        okText={isPersonalized ? 'Regenerate' : 'Generate'}
         confirmLoading={personalizeLoading}
         cancelText="Cancel"
         width={620}
         destroyOnClose
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-          Use your own template to generate a per-user summary for this content.
-          Other users still see the global summary unaffected.
+          {autoSummaryEnabled
+            ? '一次性手动触发: 用你的私有模板为这一条 feed 生成 per-user 摘要 (其他用户不受影响). 自动批量个性化已在齿轮中开启, 通常无需手动点击.'
+            : '一次性手动触发: 用你的私有模板生成 per-user 摘要. 想为该渠道所有新 feed 自动个性化, 请到右上角齿轮中开启.'}
         </Text>
         <UploadAnalysisTemplatePicker
           value={personalizePicker}
@@ -1101,6 +1172,10 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
               ? 'Toggle on to use your private youtube_summary template (Edit it in Prompt Templates → My Templates).'
               : 'Toggle on to use your private feed_summary template (Edit it in Prompt Templates → My Templates).'
           }
+          // 变量 (author/title/text/channel/description/transcript) 由后端
+          // FeedSummaryPersonalizationService 自动从 subscription_content 行注入,
+          // 用户不需要也不应该手动填写, 所以关掉 picker 内的变量编辑器.
+          showVariablesEditor={false}
           disabled={personalizeLoading}
         />
         {!personalizePicker.templateId && (

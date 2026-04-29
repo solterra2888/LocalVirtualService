@@ -1703,8 +1703,10 @@ async def create_text_note(
     content: str = Body(..., embed=True),
     auto_analyze_template_id: Optional[int] = Body(None, embed=True),
     auto_analyze_template_variables: Optional[Dict[str, Any]] = Body(None, embed=True),
+    auto_analyze_enabled: bool = Body(True, embed=True),
     auto_tag_template_id: Optional[int] = Body(None, embed=True),
     auto_tag_template_variables: Optional[Dict[str, Any]] = Body(None, embed=True),
+    auto_tag_enabled: bool = Body(True, embed=True),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1783,6 +1785,7 @@ async def create_text_note(
                 delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
                 template_id=auto_tag_template_id,
                 template_variables=auto_tag_template_variables,
+                enabled=auto_tag_enabled,
             )
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
@@ -1794,6 +1797,7 @@ async def create_text_note(
                 template_variables=auto_analyze_template_variables,
                 username=username,
                 delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                enabled=auto_analyze_enabled,
             )
         except Exception as e:
             warning(f"Failed to trigger auto LLM tasks for text note: {str(e)}",
@@ -2658,9 +2662,11 @@ async def upload_audio(
     file: UploadFile = File(...),
     auto_analyze_template_id: Optional[int] = Form(None),
     auto_analyze_template_variables: str = Form('{}'),  # JSON string
+    auto_analyze_enabled: bool = Form(True),
     # PR-5: 上传弹窗 file_tagging picker
     auto_tag_template_id: Optional[int] = Form(None),
     auto_tag_template_variables: str = Form('{}'),  # JSON string
+    auto_tag_enabled: bool = Form(True),
     current_user=Depends(get_current_user)
 ):
     """
@@ -2764,9 +2770,11 @@ async def upload_audio(
                 'diarization_enabled': True,
                 'auto_analyze_template_id': auto_analyze_template_id,
                 'auto_analyze_template_variables': audio_template_vars,
+                'auto_analyze_enabled': auto_analyze_enabled,
                 # PR-5: file_tagging picker 透传到 Celery 任务
                 'auto_tag_template_id': auto_tag_template_id,
                 'auto_tag_template_variables': audio_tag_template_vars,
+                'auto_tag_enabled': auto_tag_enabled,
             },
             queue='file_processing'
         )
@@ -2803,11 +2811,13 @@ async def upload_and_process_document(
     task_type: str = Form(None),
     template_id: Optional[int] = Form(None),
     template_variables: str = Form('{}'),  # JSON string
+    auto_analyze_enabled: bool = Form(True),
     custom_inputs: str = Form('{}'),  # JSON string
     params: str = Form('{}'),  # JSON string (sector, industry, ticker, etc.)
     # PR-5: 上传弹窗用户选择的 file_tagging 模板 (可选)
     auto_tag_template_id: Optional[int] = Form(None),
     auto_tag_template_variables: str = Form('{}'),  # JSON string
+    auto_tag_enabled: bool = Form(True),
     current_user=Depends(get_current_user)
 ):
     """
@@ -2901,10 +2911,14 @@ async def upload_and_process_document(
             'task_type': task_type or 'local_llm_template',
             'template_id': template_id,
             'template_variables': template_vars,
+            # 方案 A: 上传弹窗 AI Analysis 开关
+            'auto_analyze_enabled': auto_analyze_enabled,
             # PR-5: file_tagging picker 选择的模板, 透传到 Celery 任务,
             # 由 upload_and_process_document_task 末尾的 trigger_auto_tagging 使用.
             'auto_tag_template_id': auto_tag_template_id,
             'auto_tag_template_variables': auto_tag_template_vars,
+            # 方案 A: 上传弹窗 AI Tagging 开关
+            'auto_tag_enabled': auto_tag_enabled,
         }
 
         # 提交异步任务到 Celery
@@ -3150,9 +3164,11 @@ async def upload_web_link(
             kwargs={
                 'auto_analyze_template_id': request.auto_analyze_template_id,
                 'auto_analyze_template_variables': request.auto_analyze_template_variables or {},
+                'auto_analyze_enabled': request.auto_analyze_enabled,
                 # PR-5: file_tagging picker
                 'auto_tag_template_id': request.auto_tag_template_id,
                 'auto_tag_template_variables': request.auto_tag_template_variables or {},
+                'auto_tag_enabled': request.auto_tag_enabled,
             },
             queue='file_processing'
         )
@@ -4166,6 +4182,8 @@ async def upload_youtube_link(
             auto_analyze_template_id = None
         if not isinstance(auto_analyze_template_variables, dict):
             auto_analyze_template_variables = {}
+        # 方案 A: 上传弹窗 AI Analysis 开关 (兼容旧客户端不传 = True)
+        auto_analyze_enabled = bool(request.get('auto_analyze_enabled', True))
 
         # PR-5: file_tagging picker 选择的模板, 同样持久化到 upload_params
         auto_tag_template_id = request.get('auto_tag_template_id')
@@ -4176,6 +4194,8 @@ async def upload_youtube_link(
             auto_tag_template_id = None
         if not isinstance(auto_tag_template_variables, dict):
             auto_tag_template_variables = {}
+        # 方案 A: 上传弹窗 AI Tagging 开关 (兼容旧客户端不传 = True)
+        auto_tag_enabled = bool(request.get('auto_tag_enabled', True))
 
         username = current_user.username if hasattr(current_user, 'username') else 'guest'
 
@@ -4220,9 +4240,13 @@ async def upload_youtube_link(
                         # 持久化, finalize_youtube_file_task 会读出来触发 trigger_auto_analyze
                         "auto_analyze_template_id": auto_analyze_template_id,
                         "auto_analyze_template_variables": auto_analyze_template_variables,
+                        # 方案 A: 上传弹窗 AI Analysis 开关
+                        "auto_analyze_enabled": auto_analyze_enabled,
                         # PR-5: file_tagging picker 透传 (finalize 时读出供 trigger_auto_tagging)
                         "auto_tag_template_id": auto_tag_template_id,
                         "auto_tag_template_variables": auto_tag_template_variables,
+                        # 方案 A: 上传弹窗 AI Tagging 开关
+                        "auto_tag_enabled": auto_tag_enabled,
                     }),
                     '', 'processing',
                 ))

@@ -220,13 +220,26 @@ class FeedSummaryPersonalizationService:
             template_id=resolved.template_id,
             log_callback=self.log_callback,
         )
+
+        # 方案 B: 按渠道把 row 的细颗粒字段注入模板变量,
+        # 让用户在 PromptTemplatesPage 里可以自由用 {{author}}/{{title}}/{{text}}/
+        # {{channel}}/{{description}}/{{transcript}} 等占位符.
+        # 调用方传入的 template_variables 优先级最高 (覆盖默认推导).
+        per_channel_vars = self._build_template_variables(
+            row=row,
+            channel=resolved_channel,
+            text=text,
+        )
+        merged_vars: Dict[str, Any] = {
+            "channel_type": resolved_channel,
+            **per_channel_vars,
+            **(template_variables or {}),
+        }
+
         analysis = await llm_service.analyze_file_content(
             file_content=text,
             file_name=f"feed_personalize:{resolved_channel}:{content_id}:user{user_id}",
-            custom_variables={
-                "channel_type": resolved_channel,
-                **(template_variables or {}),
-            },
+            custom_variables=merged_vars,
             user_id=user_id,
         )
 
@@ -292,6 +305,44 @@ class FeedSummaryPersonalizationService:
                 "model": analysis.get("model"),
                 "provider": analysis.get("provider"),
             },
+        }
+
+    # ──────────────────────────────────────────────────────────────────
+    # 辅助: 模板变量映射 (PR-A 方案 B)
+    # ──────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_template_variables(
+        row: Dict[str, Any],
+        channel: str,
+        text: str,
+    ) -> Dict[str, Any]:
+        """
+        把 subscription_content 行按渠道映射到 prompt 模板占位符.
+
+        feed_summary_v1 (Twitter / 通用): {{author}} {{title}} {{text}}
+            - text 是 _build_tagging_text 已合并的正文 (含转推/引用)
+            - title 多数 Twitter 行为空, 兜底空字符串
+        youtube_summary_v1: {{channel}} {{title}} {{description}} {{transcript}}
+            - channel = author_name (频道名)
+            - description ← row.content (RSS 抓的视频简介)
+            - transcript = 仅字幕, 不含 title (与 _build_tagging_text 合并的 text 区分)
+        """
+        if channel == "youtube":
+            return {
+                "channel": (row.get("author_name") or "").strip(),
+                "title": (row.get("title") or "").strip(),
+                "description": (row.get("content") or "").strip(),
+                "transcript": (row.get("transcript") or "").strip(),
+            }
+
+        # twitter / 默认: feed_summary_v1
+        return {
+            "author": (
+                row.get("author_name") or row.get("author_identifier") or ""
+            ).strip(),
+            "title": (row.get("title") or "").strip(),
+            "text": text,
         }
 
     # ──────────────────────────────────────────────────────────────────

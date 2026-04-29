@@ -91,7 +91,30 @@ SELECT
 **核心观点**: 一句话, 不超过 30 字
 **关键事实**: 3-5 条要点, 每条 ≤ 25 字
 **潜在影响**: 从投资视角解读对市场/标的的可能影响, 1-2 句',
-    '{}'::jsonb,
+    -- variables 元数据 (前端 InsertVariablePopover 用), 由
+    -- FeedSummaryPersonalizationService._build_template_variables 注入实际值.
+    '{
+        "channel_type": {
+            "type": "string",
+            "required": false,
+            "description": "渠道类型 (twitter / youtube / rss 等), 由系统自动注入"
+        },
+        "author": {
+            "type": "string",
+            "required": false,
+            "description": "Feed 作者名 (Twitter 用户名 / 频道名等)"
+        },
+        "title": {
+            "type": "string",
+            "required": false,
+            "description": "Feed 标题 (Twitter 通常为空; YouTube/RSS 有标题)"
+        },
+        "text": {
+            "type": "string",
+            "required": true,
+            "description": "Feed 正文 (Twitter 已合并转推/引用上下文; 其他渠道为内容主体)"
+        }
+    }'::jsonb,
     '{"type": "text"}'::jsonb,
     'qwen', 'qwen-plus', 0.5, 800,
     true, false, true,
@@ -129,7 +152,30 @@ SELECT
 **视频要点**: 不超过 5 条, 每条 ≤ 30 字
 **关键引用/数据**: 截取视频中提到的具体数字、引语, 各≤ 20 字
 **投资视角**: 1-2 句, 该视频对当前市场/标的判断的潜在影响',
-    '{}'::jsonb,
+    -- variables 元数据 (前端 InsertVariablePopover 用), 由
+    -- FeedSummaryPersonalizationService._build_template_variables 注入实际值.
+    '{
+        "channel": {
+            "type": "string",
+            "required": false,
+            "description": "YouTube 频道名 (来自 subscription_content.author_name)"
+        },
+        "title": {
+            "type": "string",
+            "required": false,
+            "description": "视频标题"
+        },
+        "description": {
+            "type": "string",
+            "required": false,
+            "description": "视频描述 / 简介 (来自 subscription_content.content; 可能为空)"
+        },
+        "transcript": {
+            "type": "string",
+            "required": true,
+            "description": "视频字幕 / 文字稿 (不含标题)"
+        }
+    }'::jsonb,
     '{"type": "text"}'::jsonb,
     'qwen', 'qwen-plus', 0.5, 1500,
     true, false, true,

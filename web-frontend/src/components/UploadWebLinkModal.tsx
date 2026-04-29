@@ -59,9 +59,11 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
     const webAnalyzeOptions = {
       auto_analyze_template_id: analyzePicker.templateId ?? null,
       auto_analyze_template_variables: analyzePicker.templateVariables || {},
+      auto_analyze_enabled: analyzePicker.enabled !== false,
       // PR-5: file_tagging picker
       auto_tag_template_id: tagPicker.templateId ?? null,
       auto_tag_template_variables: tagPicker.templateVariables || {},
+      auto_tag_enabled: tagPicker.enabled !== false,
     };
 
     handleClose();

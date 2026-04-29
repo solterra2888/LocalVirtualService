@@ -64,20 +64,46 @@ class LLMRateLimiter:
     """Per-user per-provider 固定 1 分钟窗口限速."""
 
     KEY_PREFIX = "llm:rl"
-    DEFAULT_LIMIT_PER_MIN = 30
     KEY_TTL_SECONDS = 70  # 略大于 60s, 防止边界丢失
+
+    # PR-F (2026-04-28): 推迟正式启用; 仅当 env LLM_USER_RATE_LIMIT_PER_MIN 显式
+    # 设置为 >0 的整数时才生效. 未设置 / 设置为 0 / 非法值 → check_and_consume 直接
+    # return, 完全跳过 Redis 调用. 这样观察期内代码彻底 inert, 不引入任何运行时风险.
+    # 决定开启时只需在 .env 里加一行:
+    #     LLM_USER_RATE_LIMIT_PER_MIN=30
+    # 然后重启 web 进程即可.
+    _ENV_KEY = "LLM_USER_RATE_LIMIT_PER_MIN"
 
     _instance: Optional["LLMRateLimiter"] = None
 
     def __init__(self, redis_url: Optional[str] = None, limit_per_min: Optional[int] = None) -> None:
         self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.limit_per_min = int(
-            limit_per_min
-            if limit_per_min is not None
-            else os.getenv("LLM_USER_RATE_LIMIT_PER_MIN", self.DEFAULT_LIMIT_PER_MIN)
-        )
+        self.limit_per_min = self._parse_limit(limit_per_min)
         self._client = None  # 懒初始化
         self._init_failed = False
+
+    @classmethod
+    def _parse_limit(cls, override: Optional[int]) -> int:
+        """解析 limit; 返回 0 表示禁用 (软关闭)."""
+        if override is not None:
+            try:
+                v = int(override)
+                return v if v > 0 else 0
+            except (TypeError, ValueError):
+                return 0
+        raw = os.getenv(cls._ENV_KEY)
+        if not raw:
+            return 0
+        try:
+            v = int(raw)
+            return v if v > 0 else 0
+        except ValueError:
+            logger.warning(f"Invalid {cls._ENV_KEY}='{raw}', rate limit disabled")
+            return 0
+
+    @property
+    def enabled(self) -> bool:
+        return self.limit_per_min > 0
 
     @classmethod
     def instance(cls) -> "LLMRateLimiter":
@@ -128,6 +154,13 @@ class LLMRateLimiter:
         if not user_id:
             return  # 系统调用免限速
 
+        # 软关闭: 未显式启用时立刻 return, 不触碰 Redis
+        effective_limit = (
+            self._parse_limit(limit_per_min) if limit_per_min is not None else self.limit_per_min
+        )
+        if effective_limit <= 0:
+            return
+
         if not provider:
             provider = "default"
 
@@ -138,7 +171,6 @@ class LLMRateLimiter:
         now = int(time.time())
         bucket = now // 60  # 当前 60 秒窗口
         key = f"{self.KEY_PREFIX}:{user_id}:{provider}:{bucket}"
-        effective_limit = int(limit_per_min) if limit_per_min is not None else self.limit_per_min
 
         try:
             pipe = client.pipeline(transaction=False)

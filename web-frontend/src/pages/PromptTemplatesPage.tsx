@@ -20,19 +20,20 @@
  *   - Set as Default Modal
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { TextAreaRef } from 'antd/es/input/TextArea';
 import {
   Alert,
+  App,
   Button,
   Card,
   Col,
+  ConfigProvider,
   Drawer,
   Empty,
   Form,
   Input,
   InputNumber,
-  message,
-  Modal,
   Row,
   Select,
   Space,
@@ -41,25 +42,43 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Grid,
+  theme as antdTheme,
 } from 'antd';
 import {
-  EditOutlined,
   ReloadOutlined,
+  SettingOutlined,
   RobotOutlined,
   LockOutlined,
   ThunderboltOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import promptTemplateService, {
+  ModuleInfo,
   MyTemplateItem,
   PromptTemplate,
   PromptTemplateDetail,
   UpdateMyTemplatePayload,
 } from '../services/promptTemplateService';
+import InsertVariablePopover from '../components/InsertVariablePopover';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
+const { useBreakpoint } = Grid;
+
+// 与 Scheduler Management 页一致的外层容器圆角/阴影
+const CARD_STYLE_BEHANCE = {
+  borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  border: '1px solid #f0f0f0',
+} as const;
+const CARD_STYLE_BEHANCE_DARK = {
+  borderRadius: 12,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+} as const;
 
 const THEME = {
   light: {
@@ -70,6 +89,7 @@ const THEME = {
     textSecondary: 'rgba(0, 0, 0, 0.45)',
     codeBg: '#f5f5f5',
     accent: '#1890ff',
+    hoverRowBg: 'rgba(0, 0, 0, 0.02)',
   },
   dark: {
     pageBg: '#1E202B',
@@ -79,6 +99,7 @@ const THEME = {
     textSecondary: '#A0A3AD',
     codeBg: '#0f1420',
     accent: '#60a5fa',
+    hoverRowBg: 'rgba(255, 255, 255, 0.06)',
   },
 } as const;
 
@@ -97,11 +118,16 @@ interface EditableForm {
   max_tokens: number;
 }
 
-const PromptTemplatesPage: React.FC = () => {
+const PromptTemplatesPageContent: React.FC = () => {
+  const { modal, message: appMessage } = App.useApp();
   const { user } = useAuthStore();
   const isAdmin = !!user?.is_admin;
   const { themeMode } = useDashboardSettings();
   const colors = THEME[themeMode];
+  const isDark = themeMode === 'dark';
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
+  const screens = useBreakpoint();
+  const isLgUp = !!screens?.lg;
 
   // ── State: My Templates ────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'my' | 'system'>('my');
@@ -111,6 +137,10 @@ const PromptTemplatesPage: React.FC = () => {
   // ── State: System Templates (admin only) ───────────────────────────────
   const [sysItems, setSysItems] = useState<PromptTemplate[]>([]);
   const [sysLoading, setSysLoading] = useState(false);
+  // PR-C followup: 模块配置表用于把 system 模板分成 "全局共享 (configurable=false)"
+  // 和 "USER_OWNED 种子模板 (configurable=true)" 两组, 让 admin 一目了然
+  // 哪些编辑会立即生效, 哪些仅作种子.
+  const [modules, setModules] = useState<ModuleInfo[]>([]);
 
   // ── State: Editor Drawer ───────────────────────────────────────────────
   type EditingTarget =
@@ -127,6 +157,39 @@ const PromptTemplatesPage: React.FC = () => {
     [watchedProvider],
   );
 
+  // 当前正在编辑的模板的 variables 字典 (供 Insert Variable 用)
+  const editingVariables = useMemo(() => {
+    if (!editing) return {};
+    return (editing.kind === 'my'
+      ? editing.item.variables
+      : editing.template.variables) as Record<string, any> | undefined;
+  }, [editing]);
+
+  // User Prompt Template 的 TextArea ref, 用于 Insert Variable 按光标插入
+  const promptTextAreaRef = useRef<TextAreaRef>(null);
+
+  const insertTokenAtCursor = (token: string) => {
+    const textarea = promptTextAreaRef.current?.resizableTextArea?.textArea;
+    const current = form.getFieldValue('user_prompt_template') || '';
+    if (!textarea) {
+      form.setFieldValue('user_prompt_template', `${current}${token}`);
+      return;
+    }
+    const start = textarea.selectionStart ?? current.length;
+    const end = textarea.selectionEnd ?? current.length;
+    const next = current.slice(0, start) + token + current.slice(end);
+    form.setFieldValue('user_prompt_template', next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + token.length;
+      try {
+        textarea.setSelectionRange(cursor, cursor);
+      } catch {
+        // ignore
+      }
+    });
+  };
+
   // ── Effects ────────────────────────────────────────────────────────────
   useEffect(() => {
     loadMyTemplates();
@@ -142,7 +205,7 @@ const PromptTemplatesPage: React.FC = () => {
       const items = await promptTemplateService.listMyTemplates();
       setMyItems(items);
     } catch (err: any) {
-      message.error(`加载模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
+      appMessage.error(`加载模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
     } finally {
       setMyLoading(false);
     }
@@ -151,10 +214,14 @@ const PromptTemplatesPage: React.FC = () => {
   const loadSystemTemplates = async () => {
     setSysLoading(true);
     try {
-      const items = await promptTemplateService.listSystemTemplates();
+      const [items, mods] = await Promise.all([
+        promptTemplateService.listSystemTemplates(),
+        promptTemplateService.getModules(),
+      ]);
       setSysItems(items);
+      setModules(mods);
     } catch (err: any) {
-      message.error(`加载系统模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
+      appMessage.error(`加载系统模板失败: ${err?.response?.data?.detail || err?.message || ''}`);
     } finally {
       setSysLoading(false);
     }
@@ -189,7 +256,7 @@ const PromptTemplatesPage: React.FC = () => {
       });
       setDrawerVisible(true);
     } catch (err: any) {
-      message.error(`加载模板详情失败: ${err?.message || ''}`);
+      appMessage.error(`加载模板详情失败: ${err?.message || ''}`);
     }
   };
 
@@ -208,24 +275,24 @@ const PromptTemplatesPage: React.FC = () => {
 
       if (editing.kind === 'my') {
         await promptTemplateService.updateMyTemplate(editing.item.module_code, payload);
-        message.success(`已更新 "${editing.item.module_name}" 模板`);
+        appMessage.success(`已更新 "${editing.item.module_name}" 模板`);
         await loadMyTemplates();
       } else {
         await promptTemplateService.updateSystemTemplate(editing.template.id, payload);
-        message.success(`已更新系统模板 "${editing.template.template_name}"`);
+        appMessage.success(`已更新系统模板 "${editing.template.template_name}"`);
         await loadSystemTemplates();
       }
       setDrawerVisible(false);
       setEditing(null);
     } catch (err: any) {
-      message.error(`保存失败: ${err?.response?.data?.detail || err?.message || ''}`);
+      appMessage.error(`保存失败: ${err?.response?.data?.detail || err?.message || ''}`);
     } finally {
       setSaving(false);
     }
   };
 
   const handleReset = (item: MyTemplateItem) => {
-    Modal.confirm({
+    modal.confirm({
       title: '重置为系统默认?',
       content: `这会用系统默认模板覆盖你在 "${item.module_name}" 的当前内容. 此操作不可恢复.`,
       okText: '确认重置',
@@ -234,10 +301,10 @@ const PromptTemplatesPage: React.FC = () => {
       onOk: async () => {
         try {
           await promptTemplateService.resetMyTemplate(item.module_code);
-          message.success(`"${item.module_name}" 已重置为系统默认`);
+          appMessage.success(`"${item.module_name}" 已重置为系统默认`);
           await loadMyTemplates();
         } catch (err: any) {
-          message.error(`重置失败: ${err?.response?.data?.detail || err?.message || ''}`);
+          appMessage.error(`重置失败: ${err?.response?.data?.detail || err?.message || ''}`);
         }
       },
     });
@@ -267,17 +334,12 @@ const PromptTemplatesPage: React.FC = () => {
                 <Text strong style={{ color: colors.text, fontSize: 15 }}>
                   {item.module_name}
                 </Text>
-                {isOwned ? (
-                  <Tag color="blue" style={{ margin: 0 }}>我的</Tag>
-                ) : (
+                {!isOwned && (
                   <Tag icon={<LockOutlined />} color="default" style={{ margin: 0 }}>
                     系统级 {isAdmin ? '' : '(只读)'}
                   </Tag>
                 )}
               </Space>
-              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                {item.module_description}
-              </div>
             </div>
             <Space>
               {isOwned && (
@@ -289,36 +351,35 @@ const PromptTemplatesPage: React.FC = () => {
                   />
                 </Tooltip>
               )}
-              <Button
-                type="primary"
-                size="small"
-                icon={<EditOutlined />}
-                disabled={isReadonly}
-                onClick={() => openEditMy(item)}
-              >
-                {isReadonly ? '只读' : '编辑'}
-              </Button>
+              <Tooltip title={isReadonly ? '只读' : '编辑'}>
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<SettingOutlined />}
+                  disabled={isReadonly}
+                  onClick={() => openEditMy(item)}
+                  aria-label={isReadonly ? '只读' : '编辑'}
+                  style={{
+                    color: colors.text,
+                    borderColor: colors.cardBorder,
+                    background: isDark ? 'rgba(255,255,255,0.04)' : colors.cardBg,
+                  }}
+                />
+              </Tooltip>
             </Space>
           </Space>
 
-          <div
-            style={{
-              background: colors.codeBg,
-              border: `1px solid ${colors.cardBorder}`,
-              borderRadius: 6,
-              padding: 8,
-              fontSize: 12,
-              color: colors.textSecondary,
-              maxHeight: 80,
-              overflow: 'hidden',
-              fontFamily: 'monospace',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.4,
-            }}
-          >
-            {(item.user_prompt_template || '').slice(0, 220)}
-            {item.user_prompt_template && item.user_prompt_template.length > 220 ? '…' : ''}
-          </div>
+          {item.description && (
+            <div
+              style={{
+                fontSize: 13,
+                color: colors.textSecondary,
+                lineHeight: 1.6,
+              }}
+            >
+              {item.description}
+            </div>
+          )}
 
           <Space size={4} wrap>
             {item.recommended_provider && (
@@ -339,64 +400,306 @@ const PromptTemplatesPage: React.FC = () => {
     );
   };
 
-  // ── Render: System Templates table-like list ──────────────────────────
+  // ── Render: System Templates — Scheduler Management 式左右分栏 + 行列表 ──
   const renderSystemList = () => {
     if (sysLoading) return <Spin />;
-    if (!sysItems.length) return <Empty description="无系统模板" />;
+
+    const moduleConfigurableMap = new Map<string, boolean>(
+      modules.map((m) => [m.module_code, m.configurable]),
+    );
+
+    const fixedItems = sysItems.filter((t) => !moduleConfigurableMap.get(t.module_code || ''));
+    const seedItems = sysItems.filter((t) => !!moduleConfigurableMap.get(t.module_code || ''));
+
+    const renderSystemListItem = (tpl: PromptTemplate, index: number, listLength: number) => (
+      <div
+        key={tpl.id}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 16,
+          padding: '16px 24px',
+          borderBottom: index < listLength - 1 ? `1px solid ${colors.cardBorder}` : 'none',
+          backgroundColor: 'transparent',
+          transition: 'background-color 0.2s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = colors.hoverRowBg;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+      >
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 15,
+              color: colors.text,
+              marginBottom: tpl.description ? 4 : 6,
+            }}
+          >
+            {tpl.template_name}
+          </div>
+          {tpl.description && (
+            <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 8, lineHeight: 1.6 }}>
+              {tpl.description}
+            </div>
+          )}
+          <Space size={4} wrap>
+            {tpl.recommended_provider && (
+              <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>
+                <RobotOutlined /> {tpl.recommended_provider}
+              </Tag>
+            )}
+            {tpl.recommended_model && (
+              <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>
+                {tpl.recommended_model}
+              </Tag>
+            )}
+            <Tag style={{ fontSize: 10, margin: 0 }}>Temp: {tpl.temperature}</Tag>
+            <Tag style={{ fontSize: 10, margin: 0 }}>Max: {tpl.max_tokens}</Tag>
+          </Space>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <Tooltip title="编辑">
+            <Button
+              type="default"
+              size="middle"
+              icon={<SettingOutlined />}
+              onClick={() => openEditSystem(tpl)}
+              style={{
+                borderRadius: 8,
+                width: 36,
+                height: 36,
+                padding: 0,
+                color: colors.text,
+                borderColor: colors.cardBorder,
+                background: isDark ? 'rgba(255,255,255,0.04)' : colors.cardBg,
+              }}
+              aria-label="编辑"
+            />
+          </Tooltip>
+        </div>
+      </div>
+    );
+
+    if (!sysItems.length) {
+      return <Empty description="无系统模板" />;
+    }
 
     return (
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {sysItems.map((tpl) => (
-          <Card
-            key={tpl.id}
-            size="small"
+      <div
+        style={{
+          ...cardStyle,
+          marginBottom: 0,
+          overflow: 'hidden',
+          backgroundColor: colors.cardBg,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 24,
+            padding: '20px 24px',
+            borderBottom: `1px solid ${colors.cardBorder}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: isDark ? '#fa8c16' : '#d46b08',
+              }}
+            >
+              {fixedItems.length}
+            </span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>System fixed</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: isDark ? '#52c41a' : '#389e0d',
+              }}
+            >
+              {seedItems.length}
+            </span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>Seeds</span>
+          </div>
+        </div>
+
+        <Row
+          gutter={[0, 0]}
+          align="stretch"
+          wrap
+          style={{ margin: 0, display: 'flex' }}
+        >
+          <Col
+            xs={24}
+            lg={12}
             style={{
-              background: colors.cardBg,
-              border: `1px solid ${colors.cardBorder}`,
-              borderRadius: 8,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
             }}
-            bodyStyle={{ padding: 14 }}
           >
-            <Row align="middle" gutter={12}>
-              <Col flex="auto">
-                <Space size={6}>
-                  <Text strong style={{ color: colors.text }}>
-                    {tpl.template_name}
-                  </Text>
-                  <Tag color="geekblue">{tpl.template_code}</Tag>
-                  {tpl.module_code && <Tag color="cyan">{tpl.module_code}</Tag>}
-                </Space>
-                <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                  {tpl.description || '—'}
-                </div>
-              </Col>
-              <Col>
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<EditOutlined />}
-                  onClick={() => openEditSystem(tpl)}
+            <div
+              style={{
+                padding: '14px 24px 10px',
+                borderBottom: `1px solid ${colors.cardBorder}`,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <LockOutlined
+                  style={{ color: isDark ? '#fa8c16' : '#d46b08', fontSize: 16 }}
+                />
+                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>
+                  System fixed
+                </span>
+              </div>
+              <Text
+                style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}
+              >
+                编辑后所有用户下次调用即使用新内容（SYSTEM_FIXED 模块，无 per-user 副本）
+              </Text>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
+              {fixedItems.length === 0 ? (
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 24,
+                    minHeight: 160,
+                  }}
                 >
-                  编辑
-                </Button>
-              </Col>
-            </Row>
-          </Card>
-        ))}
-      </Space>
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无" />
+                </div>
+              ) : (
+                <>
+                  {fixedItems.map((tpl, index) =>
+                    renderSystemListItem(tpl, index, fixedItems.length),
+                  )}
+                  <div
+                    style={{ flex: 1, minHeight: 0, background: 'transparent' }}
+                    aria-hidden
+                  />
+                </>
+              )}
+            </div>
+          </Col>
+          <Col
+            xs={24}
+            lg={12}
+            style={{
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              borderTop: isLgUp ? undefined : `1px solid ${colors.cardBorder}`,
+              borderLeft: isLgUp ? `1px solid ${colors.cardBorder}` : undefined,
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 24px 10px',
+                borderBottom: `1px solid ${colors.cardBorder}`,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ExperimentOutlined
+                  style={{ color: isDark ? '#52c41a' : '#389e0d', fontSize: 16 }}
+                />
+                <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>Seeds</span>
+              </div>
+              <Text
+                style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}
+              >
+                仅作 USER_OWNED 模块的默认种子；新用户与「重置」时采用，不覆盖现有用户副本
+              </Text>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
+              {seedItems.length === 0 ? (
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 24,
+                    minHeight: 160,
+                  }}
+                >
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无" />
+                </div>
+              ) : (
+                <>
+                  {seedItems.map((tpl, index) =>
+                    renderSystemListItem(tpl, index, seedItems.length),
+                  )}
+                  <div
+                    style={{ flex: 1, minHeight: 0, background: 'transparent' }}
+                    aria-hidden
+                  />
+                </>
+              )}
+            </div>
+          </Col>
+        </Row>
+      </div>
     );
   };
 
   // ── Render: Editor Drawer ──────────────────────────────────────────────
-  const editingTitle = editing
-    ? editing.kind === 'my'
-      ? `编辑: ${editing.item.module_name}`
-      : `[Admin] 编辑系统模板: ${editing.template.template_name}`
-    : '';
+  const renderDrawerTitle = () => {
+    if (!editing) return '';
+    const code = editing.kind === 'my' ? editing.item.template_code : editing.template.template_code;
+    const line1 =
+      editing.kind === 'my'
+        ? `编辑: ${editing.item.module_name}`
+        : `[Admin] 编辑系统模板: ${editing.template.template_name}`;
+    return (
+      <Space direction="vertical" size={2}>
+        <span style={{ lineHeight: 1.3 }}>{line1}</span>
+        {code && (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            template_code:{' '}
+            <Text code copyable>
+              {code}
+            </Text>
+          </Text>
+        )}
+      </Space>
+    );
+  };
 
   const renderEditor = () => (
     <Drawer
-      title={editingTitle}
+      title={renderDrawerTitle()}
       width={720}
       open={drawerVisible}
       onClose={() => {
@@ -404,6 +707,23 @@ const PromptTemplatesPage: React.FC = () => {
         setEditing(null);
       }}
       destroyOnClose
+      styles={
+        isDark
+          ? {
+              content: { background: colors.cardBg },
+              body: { background: colors.cardBg, padding: 24 },
+              header: {
+                background: colors.cardBg,
+                borderBottom: `1px solid ${colors.cardBorder}`,
+                color: colors.text,
+              },
+              footer: {
+                background: colors.cardBg,
+                borderTop: `1px solid ${colors.cardBorder}`,
+              },
+            }
+          : undefined
+      }
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button onClick={() => setDrawerVisible(false)}>取消</Button>
@@ -419,16 +739,37 @@ const PromptTemplatesPage: React.FC = () => {
             <Alert
               type="info"
               showIcon
-              message={`你正在编辑你自己的 "${editing.item.module_name}" 私有模板。其他用户不会受影响。`}
               style={{ marginBottom: 16 }}
+              message={
+                <>
+                  你正在编辑你自己的 "{editing.item.module_name}" 私有模板。修改只影响你自己。
+                  <br />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Prompt 里用{' '}
+                    <Text code style={{ fontSize: 11 }}>{'{{variable_name}}'}</Text>{' '}
+                    引用变量（如文件正文、新闻标题），运行时由系统自动填充。
+                    点击下方编辑器右上角 <Text strong>Insert Variable</Text> 查看可用变量。
+                  </Text>
+                </>
+              }
             />
           )}
           {editing.kind === 'system' && (
             <Alert
               type="warning"
               showIcon
-              message={`你正在编辑系统模板 "${editing.template.template_name}"，所有未自定义的用户都会立即使用这份新内容。`}
               style={{ marginBottom: 16 }}
+              message={
+                <>
+                  你正在编辑系统模板 "{editing.template.template_name}"，所有未自定义的用户都会立即使用这份新内容。
+                  <br />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Prompt 里用{' '}
+                    <Text code style={{ fontSize: 11 }}>{'{{variable_name}}'}</Text>{' '}
+                    引用变量，点击下方编辑器右上角 <Text strong>Insert Variable</Text> 查看可用变量。
+                  </Text>
+                </>
+              }
             />
           )}
 
@@ -440,13 +781,28 @@ const PromptTemplatesPage: React.FC = () => {
             <TextArea rows={4} placeholder="（可选）" />
           </Form.Item>
 
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 4,
+            }}
+          >
+            <Text strong style={{ fontSize: 14 }}>
+              User Prompt Template <Text type="danger">*</Text>
+            </Text>
+            <InsertVariablePopover
+              variables={editingVariables}
+              onInsert={insertTokenAtCursor}
+            />
+          </div>
           <Form.Item
-            label="User Prompt Template"
             name="user_prompt_template"
             rules={[{ required: true, message: '不能为空' }]}
             extra="支持 {{变量}} 占位符；用户调用时会被自动填充。"
           >
-            <TextArea rows={12} />
+            <TextArea ref={promptTextAreaRef} rows={12} />
           </Form.Item>
 
           <Row gutter={12}>
@@ -484,18 +840,20 @@ const PromptTemplatesPage: React.FC = () => {
     </Drawer>
   );
 
-  // ── My Templates split: USER_OWNED first, SYSTEM_FIXED below ───────────
+  // ── My Templates: 仅展示用户自己可编辑的 USER_OWNED 卡片 ───────────────
+  // 简化决策 (2026-04-28): 旧版还展示 SYSTEM_FIXED 只读区, 与 System Templates
+  // Tab (admin) 完全冗余, 普通用户也用不上. 删掉, 让此页对普通用户彻底单一目的:
+  // "这就是我能编辑的全部模板".
   const ownedItems = myItems.filter((x) => x.kind === 'user_owned');
-  const systemItems = myItems.filter((x) => x.kind === 'system_fixed');
 
   return (
     <div style={{ padding: 24, background: colors.pageBg, minHeight: '100vh' }}>
       <Title level={3} style={{ color: colors.text, marginBottom: 4 }}>
         Prompt Templates
       </Title>
-      <Paragraph type="secondary" style={{ marginBottom: 20 }}>
-        每个功能模块对应你自己的一份私有模板（My Templates 中可编辑/重置）；
-        系统级模板对所有用户共享，仅管理员可改 prompt 内容。
+      <Paragraph style={{ marginBottom: 20, color: colors.textSecondary }}>
+        在 My Templates 中编辑你自己的 LLM 模板。每个功能模块对应一份私有模板，
+        重置 = 拉回系统默认（覆盖式，无历史）。
       </Paragraph>
 
       <Tabs
@@ -511,25 +869,11 @@ const PromptTemplatesPage: React.FC = () => {
             ),
             children: (
               <Spin spinning={myLoading}>
-                <Title level={5} style={{ color: colors.text, marginTop: 4 }}>
-                  我的（可编辑）
-                </Title>
                 {!ownedItems.length && !myLoading && (
                   <Empty description="未找到可编辑模板" />
                 )}
                 <Row gutter={[12, 12]}>
                   {ownedItems.map((item) => (
-                    <Col xs={24} md={12} xl={8} key={item.module_code}>
-                      {renderMyCard(item)}
-                    </Col>
-                  ))}
-                </Row>
-
-                <Title level={5} style={{ color: colors.text, marginTop: 24 }}>
-                  系统级（{isAdmin ? '可在 System Templates Tab 编辑' : '只读'}）
-                </Title>
-                <Row gutter={[12, 12]}>
-                  {systemItems.map((item) => (
                     <Col xs={24} md={12} xl={8} key={item.module_code}>
                       {renderMyCard(item)}
                     </Col>
@@ -547,17 +891,7 @@ const PromptTemplatesPage: React.FC = () => {
                       <LockOutlined /> System Templates (Admin)
                     </Space>
                   ),
-                  children: (
-                    <>
-                      <Alert
-                        type="warning"
-                        showIcon
-                        message="改动会立刻生效到所有未自定义对应模块的用户。请谨慎编辑。"
-                        style={{ marginBottom: 12 }}
-                      />
-                      {renderSystemList()}
-                    </>
-                  ),
+                  children: renderSystemList(),
                 },
               ]
             : []),
@@ -566,6 +900,41 @@ const PromptTemplatesPage: React.FC = () => {
 
       {renderEditor()}
     </div>
+  );
+};
+
+/** 与 Files / Users 等页一致：ConfigProvider darkAlgorithm + App 以统一 Tabs/Drawer/Modal/Message 的暗色表现 */
+const PromptTemplatesPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME[themeMode];
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        ...(isDark && {
+          token: {
+            colorBgContainer: colors.cardBg,
+            colorBgElevated: colors.cardBg,
+            colorBorderSecondary: colors.cardBorder,
+            colorPrimary: colors.accent,
+            colorText: colors.text,
+            colorTextSecondary: colors.textSecondary,
+            colorFillQuaternary: 'rgba(255, 255, 255, 0.04)',
+            colorBgLayout: colors.pageBg,
+            colorSplit: colors.cardBorder,
+            borderRadius: 8,
+            borderRadiusLG: 10,
+            colorBorder: colors.cardBorder,
+          },
+        }),
+      }}
+    >
+      <App>
+        <PromptTemplatesPageContent />
+      </App>
+    </ConfigProvider>
   );
 };
 

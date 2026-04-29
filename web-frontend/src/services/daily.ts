@@ -236,6 +236,17 @@ export interface DailyItemDetailFeed {
 
   /** AI 标签 lite (与列表行 tags 同形, 未打标 = null) */
   tags: DailyItemDetailFeedTags | null;
+
+  /**
+   * PR-D1: per-user 个性化摘要 (subscription_content_user_summaries.summary).
+   * 抽屉 "AI 深度分析" 段消费; null = 该用户对本条 feed 还没生成个性化.
+   * 由 personalize_feed_summary_task 写入 (用户开启自动 fan-out 后随 tag 完成自动生成).
+   */
+  personalized_summary?: string | null;
+  /** 生成时使用的 llm_prompt_templates.id (feed_summary / youtube_summary 模块) */
+  personalized_template_id?: number | null;
+  /** ISO 8601 时间戳 (subscription_content_user_summaries.tagged_at) */
+  personalized_at?: string | null;
 }
 
 export interface DailyItemDetail extends DailyFeedItem {

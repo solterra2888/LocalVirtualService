@@ -15,8 +15,12 @@ import { api } from './api';
 export interface UploadAnalyzeOptions {
   auto_analyze_template_id?: number | null;
   auto_analyze_template_variables?: Record<string, any>;
+  /** 方案 A: 上传弹窗 AI Analysis 开关 (false 时后端跳过整条分析链路) */
+  auto_analyze_enabled?: boolean;
   auto_tag_template_id?: number | null;
   auto_tag_template_variables?: Record<string, any>;
+  /** 方案 A: 上传弹窗 AI Tagging 开关 (false 时后端跳过整条打标链路) */
+  auto_tag_enabled?: boolean;
 }
 
 // 文件类型定义
@@ -239,6 +243,11 @@ export const filesAPI = {
       'auto_analyze_template_variables',
       JSON.stringify(analyzeOptions?.auto_analyze_template_variables || {})
     );
+    // 方案 A: AI Analysis 开关 (默认 true)
+    formData.append(
+      'auto_analyze_enabled',
+      String(analyzeOptions?.auto_analyze_enabled !== false)
+    );
     // PR-5: file_tagging picker
     if (analyzeOptions?.auto_tag_template_id) {
       formData.append(
@@ -249,6 +258,11 @@ export const filesAPI = {
     formData.append(
       'auto_tag_template_variables',
       JSON.stringify(analyzeOptions?.auto_tag_template_variables || {})
+    );
+    // 方案 A: AI Tagging 开关 (默认 true)
+    formData.append(
+      'auto_tag_enabled',
+      String(analyzeOptions?.auto_tag_enabled !== false)
     );
 
     return api.upload('/files/upload-audio', formData);
@@ -277,10 +291,14 @@ export const filesAPI = {
       auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
       auto_analyze_template_variables:
         analyzeOptions?.auto_analyze_template_variables || {},
+      // 方案 A: AI Analysis 开关
+      auto_analyze_enabled: analyzeOptions?.auto_analyze_enabled !== false,
       // PR-5: file_tagging picker
       auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
       auto_tag_template_variables:
         analyzeOptions?.auto_tag_template_variables || {},
+      // 方案 A: AI Tagging 开关
+      auto_tag_enabled: analyzeOptions?.auto_tag_enabled !== false,
     });
   },
 
@@ -323,10 +341,14 @@ export const filesAPI = {
       auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
       auto_analyze_template_variables:
         analyzeOptions?.auto_analyze_template_variables || {},
+      // 方案 A: AI Analysis 开关
+      auto_analyze_enabled: analyzeOptions?.auto_analyze_enabled !== false,
       // PR-5: file_tagging picker
       auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
       auto_tag_template_variables:
         analyzeOptions?.auto_tag_template_variables || {},
+      // 方案 A: AI Tagging 开关
+      auto_tag_enabled: analyzeOptions?.auto_tag_enabled !== false,
     });
   },
 
@@ -338,11 +360,15 @@ export const filesAPI = {
       task_type?: string;
       template_id?: number;
       template_variables?: Record<string, any>;
+      /** 方案 A: 上传弹窗 AI Analysis 开关 (默认 true) */
+      auto_analyze_enabled?: boolean;
       custom_inputs?: Record<string, any>;
       params?: Record<string, any>;
       // PR-5: file_tagging picker (与 audio/youtube/web-link/text-note 入口对齐)
       auto_tag_template_id?: number | null;
       auto_tag_template_variables?: Record<string, any>;
+      /** 方案 A: 上传弹窗 AI Tagging 开关 */
+      auto_tag_enabled?: boolean;
     }
   ): Promise<{
     success: boolean;
@@ -364,6 +390,11 @@ export const filesAPI = {
       formData.append('template_id', options.template_id.toString());
     }
     formData.append('template_variables', JSON.stringify(options.template_variables || {}));
+    // 方案 A: AI Analysis 开关
+    formData.append(
+      'auto_analyze_enabled',
+      String(options.auto_analyze_enabled !== false)
+    );
     formData.append('custom_inputs', JSON.stringify(options.custom_inputs || {}));
     formData.append('params', JSON.stringify(options.params || {}));
     // PR-5: file_tagging picker 的两个新参数
@@ -373,6 +404,11 @@ export const filesAPI = {
     formData.append(
       'auto_tag_template_variables',
       JSON.stringify(options.auto_tag_template_variables || {})
+    );
+    // 方案 A: AI Tagging 开关
+    formData.append(
+      'auto_tag_enabled',
+      String(options.auto_tag_enabled !== false)
     );
 
     return api.upload('/files/upload-and-process-document', formData);
@@ -637,10 +673,14 @@ export const filesAPI = {
         auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
         auto_analyze_template_variables:
           analyzeOptions?.auto_analyze_template_variables || {},
+        // 方案 A: AI Analysis 开关 (默认 true 兼容旧调用)
+        auto_analyze_enabled: analyzeOptions?.auto_analyze_enabled !== false,
         // PR-5: file_tagging picker
         auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
         auto_tag_template_variables:
           analyzeOptions?.auto_tag_template_variables || {},
+        // 方案 A: AI Tagging 开关
+        auto_tag_enabled: analyzeOptions?.auto_tag_enabled !== false,
       }
     );
   },

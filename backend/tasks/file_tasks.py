@@ -46,6 +46,7 @@ def trigger_auto_tagging(
     delay=2,
     template_id=None,
     template_variables=None,
+    enabled=True,
 ):
     """
     触发自动打标签任务
@@ -55,14 +56,24 @@ def trigger_auto_tagging(
         username: 用户名
         delay: 延迟执行时间（秒），默认2秒，确保DB事务已提交
         template_id: 上传弹窗用户选择的 file_tagging 模板 ID (PR-5);
-            未传时 task 内部会走 user_template_preferences[file_tagging] →
+            未传时 task 内部会走 LLMTemplateResolver → user_owned 模板 →
             content_tag_v1 兜底.
         template_variables: 运行时模板变量 (PR-5); 与默认模板的 additional_context 合并.
+        enabled: 用户在上传弹窗里的 AI Tagging 开关状态. False 时直接跳过 (方案 A).
+            默认 True 保持向后兼容 (旧调用方未传等于 ON).
     """
-    # 检查是否启用自动打标签
+    # 用户上传弹窗里主动关闭 → 跳过整条打标链路
+    if not enabled:
+        info(
+            f"用户在上传弹窗禁用自动打标 (enabled=False), 跳过: file_ids={file_detail_ids}",
+            source="auto_tagging",
+        )
+        return
+
+    # 全局环境变量级禁用 (运维兜底, 不受用户控制)
     auto_tag_enabled = os.getenv('AUTO_TAG_ENABLED', 'true').lower() == 'true'
     if not auto_tag_enabled:
-        info("自动打标签功能已禁用", source="auto_tagging")
+        info("自动打标签功能已被环境变量禁用", source="auto_tagging")
         return
 
     # 确保是列表
@@ -173,6 +184,7 @@ def trigger_auto_analyze(
     template_variables=None,
     username=None,
     delay=2,
+    enabled=True,
 ):
     """
     content 写入完成后, 可选地自动投递 analyze_document/audio 任务.
@@ -196,9 +208,18 @@ def trigger_auto_analyze(
           不在此处做幂等,由调用方保证只在每次 content 写入完成后投递一次.
         - 自动并行链路下用 skip_post_trigger=True 关掉 analyze 末尾的重复 trigger_auto_*.
     """
+    # 方案 A: 用户在上传弹窗主动关闭 → 跳过, 不再做 audio fallback
+    if not enabled:
+        info(
+            f"用户在上传弹窗禁用自动 AI 分析 (enabled=False), 跳过: "
+            f"file_id={file_detail_id}, file_type={file_type}",
+            source="auto_analyze",
+        )
+        return
+
     auto_analyze_enabled = os.getenv('AUTO_ANALYZE_ENABLED', 'true').lower() == 'true'
     if not auto_analyze_enabled:
-        info("自动 AI 分析功能已禁用", source="auto_analyze")
+        info("自动 AI 分析功能已被环境变量禁用", source="auto_analyze")
         return
 
     if not file_detail_id or not execution_id:
@@ -210,7 +231,8 @@ def trigger_auto_analyze(
 
     is_audio_like = file_type in ('audio', 'youtube')
 
-    # 音频/YouTube 未指定模板时降级为 audio_analysis_v1
+    # 音频/YouTube enabled=True 但未指定模板时降级为 audio_analysis_v1
+    # (例如旧客户端不传 template_id, 但仍想跑分析)
     resolved_template_id = template_id
     if is_audio_like and not resolved_template_id:
         try:
@@ -229,10 +251,10 @@ def trigger_auto_analyze(
             error(f"加载默认音频模板失败: {e}", source="auto_analyze")
             return
 
-    # 文档/网页/文本笔记: 用户未选模板则不触发 (analyze_document_task 强依赖 template_id)
+    # 文档/网页/文本笔记 enabled=True 但未传 template_id: 跳过
     if not resolved_template_id:
         info(
-            f"用户未选择 analyze 模板, 跳过自动 AI 分析: file_id={file_detail_id}, file_type={file_type}",
+            f"用户开启 AI 分析但未传 template_id, 跳过: file_id={file_detail_id}, file_type={file_type}",
             source="auto_analyze",
         )
         return
@@ -549,11 +571,14 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                     # PR-5: 从 task_info 取 file_tagging 模板, 透传给 trigger_auto_tagging
                     auto_tag_template_id = task_info.get('auto_tag_template_id') if task_info else None
                     auto_tag_template_vars = task_info.get('auto_tag_template_variables') if task_info else None
+                    # 方案 A: 取上传弹窗 AI Tagging 开关; 旧记录无此字段 = True 兼容
+                    auto_tag_enabled = bool(task_info.get('auto_tag_enabled', True)) if task_info else True
                     trigger_auto_tagging(
                         file_ids, username,
                         delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
                         template_id=auto_tag_template_id,
                         template_variables=auto_tag_template_vars,
+                        enabled=auto_tag_enabled,
                     )
                     trigger_auto_naming(file_ids, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                     trigger_auto_classify(file_ids, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
@@ -1528,8 +1553,10 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                                       language_hints=None, diarization_enabled=True,
                                       auto_analyze_template_id=None,
                                       auto_analyze_template_variables=None,
+                                      auto_analyze_enabled=True,
                                       auto_tag_template_id=None,
-                                      auto_tag_template_variables=None):
+                                      auto_tag_template_variables=None,
+                                      auto_tag_enabled=True):
     """
     异步上传音频文件到 OSS 并进行语音识别
     
@@ -1814,6 +1841,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                 delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
                 template_id=auto_tag_template_id,
                 template_variables=auto_tag_template_variables,
+                enabled=auto_tag_enabled,
             )
             trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
@@ -1825,6 +1853,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                 template_variables=auto_analyze_template_variables,
                 username=username,
                 delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                enabled=auto_analyze_enabled,
             )
         except Exception as e:
             error(f"触发自动并行 LLM 任务失败: {str(e)}", source="celery_audio_upload")
@@ -2105,10 +2134,13 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                     # PR-5: 把 auto_tag_template_id 从 task_info 透传到 trigger_auto_tagging
                     auto_tag_template_id = task_info.get('auto_tag_template_id') if task_info else None
                     auto_tag_template_vars = task_info.get('auto_tag_template_variables') if task_info else None
+                    # 方案 A: 上传弹窗 AI Tagging 开关; 旧记录无字段 = True 兼容
+                    auto_tag_enabled = bool(task_info.get('auto_tag_enabled', True)) if task_info else True
                     trigger_auto_tagging(
                         file_ids, username=username, delay=2,
                         template_id=auto_tag_template_id,
                         template_variables=auto_tag_template_vars,
+                        enabled=auto_tag_enabled,
                     )
                     trigger_auto_naming(file_ids, username=username, delay=2)
                     trigger_auto_classify(file_ids, username=username, delay=2)
@@ -2117,6 +2149,8 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                     # 否则跳过 (文档分析强依赖 template_id, 没选就走 FilesPage 右侧 fallback)
                     auto_template_id = task_info.get('template_id') if task_info else None
                     auto_template_vars = task_info.get('template_variables') if task_info else None
+                    # 方案 A: 上传弹窗 AI Analysis 开关; 旧记录无字段 = True 兼容
+                    auto_analyze_enabled = bool(task_info.get('auto_analyze_enabled', True)) if task_info else True
                     for fid, stats_id in rows:
                         trigger_auto_analyze(
                             file_detail_id=fid,
@@ -2126,6 +2160,7 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                             template_variables=auto_template_vars,
                             username=username,
                             delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                            enabled=auto_analyze_enabled,
                         )
         except Exception as e:
             error(f"触发自动并行 LLM 任务失败: {str(e)}", source="celery_doc_upload")
@@ -2304,8 +2339,10 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
 def scrape_and_process_web_link_task(self, url, username,
                                       auto_analyze_template_id=None,
                                       auto_analyze_template_variables=None,
+                                      auto_analyze_enabled=True,
                                       auto_tag_template_id=None,
-                                      auto_tag_template_variables=None):
+                                      auto_tag_template_variables=None,
+                                      auto_tag_enabled=True):
     """
     服务端网页抓取：抓取 URL → Readability 提取正文 → 图片 base64 内嵌 → 上传 OSS → 写入 DB。
     替代 Chrome Extension 在浏览器端完成的全部工作。
@@ -2491,6 +2528,7 @@ def scrape_and_process_web_link_task(self, url, username,
             delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
             template_id=auto_tag_template_id,
             template_variables=auto_tag_template_variables,
+            enabled=auto_tag_enabled,
         )
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
@@ -2502,6 +2540,7 @@ def scrape_and_process_web_link_task(self, url, username,
             template_variables=auto_analyze_template_variables,
             username=username,
             delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+            enabled=auto_analyze_enabled,
         )
 
         return {
@@ -3355,9 +3394,13 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     _params = {}
                 auto_analyze_template_id = _params.get('auto_analyze_template_id')
                 auto_analyze_template_variables = _params.get('auto_analyze_template_variables')
+                # 方案 A: AI Analysis 开关 (旧记录无字段 = True)
+                auto_analyze_enabled = bool(_params.get('auto_analyze_enabled', True))
                 # PR-5: 读取 file_tagging picker 选择
                 auto_tag_template_id = _params.get('auto_tag_template_id')
                 auto_tag_template_variables = _params.get('auto_tag_template_variables')
+                # 方案 A: AI Tagging 开关
+                auto_tag_enabled = bool(_params.get('auto_tag_enabled', True))
             except Exception:
                 pass
 
@@ -3395,6 +3438,7 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     [file_id], username, delay=2,
                     template_id=auto_tag_template_id,
                     template_variables=auto_tag_template_variables,
+                    enabled=auto_tag_enabled,
                 )
                 trigger_auto_naming([file_id], username, delay=2)
                 trigger_auto_classify([file_id], username, delay=2)
@@ -3406,6 +3450,7 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                     template_variables=auto_analyze_template_variables,
                     username=username,
                     delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                    enabled=auto_analyze_enabled,
                 )
                 info(
                     f"finalize: 已触发 auto-tag/name/classify/analyze file_id={file_id} "

@@ -182,6 +182,31 @@ def tag_feed_content_task(
             ),
         )
 
+        # PR-N2: 全局打标成功后链式派发 fan-out, 由 fan-out 根据
+        # user_feed_summary_settings 决定要不要为 N 个用户跑个性化摘要.
+        # 用 apply_async (而非 chain) 解耦: fan-out 内部失败不会让 tag 任务被
+        # 错误地标记失败 / 重试; 也避免 result.get() 阻塞.
+        try:
+            from backend.tasks.feed_summary_tasks import (
+                fan_out_personalize_summary_task,
+            )
+            fan_out_personalize_summary_task.apply_async(
+                args=(content_id,),
+                countdown=2,
+            )
+            info(
+                f"FeedTagging {self.request.id}: 已链式派发 fan_out_personalize_summary "
+                f"content_id={content_id}",
+                source="celery_feed_tagging",
+            )
+        except Exception as fan_out_err:
+            # 即使 fan-out 派发本身失败, tag 主链路也算成功 (用户仍能看到 baseline summary)
+            error(
+                f"FeedTagging {self.request.id}: 派发 fan_out_personalize_summary 失败 "
+                f"content_id={content_id} err={fan_out_err}",
+                source="celery_feed_tagging",
+            )
+
         return {
             "status": "completed",
             "content_id": content_id,

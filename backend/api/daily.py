@@ -867,7 +867,9 @@ def _fetch_feed_detail(
     """根据 subscription_content.id 装配 Feed 卡片完整详情.
 
     鉴权: user_id = ANY(sc.user_ids) (与列表口径 + Feeds 模块一致).
-    单查询 LEFT JOIN subscription_content_tags 取出 AI 标签轻量结构.
+    单查询 LEFT JOIN subscription_content_tags 取 AI 打标轻量结构;
+    LEFT JOIN subscription_content_user_summaries (PR-D1) 取 per-user 个性化摘要,
+    抽屉前端 "AI 深度分析" 段消费.
     跳转目标 subscription_id 用 (channel_type, channel_identifier) 反查 subscription_list.
     """
     cursor.execute(
@@ -886,12 +888,19 @@ def _fetch_feed_detail(
                 AS has_transcript,
             COALESCE(LENGTH(sc.content), 0) + COALESCE(LENGTH(sc.transcript), 0) AS content_length,
             sct.sector, sct.sector_en, sct.industry, sct.industry_en,
-            sct.ticker, sct.concepts, sct.summary, sct.confidence, sct.tagged_at
+            sct.ticker, sct.concepts, sct.summary, sct.confidence, sct.tagged_at,
+            scus.summary       AS personalized_summary,
+            scus.template_id   AS personalized_template_id,
+            scus.tagged_at     AS personalized_at
         FROM subscription_content sc
-        LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
+        LEFT JOIN subscription_content_tags sct
+            ON sct.subscription_content_id = sc.id
+        LEFT JOIN subscription_content_user_summaries scus
+            ON scus.subscription_content_id = sc.id
+           AND scus.user_id = %s
         WHERE sc.id = %s AND %s = ANY(sc.user_ids)
         """,
-        (content_db_id, current_user.user_id),
+        (current_user.user_id, content_db_id, current_user.user_id),
     )
     row = cursor.fetchone()
     if not row:
@@ -911,6 +920,7 @@ def _fetch_feed_detail(
         content_length,
         sector, sector_en, industry, industry_en,
         ticker_raw, concepts_raw, summary, confidence, tagged_at,
+        personalized_summary, personalized_template_id, personalized_at,
     ) = row
 
     subtype = _FEED_CHANNEL_TYPE_MAP.get(channel_type or "news", "news")
@@ -993,6 +1003,9 @@ def _fetch_feed_detail(
         heat_level=heat_level,
         has_transcript=bool(has_transcript),
         tags=tags_payload,
+        personalized_summary=personalized_summary or None,
+        personalized_template_id=personalized_template_id,
+        personalized_at=personalized_at.isoformat() if personalized_at else None,
     )
 
     composed_title = title or author_name or author_identifier or "Untitled"

@@ -42,9 +42,13 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
       await filesAPI.createTextNote(title.trim(), trimmed, {
         auto_analyze_template_id: analyzePicker.templateId ?? null,
         auto_analyze_template_variables: analyzePicker.templateVariables || {},
+        // 方案 A: AI Analysis 开关
+        auto_analyze_enabled: analyzePicker.enabled !== false,
         // PR-5: file_tagging picker
         auto_tag_template_id: tagPicker.templateId ?? null,
         auto_tag_template_variables: tagPicker.templateVariables || {},
+        // 方案 A: AI Tagging 开关
+        auto_tag_enabled: tagPicker.enabled !== false,
       });
       message.success(
         analyzePicker.templateId

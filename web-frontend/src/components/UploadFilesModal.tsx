@@ -172,6 +172,8 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
         task_type: 'document_upload',
         template_id: analyzePicker.templateId, // 用户在 picker 选的模板, 上传完成后后端 trigger_auto_analyze
         template_variables: analyzePicker.templateVariables || {},
+        // 方案 A: AI Analysis 开关
+        auto_analyze_enabled: analyzePicker.enabled !== false,
         custom_inputs: {},
         params: {
           ...params,
@@ -180,6 +182,8 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
         // PR-5: file_tagging picker 选择, 上传完成后后端 trigger_auto_tagging
         auto_tag_template_id: tagPicker.templateId,
         auto_tag_template_variables: tagPicker.templateVariables || {},
+        // 方案 A: AI Tagging 开关
+        auto_tag_enabled: tagPicker.enabled !== false,
       });
 
       addTask(response.task_id, file.name, 'document');
@@ -202,6 +206,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
   const resetAndClose = () => {
     setSelectedFile(null);
     setAnalyzePicker({});
+    setTagPicker({});
     setProcessingParams({
       processing_mode: 'quick',
       language: ['ch_sim', 'en'],

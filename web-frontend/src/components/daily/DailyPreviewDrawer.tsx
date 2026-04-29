@@ -28,6 +28,7 @@ import React from 'react';
 import {
   App,
   Button,
+  Collapse,
   Drawer,
   Empty,
   Skeleton,
@@ -42,6 +43,7 @@ import {
   ArrowUpOutlined,
   CloseOutlined,
   ExportOutlined,
+  FileTextOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -53,6 +55,7 @@ import {
 import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 import DailyOriginalView from './DailyOriginalView';
+import DailyAIAnalysisSection from './DailyAIAnalysisSection';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
@@ -91,6 +94,13 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // PR-D2: Original 段折叠状态.
+  //   规则: 抽屉里有 "AI 深度分析"(final_report / personalized_summary) 时默认折叠;
+  //         否则默认展开 (与现状兼容). 用户点击 Collapse 后会切到手动模式,
+  //         切换 item 时重置.
+  const [originalExpanded, setOriginalExpanded] = React.useState(true);
+  const [userToggledOriginal, setUserToggledOriginal] = React.useState(false);
+
   // 防止过期请求覆盖最新选中
   const requestSeqRef = React.useRef(0);
 
@@ -102,13 +112,14 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < items.length - 1;
 
-  // 切换 item 时拉详情
+  // 切换 item 时拉详情 + 重置折叠"用户已手动操作"标志
   React.useEffect(() => {
     if (!item) {
       setDetail(null);
       setError(null);
       return;
     }
+    setUserToggledOriginal(false);
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
@@ -126,6 +137,16 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
       }
     })();
   }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- item identity tied to id
+
+  // detail 加载完后, 如果用户没手动操作过 Original Collapse, 按 "有 AI 深度分析则折叠" 规则自动决定
+  const hasAIAnalysis = !!(
+    detail?.upload?.final_report ||
+    detail?.feed?.personalized_summary
+  );
+  React.useEffect(() => {
+    if (!detail || userToggledOriginal) return;
+    setOriginalExpanded(!hasAIAnalysis);
+  }, [detail, hasAIAnalysis, userToggledOriginal]);
 
   // 键盘快捷键 (Esc / ↑ / ↓ / J / K)
   React.useEffect(() => {
@@ -401,39 +422,60 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
           )}
         </div>
 
-        {/* Original 区 */}
-        <div>
-          <Text
-            type="secondary"
-            style={{
-              fontSize: 11,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              color: colors.textMuted,
-              display: 'block',
-              marginBottom: 8,
-            }}
-          >
-            Original
-          </Text>
-          {loading && !detail ? (
-            <div style={{ padding: 8 }}>
-              <Skeleton active paragraph={{ rows: 4 }} />
-            </div>
-          ) : error ? (
-            <Empty
-              description={
-                <Text style={{ color: colors.textMuted }}>
-                  {error || 'Failed to load original content'}
-                </Text>
-              }
-            />
-          ) : detail ? (
-            <DailyOriginalView detail={detail} themeMode={themeMode} />
-          ) : (
-            <Spin />
-          )}
-        </div>
+        {/* PR-D2: AI Analysis 段 - 长篇 LLM 产物 (final_report / personalized_summary).
+            没有数据时组件内部直接 return null, 整段静默隐藏. */}
+        <DailyAIAnalysisSection detail={detail} themeMode={themeMode} />
+
+        {/* Original 段 - 按规则默认折叠 (有 AI 深度分析时) / 展开 (兜底).
+            外层 Collapse ghost 模式去掉边框, 仅保留展开/折叠行为. */}
+        <Collapse
+          ghost
+          activeKey={originalExpanded ? ['original'] : []}
+          onChange={(keys) => {
+            const arr = Array.isArray(keys) ? keys : keys ? [keys] : [];
+            setOriginalExpanded(arr.includes('original'));
+            setUserToggledOriginal(true);
+          }}
+          items={[
+            {
+              key: 'original',
+              label: (
+                <Space size={6} align="center">
+                  <FileTextOutlined style={{ color: colors.textMuted, fontSize: 13 }} />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 0.6,
+                      textTransform: 'uppercase',
+                      color: colors.textMuted,
+                    }}
+                  >
+                    Original Content
+                  </Text>
+                </Space>
+              ),
+              children: loading && !detail ? (
+                <div style={{ padding: 8 }}>
+                  <Skeleton active paragraph={{ rows: 4 }} />
+                </div>
+              ) : error ? (
+                <Empty
+                  description={
+                    <Text style={{ color: colors.textMuted }}>
+                      {error || 'Failed to load original content'}
+                    </Text>
+                  }
+                />
+              ) : detail ? (
+                <DailyOriginalView detail={detail} themeMode={themeMode} />
+              ) : (
+                <Spin />
+              ),
+              style: { padding: 0 },
+            },
+          ]}
+          style={{ background: 'transparent' }}
+        />
       </Space>
     );
   };

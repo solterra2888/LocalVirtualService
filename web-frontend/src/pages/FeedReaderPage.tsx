@@ -39,6 +39,7 @@ import {
   PauseCircleOutlined,
   CheckSquareOutlined,
   CloseOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -69,6 +70,7 @@ import {
 } from '../components/feed/feedChannelConfig';
 import FeedArticleBody from '../components/feed/FeedArticleBody';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
+import FeedSummarySettingsDrawer from '../components/feed/FeedSummarySettingsDrawer';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
@@ -92,6 +94,9 @@ const FeedReaderPageInner: React.FC = () => {
   const [contentsLoading, setContentsLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
+
+  // PR-N3: 个性化摘要设置 Drawer
+  const [summarySettingsOpen, setSummarySettingsOpen] = useState(false);
   
   // 🔥 分页状态
   const [contentOffset, setContentOffset] = useState(0);
@@ -746,6 +751,17 @@ const FeedReaderPageInner: React.FC = () => {
                   style={{ color: '#2196F3' }}
                 >
                   <span className="feed-list-type-tab-icon"><PlusOutlined /></span>
+                </button>
+              </Tooltip>
+              <Tooltip title="Personalized summary settings">
+                <button
+                  type="button"
+                  className="feed-list-type-tab"
+                  onClick={() => setSummarySettingsOpen(true)}
+                  aria-label="Personalized summary settings"
+                  style={{ color: themeColors.textSecondary }}
+                >
+                  <span className="feed-list-type-tab-icon"><SettingOutlined /></span>
                 </button>
               </Tooltip>
             </div>
@@ -1610,6 +1626,12 @@ const FeedReaderPageInner: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* PR-N3: 个性化摘要设置 Drawer (右上角齿轮) */}
+      <FeedSummarySettingsDrawer
+        open={summarySettingsOpen}
+        onClose={() => setSummarySettingsOpen(false)}
+      />
     </Layout>
   );
 };
