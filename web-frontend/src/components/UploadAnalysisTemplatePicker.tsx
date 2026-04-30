@@ -48,7 +48,11 @@ const { TextArea } = Input;
 
 // ── Provider → Model 映射 ────────────────────────────────────────────────
 const PROVIDER_MODELS: Record<string, string[]> = {
-  qwen: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext', 'qwen3-turbo', 'qwen3-plus', 'qwen3-max'],
+  qwen: [
+    'qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext',
+    'qwen3-max',
+    'qwen3.6-flash', 'qwen3.6-plus', 'qwen3.6-max-preview',
+  ],
   doubao: ['doubao-seed-1-6-250615'],
   glm: ['glm-4.6', 'glm-4', 'glm-4-flash'],
 };
@@ -504,7 +508,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
             </Col>
             <Col span={12}>
               <Form.Item label="Max Tokens" name="max_tokens">
-                <InputNumber min={1} max={8000} step={100} style={{ width: '100%' }} />
+                <InputNumber min={1} max={65536} step={100} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>

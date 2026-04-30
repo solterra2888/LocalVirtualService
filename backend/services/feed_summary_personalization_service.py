@@ -323,16 +323,17 @@ class FeedSummaryPersonalizationService:
         feed_summary_v1 (Twitter / 通用): {{author}} {{title}} {{text}}
             - text 是 _build_tagging_text 已合并的正文 (含转推/引用)
             - title 多数 Twitter 行为空, 兜底空字符串
-        youtube_summary_v1: {{channel}} {{title}} {{description}} {{transcript}}
+        youtube_summary_v1 (v3 投研派): {{channel}} {{title}} {{transcript}}
             - channel = author_name (频道名)
-            - description ← row.content (RSS 抓的视频简介)
             - transcript = 仅字幕, 不含 title (与 _build_tagging_text 合并的 text 区分)
+            - description (RSS 抓的视频简介) v3 起不再注入: 内容多为长广告/标签/链接,
+              信噪比低, 让 LLM 看反而干扰投研侧分析; 见 migration
+              update_youtube_summary_bloomberg_v3_investor_lens.sql
         """
         if channel == "youtube":
             return {
                 "channel": (row.get("author_name") or "").strip(),
                 "title": (row.get("title") or "").strip(),
-                "description": (row.get("content") or "").strip(),
                 "transcript": (row.get("transcript") or "").strip(),
             }
 
@@ -411,8 +412,8 @@ class FeedSummaryPersonalizationService:
         except json.JSONDecodeError:
             pass
 
-        # 当作纯文本 summary 处理 (用户简单模板可能直接输出一句话)
-        return cleaned[:500], None, []
+        # 当作纯文本 summary 处理 (完整保留 LLM 输出, 不截断)
+        return cleaned, None, []
 
     # ──────────────────────────────────────────────────────────────────
     # UPSERT

@@ -41,7 +41,8 @@ def _get_default_providers():
             "description": "Alibaba Cloud Qwen large language model with multiple specifications",
             "icon": "🔷",
             "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext",
-                      "qwen3-turbo", "qwen3-plus", "qwen3-max"],
+                      "qwen3-max",
+                      "qwen3.6-flash", "qwen3.6-plus", "qwen3.6-max-preview"],
             "baseUrl": "https://dashscope.aliyuncs.com"
         },
         "doubao": {

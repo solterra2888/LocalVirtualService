@@ -758,7 +758,7 @@ const LLMConfigPage: React.FC = () => {
             <Text strong>Max Tokens</Text>
             <InputNumber
               min={100}
-              max={32000}
+              max={65536}
               value={provider.maxTokens}
               onChange={(value) => updateProvider(provider.id, { maxTokens: value || 1000 })}
               style={{ width: '100%', marginTop: 4 }}
