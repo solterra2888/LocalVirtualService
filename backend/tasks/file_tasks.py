@@ -231,10 +231,57 @@ def trigger_auto_analyze(
 
     is_audio_like = file_type in ('audio', 'youtube')
 
-    # 音频/YouTube enabled=True 但未指定模板时降级为 audio_analysis_v1
-    # (例如旧客户端不传 template_id, 但仍想跑分析)
     resolved_template_id = template_id
-    if is_audio_like and not resolved_template_id:
+
+    # ── YouTube: 未指定模板时走 LLMTemplateResolver('youtube_analysis')
+    # 取用户私有 youtube_analysis 行（独立于 Feeds youtube_summary 模块）。
+    # fallback 链: runtime → user_owned → youtube_analysis_v1 系统默认。
+    if file_type == 'youtube' and not resolved_template_id:
+        try:
+            from backend.utils.user_resolver import get_user_id_by_username
+            from backend.services.llm_template_resolver import LLMTemplateResolver, ResolveError
+            user_id = get_user_id_by_username(username) if username else None
+            if user_id is not None:
+                resolver = LLMTemplateResolver()
+                resolved_tpl = resolver.resolve('youtube_analysis', user_id)
+                resolved_template_id = resolved_tpl.template_id
+                info(
+                    f"LLMTemplateResolver fallback: youtube_analysis 模板 "
+                    f"template_id={resolved_template_id} source={resolved_tpl.source}, "
+                    f"file_id={file_detail_id}",
+                    source="auto_analyze",
+                )
+            else:
+                # user_id 无法解析时直接按 template_code 加载系统默认
+                from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+                ts = LLMPromptTemplateService()
+                tpl = ts.get_template_by_code('youtube_analysis_v1')
+                if tpl:
+                    resolved_template_id = tpl.get('id')
+                    info(
+                        f"youtube_analysis_v1 系统默认 fallback (user_id=None): "
+                        f"template_id={resolved_template_id}, file_id={file_detail_id}",
+                        source="auto_analyze",
+                    )
+        except Exception as e:
+            # Resolver 失败时降级为 youtube_analysis_v1 系统默认
+            warning(
+                f"LLMTemplateResolver 解析 youtube_analysis 失败，尝试系统默认: "
+                f"file_id={file_detail_id}, error={e}",
+                source="auto_analyze",
+            )
+            try:
+                from backend.services.llm_prompt_template_service import LLMPromptTemplateService
+                ts = LLMPromptTemplateService()
+                tpl = ts.get_template_by_code('youtube_analysis_v1')
+                if tpl:
+                    resolved_template_id = tpl.get('id')
+            except Exception as e2:
+                error(f"加载 youtube_analysis_v1 系统默认失败: {e2}", source="auto_analyze")
+
+    # ── 纯音频: 未指定模板时降级为 audio_analysis_v1
+    # (例如旧客户端不传 template_id, 但仍想跑分析)
+    if file_type == 'audio' and not resolved_template_id:
         try:
             from backend.services.llm_prompt_template_service import LLMPromptTemplateService
             ts = LLMPromptTemplateService()
@@ -251,10 +298,34 @@ def trigger_auto_analyze(
             error(f"加载默认音频模板失败: {e}", source="auto_analyze")
             return
 
-    # 文档/网页/文本笔记 enabled=True 但未传 template_id: 跳过
+    # ── 文档/网页/文本笔记: 未传 template_id 走 LLMTemplateResolver('file_analysis')
+    # Web Clipper (process_web_clip_task) 没有弹窗，必须走这条路才能触发 AI 分析.
+    if not is_audio_like and not resolved_template_id:
+        try:
+            from backend.utils.user_resolver import get_user_id_by_username
+            from backend.services.llm_template_resolver import LLMTemplateResolver, ResolveError
+            user_id = get_user_id_by_username(username) if username else None
+            if user_id is not None:
+                resolver = LLMTemplateResolver()
+                resolved_tpl = resolver.resolve('file_analysis', user_id)
+                resolved_template_id = resolved_tpl.template_id
+                info(
+                    f"LLMTemplateResolver fallback: file_analysis 模板 "
+                    f"template_id={resolved_template_id} source={resolved_tpl.source}, "
+                    f"file_id={file_detail_id}",
+                    source="auto_analyze",
+                )
+        except Exception as e:
+            info(
+                f"LLMTemplateResolver 未能解析 file_analysis 模板, 跳过 AI 分析: "
+                f"file_id={file_detail_id}, file_type={file_type}, error={e}",
+                source="auto_analyze",
+            )
+
     if not resolved_template_id:
         info(
-            f"用户开启 AI 分析但未传 template_id, 跳过: file_id={file_detail_id}, file_type={file_type}",
+            f"用户开启 AI 分析但未传 template_id 且无 file_analysis 可用模板, 跳过: "
+            f"file_id={file_detail_id}, file_type={file_type}",
             source="auto_analyze",
         )
         return
@@ -737,7 +808,7 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
 
         # 准备变量
         variables = template_variables.copy() if template_variables else {}
-        # file_content 由模板定义，此处注入 ASR 格式化文本
+        # file_content 由 LocalLLMAnalysisService.process_all_contents 统一注入。
         # (variables 中若用户没有指定 additional_instructions，会自动用模板 default)
 
         # 构造 successful_results，复用 process_all_contents
@@ -2279,10 +2350,12 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
         info(f"Web Clip 文本提取完成: file_detail_id={file_detail_id}, content_length={len(plain_text)}",
              source="celery_web_clip")
 
-        # PR-4 R1 修复: 与 upload-web-link / upload-and-process-document 对齐, 4 路并行 LLM 全部触发.
-        # Chrome Extension 当前不传 template_id, trigger_auto_analyze 内部会:
-        #   - 若用户在 Settings 里设了 file_analysis 偏好 → 用偏好模板 (PR-3 ④ 接入后生效)
-        #   - 否则按文档/网页规则跳过 (与现状一致, 不会无意触发空 LLM 调用)
+        # PR-4 R1: 与 upload-web-link / upload-and-process-document 对齐, 4 路并行 LLM 全部触发.
+        # Chrome Extension 不传 template_id; trigger_auto_analyze 内部走
+        #   LLMTemplateResolver.resolve('file_analysis', user_id) fallback:
+        #   - 用户有私有 file_analysis 模板 → 用用户模板
+        #   - 否则 → 系统默认 file_analysis_v1
+        #   - username 为空或 Resolver 异常 → 跳过 (不会无意触发空 LLM 调用)
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
@@ -3359,6 +3432,9 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
         # PR-5: 同样持久化 file_tagging picker 选择, 用于触发 trigger_auto_tagging
         auto_tag_template_id = None
         auto_tag_template_variables = None
+        # 解析 upload_params 失败时必须仍有默认值, 否则下方 trigger_auto_tagging(..., enabled=) 会 NameError
+        auto_tag_enabled = True
+        auto_analyze_enabled = True
         with db_manager.get_connection_context() as conn:
             cur = conn.cursor()
 

@@ -37,6 +37,7 @@ class TemplatePreferenceService:
         'file_classify':  'auto_classify_v1',       # SYSTEM_ONLY (PR-A)
         'file_analysis':  'file_analysis_v1',       # PR-A: 单一通用模板 (孤儿 3 个已 archive)
         'audio_analysis': 'audio_analysis_v1',      # PR-A: 从 file_analysis 拆出
+        'youtube_analysis': 'youtube_analysis_v1',  # 2026-05: Upload YouTube Link 专用深度分析
         # —— Feed 模块 ——
         'feed_tagging':   'content_tag_feeds_v1',   # SYSTEM_ONLY (PR-A, hybrid: 全局 tag)
         'feed_summary':   'feed_summary_v1',        # PR-A 种子: per-user Twitter feed 摘要
@@ -69,6 +70,7 @@ class TemplatePreferenceService:
         'youtube_phase2',
         'file_analysis',
         'audio_analysis',       # PR-A 新增
+        'youtube_analysis',     # 2026-05: Upload YouTube Link 专用深度分析
         'file_tagging',
         'feed_summary',
         'youtube_summary',      # PR-A 新增
@@ -117,9 +119,17 @@ class TemplatePreferenceService:
             # PR-A 新增: audio_analysis 从 file_analysis 模块拆出, 独立 per-user
             'module_code': 'audio_analysis',
             'module_name': '音频内容分析',
-            'description': '对上传音频/YouTube 转写内容做结构化分析（per-user）',
+            'description': '对上传音频文件转写内容做结构化分析（per-user）',
             'configurable': True,
             'default_template_code': 'audio_analysis_v1',
+        },
+        {
+            # 2026-05: Upload Sources YouTube Link 深度分析，独立于 Feeds youtube_summary
+            'module_code': 'youtube_analysis',
+            'module_name': 'YouTube 视频深度分析',
+            'description': 'Upload Sources YouTube Link 的深度分析（per-user，独立于 Feeds 摘要模块）',
+            'configurable': True,
+            'default_template_code': 'youtube_analysis_v1',
         },
         {
             'module_code': 'file_tagging',

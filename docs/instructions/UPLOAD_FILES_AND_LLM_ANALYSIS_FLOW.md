@@ -1,6 +1,6 @@
 # Upload Files 模块 & LLM 分析流程说明
 
-> 最后更新：2026-04-14
+> 最后更新：2026-05-02（新增 `youtube_analysis` 独立模块，Upload YouTube Link 与 Feeds `youtube_summary` 完全解耦）
 
 本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、网页链接）以及 **用户直接撰写的文本笔记（My Notes / Thoughts，`file_type='text'`）** 的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
 
@@ -58,8 +58,9 @@ file_tasks.py  ──►  FileProcessingWorker  ──►  解析/转写服务
               │ 自动触发（系统并行，4 路 LLM，无需用户干预，互不阻塞）                              │
               ▼          ▼               ▼                             ▼                               ▼
    tag_file_content_task   name_file_content_task   classify_file_content_task    analyze_document_task / analyze_audio_task
-   模板: content_tag_v1    模板: auto_name_v1       模板: auto_classify_v1         模板: 用户在上传弹窗选择 (None 则跳过;
-   (固定)                  (固定)                   (固定)                          音频/YouTube 默认 audio_analysis_v1)
+   模板: content_tag_v1    模板: auto_name_v1       模板: auto_classify_v1         文档/网页/文本: LLMTemplateResolver(file_analysis)
+   (固定)                  (固定)                   (固定)                          或弹窗 runtime；音频缺省 audio_analysis_v1
+                                                                                    YouTube 缺省 LLMTemplateResolver(youtube_analysis)
    → 写 file_tags 表       → 写 display_name        → 写 user_execution_folders    → 写 processing_stats.final_report
                                                                                     + ai_time / total_tokens / cost
               │                                                                                       │
@@ -70,9 +71,9 @@ file_tasks.py  ──►  FileProcessingWorker  ──►  解析/转写服务
 
 > **第 4 路（analyze_document_task / analyze_audio_task）触发方式：**
 > 由 `trigger_auto_analyze` 统一投递，与前 3 路同节奏 (`AUTO_ANALYZE_DELAY` 默认 2 s)。
-> 用户在 5 个上传弹窗里通过 `<UploadAnalysisTemplatePicker />` 选择模板：
-> - 文档 / 网页 / 文本笔记：未选则不触发（FilesPage 右侧面板仍可手动选模板触发）。
-> - 音频 / YouTube：未选则降级 `audio_analysis_v1`，与历史行为一致。
+> - **文档 / 网页 / 文本笔记：** 上传弹窗里 `<UploadAnalysisTemplatePicker />` 选的模板作为 **runtime**（最高优先）；未选时 `trigger_auto_analyze` 调用 `LLMTemplateResolver.resolve('file_analysis', user_id)`，使用用户私有 `file_analysis` 模板或系统默认 `file_analysis_v1`。Chrome Web Clipper（`process_web_clip_task`）无弹窗，依赖该 fallback。若 `auto_analyze_enabled=False`、全局 `AUTO_ANALYZE_ENABLED=false`、或 username 无法解析且 Resolver 失败，则不投递。
+> - **音频：** 未选 runtime 模板则降级 `audio_analysis_v1`，与历史行为一致。
+> - **YouTube：** 未选 runtime 模板则走 `LLMTemplateResolver.resolve('youtube_analysis', user_id)`，取用户私有 `youtube_analysis` 行或系统默认 `youtube_analysis_v1`（Bloomberg-view 风格，与 Feeds `youtube_summary` 模块完全独立）。
 >
 > **避免重复入队：** `trigger_auto_analyze` 投递 `analyze_*_task` 时带 `skip_post_trigger=True`，
 > analyze 任务完成后**不再**重复投 tag/name/classify。但若 `analyze_document_task` 内部走了
@@ -368,7 +369,7 @@ POST /api/files/create-text-note
 
 | 触发路径 | 入口 | `template_id` 来源 | `skip_post_trigger` |
 |----------|------|--------------------|---------------------|
-| **自动并行链路** | `trigger_auto_analyze` (file_tasks.py) | 上传弹窗 `<UploadAnalysisTemplatePicker />` | `True`（已在并行链路里同步触发 tag/name/classify，避免重复入队）|
+| **自动并行链路** | `trigger_auto_analyze` (file_tasks.py) | 弹窗 **runtime**；未传则 `LLMTemplateResolver('file_analysis')`（文档/网页/文本）或 `audio_analysis_v1`（音频/YouTube 缺省） | `True`（已在并行链路里同步触发 tag/name/classify，避免重复入队）|
 | **用户主动 Re-analyze** | FilesPage 右侧面板 → `POST /api/files/*/analyze` | 右侧 `TemplateSelector` 选中值 | `False`（保留历史行为：分析完成后再补一轮 tag/name/classify）|
 
 ```
@@ -413,7 +414,7 @@ trigger_auto_analyze                  POST /api/files/*/analyze
 
 ### 4.2 系统自动触发的并行 LLM 任务（4 路并行）
 
-每当某个文件的 `content` 字段非空写入完成，系统会**同时**（`countdown` 延迟后）投递最多 4 个独立 Celery 消息，互不依赖、可并发执行。其中 analyze 路只有在用户上传时选择了模板（或音频缺省 `audio_analysis_v1`）才会被触发：
+每当某个文件的 `content` 字段非空写入完成，系统会**同时**（`countdown` 延迟后）投递最多 4 个独立 Celery 消息，互不依赖、可并发执行。其中 **analyze** 路：文档/网页/文本在 runtime 未传时由 `LLMTemplateResolver('file_analysis')` 解析模板；音频/YouTube 未传 runtime 时用 `audio_analysis_v1`；若用户关闭 `auto_analyze_enabled` 或环境变量关闭全局开关，则不投递。
 
 ```
 content 写入完成
@@ -581,21 +582,21 @@ classify_file_content_task(file_id, username, force=False)
 
 | 触发来源（Celery 任务） | 触发条件 | 触发的并行任务 |
 |------------------------|----------|----------------|
-| `process_files_task`（批量解析文档） | 解析完成，查 `file_processing_details` where `task_id=self.request.id AND status='completed' AND content != ''` | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`(可选) |
-| `upload_and_process_document_task`（上传并解析） | 解析完成，同上查询 | 同上 |
-| `upload_and_transcribe_audio_task`（音频转写） | ASR 写入 `content` 后 | 同上（传 `file_detail_id`，analyze 默认 `audio_analysis_v1`） |
-| `scrape_and_process_web_link_task`（网页抓取） | HTML 转纯文本写入 `content` 后 | 同上 |
-| `process_web_clip_task`（Chrome 剪藏） | 去标签写入 `content` 后 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（剪藏入口无模板选择，不触发 analyze）|
-| `finalize_youtube_file_task`（YouTube 链接，由本地 Worker 回调） | 字幕/ASR 写入 `content` 后，仅 outcome='completed' 触发；从 `processing_stats.upload_params.auto_analyze_template_id` 读模板 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（默认 `audio_analysis_v1`）|
+| `process_files_task`（批量解析文档，`POST /api/files/process`） | 解析完成，查 `file_processing_details` where `task_id=self.request.id AND status='completed' AND content != ''` | **仅** `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（当前实现**未**调用 `trigger_auto_analyze`；需深度分析请走 FilesPage 手动 Re-analyze 或上传并解析弹窗） |
+| `upload_and_process_document_task`（上传并解析） | 解析完成，查 `file_processing_details` where `task_id=self.request.id AND status='completed' AND content != ''` | 四路：`trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（弹窗 runtime 或 `LLMTemplateResolver('file_analysis')`） |
+| `upload_and_transcribe_audio_task`（音频转写） | ASR 写入 `content` 后 | 四路；`trigger_auto_analyze` 为弹窗 runtime 或缺省 `audio_analysis_v1` |
+| `scrape_and_process_web_link_task`（网页抓取） | HTML 转纯文本写入 `content` 后 | 四路；`trigger_auto_analyze` 为弹窗 runtime 或 `LLMTemplateResolver('file_analysis')` |
+| `process_web_clip_task`（Chrome 剪藏） | 去标签写入 `content` 后 | 四路齐全：`trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（无弹窗 runtime，`trigger_auto_analyze` 内走 `LLMTemplateResolver('file_analysis')`） |
+| `finalize_youtube_file_task`（YouTube 链接，由本地 Worker 回调） | 字幕/ASR 写入 `content` 后，仅 outcome='completed' 触发；从 `processing_stats.upload_params.auto_analyze_template_id` 读模板 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（默认 `LLMTemplateResolver('youtube_analysis')` → `youtube_analysis_v1`）|
 | `analyze_document_task`（用户 Re-analyze 文档） | `skip_post_trigger=False`（API 入口）→ LLM 分析报告写入后 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（不再递归触发 analyze）|
 | `analyze_document_task`（自动并行链路） | `skip_post_trigger=True` 且未走 LlamaParse 兜底 | **不再触发**（避免与上层并行链路重复）|
 | `analyze_document_task`（自动链路 + 任务内 LlamaParse） | `skip_post_trigger=True` 但 `content_was_filled_by_llama=True` | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（给新 content 补打标）|
 | `analyze_audio_task`（用户 Re-analyze 音频） | `skip_post_trigger=False`（API 入口） | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` |
 | `analyze_audio_task`（自动并行链路） | `skip_post_trigger=True` | **不再触发** |
-| `reparse_document_task`（重新解析） | 重新解析写入 `content` 后 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`(可选) |
-| `POST /api/files/create-text-note`（**同步 HTTP**，非 Celery） | 插入 `file_processing_details` 并写入 `content` 后，在 API 内直接调用 | 同上 |
+| `reparse_document_task`（重新解析） | 重新解析写入 `content` 后 | **仅** `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（当前实现**未**调用 `trigger_auto_analyze`） |
+| `POST /api/files/create-text-note`（**同步 HTTP**，非 Celery） | 插入 `file_processing_details` 并写入 `content` 后，在 API 内直接调用 | 四路齐全；`trigger_auto_analyze` 为弹窗 runtime 或 `LLMTemplateResolver('file_analysis')` |
 
-> **`trigger_auto_analyze(可选)`** 含义：仅在用户上传时通过 `<UploadAnalysisTemplatePicker />` 选择了模板（或音频/YouTube 缺省 `audio_analysis_v1`）时才会投递 analyze 任务；否则跳过这一路。
+> **`trigger_auto_analyze` 是否投递：** 用户侧 `auto_analyze_enabled` 与全局 `AUTO_ANALYZE_ENABLED` 为真时，文档/网页/文本走 **runtime 或** `LLMTemplateResolver('file_analysis')`；纯音频可走 runtime 或缺省 `audio_analysis_v1`；YouTube 可走 runtime 或 `LLMTemplateResolver('youtube_analysis')`（缺省 `youtube_analysis_v1`，独立于 Feeds `youtube_summary` 模块）。`POST /api/files/process` 触发的 `process_files_task` 当前不调用本函数。
 
 > **已修复（2026-04）：** Upload YouTube Link 的字幕路径、ASR 路径、以及 `POST /api/files/{file_id}/transcribe-asr` 手动重转，最终都会通过本地 Worker 回调远程 `finalize_youtube_file_task`，触发 auto-tag / auto-name / auto-classify。原先「`transcribe_youtube_file_asr_task` 完成后不触发」的已知遗漏已随之修复。
 
@@ -677,7 +678,7 @@ POST /api/llm-prompt-templates/templates/test
 | `uploadWebLink(payload, analyzeOptions?)` | `POST /api/files/upload-web-link` |
 | `createTextNote(payload, analyzeOptions?)` | `POST /api/files/create-text-note` |
 
-> 5 个上传方法均接受可选 `analyzeOptions = { auto_analyze_template_id?, auto_analyze_template_variables? }`。前端在 5 个上传弹窗中通过共用组件 `<UploadAnalysisTemplatePicker mode="optional" />`（`web-frontend/src/components/UploadAnalysisTemplatePicker.tsx`）让用户选择模板；该组件包了 `<TemplateSelector autoSelectDefault={false} />`（默认不预选模板，"None" 即跳过自动 analyze）+ `<TemplateVariablesEditor />`。后端收到的 `auto_analyze_template_id` 会沿着上传任务一路透传给 `trigger_auto_analyze`；YouTube 因终态在远程 `finalize_youtube_file_task` 内回调，模板参数会先持久化到 `processing_stats.upload_params.auto_analyze_template_id` / `auto_analyze_template_variables`，等回调时再读出。
+> 5 个上传方法均接受可选 `analyzeOptions = { auto_analyze_template_id?, auto_analyze_template_variables? }`。前端在 5 个上传弹窗中通过共用组件 `<UploadAnalysisTemplatePicker mode="optional" />`（`web-frontend/src/components/UploadAnalysisTemplatePicker.tsx`）让用户选择模板；该组件包了 `<TemplateSelector autoSelectDefault={false} />`（默认不预选：表示不传 **runtime** `template_id`；后端 `trigger_auto_analyze` 会对文档/网页/文本再调用 `LLMTemplateResolver('file_analysis')`，使用用户私有或系统默认 `file_analysis_v1`，而非整路跳过）+ `<TemplateVariablesEditor />`。用户显式选的 `auto_analyze_template_id` 沿上传任务透传为 runtime（最高优先）；YouTube 终态在远程 `finalize_youtube_file_task` 回调，模板参数先写入 `processing_stats.upload_params.auto_analyze_template_id` / `auto_analyze_template_variables` 再读出。
 | `updateFileDetailContent(fileId, content, triggerLlm?)` | `PATCH /api/files/details/{file_id}/content`（第三参数为可选 `trigger_llm`，用于保存后再次触发并行 LLM） |
 | `processFiles()` | `POST /api/files/process` |
 | `analyzeAudio()` | `POST /api/files/audio/analyze` |
@@ -736,7 +737,7 @@ POST /api/llm-prompt-templates/templates/test
 | 自动打标签 | 系统自动（content 写入后） | `tag_file_content` | `content_tag_v1`（固定） |
 | 自动命名 | 系统自动（content 写入后） | `name_file_content` | `auto_name_v1`（固定） |
 | 自动归类 | 系统自动（content 写入后） | `classify_file_content` | `auto_classify_v1`（固定） |
-| 自动深度分析 | 系统自动（content 写入后，且用户在上传弹窗选择了模板，或音频/YouTube 缺省） | `analyze_document_async` / `analyze_audio_async`（`skip_post_trigger=True`） | 用户选择（动态），音频/YouTube 缺省 `audio_analysis_v1` |
+| 自动深度分析 | 系统自动（content 写入后，且用户在上传弹窗选择了模板，或音频/YouTube 缺省） | `analyze_document_async` / `analyze_audio_async`（`skip_post_trigger=True`） | 用户选择（动态），纯音频缺省 `audio_analysis_v1`，YouTube 缺省 `LLMTemplateResolver('youtube_analysis')` → `youtube_analysis_v1` |
 
 ### 手动触发打标签/命名（管理接口）
 

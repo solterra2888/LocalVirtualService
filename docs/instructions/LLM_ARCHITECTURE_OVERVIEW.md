@@ -1,6 +1,6 @@
 # LLM 模型使用整体架构文档
 
-> 最后更新：2026-04-29（Phase 2 双态模板 + Upload/Feeds 产品化）
+> 最后更新：2026-05-02（新增 `youtube_analysis` USER_OWNED 模块，Upload YouTube Link 与 Feeds `youtube_summary` 完全解耦）
 >
 > **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.9）。
 
@@ -73,7 +73,7 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 | **SYSTEM_FIXED** | 全站共享、客观一致 | 仅 Admin（`/llm/prompts/system-templates`） | `scope='system'` |
 | **USER_OWNED** | 每用户一份当前内容，重置=覆盖、无版本历史 | 用户（`/llm/prompts/my-templates/...`） | `scope='user'`，`(created_by, module_code)`  partial unique |
 
-**USER_OWNED 模块（7 个）**：`twitter_phase2`, `youtube_phase2`, `file_analysis`, `audio_analysis`, `file_tagging`, `feed_summary`, `youtube_summary`。
+**USER_OWNED 模块（8 个）**：`twitter_phase2`, `youtube_phase2`, `file_analysis`, `audio_analysis`, `youtube_analysis`, `file_tagging`, `feed_summary`, `youtube_summary`。
 
 **SYSTEM_FIXED 典型模块**：`feed_tagging`（Hybrid 决策：全局 tag）、`file_naming`, `file_classify`, `news_summary`, `twitter_phase1`, `youtube_phase1`, `news_classification`, `theme_description` 等。
 
@@ -92,7 +92,7 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 - **打标 `feed_tagging`**：走 **SYSTEM_FIXED** 模板（如 `content_tag_feeds_v1`），结果写入 **`subscription_content_tags`**，全站订阅者共用同一套客观标签/summary 基线。
 - **个性化摘要**：写入 **`subscription_content_user_summaries`**。按内容渠道选择 **USER_OWNED** 模块：
   - Twitter 类 → `feed_summary`（系统种子 `feed_summary_v1`）
-  - YouTube 视频 → `youtube_summary`（系统种子 `youtube_summary_v1`，per-video、per-user）
+  - YouTube 视频 → `youtube_summary`（系统种子 `youtube_summary_v1`，per-video、per-user，**仅用于 Feeds**；Upload YouTube Link 使用独立的 `youtube_analysis` 模块）
 
 读取侧仍可采用 `COALESCE(用户摘要, 全局 tags.summary)` 一类策略；路由逻辑见 `FeedSummaryPersonalizationService` 中 `_CHANNEL_TO_MODULE`。
 
@@ -333,6 +333,12 @@ LocalLLMAnalysisService LocalLLMAnalysisService LocalLLMAnalysisService        L
   (sector/industry/    (AI 生成的展示名)   (自动归类到用户文件夹)             (AI 深度分析报告)
    tickers/concepts)
 ```
+
+**`trigger_auto_analyze`（第 4 路）在 runtime 未传 `template_id` 时的行为：**
+
+- **纯音频**：降级为系统模板 `audio_analysis_v1`（与历史一致）。
+- **YouTube**：调用 `LLMTemplateResolver.resolve('youtube_analysis', user_id)`，使用用户私有 `youtube_analysis` 行或系统默认 `youtube_analysis_v1`（Bloomberg-view 风格，**独立于 Feeds `youtube_summary` 模块**）。`analyze_audio_task` 额外注入 `transcript`/`title`/`channel`/`description` 变量别名。
+- **文档 / 网页 / 文本**（含 Chrome Web Clipper）：调用 `LLMTemplateResolver.resolve('file_analysis', user_id)`，使用用户私有 `file_analysis` 行或系统默认 `file_analysis_v1`。上传弹窗若选了分析模板，则以 **runtime** 覆盖 Resolver（最高优先）。
 
 #### 4.1.2 各文件类型的触发链路
 
@@ -731,9 +737,10 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `auto_classify_v1` | `file_classify`（SYSTEM_FIXED） | `{{file_content}}` `{{folder_list}}` `{{file_type}}` | text (文件夹名) | `ContentClassifyService` |
 | `content_tag_feeds_v1` | `feed_tagging`（SYSTEM_FIXED） | `{{content}}` | JSON: sector/industry/tickers/summary | `FeedContentTaggingService` |
 | `file_analysis_v1` | `file_analysis`（通用文档分析默认） | `{{file_content}}` 等 | 分析报告 | `LocalLLMAnalysisService` |
-| `audio_analysis_v1` | `audio_analysis`（音频/YouTube 转写分析默认） | `{{file_content}}` | 分析报告 | `LocalLLMAnalysisService` |
+| `audio_analysis_v1` | `audio_analysis`（纯音频转写分析默认） | `{{file_content}}` | 分析报告 | `LocalLLMAnalysisService` |
+| `youtube_analysis_v1` | `youtube_analysis`（**Upload YouTube Link 深度分析默认，USER_OWNED**，clone 自 `youtube_summary_v1`）| `{{file_content}}` / `{{transcript}}` `{{title}}` `{{channel}}` `{{description}}` | 分析报告 | `LocalLLMAnalysisService` |
 | `feed_summary_v1` | `feed_summary`（Twitter 类 Feed 个性化摘要种子） | 依模板 | 摘要文本 | `FeedSummaryPersonalizationService` |
-| `youtube_summary_v1` | `youtube_summary`（YouTube 单条 per-user 摘要种子） | 依模板 | 摘要文本 | `FeedSummaryPersonalizationService` |
+| `youtube_summary_v1` | `youtube_summary`（**Feeds** YouTube 单条 per-user 摘要种子，与 `youtube_analysis` 独立） | 依模板 | 摘要文本 | `FeedSummaryPersonalizationService` |
 | `twitter_daily_phase1_default` | Twitter Report 阶段 A | tweets 文本 | 作者摘要文本 | `TwitterAuthorSummaryService` |
 | `twitter_daily_phase2_default` | `twitter_phase2`（日报 Phase2，USER_OWNED 种子） | 阶段 A 摘要合集 | 综合报告 Markdown | `TwitterDailyReportService` |
 | `youtube_daily_phase1_default` | YouTube Report 阶段 A | 视频标题 + transcript | 频道摘要文本 | `YouTubeAuthorSummaryService` |
@@ -743,7 +750,7 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `news_classification` | `news_classification`（SYSTEM_FIXED） | `{{title}}` `{{content}}` `{{symbols}}` | JSON 分类维度 | `NewsAnalysisService` |
 | 用户私有模板行 | USER_OWNED 模块（`scope=user`） | 依各模块 variables | 依模板 | 经 `LLMTemplateResolver` 的各类服务 |
 
-用户在 **PromptTemplatesPage → 我的模板** 编辑 7 个 USER_OWNED 模块；管理员在 **系统模板 (Admin)** 或 `PUT /system-templates` 编辑 SYSTEM_FIXED 文案。
+用户在 **PromptTemplatesPage → 我的模板** 编辑 8 个 USER_OWNED 模块；管理员在 **系统模板 (Admin)** 或 `PUT /system-templates` 编辑 SYSTEM_FIXED 文案。
 
 ---
 

@@ -1433,6 +1433,18 @@
   font-weight: 600;
 }
 
+/* 右侧面板 Info / AI Analysis / Markdown：仅图标 Tab */
+.files-page-layout .files-detail-right-header .files-detail-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 6px 10px;
+  margin-right: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .app-dark .files-page-layout .files-detail-tab.is-active {
   --files-tab-active: #2196F3;
 }

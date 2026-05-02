@@ -67,7 +67,8 @@ import {
   InboxOutlined,
   DownOutlined,
   UpOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -3667,35 +3668,51 @@ const FilesPageInner: React.FC = () => {
                     ) : (
                       <>
                         <div className="files-detail-right-header">
-                          <div
-                            className={`files-detail-tab ${rightPanelView === 'info' ? 'is-active' : ''}`}
-                            onClick={() => setRightPanelView('info')}
-                          >
-                            Info
-                          </div>
-                          {!ibReportDataForReview && (
+                          <Tooltip title="Info">
                             <div
-                              className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
-                              onClick={() => setRightPanelView('analysis')}
+                              className={`files-detail-tab ${rightPanelView === 'info' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('info')}
+                              role="tab"
+                              aria-label="Info"
                             >
-                              AI Analysis
+                              <InfoCircleOutlined />
                             </div>
+                          </Tooltip>
+                          {!ibReportDataForReview && (
+                            <Tooltip title="AI Analysis">
+                              <div
+                                className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
+                                onClick={() => setRightPanelView('analysis')}
+                                role="tab"
+                                aria-label="AI Analysis"
+                              >
+                                <RobotOutlined />
+                              </div>
+                            </Tooltip>
                           )}
                           {!ibReportDataForReview && (
-                            <div
-                              className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
-                              onClick={() => setRightPanelView('content')}
-                            >
-                              Markdown
-                            </div>
+                            <Tooltip title="Markdown">
+                              <div
+                                className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
+                                onClick={() => setRightPanelView('content')}
+                                role="tab"
+                                aria-label="Markdown"
+                              >
+                                <FileTextOutlined />
+                              </div>
+                            </Tooltip>
                           )}
                           {ibReportDataForReview && (
-                            <div
-                              className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
-                              onClick={() => setRightPanelView('review')}
-                            >
-                              Trade Review
-                            </div>
+                            <Tooltip title="Trade Review">
+                              <div
+                                className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
+                                onClick={() => setRightPanelView('review')}
+                                role="tab"
+                                aria-label="Trade Review"
+                              >
+                                <ThunderboltOutlined />
+                              </div>
+                            </Tooltip>
                           )}
                           <div style={{ flex: 1 }} />
                           <Tooltip title="Collapse panel">
@@ -4474,34 +4491,36 @@ export const ExecutionDetailsPanel: React.FC<{
         extra={
           fileTags && (
             <Space size="small">
-              <Button 
-                type="link" 
-                size="small" 
-                icon={<EditOutlined />}
-                onClick={handleEditTags}
-              >
-                Edit
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => handleRetagFile()}
-              >
-                Retag
-              </Button>
-              {/* PR-5: Re-tag with custom template */}
-              <Button
-                type="link"
-                size="small"
-                icon={<RobotOutlined />}
-                onClick={() => {
-                  setRetagPicker({});
-                  setRetagModalOpen(true);
-                }}
-              >
-                Retag with template
-              </Button>
+              <Tooltip title="Edit tags">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={handleEditTags}
+                  aria-label="Edit tags"
+                />
+              </Tooltip>
+              <Tooltip title="Retag">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => handleRetagFile()}
+                  aria-label="Retag"
+                />
+              </Tooltip>
+              <Tooltip title="Re-tag with template">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<RobotOutlined />}
+                  onClick={() => {
+                    setRetagPicker({});
+                    setRetagModalOpen(true);
+                  }}
+                  aria-label="Re-tag with template"
+                />
+              </Tooltip>
             </Space>
           )
         }
@@ -4757,12 +4776,12 @@ export const ExecutionDetailsPanel: React.FC<{
               justifyContent: 'flex-end',
               gap: 8,
             }}>
-              <Button onClick={() => setEditTagsVisible(false)}>
-                Cancel
-              </Button>
-              <Button type="primary" onClick={handleSaveTags}>
-                Save
-              </Button>
+              <Tooltip title="Cancel">
+                <Button icon={<CloseOutlined />} onClick={() => setEditTagsVisible(false)} aria-label="Cancel" />
+              </Tooltip>
+              <Tooltip title="Save">
+                <Button type="primary" icon={<CheckOutlined />} onClick={handleSaveTags} aria-label="Save" />
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -5235,12 +5254,14 @@ const ContentMarkdownView: React.FC<{
           className={isDark ? 'files-content-textarea-dark' : ''}
         />
         <Space style={{ marginTop: 12 }}>
-          <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
-            Save
-          </Button>
-          <Button onClick={handleCancelEdit} disabled={saving}>
-            Cancel
-          </Button>
+          <Tooltip title="Save">
+            <Button type="primary" onClick={handleSave} loading={saving} icon={<CheckOutlined />} aria-label="Save" />
+          </Tooltip>
+          <Tooltip title="Cancel">
+            <span>
+              <Button onClick={handleCancelEdit} disabled={saving} icon={<CloseOutlined />} aria-label="Cancel" />
+            </span>
+          </Tooltip>
         </Space>
       </div>
       </>
@@ -5282,20 +5303,21 @@ const ContentMarkdownView: React.FC<{
           ) : (
             <>
               <div style={{ marginBottom: '20px', fontSize: '16px' }}>No extracted content for {fileToShow.filename}</div>
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={handleOpenReparseModal}
-                disabled={fileStatus === 'processing'}
-                style={{
-                  height: '40px',
-                  paddingInline: '24px',
-                  fontSize: '14px',
-                  borderRadius: '8px',
-                }}
-              >
-                Re-parse Document
-              </Button>
+              <Tooltip title="Re-parse document">
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={handleOpenReparseModal}
+                  disabled={fileStatus === 'processing'}
+                  aria-label="Re-parse document"
+                  style={{
+                    height: '40px',
+                    width: '40px',
+                    paddingInline: 0,
+                    borderRadius: '8px',
+                  }}
+                />
+              </Tooltip>
             </>
           )}
         </div>
@@ -5328,17 +5350,19 @@ const ContentMarkdownView: React.FC<{
             Document processing... (Edit disabled)
           </div>
         )}
-        <Button 
-          type="primary" 
-          ghost 
-          size="small" 
-          icon={<EditOutlined />} 
-          onClick={handleStartEdit}
-          disabled={!canEdit}
-          title={!canEdit ? 'Cannot edit while document is being processed' : 'Edit markdown content'}
-        >
-          Edit
-        </Button>
+        <Tooltip title={!canEdit ? 'Cannot edit while document is being processed' : 'Edit markdown'}>
+          <span>
+            <Button
+              type="primary"
+              ghost
+              size="small"
+              icon={<EditOutlined />}
+              onClick={handleStartEdit}
+              disabled={!canEdit}
+              aria-label="Edit markdown"
+            />
+          </span>
+        </Tooltip>
       </div>
       <MarkdownRenderer
         content={contentStr}
@@ -5424,12 +5448,14 @@ const OriginalTextNotePanel: React.FC<{
           className={isDark ? 'files-content-textarea-dark' : ''}
         />
         <Space style={{ marginTop: 12 }}>
-          <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
-            Save
-          </Button>
-          <Button onClick={handleCancelEdit} disabled={saving}>
-            Cancel
-          </Button>
+          <Tooltip title="Save">
+            <Button type="primary" onClick={handleSave} loading={saving} icon={<CheckOutlined />} aria-label="Save" />
+          </Tooltip>
+          <Tooltip title="Cancel">
+            <span>
+              <Button onClick={handleCancelEdit} disabled={saving} icon={<CloseOutlined />} aria-label="Cancel" />
+            </span>
+          </Tooltip>
         </Space>
       </div>
     );
@@ -5457,9 +5483,9 @@ const OriginalTextNotePanel: React.FC<{
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 14, color: themeColors.text }}>{filename}</span>
-        <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
-          Edit
-        </Button>
+        <Tooltip title="Edit">
+          <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit} aria-label="Edit" />
+        </Tooltip>
       </div>
       {content.trim() ? (
         <MarkdownRenderer content={content} variant={isDark ? 'dark' : 'light'} />
@@ -7142,6 +7168,12 @@ export const AIAnalysisView: React.FC<{
     setReAnalyzeTemplateVars({});
   }, [reAnalyzeTemplateId]);
 
+  /** 切换 execution 时重置，避免把上一条记录的 rc 状态当成「上一次」 */
+  const prevRcAgentForAnalysisRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    prevRcAgentForAnalysisRef.current = undefined;
+  }, [execution.id]);
+
   const handleStartEdit = () => {
     setEditContent(aiAnalysisData?.execution?.final_report ?? '');
     setIsEditing(true);
@@ -7172,6 +7204,17 @@ export const AIAnalysisView: React.FC<{
       onLoadAnalysis();
     }
   }, [execution.id, aiAnalysisData, onLoadAnalysis]);
+
+  // 自动并行 analyze（trigger_auto_analyze）完成后仅刷新左侧列表的 rc，不会重拉 details；
+  // 在 analyzing → success/failed 时强制拉取 final_report，避免右侧面板停在空状态或 Loading 占位。
+  useEffect(() => {
+    const prev = prevRcAgentForAnalysisRef.current;
+    const cur = execution.rc_agent_status;
+    prevRcAgentForAnalysisRef.current = cur;
+    if (prev === 'analyzing' && (cur === 'success' || cur === 'failed')) {
+      onLoadAnalysis();
+    }
+  }, [execution.id, execution.rc_agent_status, onLoadAnalysis]);
 
   const emptyStateWrapperStyle: React.CSSProperties = {
     flex: 1,
@@ -7259,20 +7302,21 @@ export const AIAnalysisView: React.FC<{
                   />
                 </div>
               )}
-              <Button
-                type="primary"
-                icon={<SoundOutlined />}
-                onClick={() => onAnalyzeAudio(execution, audioTemplateVars)}
-                style={{
-                  height: '40px',
-                  paddingInline: mobileCompactActions ? '16px' : '24px',
-                  fontSize: '14px',
-                  borderRadius: '8px',
-                  maxWidth: '100%',
-                }}
-              >
-                Analyze Audio
-              </Button>
+              <Tooltip title="Analyze audio">
+                <Button
+                  type="primary"
+                  icon={<SoundOutlined />}
+                  onClick={() => onAnalyzeAudio(execution, audioTemplateVars)}
+                  aria-label="Analyze audio"
+                  style={{
+                    height: '40px',
+                    width: '40px',
+                    paddingInline: 0,
+                    borderRadius: '8px',
+                    maxWidth: '100%',
+                  }}
+                />
+              </Tooltip>
             </div>
           )}
           {canAnalyzeDoc && (
@@ -7291,25 +7335,26 @@ export const AIAnalysisView: React.FC<{
                 showVariablesEditor
               />
               <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                <Button
-                  type="primary"
-                  icon={<RobotOutlined />}
-                  disabled={!analyzeDocPicker.templateId || analyzeDocPicker.enabled === false}
-                  onClick={() => {
-                    if (analyzeDocPicker.templateId != null) {
-                      onAnalyzeDocument?.(execution, analyzeDocPicker.templateId, analyzeDocPicker.templateVariables || {});
-                    }
-                  }}
-                  style={{
-                    height: '40px',
-                    paddingInline: mobileCompactActions ? '16px' : '24px',
-                    fontSize: '14px',
-                    borderRadius: '8px',
-                    maxWidth: '100%',
-                  }}
-                >
-                  Analyze Document
-                </Button>
+                <Tooltip title="Analyze document">
+                  <Button
+                    type="primary"
+                    icon={<RobotOutlined />}
+                    disabled={!analyzeDocPicker.templateId || analyzeDocPicker.enabled === false}
+                    onClick={() => {
+                      if (analyzeDocPicker.templateId != null) {
+                        onAnalyzeDocument?.(execution, analyzeDocPicker.templateId, analyzeDocPicker.templateVariables || {});
+                      }
+                    }}
+                    aria-label="Analyze document"
+                    style={{
+                      height: '40px',
+                      width: '40px',
+                      paddingInline: 0,
+                      borderRadius: '8px',
+                      maxWidth: '100%',
+                    }}
+                  />
+                </Tooltip>
               </div>
             </div>
           )}
@@ -7348,14 +7393,15 @@ export const AIAnalysisView: React.FC<{
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
               {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
-                <Button
-                  type="default"
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={() => setReAnalyzeModalVisible(true)}
-                >
-                  Re-analyze
-                </Button>
+                <Tooltip title="Re-analyze">
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => setReAnalyzeModalVisible(true)}
+                    aria-label="Re-analyze"
+                  />
+                </Tooltip>
               )}
               {!isEditing && (
                 <Tooltip title="Edit">
@@ -7390,30 +7436,32 @@ export const AIAnalysisView: React.FC<{
             </Col>
             <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
               {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
-                <Button
-                  type="default"
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={() => setReAnalyzeModalVisible(true)}
-                >
-                  Re-analyze
-                </Button>
+                <Tooltip title="Re-analyze">
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => setReAnalyzeModalVisible(true)}
+                    aria-label="Re-analyze"
+                  />
+                </Tooltip>
               )}
               {!isEditing && (
-                <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit}>
-                  Edit
-                </Button>
+                <Tooltip title="Edit">
+                  <Button type="primary" ghost size="small" icon={<EditOutlined />} onClick={handleStartEdit} aria-label="Edit" />
+                </Tooltip>
               )}
               {onDownloadPdf && !isEditing && (
-                <Button
-                  icon={<DownloadOutlined />}
-                  onClick={onDownloadPdf}
-                  loading={pdfDownloading}
-                  size="small"
-                  className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
-                >
-                  Export
-                </Button>
+                <Tooltip title="Export PDF">
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={onDownloadPdf}
+                    loading={pdfDownloading}
+                    size="small"
+                    className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                    aria-label="Export PDF"
+                  />
+                </Tooltip>
               )}
             </Col>
           </Row>
@@ -7494,21 +7542,22 @@ export const AIAnalysisView: React.FC<{
                     label="Document Analysis Template"
                     showVariablesEditor
                   />
-                  <Button
-                    type="primary"
-                    icon={<RobotOutlined />}
-                    disabled={!reAnalyzeDocPicker.templateId || reAnalyzeDocPicker.enabled === false}
-                    style={{ marginTop: 16 }}
-                    onClick={() => {
-                      if (reAnalyzeDocPicker.templateId != null && onAnalyzeDocument) {
-                        onAnalyzeDocument(execution, reAnalyzeDocPicker.templateId, reAnalyzeDocPicker.templateVariables || {});
-                        setReAnalyzeModalVisible(false);
-                        setReAnalyzeDocPicker({});
-                      }
-                    }}
-                  >
-                    Re-analyze Document
-                  </Button>
+                  <Tooltip title="Re-analyze document">
+                    <Button
+                      type="primary"
+                      icon={<RobotOutlined />}
+                      disabled={!reAnalyzeDocPicker.templateId || reAnalyzeDocPicker.enabled === false}
+                      style={{ marginTop: 16 }}
+                      onClick={() => {
+                        if (reAnalyzeDocPicker.templateId != null && onAnalyzeDocument) {
+                          onAnalyzeDocument(execution, reAnalyzeDocPicker.templateId, reAnalyzeDocPicker.templateVariables || {});
+                          setReAnalyzeModalVisible(false);
+                          setReAnalyzeDocPicker({});
+                        }
+                      }}
+                      aria-label="Re-analyze document"
+                    />
+                  </Tooltip>
                 </div>
               )}
               {canReAnalyzeAudio && (
@@ -7522,19 +7571,20 @@ export const AIAnalysisView: React.FC<{
                       />
                     </div>
                   )}
-                  <Button
-                    type="primary"
-                    icon={<SoundOutlined />}
-                    onClick={() => {
-                      if (onAnalyzeAudio) {
-                        onAnalyzeAudio(execution, reAnalyzeAudioVars);
-                        setReAnalyzeModalVisible(false);
-                        setReAnalyzeAudioVars({});
-                      }
-                    }}
-                  >
-                    Re-analyze Audio
-                  </Button>
+                  <Tooltip title="Re-analyze audio">
+                    <Button
+                      type="primary"
+                      icon={<SoundOutlined />}
+                      onClick={() => {
+                        if (onAnalyzeAudio) {
+                          onAnalyzeAudio(execution, reAnalyzeAudioVars);
+                          setReAnalyzeModalVisible(false);
+                          setReAnalyzeAudioVars({});
+                        }
+                      }}
+                      aria-label="Re-analyze audio"
+                    />
+                  </Tooltip>
                 </div>
               )}
             </div>
@@ -7568,33 +7618,20 @@ export const AIAnalysisView: React.FC<{
             className={isDark ? 'files-content-textarea-dark' : ''}
           />
           <Space style={{ marginTop: 12 }}>
-            {mobileCompactActions ? (
-              <>
-                <Tooltip title="Save">
-                  <Button
-                    type="primary"
-                    onClick={handleSave}
-                    loading={saving}
-                    icon={<CheckOutlined />}
-                    aria-label="Save"
-                  />
-                </Tooltip>
-                <Tooltip title="Cancel">
-                  <span>
-                    <Button onClick={handleCancelEdit} disabled={saving} icon={<CloseOutlined />} aria-label="Cancel" />
-                  </span>
-                </Tooltip>
-              </>
-            ) : (
-              <>
-                <Button type="primary" onClick={handleSave} loading={saving} icon={<EditOutlined />}>
-                  Save
-                </Button>
-                <Button onClick={handleCancelEdit} disabled={saving}>
-                  Cancel
-                </Button>
-              </>
-            )}
+            <Tooltip title="Save">
+              <Button
+                type="primary"
+                onClick={handleSave}
+                loading={saving}
+                icon={<CheckOutlined />}
+                aria-label="Save"
+              />
+            </Tooltip>
+            <Tooltip title="Cancel">
+              <span>
+                <Button onClick={handleCancelEdit} disabled={saving} icon={<CloseOutlined />} aria-label="Cancel" />
+              </span>
+            </Tooltip>
           </Space>
         </div>
       ) : (

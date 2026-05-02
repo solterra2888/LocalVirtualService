@@ -322,14 +322,14 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
             </ul>
           </div>
 
-          {/* PR-A: YouTube 走 audio_analysis 模块 (转写后做音频/视频内容分析) */}
+          {/* YouTube 使用独立的 youtube_analysis 模块（与 Feeds youtube_summary 完全解耦） */}
           <div style={{ marginBottom: '20px' }}>
             <UploadAnalysisTemplatePicker
               value={analyzePicker}
               onChange={setAnalyzePicker}
               mode="audio-default"
-              moduleCode="audio_analysis"
-              label="Audio Analysis Template"
+              moduleCode="youtube_analysis"
+              label="YouTube Analysis Template"
               textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
               disabled={isProcessing}
