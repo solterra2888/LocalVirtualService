@@ -6,6 +6,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query, Body
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from backend.utils.datetime_utils import utcnow
 
 from backend.schemas.news import (
     NewsResponse,
@@ -1186,8 +1187,8 @@ async def delete_news_by_date_range(
             logger.info(f"删除新闻完成 - 用户: {current_user.username}, "
                        f"实际删除 {deleted_news_count} 条新闻，预估级联删除 {total_count} 条记录")
             
-            # 3. 返回删除统计
-            executed_at = datetime.now().isoformat()
+            # 3. 返回删除统计 (UTC ISO，前端按用户时区渲染)
+            executed_at = utcnow().isoformat()
             
             return DeleteNewsByDateRangeResponse(
                 success=True,

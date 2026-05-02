@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from backend.utils.logger import info, error, warning
 from backend.utils.env_loader import load_project_env
+from backend.utils.datetime_utils import utcnow
 
 # 确保加载项目环境变量
 load_project_env()
@@ -403,7 +404,7 @@ class OSSService:
             result["signed_url"] = signed_url
             
             result["success"] = True
-            result["upload_time"] = datetime.now().isoformat()
+            result["upload_time"] = utcnow().isoformat()
             
             info(f"文件已上传到 OSS: {filename} (size: {file_size / 1024 / 1024:.2f}MB)")
             
@@ -506,7 +507,7 @@ class OSSService:
             )
             
             result["success"] = True
-            result["upload_time"] = datetime.now().isoformat()
+            result["upload_time"] = utcnow().isoformat()
             info(f"字节内容已上传到 OSS: {object_name} (size: {len(data) / 1024:.1f}KB)")
             
         except Exception as e:

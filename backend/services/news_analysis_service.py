@@ -9,6 +9,7 @@ import asyncio
 import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from backend.database.db_manager import DatabaseManager
 from backend.core.llm_framework import llm_service
 from backend.utils.logger import get_logger
@@ -347,7 +348,7 @@ class NewsAnalysisService:
                         "tokens": response.usage.get('total_tokens') if hasattr(response, 'usage') and response.usage else None,
                         "temperature": template_temperature,
                         "retry_count": attempt,
-                        "analyzed_at": datetime.now().isoformat()
+                        "analyzed_at": utcnow().isoformat()  # UTC ISO，前端按用户时区渲染
                     }
                     
                     # 🔥 合并：将当前模板的结果添加到字典中
@@ -408,7 +409,7 @@ class NewsAnalysisService:
                                 'related_sectors': classification_data.get('related_sectors', []),
                                 'related_countries': classification_data.get('related_countries', []),
                                 'rationale': classification_data.get('rationale'),
-                                'analyzed_at': datetime.now().isoformat()
+                                'analyzed_at': utcnow().isoformat()  # UTC ISO，前端按用户时区渲染
                             }
                             
                             # 提取置信度

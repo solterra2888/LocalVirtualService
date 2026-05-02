@@ -5,6 +5,7 @@
 
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, date
+from backend.utils.datetime_utils import utcnow
 from backend.database.db_manager import DatabaseManager
 from backend.services.project_permission_service import ProjectPermissionService
 from backend.utils.logger import get_logger
@@ -32,7 +33,9 @@ class InvestmentProjectService:
         Returns:
             str: 项目编号，格式：PROJ-{IDENTIFIER}-{DATE}
         """
-        today = datetime.now().strftime("%Y%m%d")
+        # 项目 ID 中的日期用 UTC: 服务器在 HK, datetime.now() 跨日时段会比 UTC 早 1 天,
+        # 导致 ID 显示的日期与系统其他模块 (按 UTC) 不一致.
+        today = utcnow().strftime("%Y%m%d")
         type_prefix = project_type.upper()[:4]
         id_part = identifier.replace('.', '').replace(' ', '-')[:15] if identifier else 'GENERAL'
         return f"PROJ-{id_part}-{today}"

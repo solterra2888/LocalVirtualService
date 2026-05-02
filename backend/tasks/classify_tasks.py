@@ -10,6 +10,7 @@ from backend.celery_app import app
 from backend.services.content_classify_service import ContentClassifyService
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import info, error, warning
 
 
@@ -50,7 +51,7 @@ def classify_file_content_task(self, file_id, username=None, force=False):
 
             if log_message:
                 log_entry = {
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_classify'

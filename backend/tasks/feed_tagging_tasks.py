@@ -20,6 +20,7 @@ from backend.services.feed_content_tagging_service import (
     FeedContentTaggingService,
 )
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import error, info, warning
 
 
@@ -76,7 +77,7 @@ def tag_feed_content_task(
             if log_message:
                 _progress["logs"].append(
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utcnow().isoformat(),
                         "level": "info",
                         "message": log_message,
                         "source": "celery_feed_tagging",

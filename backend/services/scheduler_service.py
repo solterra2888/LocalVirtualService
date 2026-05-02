@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from backend.database.db_manager import DatabaseManager
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import get_logger
 from backend.services.eodhd_news_service import EODHDNewsService
 from backend.services.watchlist_news_service import WatchlistNewsService
@@ -868,14 +869,10 @@ class SchedulerService:
             end_date = params.get('end_date')
             
             if params.get('recent_days') is not None:
-                from datetime import datetime, timedelta
-                
-                # 获取当前日期
-                current_date = datetime.now()
+                # 用 utcnow() 而非 datetime.now()：服务器在 HK (UTC+8)，
+                # HK 午夜时 datetime.now() 给出"明天"日期，导致 EODHD 返回空结果。
+                current_date = utcnow()
                 recent_days = params.get('recent_days')
-                
-                # 计算开始日期和结束日期
-                # 如果当前时间是2022-04-22，用户选择最近天数为10天，则日期范围是2022-04-12到2022-04-22
                 end_date = current_date.strftime('%Y-%m-%d')
                 start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
                 
@@ -1131,13 +1128,8 @@ class SchedulerService:
             end_date = None
             
             if params.get('recent_days') is not None:
-                from datetime import datetime, timedelta
-                
-                # 获取当前日期
-                current_date = datetime.now()
+                current_date = utcnow()
                 recent_days = params.get('recent_days')
-                
-                # 计算开始日期和结束日期
                 end_date = current_date.strftime('%Y-%m-%d')
                 start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
                 
@@ -1709,8 +1701,8 @@ class SchedulerService:
                     from_date = params['start_date']
                     to_date = params['end_date']
                 elif 'fetch_next_week' in params and params['fetch_next_week']:
-                    # 获取下周数据（周一到周日）
-                    today = datetime.now()
+                    # 获取下周数据（周一到周日）。用 utcnow 避免 HK 跨日时段日期偏移.
+                    today = utcnow()
                     days_until_monday = (7 - today.weekday()) % 7
                     if days_until_monday == 0:
                         days_until_monday = 7
@@ -1721,12 +1713,12 @@ class SchedulerService:
                 elif 'days' in params:
                     # 使用相对天数
                     days = params['days']
-                    today = datetime.now()
+                    today = utcnow()
                     from_date = today.strftime('%Y-%m-%d')
                     to_date = (today + timedelta(days=days)).strftime('%Y-%m-%d')
                 else:
                     # 默认获取未来30天的数据
-                    today = datetime.now()
+                    today = utcnow()
                     from_date = today.strftime('%Y-%m-%d')
                     to_date = (today + timedelta(days=30)).strftime('%Y-%m-%d')
                 

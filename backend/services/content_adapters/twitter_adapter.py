@@ -5,7 +5,7 @@ Twitter 内容适配器
 
 from typing import Dict, Any, List
 from datetime import datetime
-from backend.utils.datetime_utils import utcnow
+from backend.utils.datetime_utils import utcnow, ensure_utc
 from .base_adapter import BaseContentAdapter
 
 
@@ -62,10 +62,16 @@ class TwitterAdapter(BaseContentAdapter):
         # 提取媒体URL
         media_urls = self._extract_twitter_media_urls(raw_data)
         
-        # 解析发布时间
+        # 解析发布时间。
+        # 防御性兜底：twitterapi.io 返回的 createdAt 偶发遇到无 tz 标记的字符串，
+        # 此时 dateutil.parser 会返回 naive datetime；后续 psycopg2 全局适配器会把
+        # naive 视为 HK 本地，再转 UTC 入库 → 比真实时间早 8h。
+        # 用 ensure_utc 强制规整为 aware UTC，规避这个坑。fallback 直接走 utcnow()。
         created_at_str = raw_data.get('createdAt', '')
-        # 服务器在 HK (UTC+8); fallback 必须用 UTC 与上游 (Twitter API 返回 UTC) 对齐.
-        published_at = self.parse_datetime(created_at_str) if created_at_str else utcnow()
+        if created_at_str:
+            published_at = ensure_utc(self.parse_datetime(created_at_str))
+        else:
+            published_at = utcnow()
         
         # 计算互动数
         like_count = raw_data.get('likeCount', 0) or 0

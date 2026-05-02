@@ -9,6 +9,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import datetime, timedelta
+from backend.utils.datetime_utils import utcnow
 from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -278,7 +279,9 @@ class EarningsCalendarService:
             import json
             
             start_time = time.time()
-            fetch_date = datetime.now().strftime('%Y-%m-%d')
+            # fetch_date 是去重 key 的一部分 (code, report_date, fetch_date), 必须用 UTC
+            # 否则 HK 跨日时段重复任务会因日期不同而无法去重.
+            fetch_date = utcnow().strftime('%Y-%m-%d')
             
             # 🔥 使用字典去重：key = (code, report_date, fetch_date)
             records_dict = {}
@@ -529,7 +532,7 @@ class EarningsCalendarService:
             执行结果
         """
         try:
-            today = datetime.now().date()
+            today = utcnow().date()
             # 计算下周一和下周日
             days_until_next_monday = (7 - today.weekday()) % 7
             if days_until_next_monday == 0:
@@ -564,7 +567,7 @@ class EarningsCalendarService:
             执行结果
         """
         try:
-            today = datetime.now().date()
+            today = utcnow().date()
             end_date = today + timedelta(days=days)
             
             start_date_str = today.strftime('%Y-%m-%d')

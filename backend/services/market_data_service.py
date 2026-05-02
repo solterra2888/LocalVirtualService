@@ -179,7 +179,10 @@ class MarketDataService:
     def fetch_eod_data(self, ticker: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
         """获取EOD历史数据"""
         try:
-            from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            # 用 utcnow 而非 datetime.now: 服务器在 HK (UTC+8), 跨日时段 datetime.now()
+            # 取本地日期会比 UTC 早 1 天, 导致 EODHD 返回不全/空数据.
+            from backend.utils.datetime_utils import utcnow
+            from_date = (utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
             
             url = f"{self.eod_base_url}/{ticker}"
             params = {

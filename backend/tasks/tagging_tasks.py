@@ -10,6 +10,7 @@ from backend.celery_app import app
 from backend.services.content_tagging_service import ContentTaggingService
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import info, error, warning
 
 
@@ -64,7 +65,7 @@ def tag_file_content_task(
             
             if log_message:
                 log_entry = {
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_tagging'

@@ -7,6 +7,7 @@ IPO Calendar Service
 import os
 import requests
 from datetime import datetime, timedelta
+from backend.utils.datetime_utils import utcnow
 from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -168,7 +169,7 @@ class IPOCalendarService:
         Returns:
             同 fetch_ipo_calendar
         """
-        today = datetime.now().date()
+        today = utcnow().date()  # 用 UTC 避免 HK 跨日时段日期偏移
         start_date = today.strftime("%Y-%m-%d")
         end_date = (today + timedelta(days=days)).strftime("%Y-%m-%d")
         
@@ -183,7 +184,7 @@ class IPOCalendarService:
         Returns:
             同 fetch_ipo_calendar
         """
-        today = datetime.now().date()
+        today = utcnow().date()  # 用 UTC 避免 HK 跨日时段日期偏移
         # 计算下周的开始日期（下周一）
         days_until_next_monday = (7 - today.weekday()) % 7
         if days_until_next_monday == 0:

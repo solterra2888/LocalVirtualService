@@ -460,7 +460,7 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
             # 如果有新的日志消息，添加到日志列表
             if log_message:
                 log_entry = {
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_task'
@@ -648,7 +648,7 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
                 update_progress.logs = []
             if log_message:
                 update_progress.logs.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_audio_analysis'
@@ -924,7 +924,7 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
                 update_progress.logs = []
             if log_message:
                 update_progress.logs.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_doc_analysis'
@@ -1284,7 +1284,7 @@ def reparse_document_task(self, file_id, params, username):
                 update_progress.logs = []
             if log_message:
                 update_progress.logs.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_reparse'
@@ -1589,7 +1589,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                 update_progress.logs = []
             if log_message:
                 update_progress.logs.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_audio_upload'
@@ -1915,7 +1915,7 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                 update_progress.logs = []
             if log_message:
                 update_progress.logs.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message,
                     'source': 'celery_doc_upload'
@@ -2759,7 +2759,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                 state_data['message'] = log_message
             if log_message:
                 state_data['logs'].append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'error' if status == 'failed' else 'info',
                     'message': log_message
                 })
@@ -2860,7 +2860,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                         final_report, rc_agent_status
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """, (
-                    datetime.now().isoformat(), 1, 0, username,
+                    utcnow(), 1, 0, username,
                     'YouTube Processing', elapsed_seconds, elapsed_seconds, 0, 0, 0,
                     json.dumps({
                         "youtube_url": youtube_url,
@@ -3076,7 +3076,7 @@ def upload_and_process_youtube_task(self, youtube_url: str, username: str = 'gue
                     'files_failed': 1,
                     'total_files': 1,
                     'error': error_msg,
-                    'logs': [{'timestamp': datetime.now().isoformat(),
+                    'logs': [{'timestamp': utcnow().isoformat(),
                                'level': 'error', 'message': error_msg}]
                 }
             )
@@ -3119,7 +3119,7 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
             }
             if log_message:
                 meta['logs'].append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': utcnow().isoformat(),
                     'level': 'info',
                     'message': log_message
                 })
@@ -3281,7 +3281,7 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
                     'total_files': 1,
                     'error': error_msg,
                     'logs': [{
-                        'timestamp': datetime.now().isoformat(),
+                        'timestamp': utcnow().isoformat(),
                         'level': 'error',
                         'message': error_msg
                     }]
@@ -3410,7 +3410,7 @@ def finalize_youtube_file_task(self, file_id: int, username: str,
                 'caption_source': source,
                 'asr_used': source == 'asr',
                 'final_length': length,
-                'finalized_at': datetime.now().isoformat(),
+                'finalized_at': utcnow().isoformat(),
                 'finalize_reason': reason,
             })
 

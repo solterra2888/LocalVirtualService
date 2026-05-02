@@ -12,6 +12,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from backend.utils.datetime_utils import utcnow
 from typing import List, Dict, Any, Optional, Union
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -203,7 +204,7 @@ class EconomicEventsService:
         Returns:
             经济事件数据列表
         """
-        end_date = datetime.now()
+        end_date = utcnow()
         start_date = end_date - timedelta(days=days)
         
         return self.get_economic_events(
@@ -222,7 +223,7 @@ class EconomicEventsService:
         Returns:
             经济事件数据列表
         """
-        start_date = datetime.now()
+        start_date = utcnow()
         end_date = start_date + timedelta(days=days)
         
         return self.get_economic_events(
@@ -242,7 +243,7 @@ class EconomicEventsService:
         Returns:
             经济事件数据列表
         """
-        end_date = datetime.now() + timedelta(days=days//2)
+        end_date = utcnow() + timedelta(days=days//2)
         start_date = end_date - timedelta(days=days)
         
         return self.get_economic_events(

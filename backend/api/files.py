@@ -4216,7 +4216,7 @@ async def upload_youtube_link(
         if use_local:
             # ── 新路径: 同步建记录 + 派发本地 Worker ──────────────────
             filename = f"YouTube_{video_id}"
-            now_iso = datetime.now().isoformat()
+            now_iso = utcnow()  # aware UTC; psycopg2 adapter -> naive UTC
 
             db_manager = DatabaseManager(get_database_config())
             with db_manager.get_connection_context() as conn:

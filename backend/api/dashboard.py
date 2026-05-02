@@ -6,6 +6,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 import json
 import os
 import urllib.parse
@@ -1390,9 +1391,9 @@ async def test_stock_historical_data(
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
-        # Calculate date range
-        from datetime import datetime, timedelta
-        end_date = datetime.now().date()
+        # Calculate date range (UTC: avoid HK midnight day-shift for stock chart queries)
+        from datetime import timedelta
+        end_date = utcnow().date()
         start_date = end_date - timedelta(days=days)
         
         print(f"Date range: {start_date} to {end_date}")
@@ -1472,9 +1473,9 @@ async def get_stock_historical_data(
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
         
-        # Calculate date range
-        from datetime import datetime, timedelta
-        end_date = datetime.now().date()
+        # Calculate date range (UTC: avoid HK midnight day-shift for stock chart queries)
+        from datetime import timedelta
+        end_date = utcnow().date()
         start_date = end_date - timedelta(days=days)
         
         print(f"Date range: {start_date} to {end_date}")
@@ -1549,7 +1550,8 @@ async def get_stock_historical_data(
         
         # 优化：如果最后一天是今天，尝试用实时数据替换/补充
         # 这样 candlestick 图表的最后一根 K 线会显示实时价格
-        today_str = datetime.now().date().strftime('%Y-%m-%d')
+        # 用 UTC: stock_prices_eod 的 date 列存的是 UTC 自然日 (与 EODHD API 对齐).
+        today_str = utcnow().date().strftime('%Y-%m-%d')
         has_today_data = any(item['date'] == today_str for item in historical_data)
         
         # 查询实时价格数据
@@ -1643,7 +1645,7 @@ async def batch_stock_historical_data(
 
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
-    end_date = datetime.now().date()
+    end_date = utcnow().date()  # UTC: 与 stock_prices_eod 的 date 列对齐
     start_date = end_date - timedelta(days=days)
 
     def _infer_suffix(currency: str, symbol: str) -> str:
@@ -2189,7 +2191,7 @@ async def health_check():
     """
     仪表板API健康检查端点
     """
-    return {"status": "healthy", "service": "dashboard", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "service": "dashboard", "timestamp": utcnow().isoformat()}
 
 
 # ============================================

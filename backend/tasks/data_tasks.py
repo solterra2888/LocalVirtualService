@@ -1174,9 +1174,11 @@ def fetch_single_ticker_eod_history_task(self, ticker: str, days_back: int = Non
             log_message=f"正在从 EODHD API 获取 {ticker} 数据..."
         )
         
-        # 计算日期范围
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        # 计算日期范围 (用 UTC 避免 HK 跨日时段的日期偏移)
+        from backend.utils.datetime_utils import utcnow
+        _now = utcnow()
+        end_date = _now.strftime('%Y-%m-%d')
+        start_date = (_now - timedelta(days=days_back)).strftime('%Y-%m-%d')
         
         # 获取数据
         eod_data = eod_service.fetch_eod_data_for_ticker(ticker, start_date, end_date)

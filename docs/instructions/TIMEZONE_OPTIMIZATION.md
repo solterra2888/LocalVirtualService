@@ -392,6 +392,112 @@ def install_psycopg2_utc_adapter() -> None:
 
 ---
 
+## 7.6 Twitter / News / EODHD 订阅拉取问题根治（2026-05-02）
+
+> 排查触发：Walter Bloomberg (@DeItaone) 过去 48 小时 100 条推文数据库仅有 7 条（93% 缺失）。
+
+### 7.6.1 问题汇总
+
+| 模块 | 问题 | 根因 | 影响 |
+|------|------|------|------|
+| **Twitter** | 93% 推文缺失 | `twitterapi.io` `advanced_search` 索引延迟 12-20h；`smart_hours` 优化把窗口压到 2-3h 远小于延迟 | 🔴 致命：数据长期大量缺失 |
+| **Twitter** | `fetched_at` / `last_fetched_at` +8h | `CURRENT_TIMESTAMP` 在某些 worker 实例 session TZ 未 UTC | 🟡 时区显示错乱 |
+| **Twitter** | `published_at` 部分 +8h | psycopg2 UTC 适配器在同一批次内偶发未生效 | 🟡 时区显示错乱 |
+| **Twitter** | `is_first_fetch` 误判 | author 强制小写后与 DB 大小写敏感 author_identifier 不匹配 | 🟢 低：只浪费 API 配额 |
+| **News** | `fetched_at` +8h（141 行）| 同 Twitter：`CURRENT_TIMESTAMP` HK 时钟 | 🟡 时区显示错乱（无数据缺口）|
+| **News** | `datetime.now()` 日期计算 | HK 午夜时 end_date 超前 1 天 | 🟢 低：下次 30min 自愈 |
+| **EODHD 股价** | `datetime.now()` 日期计算 | 同上 | 🟢 低：days_back 窗口有冗余 |
+| **YouTube** | 无问题 | home VM worker 已独立修好（7.5.5 节）| ✅ |
+
+### 7.6.2 修复内容
+
+| 文件 | 改动 |
+|------|------|
+| `backend/services/twitter_subscription_service.py` | 加 `min_lookback_hours=24` 下限；`default_query_hours` 24→48；`max_pages` 3→6/10；`_update_subscription_status` 用 `utcnow()` 显式传参；修 author 大小写不敏感比较 |
+| `backend/services/subscription_content_service.py` | `fetched_at` 用 Python `utcnow()` 替代 SQL `CURRENT_TIMESTAMP` |
+| `backend/services/content_adapters/twitter_adapter.py` | `published_at` 用 `ensure_utc()` 强制 aware UTC 兜底 |
+| `backend/services/eodhd_news_feed_service.py` | `datetime.now()` → `utcnow()` 用于日期范围计算 |
+| `backend/services/scheduler_service.py` | 两处 `recent_days` 日期计算 `datetime.now()` → `utcnow()` |
+| `backend/services/eodhd_eod_stock_prices_service.py` | 两处 `datetime.now()` → `_utcnow()` 用于 EOD 日期范围 |
+| `backend/database/migrations/fix_twitter_subscription_hk_clock_2026_05.sql` | 历史修正：twitter `fetched_at`/`published_at`/`last_fetched_at`/`fetch_time` HK 时钟行 -8h |
+
+### 7.6.3 关键设计决策：Twitter lookback 窗口
+
+`twitterapi.io` `advanced_search` 存在 **12-20h 搜索索引延迟**。推文发布后不会立即出现在搜索结果里，因此任何小于延迟时长的查询窗口都会导致推文永久丢失。
+
+**根治方案**：强制最小 lookback 窗口为 `min_lookback_hours = 24h`（可通过 `TWITTER_MIN_LOOKBACK_HOURS` 环境变量调整）。重复内容由 `ON CONFLICT (channel_type, content_id)` 自然去重，零脏库风险。
+
+```
+smart_hours = max(min_lookback_hours, min(estimated_hours, default_query_hours))
+```
+
+### 7.6.4 部署注意
+
+1. 重启远程 Celery `data_fetching` + `default` 队列 worker（让新代码生效）
+2. 确认 `task_scheduling.twitter_subscription.enabled = true`（当前已禁用）
+3. 新增环境变量（可选）：`TWITTER_DEFAULT_QUERY_HOURS=48`、`TWITTER_MIN_LOOKBACK_HOURS=24`
+
+---
+
+## 7.7 全代码库 `datetime.now()` 系统性清理（2026-05-02）
+
+> 在修复 Twitter Feeds 后做了一次全 backend 扫描，发现还有 25+ 处 `datetime.now()` 在执行日期/时区敏感操作。
+
+### 7.7.1 问题分类
+
+代码里的 `datetime.now()` 用法分四类，本轮**只清理前两类**，第三类有适配器兜底（功能正常但不规范），第四类是无害用法：
+
+| 用法分类 | 风险 | 处理 |
+|---|---|---|
+| **(A) 上游 API 日期参数** (`start_date`/`end_date`) | 🔴 HK 跨日 8 小时窗口 (00:00-08:00 HK) 内日期偏移 1 天，导致 EOD/IPO/财报/经济事件 API 返回空或错位 | ✅ 全部改用 `utcnow()` |
+| **(B) 用户可见时间戳泄漏** (JSON metadata, API response, `read_at`/`analyzed_at`/`scraped_at`/`executed_at`) | 🟡 前端按浏览器时区渲染时显示偏 +8h | ✅ 全部改用 `utcnow().isoformat()` |
+| **(C) DB INSERT 字面值** (`created_at`/`updated_at`/`last_login` 等) | 🟢 psycopg2 全局适配器兜底自动 HK→UTC，功能正常 | ⏸ 保持现状（详见 7.5.2 适配器机制）|
+| **(D) 进程内时间测量** (`start = now(); ...; elapsed = now() - start`)、文件名时间戳、缓存 TTL | 🟢 完全无害（同进程内时间差与时区无关）| ⏸ 保持现状 |
+
+### 7.7.2 本轮 (A)+(B) 修复清单
+
+**(A) 上游 API 日期参数 — 9 个文件**
+
+| 文件 | 用途 |
+|---|---|
+| `backend/services/market_data_service.py` | EOD 历史数据 from_date |
+| `backend/tasks/data_tasks.py` | 单 ticker EOD start_date/end_date |
+| `backend/services/scheduler_service.py` | 经济事件日历 from/to_date（3 处分支）|
+| `backend/services/earnings_calendar_service.py` | 财报日历 fetch_date（去重 key 一部分）+ next_week + custom_period |
+| `backend/services/ipo_calendar_service.py` | IPO 日历 today（2 处分支）|
+| `backend/services/economic_events_service.py` | 经济事件最近/未来/按国家 3 个 API |
+| `backend/services/watchlist_news_service.py` | watchlist 新闻日期范围 |
+| `backend/api/dashboard.py` | 股票图表 + 投资组合历史价格日期范围（4 处）|
+| `backend/services/investment_project_service.py` | 项目 ID 生成中的 YYYYMMDD 日期段 |
+
+**(B) 用户可见时间戳 — 5 个文件**
+
+| 文件 | 字段 |
+|---|---|
+| `backend/services/subscription_content_service.py` | `read_at`（已读时间）|
+| `backend/services/news_analysis_service.py` | `analyzed_at`（分析时间，2 处）|
+| `backend/api/news.py` | `executed_at`（删除统计 API 响应）|
+| `backend/services/cctv_news_service.py` | `scraped_at` / `content_scraped_at`（3 处）|
+| `backend/scrapers/futu_scraper.py` | `scraped_at` |
+
+### 7.7.3 仍保留 `datetime.now()`（无需修改）
+
+以下文件的 `datetime.now()` 属于 (C) 或 (D) 类，psycopg2 适配器或语义本身已正确，**不必清理**：
+
+- `backend/services/eodhd_fundamentals_service.py` — 50+ 处 `datetime.now()` 用于 `created_at`/`updated_at`，适配器自动转 UTC
+- `backend/api/files.py` / `backend/tasks/file_tasks.py` / `backend/workers/file_worker.py` — 文件上传 `upload_time`、INSERT 时间戳，适配器兜底
+- `backend/auth/user_auth.py` — `last_login` INSERT
+- `backend/services/market_data_service.py` 1003-1118 行 — 全是 elapsed timing
+- `backend/services/oss_service.py` / `backend/api/markets.py` / `backend/api/scheduler.py` — 文件名时间戳（仅作唯一 ID，时区无关）
+- `backend/main.py` 健康检查 timestamp（前端不消费）
+- `backend/services/theme_unification_service.py` 缓存 TTL（同进程内时间差）
+
+### 7.7.4 `date.today()` 残留
+
+`backend/services/eodhd_fundamentals_service.py` 仍有 7 处 `date.today()` 用作 `data_date`。该服务通常在 HK 6:00 = UTC 22:00（同一天）触发，影响窗口仅是 HK 0:00-8:00 之间的手动重跑。**保持现状**（已在 7.5.5 节归类为低优先级）。
+
+---
+
 ### 7.5.5 ⚠️ 家用虚拟机 Worker 的独立写入路径（已修复）
 
 **症状**: YouTube Feed 'Why Americans Can't Buy Cheap Chinese EVs' 在 HK 当地 25 日 22:42 时,
@@ -433,9 +539,65 @@ News / Twitter 走主仓库路径, 不受影响.
 - `backend/database/migrations/fix_file_processing_details_utc.sql` — Phase 1 迁移
 - `backend/database/migrations/fix_all_naive_timestamps_to_utc.sql` — Phase 2 迁移
 - `backend/database/migrations/fix_youtube_subscription_content_utc.sql` — Phase 3 迁移 (家用 Worker)
+- `backend/database/migrations/fix_twitter_subscription_hk_clock_2026_05.sql` — Phase 4 迁移 (Twitter + News HK 时钟)
 - `backend/schemas/*.py` — datetime 字段统一改 UtcDateTime
+- `backend/services/twitter_subscription_service.py` — Twitter 订阅抓取；`min_lookback_hours` 兜住 API 索引延迟
+- `backend/services/subscription_content_service.py` — 通用订阅内容保存；`fetched_at` 显式 UTC
+- `backend/services/content_adapters/twitter_adapter.py` — Twitter 适配器；`ensure_utc` 兜底
 - `deployment/local_virtual_service/worker/db.py` — 家用 Worker 的连接层 (UTC adapter + TimeZone=UTC)
 - `deployment/local_virtual_service/worker/services.py` — 家用 Worker 的内联 YouTube adapter (UTC fallback)
 - `web-frontend/src/utils/datetime.ts` — 前端时区工具库
 - `web-frontend/src/contexts/DashboardSettingsContext.tsx` — 用户时区偏好状态管理
 - `docs/instructions/DAILY_MODULE.md` §13 — 时区契约完整版（含禁用/推荐对照表、schema 演进 TODO）
+
+## 7.8 任务进度日志 timestamp 美国用户错位修复（2026-05-02 补丁）
+
+### 背景
+评估 `upload sources` 时间链路时发现：所有 Celery 任务进度日志（`tasks/file_tasks.py` / `tasks/naming_tasks.py` / `tasks/tagging_tasks.py` / `tasks/classify_tasks.py` / `tasks/feed_tagging_tasks.py` / `tasks/feed_summary_tasks.py`）写入 JSONB `logs[].timestamp` 时使用：
+
+```python
+'timestamp': datetime.now().isoformat()  # "2026-05-02T17:50:00" — naive, 无 tz 标记
+```
+
+前端 `LogViewer` / `useLogger` 用 `new Date(log.timestamp).toLocaleString()` 渲染。JS `new Date()` 解析**无时区标记的 ISO 字符串**时会**当作浏览器本地时区**：
+
+| 用户位置 | 浏览器解释 | 真实时刻 | 误差 |
+|---|---|---|---|
+| 香港/中国 (UTC+8) | HK 17:50 | HK 17:50 | ✅ 巧合对（与服务器同时区） |
+| 美东 (UTC-5) | NY 17:50 | NY 05:50 | ❌ 晚 12 小时 |
+| 美西 (UTC-8) | LA 17:50 | LA 02:50 | ❌ 晚 15 小时 |
+
+这是 §7.7 评估时被误归类为低优先级的"漏网之鱼"——只对**美国用户**有显著影响（HK/CN 用户因与服务器同 UTC+8 巧合显示正确）。
+
+### 修复
+全部改为 `utcnow().isoformat()`，输出 `"2026-05-02T09:50:00+00:00"`，前端解析时按浏览器时区正确转换。
+
+涉及文件：
+- `backend/tasks/file_tasks.py` — 12 处（11 个 log timestamp + 1 个 INSERT 字面值改 `utcnow()` 让适配器接管）
+- `backend/tasks/naming_tasks.py` — 1 处
+- `backend/tasks/tagging_tasks.py` — 1 处
+- `backend/tasks/classify_tasks.py` — 1 处
+- `backend/tasks/feed_tagging_tasks.py` — 1 处
+- `backend/tasks/feed_summary_tasks.py` — 1 处
+- `backend/api/files.py` — 1 处（YouTube 本地路径 `processing_stats` INSERT 改 `utcnow()`）
+- `backend/api/dashboard.py` — 1 处（健康检查端点 timestamp）
+- `backend/services/oss_service.py` — 2 处（OSS 上传返回的 `upload_time`）
+- `backend/api/screener.py` — 1 处（手动数据更新返回的 `last_update`）
+
+### 跨地区影响评估（修复后）
+
+**对所有用户都是改善**：
+- HK/CN 用户：之前巧合对，修复后仍正确（前端 dayjs 把 +00:00 转成 Asia/Shanghai 显示）
+- 美东用户：之前 log 时间晚 12 小时，修复后正确显示 NY 本地时间
+- 美西用户：之前 log 时间晚 15 小时，修复后正确显示 LA 本地时间
+- 其他地区：浏览器自动检测时区，全部正确
+
+### `Upload Sources` 时间链路总评
+
+| 字段 | 写入路径 | 状态 |
+|---|---|---|
+| `files.upload_time` | Pydantic `UtcDateTime` 类型 + `datetime.now()` 经 psycopg2 适配器 → UTC | ✅ 正确 |
+| `file_processing_details.created_at` | 大部分 `utcnow()` (aware UTC)，少部分 `datetime.now()` 经适配器 | ✅ 正确 |
+| `processing_stats.timestamp` (本次修复) | 之前传 `.isoformat()` 字符串绕过适配器 → 已改 `utcnow()` 让适配器接管 | ✅ 修复完成 |
+| 任务进度 `logs[].timestamp` (本次修复) | 之前 naive ISO 字符串 → 已改 `utcnow().isoformat()` 带 +00:00 | ✅ 修复完成 |
+| OSS `upload_time` (本次修复) | 之前 naive ISO 字符串 → 已改 `utcnow().isoformat()` | ✅ 修复完成 |

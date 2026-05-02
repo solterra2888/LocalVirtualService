@@ -10,11 +10,12 @@ EODHD News Feed Service - 将 EODHD 新闻作为 Feed 订阅内容写入 subscri
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any, Optional, Set
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import get_logger
 from backend.services.content_adapters.news_adapter import NewsAdapter, determine_source
 from backend.services.subscription_content_service import SubscriptionContentService
@@ -92,9 +93,12 @@ class EODHDNewsFeedService:
         logger.info(f"发现 {len(subscribed_sources)} 个已订阅的新闻源",
                      sources=list(subscribed_sources))
 
-        # Step 2: 从 EODHD API 拉取新闻
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=recent_days)).strftime('%Y-%m-%d')
+        # Step 2: 从 EODHD API 拉取新闻.
+        # 用 utcnow() 而非 datetime.now()：服务器在 HK (UTC+8)，午夜 HK 时
+        # datetime.now() 会给出"明天"的 HK 日期，导致 EODHD 返回空结果直到下次重跑。
+        now = utcnow()
+        end_date = now.strftime('%Y-%m-%d')
+        start_date = (now - timedelta(days=recent_days)).strftime('%Y-%m-%d')
 
         articles = self._fetch_from_eodhd(
             start_date=start_date,

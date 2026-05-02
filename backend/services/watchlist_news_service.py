@@ -7,6 +7,7 @@ import os
 import requests
 import time
 from datetime import datetime, timedelta
+from backend.utils.datetime_utils import utcnow
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
@@ -208,8 +209,8 @@ class WatchlistNewsService:
             end_date = None
             
             if recent_days is not None:
-                # 计算日期范围
-                current_date = datetime.now()
+                # 计算日期范围 (用 UTC 避免 HK 跨日时段日期偏移)
+                current_date = utcnow()
                 end_date = current_date.strftime('%Y-%m-%d')
                 start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
                 

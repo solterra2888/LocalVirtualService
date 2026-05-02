@@ -10,6 +10,7 @@ import logging
 
 from ..database.db_manager import DatabaseManager
 from ..utils.database_config import get_database_config
+from ..utils.datetime_utils import utcnow
 from ..schemas.user import TokenData
 from ..auth.jwt_utils import get_current_user
 
@@ -466,7 +467,7 @@ async def update_data(current_user: TokenData = Depends(get_current_user)):
             "status": "success",
             "message": "数据更新已启动",
             "updated_count": 0,  # TODO: 返回实际更新数量
-            "last_update": datetime.now().isoformat()
+            "last_update": utcnow().isoformat()
         }
         
     except Exception as e:

@@ -9,6 +9,7 @@ import time
 import random
 import re
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from typing import Optional, List, Dict, Any
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -127,11 +128,11 @@ class CCTVNewsService:
                 
                 if content:
                     news['content'] = content
-                    news['content_scraped_at'] = datetime.now().isoformat()
+                    news['content_scraped_at'] = utcnow().isoformat()  # UTC ISO
                     success_content_count += 1
                 else:
                     news['content'] = None
-                    news['content_scraped_at'] = datetime.now().isoformat()
+                    news['content_scraped_at'] = utcnow().isoformat()  # UTC ISO
                     failed_content_count += 1
                     self.logger.warning(f"内容提取失败: {news['url']}")
                 
@@ -346,7 +347,7 @@ class CCTVNewsService:
                     'title': title,
                     'url': url,
                     'date': news_date,
-                    'scraped_at': datetime.now().isoformat()
+                    'scraped_at': utcnow().isoformat()  # UTC ISO
                 })
             
             self.logger.info(f"成功提取 {len(news_list)} 条新闻")

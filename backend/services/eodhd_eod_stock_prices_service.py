@@ -20,6 +20,8 @@ import time
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Set
+
+from backend.utils.datetime_utils import utcnow as _utcnow
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -521,9 +523,11 @@ class EODHDEODStockPricesService:
                     'execution_time': time.time() - start_time
                 }
             
-            # 计算日期范围
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+            # 计算日期范围。用 utcnow() 避免 HK 午夜时 datetime.now() 给出明天的 HK 日期，
+            # 导致 EODHD 对"今天"日期查询返回空数据（明天尚无收盘价）。
+            _now = _utcnow()
+            end_date = _now.strftime('%Y-%m-%d')
+            start_date = (_now - timedelta(days=days_back)).strftime('%Y-%m-%d')
             
             # 🔄 遍历所有周期
             period_results = {}
@@ -646,9 +650,10 @@ class EODHDEODStockPricesService:
         logger.info(f"开始获取ticker {ticker} 的历史价格数据，回溯{days_back}天")
         
         try:
-            # 计算日期范围
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+            # 计算日期范围（UTC，避免 HK 午夜日期偏移）
+            _now = _utcnow()
+            end_date = _now.strftime('%Y-%m-%d')
+            start_date = (_now - timedelta(days=days_back)).strftime('%Y-%m-%d')
             
             # 获取历史数据
             eod_data = self.fetch_eod_data_for_ticker(ticker, start_date, end_date)

@@ -10,6 +10,7 @@ from psycopg2.extras import Json
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import get_logger
 from backend.services.content_adapters import get_adapter
 
@@ -114,6 +115,13 @@ class SubscriptionContentService:
             engagement_count = normalized_data.get('engagement_count', 0)
             heat_level = self.calculate_heat_level(engagement_count)
             
+            # 用 Python `utcnow()` 显式传参代替 SQL 的 `CURRENT_TIMESTAMP`：
+            # CURRENT_TIMESTAMP 落到 naive `timestamp without time zone` 列时
+            # 会按连接 session 时区 (HK = +8) 写入，部分 worker 部署滞后可能没设
+            # `SET TIME ZONE='UTC'`，导致 fetched_at 误写 HK 时钟值。
+            # Python aware UTC 经过 psycopg2 全局适配器始终规整为 UTC 入库。
+            now_utc = utcnow()
+
             query = """
                 INSERT INTO subscription_content (
                     channel_type,
@@ -148,7 +156,7 @@ class SubscriptionContentService:
                     in_reply_to_user_id,
                     heat_level
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (channel_type, content_id) DO UPDATE SET
@@ -167,7 +175,7 @@ class SubscriptionContentService:
                     duration_seconds = EXCLUDED.duration_seconds,
                     channel_id = EXCLUDED.channel_id,
                     heat_level = EXCLUDED.heat_level,
-                    fetched_at = CURRENT_TIMESTAMP
+                    fetched_at = EXCLUDED.fetched_at
                 RETURNING id, (xmax = 0) AS inserted
             """
             
@@ -185,6 +193,7 @@ class SubscriptionContentService:
                 normalized_data.get('view_count', 0),
                 Json(normalized_data.get('metadata', {})),
                 user_ids,
+                now_utc,
                 # Twitter 特定字段
                 normalized_data.get('is_retweet', False),
                 normalized_data.get('retweeted_author'),
@@ -503,9 +512,11 @@ class SubscriptionContentService:
                 WHERE id = %s
             """
             
+            # read_at 是用户可见的"已读时间"，必须用 UTC ISO (...+00:00)，
+            # 否则前端按浏览器时区渲染会比真实已读时刻晚 8h.
             read_info = Json({
                 'is_read': is_read,
-                'read_at': datetime.now().isoformat() if is_read else None
+                'read_at': utcnow().isoformat() if is_read else None
             })
             
             cursor.execute(query, (str(user_id), read_info, content_id))

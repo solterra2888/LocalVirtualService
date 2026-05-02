@@ -11,6 +11,7 @@ import json
 import time
 import random
 from datetime import datetime
+from backend.utils.datetime_utils import utcnow
 from bs4 import BeautifulSoup
 from typing import Optional, List, Dict
 import re
@@ -545,7 +546,7 @@ def extract_theme_from_soup_element(element, market='US'):
         match = re.search(r'-(BK\d+)', theme_url)
         theme_data['theme_id'] = match.group(1) if match else ""
         
-        theme_data['scraped_at'] = datetime.now().isoformat()
+        theme_data['scraped_at'] = utcnow().isoformat()  # UTC ISO
         
         return theme_data
         

@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 
 from backend.database.db_manager import DatabaseManager
+from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import get_logger
 from backend.services.subscription_content_service import SubscriptionContentService
 
@@ -45,7 +46,14 @@ class TwitterSubscriptionService:
             self.content_service = SubscriptionContentService()
             
             # 配置参数
-            self.default_query_hours = int(os.getenv('TWITTER_DEFAULT_QUERY_HOURS', '24'))
+            # 默认查询窗口 48h（之前 24h）：twitterapi.io advanced_search 存在 12-24h 索引延迟，
+            # 必须留足追赶余量，否则当前调度周期错过的推文很难再被回收。
+            self.default_query_hours = int(os.getenv('TWITTER_DEFAULT_QUERY_HOURS', '48'))
+            # 增量定时任务的"最小 lookback 窗口"：twitterapi.io 索引延迟最长 ~12-20h，
+            # 因此即便上次抓取仅在 1h 前，也必须重新扫描过去 24h 才能捕获那期间被新索引的推文。
+            # 重复内容由 ON CONFLICT 自然去重，不会写脏库；代价仅为多几次 HTTP 调用。
+            # 详见 fetch_and_store_tweets 中的注释与 docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md。
+            self.min_lookback_hours = int(os.getenv('TWITTER_MIN_LOOKBACK_HOURS', '24'))
             self.test_fetch_query_hours = 12  # Test Fetch 固定使用12小时
             self.initial_fetch_hours = int(os.getenv('TWITTER_INITIAL_FETCH_HOURS', '168'))  # 首次获取：7天（168小时）
             self.max_tweets_per_request = int(os.getenv('TWITTER_MAX_TWEETS_PER_REQUEST', '20'))
@@ -294,43 +302,64 @@ class TwitterSubscriptionService:
     
     def _calculate_fetch_since_hours(self, author_subs: List[Dict[str, Any]]) -> int:
         """
-        根据订阅的 last_fetched_at 计算最优时间窗口，避免每次都拉取 24 小时的全量数据。
+        根据订阅的 last_fetched_at 计算时间窗口。
+
+        重要约束（2026-05 修订）:
+            twitterapi.io 的 `advanced_search` 端点存在显著的搜索索引延迟
+            （观察到 12-20h，部分账号偶发更长）。即推文 published 后并不会
+            立即出现在 advanced_search 结果里。
+
+            因此"距上次抓取多久就只查多久"这种最小化窗口策略会导致：
+              - 上次抓取在 T 时刻、本次在 T+2h
+              - 本次只查 [T+2h-2h, T+2h] = [T, T+2h] 的窗口
+              - 但很多 published_at ∈ [T-12h, T] 的推文要到现在才被索引
+              - 这些推文永远不会再进抓取窗口 → 永久丢失
+
+            根治方案：始终保留 `min_lookback_hours`（默认 24h）的回看窗口，
+            足以覆盖 API 的索引延迟。重复内容由 subscription_content
+            (channel_type, content_id) UNIQUE + ON CONFLICT DO UPDATE 去重，
+            代价仅为每次多扫几页 HTTP 请求。
         """
         latest_fetch = None
         for sub in author_subs:
             lfa = sub.get('last_fetched_at')
             if lfa and (latest_fetch is None or lfa > latest_fetch):
                 latest_fetch = lfa
-        
-        if latest_fetch is None:
+
+        if latest_fetch is None or not isinstance(latest_fetch, datetime):
             return self.default_query_hours
-        
-        if not isinstance(latest_fetch, datetime):
-            return self.default_query_hours
-        
-        # DB 列为 timestamp without time zone，存储的是服务器本地时间，
-        # 必须用同类型的 naive datetime 比较，避免时区偏移导致负值。
+
+        # 计算"距上次抓取的小时差"。注意 last_fetched_at 列是 timestamp
+        # without time zone：历史上既有 UTC 时钟存的行，也有 HK 时钟误存的行
+        # （见 docs/instructions/TIMEZONE_OPTIMIZATION.md §7.5）。这里只把它
+        # 当作"参考"——下面的 max(min_lookback_hours, ...) 会兜底，所以即使
+        # delta 算偏 8h 也不会引发新的丢数据问题。
         if latest_fetch.tzinfo is None:
             now = datetime.now()
         else:
             now = datetime.now(timezone.utc)
-        
         hours_since = (now - latest_fetch).total_seconds() / 3600
-        
-        if hours_since < 0:
-            return self.default_query_hours
-        
-        # 加 30 分钟 buffer 并向上取整，最小 1 小时
-        smart_hours = max(1, int(hours_since + 1.5))
-        return min(smart_hours, self.default_query_hours)
-    
+
+        # 估算窗口：距上次抓取时长 + 1.5h buffer
+        estimated = max(1, int(hours_since + 1.5))
+
+        # 关键修复：套上 [min_lookback_hours, default_query_hours] 区间。
+        # min_lookback 兜住索引延迟，default 兜住单次最大代价。
+        return max(self.min_lookback_hours, min(estimated, self.default_query_hours))
+
     def _calculate_max_pages(self, since_hours: int) -> int:
-        """根据时间窗口动态调整最大分页数。窗口越小，所需页数越少。"""
+        """根据时间窗口动态调整最大分页数。窗口越大，需要的页数越多。
+
+        每页 ~20 条；高频账号（如 @DeItaone）一天可达 100+ 条，因此 24h 窗口
+        至少要 6 页才能完整覆盖；48h 追赶时给到 10 页。
+        """
         if since_hours <= 3:
             return 2
         elif since_hours <= 12:
             return 3
-        return 5
+        elif since_hours <= 24:
+            return 6
+        return 10
     
     def _get_existing_tweet_ids(self, conn, tweet_ids: List[str]) -> set:
         """批量查询哪些 tweet ID 已存在于数据库，返回已存在的 ID 集合。"""
@@ -347,7 +376,11 @@ class TwitterSubscriptionService:
         return existing
     
     def _ensure_user_ids_for_author(self, conn, author: str, user_ids: List[int]):
-        """批量确保该作者所有已有内容都包含这些 user_ids（处理新订阅用户场景）。"""
+        """批量确保该作者所有已有内容都包含这些 user_ids（处理新订阅用户场景）。
+
+        author 已被 aggregate_subscriptions_by_author 强制小写，但 DB 存大小写敏感的
+        原始 username。用 lower(author_identifier) 兜底，避免漏更新。
+        """
         if not user_ids:
             return
         cursor = conn.cursor()
@@ -356,7 +389,7 @@ class TwitterSubscriptionService:
                 UPDATE subscription_content
                 SET user_ids = ARRAY(SELECT DISTINCT UNNEST(user_ids || %s::integer))
                 WHERE channel_type = 'twitter'
-                AND author_identifier = %s
+                AND lower(author_identifier) = lower(%s)
                 AND NOT (%s = ANY(user_ids))
             """, (uid, author, uid))
         cursor.close()
@@ -574,10 +607,15 @@ class TwitterSubscriptionService:
                     user_ids = list({sub['user_id'] for sub in author_subs})
                     subscription_ids = [sub['id'] for sub in author_subs]
                     
-                    # 检查是否是首次获取（该作者没有任何内容）
+                    # 检查是否是首次获取（该作者没有任何内容）。
+                    # 注意：aggregate_subscriptions_by_author 把 author 强制小写 (deitaone),
+                    # 但 DB 里 author_identifier 保留 Twitter 原始大小写 (DeItaone)。
+                    # 因此用 lower(author_identifier) 做大小写不敏感比较，否则会把已有
+                    # 内容的作者误判为"首次获取"，触发 168h 全量拉取，浪费 API 配额。
                     cursor.execute(
                         "SELECT COUNT(*) FROM subscription_content "
-                        "WHERE channel_type = 'twitter' AND author_identifier = %s",
+                        "WHERE channel_type = 'twitter' "
+                        "AND lower(author_identifier) = lower(%s)",
                         (author,)
                     )
                     content_count = cursor.fetchone()[0]
@@ -742,25 +780,34 @@ class TwitterSubscriptionService:
     def _update_subscription_status(self, cursor, subscription_id: int,
                                    items_count: int, status: str,
                                    error: str = None):
-        """更新订阅状态"""
+        """更新订阅状态.
+
+        注意：`last_fetched_at` 用 Python `utcnow()` 显式传参，**不要用 PG 的
+        `CURRENT_TIMESTAMP`**。因为部分 worker 进程的 DB 连接 session 时区
+        未必是 UTC（部署滞后或第三方 DSN），CURRENT_TIMESTAMP 落到 naive 列时
+        会写成服务器本地（HK +8h）。Python aware UTC 经过 psycopg2 全局适配器
+        始终被规整为 UTC 进库（详见 backend/utils/datetime_utils.py
+        ::install_psycopg2_utc_adapter）。
+        """
+        now = utcnow()
         try:
             if status == 'success':
                 cursor.execute('''
                 UPDATE subscription_list
-                SET last_fetched_at = CURRENT_TIMESTAMP,
+                SET last_fetched_at = %s,
                     last_fetch_items_count = %s,
                     total_items_fetched = total_items_fetched + %s,
                     consecutive_failures = 0
                 WHERE id = %s
-                ''', (items_count, items_count, subscription_id))
+                ''', (now, items_count, items_count, subscription_id))
             else:
                 cursor.execute('''
                 UPDATE subscription_list
-                SET last_fetched_at = CURRENT_TIMESTAMP,
+                SET last_fetched_at = %s,
                     last_fetch_items_count = 0,
                     consecutive_failures = consecutive_failures + 1
                 WHERE id = %s
-                ''', (subscription_id,))
+                ''', (now, subscription_id))
         except Exception as e:
             logger.error("更新订阅状态失败", subscription_id=subscription_id, exception=str(e))
     
