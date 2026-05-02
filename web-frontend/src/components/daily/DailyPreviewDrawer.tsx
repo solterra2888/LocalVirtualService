@@ -5,15 +5,18 @@
  *
  * 布局 (自上而下):
  *   ┌──────────────────────────────────────────────────────┐
- *   │ Header: SourceBadge · ‹ Prev / Next › · Open in...   │
+ *   │ Header: SourceBadge · ‹ Prev / Next › · Close        │
  *   │ Title (h2)                                           │
  *   │ 作者 · 时间 · ⏱ X min read                            │
  *   ├──────────────────────────────────────────────────────┤
  *   │ AI Summary block (摘要 + sector/industry + tickers)   │
  *   │   - 缺失 summary 时降级提示并直接展开下方原文区        │
  *   ├──────────────────────────────────────────────────────┤
- *   │ Original Content (按 source_subtype 分发, 见            │
- *   │ DailyOriginalView)                                    │
+ *   │ AI Analysis (final_report / personalized_summary)    │
+ *   │   → shared AIAnalysisSection (via DailyAIAnalysisSection)
+ *   ├──────────────────────────────────────────────────────┤
+ *   │ Original Content (折叠, 有 AI Analysis 时默认折叠)    │
+ *   │   → shared CollapsibleOriginalSection + DailyOriginalView
  *   └──────────────────────────────────────────────────────┘
  *
  * 键盘:
@@ -26,11 +29,10 @@
 
 import React from 'react';
 import {
-  App,
   Button,
-  Collapse,
   Drawer,
   Empty,
+  Segmented,
   Skeleton,
   Space,
   Spin,
@@ -42,11 +44,7 @@ import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   CloseOutlined,
-  ExportOutlined,
-  FileTextOutlined,
-  RobotOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
 import {
   DailyFeedItem,
   DailyItemDetail,
@@ -56,6 +54,8 @@ import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 import DailyOriginalView from './DailyOriginalView';
 import DailyAIAnalysisSection from './DailyAIAnalysisSection';
+import AISummarySection from '../shared/content-viewer/AISummarySection';
+import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
@@ -87,19 +87,13 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
 }) => {
   const colors = DAILY_THEME_COLORS[themeMode];
   const { userTimezone } = useDashboardSettings();
-  const navigate = useNavigate();
-  const { message } = App.useApp();
 
   const [detail, setDetail] = React.useState<DailyItemDetail | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // PR-D2: Original 段折叠状态.
-  //   规则: 抽屉里有 "AI 深度分析"(final_report / personalized_summary) 时默认折叠;
-  //         否则默认展开 (与现状兼容). 用户点击 Collapse 后会切到手动模式,
-  //         切换 item 时重置.
-  const [originalExpanded, setOriginalExpanded] = React.useState(true);
-  const [userToggledOriginal, setUserToggledOriginal] = React.useState(false);
+  // 视图模式: Original = AI Summary + 原文; AI Analysis = AI Summary + 深度分析
+  const [viewMode, setViewMode] = React.useState<'original' | 'analysis'>('original');
 
   // 防止过期请求覆盖最新选中
   const requestSeqRef = React.useRef(0);
@@ -112,14 +106,13 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < items.length - 1;
 
-  // 切换 item 时拉详情 + 重置折叠"用户已手动操作"标志
+  // 切换 item 时拉取详情 (viewMode 不重置，跨 item 保持用户选择)
   React.useEffect(() => {
     if (!item) {
       setDetail(null);
       setError(null);
       return;
     }
-    setUserToggledOriginal(false);
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
@@ -138,33 +131,49 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     })();
   }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- item identity tied to id
 
-  // detail 加载完后, 如果用户没手动操作过 Original Collapse, 按 "有 AI 深度分析则折叠" 规则自动决定
-  const hasAIAnalysis = !!(
-    detail?.upload?.final_report ||
-    detail?.feed?.personalized_summary
-  );
-  React.useEffect(() => {
-    if (!detail || userToggledOriginal) return;
-    setOriginalExpanded(!hasAIAnalysis);
-  }, [detail, hasAIAnalysis, userToggledOriginal]);
-
-  // 键盘快捷键 (Esc / ↑ / ↓ / J / K)
+  // 键盘快捷键 (与 Feeds 阅读器对齐):
+  //   Esc — 关闭抽屉
+  //   ↑ / ↓ / K / J — 上一条 / 下一条
+  //   ← / → — Original / AI Analysis（焦点在顶栏 Segmented 内时交给组件）
   React.useEffect(() => {
     if (!item) return;
     const handler = (e: KeyboardEvent) => {
-      // 表单输入中按键不要劫持
+      if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toUpperCase();
+      if (!target) return;
+
+      if (target.closest('.ant-modal') || target.closest('.ant-image-preview-wrap')) return;
+
+      const tag = target.tagName?.toUpperCase();
       const isEditable =
         tag === 'INPUT' ||
         tag === 'TEXTAREA' ||
-        (target as any)?.isContentEditable;
+        tag === 'SELECT' ||
+        target.isContentEditable;
       if (isEditable && e.key !== 'Escape') return;
 
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
-      } else if ((e.key === 'ArrowUp' || e.key === 'k' || e.key === 'K') && hasPrev) {
+        return;
+      }
+
+      // ← / → : 视图模式
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (target.closest('.ant-segmented')) return;
+        if (e.key === 'ArrowRight') {
+          const analysisDisabled =
+            !loading &&
+            !detail?.upload?.final_report &&
+            !detail?.feed?.personalized_summary;
+          if (analysisDisabled) return;
+        }
+        e.preventDefault();
+        setViewMode(e.key === 'ArrowLeft' ? 'original' : 'analysis');
+        return;
+      }
+
+      if ((e.key === 'ArrowUp' || e.key === 'k' || e.key === 'K') && hasPrev) {
         e.preventDefault();
         onNavigate?.(items[currentIndex - 1]);
       } else if (
@@ -177,106 +186,77 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [item, hasPrev, hasNext, currentIndex, items, onClose, onNavigate]);
+  }, [
+    item,
+    hasPrev,
+    hasNext,
+    currentIndex,
+    items,
+    onClose,
+    onNavigate,
+    detail,
+    loading,
+  ]);
 
   const isMobile = placement === 'bottom';
 
-  // 顶栏 "Open in Sources/Feeds" 行为 = 旧的跳转逻辑 (作为深度查看入口保留)
-  const handleOpenInSource = React.useCallback(() => {
-    if (!item) return;
-    const nav = item.navigate;
-    if (nav.type === 'execution' && nav.execution_id) {
-      navigate(`/files?execution=${nav.execution_id}`);
-      onClose();
-      return;
-    }
-    if (nav.type === 'feed_article' && nav.subscription_id && nav.content_id) {
-      if (isMobile) {
-        // 移动端有现成深链 path
-        navigate(`/feeds/article/${nav.subscription_id}/${nav.content_id}`);
-      } else {
-        // 桌面 FeedReaderPage 暂不支持 query 深链, 用 state 传过去
-        navigate('/feeds', {
-          state: {
-            dailyTarget: {
-              subscriptionId: nav.subscription_id,
-              contentId: nav.content_id,
-            },
-          },
-        });
-      }
-      onClose();
-      return;
-    }
-    if (nav.external_url) {
-      window.open(nav.external_url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    message.info('No navigation target available');
-  }, [item, navigate, onClose, message, isMobile]);
-
-  // 渲染顶栏 (Drawer.title 槽位会自带关闭按钮 X, 这里我们换掉默认 closable 自定义)
+  // 渲染顶栏: 第一行 = 来源/导航/关闭; 第二行 = 视图模式 Tab
   const headerNode = (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 8,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Space size={8} align="center">
-        {item && <SourceBadge subtype={item.source_subtype} themeMode={themeMode} />}
-        {!isMobile && (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {currentIndex >= 0 ? `${currentIndex + 1} / ${items.length}` : ''}
-          </Text>
-        )}
-      </Space>
-      <Space size={4}>
-        {!isMobile && (
-          <>
-            <Tooltip title="Previous (↑ / K)" mouseEnterDelay={0.4}>
-              <Button
-                size="small"
-                type="text"
-                icon={<ArrowUpOutlined />}
-                disabled={!hasPrev}
-                onClick={() => hasPrev && onNavigate?.(items[currentIndex - 1])}
-              />
-            </Tooltip>
-            <Tooltip title="Next (↓ / J)" mouseEnterDelay={0.4}>
-              <Button
-                size="small"
-                type="text"
-                icon={<ArrowDownOutlined />}
-                disabled={!hasNext}
-                onClick={() => hasNext && onNavigate?.(items[currentIndex + 1])}
-              />
-            </Tooltip>
-          </>
-        )}
-        {item && (
-          <Tooltip
-            title={
-              item.source === 'upload'
-                ? 'Open in Sources for full editor & AI tools'
-                : item.navigate.type === 'external_url'
-                ? 'Open original link in new tab'
-                : 'Open in Feeds for full reader'
-            }
-            mouseEnterDelay={0.4}
-          >
-            <Button size="small" icon={<ExportOutlined />} onClick={handleOpenInSource}>
-              {isMobile ? 'Open' : 'Open in ' + (item.source === 'upload' ? 'Sources' : 'Feeds')}
-            </Button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* 第一行: 来源徽章 + 导航 + 关闭 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <Space size={8} align="center">
+          {item && <SourceBadge subtype={item.source_subtype} themeMode={themeMode} />}
+          {!isMobile && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {currentIndex >= 0 ? `${currentIndex + 1} / ${items.length}` : ''}
+            </Text>
+          )}
+        </Space>
+        <Space size={4}>
+          {!isMobile && (
+            <>
+              <Tooltip title="Previous (↑ / K)" mouseEnterDelay={0.4}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ArrowUpOutlined />}
+                  disabled={!hasPrev}
+                  onClick={() => hasPrev && onNavigate?.(items[currentIndex - 1])}
+                />
+              </Tooltip>
+              <Tooltip title="Next (↓ / J)" mouseEnterDelay={0.4}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ArrowDownOutlined />}
+                  disabled={!hasNext}
+                  onClick={() => hasNext && onNavigate?.(items[currentIndex + 1])}
+                />
+              </Tooltip>
+            </>
+          )}
+          <Tooltip title="Close (Esc)" mouseEnterDelay={0.4}>
+            <Button size="small" type="text" icon={<CloseOutlined />} onClick={onClose} />
           </Tooltip>
-        )}
-        <Tooltip title="Close (Esc)" mouseEnterDelay={0.4}>
-          <Button size="small" type="text" icon={<CloseOutlined />} onClick={onClose} />
-        </Tooltip>
-      </Space>
+        </Space>
+      </div>
+
+      {/* 第二行: 视图模式切换 Tab */}
+      <Segmented
+        value={viewMode}
+        onChange={(v) => setViewMode(v as 'original' | 'analysis')}
+        options={[
+          { label: 'Original', value: 'original' },
+          {
+            label: 'AI Analysis',
+            value: 'analysis',
+            disabled: !loading && !detail?.upload?.final_report && !detail?.feed?.personalized_summary,
+          },
+        ]}
+        style={{ width: '100%' }}
+        block
+      />
     </div>
   );
 
@@ -292,6 +272,8 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     const sector = detail?.sector || item.sector;
     const industry = detail?.industry || item.industry;
     const authorName = detail?.author_name || item.author_name;
+    const analysisContent =
+      detail?.upload?.final_report || detail?.feed?.personalized_summary || null;
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -322,31 +304,23 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
           </Space>
         </div>
 
-        {/* AI Summary 块 */}
-        <div
-          style={{
-            borderRadius: 10,
-            padding: '12px 14px',
-            background:
-              themeMode === 'dark'
-                ? 'rgba(33, 150, 243, 0.07)'
-                : 'rgba(33, 150, 243, 0.06)',
-            border: `1px solid ${colors.divider}`,
-            borderLeft: `3px solid ${colors.accent}`,
+        <AISummarySection
+          themeMode={themeMode}
+          colors={{
+            text: colors.text,
+            textMuted: colors.textMuted,
+            divider: colors.divider,
+            cardBg: colors.cardBg,
+            accent: colors.accent,
           }}
-        >
-          <Space size={6} align="center" style={{ marginBottom: showSummary ? 8 : 0 }}>
-            <RobotOutlined style={{ color: colors.accent, fontSize: 14 }} />
-            <Text strong style={{ color: colors.text, fontSize: 13 }}>
-              AI Summary
-            </Text>
-            {!showSummary && (
+          headerMeta={
+            !showSummary ? (
               <Text type="secondary" style={{ fontSize: 11 }}>
-                · pending — showing original content below
+                · pending — original below
               </Text>
-            )}
-          </Space>
-
+            ) : undefined
+          }
+        >
           {showSummary && summaryText && (
             <Text
               style={{
@@ -420,62 +394,40 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               ))}
             </div>
           )}
-        </div>
+        </AISummarySection>
 
-        {/* PR-D2: AI Analysis 段 - 长篇 LLM 产物 (final_report / personalized_summary).
-            没有数据时组件内部直接 return null, 整段静默隐藏. */}
-        <DailyAIAnalysisSection detail={detail} themeMode={themeMode} />
-
-        {/* Original 段 - 按规则默认折叠 (有 AI 深度分析时) / 展开 (兜底).
-            外层 Collapse ghost 模式去掉边框, 仅保留展开/折叠行为. */}
-        <Collapse
-          ghost
-          activeKey={originalExpanded ? ['original'] : []}
-          onChange={(keys) => {
-            const arr = Array.isArray(keys) ? keys : keys ? [keys] : [];
-            setOriginalExpanded(arr.includes('original'));
-            setUserToggledOriginal(true);
-          }}
-          items={[
-            {
-              key: 'original',
-              label: (
-                <Space size={6} align="center">
-                  <FileTextOutlined style={{ color: colors.textMuted, fontSize: 13 }} />
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 0.6,
-                      textTransform: 'uppercase',
-                      color: colors.textMuted,
-                    }}
-                  >
-                    Original Content
+        {/* AI Analysis / Original — 根据 Tab 切换 */}
+        {viewMode === 'analysis' ? (
+          <DailyAIAnalysisSection
+            content={analysisContent}
+            themeMode={themeMode}
+          />
+        ) : (
+          <CollapsibleOriginalSection
+            hasAIAnalysis={false}
+            defaultExpanded
+            themeMode={themeMode}
+            resetKey={item?.id}
+          >
+            {loading && !detail ? (
+              <div style={{ padding: 8 }}>
+                <Skeleton active paragraph={{ rows: 4 }} />
+              </div>
+            ) : error ? (
+              <Empty
+                description={
+                  <Text style={{ color: colors.textMuted }}>
+                    {error || 'Failed to load original content'}
                   </Text>
-                </Space>
-              ),
-              children: loading && !detail ? (
-                <div style={{ padding: 8 }}>
-                  <Skeleton active paragraph={{ rows: 4 }} />
-                </div>
-              ) : error ? (
-                <Empty
-                  description={
-                    <Text style={{ color: colors.textMuted }}>
-                      {error || 'Failed to load original content'}
-                    </Text>
-                  }
-                />
-              ) : detail ? (
-                <DailyOriginalView detail={detail} themeMode={themeMode} />
-              ) : (
-                <Spin />
-              ),
-              style: { padding: 0 },
-            },
-          ]}
-          style={{ background: 'transparent' }}
-        />
+                }
+              />
+            ) : detail ? (
+              <DailyOriginalView detail={detail} themeMode={themeMode} />
+            ) : (
+              <Spin />
+            )}
+          </CollapsibleOriginalSection>
+        )}
       </Space>
     );
   };

@@ -238,6 +238,13 @@ _FEED_SQL = """
         ON sct.subscription_content_id = sc.id
     WHERE %(user_id)s = ANY(sc.user_ids)
       AND sc.published_at IS NOT NULL
+      AND EXISTS (
+          SELECT 1 FROM subscription_list sl
+          WHERE sl.user_id  = %(user_id)s
+            AND sl.channel_type       = sc.channel_type
+            AND sl.channel_identifier = sc.author_identifier
+            AND sl.enabled = true
+      )
 """
 
 
@@ -898,9 +905,17 @@ def _fetch_feed_detail(
         LEFT JOIN subscription_content_user_summaries scus
             ON scus.subscription_content_id = sc.id
            AND scus.user_id = %s
-        WHERE sc.id = %s AND %s = ANY(sc.user_ids)
+        WHERE sc.id = %s
+          AND %s = ANY(sc.user_ids)
+          AND EXISTS (
+              SELECT 1 FROM subscription_list sl
+              WHERE sl.user_id          = %s
+                AND sl.channel_type       = sc.channel_type
+                AND sl.channel_identifier = sc.author_identifier
+                AND sl.enabled = true
+          )
         """,
-        (current_user.user_id, content_db_id, current_user.user_id),
+        (current_user.user_id, content_db_id, current_user.user_id, current_user.user_id),
     )
     row = cursor.fetchone()
     if not row:

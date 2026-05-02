@@ -1002,7 +1002,9 @@ async def get_subscription_contents(
         where_clause = " AND ".join(where_conditions)
         
         # 查询内容 (LEFT JOIN subscription_content_tags 带出 AI 标签 + 摘要,
-        # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §7)
+        # LEFT JOIN subscription_content_user_summaries 带出 per-user 个性化摘要,
+        # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §7 及
+        #      database/migrations/create_subscription_content_user_summaries.sql §读取规则)
         query = f"""
             SELECT 
                 sc.id,
@@ -1036,25 +1038,35 @@ async def get_subscription_contents(
                 ((sc.transcript IS NOT NULL AND sc.transcript != '') OR sc.transcript_data IS NOT NULL) AS has_transcript,
                 sct.sector, sct.sector_en, sct.industry, sct.industry_en,
                 sct.ticker, sct.concepts, sct.summary, sct.confidence,
-                sct.tagged_at
+                sct.tagged_at,
+                scus.summary    AS personalized_summary,
+                scus.reasoning  AS personalized_reasoning,
+                CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source
             FROM subscription_content sc
             LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
+            LEFT JOIN subscription_content_user_summaries scus
+                ON scus.subscription_content_id = sc.id
+               AND scus.user_id = %s
             WHERE {where_clause}
             ORDER BY sc.published_at DESC
             LIMIT %s OFFSET %s
         """
-        
+
+        # scus JOIN 的 user_id 需要在 where_clause 参数之前传入
+        params = [user_id] + params
         params.extend([limit, offset])
         cursor.execute(query, params)
         rows = cursor.fetchall()
         
-        # 获取总数 (count 查询用同样的别名, 保持 where_clause 一致)
+        # 获取总数 (count 查询无需 JOIN scus, 只需 where_clause 参数)
+        # params 结构: [user_id(scus JOIN), channel_type, channel_identifier, user_id(where), limit, offset]
+        # count 只需 where_clause 部分: params[1:-2]
         count_query = f"""
             SELECT COUNT(*)
             FROM subscription_content sc
             WHERE {where_clause}
         """
-        cursor.execute(count_query, params[:-2])  # 不包括 limit 和 offset
+        cursor.execute(count_query, params[1:-2])
         total = cursor.fetchone()[0]
         
         # 格式化结果
@@ -1065,6 +1077,7 @@ async def get_subscription_contents(
             # AI 标签 (LEFT JOIN 结果, 未打标 → None)
             # 列序: [29]sector [30]sector_en [31]industry [32]industry_en
             #       [33]ticker [34]concepts [35]summary [36]confidence [37]tagged_at
+            #       [38]personalized_summary [39]personalized_reasoning [40]summary_source
             tags_payload = None
             if row[29] is not None:
                 tickers_raw = row[33]
@@ -1120,6 +1133,10 @@ async def get_subscription_contents(
                 'has_transcript': bool(row[28]) if row[28] is not None else False,
                 # Phase 3 新增: Feeds 自动打标 + 摘要 (LEFT JOIN 结果, 未打标为 null)
                 'tags': tags_payload,
+                # PR-7: per-user 个性化摘要 (LEFT JOIN subscription_content_user_summaries)
+                'personalized_summary': row[38] or None,
+                'personalized_reasoning': row[39] or None,
+                'summary_source': row[40],
             })
         
         cursor.close()
@@ -1223,6 +1240,8 @@ async def get_subscription_content_transcript(
     """
     按需返回单条订阅内容的字幕/转写正文（不在列表接口中批量返回，减轻负载）。
     数据来自 subscription_content.transcript / transcript_data。
+    响应中的 transcript_data 为解析后的 JSON，供前端展示分段（transcript 数组）
+    或 ASR 结构（asr_data.sentences）；transcript 字段仍为拼接全文便于兼容。
     """
     user_id = current_user.user_id
     db_manager = get_db_manager()
@@ -1270,6 +1289,7 @@ async def get_subscription_content_transcript(
         if raw_text:
             return {
                 "transcript": raw_text,
+                "transcript_data": td if isinstance(td, dict) else None,
                 "language": language,
                 "source": source,
             }
@@ -1281,6 +1301,7 @@ async def get_subscription_content_transcript(
             if merged and merged.strip():
                 return {
                     "transcript": merged.strip(),
+                    "transcript_data": td,
                     "language": language,
                     "source": source,
                 }

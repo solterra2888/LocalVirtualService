@@ -1971,6 +1971,64 @@
   border-color: rgba(255, 255, 255, 0.06);
 }
 
+/* Feed 右侧：Original / AI Analysis — 浅/深同一结构：外轨道 + 透明 Segmented + #1677ff 选中块（class: feed-page-layout__view-mode-tabs） */
+.feed-page-layout__view-mode-tabs {
+  width: 100%;
+  max-width: 420px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #e8ecf2;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.feed-page-layout__view-mode-tabs .ant-segmented {
+  background: transparent !important;
+}
+
+.feed-page-layout__view-mode-tabs .ant-segmented-item {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.feed-page-layout__view-mode-tabs .ant-segmented-item:hover {
+  color: rgba(0, 0, 0, 0.85) !important;
+}
+
+/* rc-segmented 动画结束后 thumb 可能卸载，须与 item-selected 同步 */
+.feed-page-layout__view-mode-tabs .ant-segmented-thumb {
+  background: #1677ff !important;
+  box-shadow:
+    0 0 0 1px rgba(22, 119, 255, 0.45),
+    0 2px 10px rgba(22, 119, 255, 0.22) !important;
+}
+
+.feed-page-layout__view-mode-tabs .ant-segmented-item-selected {
+  background: #1677ff !important;
+  box-shadow:
+    0 0 0 1px rgba(22, 119, 255, 0.45),
+    0 2px 10px rgba(22, 119, 255, 0.22) !important;
+}
+
+.feed-page-layout__view-mode-tabs .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+/* Dark：仅替换轨道与未选/悬停字色；选中蓝块与浅色一致 */
+.app-dark .feed-page-layout__view-mode-tabs {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 8, 16, 0.72);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.app-dark .feed-page-layout__view-mode-tabs .ant-segmented-item {
+  color: rgba(160, 163, 173, 0.95) !important;
+}
+
+.app-dark .feed-page-layout__view-mode-tabs .ant-segmented-item:hover {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
 /* ========== Watchlist 页：与 Files 一致的固定左右栏（仅内部滚动） ========== */
 .watchlist-page-layout {
   height: calc(100vh - 72px);

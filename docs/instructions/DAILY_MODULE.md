@@ -20,6 +20,12 @@ Daily 模块（前端 `/daily`，是登录后的**默认落地页**）是一个*
 | 前端职责 | 跨源时间轴 + 卡片视图 + 来源筛选 + Preset | 订阅 CRUD、阅读器、未读管理 |
 | 跳转 | 卡片点击跳到对应详情页（Sources / Feeds）| 自身就是详情入口 |
 
+> **Feed 侧可见性约束（`subscription_list.enabled`）：**
+> Daily 聚合视图中，Feed 内容**仅展示用户当前 `enabled = true` 的订阅**对应内容。
+> 用户在 Feed Reader 将某订阅号设为 Disabled → 该订阅的所有历史内容从 Daily 时间轴中消失；
+> 再次 Enable → 内容重新出现（历史条目不丢失，`subscription_content` 表不变）。
+> 实现点：`_FEED_SQL` 中加了 `EXISTS (SELECT 1 FROM subscription_list sl WHERE sl.user_id = %(user_id)s AND sl.channel_type = sc.channel_type AND sl.channel_identifier = sc.author_identifier AND sl.enabled = true)`，`_fetch_feed_detail` 同步保持相同过滤。
+
 ## 1. 模块全景
 
 ```
@@ -490,7 +496,8 @@ Daily 模块**不引入任何新环境变量**，只复用现有的 DB 连接配
 
 | 场景 | 排查方向 |
 |------|---------|
-| 用户进入 `/daily` 看不到任何内容 | 1) 是否 Upload + Feed 都为空？`SELECT COUNT(*) FROM file_processing_details fpd JOIN processing_stats ps ON fpd.processing_stats_id = ps.id WHERE ps."user" = '<user>'` 与 `SELECT COUNT(*) FROM subscription_content WHERE <uid> = ANY(user_ids)`；2) Preset 是否过滤太严？`SELECT source_subtypes FROM user_daily_preferences WHERE user_id = <uid>`；3) 看后端日志 `[daily.list_daily_feed] 查询失败` |
+| 用户进入 `/daily` 看不到任何内容 | 1) 是否 Upload + Feed 都为空？`SELECT COUNT(*) FROM file_processing_details fpd JOIN processing_stats ps ON fpd.processing_stats_id = ps.id WHERE ps."user" = '<user>'` 与 `SELECT COUNT(*) FROM subscription_content WHERE <uid> = ANY(user_ids)`；2) Preset 是否过滤太严？`SELECT source_subtypes FROM user_daily_preferences WHERE user_id = <uid>`；3) **Feed 订阅是否全被 Disabled？**`SELECT id, channel_identifier, enabled FROM subscription_list WHERE user_id = <uid>`；4) 看后端日志 `[daily.list_daily_feed] 查询失败` |
+| Feed 卡片在 Daily 中消失了但内容还在 Feeds | 检查 `subscription_list.enabled`：该订阅被 Disabled 后，Daily 的 `_FEED_SQL` EXISTS 过滤会排除其全部内容。在 Feed Reader 将该订阅 Enable 后，卡片会重新出现。 |
 | 某条 Upload 文件的卡片点击后跳到 Sources 但找不到 | `processing_stats_id` 在 `file_processing_details` 上为 NULL；这种数据是异常态，应在 Upload 链路修，而不是 Daily 兼容 |
 | 某条 Feed 卡片点击没反应 / 跳到外链 | `_resolve_subscription_ids` 反查不到 → `subscription_list` 已被用户删除（但 `subscription_content.user_ids[]` 还含他）；前端会 fallback 到 `external_url`（如有），否则显示 "No navigation target" |
 | 顶部 chip 数字与列表对不上 | `/stats` 不接受 `source_subtypes` 参数（按设计），列表如果叠加了 Preset 或临时筛选，二者口径不同。这是预期行为 |

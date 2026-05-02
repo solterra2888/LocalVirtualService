@@ -12,32 +12,31 @@
  *   text       → TextNoteOriginalView   (笔记 Markdown)
  *   twitter    → TwitterOriginalView    (推文文本 + media + 转推/引用 / View on Twitter)
  *   news       → NewsOriginalView       (纯文本 + Read original)
- *   youtube_feed → YoutubeFeedOriginalView (YouTube embed + 描述 + Load transcript)
+ *   youtube_feed → YoutubeFeedOriginalBlock (YouTube embed + 描述 + transcript 自动加载)
  *
  * 资源 (image/audio/pdf 的 file_url + audio/youtube 的 ASR JSON) 通过
  *   filesAPI.getOriginalFileInfo(file_id)
- * 在抽屉打开时按需懒加载 (与现 Sources 详情页同口径). YouTube transcript
- * 同样懒加载 subscriptionsAPI.getSubscriptionContentTranscript(content_id).
+ * 在抽屉打开时按需懒加载 (与现 Sources 详情页同口径). YouTube Feed 的 transcript
+ * 在 has_transcript 时由 YoutubeFeedOriginalBlock 内自动拉取.
  *
  * 这个组件 **完全只读**, 不复用 FeedArticleBody 里的 Re-tag / ASR Trigger 等
  * 写入操作; 用户若要编辑 / 触发更深功能, 走顶栏的 "Open in Sources/Feeds".
  */
 
 import React from 'react';
-import { App, Button, Empty, Space, Spin, Tag, Tooltip, Typography } from 'antd';
+import { Button, Empty, Space, Spin, Tag, Tooltip, Typography } from 'antd';
 import {
   DownloadOutlined,
   FileTextOutlined,
   LinkOutlined,
-  MessageOutlined,
-  RetweetOutlined,
 } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { filesAPI } from '../../services/files';
-import { subscriptionsAPI } from '../../services/subscriptions';
+import YoutubeFeedOriginalBlock from '../feed/YoutubeFeedOriginalBlock';
+import TwitterOriginalView from '../shared/content-viewer/original-views/TwitterOriginalView';
+import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import type {
   DailyItemDetail,
-  DailyItemDetailFeed,
   DailyItemDetailUpload,
   DailySourceSubtype,
 } from '../../services/daily';
@@ -87,14 +86,54 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({ detail, themeMode
   }
 
   if (detail.source === 'feed' && detail.feed) {
+    const f = detail.feed;
     switch (subtype) {
       case 'twitter':
-        return <TwitterOriginalView feed={detail.feed} colors={colors} themeMode={themeMode} />;
+        return (
+          <TwitterOriginalView
+            content={f.content}
+            url={f.url}
+            media_urls={f.media_urls}
+            is_retweet={f.is_retweet ?? undefined}
+            retweeted_author={f.retweeted_author}
+            is_reply={f.is_reply ?? undefined}
+            in_reply_to_username={f.in_reply_to_username}
+            is_quote={f.is_quote ?? undefined}
+            quoted_content={f.quoted_content}
+            quoted_author={f.quoted_author}
+            themeMode={themeMode}
+          />
+        );
       case 'news':
-        return <NewsOriginalView feed={detail.feed} colors={colors} themeMode={themeMode} />;
+        return (
+          <NewsOriginalView
+            content={f.content}
+            url={f.url}
+            symbols={Array.isArray(f.metadata?.symbols) ? (f.metadata!.symbols as string[]) : []}
+            categories={f.categories ?? []}
+            sentiment={f.metadata?.sentiment as { polarity?: number } | null}
+            themeMode={themeMode}
+          />
+        );
       case 'youtube_feed':
         return (
-          <YoutubeFeedOriginalView feed={detail.feed} colors={colors} themeMode={themeMode} />
+          <YoutubeFeedOriginalBlock
+            contentId={detail.feed.content_id}
+            url={detail.feed.url ?? undefined}
+            title={detail.feed.title}
+            description={detail.feed.content || ''}
+            contentDbId={detail.feed.content_db_id}
+            hasTranscript={detail.feed.has_transcript}
+            metadata={detail.feed.metadata}
+            themeMode={themeMode}
+            colors={{
+              text: colors.text,
+              textSecondary: colors.textSecondary,
+              textMuted: colors.textMuted,
+              divider: colors.divider,
+              link: colors.accent,
+            }}
+          />
         );
     }
   }
@@ -538,337 +577,5 @@ const TextNoteOriginalView: React.FC<UploadProps> = ({ upload, colors, themeMode
   );
 };
 
-// ─── Feed renderers ────────────────────────────────────────────────
-
-interface FeedProps {
-  feed: DailyItemDetailFeed;
-  colors: DailyThemeColors;
-  themeMode: 'light' | 'dark';
-}
-
-/** twitter: 推文文本 + media + 转推/引用/回复 marker */
-const TwitterOriginalView: React.FC<FeedProps> = ({ feed, colors, themeMode }) => {
-  return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      {feed.is_retweet && feed.retweeted_author && (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          <RetweetOutlined /> Retweeted from{' '}
-          <Text strong style={{ color: colors.text, fontSize: 12 }}>
-            @{feed.retweeted_author}
-          </Text>
-        </Text>
-      )}
-      {feed.is_reply && feed.in_reply_to_username && (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          <MessageOutlined /> Replying to{' '}
-          <Text strong style={{ color: colors.text, fontSize: 12 }}>
-            @{feed.in_reply_to_username}
-          </Text>
-        </Text>
-      )}
-
-      {feed.content && (
-        <Text
-          style={{
-            color: colors.text,
-            fontSize: 14,
-            lineHeight: 1.7,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            display: 'block',
-          }}
-        >
-          {feed.content}
-        </Text>
-      )}
-
-      {feed.is_quote && feed.quoted_content && (
-        <div
-          style={{
-            borderLeft: `3px solid ${colors.accent}`,
-            paddingLeft: 12,
-            background:
-              themeMode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
-            borderRadius: 6,
-            padding: '10px 12px',
-          }}
-        >
-          {feed.quoted_author && (
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-              Quoted @{feed.quoted_author}
-            </Text>
-          )}
-          <Text
-            style={{
-              color: colors.textSecondary,
-              fontSize: 13,
-              lineHeight: 1.6,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {feed.quoted_content}
-          </Text>
-        </div>
-      )}
-
-      {feed.media_urls && feed.media_urls.length > 0 && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: feed.media_urls.length === 1 ? '1fr' : '1fr 1fr',
-            gap: 8,
-          }}
-        >
-          {feed.media_urls.slice(0, 4).map((url, idx) => (
-            <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-              <img
-                src={url}
-                alt=""
-                style={{
-                  width: '100%',
-                  maxHeight: 280,
-                  objectFit: 'cover',
-                  borderRadius: 8,
-                  border: `1px solid ${colors.divider}`,
-                  display: 'block',
-                }}
-              />
-            </a>
-          ))}
-        </div>
-      )}
-
-      {feed.url && <ExternalLinkRow href={feed.url} label="View on Twitter" colors={colors} />}
-    </Space>
-  );
-};
-
-/** news: 纯文本正文 + Tickers / Categories / Sentiment + Read original */
-const NewsOriginalView: React.FC<FeedProps> = ({ feed, colors }) => {
-  const symbols: string[] = Array.isArray(feed.metadata?.symbols)
-    ? (feed.metadata!.symbols as string[])
-    : [];
-  const sentiment = feed.metadata?.sentiment as
-    | { polarity?: number }
-    | undefined;
-  const polarity = sentiment?.polarity;
-  return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      {feed.content ? (
-        <Text
-          style={{
-            color: colors.text,
-            fontSize: 14,
-            lineHeight: 1.75,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            display: 'block',
-          }}
-        >
-          {feed.content}
-        </Text>
-      ) : (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          Article body not stored — read on the source.
-        </Text>
-      )}
-
-      {symbols.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Tickers:
-          </Text>
-          {symbols.map((sym) => (
-            <Tag key={sym} style={{ fontSize: 11, margin: 0 }}>
-              {sym}
-            </Tag>
-          ))}
-        </div>
-      )}
-
-      {feed.categories && feed.categories.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Categories:
-          </Text>
-          {feed.categories.map((c) => (
-            <Tag key={c} style={{ fontSize: 11, margin: 0 }}>
-              {c}
-            </Tag>
-          ))}
-        </div>
-      )}
-
-      {typeof polarity === 'number' && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Sentiment:
-          </Text>
-          <Tag
-            color={polarity > 0.1 ? 'green' : polarity < -0.1 ? 'red' : 'default'}
-            style={{ fontSize: 11, margin: 0 }}
-          >
-            {polarity > 0.1 ? 'Positive' : polarity < -0.1 ? 'Negative' : 'Neutral'} (
-            {polarity.toFixed(2)})
-          </Tag>
-        </div>
-      )}
-
-      {feed.url && (
-        <ExternalLinkRow href={feed.url} label="Read original article" colors={colors} />
-      )}
-    </Space>
-  );
-};
-
-/** youtube_feed: YouTube embed + 描述 + Load transcript (lazy) + Watch on YouTube */
-const YoutubeFeedOriginalView: React.FC<FeedProps> = ({ feed, colors, themeMode }) => {
-  const { message } = App.useApp();
-  const videoId = feed.content_id || extractYouTubeId(feed.url);
-  const [transcript, setTranscript] = React.useState<string | null>(null);
-  const [loadingTranscript, setLoadingTranscript] = React.useState(false);
-  const [transcriptLoaded, setTranscriptLoaded] = React.useState(false);
-  const [descExpanded, setDescExpanded] = React.useState(false);
-
-  const handleLoadTranscript = async () => {
-    if (!feed.content_db_id) return;
-    setLoadingTranscript(true);
-    try {
-      const r = await subscriptionsAPI.getSubscriptionContentTranscript(feed.content_db_id);
-      if (r.success && r.data?.transcript) {
-        setTranscript(r.data.transcript);
-      } else {
-        message.warning(r.error || 'Transcript not available');
-      }
-    } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'Failed to load transcript');
-    } finally {
-      setLoadingTranscript(false);
-      setTranscriptLoaded(true);
-    }
-  };
-
-  const stats = feed.metadata || {};
-  const viewCount = typeof stats.view_count === 'number' ? (stats.view_count as number) : null;
-  const likeCount = typeof stats.like_count === 'number' ? (stats.like_count as number) : null;
-
-  const description = feed.content || '';
-  const descCollapsedMaxHeight = 96;
-
-  return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      {videoId ? (
-        <div
-          style={{
-            position: 'relative',
-            width: '100%',
-            paddingTop: '56.25%',
-            borderRadius: 12,
-            overflow: 'hidden',
-            backgroundColor: '#000',
-          }}
-        >
-          <iframe
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              border: 'none',
-            }}
-            src={`https://www.youtube.com/embed/${videoId}`}
-            title={feed.title || 'YouTube video'}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
-        </div>
-      ) : null}
-
-      {(viewCount !== null || likeCount !== null) && (
-        <Space size={16} style={{ color: colors.textMuted, fontSize: 12 }}>
-          {viewCount !== null && <span>{viewCount.toLocaleString()} views</span>}
-          {likeCount !== null && <span>{likeCount.toLocaleString()} likes</span>}
-        </Space>
-      )}
-
-      {description && (
-        <div>
-          <SectionLabel colors={colors}>Description</SectionLabel>
-          <div
-            style={{
-              maxHeight: descExpanded ? 'none' : descCollapsedMaxHeight,
-              overflow: 'hidden',
-              position: 'relative',
-            }}
-          >
-            <Text
-              style={{
-                color: colors.textSecondary,
-                fontSize: 13,
-                lineHeight: 1.6,
-                whiteSpace: 'pre-wrap',
-                display: 'block',
-              }}
-            >
-              {description}
-            </Text>
-          </div>
-          {description.length > 240 && (
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0 }}
-              onClick={() => setDescExpanded((v) => !v)}
-            >
-              {descExpanded ? 'Less' : 'More'}
-            </Button>
-          )}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {feed.has_transcript && !transcriptLoaded && (
-          <Button
-            size="small"
-            icon={<FileTextOutlined />}
-            loading={loadingTranscript}
-            onClick={handleLoadTranscript}
-          >
-            Load transcript
-          </Button>
-        )}
-        {!feed.has_transcript && (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            No transcript yet — generate it from the Feeds page (AI Transcribe).
-          </Text>
-        )}
-        {feed.url && <ExternalLinkRow href={feed.url} label="Watch on YouTube" colors={colors} />}
-      </div>
-
-      {transcript && (
-        <>
-          <SectionLabel colors={colors}>Transcript</SectionLabel>
-          <div
-            style={{
-              background: themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
-              border: `1px solid ${colors.divider}`,
-              borderRadius: 8,
-              padding: '12px 16px',
-              maxHeight: 360,
-              overflow: 'auto',
-              fontSize: 13,
-              lineHeight: 1.7,
-              color: colors.text,
-              whiteSpace: 'pre-wrap',
-              fontFamily:
-                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-            }}
-          >
-            {transcript}
-          </div>
-        </>
-      )}
-    </Space>
-  );
-};
+// TwitterOriginalView and NewsOriginalView are now shared components.
+// See: components/shared/content-viewer/original-views/

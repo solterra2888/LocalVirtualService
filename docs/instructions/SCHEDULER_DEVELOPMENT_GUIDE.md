@@ -15,6 +15,31 @@
 
 ---
 
+## 并发与幂等保护（重要）
+
+调度器在生产环境必须**只跑一个进程**。但为了防止「双 scheduler 实例 / lifespan 二次启动 / 手动 trigger 与 cron 撞车」等情况悄悄放大，
+`backend/services/scheduler_service.py::_execute_task` 在每次执行前都会获取一把 **「按周期窗口」的 Redis 分布式锁**：
+
+| 触发类型 | 锁键格式 | TTL |
+|----------|----------|-----|
+| `cron`     | `scheduler_lock:{type}:cron:{当前 fire_time YYYYMMDDHHMM}` | 周期长度 × 0.9（最少 60s） |
+| `interval` | `scheduler_lock:{type}:int:{floor(epoch / 周期秒)}`         | 周期长度 × 0.9（最少 60s） |
+| 拿不到 trigger 时回退 | `scheduler_lock:{type}` | 600s |
+
+关键性质：
+
+- **同一个周期窗口内只允许成功执行一次**。第二次触发会拿不到锁，直接在 `task_execution_logs` 写一条 `status='skipped'`，便于在监控/SQL 排查时立刻发现「重复触发」问题。
+- **锁不在 finally 中 delete**：让 Redis TTL 自然过期，从而在 handler「派发到 Celery 即返回」(只耗时几十毫秒) 的场景里依然能拦住周期内的二次触发。
+- **任务失败也保留锁**：避免立即重试浪费外部 API 配额；下一次正常 cron tick 进入新窗口后会自动重试。
+- **对开发者透明**：只要新任务通过标准 `_add_job_to_scheduler` 注册（Cron/Interval Trigger），就自动享受这一保护。
+
+> 排查重复触发：`SELECT date_trunc('hour', started_at), status, COUNT(*) FROM task_execution_logs WHERE task_type='xxx' GROUP BY 1,2 ORDER BY 1 DESC;`
+> 同一时间窗里如果同时出现 `success` 和 `skipped`，就说明上游有重复触发源（例如双 scheduler 进程），**任务本身是安全的**，但应回到调度层面消除冗余进程。
+
+此外，`SchedulerService.start()` 与 `get_scheduler_service()` 都加了幂等/并发保护，单进程内不会因 lifespan 被多次调用而把同一任务 add_job 多次。
+
+---
+
 ## 开发流程总览
 
 开发一个新的调度器任务需要以下步骤：
@@ -855,7 +880,7 @@ psql -U your_user -d your_db
 SELECT id, name, type, enabled, next_run FROM task_scheduling;
 
 # 查看执行日志
-SELECT * FROM task_execution_log ORDER BY start_time DESC LIMIT 10;
+SELECT * FROM task_execution_logs ORDER BY started_at DESC LIMIT 10;
 
 # 重置任务（谨慎使用）
 DELETE FROM task_scheduling WHERE type = 'futu_themes';

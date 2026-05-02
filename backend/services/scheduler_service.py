@@ -82,13 +82,22 @@ class SchedulerService:
         logger.info("定时任务调度器服务初始化完成")
     
     async def start(self):
-        """启动调度器"""
+        """启动调度器 (幂等)
+
+        防御性: 若 lifespan 因某种原因被调多次 (如 uvicorn --reload 子进程异常重启),
+        重复调用 start() 时直接返回, 避免再次 _cleanup + _load_saved_tasks 把同一批任务
+        二次注册到调度器 (虽然 add_job 用了 replace_existing=True, 仍以幂等保护更稳).
+        """
         try:
+            if self.scheduler.running:
+                logger.warning("调度器已在运行, 跳过重复 start() 调用")
+                return
+
             logger.info("启动定时任务调度器")
-            
+
             # 先清理所有现有任务，确保状态同步
             await self._cleanup_existing_jobs()
-            
+
             # 启动调度器
             self.scheduler.start()
             
@@ -617,36 +626,109 @@ class SchedulerService:
             created_by=created_by
         )
     
+    def _compute_period_lock_key(
+        self,
+        task_type: str,
+        task_id: str,
+        started_at: datetime,
+    ) -> tuple:
+        """根据 task 的 trigger 计算「周期窗口」分布式锁的 (lock_key, ttl_seconds).
+
+        - cron 触发: lock_key = scheduler_lock:{type}:cron:{当前 fire_time YYYYMMDDHHMM}
+        - interval 触发: lock_key = scheduler_lock:{type}:int:{floor(epoch / 周期秒)}
+        - 拿不到 trigger 时退化为旧的「逐次锁」(scheduler_lock:{type}, TTL=600s),
+          保证向后兼容; 但此时仍有可能漏掉重复触发, 应在调度层修复.
+        TTL 取「周期长度 * 0.9」, 保证当前窗口结束前锁不释放, 同时不阻塞下一次正常 fire.
+        """
+        fallback_key = f"scheduler_lock:{task_type}"
+        fallback_ttl = 600  # 与历史行为一致
+
+        try:
+            job = self.scheduler.get_job(task_id)
+            trigger = getattr(job, 'trigger', None) if job else None
+            if trigger is None:
+                return fallback_key, fallback_ttl
+
+            if isinstance(trigger, IntervalTrigger):
+                period = int(trigger.interval.total_seconds())
+                if period <= 0:
+                    return fallback_key, fallback_ttl
+                bucket = int(started_at.timestamp()) // period
+                ttl = max(int(period * 0.9), 60)
+                return f"scheduler_lock:{task_type}:int:{bucket}", ttl
+
+            if isinstance(trigger, CronTrigger):
+                # APScheduler trigger.get_next_fire_time(previous_fire_time, now)
+                # 返回「>= now 的下一次触发」. 我们用 (started_at - 1s) 作为 now, 拿到的
+                # next_fire 即为「当前周期的预定触发时刻」(因为 scheduler 真正 fire 时
+                # started_at 几乎等于该时刻, 通常只大几十毫秒).
+                probe = started_at - timedelta(seconds=1)
+                current_fire = trigger.get_next_fire_time(None, probe)
+                if current_fire is None:
+                    return fallback_key, fallback_ttl
+                # 估算周期长度: 下下次 fire - 当前 fire
+                next_fire = trigger.get_next_fire_time(
+                    current_fire, current_fire + timedelta(seconds=1)
+                )
+                if next_fire is not None:
+                    period = int((next_fire - current_fire).total_seconds())
+                else:
+                    period = 3600  # 拿不到下一次时保守用 1 小时
+                ttl = max(int(period * 0.9), 60)
+                window_key = current_fire.strftime("%Y%m%d%H%M")
+                return f"scheduler_lock:{task_type}:cron:{window_key}", ttl
+        except Exception as e:
+            logger.warning(
+                f"计算周期锁键失败, 回退为逐次锁: {e}",
+                task_id=task_id,
+                task_type=task_type,
+            )
+        return fallback_key, fallback_ttl
+
     async def _execute_task(self, task_id: str, task_type: str, task_params: Dict[str, Any]):
-        """执行任务（带分布式锁保护）"""
+        """执行任务（带「按周期窗口」分布式锁保护）
+
+        语义说明 (重要):
+        以前的实现 lock_key = f"scheduler_lock:{task_type}", 在 finally 中 delete.
+        这只能阻止「同时正在跑的两次」, 但因为很多 handler 只是把任务派发到 Celery 就 return
+        (耗时几十毫秒), 锁会立刻释放, 同周期内 1~2 秒后到来的「重复触发」(双 scheduler 进程 /
+        APScheduler 重复 add_job 等) 仍能拿到锁, 表现为同周期 2 条 success 日志.
+
+        现改为「周期窗口锁」:
+          - lock_key = f"scheduler_lock:{task_type}:{窗口键}", 窗口键由 trigger 推导
+          - cron 任务: 窗口键 = 该次预定 fire_time 的 'YYYYMMDDHHMM'
+          - interval 任务: 窗口键 = floor(epoch / interval_seconds)
+          - TTL = 周期长度 * 0.9 (最少 60s), 让锁自然过期, finally 不再 delete
+        效果: 同一周期窗口内只允许执行一次, 第二次触发会被记为 'skipped' 立即可见.
+        若任务执行失败也保持锁, 等下一次 cron tick 重试 (避免立刻重试浪费 API 配额).
+        """
         execution_log_id = None
         started_at = datetime.now(tz=timezone.utc)
-        lock_key = f"scheduler_lock:{task_type}"
+        lock_key, lock_ttl = self._compute_period_lock_key(task_type, task_id, started_at)
         lock_acquired = False
-        
+
         try:
-            # 🔒 尝试获取 Redis 分布式锁
-            # 使用 SET NX EX 命令：只在键不存在时设置，并设置过期时间
+            # 🔒 尝试获取 Redis 周期窗口锁 (SET NX EX)
             lock_acquired = self.redis_client.set(
                 lock_key,
-                f"{task_id}_{started_at.timestamp()}",  # 锁的值包含任务ID和时间戳
-                nx=True,  # 只在不存在时设置
-                ex=600    # 10分钟后自动过期，防止死锁
+                f"{task_id}_{started_at.timestamp()}",
+                nx=True,
+                ex=lock_ttl,
             )
-            
+
             if not lock_acquired:
-                # 无法获取锁，说明同类型任务正在运行
                 logger.warning(
-                    f"⏭️  任务 {task_type} 正在运行中，跳过本次执行",
+                    f"⏭️  任务 {task_type} 在当前周期窗口已被其他实例执行, 跳过本次触发",
                     task_id=task_id,
-                    task_type=task_type
+                    task_type=task_type,
+                    lock_key=lock_key,
                 )
-                
-                # 记录跳过的执行
+
+                # 记录跳过的执行 (使日志层面能显形重复触发, 便于监控告警)
                 execution_log_id = await self._log_task_execution_start(
                     task_id, f'Task-{task_id}', task_type, started_at, task_params
                 )
-                
+
                 if execution_log_id:
                     finished_at = datetime.now(tz=timezone.utc)
                     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
@@ -655,16 +737,20 @@ class SchedulerService:
                         finished_at,
                         duration_ms,
                         'skipped',
-                        error_message='任务正在运行，已跳过本次执行'
+                        error_message=f'当前周期窗口已被其他实例执行 (lock_key={lock_key})'
                     )
-                
+
                 return {
                     'success': False,
-                    'message': '任务正在运行，已跳过',
+                    'message': '当前周期窗口已被其他实例执行, 已跳过',
                     'skipped': True
                 }
-            
-            logger.info(f"🔓 获取任务锁成功: {task_id}, 类型: {task_type}")
+
+            logger.info(
+                f"🔓 获取周期窗口锁成功: {task_id}, 类型: {task_type}",
+                lock_key=lock_key,
+                lock_ttl=lock_ttl,
+            )
             
             # 获取任务配置以获取任务名称
             task_config = await self._get_task_config(task_id)
@@ -675,8 +761,16 @@ class SchedulerService:
                 task_id, task_name, task_type, started_at, task_params
             )
             
-            # 更新最后运行时间
-            await self._update_task_config(task_id, {'last_run': started_at.isoformat()})
+            # 更新最后运行时间, 顺手把 APScheduler 算好的下次触发时间写回 task_scheduling.next_run
+            # (历史 bug: next_run 只在 create_cron_task 写一次, 之后长期停留在过期时刻, 给排查造成误导)
+            update_payload: Dict[str, Any] = {'last_run': started_at.isoformat()}
+            try:
+                _job = self.scheduler.get_job(task_id)
+                if _job is not None and getattr(_job, 'next_run_time', None):
+                    update_payload['next_run'] = _job.next_run_time.isoformat()
+            except Exception as _e:
+                logger.warning(f"读取 next_run_time 失败, 仅更新 last_run: {_e}", task_id=task_id)
+            await self._update_task_config(task_id, update_payload)
             
             # 执行任务
             handler = self.task_handlers.get(task_type)
@@ -755,13 +849,14 @@ class SchedulerService:
             logger.error(f"任务执行异常: {task_id}, 错误: {str(e)}")
         
         finally:
-            # 🔓 释放 Redis 锁
+            # 周期窗口锁不在此释放: 让 Redis TTL 自然过期, 以保证「同一周期内只执行一次」.
+            # 任务失败时同样不释放, 避免立刻重试浪费 API 配额; 下一次 cron tick 会进入新窗口.
             if lock_acquired:
-                try:
-                    self.redis_client.delete(lock_key)
-                    logger.info(f"🔓 释放任务锁: {task_type}")
-                except Exception as e:
-                    logger.error(f"释放 Redis 锁失败: {str(e)}", lock_key=lock_key)
+                logger.info(
+                    f"🔒 周期窗口锁保留至 TTL 过期: {task_type}",
+                    lock_key=lock_key,
+                    lock_ttl=lock_ttl,
+                )
     
     async def _execute_eodhd_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行EODHD新闻获取任务"""
@@ -3545,20 +3640,28 @@ class SchedulerService:
             logger.error(f"更新失败计数失败: {str(e)}")
 
 
-# 全局调度器实例
+# 全局调度器实例 + 并发安全锁
+# 之前的实现只用 None 判断, asyncio 并发场景下理论上可能重复实例化两次 SchedulerService,
+# 进而向同一 Redis/DB 重复 add_job. 加 asyncio.Lock 保证整个进程只构造一次.
 scheduler_service = None
+_scheduler_init_lock = asyncio.Lock()
 
 async def get_scheduler_service():
-    """获取调度器服务单例"""
+    """获取调度器服务单例 (并发安全)"""
     global scheduler_service
-    if scheduler_service is None:
-        scheduler_service = SchedulerService()
-        await scheduler_service.start()
+    if scheduler_service is not None:
+        return scheduler_service
+    async with _scheduler_init_lock:
+        if scheduler_service is None:
+            instance = SchedulerService()
+            await instance.start()
+            scheduler_service = instance
     return scheduler_service
 
 async def shutdown_scheduler_service():
     """关闭调度器服务"""
     global scheduler_service
-    if scheduler_service is not None:
-        await scheduler_service.stop()
-        scheduler_service = None
+    async with _scheduler_init_lock:
+        if scheduler_service is not None:
+            await scheduler_service.stop()
+            scheduler_service = None

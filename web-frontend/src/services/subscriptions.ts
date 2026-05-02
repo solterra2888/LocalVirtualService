@@ -187,6 +187,8 @@ export interface SubscriptionContentsResponse {
 /** GET /subscriptions/contents/:id/transcript */
 export interface SubscriptionContentTranscriptPayload {
   transcript: string;
+  /** Parsed subscription_content.transcript_data (YouTube segments / ASR asr_data, etc.) */
+  transcript_data?: Record<string, unknown> | null;
   language?: string | null;
   source?: string | null;
 }

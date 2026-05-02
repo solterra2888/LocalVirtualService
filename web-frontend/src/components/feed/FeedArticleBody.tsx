@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   App,
   Avatar,
@@ -6,7 +6,6 @@ import {
   Divider,
   Modal,
   Space,
-  Spin,
   Tag,
   Tooltip,
   Typography,
@@ -16,8 +15,6 @@ import {
   AlignLeftOutlined,
   BulbOutlined,
   CommentOutlined,
-  EyeOutlined,
-  FileTextOutlined,
   LikeOutlined,
   LinkOutlined,
   MessageOutlined,
@@ -30,6 +27,7 @@ import {
 } from '@ant-design/icons';
 import { api } from '../../services/api';
 import { getNewsSourceColor } from './feedChannelConfig';
+import YoutubeFeedOriginalBlock from './YoutubeFeedOriginalBlock';
 import { useFileProcessing } from '../../contexts/FileProcessingContext';
 import FeedTweetContent from './FeedTweetContent';
 import type { FeedThemeColors } from './feedTheme';
@@ -49,11 +47,12 @@ import {
   FeedSummaryChannel,
   FeedSummarySettingItem,
 } from '../../services/feedSummarySettings';
+import AIAnalysisSection from '../shared/content-viewer/AIAnalysisSection';
+import AISummarySection from '../shared/content-viewer/AISummarySection';
+import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
+import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 
 const { Text } = Typography;
-
-/** Collapsed YouTube description panel height (~4 lines at 14px / 1.5 line-height). */
-const YOUTUBE_DESCRIPTION_COLLAPSED_MAX_HEIGHT_PX = 88;
 
 export interface FeedArticleBodyProps {
   selectedContent: SubscriptionContent | null;
@@ -68,6 +67,17 @@ export interface FeedArticleBodyProps {
    * a full reload.
    */
   onTagsUpdated?: (contentId: number, tags: SubscriptionContentTagsLite) => void;
+  /**
+   * Desktop feed reader: Original Content starts expanded even with AI Analysis.
+   * Omit on mobile article page to keep the tighter default.
+   */
+  originalContentDefaultExpanded?: boolean;
+  /**
+   * 视图模式 (由父组件管理以跨内容切换保持选择).
+   * 未传入时回退到内部 state, 兼容移动端独立使用场景.
+   */
+  viewMode?: 'original' | 'analysis';
+  onViewModeChange?: (mode: 'original' | 'analysis') => void;
 }
 
 /** Channels that participate in auto-tagging (see FEEDS_AUTO_TAGGING_PLAN.md §1). */
@@ -94,11 +104,19 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   themeMode,
   onTranscriptReady,
   onTagsUpdated,
+  originalContentDefaultExpanded = false,
+  viewMode: viewModeProp,
+  onViewModeChange,
 }) => {
   const { message } = App.useApp();
   const tweetContainerRef = useRef<HTMLDivElement>(null);
   const [originalTweet, setOriginalTweet] = useState<SubscriptionContent | null>(null);
   const [originalTweetLoading, setOriginalTweetLoading] = useState(false);
+
+  // 视图模式: 优先使用父组件传入的受控值; 未传则用内部 state (mobile 兜底)
+  const [viewModeInternal, setViewModeInternal] = useState<'original' | 'analysis'>('original');
+  const viewMode = viewModeProp ?? viewModeInternal;
+  const setViewMode = onViewModeChange ?? setViewModeInternal;
 
   const [asrTaskId, setAsrTaskId] = useState<string | null>(null);
   const [asrProgress, setAsrProgress] = useState(0);
@@ -159,60 +177,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     };
   }, []);
 
-  const youtubeDescOuterRef = useRef<HTMLDivElement>(null);
-  const youtubeDescInnerRef = useRef<HTMLDivElement>(null);
-  const [youtubeDescExpanded, setYoutubeDescExpanded] = useState(false);
-  const [youtubeDescOverflows, setYoutubeDescOverflows] = useState(false);
-
-  const transcriptCacheRef = useRef<Map<number, string>>(new Map());
-  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
-  const [transcriptModalLoading, setTranscriptModalLoading] = useState(false);
-  const [transcriptModalText, setTranscriptModalText] = useState('');
-
   const { addTask, tasks } = useFileProcessing();
-
-  const openTranscriptModal = async () => {
-    if (!selectedContent?.id) return;
-    const cid = selectedContent.id;
-    setTranscriptModalOpen(true);
-    const cached = transcriptCacheRef.current.get(cid);
-    if (cached !== undefined) {
-      setTranscriptModalText(cached);
-      setTranscriptModalLoading(false);
-      return;
-    }
-    setTranscriptModalText('');
-    setTranscriptModalLoading(true);
-    const res = await subscriptionsAPI.getSubscriptionContentTranscript(cid);
-    if (res.success && res.data?.transcript) {
-      transcriptCacheRef.current.set(cid, res.data.transcript);
-      setTranscriptModalText(res.data.transcript);
-    } else {
-      message.error(res.error || 'Failed to load transcript');
-    }
-    setTranscriptModalLoading(false);
-  };
-
-  useEffect(() => {
-    setYoutubeDescExpanded(false);
-    setTranscriptModalOpen(false);
-  }, [selectedContent?.id]);
-
-  useLayoutEffect(() => {
-    if (selectedContent?.channel_type !== 'youtube') {
-      setYoutubeDescOverflows(false);
-      return;
-    }
-    const outer = youtubeDescOuterRef.current;
-    const inner = youtubeDescInnerRef.current;
-    if (!outer || !inner) {
-      setYoutubeDescOverflows(false);
-      return;
-    }
-    if (!youtubeDescExpanded) {
-      setYoutubeDescOverflows(inner.scrollHeight > outer.clientHeight + 1);
-    }
-  }, [selectedContent?.channel_type, selectedContent?.content, selectedContent?.id, youtubeDescExpanded]);
 
   useEffect(() => {
     const loadOriginalTweet = async () => {
@@ -340,6 +305,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     setPersonalizeModalOpen(false);
     setPersonalizePicker({});
     setPersonalizeLoading(false);
+    // viewMode 不在此重置 — 由父组件决定是否跨内容持久化
   }, [selectedContent?.id, clearRetagPoll]);
 
   // 组件卸载时清理轮询定时器, 防止 setState on unmounted.
@@ -516,10 +482,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const retagButtonLoading =
     retagStatus === 'dispatching' || retagStatus === 'polling';
 
-  // PR-7: 个性化 summary 优先级
-  // 1. localPersonalized (用户刚生成, 本地 state)
-  // 2. selectedContent.personalized_summary (后端列表接口附加)
-  // 3. displayTags.summary (全局 baseline)
+  // PR-7: 个性化 summary
+  // localPersonalized 优先 (用户刚生成), 否则回落到 selectedContent 字段
   const personalizedSummary =
     localPersonalized?.summary ?? selectedContent.personalized_summary ?? null;
   const personalizedReasoning =
@@ -527,7 +491,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const isPersonalized =
     !!personalizedSummary ||
     selectedContent.summary_source === 'personalized';
-  const effectiveSummary = personalizedSummary || displayTags?.summary || null;
+  // AI Summary 块只展示全局 baseline；个性化内容移至 AIAnalysisSection
+  const effectiveSummary = displayTags?.summary || null;
 
   // PR-N4: 兜底按钮可见性
   // 自动个性化开关 ON  → 全局打标完成后会自动跑; 用户主要看自动结果, 仅在 (a) 还没生成 / 失败  (b) 手动想换模板重跑 时露出按钮.
@@ -584,154 +549,70 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         </Space>
       </div>
 
-      {/* ── Phase 3: AI 摘要 + 标签 (仅 twitter/youtube, News 另有独立分析管线) ── */}
+      {/* ── AI Summary (shell 与 Daily 抽屉 AISummarySection 一致) ── */}
       {showAiTagsPanel && (
-        <div
-          style={{
-            borderRadius: 10,
-            padding: '12px 16px',
-            background: isDark
-              ? 'rgba(33, 150, 243, 0.07)'
-              : themeColors.boxMuted,
-            border: `1px solid ${themeColors.cardBorder}`,
-            borderLeft: `3px solid ${themeColors.selectedBorder}`,
+        <AISummarySection
+          themeMode={themeMode}
+          colors={{
+            text: themeColors.text,
+            textMuted: themeColors.textMuted,
+            divider: themeColors.cardBorder,
+            cardBg: themeColors.cardBg,
+            accent: themeColors.selectedBorder,
           }}
+          headerMeta={
+            displayTags?.tagged_at || isLowConfidence ? (
+              <>
+                {displayTags?.tagged_at && (
+                  <Tooltip title={dayjs(displayTags.tagged_at).format('YYYY-MM-DD HH:mm:ss')}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      · {dayjs(displayTags.tagged_at).fromNow()}
+                    </Text>
+                  </Tooltip>
+                )}
+                {isLowConfidence && (
+                  <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
+                    <Tag color="warning" style={{ fontSize: 10, lineHeight: '14px', padding: '0 5px', margin: 0 }}>
+                      low conf.
+                    </Tag>
+                  </Tooltip>
+                )}
+              </>
+            ) : undefined
+          }
+          headerActions={
+            <Tooltip
+              title={
+                tagsHasContent
+                  ? 'Re-tag — re-generate AI tags + summary (costs LLM tokens)'
+                  : 'Tag with AI — generate tags + summary (costs LLM tokens)'
+              }
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<SyncOutlined spin={retagButtonLoading} />}
+                loading={retagButtonLoading}
+                onClick={handleRetag}
+                aria-label={tagsHasContent ? 'Re-tag' : 'Tag with AI'}
+                style={{ fontSize: 15, borderRadius: 6 }}
+              />
+            </Tooltip>
+          }
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              flexWrap: 'wrap',
-              marginBottom: tagsHasContent ? 8 : 0,
-            }}
-          >
-            <Space size={6} align="center">
-              <RobotOutlined style={{ color: themeColors.selectedBorder, fontSize: 14 }} />
-              <Text strong style={{ color: themeColors.text, fontSize: 13 }}>
-                AI Summary
-              </Text>
-              {displayTags?.tagged_at && (
-                <Tooltip title={dayjs(displayTags.tagged_at).format('YYYY-MM-DD HH:mm:ss')}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    · {dayjs(displayTags.tagged_at).fromNow()}
-                  </Text>
-                </Tooltip>
-              )}
-              {isLowConfidence && (
-                <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
-                  <Tag color="warning" style={{ fontSize: 10, lineHeight: '14px', padding: '0 5px', margin: 0 }}>
-                    low conf.
-                  </Tag>
-                </Tooltip>
-              )}
-            </Space>
-            <Space size={8} align="center" wrap style={{ flexShrink: 0 }}>
-              {selectedContent.channel_type === 'youtube' && selectedContent.has_transcript && (
-                <Tooltip title="Open full video transcript in a window">
-                  <Button
-                    size="small"
-                    type="default"
-                    icon={<FileTextOutlined />}
-                    onClick={openTranscriptModal}
-                    style={{ fontSize: 12, borderRadius: 6 }}
-                  >
-                    Transcript
-                  </Button>
-                </Tooltip>
-              )}
-              <Tooltip
-                title={
-                  tagsHasContent
-                    ? 'Re-generate AI tags + summary (costs LLM tokens)'
-                    : 'Generate AI tags + summary (costs LLM tokens)'
-                }
-              >
-                <Button
-                  size="small"
-                  icon={<SyncOutlined spin={retagButtonLoading} />}
-                  loading={retagButtonLoading}
-                  onClick={handleRetag}
-                  style={{ fontSize: 12, borderRadius: 6 }}
-                >
-                  {tagsHasContent ? 'Re-tag' : 'Tag with AI'}
-                </Button>
-              </Tooltip>
-              {/*
-                PR-N4: 个性化 summary 按钮降级为兜底.
-                - 自动开关已开 → 全局打标完成后由 fan_out_personalize_summary_task 自动跑
-                  按钮仅在 "还没结果 / 想手动重跑" 时露出, 文案 Generate now / Regenerate
-                - 开关已关 + 历史曾有 personalized 记录 → 仍可 Regenerate (不强迫用户去开总开关)
-                - 开关已关 + 无历史 → 完全隐藏 (引导用户去齿轮里开)
-              */}
-              {showPersonalizeButton && (
-                <Tooltip title={personalizeButtonTooltip}>
-                  <Button
-                    size="small"
-                    icon={<RobotOutlined />}
-                    loading={personalizeLoading}
-                    onClick={() => {
-                      setPersonalizePicker({});
-                      setPersonalizeModalOpen(true);
-                    }}
-                    style={{ fontSize: 12, borderRadius: 6 }}
-                  >
-                    {personalizeButtonLabel}
-                  </Button>
-                </Tooltip>
-              )}
-              {isPersonalized && (
-                <Tooltip title="Remove personalized summary, revert to the global one.">
-                  <Button
-                    size="small"
-                    type="text"
-                    danger
-                    onClick={handleRemovePersonalization}
-                    style={{ fontSize: 12, padding: '0 6px' }}
-                  >
-                    Reset
-                  </Button>
-                </Tooltip>
-              )}
-            </Space>
-          </div>
-
           {tagsHasContent ? (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              {/* PR-7: 个性化徽标 (仅当用户有自己的 summary 覆盖时显示) */}
-              {isPersonalized && (
-                <Tag
-                  color="purple"
-                  style={{ fontSize: 10, lineHeight: '16px', padding: '0 6px', margin: 0 }}
-                >
-                  ✨ Personalized
-                </Tag>
-              )}
               {effectiveSummary && (
                 <Text
                   style={{
                     color: themeColors.text,
                     fontSize: 13,
-                    lineHeight: 1.55,
+                    lineHeight: 1.65,
                     display: 'block',
+                    whiteSpace: 'pre-wrap',
                   }}
                 >
                   {effectiveSummary}
-                </Text>
-              )}
-              {/* PR-7: 个性化模式下额外展示 reasoning (主观解读) */}
-              {isPersonalized && personalizedReasoning && (
-                <Text
-                  type="secondary"
-                  style={{
-                    fontSize: 12,
-                    lineHeight: 1.55,
-                    display: 'block',
-                    fontStyle: 'italic',
-                  }}
-                >
-                  {personalizedReasoning}
                 </Text>
               )}
 
@@ -788,266 +669,195 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 : '暂无 AI 标签 — 点击 "Tag with AI" 生成标签与摘要'}
             </Text>
           )}
-        </div>
+        </AISummarySection>
       )}
 
-      {selectedContent.channel_type === 'news' && selectedContent.title && (
-        <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block', marginTop: 8 }}>
-          {selectedContent.title}
-        </Text>
-      )}
-
-      {selectedContent.channel_type === 'news' && (
-        <>
-          <Text style={{ color: themeColors.textSecondary, fontSize: 14, whiteSpace: 'pre-wrap', lineHeight: '1.7' }}>
-            {selectedContent.content}
-          </Text>
-
-          {selectedContent.metadata?.symbols && (selectedContent.metadata.symbols as string[]).length > 0 && (
-            <div
-              style={{
-                marginTop: 12,
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: '8px 8px',
-              }}
-            >
-              <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-                Ticker:
-              </Text>
-              <Space size={[4, 4]} wrap>
-                {(selectedContent.metadata.symbols as string[]).map((sym) => (
-                  <Tag key={sym} style={PC_INFO_TAGS_TAG_STYLE}>
-                    {sym}
-                  </Tag>
-                ))}
+      {/* ── AI Analysis Tab — 仅在 viewMode === 'analysis' 时渲染 ── */}
+      {showAiTagsPanel && viewMode === 'analysis' && (
+        <AIAnalysisSection
+          content={personalizedSummary}
+          themeMode={themeMode}
+          colors={{
+            text: themeColors.text,
+            textMuted: themeColors.textMuted,
+            divider: themeColors.cardBorder,
+            cardBg: themeColors.cardBg,
+            accent: themeColors.selectedBorder,
+          }}
+          reasoning={personalizedReasoning}
+          actionsSlot={
+            showPersonalizeButton || isPersonalized ? (
+              <Space size={4}>
+                {showPersonalizeButton && (
+                  <Tooltip title={personalizeButtonTooltip}>
+                    <Button
+                      size="small"
+                      icon={<RobotOutlined />}
+                      loading={personalizeLoading}
+                      onClick={() => {
+                        setPersonalizePicker({});
+                        setPersonalizeModalOpen(true);
+                      }}
+                      style={{ fontSize: 12, borderRadius: 6 }}
+                    >
+                      {personalizeButtonLabel}
+                    </Button>
+                  </Tooltip>
+                )}
+                {isPersonalized && (
+                  <Tooltip title="Remove personalized summary, revert to the global one.">
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      onClick={handleRemovePersonalization}
+                      style={{ fontSize: 12, padding: '0 6px' }}
+                    >
+                      Reset
+                    </Button>
+                  </Tooltip>
+                )}
               </Space>
-            </div>
+            ) : undefined
+          }
+        />
+      )}
+
+      {/* ── Original Content Tab — news 始终显示; twitter/youtube 在 Original 模式下显示 ── */}
+      {(!showAiTagsPanel || viewMode === 'original') && (
+      <CollapsibleOriginalSection
+        hasAIAnalysis={false}
+        themeMode={themeMode}
+        resetKey={selectedContent.id}
+        defaultExpanded={showAiTagsPanel || originalContentDefaultExpanded}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {selectedContent.channel_type === 'news' && (
+            <NewsOriginalView
+              title={selectedContent.title}
+              content={selectedContent.content}
+              url={selectedContent.url}
+              symbols={
+                Array.isArray(selectedContent.metadata?.symbols)
+                  ? (selectedContent.metadata!.symbols as string[])
+                  : []
+              }
+              categories={selectedContent.categories ?? []}
+              sentiment={
+                selectedContent.metadata?.sentiment as { polarity?: number } | null
+              }
+              themeMode={themeMode}
+            />
           )}
 
-          {selectedContent.categories && selectedContent.categories.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Tags:</Text>
-              {selectedContent.categories.map((tag) => (
-                <Tag key={tag} style={{ fontSize: 11 }}>{tag}</Tag>
+          {selectedContent.channel_type === 'youtube' && (
+            <YoutubeFeedOriginalBlock
+              contentId={selectedContent.content_id ?? null}
+              url={selectedContent.url ?? undefined}
+              title={selectedContent.title ?? null}
+              headingTitle={selectedContent.title?.trim() || null}
+              description={selectedContent.content || ''}
+              contentDbId={selectedContent.id}
+              hasTranscript={!!selectedContent.has_transcript}
+              metadata={selectedContent.metadata}
+              themeMode={themeMode}
+              colors={{
+                text: themeColors.text,
+                textSecondary: themeColors.textSecondary,
+                textMuted: themeColors.textMuted,
+                divider: themeColors.cardBorder,
+                link: themeColors.selectedBorder,
+              }}
+              embedTopMargin={0}
+              noTranscriptHint={false}
+            />
+          )}
+
+          {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && (
+            <FeedTweetContent
+              content={selectedContent}
+              themeColors={themeColors}
+              isDark={isDark}
+              originalTweet={originalTweet}
+              originalTweetLoading={originalTweetLoading}
+              tweetContainerRef={tweetContainerRef}
+            />
+          )}
+
+          {selectedContent.channel_type !== 'youtube' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
+            <div>
+              {selectedContent.media_urls.map((url, idx) => (
+                <img key={idx} src={url} alt="" style={{ width: '100%', borderRadius: 12, marginBottom: 12 }} />
               ))}
             </div>
           )}
 
-          {selectedContent.metadata?.sentiment && (selectedContent.metadata.sentiment as { polarity?: number }).polarity != null && (
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>Sentiment:</Text>
-              <Tag color={
-                (selectedContent.metadata.sentiment as { polarity: number }).polarity > 0.1
-                  ? 'green'
-                  : (selectedContent.metadata.sentiment as { polarity: number }).polarity < -0.1
-                  ? 'red'
-                  : 'default'
-              }>
-                {(selectedContent.metadata.sentiment as { polarity: number }).polarity > 0.1
-                  ? 'Positive'
-                  : (selectedContent.metadata.sentiment as { polarity: number }).polarity < -0.1
-                  ? 'Negative'
-                  : 'Neutral'}
-                {' '}({(selectedContent.metadata.sentiment as { polarity: number }).polarity.toFixed(2)})
-              </Tag>
-            </div>
-          )}
-        </>
-      )}
-
-      {selectedContent.channel_type === 'youtube' && selectedContent.content_id && (
-        <div
-          style={{
-            position: 'relative',
-            width: '100%',
-            marginTop: showAiTagsPanel ? 20 : 0,
-            paddingTop: '56.25%',
-            borderRadius: 12,
-            overflow: 'hidden',
-            backgroundColor: '#000',
-          }}
-        >
-          <iframe
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              borderRadius: 12,
-            }}
-            src={`https://www.youtube.com/embed/${selectedContent.content_id}`}
-            title={selectedContent.title || 'YouTube Video'}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
-        </div>
-      )}
-
-      {selectedContent.channel_type === 'youtube' && selectedContent.title && (
-        <Text strong style={{ color: themeColors.text, fontSize: 18, lineHeight: '1.5', display: 'block' }}>
-          {selectedContent.title}
-        </Text>
-      )}
-
-      {selectedContent.channel_type === 'youtube' && !!selectedContent.content?.trim() && (
-        <div style={{ marginTop: 8 }}>
-          <div
-            ref={youtubeDescOuterRef}
-            style={{
-              maxHeight: youtubeDescExpanded ? 'none' : YOUTUBE_DESCRIPTION_COLLAPSED_MAX_HEIGHT_PX,
-              overflow: youtubeDescExpanded ? 'visible' : 'hidden',
-            }}
-          >
-            <div ref={youtubeDescInnerRef}>
-              <Text style={{ color: themeColors.textSecondary, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                {selectedContent.content}
-              </Text>
-            </div>
-          </div>
-          {(youtubeDescOverflows || youtubeDescExpanded) && (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => setYoutubeDescExpanded((v) => !v)}
-              style={{ padding: 0, height: 'auto', marginTop: 4 }}
-            >
-              {youtubeDescExpanded ? 'Less' : 'More'}
-            </Button>
-          )}
-        </div>
-      )}
-      {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && (
-        <div style={{ marginTop: 16 }}>
-          <FeedTweetContent
-            content={selectedContent}
-            themeColors={themeColors}
-            isDark={isDark}
-            originalTweet={originalTweet}
-            originalTweetLoading={originalTweetLoading}
-            tweetContainerRef={tweetContainerRef}
-          />
-        </div>
-      )}
-
-      {selectedContent.channel_type !== 'youtube' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
-        <div>
-          {selectedContent.media_urls.map((url, idx) => (
-            <img key={idx} src={url} alt="" style={{ width: '100%', borderRadius: 12, marginBottom: 12 }} />
-          ))}
-        </div>
-      )}
-
-      {selectedContent.channel_type === 'youtube' && selectedContent.metadata && (
-        <Space wrap size={16}>
-          {typeof selectedContent.metadata.view_count === 'number' && (
-            <Tooltip title="观看数">
-              <Space size={4}>
-                <EyeOutlined style={{ color: themeColors.textSecondary }} />
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {selectedContent.metadata.view_count.toLocaleString()}
-                </Text>
-              </Space>
-            </Tooltip>
-          )}
-          {typeof selectedContent.metadata.like_count === 'number' && (
-            <Tooltip title="点赞数">
-              <Space size={4}>
-                <LikeOutlined style={{ color: '#eb2f96' }} />
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {selectedContent.metadata.like_count.toLocaleString()}
-                </Text>
-              </Space>
-            </Tooltip>
-          )}
-          {typeof selectedContent.metadata.comment_count === 'number' && (
-            <Tooltip title="评论数">
-              <Space size={4}>
-                <CommentOutlined style={{ color: '#1890ff' }} />
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {selectedContent.metadata.comment_count.toLocaleString()}
-                </Text>
-              </Space>
-            </Tooltip>
-          )}
-        </Space>
-      )}
-
-      {selectedContent.channel_type !== 'youtube' && (
-        <Space wrap size={16} style={{ marginTop: 16 }}>
-          {selectedContent.metadata && (
-            <>
-              {typeof selectedContent.metadata.like_count === 'number' && (
-                <Tooltip title="点赞">
-                  <Space size={4}>
-                    <LikeOutlined style={{ color: '#eb2f96' }} />
-                    <Text type="secondary" style={{ fontSize: 13 }}>
-                      {selectedContent.metadata.like_count}
-                    </Text>
-                  </Space>
-                </Tooltip>
+          {selectedContent.channel_type !== 'youtube' && (
+            <Space wrap size={16}>
+              {selectedContent.metadata && (
+                <>
+                  {typeof selectedContent.metadata.like_count === 'number' && (
+                    <Tooltip title="点赞">
+                      <Space size={4}>
+                        <LikeOutlined style={{ color: '#eb2f96' }} />
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          {selectedContent.metadata.like_count}
+                        </Text>
+                      </Space>
+                    </Tooltip>
+                  )}
+                  {typeof selectedContent.metadata.retweet_count === 'number' && (
+                    <Tooltip title="转发">
+                      <Space size={4}>
+                        <RetweetOutlined style={{ color: '#52c41a' }} />
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          {selectedContent.metadata.retweet_count}
+                        </Text>
+                      </Space>
+                    </Tooltip>
+                  )}
+                  {typeof selectedContent.metadata.reply_count === 'number' && (
+                    <Tooltip title="回复">
+                      <Space size={4}>
+                        <CommentOutlined style={{ color: '#1890ff' }} />
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          {selectedContent.metadata.reply_count}
+                        </Text>
+                      </Space>
+                    </Tooltip>
+                  )}
+                  {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
+                    <Tooltip title="引用">
+                      <Space size={4}>
+                        <MessageOutlined style={{ color: '#1890ff' }} />
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          {selectedContent.metadata.quote_count}
+                        </Text>
+                      </Space>
+                    </Tooltip>
+                  )}
+                </>
               )}
-              {typeof selectedContent.metadata.retweet_count === 'number' && (
-                <Tooltip title="转发">
-                  <Space size={4}>
-                    <RetweetOutlined style={{ color: '#52c41a' }} />
-                    <Text type="secondary" style={{ fontSize: 13 }}>
-                      {selectedContent.metadata.retweet_count}
-                    </Text>
-                  </Space>
-                </Tooltip>
-              )}
-              {typeof selectedContent.metadata.reply_count === 'number' && (
-                <Tooltip title="回复">
-                  <Space size={4}>
-                    <CommentOutlined style={{ color: '#1890ff' }} />
-                    <Text type="secondary" style={{ fontSize: 13 }}>
-                      {selectedContent.metadata.reply_count}
-                    </Text>
-                  </Space>
-                </Tooltip>
-              )}
-              {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
-                <Tooltip title="引用">
-                  <Space size={4}>
-                    <MessageOutlined style={{ color: '#1890ff' }} />
-                    <Text type="secondary" style={{ fontSize: 13 }}>
-                      {selectedContent.metadata.quote_count}
-                    </Text>
-                  </Space>
-                </Tooltip>
-              )}
-            </>
-          )}
-        </Space>
-      )}
-
-      {selectedContent.url && (
-        <div style={{ marginTop: 8 }}>
-          <a
-            href={selectedContent.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: themeColors.selectedBorder }}
-          >
-            <Space>
-              <LinkOutlined />
-              {selectedContent.channel_type === 'youtube'
-                ? 'Watch on YouTube'
-                : selectedContent.channel_type === 'news'
-                ? 'Read Original Article'
-                : 'View on Twitter'}
             </Space>
-          </a>
-        </div>
-      )}
+          )}
 
-      {selectedContent.channel_type === 'youtube' && (
-        <>
-          {!selectedContent.has_transcript && (
+          {selectedContent.url && selectedContent.channel_type !== 'youtube' && (
+            <a
+              href={selectedContent.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: themeColors.selectedBorder }}
+            >
+              <Space>
+                <LinkOutlined />
+                {selectedContent.channel_type === 'news'
+                  ? 'Read Original Article'
+                  : 'View on Twitter'}
+              </Space>
+            </a>
+          )}
+
+          {selectedContent.channel_type === 'youtube' && !selectedContent.has_transcript && (
             <>
               <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
               <div
@@ -1096,36 +906,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
               </div>
             </>
           )}
-          <Modal
-            title="Transcript"
-            open={transcriptModalOpen}
-            onCancel={() => setTranscriptModalOpen(false)}
-            footer={null}
-            width={720}
-            destroyOnClose
-            bodyStyle={{ maxHeight: 'min(70vh, 640px)', overflow: 'auto', paddingTop: 8 }}
-          >
-            {transcriptModalLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-                <Spin />
-              </div>
-            ) : (
-              <Text
-                style={{
-                  color: themeColors.text,
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  display: 'block',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                }}
-              >
-                {transcriptModalText || '—'}
-              </Text>
-            )}
-          </Modal>
-        </>
+        </Space>
+      </CollapsibleOriginalSection>
       )}
 
       {/*

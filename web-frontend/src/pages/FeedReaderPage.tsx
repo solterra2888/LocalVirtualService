@@ -3,7 +3,7 @@
  * 参考 Feeder.co 的设计
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Layout,
   List,
@@ -22,6 +22,7 @@ import {
   Switch,
   Tag,
   Checkbox,
+  Segmented,
 } from 'antd';
 import {
   PlusOutlined,
@@ -78,17 +79,38 @@ dayjs.extend(relativeTime);
 const { Sider, Content } = Layout;
 const { Text } = Typography;
 
+/** 桌面 Feeds 右侧详情正文最大宽度（仅 FeedReaderPage）；Daily 预览抽屉独立宽度，不受此项影响 */
+const FEED_READER_ARTICLE_MAX_WIDTH_PX = 800;
+
 const FeedReaderPageInner: React.FC = () => {
   const { modal } = App.useApp();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
 
+  const kbdKeyStyle = useMemo(
+    () =>
+      ({
+        display: 'inline-block' as const,
+        padding: '0 5px',
+        fontSize: 10,
+        lineHeight: '16px',
+        borderRadius: 4,
+        border: `1px solid ${themeColors.cardBorder}`,
+        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        color: themeColors.textSecondary,
+      }) satisfies React.CSSProperties,
+    [themeColors.cardBorder, themeColors.textSecondary, isDark]
+  );
+
   // 状态管理
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [contents, setContents] = useState<SubscriptionContent[]>([]);
   const [selectedContent, setSelectedContent] = useState<SubscriptionContent | null>(null);
+  // 视图模式: 跨内容切换保持用户选择
+  const [feedViewMode, setFeedViewMode] = useState<'original' | 'analysis'>('original');
   
   const [loading, setLoading] = useState(false);
   const [contentsLoading, setContentsLoading] = useState(false);
@@ -485,6 +507,96 @@ const FeedReaderPageInner: React.FC = () => {
       markAsRead(content.id);
     }
   };
+
+  const scrollFeedListItemIntoView = useCallback((contentId: number) => {
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-feed-content-id="${contentId}"]`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, []);
+
+  const feedNavRef = React.useRef({
+    selectedSubscription,
+    contents,
+    selectedContent,
+  });
+  feedNavRef.current = { selectedSubscription, contents, selectedContent };
+
+  const handleSelectContentRef = React.useRef(handleSelectContent);
+  handleSelectContentRef.current = handleSelectContent;
+
+  /** 键盘: ↑↓ 在订阅文章列表中切换; ←→ 在 Original / AI Analysis 间切换 */
+  useEffect(() => {
+    const shouldIgnoreKeyTarget = (target: EventTarget | null) => {
+      if (!target || !(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      const t = target.tagName;
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return true;
+      if (target.closest('.ant-modal') || target.closest('.ant-image-preview-wrap')) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (shouldIgnoreKeyTarget(target)) return;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+
+      const { selectedSubscription: sub, contents: list, selectedContent: sel } =
+        feedNavRef.current;
+
+      // ← / → : 切换详情区视图模式（焦点在 Segmented 内时交给组件自身）
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (!sel) return;
+        if (target.closest('.ant-segmented')) return;
+        e.preventDefault();
+        setFeedViewMode(e.key === 'ArrowLeft' ? 'original' : 'analysis');
+        return;
+      }
+
+      // ↑ / ↓ : 在当前订阅的内容列表中移动（需已选订阅且有内容）
+      if (!sub || list.length === 0) return;
+
+      // 焦点在左侧订阅列表时不劫持上下键（避免与将来可聚焦订阅项冲突）
+      if (target.closest('.feed-page-layout__sider-my-feeds')) return;
+
+      const curIdx = sel ? list.findIndex((c) => c.id === sel.id) : -1;
+
+      let nextIdx = curIdx;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (curIdx === -1) {
+          nextIdx = 0;
+        } else if (curIdx < list.length - 1) {
+          nextIdx = curIdx + 1;
+        } else {
+          return;
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (curIdx === -1) {
+          nextIdx = list.length - 1;
+        } else if (curIdx > 0) {
+          nextIdx = curIdx - 1;
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
+
+      const next = list[nextIdx];
+      if (next) {
+        handleSelectContentRef.current(next);
+        scrollFeedListItemIntoView(next.id);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [scrollFeedListItemIntoView]);
 
   // 🎨 增强功能：编辑订阅
   const handleEditSubscription = (subscription: Subscription) => {
@@ -1120,6 +1232,18 @@ const FeedReaderPageInner: React.FC = () => {
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {contents.length} articles
                   </Text>
+                  {contents.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        Keyboard
+                      </Text>
+                      <kbd style={kbdKeyStyle}>↑</kbd>
+                      <kbd style={kbdKeyStyle}>↓</kbd>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        prev / next article
+                      </Text>
+                    </div>
+                  )}
                 </Space>
               </div>
 
@@ -1208,6 +1332,7 @@ const FeedReaderPageInner: React.FC = () => {
                       return (
                       <List.Item
                         key={content.id}
+                        data-feed-content-id={content.id}
                         onClick={() => handleSelectContent(content)}
                         style={{
                           padding: '16px',
@@ -1233,7 +1358,10 @@ const FeedReaderPageInner: React.FC = () => {
                           }
                         }}
                       >
-                        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div
+                          data-feed-content-id={content.id}
+                          style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}
+                        >
                           {/* title + 正文区域：严格限高，超出隐藏 */}
                           <div style={{ maxHeight: 96, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 5 }}>
                             {/* 主行：YouTube 等为标题；Twitter 无 title 时为推文正文 */}
@@ -1419,16 +1547,63 @@ const FeedReaderPageInner: React.FC = () => {
           style={{
             backgroundColor: themeColors.cardBg,
             overflowY: 'auto',
-            padding: '32px 80px',
+            padding: '0',
           }}
         >
           {selectedContent ? (
-            <div style={{ maxWidth: 600, margin: '0 auto', paddingLeft: 24, paddingRight: 24 }}>
+            <>
+              {/* ── 视图模式 Tab 栏 — sticky, 内容区外部顶端 ── */}
+              <div
+                style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 20,
+                  backgroundColor: themeColors.cardBg,
+                  borderBottom: `1px solid ${themeColors.cardBorder}`,
+                  padding: '10px 80px 12px',
+                }}
+              >
+                <div className="feed-page-layout__view-mode-tabs">
+                  <Segmented
+                    value={feedViewMode}
+                    onChange={(v) => setFeedViewMode(v as 'original' | 'analysis')}
+                    options={[
+                      { label: 'Original', value: 'original' },
+                      { label: 'AI Analysis', value: 'analysis' },
+                    ]}
+                    style={{ minWidth: 220, width: '100%' }}
+                    block
+                  />
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                    marginTop: 8,
+                  }}
+                >
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    Keyboard
+                  </Text>
+                  <kbd style={kbdKeyStyle}>←</kbd>
+                  <kbd style={kbdKeyStyle}>→</kbd>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    Switch Original / AI Analysis
+                  </Text>
+                </div>
+              </div>
+
+              <div style={{ maxWidth: FEED_READER_ARTICLE_MAX_WIDTH_PX, margin: '0 auto', paddingLeft: 24, paddingRight: 24, paddingTop: 32, paddingBottom: 40 }}>
               <FeedArticleBody
                 selectedContent={selectedContent}
                 themeColors={themeColors}
                 isDark={isDark}
                 themeMode={themeMode}
+                originalContentDefaultExpanded
+                viewMode={feedViewMode}
+                onViewModeChange={setFeedViewMode}
                 onTranscriptReady={(contentId) => {
                   setSelectedContent((prev) =>
                     prev && prev.id === contentId ? { ...prev, has_transcript: true } : prev
@@ -1446,13 +1621,15 @@ const FeedReaderPageInner: React.FC = () => {
                   );
                 }}
               />
-            </div>
+              </div>
+            </>
           ) : (
             <div style={{ 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
-              height: 'calc(100vh - 200px)'
+              height: '100%',
+              padding: '32px 80px',
             }}>
               <Empty description="Select an article to read" />
             </div>
