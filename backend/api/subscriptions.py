@@ -15,6 +15,7 @@ from backend.schemas.user import TokenData
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
+from backend.utils.datetime_utils import ensure_utc
 
 logger = get_logger("subscriptions_api")
 
@@ -1093,7 +1094,7 @@ async def get_subscription_contents(
                     'concepts': concepts,
                     'summary': row[35],
                     'confidence': row[36],
-                    'tagged_at': row[37].isoformat() if row[37] else None,
+                    'tagged_at': ensure_utc(row[37]).isoformat() if row[37] else None,
                 }
             
             contents.append({
@@ -1106,8 +1107,8 @@ async def get_subscription_contents(
                 'author_identifier': row[6],
                 'url': row[7],
                 'media_urls': row[8],
-                'published_at': row[9].isoformat() if row[9] else None,
-                'fetched_at': row[10].isoformat() if row[10] else None,
+                'published_at': ensure_utc(row[9]).isoformat() if row[9] else None,
+                'fetched_at': ensure_utc(row[10]).isoformat() if row[10] else None,
                 'engagement_count': row[11],
                 'view_count': row[12],
                 'metadata': row[13],
@@ -1387,7 +1388,7 @@ async def get_tweet_by_id(
         content = {
             'id': row[0],
             'url': row[1],
-            'fetched_at': row[2].isoformat() if row[2] else None,
+            'fetched_at': ensure_utc(row[2]).isoformat() if row[2] else None,
             'channel_type': row[3],
             'content_id': row[4],
             'title': row[5],
@@ -1398,7 +1399,7 @@ async def get_tweet_by_id(
             'engagement_count': row[10] or 0,
             'view_count': row[11] or 0,
             'metadata': row[12] or {},
-            'published_at': row[13].isoformat() if row[13] else None,
+            'published_at': ensure_utc(row[13]).isoformat() if row[13] else None,
             'is_retweet': row[14] or False,
             'retweeted_author': row[15],
             'retweeted_content': row[16],

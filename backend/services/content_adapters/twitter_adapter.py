@@ -3,13 +3,28 @@
 Twitter 内容适配器
 """
 
-from typing import Dict, Any, List
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from backend.utils.datetime_utils import utcnow, ensure_utc
 from backend.utils.logger import get_logger
 from .base_adapter import BaseContentAdapter
 
 logger = get_logger("twitter_adapter")
+
+# Twitter Snowflake epoch: Nov 4, 2010 00:00:00 UTC (in milliseconds)
+_TWITTER_EPOCH_MS = 1288834974657
+
+def _snowflake_to_utc(tweet_id_str: str) -> Optional[datetime]:
+    """
+    从 Twitter Snowflake ID 中提取精确的创建时间（UTC aware）。
+    Snowflake ID 高 41 位编码了距 Twitter Epoch (2010-11-04 UTC) 的毫秒数，
+    无论 API 返回的 createdAt 时区标签是否正确，ID 本身不会撒谎。
+    """
+    try:
+        ms = (int(tweet_id_str) >> 22) + _TWITTER_EPOCH_MS
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    except (ValueError, OverflowError, TypeError):
+        return None
 
 
 class TwitterAdapter(BaseContentAdapter):
@@ -72,39 +87,28 @@ class TwitterAdapter(BaseContentAdapter):
         # 用 ensure_utc 强制规整为 aware UTC，规避这个坑。fallback 直接走 utcnow()。
         #
         # 防御性兜底2（twitterapi.io +0000 mislabel bug）：
-        # twitterapi.io 偶发将推文的 HK 本地时间（UTC+8）错误标记为 +0000 UTC。
-        # 例如实际 UTC 为 2026-05-02T23:59:17+00:00，API 却返回
-        # 'Sun May 03 07:59:17 +0000 2026'（UTC+8 值带 +0000 标签），
-        # 导致存储值比真实 UTC 多 8h。
-        # 检测方法：twitterapi.io 的搜索索引延迟至少数小时，
-        # 若 published_at 距当前时间不足 TWITTERAPI_MIN_INDEX_LAG_HOURS，
-        # 则几乎可以确定是时区标记错误 → 尝试减去 8h 修正。
-        TWITTERAPI_MIN_INDEX_LAG_HOURS = 1  # 低于此阈值即判定为可疑
+        # twitterapi.io 偶发将推文的 HK 本地时间（UTC+8）错误标记为 +0000 UTC，
+        # 导致 createdAt 比真实 UTC 多 8h。
+        # 修复方法：用 Tweet Snowflake ID 提取真实创建时间并与 createdAt 比对。
+        # Snowflake ID 的高 41 位编码了距 Twitter Epoch 的毫秒数，
+        # 无论 API 返回的时区标签是否正确，ID 本身不会撒谎。
+        # 若偏差超过 60 秒，以 Snowflake 时间为准。
+        _SNOWFLAKE_MAX_DIFF_SECONDS = 60
         created_at_str = raw_data.get('createdAt', '')
         if created_at_str:
             published_at = ensure_utc(self.parse_datetime(created_at_str))
-            now = utcnow()
-            age_hours = (now - published_at).total_seconds() / 3600
-            if age_hours < TWITTERAPI_MIN_INDEX_LAG_HOURS:
-                corrected = published_at - timedelta(hours=8)
-                corrected_age = (now - corrected).total_seconds() / 3600
-                if corrected_age >= TWITTERAPI_MIN_INDEX_LAG_HOURS:
+            snowflake_time = _snowflake_to_utc(content_id)
+            if snowflake_time is not None:
+                diff_seconds = (published_at - snowflake_time).total_seconds()
+                if abs(diff_seconds) > _SNOWFLAKE_MAX_DIFF_SECONDS:
                     logger.warning(
-                        "twitterapi.io +0000 mislabel detected: correcting published_at",
-                        content_id=raw_data.get('id', ''),
-                        original=published_at.isoformat(),
-                        corrected=corrected.isoformat(),
-                        age_hours_before=round(age_hours, 3),
-                        age_hours_after=round(corrected_age, 3),
+                        "twitterapi.io createdAt/Snowflake mismatch: using Snowflake time",
+                        content_id=content_id,
+                        created_at=published_at.isoformat(),
+                        snowflake_time=snowflake_time.isoformat(),
+                        diff_seconds=round(diff_seconds),
                     )
-                    published_at = corrected
-                else:
-                    logger.error(
-                        "twitterapi.io suspicious published_at: correction also implausible, keeping original",
-                        content_id=raw_data.get('id', ''),
-                        original=published_at.isoformat(),
-                        age_hours=round(age_hours, 3),
-                    )
+                    published_at = snowflake_time
         else:
             published_at = utcnow()
         

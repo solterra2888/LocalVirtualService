@@ -396,96 +396,103 @@ class TwitterSubscriptionService:
     
     def fetch_tweets_from_api(self, author: str, since_hours: int = None, max_pages: int = 5) -> List[Dict[str, Any]]:
         """
-        从Twitter API获取推文
-        
-        Args:
-            author: Twitter用户名（不带@）
-            since_hours: 获取最近多少小时的推文（默认使用配置值）
-            max_pages: 最大获取页数（默认5页）
-            
-        Returns:
-            推文列表
+        从Twitter API获取推文。
+
+        ⚠️  twitterapi.io 使用须知（来自官方文档）：
+          1. **不要使用 cursor 分页** —— Twitter 分页当前有严重 bug，经常漏结果。
+          2. **必须使用 since_time:/until_time: unix 时间戳** —— 旧的
+             since:YYYY-MM-DD_HH:MM:SS_UTC 格式不再被支持。
+          3. **控制每次请求返回 ≤ 20 条** —— 通过切小时间窗口来实现，
+             不要靠分页。
+
+        本方法将 [since_time, until_time] 拆成若干 SLICE_HOURS 小时的子窗口，
+        对每个子窗口各发一次请求，合并去重后返回。
         """
         if since_hours is None:
             since_hours = self.default_query_hours
-        
+
         logger.info("开始获取Twitter推文", author=author, since_hours=since_hours, max_pages=max_pages)
-        
+
+        # 每个时间切片的宽度（小时）。
+        # 高频账号（如 DeItaone）每小时最多约 20 条，2h 切片基本安全。
+        # 1h 切片；高频账号（zaobaosg/DeItaone）每小时最多约 10-15 条，安全边际足够
+        SLICE_HOURS = 1
+
         try:
             until_time = datetime.now(timezone.utc)
             since_time = until_time - timedelta(hours=since_hours)
-            
-            since_str = since_time.strftime("%Y-%m-%d_%H:%M:%S_UTC")
-            until_str = until_time.strftime("%Y-%m-%d_%H:%M:%S_UTC")
-            
-            query = f"from:{author} since:{since_str} until:{until_str} include:nativeretweets"
-            
-            params = {
-                "query": query,
-                "queryType": "Latest"
-            }
-            
-            headers = {
-                "X-API-Key": self.api_key
-            }
-            
-            logger.debug("API请求参数", author=author, query=query)
-            
-            all_tweets = []
-            next_cursor = None
-            page_count = 0
+
+            headers = {"X-API-Key": self.api_key}
+
+            all_tweets: List[Dict[str, Any]] = []
+            seen_ids: set = set()
             api_calls = 0
-            
-            while page_count < max_pages:
-                if next_cursor:
-                    params["cursor"] = next_cursor
-                
+            window_end = until_time
+
+            while window_end > since_time:
+                window_start = max(window_end - timedelta(hours=SLICE_HOURS), since_time)
+                s_unix = int(window_start.timestamp())
+                u_unix = int(window_end.timestamp())
+
+                # 文档推荐格式：since_time:/until_time: unix 时间戳内嵌于 query
+                query = f"from:{author} since_time:{s_unix} until_time:{u_unix} include:nativeretweets"
+                params = {"query": query, "queryType": "Latest"}
+
+                logger.debug("API请求参数", author=author, query=query)
+
                 response = self.session.get(
                     self.api_base_url,
                     headers=headers,
                     params=params,
                     timeout=30,
-                    verify=True
+                    verify=True,
                 )
                 api_calls += 1
-                
+
                 if response.status_code != 200:
-                    logger.error("API请求失败", 
-                               author=author,
-                               status_code=response.status_code,
-                               response=response.text[:200])
-                    break
-                
+                    logger.error(
+                        "API请求失败",
+                        author=author,
+                        status_code=response.status_code,
+                        response=response.text[:200],
+                    )
+                    window_end = window_start
+                    continue
+
                 data = response.json()
-                
-                tweets = []
+                tweets: List[Dict[str, Any]] = []
                 if isinstance(data, list):
                     tweets = data
                 elif isinstance(data, dict):
                     tweets = data.get("tweets") or data.get("data") or []
-                
-                if not tweets:
-                    logger.debug("无更多推文，停止分页", author=author, page=page_count)
-                    break
-                
-                all_tweets.extend(tweets)
-                
-                has_next = False
-                cursor_val = ""
-                if isinstance(data, dict):
-                    has_next = bool(data.get("has_next_page") or data.get("hasNextPage"))
-                    cursor_val = (data.get("next_cursor") or data.get("nextCursor") or "")
-                
-                if has_next and cursor_val:
-                    next_cursor = cursor_val
-                    page_count += 1
-                    time.sleep(1)
-                    continue
-                break
-            
+
+                has_next = isinstance(data, dict) and bool(
+                    data.get("has_next_page") or data.get("hasNextPage")
+                )
+                if has_next:
+                    logger.warning(
+                        "时间切片内推文超过 20 条（has_next=True），部分推文可能遗漏。"
+                        "可缩小 SLICE_HOURS 或拆分为更细粒度查询。",
+                        author=author,
+                        window_start=window_start.isoformat(),
+                        window_end=window_end.isoformat(),
+                        slice_hours=SLICE_HOURS,
+                    )
+
+                new_count = 0
+                for t in tweets:
+                    tid = t.get("id") or t.get("id_str") or ""
+                    if tid and tid not in seen_ids:
+                        seen_ids.add(tid)
+                        all_tweets.append(t)
+                        new_count += 1
+
+                window_end = window_start
+                time.sleep(0.3)
+
             logger.info("推文获取完成", author=author, total_tweets=len(all_tweets), api_calls=api_calls)
             return all_tweets
-            
+
         except Exception as e:
             logger.error("获取推文失败", author=author, exception=str(e))
             return []

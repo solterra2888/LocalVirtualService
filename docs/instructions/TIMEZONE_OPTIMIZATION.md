@@ -604,7 +604,7 @@ News / Twitter 走主仓库路径, 不受影响.
 
 ---
 
-## 7.9 twitterapi.io `+0000 mislabel` bug 修复（2026-05-03 补丁）
+## 7.9 twitterapi.io `+0000 mislabel` bug 修复（2026-05-03 → 2026-05-04 补丁）
 
 ### 根本原因
 
@@ -619,30 +619,38 @@ twitterapi.io 的搜索 API 偶发将推文的 **HK 本地时间（UTC+8）错�
 | 修复前 DB 存储 | `2026-05-03 07:59:17` | 比真实 UTC 多 8h |
 | 修复后 DB 存储 | `2026-05-02 23:59:17` | 正确 UTC |
 
-**确认方法**：twitterapi.io 搜索索引延迟通常数小时。若 `published_at` 距当前抓取时间不足 1 小时，则物理上不可能已被搜索索引命中——此时判定为时区标签错误。
+受影响的样本数据已于 2026-05-03 手动修正（`subscription_content` ID `1082407`, `1082408`）。
 
-### 影响范围
-
-接近 **UTC 午夜**（`23:xx UTC`）发布的推文最易触发此 bug，因为其对应 HK 时间为次日上午（`07:xx HK`），twitterapi.io 有时将其错误作为下一天 `07:xx +0000` 返回。受影响的样本数据已于 2026-05-03 手动修正（`subscription_content` ID `1082407`, `1082408`）。
-
-### 修复方案
+### 修复方案（最终版：Snowflake ID 校验）
 
 **`backend/services/content_adapters/twitter_adapter.py`**
 
-在解析 `createdAt` 后，增加"发布时间合理性校验"：
+Twitter 的 **Snowflake ID** 高 41 位编码了距 Twitter Epoch（2010-11-04 UTC）的毫秒数，可直接推算出精确的推文创建时间，不依赖任何 API 字段，无法被伪造。将 `createdAt` 与 Snowflake 时间对比：偏差超过 60 秒则以 Snowflake 时间为准。
 
 ```python
-TWITTERAPI_MIN_INDEX_LAG_HOURS = 1
-age_hours = (utcnow() - published_at).total_seconds() / 3600
-if age_hours < TWITTERAPI_MIN_INDEX_LAG_HOURS:
-    corrected = published_at - timedelta(hours=8)
-    if (utcnow() - corrected).total_seconds() / 3600 >= TWITTERAPI_MIN_INDEX_LAG_HOURS:
-        published_at = corrected  # 自动修正 +8h mislabel
+_TWITTER_EPOCH_MS = 1288834974657
+
+def _snowflake_to_utc(tweet_id_str: str) -> Optional[datetime]:
+    ms = (int(tweet_id_str) >> 22) + _TWITTER_EPOCH_MS
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+# 在 normalize() 中：
+published_at = ensure_utc(self.parse_datetime(created_at_str))
+snowflake_time = _snowflake_to_utc(content_id)
+if snowflake_time and abs((published_at - snowflake_time).total_seconds()) > 60:
+    logger.warning("createdAt/Snowflake mismatch: using Snowflake time", ...)
+    published_at = snowflake_time
 ```
 
-- 若修正后仍不合理，保留原值并记录 ERROR 日志以便人工审查
-- 阈值 `TWITTERAPI_MIN_INDEX_LAG_HOURS = 1` 可根据实测调整
+**为何优于"时间窗口"方案**：
+
+| | 时间窗口方案（已废弃） | Snowflake 方案（当前） |
+|---|---|---|
+| 阈值 | 1 小时 | 60 秒（createdAt 与 ID 本身的误差） |
+| 对真实近期推文的影响 | ❌ 会误修正（twitterapi.io 可在几分钟内索引） | ✅ 零误修正 |
+| 覆盖范围 | 仅 +8h 偏移 | 任意时区标签错误 |
+| 数据来源 | 外部 API 字段（可伪造） | ID 自身编码（不可伪造） |
 
 ### 关键教训
 
-> **不能盲目信任第三方 API 的时区标签。** 即使带有 `+0000` 后缀，也可能是 API 服务端 bug 导致返回了本地时间。任何时间数据入库前都应进行物理合理性校验：发布时间不能比抓取时间还晚，也不能发布后不足 1 小时就出现在搜索结果中。
+> **不能盲目信任第三方 API 的时区标签**；应使用数据本身携带的不可伪造的元信息（如 Twitter Snowflake ID）进行交叉校验。twitterapi.io 的搜索索引可在数分钟内完成，时间窗口阈值极易造成误伤。

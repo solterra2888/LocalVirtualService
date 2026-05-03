@@ -33,7 +33,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 └──────────────────────────────────────────────────────────────────┘
     │
     ├─ Twitter     → TwitterSubscriptionService.fetch_and_store_tweets
-    │                (queue: data_fetching, 远程 Worker)
+    │                (queue: data_fetching, 远程 Worker；twitterapi.io，见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区))
     │
     ├─ YouTube     → fetch_youtube_subscription / fetch_all_youtube_subscriptions
     │                (queue: youtube_fetching, 家用 Worker)
@@ -204,7 +204,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 |------|------|
 | `backend/services/subscription_content_service.py` | **归一化存储层**。`save_content` / `_save_normalized_content`（根据 `channel_type` 分发到 `ContentAdapter`，`ON CONFLICT (channel_type, content_id)` 合并 `user_ids`）；`update_transcript`（写 YouTube 字幕）；`mark_as_read`；`update_subscription_unread_count` 调用等。所有渠道统一出入口。|
 | `backend/services/youtube_subscription_service.py` | **服务器端** YouTube feed 实现：RSS → Data API v3 fallback、频道校验、`fetch_all_subscriptions()`（在远程家用 Worker 上执行，详见第 6 节）。 |
-| `backend/services/twitter_subscription_service.py` | Twitter API 拉取、正文/媒体/引用树、写入 `subscription_content` |
+| `backend/services/twitter_subscription_service.py` | **twitterapi.io** 拉取（`since_time`/`until_time` 时间切片，禁用 cursor 分页）、聚合多用户订阅、写入 `subscription_content`；回看窗口由 `TWITTER_*` 环境变量与 `last_fetched_at` 共同决定（见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区)）|
 | `backend/services/eodhd_news_feed_service.py` | 从 EODHD News API 拉取 → 经 `NewsAdapter` → 写入 `subscription_content`。暴露 `AVAILABLE_NEWS_SOURCES` 给前端 News 源下拉 |
 | `backend/services/content_adapters/*.py` | 各渠道的字段归一化器：`TwitterAdapter` / `YouTubeAdapter` / `NewsAdapter` |
 | `backend/services/youtube_service.py` | YouTube 字幕/元信息工具类（被 API 与批量任务共用）|
@@ -257,7 +257,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | 调度任务类型 | 默认 cron | 执行器 | 产出 |
 |-------------|----------|--------|------|
 | `youtube_subscription` | `0 * * * *`（每小时，种子数据见 `backend/database/migrations/insert_youtube_subscription_task.sql`）| `_execute_youtube_subscription_task` → `fetch_all_youtube_subscriptions_task.delay()` | 全量扫描所有启用的 YouTube 订阅，拉最新视频并做字幕 fallback |
-| `twitter_subscription` | 由用户配置 | `_execute_twitter_subscription_task` → `fetch_twitter_subscription_task.delay(sub_id, …)` | 单订阅 Twitter 拉取 |
+| `twitter_subscription` | **推荐** `0 */2 * * *`（每 2 小时）；由 `task_scheduling` / 前端 Scheduler 配置。勿将日级 cron（如 `50 0 * * *`）长期留在生产作「测试」，否则会出现「数小时～一天无更新」的假象 | `_execute_twitter_subscription_task` → `fetch_twitter_subscription_task.delay(sub_id, …)` | 按作者聚合拉取并入库；详见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
 | `news_feed` | 由用户配置 | `_execute_news_feed_task` → `EODHDNewsFeedService.fetch_and_distribute_news`（run_in_executor 同步调用）| News 批量入 `subscription_content` |
 
 前端 `SchedulerPage.tsx` + `DataSourceConfigModal.tsx` 可配置这些调度项。
@@ -285,6 +285,47 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 - 实测整批 30–60 min。
 
 Celery 会把 `@task(time_limit=...)` 作为消息头下发，压过家用 Worker 本地 `.env` 里的全局默认，**所以 70m/60m 写在主项目 stub 上是必须的**，改家用侧 `.env` 无效（local README 的 "⚠ 远端 Worker 的 task time_limit 实际受主项目 stub 控制" 一节有完整说明）。
+
+### 6.3 Twitter 订阅抓取（twitterapi.io）+ 调度 + 时区
+
+Twitter Feeds **不经过**家用虚拟机 Worker，只在主站（或消费 `data_fetching` 队列的远程 Celery Worker）上执行 `TwitterSubscriptionService`。
+
+#### 6.3.1 上游契约（twitterapi.io 官方说明摘要）
+
+以下三条与 `backend/services/twitter_subscription_service.py::fetch_tweets_from_api` 的实现一致，违反会导致**大量漏抓**或分页失效：
+
+| 规则 | 说明 |
+|------|------|
+| **禁止依赖 cursor 分页** | Twitter 侧分页在集成层存在严重问题，继续翻页会漏结果。 |
+| **查询内必须使用 Unix 时间戳** | 使用 `since_time:<unix>`、`until_time:<unix>` 嵌入 `query` 字符串；旧的 `since:YYYY-MM-DD_HH:MM:SS_UTC` 等形式不应再使用。 |
+| **单次响应宜 ≤ 20 条** | 通过**缩小时间窗口**控制体量，而不是指望「多页补全」。 |
+
+#### 6.3.2 当前实现要点
+
+- **时间窗口**：对 `[since_time, now_utc]` 从「现在」向过去迭代，每个子窗口宽度 **`SLICE_HOURS = 1`（代码内常量）**小时，每个子窗口单独请求一次 API，结果按 tweet id **去重合并**。
+- **典型 query 片段**：`from:{handle} since_time:{s_unix} until_time:{u_unix} include:nativeretweets`，`queryType=Latest`。
+- **超限告警**：若响应里 `has_next_page` / `hasNextPage` 为真，说明该 1 小时切片内推文仍可能超过 20 条，日志会打出 **warning**（极端高频账号可考虑在代码中进一步缩小切片，例如按 30 分钟拆分——当前未实现）。
+- **诊断脚本**：`scripts/test_twitter_api.py` 可用于对比「旧 since 字符串 + cursor」与「unix 时间戳 + 切片」的返回差异（曾用于确认漏抓根因）。
+
+#### 6.3.3 回看窗口与调度（`TWITTER_*`）
+
+| 变量 | 默认 | 作用 |
+|------|------|------|
+| `TWITTER_DEFAULT_QUERY_HOURS` | `48` | 单次拉取「最多向过去看多少小时」的上限（与智能估算取 min）。 |
+| `TWITTER_MIN_LOOKBACK_HOURS` | `24` | 增量任务的**最小**回看小时数，用于兜住 twitterapi.io **索引延迟**（官方索引可能晚数小时～十余小时才稳定）。定时任务若跑得很勤，仍至少会扫这么长的一段历史。 |
+| `TWITTER_INITIAL_FETCH_HOURS` | `168` | 新订阅首次抓取向过去看的范围（7 天）。 |
+
+**调度建议**：`task_scheduling` 里 `twitter_subscription` 的 cron 使用 **`0 */2 * * *`（每 2 小时）**在刷新延迟与 API 调用量之间较均衡。若将调度改得更密（例如每小时），可在观察日志无漏抓的前提下，把 **`TWITTER_MIN_LOOKBACK_HOURS` 从 24 降到 6** 以降低每作者 API 请求次数；是否下调应结合 `has_next` 告警与 `tweets_new` 统计谨慎调整。
+
+#### 6.3.4 `published_at` 与时区展示
+
+twitterapi.io 返回的 `createdAt` 偶发将 **本地时间误标为 `+0000`（伪 UTC）**，会导致 DB 中 `published_at` 偏 +8h，前端按用户时区渲染后出现「与 X 官网不一致」的严重问题。
+
+**权威修复**：在 `backend/services/content_adapters/twitter_adapter.py` 中用 **Twitter Snowflake ID** 内嵌时间戳与 `createdAt` 交叉校验，偏差大于 60 秒则以 Snowflake 为准。完整根因、案例与教训见 **`docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.9**。
+
+#### 6.3.5 部署注意（必读）
+
+修改 `twitter_subscription_service` / `twitter_adapter` 后，必须 **重启消费 `data_fetching` 队列的 Celery Worker**（例如服务名 `rc-celery-data`），否则进程内仍为旧代码，会出现「手动 curl API 有数据、任务侧 `tweets_new=0`」的错位现象。
 
 ## 7. YouTube Feed 抓取 & 转录完整流程（涉及本地虚拟机 Worker）
 
@@ -567,6 +608,11 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
 
 | 变量 | 位置 | 默认 | 说明 |
 |------|------|------|------|
+| `TWITTER_API_KEY` | 远程主服务器 `.env` | （代码内仅作开发兜底，生产务必显式配置）| twitterapi.io 的 `X-API-Key` |
+| `TWITTER_DEFAULT_QUERY_HOURS` | 同上 | `48` | 单次查询向过去的最大跨度（小时），见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) 回看窗口说明 |
+| `TWITTER_MIN_LOOKBACK_HOURS` | 同上 | `24` | 增量任务最小回看窗口，兜索引延迟；调度很密时可评估改为 `6`，见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
+| `TWITTER_INITIAL_FETCH_HOURS` | 同上 | `168` | 新订阅首抓历史深度（小时）|
+| `TWITTER_MAX_TWEETS_PER_REQUEST` | 同上 | `20` | 与上游「每请求约 20 条」建议对齐的配置位（切片逻辑以 `SLICE_HOURS` 为主）|
 | `YOUTUBE_SUBSCRIPTION_USE_LOCAL` | 远程主服务器 `.env` | `true` | `POST /api/subscriptions` 新建 YouTube 订阅时首抓是否走家用 Worker（`false` = 走远程旧路径紧急回滚；远程服务器现基本无法直连 YouTube）|
 | `YOUTUBE_UPLOAD_USE_LOCAL` | 同上 | `true` | （非 Feeds）Upload Link 路径的同类开关 |
 | `YOUTUBE_PROXY` / `HTTPS_PROXY` | 远程主服务器 | — | `backend/services/youtube_subscription_service.py` 在远程直连兜底时使用；**不作用于 local Worker，local Worker 有自己的 `.env`** |
@@ -591,9 +637,12 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
 | Feed 批量任务堵塞用户上传 | 本身不会，已由 `youtube_priority` / `youtube_transcription_priority` 独立 worker 隔离。若被打破，检查 local Worker 是否正确启动了 Priority Worker 进程（local README "上传插队队列" 一节）|
 | 未读数不对 | 检查 DB 里 `update_subscription_unread_count` 触发器是否存在；或手动 `UPDATE subscription_list SET unread_count = ...` 重算 |
 | News 订阅新增后无内容 | News 依赖定时 `news_feed` 任务，不走单订阅首抓；确认 `task_scheduling` 里 `news_feed` 是否启用并在正常 tick |
+| Twitter 长时间无新推文 / `tweets_new=0` | 1) `task_scheduling` 中 `twitter_subscription` 的 **cron 是否过稀**（日级会看起来像「不更新」）；2) `celery_data_worker.log` / `app.log` 是否仍有 **旧版** `since:` 字符串或 cursor 相关日志；3) 改代码后是否已 **重启 `data_fetching` Worker**（见 [§6.3.5「部署注意（必读）」](#63-twitter-订阅抓取twitterapiio--调度--时区)）；4) API 429/5xx 与 `TWITTER_API_KEY`；5) 若频繁出现 `has_next=True` 的 warning，考虑缩小 `SLICE_HOURS`（需改代码）|
+| Twitter 前端时间与 X 官网不一致 | 查 `published_at` 是否曾被伪 UTC 污染；当前以 **Snowflake 校验** 为准，详见 **`docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.9** |
 
 ## 13. 相关文档索引
 
+- **`docs/instructions/TIMEZONE_OPTIMIZATION.md`** — 全站时区契约；Feeds 侧请重点阅读 **§7.9**（twitterapi.io `createdAt` 误标 + Snowflake 修复）及 §7.5.5（YouTube 家用 Worker 写入路径）
 - **[`deployment/local_virtual_service/README.md`](../../deployment/local_virtual_service/README.md)** — YouTube Feed 与 Upload Link 的家用 Worker 权威文档（队列架构、字幕/ASR 降级、Webshare、长视频路由、全部 `.env`）
 - `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md` — 对比：用户上传链路
 - `docs/instructions/NEWS_ANALYSIS_FLOW.md` — 对比：新闻 LLM 分析管线（独立于 Feeds 的 `news` 订阅）
