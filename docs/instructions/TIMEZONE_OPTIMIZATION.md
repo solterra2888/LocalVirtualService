@@ -601,3 +601,48 @@ News / Twitter 走主仓库路径, 不受影响.
 | `processing_stats.timestamp` (本次修复) | 之前传 `.isoformat()` 字符串绕过适配器 → 已改 `utcnow()` 让适配器接管 | ✅ 修复完成 |
 | 任务进度 `logs[].timestamp` (本次修复) | 之前 naive ISO 字符串 → 已改 `utcnow().isoformat()` 带 +00:00 | ✅ 修复完成 |
 | OSS `upload_time` (本次修复) | 之前 naive ISO 字符串 → 已改 `utcnow().isoformat()` | ✅ 修复完成 |
+
+---
+
+## 7.9 twitterapi.io `+0000 mislabel` bug 修复（2026-05-03 补丁）
+
+### 根本原因
+
+twitterapi.io 的搜索 API 偶发将推文的 **HK 本地时间（UTC+8）错误地标记为 `+0000` UTC**。
+
+**典型案例**：SawyerMerritt 推文 `2050726853443281316`
+
+| 来源 | 时间字符串 | 说明 |
+|---|---|---|
+| twitterapi.io 返回（该次错误） | `'Sun May 03 07:59:17 +0000 2026'` | 声称 UTC，实为 HK 07:59 = UTC 23:59 May 2 |
+| X.com 官网 | 7:59 AM（HK 时间） | 即 UTC 23:59 May 2 |
+| 修复前 DB 存储 | `2026-05-03 07:59:17` | 比真实 UTC 多 8h |
+| 修复后 DB 存储 | `2026-05-02 23:59:17` | 正确 UTC |
+
+**确认方法**：twitterapi.io 搜索索引延迟通常数小时。若 `published_at` 距当前抓取时间不足 1 小时，则物理上不可能已被搜索索引命中——此时判定为时区标签错误。
+
+### 影响范围
+
+接近 **UTC 午夜**（`23:xx UTC`）发布的推文最易触发此 bug，因为其对应 HK 时间为次日上午（`07:xx HK`），twitterapi.io 有时将其错误作为下一天 `07:xx +0000` 返回。受影响的样本数据已于 2026-05-03 手动修正（`subscription_content` ID `1082407`, `1082408`）。
+
+### 修复方案
+
+**`backend/services/content_adapters/twitter_adapter.py`**
+
+在解析 `createdAt` 后，增加"发布时间合理性校验"：
+
+```python
+TWITTERAPI_MIN_INDEX_LAG_HOURS = 1
+age_hours = (utcnow() - published_at).total_seconds() / 3600
+if age_hours < TWITTERAPI_MIN_INDEX_LAG_HOURS:
+    corrected = published_at - timedelta(hours=8)
+    if (utcnow() - corrected).total_seconds() / 3600 >= TWITTERAPI_MIN_INDEX_LAG_HOURS:
+        published_at = corrected  # 自动修正 +8h mislabel
+```
+
+- 若修正后仍不合理，保留原值并记录 ERROR 日志以便人工审查
+- 阈值 `TWITTERAPI_MIN_INDEX_LAG_HOURS = 1` 可根据实测调整
+
+### 关键教训
+
+> **不能盲目信任第三方 API 的时区标签。** 即使带有 `+0000` 后缀，也可能是 API 服务端 bug 导致返回了本地时间。任何时间数据入库前都应进行物理合理性校验：发布时间不能比抓取时间还晚，也不能发布后不足 1 小时就出现在搜索结果中。

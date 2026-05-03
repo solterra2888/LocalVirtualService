@@ -4,9 +4,12 @@ Twitter 内容适配器
 """
 
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend.utils.datetime_utils import utcnow, ensure_utc
+from backend.utils.logger import get_logger
 from .base_adapter import BaseContentAdapter
+
+logger = get_logger("twitter_adapter")
 
 
 class TwitterAdapter(BaseContentAdapter):
@@ -63,13 +66,45 @@ class TwitterAdapter(BaseContentAdapter):
         media_urls = self._extract_twitter_media_urls(raw_data)
         
         # 解析发布时间。
-        # 防御性兜底：twitterapi.io 返回的 createdAt 偶发遇到无 tz 标记的字符串，
+        # 防御性兜底1：twitterapi.io 返回的 createdAt 偶发遇到无 tz 标记的字符串，
         # 此时 dateutil.parser 会返回 naive datetime；后续 psycopg2 全局适配器会把
         # naive 视为 HK 本地，再转 UTC 入库 → 比真实时间早 8h。
         # 用 ensure_utc 强制规整为 aware UTC，规避这个坑。fallback 直接走 utcnow()。
+        #
+        # 防御性兜底2（twitterapi.io +0000 mislabel bug）：
+        # twitterapi.io 偶发将推文的 HK 本地时间（UTC+8）错误标记为 +0000 UTC。
+        # 例如实际 UTC 为 2026-05-02T23:59:17+00:00，API 却返回
+        # 'Sun May 03 07:59:17 +0000 2026'（UTC+8 值带 +0000 标签），
+        # 导致存储值比真实 UTC 多 8h。
+        # 检测方法：twitterapi.io 的搜索索引延迟至少数小时，
+        # 若 published_at 距当前时间不足 TWITTERAPI_MIN_INDEX_LAG_HOURS，
+        # 则几乎可以确定是时区标记错误 → 尝试减去 8h 修正。
+        TWITTERAPI_MIN_INDEX_LAG_HOURS = 1  # 低于此阈值即判定为可疑
         created_at_str = raw_data.get('createdAt', '')
         if created_at_str:
             published_at = ensure_utc(self.parse_datetime(created_at_str))
+            now = utcnow()
+            age_hours = (now - published_at).total_seconds() / 3600
+            if age_hours < TWITTERAPI_MIN_INDEX_LAG_HOURS:
+                corrected = published_at - timedelta(hours=8)
+                corrected_age = (now - corrected).total_seconds() / 3600
+                if corrected_age >= TWITTERAPI_MIN_INDEX_LAG_HOURS:
+                    logger.warning(
+                        "twitterapi.io +0000 mislabel detected: correcting published_at",
+                        content_id=raw_data.get('id', ''),
+                        original=published_at.isoformat(),
+                        corrected=corrected.isoformat(),
+                        age_hours_before=round(age_hours, 3),
+                        age_hours_after=round(corrected_age, 3),
+                    )
+                    published_at = corrected
+                else:
+                    logger.error(
+                        "twitterapi.io suspicious published_at: correction also implausible, keeping original",
+                        content_id=raw_data.get('id', ''),
+                        original=published_at.isoformat(),
+                        age_hours=round(age_hours, 3),
+                    )
         else:
             published_at = utcnow()
         
