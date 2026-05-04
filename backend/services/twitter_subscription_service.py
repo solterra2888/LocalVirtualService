@@ -49,11 +49,13 @@ class TwitterSubscriptionService:
             # 默认查询窗口 48h（之前 24h）：twitterapi.io advanced_search 存在 12-24h 索引延迟，
             # 必须留足追赶余量，否则当前调度周期错过的推文很难再被回收。
             self.default_query_hours = int(os.getenv('TWITTER_DEFAULT_QUERY_HOURS', '48'))
-            # 增量定时任务的"最小 lookback 窗口"：twitterapi.io 索引延迟最长 ~12-20h，
-            # 因此即便上次抓取仅在 1h 前，也必须重新扫描过去 24h 才能捕获那期间被新索引的推文。
-            # 重复内容由 ON CONFLICT 自然去重，不会写脏库；代价仅为多几次 HTTP 调用。
-            # 详见 fetch_and_store_tweets 中的注释与 docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md。
-            self.min_lookback_hours = int(os.getenv('TWITTER_MIN_LOOKBACK_HOURS', '24'))
+            # 增量定时任务的"最小 lookback 窗口"：twitterapi.io 索引延迟通常 2-6h，
+            # 因此即便上次抓取仅在 1h 前，也至少重新扫描过去 N 小时以捕获延迟索引的推文。
+            # 默认 6h：34 作者 × 6 切片 × ~1s ≈ 200s，远低于 Celery 780s 软超时；
+            #   若上游 API 索引延迟加重、出现漏抓，可适当调大（最大建议 12h）。
+            # 重复内容由 ON CONFLICT 自然去重，不会写脏库。
+            # 详见 FEEDS_MODULE.md §6.3 和 SCHEDULER_DEVELOPMENT_GUIDE.md。
+            self.min_lookback_hours = int(os.getenv('TWITTER_MIN_LOOKBACK_HOURS', '6'))
             self.test_fetch_query_hours = 12  # Test Fetch 固定使用12小时
             self.initial_fetch_hours = int(os.getenv('TWITTER_INITIAL_FETCH_HOURS', '168'))  # 首次获取：7天（168小时）
             self.max_tweets_per_request = int(os.getenv('TWITTER_MAX_TWEETS_PER_REQUEST', '20'))
@@ -315,7 +317,7 @@ class TwitterSubscriptionService:
               - 但很多 published_at ∈ [T-12h, T] 的推文要到现在才被索引
               - 这些推文永远不会再进抓取窗口 → 永久丢失
 
-            根治方案：始终保留 `min_lookback_hours`（默认 24h）的回看窗口，
+            根治方案：始终保留 `min_lookback_hours`（默认 6h）的回看窗口，
             足以覆盖 API 的索引延迟。重复内容由 subscription_content
             (channel_type, content_id) UNIQUE + ON CONFLICT DO UPDATE 去重，
             代价仅为每次多扫几页 HTTP 请求。
@@ -603,7 +605,8 @@ class TwitterSubscriptionService:
             
             total_api_calls_saved = 0
             
-            # 收集本次真正新插入的 subscription_content.id, 供循环结束后触发 Feeds 自动打标
+            # 收集本次真正新插入的 subscription_content.id
+            # 注意：打标现在在 per-author 循环内 commit 后立即派发，不再依赖循环全部结束
             all_new_content_ids: List[int] = []
             
             for author, author_subs in aggregated.items():
@@ -664,6 +667,8 @@ class TwitterSubscriptionService:
                     # 批量去重：先查哪些 tweet 已存在，跳过无需写库的
                     new_count = 0
                     existing_count = 0
+                    # 本作者本轮新插入的 subscription_content.id（仅用于 commit 后立即打标）
+                    author_new_ids: List[int] = []
                     
                     if tweets:
                         tweet_ids = [str(t.get('id', '')) for t in tweets if t.get('id')]
@@ -691,6 +696,7 @@ class TwitterSubscriptionService:
                             if is_new:
                                 new_count += 1
                                 if new_content_id is not None:
+                                    author_new_ids.append(new_content_id)
                                     all_new_content_ids.append(new_content_id)
                             else:
                                 existing_count += 1
@@ -719,7 +725,25 @@ class TwitterSubscriptionService:
                                                   status='success')
                     
                     conn.commit()
-                    
+
+                    # ── 关键修复：每作者 commit 后立即派发打标，不等所有作者结束 ──
+                    # 原来放在循环外会导致 SoftTimeLimitExceeded / SIGKILL 时打标永远丢失
+                    if author_new_ids:
+                        try:
+                            from backend.tasks.file_tasks import trigger_auto_feed_tagging
+                            trigger_auto_feed_tagging(author_new_ids, delay=2)
+                            logger.info(
+                                "已派发 Feeds 自动打标",
+                                author=author,
+                                new_content_count=len(author_new_ids),
+                            )
+                        except Exception as tag_err:
+                            logger.error(
+                                "派发 Feeds 打标失败（不影响推文抓取）",
+                                author=author,
+                                exception=str(tag_err),
+                            )
+
                     time.sleep(2)
                     
                 except Exception as e:
@@ -757,22 +781,6 @@ class TwitterSubscriptionService:
             }
             
             logger.info("推文获取并存储完成", **{k: v for k, v in result.items() if k != 'author_results'})
-            
-            # 触发 Feeds 自动打标 (仅对本次真正新插入的内容生效; 失败静默)
-            # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §6.4
-            if all_new_content_ids:
-                try:
-                    from backend.tasks.file_tasks import trigger_auto_feed_tagging
-                    trigger_auto_feed_tagging(all_new_content_ids, delay=2)
-                    logger.info(
-                        "已派发 Feeds 自动打标",
-                        new_content_count=len(all_new_content_ids),
-                    )
-                except Exception as e:
-                    logger.error(
-                        "派发 Feeds 自动打标失败 (不影响推文抓取结果)",
-                        exception=str(e),
-                    )
             
             return result
             
