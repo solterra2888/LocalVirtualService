@@ -53,6 +53,7 @@ import {
   SubscriptionContent,
 } from '../services/subscriptions';
 import { FEED_THEME_COLORS as THEME_COLORS } from '../components/feed/feedTheme';
+import { aiTagChipStyle } from '../components/shared/aiTagChipStyles';
 import {
   getFeedListHeadline,
   getHeatLevelConfig,
@@ -60,6 +61,7 @@ import {
   playNewItemsNotificationSound,
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
+  subscriptionContentMatchesSearchQuery,
 } from '../components/feed/feedUtils';
 import {
   getChannelIcon,
@@ -133,6 +135,7 @@ const FeedReaderPageInner: React.FC = () => {
   // 🔍 过滤器：Active / Disabled
   const [subscriptionFilter, setSubscriptionFilter] = useState<'active' | 'disabled'>('active');
   const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
+  const [contentSearchQuery, setContentSearchQuery] = useState('');
 
   // ☑️ Batch mode
   const [batchMode, setBatchMode] = useState(false);
@@ -154,6 +157,12 @@ const FeedReaderPageInner: React.FC = () => {
       ),
     [statusFilteredSubscriptions, feedChannelTypeFilter]
   );
+
+  const filteredContents = useMemo(() => {
+    const q = contentSearchQuery.trim();
+    if (!q) return contents;
+    return contents.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
+  }, [contents, contentSearchQuery]);
 
   /** 切换 Active/Disabled 或频道类型时，若当前选中不在列表内则改选第一项 */
   useEffect(() => {
@@ -232,6 +241,10 @@ const FeedReaderPageInner: React.FC = () => {
 
   // 加载选中订阅的内容（仅依赖 subscription id，避免 markAsRead 更新 unread_count 时触发重新加载造成循环）
   const selectedSubscriptionId = selectedSubscription?.id;
+  useEffect(() => {
+    setContentSearchQuery('');
+  }, [selectedSubscriptionId]);
+
   useEffect(() => {
     if (selectedSubscriptionId != null) {
       loadContents(selectedSubscriptionId);
@@ -508,6 +521,23 @@ const FeedReaderPageInner: React.FC = () => {
     }
   };
 
+  const searchActive = Boolean(contentSearchQuery.trim());
+  useEffect(() => {
+    if (!searchActive) return;
+    if (!selectedContent) return;
+    if (filteredContents.some((c) => c.id === selectedContent.id)) return;
+    if (filteredContents.length > 0) {
+      const next = filteredContents[0];
+      setSelectedContent(next);
+      if (!next.is_read) {
+        void markAsRead(next.id);
+      }
+    } else {
+      setSelectedContent(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markAsRead closes over subscription; sync only on filter inputs
+  }, [searchActive, filteredContents, selectedContent?.id, contents]);
+
   const scrollFeedListItemIntoView = useCallback((contentId: number) => {
     requestAnimationFrame(() => {
       document
@@ -518,10 +548,10 @@ const FeedReaderPageInner: React.FC = () => {
 
   const feedNavRef = React.useRef({
     selectedSubscription,
-    contents,
+    contents: filteredContents,
     selectedContent,
   });
-  feedNavRef.current = { selectedSubscription, contents, selectedContent };
+  feedNavRef.current = { selectedSubscription, contents: filteredContents, selectedContent };
 
   const handleSelectContentRef = React.useRef(handleSelectContent);
   handleSelectContentRef.current = handleSelectContent;
@@ -1230,6 +1260,7 @@ const FeedReaderPageInner: React.FC = () => {
                       selectedSubscription.channel_identifier}
                   </Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
+                    {searchActive ? `${filteredContents.length} / ` : ''}
                     {contents.length} articles
                   </Text>
                   {contents.length > 0 && (
@@ -1244,6 +1275,14 @@ const FeedReaderPageInner: React.FC = () => {
                       </Text>
                     </div>
                   )}
+                  <Input.Search
+                    allowClear
+                    placeholder="Search articles…"
+                    value={contentSearchQuery}
+                    onChange={(e) => setContentSearchQuery(e.target.value)}
+                    aria-label="Search bar"
+                    style={{ marginTop: 10 }}
+                  />
                 </Space>
               </div>
 
@@ -1323,10 +1362,28 @@ const FeedReaderPageInner: React.FC = () => {
                     }
                   />
                 </div>
+              ) : filteredContents.length === 0 ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: 'calc(100vh - 300px)',
+                    padding: 16,
+                  }}
+                >
+                  <Empty
+                    description={
+                      <span style={{ color: themeColors.textSecondary }}>
+                        No articles match your search
+                      </span>
+                    }
+                  />
+                </div>
               ) : (
                 <>
                   <List
-                    dataSource={contents}
+                    dataSource={filteredContents}
                     renderItem={(content) => {
                       const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(content);
                       return (
@@ -1449,16 +1506,11 @@ const FeedReaderPageInner: React.FC = () => {
                             && content.tags.sector !== '未分类'
                             && content.tags.sector_en !== 'Uncategorized'
                             && (content.tags.tickers?.length || content.tags.sector) && (
-                              <Space size={[4, 4]} wrap style={{ marginTop: 4 }}>
+                              <Space size={[8, 8]} wrap style={{ marginTop: 4 }}>
                                 {content.tags.sector && (
                                   <Tag
-                                    color="blue"
-                                    style={{
-                                      fontSize: 10,
-                                      lineHeight: '14px',
-                                      padding: '0 5px',
-                                      margin: 0,
-                                    }}
+                                    bordered={false}
+                                    style={aiTagChipStyle('sector', themeMode)}
                                   >
                                     {content.tags.sector}
                                   </Tag>
@@ -1468,13 +1520,8 @@ const FeedReaderPageInner: React.FC = () => {
                                     {content.tags.tickers.slice(0, 2).map((t) => (
                                       <Tag
                                         key={t}
-                                        color="magenta"
-                                        style={{
-                                          fontSize: 10,
-                                          lineHeight: '14px',
-                                          padding: '0 5px',
-                                          margin: 0,
-                                        }}
+                                        bordered={false}
+                                        style={aiTagChipStyle('ticker', themeMode)}
                                       >
                                         {t}
                                       </Tag>
@@ -1482,11 +1529,9 @@ const FeedReaderPageInner: React.FC = () => {
                                     {content.tags.tickers.length > 2 && (
                                       <Tooltip title={content.tags.tickers.slice(2).join(', ')}>
                                         <Tag
+                                          bordered={false}
                                           style={{
-                                            fontSize: 10,
-                                            lineHeight: '14px',
-                                            padding: '0 5px',
-                                            margin: 0,
+                                            ...aiTagChipStyle('overflow', themeMode),
                                             cursor: 'default',
                                           }}
                                         >
@@ -1505,7 +1550,7 @@ const FeedReaderPageInner: React.FC = () => {
                   />
                   
                   {/* 🔥 加载更多按钮 */}
-                  {contents.length > 0 && hasMoreContents && (
+                  {filteredContents.length > 0 && hasMoreContents && (
                     <div style={{ textAlign: 'center', padding: '16px' }}>
                       <Button
                         type="link"
@@ -1519,7 +1564,7 @@ const FeedReaderPageInner: React.FC = () => {
                   )}
                   
                   {/* 🎯 没有更多内容提示 */}
-                  {contents.length > 0 && !hasMoreContents && (
+                  {filteredContents.length > 0 && !hasMoreContents && (
                     <div style={{ textAlign: 'center', padding: '16px' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         No more content

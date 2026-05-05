@@ -219,15 +219,15 @@ class UserTemplateSeederService:
 
         clone_data: Dict[str, Any] = {
             "template_code": f"user_{user_id}_{module_code}",
-            "template_name": f"{sys_tpl.get('template_name', module_code)} (我的)",
+            "template_name": f"{sys_tpl.get('template_name', module_code)} (My)",
             "module_code": module_code,
             "scope": "user",
             "is_active": True,
             "is_default": False,
             "is_public": False,
             "description": (
-                f"克隆自系统默认 {sys_tpl.get('template_code')}, "
-                "可在 My Templates 自由修改"
+                f"Cloned from system default {sys_tpl.get('template_code')}. "
+                "Freely editable in My Templates."
             ),
         }
         for field in self._CLONE_FIELDS:

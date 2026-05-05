@@ -36,7 +36,8 @@ import type {
   SubscriptionContentTagsLite,
 } from '../../services/subscriptions';
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
-import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
+import ReportTickerTags from '../ReportTickerTags';
+import { aiTagChipStyle, AI_TAG_CHIP_FONT_SIZE } from '../shared/aiTagChipStyles';
 // PR-7: 个性化 summary picker
 import UploadAnalysisTemplatePicker, {
   UploadAnalysisTemplatePickerValue,
@@ -572,7 +573,15 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 )}
                 {isLowConfidence && (
                   <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
-                    <Tag color="warning" style={{ fontSize: 10, lineHeight: '14px', padding: '0 5px', margin: 0 }}>
+                    <Tag
+                      color="warning"
+                      style={{
+                        fontSize: AI_TAG_CHIP_FONT_SIZE,
+                        lineHeight: '12px',
+                        padding: '0 4px',
+                        margin: 0,
+                      }}
+                    >
                       low conf.
                     </Tag>
                   </Tooltip>
@@ -618,13 +627,13 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
 
               {/* 行业 / 子行业 badges (未分类样式灰化) */}
               {!isUncategorized && displayTags && (
-                <Space size={[4, 4]} wrap>
-                  <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+                <Space size={[8, 8]} wrap>
+                  <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
                     {displayTags.sector}
                     {displayTags.sector_en ? ` / ${displayTags.sector_en}` : ''}
                   </Tag>
                   {displayTags.industry && displayTags.industry !== displayTags.sector && (
-                    <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>
+                    <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
                       {displayTags.industry}
                       {displayTags.industry_en ? ` / ${displayTags.industry_en}` : ''}
                     </Tag>
@@ -639,12 +648,14 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
 
               {/* Tickers (复用 ReportTickerTags 组件) */}
               {displayTags && displayTags.tickers && displayTags.tickers.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>Tickers:</Text>
                   <ReportTickerTags
                     tickers={displayTags.tickers}
-                    tagColor="magenta"
-                    tagStyle={PC_INFO_TAGS_TAG_STYLE}
+                    tagStyle={aiTagChipStyle('ticker', themeMode)}
+                    overflowTagStyle={aiTagChipStyle('overflow', themeMode)}
+                    tagBordered={false}
+                    spaceSize={[8, 8]}
                     maxVisible={6}
                   />
                 </div>
@@ -652,12 +663,14 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
 
               {/* Concepts (chips) */}
               {displayTags && displayTags.concepts && displayTags.concepts.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
                     <BulbOutlined /> Concepts:
                   </Text>
                   {displayTags.concepts.map((c) => (
-                    <Tag key={c} style={{ fontSize: 11, margin: 0 }}>{c}</Tag>
+                    <Tag key={c} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
+                      {c}
+                    </Tag>
                   ))}
                 </div>
               )}

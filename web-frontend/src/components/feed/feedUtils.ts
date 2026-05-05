@@ -77,3 +77,23 @@ export function getHeatLevelConfig(heatLevel?: number) {
       return { color: '#8c8c8c', text: 'Low heat', bgColor: 'rgba(140, 140, 140, 0.1)' };
   }
 }
+
+/** Client-side filter for feed article lists (title, body, author, tags, etc.). */
+export function subscriptionContentMatchesSearchQuery(c: SubscriptionContent, rawQuery: string): boolean {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return true;
+  const hay: string[] = [
+    c.title,
+    c.content,
+    c.author_name,
+    c.author_identifier,
+    getFeedListHeadline(c),
+    c.personalized_summary ?? undefined,
+    c.tags?.summary ?? undefined,
+    ...(c.tags?.tickers ?? []),
+    ...(c.tags?.concepts ?? []),
+    c.retweeted_content,
+    c.quoted_content,
+  ].filter((s): s is string => Boolean(s && String(s).trim()));
+  return hay.some((s) => String(s).toLowerCase().includes(q));
+}

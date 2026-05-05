@@ -13,6 +13,7 @@ import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
+import { aiTagChipStyle } from '../shared/aiTagChipStyles';
 
 interface DailyCardProps {
   item: DailyFeedItem;
@@ -118,34 +119,15 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
                 onTickerClick(ticker);
               }}
               style={{
-                fontSize: 11,
-                fontWeight: 600,
-                lineHeight: 1.4,
-                padding: '2px 7px',
-                borderRadius: 3,
-                background: colors.tickerBg,
-                color: colors.tickerFg,
+                ...aiTagChipStyle('ticker', themeMode),
                 cursor: onTickerClick ? 'pointer' : 'default',
-                whiteSpace: 'nowrap',
               }}
             >
               {ticker.replace(/\.US$/, '')}
             </span>
           ))}
           {item.concepts.slice(0, 6).map((concept) => (
-            <span
-              key={`c-${concept}`}
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                lineHeight: 1.4,
-                padding: '2px 7px',
-                borderRadius: 3,
-                background: colors.conceptBg,
-                color: colors.conceptFg,
-                whiteSpace: 'nowrap',
-              }}
-            >
+            <span key={`c-${concept}`} style={aiTagChipStyle('concept', themeMode)}>
               {concept}
             </span>
           ))}

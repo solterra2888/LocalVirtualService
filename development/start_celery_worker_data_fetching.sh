@@ -21,7 +21,7 @@ dev_check_celery || exit 1
 
 echo ""
 echo -e "${CYAN}🚀 启动配置:${NC}"
-echo "   - 队列: data_fetching"
+echo "   - 队列: data_fetching, youtube_fetching"
 if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "   - 进程池: solo（macOS 上避免 prefork 段错误）"
 else
@@ -36,7 +36,7 @@ echo ""
 # macOS: 见 start_celery_worker_dev.sh 说明；solo 池不 fork 子进程。
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 
-CELERY_EXTRA_ARGS=(-Q data_fetching --loglevel="${CELERY_LOG_LEVEL:-info}")
+CELERY_EXTRA_ARGS=(-Q data_fetching,youtube_fetching --loglevel="${CELERY_LOG_LEVEL:-info}")
 if [[ "$(uname -s)" == "Darwin" ]]; then
   CELERY_EXTRA_ARGS+=(--pool=solo)
 else

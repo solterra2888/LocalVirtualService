@@ -89,7 +89,8 @@ import MarkdownRenderer from '../components/MarkdownRenderer';
 import IBTradingReportView, { isIBReportContent, IBReportData } from '../components/IBTradingReportView';
 import TradeReviewView from '../components/TradeReviewView';
 import { downloadElementAsPDF } from '../utils/pdfDownload';
-import ReportTickerTags, { parseReportTickers, PC_INFO_TAGS_TAG_STYLE } from '../components/ReportTickerTags';
+import ReportTickerTags, { parseReportTickers } from '../components/ReportTickerTags';
+import { aiTagChipStyle, AI_TAG_CHIP_BASE } from '../components/shared/aiTagChipStyles';
 import TemplateSelector from '../components/TemplateSelector';
 import TemplateVariablesEditor from '../components/TemplateVariablesEditor';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
@@ -4100,6 +4101,7 @@ export const ExecutionDetailsPanel: React.FC<{
   getDisplayAgentName: (name: string) => string;
   onExecutionRefresh?: () => void;  // 当检测到 processing/AI 完成时，供父组件刷新 Basic Information
 }> = ({ execution, themeColors, isDark = false, getDisplayAgentName, onExecutionRefresh }) => {
+  const tagThemeMode = isDark ? 'dark' : 'light';
   const [fileId, setFileId] = useState<number | null>(null);
   const [fileStatus, setFileStatus] = useState<string | null>(null);
   const [fileErrorMessage, setFileErrorMessage] = useState<string | null>(null);
@@ -4442,12 +4444,20 @@ export const ExecutionDetailsPanel: React.FC<{
           <Descriptions.Item label="User">{execution.username}</Descriptions.Item>
           <Descriptions.Item label="Document Name">{execution.first_display_name || execution.first_filename || '-'}</Descriptions.Item>
           <Descriptions.Item label="Document Type">
-            {execution.first_file_type ? <Tag color="blue">{execution.first_file_type.toUpperCase()}</Tag> : '-'}
+            {execution.first_file_type ? (
+              <Tag color="blue" bordered={false} style={AI_TAG_CHIP_BASE}>
+                {execution.first_file_type.toUpperCase()}
+              </Tag>
+            ) : (
+              '-'
+            )}
           </Descriptions.Item>
           <Descriptions.Item label="Folder Type">
             <Tooltip title="Automatic folder assignment from auto-classify (classify_file_content_task). Shows Uncategorized when the model did not match any of your folders.">
               {execution.folder_name ? (
-                <Tag color="geekblue">{execution.folder_name}</Tag>
+                <Tag color="geekblue" bordered={false} style={AI_TAG_CHIP_BASE}>
+                  {execution.folder_name}
+                </Tag>
               ) : (
                 <span style={{ color: themeColors.textMuted }}>Uncategorized</span>
               )}
@@ -4465,14 +4475,24 @@ export const ExecutionDetailsPanel: React.FC<{
           </Descriptions.Item>
           <Descriptions.Item label="Status">
             <Tooltip title={statusItem.tooltip}>
-              <Tag color={statusItem.color as any}>{statusItem.text}</Tag>
+              <Tag color={statusItem.color as any} bordered={false} style={AI_TAG_CHIP_BASE}>
+                {statusItem.text}
+              </Tag>
             </Tooltip>
           </Descriptions.Item>
           {(execution.llm_model || execution.llm_provider) && (
             <Descriptions.Item label="Analysis Model">
               <Space size={4}>
-                {execution.llm_provider && <Tag color="blue">{execution.llm_provider}</Tag>}
-                {execution.llm_model && <Tag color="cyan">{execution.llm_model}</Tag>}
+                {execution.llm_provider && (
+                  <Tag color="blue" bordered={false} style={AI_TAG_CHIP_BASE}>
+                    {execution.llm_provider}
+                  </Tag>
+                )}
+                {execution.llm_model && (
+                  <Tag color="cyan" bordered={false} style={AI_TAG_CHIP_BASE}>
+                    {execution.llm_model}
+                  </Tag>
+                )}
               </Space>
             </Descriptions.Item>
           )}
@@ -4577,17 +4597,25 @@ export const ExecutionDetailsPanel: React.FC<{
           >
             <Descriptions.Item label="Sector">
               <Space size={[4, 4]} wrap>
-                <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.sector}</Tag>
+                <Tag bordered={false} style={aiTagChipStyle('sector', tagThemeMode)}>
+                  {fileTags.sector}
+                </Tag>
                 {fileTags.sector_en && (
-                  <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.sector_en}</Tag>
+                  <Tag bordered={false} style={aiTagChipStyle('sector', tagThemeMode)}>
+                    {fileTags.sector_en}
+                  </Tag>
                 )}
               </Space>
             </Descriptions.Item>
             <Descriptions.Item label="Industry">
               <Space size={[4, 4]} wrap>
-                <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.industry}</Tag>
+                <Tag bordered={false} style={aiTagChipStyle('sector', tagThemeMode)}>
+                  {fileTags.industry}
+                </Tag>
                 {fileTags.industry_en && (
-                  <Tag style={PC_INFO_TAGS_TAG_STYLE}>{fileTags.industry_en}</Tag>
+                  <Tag bordered={false} style={aiTagChipStyle('sector', tagThemeMode)}>
+                    {fileTags.industry_en}
+                  </Tag>
                 )}
               </Space>
             </Descriptions.Item>
@@ -4595,7 +4623,7 @@ export const ExecutionDetailsPanel: React.FC<{
               <Descriptions.Item label="Stock Tickers">
                 <Space size={[4, 4]} wrap>
                   {fileTags.tickers.map((ticker: string) => (
-                    <Tag key={ticker} style={PC_INFO_TAGS_TAG_STYLE}>
+                    <Tag key={ticker} bordered={false} style={aiTagChipStyle('ticker', tagThemeMode)}>
                       {ticker}
                     </Tag>
                   ))}
@@ -4606,7 +4634,7 @@ export const ExecutionDetailsPanel: React.FC<{
               <Descriptions.Item label="Concepts">
                 <Space size={[4, 4]} wrap>
                   {fileTags.concepts.map((concept: string) => (
-                    <Tag key={concept} style={PC_INFO_TAGS_TAG_STYLE}>
+                    <Tag key={concept} bordered={false} style={aiTagChipStyle('concept', tagThemeMode)}>
                       {concept}
                     </Tag>
                   ))}
@@ -4618,12 +4646,13 @@ export const ExecutionDetailsPanel: React.FC<{
                 <Space size={4}>
                   <Tag
                     color={fileTags.confidence > 0.8 ? 'success' : fileTags.confidence > 0.5 ? 'warning' : 'error'}
+                    bordered={false}
                     icon={
                       fileTags.confidence > 0.8 ? (
                         <CheckCircleOutlined style={{ fontSize: 10 }} />
                       ) : undefined
                     }
-                    style={PC_INFO_TAGS_TAG_STYLE}
+                    style={AI_TAG_CHIP_BASE}
                   >
                     {(fileTags.confidence * 100).toFixed(0)}%
                   </Tag>

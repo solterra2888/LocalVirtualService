@@ -58,7 +58,8 @@ import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
-import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../ReportTickerTags';
+import ReportTickerTags from '../ReportTickerTags';
+import { aiTagChipStyle } from '../shared/aiTagChipStyles';
 
 const { Title, Text } = Typography;
 
@@ -337,14 +338,14 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
 
           {(sector || industry) && (
             <div style={{ marginTop: 8 }}>
-              <Space size={[4, 4]} wrap>
+              <Space size={[8, 8]} wrap>
                 {sector && (
-                  <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+                  <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
                     {sector}
                   </Tag>
                 )}
                 {industry && industry !== sector && (
-                  <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>
+                  <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
                     {industry}
                   </Tag>
                 )}
@@ -367,8 +368,9 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               </Text>
               <ReportTickerTags
                 tickers={tickers}
-                tagColor="magenta"
-                tagStyle={PC_INFO_TAGS_TAG_STYLE}
+                tagBordered={false}
+                tagStyle={aiTagChipStyle('ticker', themeMode)}
+                overflowTagStyle={aiTagChipStyle('overflow', themeMode)}
                 maxVisible={6}
               />
             </div>
@@ -388,7 +390,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
                 Concepts:
               </Text>
               {concepts.slice(0, 8).map((c) => (
-                <Tag key={c} style={{ fontSize: 11, margin: 0 }}>
+                <Tag key={c} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
                   {c}
                 </Tag>
               ))}

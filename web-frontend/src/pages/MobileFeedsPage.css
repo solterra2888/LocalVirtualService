@@ -70,6 +70,15 @@
     max(12px, env(safe-area-inset-right, 0px));
 }
 
+.mobile-feeds-search-wrap {
+  padding: 0 max(12px, env(safe-area-inset-left, 0px)) 10px max(12px, env(safe-area-inset-right, 0px));
+}
+
+.mobile-feeds-search-wrap .ant-input-search .ant-input,
+.mobile-feeds-search-wrap .ant-input-affix-wrapper {
+  border-radius: 10px;
+}
+
 /* Pill-style All / Unread — sits on page bg */
 .mobile-feeds-segment .ant-segmented {
   background: var(--mobile-feeds-box-muted, #f0f0f0);

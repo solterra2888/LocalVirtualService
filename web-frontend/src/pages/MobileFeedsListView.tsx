@@ -58,6 +58,7 @@ import {
   normalizeTwitterUsername,
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
+  subscriptionContentMatchesSearchQuery,
 } from '../components/feed/feedUtils';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import { getModalStyles } from '../utils/modalStyles';
@@ -109,6 +110,7 @@ const MobileFeedsListView: React.FC = () => {
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [contentSearchQuery, setContentSearchQuery] = useState('');
 
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -315,6 +317,17 @@ const MobileFeedsListView: React.FC = () => {
     });
   }, [filteredSubscriptions, setSelectedSubscription]);
 
+  const selectedSubscriptionId = selectedSubscription?.id;
+  useEffect(() => {
+    setContentSearchQuery('');
+  }, [selectedSubscriptionId]);
+
+  const filteredContents = useMemo(() => {
+    const q = contentSearchQuery.trim();
+    if (!q) return contents;
+    return contents.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
+  }, [contents, contentSearchQuery]);
+
   const toolbarSubline = (sub: Subscription | null) => {
     if (!sub) return null;
     if (sub.channel_type === 'news') {
@@ -422,6 +435,18 @@ const MobileFeedsListView: React.FC = () => {
         />
       </div>
 
+      {selectedSubscription && (
+        <div className="mobile-feeds-search-wrap">
+          <Input.Search
+            allowClear
+            placeholder="Search articles…"
+            value={contentSearchQuery}
+            onChange={(e) => setContentSearchQuery(e.target.value)}
+            aria-label="Search bar"
+          />
+        </div>
+      )}
+
       {loading && subscriptions.length === 0 ? (
         <div className="mobile-feeds-spin-wrap">
           <Spin size="large" />
@@ -452,9 +477,17 @@ const MobileFeedsListView: React.FC = () => {
             }
           />
         </div>
+      ) : filteredContents.length === 0 ? (
+        <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+          <Empty
+            description={
+              <span style={{ color: themeColors.textSecondary }}>No articles match your search</span>
+            }
+          />
+        </div>
       ) : (
         <div className="mobile-feeds-list-scroll">
-          {contents.map((c) => {
+          {filteredContents.map((c) => {
             const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(c);
             return (
             <div

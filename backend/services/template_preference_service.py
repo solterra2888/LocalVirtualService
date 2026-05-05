@@ -78,128 +78,128 @@ class TemplatePreferenceService:
 
     # 所有可注册模块的元信息（用于前端展示与 LLMTemplateResolver）
     MODULE_REGISTRY: List[Dict[str, Any]] = [
-        # —— Daily Reports —————————————————————————————————————————————————
+        # —— Daily Reports ——————————————————————————————————————————————————
         {
             'module_code': 'twitter_phase1',
-            'module_name': 'Twitter 作者摘要',
-            'description': '按作者汇总当日推文（Phase 1，全局共享，不可定制）',
+            'module_name': 'Twitter Daily Report — Phase 1',
+            'description': 'Aggregates tweets per author into a structured daily summary (Phase 1, globally shared, not user-customizable).',
             'configurable': False,
             'default_template_code': 'twitter_daily_phase1_default',
         },
         {
             'module_code': 'twitter_phase2',
-            'module_name': 'Twitter 日报',
-            'description': '综合多位作者摘要生成日报（Phase 2，按用户）',
+            'module_name': 'Twitter Daily Report — Phase 2',
+            'description': 'Combines Phase 1 per-author summaries into your personalized daily digest (per-user, customizable).',
             'configurable': True,
             'default_template_code': 'twitter_daily_phase2_default',
         },
         {
             'module_code': 'youtube_phase1',
-            'module_name': 'YouTube 频道摘要',
-            'description': '按频道汇总当日视频（Phase 1，全局共享，不可定制）',
+            'module_name': 'YouTube Daily Report — Phase 1',
+            'description': 'Aggregates videos per channel into a structured daily summary (Phase 1, globally shared, not user-customizable).',
             'configurable': False,
             'default_template_code': 'youtube_daily_phase1_default',
         },
         {
             'module_code': 'youtube_phase2',
-            'module_name': 'YouTube 日报',
-            'description': '综合多个频道摘要生成日报（Phase 2，按用户）',
+            'module_name': 'YouTube Daily Report — Phase 2',
+            'description': 'Combines Phase 1 per-channel summaries into your personalized daily video digest (per-user, customizable).',
             'configurable': True,
             'default_template_code': 'youtube_daily_phase2_default',
         },
-        # —— File 模块 ——————————————————————————————————————————————————————
+        # —— File modules ——————————————————————————————————————————————————
         {
             'module_code': 'file_analysis',
-            'module_name': '文件内容分析 (通用)',
-            'description': '使用 LLM 模板深度分析上传的文档/网页/文本内容（per-user）',
+            'module_name': 'Document Analysis',
+            'description': 'Deep structured analysis for uploaded documents, web pages, and text notes using your personal LLM template (per-user).',
             'configurable': True,
             'default_template_code': 'file_analysis_v1',
         },
         {
-            # PR-A 新增: audio_analysis 从 file_analysis 模块拆出, 独立 per-user
+            # PR-A: audio_analysis split out from file_analysis as its own per-user module
             'module_code': 'audio_analysis',
-            'module_name': '音频内容分析',
-            'description': '对上传音频文件转写内容做结构化分析（per-user）',
+            'module_name': 'Audio / Meeting Analysis',
+            'description': 'Structured analysis of audio transcription content — podcasts, meetings, YouTube videos (per-user).',
             'configurable': True,
             'default_template_code': 'audio_analysis_v1',
         },
         {
-            # 2026-05: Upload Sources YouTube Link 深度分析，独立于 Feeds youtube_summary
+            # 2026-05: Upload Sources YouTube Link deep analysis, independent from Feeds youtube_summary
             'module_code': 'youtube_analysis',
-            'module_name': 'YouTube 视频深度分析',
-            'description': 'Upload Sources YouTube Link 的深度分析（per-user，独立于 Feeds 摘要模块）',
+            'module_name': 'YouTube Upload Analysis',
+            'description': 'Deep analysis for YouTube links uploaded via Upload Sources (per-user). Independent from the Feeds youtube_summary module.',
             'configurable': True,
             'default_template_code': 'youtube_analysis_v1',
         },
         {
             'module_code': 'file_tagging',
-            'module_name': '文件自动打标',
-            'description': '为上传的文件提取行业分类、ticker、概念等结构化标签（per-user）',
+            'module_name': 'File Auto-Tagging',
+            'description': 'Extracts structured financial tags — sector, industry, tickers, concepts — from uploaded file content (per-user).',
             'configurable': True,
             'default_template_code': 'content_tag_v1',
         },
         {
-            # PR-A: 转 SYSTEM_ONLY, 仅 admin 可调
+            # PR-A: converted to SYSTEM_ONLY, admin-only
             'module_code': 'file_naming',
-            'module_name': '文件自动命名',
-            'description': '基于内容为文件生成简洁的展示名（系统级）',
+            'module_name': 'File Auto-Naming',
+            'description': 'Generates a concise display name for uploaded files based on content (system-level, admin-only).',
             'configurable': False,
             'default_template_code': 'auto_name_v1',
         },
         {
-            # PR-A: 转 SYSTEM_ONLY, 仅 admin 可调
+            # PR-A: converted to SYSTEM_ONLY, admin-only
             'module_code': 'file_classify',
-            'module_name': '文件自动归类',
-            'description': '把文件归入用户预定义的文件夹中最匹配的一个（系统级）',
+            'module_name': 'File Auto-Classification',
+            'description': 'Assigns uploaded files to the best-matching folder in the user\'s library (system-level, admin-only).',
             'configurable': False,
             'default_template_code': 'auto_classify_v1',
         },
-        # —— Feed 模块 ——————————————————————————————————————————————————————
+        # —— Feed modules ——————————————————————————————————————————————————
         {
-            # PR-A: 转 SYSTEM_ONLY (hybrid: tag 全局共享, 仅 admin 可调)
+            # PR-A: converted to SYSTEM_ONLY (hybrid: global tags, admin-only)
             'module_code': 'feed_tagging',
-            'module_name': 'Feed 内容打标',
-            'description': '为 Twitter / YouTube feed 单条内容生成标签（全局共享，仅 admin 可调）',
+            'module_name': 'Feed Auto-Tagging',
+            'description': 'Generates structured tags for individual Twitter/YouTube feed items (globally shared, admin-only).',
             'configurable': False,
             'default_template_code': 'content_tag_feeds_v1',
         },
         {
-            # PR-A: 已 seed feed_summary_v1 系统默认模板
+            # PR-A: feed_summary_v1 system seed already created
             'module_code': 'feed_summary',
-            'module_name': 'Feed 个性化摘要 (Twitter)',
-            'description': '用户主动 Re-summarize Twitter feed 单条内容（per-user 视图）',
+            'module_name': 'Twitter Feed Summary',
+            'description': 'Generates a personalized summary for individual Twitter feed items (per-user, results visible only to you).',
             'configurable': True,
             'default_template_code': 'feed_summary_v1',
         },
         {
-            # PR-A 新增: per-video per-user 摘要 (区别于 feed_summary 偏 Twitter)
+            # PR-A: per-video per-user summary (distinct from feed_summary which is Twitter-focused)
             'module_code': 'youtube_summary',
-            'module_name': 'YouTube 视频个性化摘要',
-            'description': '对单条 YouTube 视频生成 per-user 摘要（per-video，懒触发）',
+            'module_name': 'YouTube Feed Summary',
+            'description': 'Generates a per-user personalized summary for individual YouTube feed videos (per-video, Feeds only).',
             'configurable': True,
             'default_template_code': 'youtube_summary_v1',
         },
-        # —— News 模块 ——————————————————————————————————————————————————————
+        # —— News modules ——————————————————————————————————————————————————
         {
-            # PR-A: 转 SYSTEM_ONLY, 全局共享, 仅 admin 可调
+            # PR-A: converted to SYSTEM_ONLY, globally shared, admin-only
             'module_code': 'news_summary',
-            'module_name': '新闻摘要',
-            'description': '对单条新闻生成核心要点 + 市场影响摘要（系统级）',
+            'module_name': 'News Summary',
+            'description': 'Generates a key-points summary and market impact analysis for individual news items (system-level, admin-only).',
             'configurable': False,
             'default_template_code': 'news_summary_v1',
         },
         {
             'module_code': 'news_classification',
-            'module_name': '新闻分类维度',
-            'description': '提取新闻的主题/事件/影响范围/紧急度等结构化分类（系统级）',
+            'module_name': 'News Classification',
+            'description': 'Extracts structured classification labels from news — theme, event type, impact scope, urgency (system-level, admin-only).',
             'configurable': False,
             'default_template_code': 'news_classification',
         },
-        # —— Theme 模块 ——————————————————————————————————————————————————————
+        # —— Theme modules —————————————————————————————————————————————————
         {
             'module_code': 'theme_description',
-            'module_name': '主题描述生成',
-            'description': '为投资主题生成描述文本（用于向量检索）（系统级）',
+            'module_name': 'Investment Theme Description',
+            'description': 'Generates semantic description text for investment themes used in vector-based similarity retrieval (system-level, admin-only).',
             'configurable': False,
             'default_template_code': 'theme_description_generator_v1',
         },

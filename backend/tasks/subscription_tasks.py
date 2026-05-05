@@ -287,20 +287,18 @@ def smart_wait_and_add_user_task(
         }
 
 
-# NOTE (2026-04):
-# `fetch_youtube_subscription` 的真正实现已经迁移到 local_virtual_service
-# (deployment/local_virtual_service/worker/tasks.py:fetch_youtube_subscription).
-# 远程 IP 会被 YouTube 风控, 无法稳定拉取 RSS / 字幕, 因此本函数仅作为
-# **派发器** 保留, 兼容所有通过 `apply_async(queue='data_fetching')` 显式
-# 投递到远程队列的遗留调用点 (例如 backend/api/subscriptions.py 里的灰度
-# 回滚分支). 调用时会把任务原样重新派发到 youtube_fetching 队列,
-# 交由本地家用 Worker 执行.
+# NOTE (2026-04 → 2026-05 更新):
+# 此任务现在直接使用 YouTubeSubscriptionService 执行实际抓取, 不再做二次派发.
+# 路由到 youtube_fetching 队列 (celery_config.py), 由能访问 YouTube 的 Worker 消费:
+#   - 本地开发: data_fetching_worker 同时监听 youtube_fetching 队列
+#   - 生产/HK: local_virtual_service 的家用 Worker 监听 youtube_fetching 队列
 @app.task(
     name='fetch_youtube_subscription',
     bind=True,
-    max_retries=0,     # 派发器不应重试 (真正的重试在本地 worker 里做)
-    time_limit=60,     # 派发即返回, 1 分钟硬超时足够兜底
-    soft_time_limit=30,
+    max_retries=2,
+    default_retry_delay=60,
+    time_limit=600,      # 10 分钟硬超时（RSS + 字幕抓取）
+    soft_time_limit=540,
 )
 def fetch_youtube_subscription_task(
     self,
@@ -309,39 +307,47 @@ def fetch_youtube_subscription_task(
     force_fetch: bool = False
 ) -> Dict[str, Any]:
     """
-    已废弃: 此任务不再在远程执行实际抓取逻辑, 仅负责把消息转发到
-    local_virtual_service 的 `fetch_youtube_subscription` 队列.
+    获取单个 YouTube 订阅的最新视频并存入数据库。
 
-    Returns:
-        { redispatched: bool, remote_task_id: str | None }
+    由 subscriptions API 在新建订阅时触发（首次抓取），也可由调度器调用。
+    路由到 youtube_fetching 队列，需要能访问 YouTube 的 Worker 执行。
     """
-    logger.warning(
-        "fetch_youtube_subscription_task (远程) 已废弃, 正在重定向到本地 Worker: "
+    logger.info(
+        f"[Celery Task] fetch_youtube_subscription 开始: "
         f"subscription_id={subscription_id} user_id={user_id} force_fetch={force_fetch}"
     )
     try:
-        from celery import current_app
-        # 不传 queue → 由 celery_config.py 的默认路由送到 youtube_fetching (本地).
-        new_task = current_app.send_task(
-            'fetch_youtube_subscription',
-            args=[subscription_id, user_id, force_fetch],
-            countdown=0,
+        from backend.services.youtube_subscription_service import YouTubeSubscriptionService
+
+        result = YouTubeSubscriptionService.fetch_and_store_videos(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch,
         )
-        logger.info(f"[Celery Task] Redispatched to local worker: task_id={new_task.id}")
-        return {
-            'success': True,
-            'redispatched': True,
-            'remote_task_id': new_task.id,
-        }
+
+        logger.info(
+            f"[Celery Task] fetch_youtube_subscription 完成: "
+            f"subscription_id={subscription_id}, "
+            f"new={result.get('videos_new', 0)}, "
+            f"existing={result.get('videos_existing', 0)}"
+        )
+        return result
+
     except Exception as exc:
         logger.error(
-            f"[Celery Task] Redispatch to local worker failed: {exc}",
+            f"[Celery Task] fetch_youtube_subscription 失败: "
+            f"subscription_id={subscription_id}, error={exc}",
             exc_info=True,
         )
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                f"[Celery Task] 重试中... "
+                f"(attempt {self.request.retries + 1}/{self.max_retries})"
+            )
+            raise self.retry(exc=exc)
         return {
             'success': False,
-            'redispatched': False,
-            'message': f'Redispatch failed: {exc}',
+            'message': str(exc),
             'videos_new': 0,
             'videos_existing': 0,
         }

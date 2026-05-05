@@ -12,7 +12,8 @@ import React from 'react';
 import { Space, Tag, Typography } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
 import { DAILY_THEME_COLORS } from '../../../daily/dailyTheme';
-import ReportTickerTags, { PC_INFO_TAGS_TAG_STYLE } from '../../../ReportTickerTags';
+import ReportTickerTags from '../../../ReportTickerTags';
+import { aiTagChipStyle } from '../../aiTagChipStyles';
 
 const { Text } = Typography;
 
@@ -80,8 +81,9 @@ const NewsOriginalView: React.FC<NewsOriginalViewProps> = ({
           </Text>
           <ReportTickerTags
             tickers={symbols}
-            tagColor="magenta"
-            tagStyle={PC_INFO_TAGS_TAG_STYLE}
+            tagBordered={false}
+            tagStyle={aiTagChipStyle('ticker', themeMode)}
+            overflowTagStyle={aiTagChipStyle('overflow', themeMode)}
             maxVisible={10}
           />
         </div>
@@ -91,7 +93,7 @@ const NewsOriginalView: React.FC<NewsOriginalViewProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>Tags:</Text>
           {categories.map((c) => (
-            <Tag key={c} style={{ fontSize: 11, margin: 0 }}>
+            <Tag key={c} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
               {c}
             </Tag>
           ))}
