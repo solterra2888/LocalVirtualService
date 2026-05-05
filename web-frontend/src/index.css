@@ -81,4 +81,46 @@ code {
 
 .full-width {
   width: 100%;
+}
+
+/* 横屏提示遮罩（仅在真实移动设备横屏时显示） */
+@media screen and (orientation: landscape) and (max-height: 600px) {
+  #rotate-overlay {
+    display: flex !important;
+  }
+}
+
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #0a0a0a;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: #fff;
+}
+
+#rotate-overlay .rotate-icon {
+  font-size: 56px;
+  animation: rotate-hint 1.6s ease-in-out infinite alternate;
+}
+
+#rotate-overlay .rotate-text {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+}
+
+#rotate-overlay .rotate-sub {
+  font-size: 13px;
+  opacity: 0.5;
+}
+
+@keyframes rotate-hint {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-90deg); }
 } 
