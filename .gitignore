@@ -20,6 +20,7 @@ development/.dev_pids
 development/.dev_redis_pid
 development/.env.redis.local
 development/logs/
+others/
 market_data_test_output
 .idea/
 download/
