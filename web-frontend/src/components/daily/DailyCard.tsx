@@ -8,12 +8,14 @@
 
 import React from 'react';
 import { ClockCircleOutlined } from '@ant-design/icons';
+import { Avatar, Tooltip } from 'antd';
 import type { DailyFeedItem } from '../../services/daily';
 import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import { aiTagChipStyle } from '../shared/aiTagChipStyles';
+import { useAuthStore } from '../../store/authStore';
 
 interface DailyCardProps {
   item: DailyFeedItem;
@@ -25,7 +27,10 @@ interface DailyCardProps {
 const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTickerClick }) => {
   const colors = DAILY_THEME_COLORS[themeMode];
   const { userTimezone } = useDashboardSettings();
+  const currentUser = useAuthStore((s) => s.user);
   const [hover, setHover] = React.useState(false);
+
+  const isShared = item.source === 'upload' && !!item.shared_by_username;
 
   const summaryOrSnippet = item.summary || item.snippet;
   const hasSummary = !!item.summary;
@@ -134,7 +139,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
         </div>
       )}
 
-      {/* 底部 meta 行: 作者(Feed) + 时间 + 阅读时长 */}
+      {/* 底部 meta 行: 作者(Feed) + 时间 + 阅读时长 + 共享 Avatar 对(Upload 共享时) */}
       <div
         style={{
           display: 'flex',
@@ -175,6 +180,41 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
             <span style={{ opacity: 0.5 }}>·</span>
             <span style={{ fontStyle: 'italic', opacity: 0.7 }}>summary pending</span>
           </>
+        )}
+
+        {/* 共享 Avatar 对：分享者 → | → 被分享者（当前用户），仅 Upload 共享时展示 */}
+        {isShared && item.shared_by_username && (
+          <div
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              flexShrink: 0,
+            }}
+          >
+            <Tooltip title={`Shared by ${item.shared_by_username}`}>
+              <Avatar
+                size={20}
+                src={item.shared_by_avatar_url ?? undefined}
+                style={{ backgroundColor: '#722ed1', fontSize: 10, cursor: 'default' }}
+              >
+                {item.shared_by_username.charAt(0).toUpperCase()}
+              </Avatar>
+            </Tooltip>
+            <span style={{ color: colors.textMuted, fontSize: 12, lineHeight: '20px', opacity: 0.5, userSelect: 'none' }}>
+              |
+            </span>
+            <Tooltip title={currentUser?.username ?? 'You'}>
+              <Avatar
+                size={20}
+                src={currentUser?.avatar_url ?? undefined}
+                style={{ backgroundColor: '#1677ff', fontSize: 10, cursor: 'default' }}
+              >
+                {(currentUser?.username ?? 'Y').charAt(0).toUpperCase()}
+              </Avatar>
+            </Tooltip>
+          </div>
         )}
       </div>
     </div>

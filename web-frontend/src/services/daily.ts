@@ -52,6 +52,15 @@ export interface DailyFeedItem {
   published_at: string;        // ISO 8601
   reading_time_min: number | null;
   navigate: DailyNavigate;
+
+  /**
+   * Upload 共享标记：当前卡片是他人分享给当前用户的文件时非 null。
+   * Feed 卡片 / 当前用户自己上传的文件 = null。
+   */
+  shared_by_username: string | null;
+  shared_by_user_id: number | null;
+  /** OSS 签名 URL 或外链; 无头像或非共享卡片时为 null */
+  shared_by_avatar_url: string | null;
 }
 
 export interface DailyFeedResponse {

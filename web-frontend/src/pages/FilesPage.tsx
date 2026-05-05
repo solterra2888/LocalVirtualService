@@ -68,7 +68,8 @@ import {
   DownOutlined,
   UpOutlined,
   GlobalOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  PrinterOutlined
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -5527,6 +5528,105 @@ const OriginalTextNotePanel: React.FC<{
   );
 };
 
+/** Web Link 快照：iframe 预览 + 仅此类可用的「打印」 */
+const WebOriginalPreviewWithPrint: React.FC<{
+  webEmbedSrc: string;
+  filename?: string;
+  themeColors: any;
+  isDark: boolean;
+}> = ({ webEmbedSrc, filename, themeColors, isDark }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [snapshotReady, setSnapshotReady] = useState(false);
+
+  useEffect(() => {
+    setSnapshotReady(false);
+  }, [webEmbedSrc]);
+
+  const handlePrint = useCallback(() => {
+    const iframe = iframeRef.current;
+    if (!webEmbedSrc) {
+      message.warning('No snapshot URL to print.');
+      return;
+    }
+    if (!snapshotReady || !iframe?.contentWindow) {
+      message.warning('Snapshot is still loading. Try again in a moment.');
+      return;
+    }
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch {
+      try {
+        const w = window.open(webEmbedSrc, '_blank');
+        if (!w) {
+          message.error('Unable to open print window. Check whether pop-ups are blocked.');
+          return;
+        }
+        const runPrint = () => {
+          try {
+            w.focus();
+            w.print();
+          } catch {
+            message.info('Opened the snapshot in a new tab. Use your browser’s Print command there.');
+          }
+        };
+        if (w.document?.readyState === 'complete') runPrint();
+        else w.addEventListener('load', runPrint, { once: true });
+      } catch {
+        message.error('Print is not available for this preview.');
+      }
+    }
+  }, [webEmbedSrc, snapshotReady]);
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+        <Tooltip title="Print the snapshot shown below">
+          <Button
+            type="default"
+            size="small"
+            icon={<PrinterOutlined />}
+            onClick={handlePrint}
+            disabled={!webEmbedSrc}
+            aria-label="Print web snapshot"
+          >
+            Print
+          </Button>
+        </Tooltip>
+      </div>
+      <div
+        className="original-web-frame-host"
+        style={{
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          border: `1px solid ${themeColors.cardBorder}`,
+          borderRadius: '8px',
+          overflow: 'hidden',
+          backgroundColor: themeColors.cardBg,
+        }}
+      >
+        <iframe
+          ref={iframeRef}
+          src={webEmbedSrc}
+          title={filename || 'Web snapshot'}
+          onLoad={() => setSnapshotReady(true)}
+          sandbox="allow-same-origin allow-modals"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            border: 'none',
+            colorScheme: isDark ? 'dark' : 'light',
+            backgroundColor: isDark ? '#141414' : '#fff',
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
 // 原文内容查看组件（仅支持单文件，不再显示文件列表）
 export const OriginalContentView: React.FC<{
   execution: TaskExecution;
@@ -6011,35 +6111,12 @@ export const OriginalContentView: React.FC<{
         } else if (fileType === 'web') {
           const webEmbedSrc = absoluteUrlForEmbeddedFile(fileContent.file_url || '');
           return (
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <div
-                className="original-web-frame-host"
-                style={{
-                  position: 'relative',
-                  flex: 1,
-                  minHeight: 0,
-                  border: `1px solid ${themeColors.cardBorder}`,
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: themeColors.cardBg,
-                }}
-              >
-                <iframe
-                  src={webEmbedSrc}
-                  title={fileContent.filename}
-                  sandbox="allow-same-origin"
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    width: '100%',
-                    height: '100%',
-                    border: 'none',
-                    colorScheme: isDark ? 'dark' : 'light',
-                    backgroundColor: isDark ? '#141414' : '#fff',
-                  }}
-                />
-              </div>
-            </div>
+            <WebOriginalPreviewWithPrint
+              webEmbedSrc={webEmbedSrc}
+              filename={fileContent.filename}
+              themeColors={themeColors}
+              isDark={isDark}
+            />
           );
         } else {
           return (

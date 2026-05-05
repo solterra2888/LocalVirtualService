@@ -77,6 +77,21 @@ class DailyFeedItem(BaseModel):
 
     navigate: DailyNavigate = Field(..., description="点击跳转目标")
 
+    # Upload 共享标记: 当前卡片是他人分享给当前用户的文件时非 null。
+    # Feed 侧永远为 null；当前用户是 owner 时也为 null。
+    shared_by_username: Optional[str] = Field(
+        None,
+        description="文件分享者用户名; 仅 source=upload 且该文件由他人共享给当前用户时非 null",
+    )
+    shared_by_user_id: Optional[int] = Field(
+        None,
+        description="文件分享者 user_id; 含义同 shared_by_username",
+    )
+    shared_by_avatar_url: Optional[str] = Field(
+        None,
+        description="文件分享者头像 URL (OSS 签名 URL 或外链); 无头像或非共享卡片时为 null",
+    )
+
 
 class DailyFeedResponse(BaseModel):
     """分页响应."""

@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
+from backend.utils.avatar import resolve_avatar_url as _resolve_avatar
 from backend.schemas.daily import (
     DailyFeedItem,
     DailyFeedResponse,
@@ -167,6 +168,9 @@ def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
 #  18  concepts       jsonb / null
 #  19  confidence     double precision / null
 #  20  published_at   timestamptz
+#  21  shared_by_username      text / null  (Upload 共享：分享者用户名; 无共享或 Feed 侧 = null)
+#  22  shared_by_user_id       int / null   (Upload 共享：分享者 user_id)
+#  23  shared_by_avatar_url_raw text / null  (Upload 共享：分享者头像原始值, Python 层再经 resolve_avatar_url 签名)
 
 _UPLOAD_SQL = """
     SELECT
@@ -196,11 +200,35 @@ _UPLOAD_SQL = """
         ft.ticker                                     AS ticker,
         ft.concepts                                   AS concepts,
         ft.confidence                                 AS confidence,
-        fpd.created_at                                AS published_at
+        fpd.created_at                                AS published_at,
+        (SELECT u.username
+         FROM file_shares fs
+         JOIN users u ON u.id = fs.shared_by_user_id
+         WHERE fs.file_id = fpd.id
+           AND fs.shared_to_user_id = %(user_id)s
+         ORDER BY fs.created_at DESC LIMIT 1)         AS shared_by_username,
+        (SELECT fs.shared_by_user_id
+         FROM file_shares fs
+         WHERE fs.file_id = fpd.id
+           AND fs.shared_to_user_id = %(user_id)s
+         ORDER BY fs.created_at DESC LIMIT 1)         AS shared_by_user_id,
+        (SELECT u.avatar_url
+         FROM file_shares fs
+         JOIN users u ON u.id = fs.shared_by_user_id
+         WHERE fs.file_id = fpd.id
+           AND fs.shared_to_user_id = %(user_id)s
+         ORDER BY fs.created_at DESC LIMIT 1)         AS shared_by_avatar_url_raw
     FROM file_processing_details fpd
     JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
     LEFT JOIN file_tags ft ON ft.file_id = fpd.id
-    WHERE ps."user" = %(username)s
+    WHERE (
+        ps."user" = %(username)s
+        OR EXISTS (
+            SELECT 1 FROM file_shares fs
+            WHERE fs.file_id = fpd.id
+              AND fs.shared_to_user_id = %(user_id)s
+        )
+    )
       AND fpd.status = 'completed'
       AND COALESCE(fpd.content, '') <> ''
 """
@@ -232,7 +260,10 @@ _FEED_SQL = """
         sct.ticker                                    AS ticker,
         sct.concepts                                  AS concepts,
         sct.confidence                                AS confidence,
-        sc.published_at                               AS published_at
+        sc.published_at                               AS published_at,
+        NULL::text                                    AS shared_by_username,
+        NULL::integer                                 AS shared_by_user_id,
+        NULL::text                                    AS shared_by_avatar_url_raw
     FROM subscription_content sc
     LEFT JOIN subscription_content_tags sct
         ON sct.subscription_content_id = sc.id
@@ -378,6 +409,9 @@ def _row_to_item(
         concepts_raw,
         confidence,
         published_at,
+        shared_by_username,
+        shared_by_user_id,
+        shared_by_avatar_url_raw,
     ) = row
 
     if source == "upload":
@@ -434,6 +468,9 @@ def _row_to_item(
         published_at=pub,
         reading_time_min=_reading_time_min(content_length),
         navigate=navigate,
+        shared_by_username=shared_by_username or None,
+        shared_by_user_id=int(shared_by_user_id) if shared_by_user_id is not None else None,
+        shared_by_avatar_url=_resolve_avatar(shared_by_avatar_url_raw),
     )
 
 
@@ -760,9 +797,9 @@ def _fetch_upload_detail(
 ) -> DailyItemDetail:
     """根据 file_processing_details.id 装配 Upload 卡片完整详情.
 
-    鉴权: processing_stats."user" == 当前用户名 (与列表口径一致).
-    file_shares 共享场景留给 /api/files/original/{id} 二次校验, 这里不放行
-    防止外部用户列出他人的 Daily 详情.
+    鉴权: 当前用户是文件 owner (processing_stats."user") 或
+          被通过 file_shares 主动分享到该文件 (shared_to_user_id)。
+    与 _UPLOAD_SQL 及 /api/files/details 列表接口口径保持一致。
     """
     cursor.execute(
         """
@@ -776,7 +813,6 @@ def _fetch_upload_detail(
             COALESCE(fpd.content_length, 0)         AS content_length,
             fpd.created_at,
             fpd.processing_stats_id,
-            ps."user"                                AS owner_username,
             ps.final_report,
             ft.summary,
             ft.reasoning,
@@ -789,12 +825,20 @@ def _fetch_upload_detail(
         JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
         LEFT JOIN file_tags ft ON ft.file_id = fpd.id
         WHERE fpd.id = %s
+          AND (
+              ps."user" = %s
+              OR EXISTS (
+                  SELECT 1 FROM file_shares fs
+                  WHERE fs.file_id = fpd.id
+                    AND fs.shared_to_user_id = %s
+              )
+          )
         """,
-        (file_id,),
+        (file_id, current_user.username, current_user.user_id),
     )
     row = cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Upload 文件不存在或已删除")
+        raise HTTPException(status_code=404, detail="Upload 文件不存在、已删除或无访问权限")
 
     (
         item_id,
@@ -806,7 +850,6 @@ def _fetch_upload_detail(
         content_length,
         created_at,
         processing_stats_id,
-        owner_username,
         final_report,
         summary,
         reasoning,
@@ -816,9 +859,6 @@ def _fetch_upload_detail(
         concepts_raw,
         confidence,
     ) = row
-
-    if owner_username != current_user.username:
-        raise HTTPException(status_code=403, detail="无权访问该文件")
 
     subtype = _UPLOAD_FILE_TYPE_MAP.get(file_type or "document", "document")
     summary_text = summary or None
