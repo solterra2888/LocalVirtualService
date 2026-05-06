@@ -16,13 +16,32 @@
  */
 
 import React from 'react';
-import { Button, Space, Spin, Typography } from 'antd';
-import { AlignLeftOutlined, LinkOutlined } from '@ant-design/icons';
+import { Button, Space, Spin, Tooltip, Typography } from 'antd';
+import { AlignLeftOutlined, LinkOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 import { subscriptionsAPI } from '../../services/subscriptions';
 
 const { Text } = Typography;
 
 const DESCRIPTION_PEEK_CHARS = 300;
+
+const TRANSCRIPT_FONT_STORAGE_KEY = 'guanhe.youtubeTranscriptFontPx';
+const TRANSCRIPT_FONT_DEFAULT = 13;
+const TRANSCRIPT_FONT_MIN = 11;
+const TRANSCRIPT_FONT_MAX = 22;
+const TRANSCRIPT_FONT_STEP = 1;
+
+function readStoredTranscriptFontPx(): number {
+  if (typeof window === 'undefined') return TRANSCRIPT_FONT_DEFAULT;
+  try {
+    const raw = localStorage.getItem(TRANSCRIPT_FONT_STORAGE_KEY);
+    if (raw == null) return TRANSCRIPT_FONT_DEFAULT;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n)) return TRANSCRIPT_FONT_DEFAULT;
+    return Math.min(TRANSCRIPT_FONT_MAX, Math.max(TRANSCRIPT_FONT_MIN, n));
+  } catch {
+    return TRANSCRIPT_FONT_DEFAULT;
+  }
+}
 
 function extractYouTubeId(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -58,6 +77,21 @@ export const YoutubeFeedTranscriptPanel: React.FC<YoutubeFeedTranscriptPanelProp
   const [transcriptPlain, setTranscriptPlain] = React.useState<string | null>(null);
   const [transcriptLoading, setTranscriptLoading] = React.useState(false);
   const [transcriptError, setTranscriptError] = React.useState<string | null>(null);
+  const [transcriptFontPx, setTranscriptFontPx] = React.useState(readStoredTranscriptFontPx);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(TRANSCRIPT_FONT_STORAGE_KEY, String(transcriptFontPx));
+    } catch {
+      /* ignore */
+    }
+  }, [transcriptFontPx]);
+
+  const bumpFont = React.useCallback((delta: number) => {
+    setTranscriptFontPx((prev) =>
+      Math.min(TRANSCRIPT_FONT_MAX, Math.max(TRANSCRIPT_FONT_MIN, prev + delta))
+    );
+  }, []);
 
   React.useEffect(() => {
     if (!hasTranscript) {
@@ -94,21 +128,61 @@ export const YoutubeFeedTranscriptPanel: React.FC<YoutubeFeedTranscriptPanelProp
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          justifyContent: 'space-between',
+          gap: 8,
           marginBottom: 6,
         }}
       >
-        <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
-        <Text
-          style={{
-            fontSize: 11,
-            letterSpacing: 0.5,
-            textTransform: 'uppercase',
-            color: colors.textMuted,
-          }}
-        >
-          Transcript
-        </Text>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
+          <Text
+            style={{
+              fontSize: 11,
+              letterSpacing: 0.5,
+              textTransform: 'uppercase',
+              color: colors.textMuted,
+            }}
+          >
+            Transcript
+          </Text>
+        </div>
+        {hasTranscript ? (
+          <Space size={0} style={{ flexShrink: 0 }}>
+            <Tooltip title="Smaller text">
+              <Button
+                type="text"
+                size="small"
+                aria-label="Decrease transcript font size"
+                icon={<ZoomOutOutlined style={{ fontSize: 14, color: colors.textMuted }} />}
+                disabled={transcriptFontPx <= TRANSCRIPT_FONT_MIN}
+                onClick={() => bumpFont(-TRANSCRIPT_FONT_STEP)}
+                style={{ padding: '0 6px', height: 28 }}
+              />
+            </Tooltip>
+            <Text
+              style={{
+                fontSize: 11,
+                color: colors.textMuted,
+                minWidth: 28,
+                textAlign: 'center',
+                userSelect: 'none',
+              }}
+            >
+              {transcriptFontPx}px
+            </Text>
+            <Tooltip title="Larger text">
+              <Button
+                type="text"
+                size="small"
+                aria-label="Increase transcript font size"
+                icon={<ZoomInOutlined style={{ fontSize: 14, color: colors.textMuted }} />}
+                disabled={transcriptFontPx >= TRANSCRIPT_FONT_MAX}
+                onClick={() => bumpFont(TRANSCRIPT_FONT_STEP)}
+                style={{ padding: '0 6px', height: 28 }}
+              />
+            </Tooltip>
+          </Space>
+        ) : null}
       </div>
 
       {!hasTranscript && !suppressEmptyHint && (
@@ -138,7 +212,7 @@ export const YoutubeFeedTranscriptPanel: React.FC<YoutubeFeedTranscriptPanelProp
             border: `1px solid ${colors.divider}`,
             borderRadius: 8,
             padding: '12px 16px',
-            fontSize: 13,
+            fontSize: transcriptFontPx,
             lineHeight: 1.7,
             color: colors.text,
             whiteSpace: 'pre-wrap',

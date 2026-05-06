@@ -1240,7 +1240,10 @@ async def get_subscription_content_transcript(
 ):
     """
     按需返回单条订阅内容的字幕/转写正文（不在列表接口中批量返回，减轻负载）。
-    仅读取 subscription_content.transcript（纯文本拼接列）；无结构化 payload。
+
+    优先返回 transcript_cleaned（清洗后的可读版本），
+    若 transcript_cleaned 为空则回退到原始 transcript。
+    响应键始终为 "transcript"，前端无需改动。
     """
     user_id = current_user.user_id
     db_manager = get_db_manager()
@@ -1250,7 +1253,7 @@ async def get_subscription_content_transcript(
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT channel_type, transcript
+            SELECT channel_type, transcript, transcript_cleaned
             FROM subscription_content
             WHERE id = %s AND %s = ANY(user_ids)
             """,
@@ -1263,17 +1266,20 @@ async def get_subscription_content_transcript(
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        channel_type, transcript_col = row[0], row[1]
+        channel_type, transcript_raw, transcript_cleaned = row[0], row[1], row[2]
 
         if channel_type != "youtube":
             raise HTTPException(status_code=400, detail="Transcript is only available for YouTube content")
 
-        raw_text = (transcript_col or "").strip() if transcript_col else ""
+        # 优先使用清洗后版本，回退到原始版本
+        cleaned_text = (transcript_cleaned or "").strip()
+        raw_text = (transcript_raw or "").strip()
+        text = cleaned_text or raw_text
 
-        if not raw_text:
+        if not text:
             raise HTTPException(status_code=404, detail="Transcript not available for this content")
 
-        return {"transcript": raw_text}
+        return {"transcript": text}
 
     except HTTPException:
         raise
