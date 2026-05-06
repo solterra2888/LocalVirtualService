@@ -7,17 +7,18 @@
  *   document   → DocumentOriginalView   (PDF / Word / Excel / CSV: PDF iframe + 解析 Markdown)
  *   image      → ImageOriginalView      (img 内嵌 + OCR Markdown)
  *   audio      → AudioOriginalView      (audio 播放器 + ASR 文本浏览)
- *   youtube    → YoutubeUploadOriginalView (YouTube embed + ASR 文本)
+ *   youtube    → YoutubeUploadOriginalView (嵌入 + 标题 + 描述; 有 Transcript Tab 时字幕在 Tab 内)
  *   web        → WebOriginalView        (解析 Markdown + Open original)
  *   text       → TextNoteOriginalView   (笔记 Markdown)
  *   twitter    → TwitterOriginalView    (推文文本 + media + 转推/引用 / View on Twitter)
  *   news       → NewsOriginalView       (纯文本 + Read original)
- *   youtube_feed → YoutubeFeedOriginalBlock (YouTube embed + 描述 + transcript 自动加载)
+ *   youtube_feed → YoutubeFeedOriginalBlock (YouTube embed + 描述; 字幕见抽屉 Transcript Tab)
  *
  * 资源 (image/audio/pdf 的 file_url + audio/youtube 的 ASR JSON) 通过
  *   filesAPI.getOriginalFileInfo(file_id)
  * 在抽屉打开时按需懒加载 (与现 Sources 详情页同口径). YouTube Feed 的 transcript
- * 在 has_transcript 时由 YoutubeFeedOriginalBlock 内自动拉取.
+ * 由 DailyPreviewDrawer 的 Transcript Tab 内 YoutubeFeedTranscriptPanel /
+ * DailyYoutubeUploadTranscriptPanel 展示.
  *
  * 这个组件 **完全只读**, 不复用 FeedArticleBody 里的 Re-tag / ASR Trigger 等
  * 写入操作; 用户若要编辑 / 触发更深功能, 走顶栏的 "Open in Sources/Feeds".
@@ -26,6 +27,7 @@
 import React from 'react';
 import { Button, Empty, Space, Spin, Tag, Tooltip, Typography } from 'antd';
 import {
+  AlignLeftOutlined,
   DownloadOutlined,
   FileTextOutlined,
   LinkOutlined,
@@ -59,10 +61,16 @@ const TRANSCRIPT_PEEK_LINES = 30;
 interface DailyOriginalViewProps {
   detail: DailyItemDetail;
   themeMode: 'light' | 'dark';
+  /** Daily 抽屉: YouTube Feed / YouTube Upload 字幕单独 Tab，不在 Original 内嵌 */
+  splitYoutubeTranscriptTab?: boolean;
 }
 
 /** 顶层分发器: 按 source_subtype 路由到具体渲染器 */
-const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({ detail, themeMode }) => {
+const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
+  detail,
+  themeMode,
+  splitYoutubeTranscriptTab = false,
+}) => {
   const colors = DAILY_THEME_COLORS[themeMode];
   const subtype: DailySourceSubtype = detail.source_subtype;
 
@@ -76,7 +84,12 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({ detail, themeMode
         return <AudioOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />;
       case 'youtube':
         return (
-          <YoutubeUploadOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />
+          <YoutubeUploadOriginalView
+            upload={detail.upload}
+            colors={colors}
+            themeMode={themeMode}
+            omitTranscript={splitYoutubeTranscriptTab}
+          />
         );
       case 'web':
         return <WebOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />;
@@ -126,6 +139,7 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({ detail, themeMode
             hasTranscript={detail.feed.has_transcript}
             metadata={detail.feed.metadata}
             themeMode={themeMode}
+            showTranscript={!splitYoutubeTranscriptTab}
             colors={{
               text: colors.text,
               textSecondary: colors.textSecondary,
@@ -260,6 +274,80 @@ interface UploadProps {
   upload: DailyItemDetailUpload;
   colors: DailyThemeColors;
   themeMode: 'light' | 'dark';
+}
+
+/** Daily 抽屉 Transcript Tab — Upload YouTube 的 ASR 全文（与 Upload 原文区字幕块同样式） */
+export function DailyYoutubeUploadTranscriptPanel({
+  upload,
+  themeMode,
+  colors,
+}: UploadProps) {
+  const { data, loading } = useOriginalFileInfo(upload.file_id, true);
+  const lines = React.useMemo<FlatTranscriptLine[]>(
+    () => flattenAsr(data?.asr_with_diarization),
+    [data?.asr_with_diarization]
+  );
+  const transcriptPlain = React.useMemo(() => {
+    if (lines.length === 0) return '';
+    return lines.map((l) => l.text).join('\n');
+  }, [lines]);
+
+  if (loading && !data) {
+    return (
+      <div style={{ textAlign: 'center', padding: '12px 0' }}>
+        <Spin size="small" />
+      </div>
+    );
+  }
+
+  if (transcriptPlain) {
+    return (
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 6,
+          }}
+        >
+          <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
+          <Text
+            style={{
+              fontSize: 11,
+              letterSpacing: 0.5,
+              textTransform: 'uppercase',
+              color: colors.textMuted,
+            }}
+          >
+            Transcript
+          </Text>
+        </div>
+        <div
+          style={{
+            background:
+              themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
+            border: `1px solid ${colors.divider}`,
+            borderRadius: 8,
+            padding: '12px 16px',
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: colors.text,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {transcriptPlain}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Text type="secondary" style={{ fontSize: 12 }}>
+      No transcript available — open the file in Sources for full diarization view.
+    </Text>
+  );
 }
 
 /** document: PDF/Word/Excel/CSV — 解析 Markdown + 下载按钮 */
@@ -445,19 +533,41 @@ const AudioOriginalView: React.FC<UploadProps> = ({ upload, colors, themeMode })
   );
 };
 
-/** youtube (upload): YouTube embed + transcript */
-const YoutubeUploadOriginalView: React.FC<UploadProps> = ({ upload, colors, themeMode }) => {
+/** youtube (upload): 与 Feeds `YoutubeFeedOriginalBlock` 一致的嵌入 / 标题 / 描述 / 字幕区视觉 */
+const YT_UPLOAD_DESCRIPTION_PEEK = 300;
+
+/** youtube (upload): YouTube embed + 标题 + 描述 + 可选内嵌字幕（omitTranscript 时仅前三项） */
+const YoutubeUploadOriginalView: React.FC<
+  UploadProps & { omitTranscript?: boolean }
+> = ({ upload, colors, themeMode, omitTranscript = false }) => {
   const { data, loading } = useOriginalFileInfo(upload.file_id, true);
   const videoId = React.useMemo(
     () => extractYouTubeId(upload.original_file_path) || extractYouTubeId(data?.file_url || null),
     [upload.original_file_path, data?.file_url]
   );
-  const [expanded, setExpanded] = React.useState(false);
+
+  const urlForLink = (upload.original_file_path ?? '').trim() || (data?.file_url ?? '').trim() || null;
+
+  const [descExpanded, setDescExpanded] = React.useState(false);
+  const descTrimmed = (upload.content ?? '').trim();
+  const descOverflow = descTrimmed.length > YT_UPLOAD_DESCRIPTION_PEEK;
+  const visibleDesc =
+    descExpanded || !descOverflow
+      ? descTrimmed
+      : descTrimmed.slice(0, YT_UPLOAD_DESCRIPTION_PEEK) + '…';
+
   const lines = React.useMemo<FlatTranscriptLine[]>(
     () => flattenAsr(data?.asr_with_diarization),
     [data?.asr_with_diarization]
   );
-  const visible = expanded ? lines : lines.slice(0, TRANSCRIPT_PEEK_LINES);
+
+  const transcriptPlain = React.useMemo(() => {
+    if (lines.length === 0) return '';
+    return lines.map((l) => l.text).join('\n');
+  }, [lines]);
+
+  const displayTitle =
+    (upload.display_name ?? upload.filename ?? '').trim() || null;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -482,58 +592,105 @@ const YoutubeUploadOriginalView: React.FC<UploadProps> = ({ upload, colors, them
               border: 'none',
             }}
             src={`https://www.youtube.com/embed/${videoId}`}
-            title={upload.display_name || 'YouTube video'}
+            title={displayTitle || 'YouTube video'}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
           />
         </div>
+      ) : urlForLink ? (
+        <a
+          href={urlForLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: colors.accent,
+            fontSize: 13,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <LinkOutlined /> Watch on YouTube
+        </a>
       ) : null}
-
-      {upload.original_file_path && (
-        <ExternalLinkRow
-          href={upload.original_file_path}
-          label="Watch on YouTube"
-          colors={colors}
-        />
-      )}
 
       {loading && !data && <Spin size="small" />}
 
-      {lines.length > 0 ? (
-        <>
-          <SectionLabel colors={colors}>Transcript</SectionLabel>
+      {displayTitle && (
+        <Text
+          strong
+          style={{ color: colors.text, fontSize: 15, lineHeight: '1.5', display: 'block' }}
+        >
+          {displayTitle}
+        </Text>
+      )}
+
+      {descTrimmed && (
+        <div>
+          <Text
+            style={{
+              color: colors.textSecondary,
+              fontSize: 13,
+              lineHeight: 1.65,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              display: 'block',
+            }}
+          >
+            {visibleDesc}
+          </Text>
+          {descOverflow && (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: '2px 0', fontSize: 12 }}
+              onClick={() => setDescExpanded((v) => !v)}
+            >
+              {descExpanded ? 'Show less' : 'Show more'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {transcriptPlain && !omitTranscript ? (
+        <div>
           <div
             style={{
-              background: themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginBottom: 6,
+            }}
+          >
+            <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
+            <Text
+              style={{
+                fontSize: 11,
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                color: colors.textMuted,
+              }}
+            >
+              Transcript
+            </Text>
+          </div>
+          <div
+            style={{
+              background:
+                themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
               border: `1px solid ${colors.divider}`,
               borderRadius: 8,
               padding: '12px 16px',
-              maxHeight: expanded ? 'none' : 320,
-              overflow: 'auto',
               fontSize: 13,
               lineHeight: 1.7,
               color: colors.text,
               whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
             }}
           >
-            {visible.map((l, idx) => (
-              <span key={idx}>
-                {l.text}
-                {idx < visible.length - 1 ? ' ' : ''}
-              </span>
-            ))}
+            {transcriptPlain}
           </div>
-          {lines.length > TRANSCRIPT_PEEK_LINES && (
-            <Button type="link" size="small" onClick={() => setExpanded((v) => !v)}>
-              {expanded ? 'Show less' : `Show all ${lines.length} segments`}
-            </Button>
-          )}
-        </>
-      ) : upload.content ? (
-        <>
-          <SectionLabel colors={colors}>Description / Notes</SectionLabel>
-          <MarkdownPanel content={upload.content} themeMode={themeMode} colors={colors} />
-        </>
+        </div>
       ) : null}
     </Space>
   );

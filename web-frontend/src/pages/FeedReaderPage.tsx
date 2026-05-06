@@ -72,6 +72,10 @@ import {
   type FeedChannelTypeFilterKey,
 } from '../components/feed/feedChannelConfig';
 import FeedArticleBody from '../components/feed/FeedArticleBody';
+import {
+  type FeedArticleViewMode,
+  adjacentFeedArticleViewMode,
+} from '../components/feed/feedArticleViewMode';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import FeedSummarySettingsDrawer from '../components/feed/FeedSummarySettingsDrawer';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
@@ -111,8 +115,8 @@ const FeedReaderPageInner: React.FC = () => {
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [contents, setContents] = useState<SubscriptionContent[]>([]);
   const [selectedContent, setSelectedContent] = useState<SubscriptionContent | null>(null);
-  // 视图模式: 跨内容切换保持用户选择
-  const [feedViewMode, setFeedViewMode] = useState<'original' | 'analysis'>('original');
+  // 视图模式: 跨内容切换保持用户选择（YouTube 含 Transcript Tab）
+  const [feedViewMode, setFeedViewMode] = useState<FeedArticleViewMode>('original');
   
   const [loading, setLoading] = useState(false);
   const [contentsLoading, setContentsLoading] = useState(false);
@@ -163,6 +167,25 @@ const FeedReaderPageInner: React.FC = () => {
     if (!q) return contents;
     return contents.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
   }, [contents, contentSearchQuery]);
+
+  const showTranscriptTabInFeeds = selectedContent?.channel_type === 'youtube';
+
+  const feedSegmentedOptions = useMemo(() => {
+    const opts: { label: string; value: FeedArticleViewMode }[] = [
+      { label: 'Original', value: 'original' },
+      { label: 'AI Analysis', value: 'analysis' },
+    ];
+    if (showTranscriptTabInFeeds) {
+      opts.push({ label: 'Transcript', value: 'transcript' });
+    }
+    return opts;
+  }, [showTranscriptTabInFeeds]);
+
+  useEffect(() => {
+    if (!showTranscriptTabInFeeds && feedViewMode === 'transcript') {
+      setFeedViewMode('original');
+    }
+  }, [selectedContent?.id, showTranscriptTabInFeeds, feedViewMode]);
 
   /** 切换 Active/Disabled 或频道类型时，若当前选中不在列表内则改选第一项 */
   useEffect(() => {
@@ -556,7 +579,7 @@ const FeedReaderPageInner: React.FC = () => {
   const handleSelectContentRef = React.useRef(handleSelectContent);
   handleSelectContentRef.current = handleSelectContent;
 
-  /** 键盘: ↑↓ 在订阅文章列表中切换; ←→ 在 Original / AI Analysis 间切换 */
+  /** 键盘: ↑↓ 在订阅文章列表中切换; ←→ 在 Original / AI Analysis / Transcript(YouTube) 间切换 */
   useEffect(() => {
     const shouldIgnoreKeyTarget = (target: EventTarget | null) => {
       if (!target || !(target instanceof HTMLElement)) return false;
@@ -582,7 +605,10 @@ const FeedReaderPageInner: React.FC = () => {
         if (!sel) return;
         if (target.closest('.ant-segmented')) return;
         e.preventDefault();
-        setFeedViewMode(e.key === 'ArrowLeft' ? 'original' : 'analysis');
+        const showTr = sel.channel_type === 'youtube';
+        setFeedViewMode((prev) =>
+          adjacentFeedArticleViewMode(prev, e.key === 'ArrowRight' ? 1 : -1, true, showTr)
+        );
         return;
       }
 
@@ -1611,11 +1637,8 @@ const FeedReaderPageInner: React.FC = () => {
                 <div className="feed-page-layout__view-mode-tabs">
                   <Segmented
                     value={feedViewMode}
-                    onChange={(v) => setFeedViewMode(v as 'original' | 'analysis')}
-                    options={[
-                      { label: 'Original', value: 'original' },
-                      { label: 'AI Analysis', value: 'analysis' },
-                    ]}
+                    onChange={(v) => setFeedViewMode(v as FeedArticleViewMode)}
+                    options={feedSegmentedOptions}
                     style={{ minWidth: 220, width: '100%' }}
                     block
                   />
@@ -1635,7 +1658,10 @@ const FeedReaderPageInner: React.FC = () => {
                   <kbd style={kbdKeyStyle}>←</kbd>
                   <kbd style={kbdKeyStyle}>→</kbd>
                   <Text type="secondary" style={{ fontSize: 11 }}>
-                    Switch Original / AI Analysis
+                    Switch Original / AI Analysis / Transcript
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    · Use Page Up and Page Down to scroll transcript and other long content.
                   </Text>
                 </div>
               </div>
@@ -1646,7 +1672,6 @@ const FeedReaderPageInner: React.FC = () => {
                 themeColors={themeColors}
                 isDark={isDark}
                 themeMode={themeMode}
-                originalContentDefaultExpanded
                 viewMode={feedViewMode}
                 onViewModeChange={setFeedViewMode}
                 onTranscriptReady={(contentId) => {

@@ -314,7 +314,7 @@ class SubscriptionContentService:
                     in_reply_to_username,
                     in_reply_to_user_id,
                     heat_level,
-                    ((transcript IS NOT NULL AND transcript != '') OR transcript_data IS NOT NULL) AS has_transcript
+                    (transcript IS NOT NULL AND transcript != '') AS has_transcript
                 FROM subscription_content
                 WHERE {where_clause}
                 ORDER BY published_at DESC

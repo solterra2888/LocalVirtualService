@@ -1,39 +1,156 @@
 /**
- * YouTube Feed 原始内容块.
+ * YouTube Feed 原始内容块 + 独立 Transcript 面板.
  *
- * 功能:
+ * YoutubeFeedOriginalBlock:
  *   · YouTube embed iframe (从 contentId 或解析 URL)
  *   · 视频标题 / 描述 (超长时折叠)
- *   · Transcript 区 (hasTranscript=true 时自动拉取；优先展示 transcript_data 分段 + 时间戳，ASR 含说话人)
- *   · 无字幕提示 (noTranscriptHint=false 时显示)
+ *   · Transcript 区 (可选: showTranscript=true 且 hasTranscript 时懒加载纯文本)
+ *
+ * YoutubeFeedTranscriptPanel:
+ *   · 仅字幕区 (Daily 抽屉「Transcript」Tab 与 Original 拆分)
  *
  * 使用方:
- *   · FeedArticleBody      (Feeds 右侧面板, channel_type='youtube')
- *   · DailyOriginalView    (Daily 抽屉, source_subtype='youtube_feed')
+ *   · FeedArticleBody      (Feeds: Original Tab 仅 embed+描述; Transcript Tab 用 YoutubeFeedTranscriptPanel)
+ *   · DailyOriginalView    (Daily 抽屉 Original Tab, showTranscript=false 时无字幕)
+ *   · DailyPreviewDrawer   (Transcript Tab → YoutubeFeedTranscriptPanel)
  */
 
 import React from 'react';
 import { Button, Space, Spin, Typography } from 'antd';
 import { AlignLeftOutlined, LinkOutlined } from '@ant-design/icons';
 import { subscriptionsAPI } from '../../services/subscriptions';
-import {
-  formatTranscriptTime,
-  rowsFromSubscriptionTranscriptData,
-  type YoutubeFeedTranscriptRow,
-} from './youtubeFeedTranscriptDisplay';
 
 const { Text } = Typography;
 
 const DESCRIPTION_PEEK_CHARS = 300;
-const TRANSCRIPT_PEEK_CHARS = 1500;
-/** Collapsed transcript: max segment rows when showing structured caption / ASR data. */
-const TRANSCRIPT_PEEK_ROWS = 48;
 
 function extractYouTubeId(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
   return m ? m[1] : null;
 }
+
+export type YoutubeFeedChromeColors = {
+  text: string;
+  textSecondary: string;
+  textMuted: string;
+  divider: string;
+  link: string;
+};
+
+export interface YoutubeFeedTranscriptPanelProps {
+  contentDbId: number;
+  hasTranscript: boolean;
+  themeMode: 'light' | 'dark';
+  colors: YoutubeFeedChromeColors;
+  /** When true and there is no transcript, do not show the "No transcript available" line. */
+  suppressEmptyHint?: boolean;
+}
+
+/** 仅展示 YouTube Feed 字幕（懒加载 subscription_content.transcript） */
+export const YoutubeFeedTranscriptPanel: React.FC<YoutubeFeedTranscriptPanelProps> = ({
+  contentDbId,
+  hasTranscript,
+  themeMode,
+  colors,
+  suppressEmptyHint = false,
+}) => {
+  const [transcriptPlain, setTranscriptPlain] = React.useState<string | null>(null);
+  const [transcriptLoading, setTranscriptLoading] = React.useState(false);
+  const [transcriptError, setTranscriptError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!hasTranscript) {
+      setTranscriptPlain(null);
+      setTranscriptError(null);
+      return;
+    }
+    let cancelled = false;
+    setTranscriptLoading(true);
+    setTranscriptPlain(null);
+    setTranscriptError(null);
+    subscriptionsAPI.getSubscriptionContentTranscript(contentDbId).then((res) => {
+      if (cancelled) return;
+      setTranscriptLoading(false);
+      if (!res.success || !res.data) {
+        setTranscriptError(res.error ?? 'Failed to load transcript');
+        return;
+      }
+      const text = (res.data.transcript ?? '').trim();
+      if (text) {
+        setTranscriptPlain(text);
+      } else {
+        setTranscriptError(res.error ?? 'Failed to load transcript');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [contentDbId, hasTranscript]);
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 6,
+        }}
+      >
+        <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
+        <Text
+          style={{
+            fontSize: 11,
+            letterSpacing: 0.5,
+            textTransform: 'uppercase',
+            color: colors.textMuted,
+          }}
+        >
+          Transcript
+        </Text>
+      </div>
+
+      {!hasTranscript && !suppressEmptyHint && (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          <AlignLeftOutlined style={{ marginRight: 4 }} />
+          No transcript available for this video.
+        </Text>
+      )}
+
+      {hasTranscript && transcriptLoading && (
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          <Spin size="small" />
+        </div>
+      )}
+
+      {hasTranscript && !transcriptLoading && transcriptError && (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {transcriptError}
+        </Text>
+      )}
+
+      {hasTranscript && !transcriptLoading && transcriptPlain && (
+        <div
+          style={{
+            background:
+              themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
+            border: `1px solid ${colors.divider}`,
+            borderRadius: 8,
+            padding: '12px 16px',
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: colors.text,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {transcriptPlain}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export interface YoutubeFeedOriginalBlockProps {
   /** YouTube video ID (e.g. "dQw4w9WgXcQ"). Primary source for embed. */
@@ -52,17 +169,13 @@ export interface YoutubeFeedOriginalBlockProps {
   hasTranscript: boolean;
   metadata?: Record<string, unknown> | null;
   themeMode: 'light' | 'dark';
-  colors: {
-    text: string;
-    textSecondary: string;
-    textMuted: string;
-    divider: string;
-    link: string;
-  };
+  colors: YoutubeFeedChromeColors;
   /** Extra top margin for the embed (e.g. when shown below an AI summary card). */
   embedTopMargin?: number;
   /** When true, suppresses the "no transcript available" info row. */
   noTranscriptHint?: boolean;
+  /** When false, transcript is not shown here (e.g. Daily drawer uses a separate Transcript tab). Default true. */
+  showTranscript?: boolean;
 }
 
 const YoutubeFeedOriginalBlock: React.FC<YoutubeFeedOriginalBlockProps> = ({
@@ -77,72 +190,17 @@ const YoutubeFeedOriginalBlock: React.FC<YoutubeFeedOriginalBlockProps> = ({
   colors,
   embedTopMargin = 0,
   noTranscriptHint = false,
+  showTranscript = true,
 }) => {
   const videoId = contentId || extractYouTubeId(url);
 
-  const [transcriptPlain, setTranscriptPlain] = React.useState<string | null>(null);
-  const [transcriptRows, setTranscriptRows] = React.useState<YoutubeFeedTranscriptRow[] | null>(
-    null
-  );
-  const [transcriptLoading, setTranscriptLoading] = React.useState(false);
-  const [transcriptError, setTranscriptError] = React.useState<string | null>(null);
-  const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
   const [descExpanded, setDescExpanded] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!hasTranscript) {
-      setTranscriptPlain(null);
-      setTranscriptRows(null);
-      setTranscriptError(null);
-      return;
-    }
-    let cancelled = false;
-    setTranscriptLoading(true);
-    setTranscriptPlain(null);
-    setTranscriptRows(null);
-    setTranscriptError(null);
-    setTranscriptExpanded(false);
-    subscriptionsAPI.getSubscriptionContentTranscript(contentDbId).then((res) => {
-      if (cancelled) return;
-      setTranscriptLoading(false);
-      if (!res.success || !res.data) {
-        setTranscriptError(res.error ?? 'Failed to load transcript');
-        return;
-      }
-      const structured = rowsFromSubscriptionTranscriptData(res.data.transcript_data);
-      if (structured && structured.length > 0) {
-        setTranscriptRows(structured);
-        setTranscriptPlain(null);
-      } else if (res.data.transcript?.trim()) {
-        setTranscriptRows(null);
-        setTranscriptPlain(res.data.transcript);
-      } else {
-        setTranscriptError(res.error ?? 'Failed to load transcript');
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [contentDbId, hasTranscript]);
 
   const descTrimmed = (description ?? '').trim();
   const descOverflow = descTrimmed.length > DESCRIPTION_PEEK_CHARS;
   const visibleDesc = descExpanded || !descOverflow
     ? descTrimmed
     : descTrimmed.slice(0, DESCRIPTION_PEEK_CHARS) + '…';
-
-  const plainOverflow =
-    (transcriptPlain?.length ?? 0) > TRANSCRIPT_PEEK_CHARS;
-  const visiblePlainTranscript =
-    transcriptExpanded || !plainOverflow
-      ? (transcriptPlain ?? '')
-      : (transcriptPlain ?? '').slice(0, TRANSCRIPT_PEEK_CHARS) + '…';
-
-  const rowOverflow = (transcriptRows?.length ?? 0) > TRANSCRIPT_PEEK_ROWS;
-  const visibleTranscriptRows =
-    transcriptExpanded || !rowOverflow
-      ? transcriptRows ?? []
-      : (transcriptRows ?? []).slice(0, TRANSCRIPT_PEEK_ROWS);
 
   const displayTitle = headingTitle || title;
 
@@ -231,156 +289,14 @@ const YoutubeFeedOriginalBlock: React.FC<YoutubeFeedOriginalBlockProps> = ({
         </div>
       )}
 
-      {/* ── Transcript ── */}
-      {hasTranscript && (
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginBottom: 6,
-            }}
-          >
-            <AlignLeftOutlined style={{ color: colors.textMuted, fontSize: 12 }} />
-            <Text
-              style={{
-                fontSize: 11,
-                letterSpacing: 0.5,
-                textTransform: 'uppercase',
-                color: colors.textMuted,
-              }}
-            >
-              Transcript
-            </Text>
-          </div>
-
-          {transcriptLoading && (
-            <div style={{ textAlign: 'center', padding: '12px 0' }}>
-              <Spin size="small" />
-            </div>
-          )}
-
-          {!transcriptLoading && transcriptError && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {transcriptError}
-            </Text>
-          )}
-
-          {!transcriptLoading && transcriptRows && transcriptRows.length > 0 && (
-            <>
-              <div
-                style={{
-                  background:
-                    themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
-                  border: `1px solid ${colors.divider}`,
-                  borderRadius: 8,
-                  padding: '10px 12px',
-                  maxHeight: transcriptExpanded ? 'none' : 320,
-                  overflowY: 'auto',
-                }}
-              >
-                {visibleTranscriptRows.map((row, idx) => (
-                  <div
-                    key={row.key}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '52px 1fr',
-                      columnGap: 10,
-                      alignItems: 'start',
-                      padding: '6px 0',
-                      borderBottom:
-                        idx === visibleTranscriptRows.length - 1
-                          ? 'none'
-                          : `1px solid ${colors.divider}`,
-                      fontSize: 13,
-                      lineHeight: 1.55,
-                      color: colors.text,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontVariantNumeric: 'tabular-nums',
-                        color: colors.textMuted,
-                        paddingTop: 1,
-                      }}
-                    >
-                      {formatTranscriptTime(row.startSec)}
-                    </Text>
-                    <div style={{ minWidth: 0, wordBreak: 'break-word' }}>
-                      {row.speakerLabel && (
-                        <Text
-                          strong
-                          style={{
-                            fontSize: 11,
-                            color: colors.textSecondary,
-                            display: 'block',
-                            marginBottom: 2,
-                          }}
-                        >
-                          {row.speakerLabel}
-                        </Text>
-                      )}
-                      <span>{row.text}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {rowOverflow && (
-                <Button
-                  type="link"
-                  size="small"
-                  style={{ padding: '4px 0', fontSize: 12 }}
-                  onClick={() => setTranscriptExpanded((v) => !v)}
-                >
-                  {transcriptExpanded ? 'Show less' : 'Show full transcript'}
-                </Button>
-              )}
-            </>
-          )}
-
-          {!transcriptLoading && transcriptPlain && (
-            <>
-              <div
-                style={{
-                  background:
-                    themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
-                  border: `1px solid ${colors.divider}`,
-                  borderRadius: 8,
-                  padding: '12px 16px',
-                  fontSize: 13,
-                  lineHeight: 1.7,
-                  color: colors.text,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  maxHeight: transcriptExpanded ? 'none' : 320,
-                  overflowY: 'auto',
-                }}
-              >
-                {visiblePlainTranscript}
-              </div>
-              {plainOverflow && (
-                <Button
-                  type="link"
-                  size="small"
-                  style={{ padding: '4px 0', fontSize: 12 }}
-                  onClick={() => setTranscriptExpanded((v) => !v)}
-                >
-                  {transcriptExpanded ? 'Show less' : 'Show full transcript'}
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── No transcript hint ── */}
-      {!hasTranscript && !noTranscriptHint && (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          <AlignLeftOutlined style={{ marginRight: 4 }} />
-          No transcript available for this video.
-        </Text>
+      {showTranscript && (
+        <YoutubeFeedTranscriptPanel
+          contentDbId={contentDbId}
+          hasTranscript={hasTranscript}
+          themeMode={themeMode}
+          colors={colors}
+          suppressEmptyHint={noTranscriptHint}
+        />
       )}
     </Space>
   );

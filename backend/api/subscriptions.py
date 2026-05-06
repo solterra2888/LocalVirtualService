@@ -1036,7 +1036,7 @@ async def get_subscription_contents(
                 sc.in_reply_to_username,
                 sc.in_reply_to_user_id,
                 sc.heat_level,
-                ((sc.transcript IS NOT NULL AND sc.transcript != '') OR sc.transcript_data IS NOT NULL) AS has_transcript,
+                (sc.transcript IS NOT NULL AND sc.transcript != '') AS has_transcript,
                 sct.sector, sct.sector_en, sct.industry, sct.industry_en,
                 sct.ticker, sct.concepts, sct.summary, sct.confidence,
                 sct.tagged_at,
@@ -1240,9 +1240,7 @@ async def get_subscription_content_transcript(
 ):
     """
     按需返回单条订阅内容的字幕/转写正文（不在列表接口中批量返回，减轻负载）。
-    数据来自 subscription_content.transcript / transcript_data。
-    响应中的 transcript_data 为解析后的 JSON，供前端展示分段（transcript 数组）
-    或 ASR 结构（asr_data.sentences）；transcript 字段仍为拼接全文便于兼容。
+    仅读取 subscription_content.transcript（纯文本拼接列）；无结构化 payload。
     """
     user_id = current_user.user_id
     db_manager = get_db_manager()
@@ -1252,7 +1250,7 @@ async def get_subscription_content_transcript(
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT channel_type, transcript, transcript_data
+            SELECT channel_type, transcript
             FROM subscription_content
             WHERE id = %s AND %s = ANY(user_ids)
             """,
@@ -1265,49 +1263,17 @@ async def get_subscription_content_transcript(
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        channel_type, transcript_col, transcript_data_col = row[0], row[1], row[2]
+        channel_type, transcript_col = row[0], row[1]
 
         if channel_type != "youtube":
             raise HTTPException(status_code=400, detail="Transcript is only available for YouTube content")
 
         raw_text = (transcript_col or "").strip() if transcript_col else ""
 
-        td: Any = transcript_data_col
-        if isinstance(td, str) and td.strip():
-            try:
-                td = json.loads(td)
-            except json.JSONDecodeError:
-                td = None
-        elif td is not None and not isinstance(td, dict):
-            td = None
+        if not raw_text:
+            raise HTTPException(status_code=404, detail="Transcript not available for this content")
 
-        language: Optional[str] = None
-        source: Optional[str] = None
-        if isinstance(td, dict):
-            language = td.get("language")
-            source = td.get("source")
-
-        if raw_text:
-            return {
-                "transcript": raw_text,
-                "transcript_data": td if isinstance(td, dict) else None,
-                "language": language,
-                "source": source,
-            }
-
-        if isinstance(td, dict):
-            from backend.services.youtube_service import YouTubeService
-
-            merged = YouTubeService.get_full_text(td)
-            if merged and merged.strip():
-                return {
-                    "transcript": merged.strip(),
-                    "transcript_data": td,
-                    "language": language,
-                    "source": source,
-                }
-
-        raise HTTPException(status_code=404, detail="Transcript not available for this content")
+        return {"transcript": raw_text}
 
     except HTTPException:
         raise

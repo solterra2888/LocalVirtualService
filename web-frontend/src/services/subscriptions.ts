@@ -184,13 +184,9 @@ export interface SubscriptionContentsResponse {
   offset: number;
 }
 
-/** GET /subscriptions/contents/:id/transcript */
+/** GET /subscriptions/contents/:id/transcript — subscription_content.transcript only */
 export interface SubscriptionContentTranscriptPayload {
   transcript: string;
-  /** Parsed subscription_content.transcript_data (YouTube segments / ASR asr_data, etc.) */
-  transcript_data?: Record<string, unknown> | null;
-  language?: string | null;
-  source?: string | null;
 }
 
 // 订阅管理 API

@@ -12,11 +12,8 @@
  *   │ AI Summary block (摘要 + sector/industry + tickers)   │
  *   │   - 缺失 summary 时降级提示并直接展开下方原文区        │
  *   ├──────────────────────────────────────────────────────┤
- *   │ AI Analysis (final_report / personalized_summary)    │
- *   │   → shared AIAnalysisSection (via DailyAIAnalysisSection)
- *   ├──────────────────────────────────────────────────────┤
- *   │ Original Content (折叠, 有 AI Analysis 时默认折叠)    │
- *   │   → shared CollapsibleOriginalSection + DailyOriginalView
+ *   │ Original | AI Analysis | Transcript (YouTube Feed / Upload YT Link) — Segmented Tab   │
+ *   │   Transcript → YoutubeFeedTranscriptPanel (feed) / DailyYoutubeUploadTranscriptPanel (upload)   │
  *   └──────────────────────────────────────────────────────┘
  *
  * 键盘:
@@ -55,10 +52,15 @@ import {
 } from '../../services/daily';
 import SourceBadge from './SourceBadge';
 import { DAILY_THEME_COLORS } from './dailyTheme';
-import DailyOriginalView from './DailyOriginalView';
+import DailyOriginalView, { DailyYoutubeUploadTranscriptPanel } from './DailyOriginalView';
 import DailyAIAnalysisSection from './DailyAIAnalysisSection';
 import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
+import { YoutubeFeedTranscriptPanel } from '../feed/YoutubeFeedOriginalBlock';
+import {
+  type FeedArticleViewMode,
+  adjacentFeedArticleViewMode,
+} from '../feed/feedArticleViewMode';
 import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import ReportTickerTags from '../ReportTickerTags';
@@ -97,8 +99,20 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // 视图模式: Original = AI Summary + 原文; AI Analysis = AI Summary + 深度分析
-  const [viewMode, setViewMode] = React.useState<'original' | 'analysis'>('original');
+  // 视图模式: Original | AI Analysis | Transcript（YouTube Feed 与 Upload YT Link 显示第三 Tab）
+  const [viewMode, setViewMode] = React.useState<FeedArticleViewMode>('original');
+
+  const showTranscriptTab =
+    item?.source_subtype === 'youtube_feed' ||
+    (item?.source === 'upload' && item?.source_subtype === 'youtube');
+  const analysisTabEnabled =
+    loading || !!(detail?.upload?.final_report || detail?.feed?.personalized_summary);
+
+  React.useEffect(() => {
+    if (!showTranscriptTab && viewMode === 'transcript') {
+      setViewMode('original');
+    }
+  }, [item?.id, showTranscriptTab, viewMode]);
 
   // 防止过期请求覆盖最新选中
   const requestSeqRef = React.useRef(0);
@@ -151,7 +165,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   // 键盘快捷键 (与 Feeds 阅读器对齐):
   //   Esc — 关闭抽屉
   //   ↑ / ↓ / K / J — 上一条 / 下一条
-  //   ← / → — Original / AI Analysis（焦点在顶栏 Segmented 内时交给组件）
+  //   ← / → — Original / AI Analysis / Transcript（焦点在顶栏 Segmented 内时交给组件）
   React.useEffect(() => {
     if (!item) return;
     const handler = (e: KeyboardEvent) => {
@@ -175,18 +189,14 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
         return;
       }
 
-      // ← / → : 视图模式
+      // ← / → : 在可用 Tab 间循环
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         if (target.closest('.ant-segmented')) return;
-        if (e.key === 'ArrowRight') {
-          const analysisDisabled =
-            !loading &&
-            !detail?.upload?.final_report &&
-            !detail?.feed?.personalized_summary;
-          if (analysisDisabled) return;
-        }
         e.preventDefault();
-        setViewMode(e.key === 'ArrowLeft' ? 'original' : 'analysis');
+        const dir: 1 | -1 = e.key === 'ArrowRight' ? 1 : -1;
+        setViewMode((prev) =>
+          adjacentFeedArticleViewMode(prev, dir, analysisTabEnabled, showTranscriptTab)
+        );
         return;
       }
 
@@ -213,7 +223,33 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     onNavigate,
     detail,
     loading,
+    analysisTabEnabled,
+    showTranscriptTab,
   ]);
+
+  const drawerSegmentedOptions = React.useMemo(
+    () => {
+      const opts: { label: string; value: FeedArticleViewMode; disabled?: boolean }[] = [
+        { label: 'Original', value: 'original' },
+        {
+          label: 'AI Analysis',
+          value: 'analysis',
+          disabled: !analysisTabEnabled,
+        },
+      ];
+      if (showTranscriptTab) {
+        opts.push({ label: 'Transcript', value: 'transcript' });
+      }
+      return opts;
+    },
+    [analysisTabEnabled, showTranscriptTab]
+  );
+
+  React.useEffect(() => {
+    if (!analysisTabEnabled && viewMode === 'analysis') {
+      setViewMode('original');
+    }
+  }, [analysisTabEnabled, viewMode]);
 
   // 渲染顶栏: 第一行 = 来源/导航/关闭; 第二行 = 视图模式 Tab
   const headerNode = (
@@ -260,15 +296,8 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
       {/* 第二行: 视图模式切换 Tab */}
       <Segmented
         value={viewMode}
-        onChange={(v) => setViewMode(v as 'original' | 'analysis')}
-        options={[
-          { label: 'Original', value: 'original' },
-          {
-            label: 'AI Analysis',
-            value: 'analysis',
-            disabled: !loading && !detail?.upload?.final_report && !detail?.feed?.personalized_summary,
-          },
-        ]}
+        onChange={(v) => setViewMode(v as FeedArticleViewMode)}
+        options={drawerSegmentedOptions}
         style={{ width: '100%' }}
         block
       />
@@ -412,19 +441,53 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
           )}
         </AISummarySection>
 
-        {/* AI Analysis / Original — 根据 Tab 切换 */}
+        {/* Original / AI Analysis / Transcript — 根据 Tab 切换 */}
         {viewMode === 'analysis' ? (
           <DailyAIAnalysisSection
             content={analysisContent}
             themeMode={themeMode}
           />
+        ) : viewMode === 'transcript' ? (
+          <CollapsibleOriginalSection>
+            {loading && !detail ? (
+              <div style={{ padding: 8 }}>
+                <Skeleton active paragraph={{ rows: 4 }} />
+              </div>
+            ) : error ? (
+              <Empty
+                description={
+                  <Text style={{ color: colors.textMuted }}>
+                    {error || 'Failed to load transcript'}
+                  </Text>
+                }
+              />
+            ) : detail?.feed && item?.source_subtype === 'youtube_feed' ? (
+              <YoutubeFeedTranscriptPanel
+                contentDbId={detail.feed.content_db_id}
+                hasTranscript={detail.feed.has_transcript}
+                themeMode={themeMode}
+                colors={{
+                  text: colors.text,
+                  textSecondary: colors.textSecondary,
+                  textMuted: colors.textMuted,
+                  divider: colors.divider,
+                  link: colors.accent,
+                }}
+              />
+            ) : detail?.upload &&
+              item?.source === 'upload' &&
+              item?.source_subtype === 'youtube' ? (
+              <DailyYoutubeUploadTranscriptPanel
+                upload={detail.upload}
+                themeMode={themeMode}
+                colors={colors}
+              />
+            ) : (
+              <Spin />
+            )}
+          </CollapsibleOriginalSection>
         ) : (
-          <CollapsibleOriginalSection
-            hasAIAnalysis={false}
-            defaultExpanded
-            themeMode={themeMode}
-            resetKey={item?.id}
-          >
+          <CollapsibleOriginalSection>
             {loading && !detail ? (
               <div style={{ padding: 8 }}>
                 <Skeleton active paragraph={{ rows: 4 }} />
@@ -438,7 +501,11 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
                 }
               />
             ) : detail ? (
-              <DailyOriginalView detail={detail} themeMode={themeMode} />
+              <DailyOriginalView
+                detail={detail}
+                themeMode={themeMode}
+                splitYoutubeTranscriptTab
+              />
             ) : (
               <Spin />
             )}

@@ -931,8 +931,7 @@ def _fetch_feed_detail(
             sc.is_retweet, sc.retweeted_author, sc.retweeted_content, sc.retweeted_url,
             sc.is_quote,   sc.quoted_author,    sc.quoted_content,    sc.quoted_url,
             sc.is_reply,   sc.in_reply_to_id,   sc.in_reply_to_username, sc.in_reply_to_user_id,
-            ((sc.transcript IS NOT NULL AND sc.transcript <> '') OR sc.transcript_data IS NOT NULL)
-                AS has_transcript,
+            (sc.transcript IS NOT NULL AND sc.transcript <> '') AS has_transcript,
             COALESCE(LENGTH(sc.content), 0) + COALESCE(LENGTH(sc.transcript), 0) AS content_length,
             sct.sector, sct.sector_en, sct.industry, sct.industry_en,
             sct.ticker, sct.concepts, sct.summary, sct.confidence, sct.tagged_at,

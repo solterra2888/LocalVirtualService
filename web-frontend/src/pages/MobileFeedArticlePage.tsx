@@ -6,6 +6,7 @@ import { ArrowLeftOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useMobileFeeds } from '../contexts/MobileFeedsContext';
 import FeedArticleBody from '../components/feed/FeedArticleBody';
+import { type FeedArticleViewMode } from '../components/feed/feedArticleViewMode';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import {
   subscriptionsAPI,
@@ -62,8 +63,8 @@ const MobileFeedArticlePage: React.FC = () => {
 
   const [content, setContent] = useState<SubscriptionContent | null>(null);
   const [loading, setLoading] = useState(true);
-  /** Twitter / YouTube 与桌面 Feeds 一致: Original ↔ AI Analysis（需与 FeedArticleBody 联动） */
-  const [feedViewMode, setFeedViewMode] = useState<'original' | 'analysis'>('original');
+  /** Twitter / YouTube: Original | AI Analysis | Transcript(YouTube)；与 FeedArticleBody 联动 */
+  const [feedViewMode, setFeedViewMode] = useState<FeedArticleViewMode>('original');
 
   const subId = subscriptionId ? Number(subscriptionId) : NaN;
   const cId = contentId ? Number(contentId) : NaN;
@@ -101,7 +102,7 @@ const MobileFeedArticlePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when article route changes
   }, [subId, cId, location.key]);
 
-  /** 切换订阅时回到 Original；同订阅内上/下一条保留当前 Tab（Original / AI Analysis） */
+  /** 切换订阅时回到 Original；同订阅内上/下一条保留当前 Tab（含 Transcript） */
   useEffect(() => {
     setFeedViewMode('original');
   }, [subId]);
@@ -128,7 +129,27 @@ const MobileFeedArticlePage: React.FC = () => {
   const showFeedViewModeTabs =
     !!content && (content.channel_type === 'twitter' || content.channel_type === 'youtube');
 
+  const showTranscriptTabMobile = content?.channel_type === 'youtube';
+
+  const mobileFeedSegmentedOptions = useMemo(() => {
+    const opts: { label: string; value: FeedArticleViewMode }[] = [
+      { label: 'Original', value: 'original' },
+      { label: 'AI Analysis', value: 'analysis' },
+    ];
+    if (showTranscriptTabMobile) {
+      opts.push({ label: 'Transcript', value: 'transcript' });
+    }
+    return opts;
+  }, [showTranscriptTabMobile]);
+
+  useEffect(() => {
+    if (!showTranscriptTabMobile && feedViewMode === 'transcript') {
+      setFeedViewMode('original');
+    }
+  }, [content?.id, content?.channel_type, showTranscriptTabMobile, feedViewMode]);
+
   const listInSync = selectedSubscription?.id === subId;
+
   const currentIndex = useMemo(() => {
     if (!listInSync || !content) return -1;
     return contents.findIndex((c) => c.id === content.id);
@@ -247,11 +268,8 @@ const MobileFeedArticlePage: React.FC = () => {
         {showFeedViewModeTabs && (
           <Segmented
             value={feedViewMode}
-            onChange={(v) => setFeedViewMode(v as 'original' | 'analysis')}
-            options={[
-              { label: 'Original', value: 'original' },
-              { label: 'AI Analysis', value: 'analysis' },
-            ]}
+            onChange={(v) => setFeedViewMode(v as FeedArticleViewMode)}
+            options={mobileFeedSegmentedOptions}
             style={{ width: '100%' }}
             block
           />

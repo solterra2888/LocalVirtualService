@@ -27,7 +27,9 @@ import {
 } from '@ant-design/icons';
 import { api } from '../../services/api';
 import { getNewsSourceColor } from './feedChannelConfig';
-import YoutubeFeedOriginalBlock from './YoutubeFeedOriginalBlock';
+import YoutubeFeedOriginalBlock, {
+  YoutubeFeedTranscriptPanel,
+} from './YoutubeFeedOriginalBlock';
 import { useFileProcessing } from '../../contexts/FileProcessingContext';
 import FeedTweetContent from './FeedTweetContent';
 import type { FeedThemeColors } from './feedTheme';
@@ -52,6 +54,9 @@ import AIAnalysisSection from '../shared/content-viewer/AIAnalysisSection';
 import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
+import type { FeedArticleViewMode } from './feedArticleViewMode';
+
+export type { FeedArticleViewMode } from './feedArticleViewMode';
 
 const { Text } = Typography;
 
@@ -69,16 +74,11 @@ export interface FeedArticleBodyProps {
    */
   onTagsUpdated?: (contentId: number, tags: SubscriptionContentTagsLite) => void;
   /**
-   * Desktop feed reader: Original Content starts expanded even with AI Analysis.
-   * Omit on mobile article page to keep the tighter default.
-   */
-  originalContentDefaultExpanded?: boolean;
-  /**
    * 视图模式 (由父组件管理以跨内容切换保持选择).
    * 未传入时回退到内部 state, 兼容移动端独立使用场景.
    */
-  viewMode?: 'original' | 'analysis';
-  onViewModeChange?: (mode: 'original' | 'analysis') => void;
+  viewMode?: FeedArticleViewMode;
+  onViewModeChange?: (mode: FeedArticleViewMode) => void;
 }
 
 /** Channels that participate in auto-tagging (see FEEDS_AUTO_TAGGING_PLAN.md §1). */
@@ -105,7 +105,6 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   themeMode,
   onTranscriptReady,
   onTagsUpdated,
-  originalContentDefaultExpanded = false,
   viewMode: viewModeProp,
   onViewModeChange,
 }) => {
@@ -115,7 +114,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const [originalTweetLoading, setOriginalTweetLoading] = useState(false);
 
   // 视图模式: 优先使用父组件传入的受控值; 未传则用内部 state (mobile 兜底)
-  const [viewModeInternal, setViewModeInternal] = useState<'original' | 'analysis'>('original');
+  const [viewModeInternal, setViewModeInternal] = useState<FeedArticleViewMode>('original');
   const viewMode = viewModeProp ?? viewModeInternal;
   const setViewMode = onViewModeChange ?? setViewModeInternal;
 
@@ -736,14 +735,79 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         />
       )}
 
+      {/* ── Transcript Tab (YouTube only) — embed/描述在 Original，字幕单独 Tab ── */}
+      {selectedContent.channel_type === 'youtube' && viewMode === 'transcript' && (
+        <CollapsibleOriginalSection>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {selectedContent.has_transcript ? (
+              <YoutubeFeedTranscriptPanel
+                contentDbId={selectedContent.id}
+                hasTranscript
+                themeMode={themeMode}
+                colors={{
+                  text: themeColors.text,
+                  textSecondary: themeColors.textSecondary,
+                  textMuted: themeColors.textMuted,
+                  divider: themeColors.cardBorder,
+                  link: themeColors.selectedBorder,
+                }}
+              />
+            ) : (
+              <>
+                <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
+                <div
+                  style={{
+                    border: `1px dashed ${themeColors.cardBorder}`,
+                    borderRadius: 8,
+                    padding: '12px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <Space>
+                    <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                      {asrStatus === 'processing'
+                        ? `Transcribing… ${asrProgress}%`
+                        : asrStatus === 'completed'
+                          ? 'Transcription complete — please refresh'
+                          : asrStatus === 'failed'
+                            ? 'Transcription failed'
+                            : 'No transcript available'}
+                    </Text>
+                    {asrStatus === 'failed' && (
+                      <Tag color="red" style={{ fontSize: 11 }}>
+                        Failed
+                      </Tag>
+                    )}
+                  </Space>
+                  {asrStatus !== 'completed' && (
+                    <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={asrStatus === 'processing'}
+                        disabled={asrStatus === 'processing'}
+                        onClick={handleTriggerASR}
+                        style={{ fontSize: 12, borderRadius: 6 }}
+                      >
+                        {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
+                      </Button>
+                    </Tooltip>
+                  )}
+                </div>
+              </>
+            )}
+          </Space>
+        </CollapsibleOriginalSection>
+      )}
+
       {/* ── Original Content Tab — news 始终显示; twitter/youtube 在 Original 模式下显示 ── */}
       {(!showAiTagsPanel || viewMode === 'original') && (
-      <CollapsibleOriginalSection
-        hasAIAnalysis={false}
-        themeMode={themeMode}
-        resetKey={selectedContent.id}
-        defaultExpanded={showAiTagsPanel || originalContentDefaultExpanded}
-      >
+      <CollapsibleOriginalSection>
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {selectedContent.channel_type === 'news' && (
             <NewsOriginalView
@@ -782,7 +846,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 link: themeColors.selectedBorder,
               }}
               embedTopMargin={0}
-              noTranscriptHint={false}
+              noTranscriptHint
+              showTranscript={false}
             />
           )}
 
@@ -870,55 +935,6 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </a>
           )}
 
-          {selectedContent.channel_type === 'youtube' && !selectedContent.has_transcript && (
-            <>
-              <Divider style={{ borderColor: themeColors.cardBorder, margin: '8px 0' }} />
-              <div
-                style={{
-                  border: `1px dashed ${themeColors.cardBorder}`,
-                  borderRadius: 8,
-                  padding: '12px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Space>
-                  <AlignLeftOutlined style={{ color: themeColors.textSecondary }} />
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                    {asrStatus === 'processing'
-                      ? `Transcribing… ${asrProgress}%`
-                      : asrStatus === 'completed'
-                      ? 'Transcription complete — please refresh'
-                      : asrStatus === 'failed'
-                      ? 'Transcription failed'
-                      : 'No transcript available'}
-                  </Text>
-                  {asrStatus === 'failed' && (
-                    <Tag color="red" style={{ fontSize: 11 }}>
-                      Failed
-                    </Tag>
-                  )}
-                </Space>
-                {asrStatus !== 'completed' && (
-                  <Tooltip title="Use Fun-ASR to generate transcript (costs ASR tokens)">
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={asrStatus === 'processing'}
-                      disabled={asrStatus === 'processing'}
-                      onClick={handleTriggerASR}
-                      style={{ fontSize: 12, borderRadius: 6 }}
-                    >
-                      {asrStatus === 'failed' ? 'Retry ASR' : 'AI Transcribe'}
-                    </Button>
-                  </Tooltip>
-                )}
-              </div>
-            </>
-          )}
         </Space>
       </CollapsibleOriginalSection>
       )}
