@@ -94,7 +94,7 @@ def get_file_tags(
         
         row = cursor.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="文件标签不存在")
+            raise HTTPException(status_code=404, detail="File tags not found")
         
         tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
         ticker_raw = json.dumps(tickers) if tickers else None

@@ -137,8 +137,8 @@ export function useSubscriptionFeed(options: UseSubscriptionFeedOptions = {}) {
     }
   }, [selectedSubscriptionId, onlyUnread, loadContents]);
 
-  const loadMoreContents = useCallback(async () => {
-    if (!selectedSubscription || loadingMore || !hasMoreContents) return;
+  const loadMoreContents = useCallback(async (): Promise<SubscriptionContent[] | null> => {
+    if (!selectedSubscription || loadingMore || !hasMoreContents) return null;
 
     setLoadingMore(true);
     try {
@@ -155,10 +155,13 @@ export function useSubscriptionFeed(options: UseSubscriptionFeedOptions = {}) {
         setContents((prev) => [...prev, ...newContents]);
         setContentOffset(nextOffset);
         setHasMoreContents(nextOffset < newTotal);
+        return newContents;
       }
+      return null;
     } catch (error) {
       console.error('Failed to load more contents:', error);
       message.error('Failed to load more');
+      return null;
     } finally {
       setLoadingMore(false);
     }

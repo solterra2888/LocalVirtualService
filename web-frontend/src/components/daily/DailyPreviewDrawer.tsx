@@ -24,10 +24,13 @@
  *   - ↑ / k     上一条
  *   - ↓ / j     下一条
  *
+ * 移动端 bottom-sheet: 两侧浮动 < >（与 Mobile Feeds 全文页一致）切换上一条/下一条。
+ *
  * 设计取舍详见 docs/instructions/DAILY_MODULE.md §1.
  */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   Button,
   Drawer,
@@ -60,6 +63,7 @@ import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import ReportTickerTags from '../ReportTickerTags';
 import { aiTagChipStyle } from '../shared/aiTagChipStyles';
+import './DailyPreviewDrawer.css';
 
 const { Title, Text } = Typography;
 
@@ -106,6 +110,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   );
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < items.length - 1;
+  const isMobile = placement === 'bottom';
 
   // 切换 item 时拉取详情 (viewMode 不重置，跨 item 保持用户选择)
   React.useEffect(() => {
@@ -131,6 +136,17 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
       }
     })();
   }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- item identity tied to id
+
+  // 移动端 bottom-sheet: 切换条目后正文区滚回顶部
+  React.useEffect(() => {
+    if (!item?.id || !isMobile) return;
+    requestAnimationFrame(() => {
+      const body = document.querySelector('.daily-preview-drawer-mobile .ant-drawer-body');
+      if (body instanceof HTMLElement) {
+        body.scrollTop = 0;
+      }
+    });
+  }, [item?.id, isMobile]);
 
   // 键盘快捷键 (与 Feeds 阅读器对齐):
   //   Esc — 关闭抽屉
@@ -198,8 +214,6 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     detail,
     loading,
   ]);
-
-  const isMobile = placement === 'bottom';
 
   // 渲染顶栏: 第一行 = 来源/导航/关闭; 第二行 = 视图模式 Tab
   const headerNode = (
@@ -434,31 +448,89 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     );
   };
 
+  const showMobileNavFabs =
+    isMobile && !!item && currentIndex >= 0 && items.length > 0 && !!onNavigate;
+
+  const dailyNavFabPortalStyle = React.useMemo(
+    () =>
+      ({
+        ['--nav-fab-text' as string]: colors.text,
+        ['--nav-fab-muted' as string]: colors.textMuted,
+      }) as React.CSSProperties,
+    [colors.text, colors.textMuted]
+  );
+
+  const dailyNavPortal =
+    showMobileNavFabs &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        className="daily-preview-nav-portal"
+        data-theme={themeMode}
+        style={dailyNavFabPortalStyle}
+      >
+        <div className="daily-preview-nav-fabs" aria-label="Daily item navigation">
+          <Tooltip title="Previous (↑ / K)" placement="right">
+            <span className="daily-preview-nav-fab-tooltip-wrap">
+              <button
+                type="button"
+                className="daily-preview-nav-fab"
+                disabled={!hasPrev}
+                onClick={() => hasPrev && onNavigate?.(items[currentIndex - 1])}
+                aria-label="Previous item"
+              >
+                {'<'}
+              </button>
+            </span>
+          </Tooltip>
+          <Tooltip title="Next (↓ / J)" placement="left">
+            <span className="daily-preview-nav-fab-tooltip-wrap">
+              <button
+                type="button"
+                className="daily-preview-nav-fab"
+                disabled={!hasNext}
+                onClick={() => hasNext && onNavigate?.(items[currentIndex + 1])}
+                aria-label="Next item"
+              >
+                {'>'}
+              </button>
+            </span>
+          </Tooltip>
+        </div>
+      </div>,
+      document.body
+    );
+
   return (
-    <Drawer
-      open={!!item}
-      onClose={onClose}
-      placement={placement}
-      width={placement === 'right' ? DESKTOP_DRAWER_WIDTH : undefined}
-      height={placement === 'bottom' ? '92vh' : undefined}
-      closable={false}
-      destroyOnClose
-      title={headerNode}
-      styles={{
-        header: {
-          background: colors.cardBg,
-          borderBottom: `1px solid ${colors.divider}`,
-          padding: '10px 16px',
-        },
-        body: {
-          background: colors.pageBg,
-          padding: isMobile ? '14px 16px 32px' : '20px 24px 40px',
-        },
-        wrapper: { boxShadow: '-8px 0 24px rgba(0,0,0,0.08)' },
-      }}
-    >
-      {renderBody()}
-    </Drawer>
+    <>
+      <Drawer
+        open={!!item}
+        onClose={onClose}
+        placement={placement}
+        width={placement === 'right' ? DESKTOP_DRAWER_WIDTH : undefined}
+        height={placement === 'bottom' ? '92vh' : undefined}
+        closable={false}
+        destroyOnClose
+        rootClassName={isMobile ? 'daily-preview-drawer-mobile' : undefined}
+        title={headerNode}
+        styles={{
+          header: {
+            background: colors.cardBg,
+            borderBottom: `1px solid ${colors.divider}`,
+            padding: '10px 16px',
+          },
+          body: {
+            background: colors.pageBg,
+            padding: isMobile ? '14px 16px 32px' : '20px 24px 40px',
+          },
+          wrapper: { boxShadow: '-8px 0 24px rgba(0,0,0,0.08)' },
+        }}
+      >
+        {renderBody()}
+      </Drawer>
+
+      {dailyNavPortal}
+    </>
   );
 };
 

@@ -1,0 +1,120 @@
+/*
+ * Daily 移动端浮动导航：createPortal → body；置于屏幕下方、避开底栏（高 60px，与 MobileBottomNav 一致）。
+ */
+.daily-preview-nav-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  pointer-events: none;
+}
+
+.daily-preview-nav-portal .daily-preview-nav-fabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 14px);
+  transform: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 max(12px, env(safe-area-inset-left, 0px)) 0 max(12px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+
+.daily-preview-nav-fab-tooltip-wrap {
+  display: inline-flex;
+  pointer-events: auto;
+}
+
+.daily-preview-nav-portal button.daily-preview-nav-fab {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+
+.daily-preview-nav-portal[data-theme='light'] button.daily-preview-nav-fab {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  margin: 0;
+  border-radius: 22px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+  color: var(--nav-fab-text, rgba(0, 0, 0, 0.82));
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.95), 0 0 1px rgba(255, 255, 255, 1);
+}
+
+.daily-preview-nav-portal[data-theme='light'] button.daily-preview-nav-fab:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.daily-preview-nav-portal[data-theme='light'] button.daily-preview-nav-fab:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.daily-preview-nav-portal[data-theme='light'] button.daily-preview-nav-fab:disabled {
+  cursor: not-allowed;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.28);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: none;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.9);
+}
+
+.daily-preview-nav-portal[data-theme='dark'] button.daily-preview-nav-fab {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  margin: 0;
+  border-radius: 22px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+  color: var(--nav-fab-text, rgba(255, 255, 255, 0.92));
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+}
+
+.daily-preview-nav-portal[data-theme='dark'] button.daily-preview-nav-fab:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.daily-preview-nav-portal[data-theme='dark'] button.daily-preview-nav-fab:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.daily-preview-nav-portal[data-theme='dark'] button.daily-preview-nav-fab:disabled {
+  cursor: not-allowed;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+  text-shadow: none;
+}
