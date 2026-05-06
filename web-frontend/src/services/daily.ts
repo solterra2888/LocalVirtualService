@@ -35,6 +35,12 @@ export interface DailyNavigate {
   external_url?: string | null;     // 原始外链
 }
 
+export interface DailyShareRecipient {
+  user_id: number;
+  username: string;
+  avatar_url: string | null;
+}
+
 export interface DailyFeedItem {
   id: string;                  // 复合 ID: upload_<id> 或 feed_<id>
   source: DailySource;
@@ -61,6 +67,8 @@ export interface DailyFeedItem {
   shared_by_user_id: number | null;
   /** OSS 签名 URL 或外链; 无头像或非共享卡片时为 null */
   shared_by_avatar_url: string | null;
+  /** owner 分享给的用户列表；被分享者视角为空数组 */
+  shared_to: DailyShareRecipient[];
 }
 
 export interface DailyFeedResponse {

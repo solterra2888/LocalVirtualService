@@ -30,7 +30,11 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
   const currentUser = useAuthStore((s) => s.user);
   const [hover, setHover] = React.useState(false);
 
-  const isShared = item.source === 'upload' && !!item.shared_by_username;
+  const isIncomingShare = item.source === 'upload' && !!item.shared_by_username;
+  const isOutgoingShare =
+    item.source === 'upload' &&
+    !item.shared_by_username &&
+    (item.shared_to?.length ?? 0) > 0;
 
   const summaryOrSnippet = item.summary || item.snippet;
   const hasSummary = !!item.summary;
@@ -182,8 +186,8 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
           </>
         )}
 
-        {/* 共享 Avatar 对：分享者 → | → 被分享者（当前用户），仅 Upload 共享时展示 */}
-        {isShared && item.shared_by_username && (
+        {/* 被分享：分享者 | 当前用户 */}
+        {isIncomingShare && item.shared_by_username && (
           <div
             style={{
               marginLeft: 'auto',
@@ -214,6 +218,45 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
                 {(currentUser?.username ?? 'Y').charAt(0).toUpperCase()}
               </Avatar>
             </Tooltip>
+          </div>
+        )}
+
+        {/* 分享者（owner）：自己 | 收件人组 — 与 Sources 左侧栏一致 */}
+        {isOutgoingShare && (
+          <div
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              flexShrink: 0,
+            }}
+          >
+            <Tooltip title={currentUser?.username ?? 'You'}>
+              <Avatar
+                size={20}
+                src={currentUser?.avatar_url ?? undefined}
+                style={{ backgroundColor: '#722ed1', fontSize: 10, cursor: 'default' }}
+              >
+                {(currentUser?.username ?? 'Y').charAt(0).toUpperCase()}
+              </Avatar>
+            </Tooltip>
+            <span style={{ color: colors.textMuted, fontSize: 12, lineHeight: '20px', opacity: 0.5, userSelect: 'none' }}>
+              |
+            </span>
+            <Avatar.Group size={20} max={{ count: 3, style: { backgroundColor: '#722ed1', fontSize: 10 } }}>
+              {item.shared_to.map((u) => (
+                <Tooltip key={u.user_id} title={u.username}>
+                  <Avatar
+                    size={20}
+                    src={u.avatar_url ?? undefined}
+                    style={{ backgroundColor: '#1890ff', fontSize: 10 }}
+                  >
+                    {u.username.charAt(0).toUpperCase()}
+                  </Avatar>
+                </Tooltip>
+              ))}
+            </Avatar.Group>
           </div>
         )}
       </div>

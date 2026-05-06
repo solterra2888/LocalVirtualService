@@ -40,6 +40,16 @@ SourceSubtype = Literal[
 ]
 
 
+class DailyShareRecipient(BaseModel):
+    """Upload 文件分享给的用户 (仅 owner 视角 Daily 卡片用)."""
+
+    user_id: int = Field(..., description="被分享用户 id")
+    username: str = Field(..., description="被分享用户名")
+    avatar_url: Optional[str] = Field(
+        None, description="头像可访问 URL (后端已 resolve_avatar_url)"
+    )
+
+
 class DailyNavigate(BaseModel):
     """卡片点击跳转目标信息（前端依此构造路由）."""
 
@@ -77,8 +87,9 @@ class DailyFeedItem(BaseModel):
 
     navigate: DailyNavigate = Field(..., description="点击跳转目标")
 
-    # Upload 共享标记: 当前卡片是他人分享给当前用户的文件时非 null。
-    # Feed 侧永远为 null；当前用户是 owner 时也为 null。
+    # Upload 被分享者视角: shared_by_* 非空, shared_to 为空。
+    # Upload owner 且曾分享: shared_to 非空, shared_by_* 为空。
+    # Feed 侧 shared_by_* 为空且 shared_to 为空。
     shared_by_username: Optional[str] = Field(
         None,
         description="文件分享者用户名; 仅 source=upload 且该文件由他人共享给当前用户时非 null",
@@ -90,6 +101,13 @@ class DailyFeedItem(BaseModel):
     shared_by_avatar_url: Optional[str] = Field(
         None,
         description="文件分享者头像 URL (OSS 签名 URL 或外链); 无头像或非共享卡片时为 null",
+    )
+    shared_to: List[DailyShareRecipient] = Field(
+        default_factory=list,
+        description=(
+            "当前用户为文件 owner 且曾分享给他人的收件人列表; "
+            "与 Sources 左侧 share_info.shared_to 同形。被分享者视角为空列表。"
+        ),
     )
 
 

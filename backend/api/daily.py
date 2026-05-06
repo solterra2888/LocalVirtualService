@@ -16,6 +16,7 @@ Daily 聚合视图 API.
     app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
 """
 
+import json
 import math
 import re
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from backend.schemas.daily import (
     DailyNavigate,
     DailyPresetResponse,
     DailyPresetUpdate,
+    DailyShareRecipient,
     DailySourceCount,
     DailyStatsResponse,
 )
@@ -171,6 +173,7 @@ def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
 #  21  shared_by_username      text / null  (Upload 共享：分享者用户名; 无共享或 Feed 侧 = null)
 #  22  shared_by_user_id       int / null   (Upload 共享：分享者 user_id)
 #  23  shared_by_avatar_url_raw text / null  (Upload 共享：分享者头像原始值, Python 层再经 resolve_avatar_url 签名)
+#  24  shared_to_recipients_raw json / null   (Upload owner：分享给的用户 JSON 数组; 非 owner = null)
 
 _UPLOAD_SQL = """
     SELECT
@@ -217,7 +220,27 @@ _UPLOAD_SQL = """
          JOIN users u ON u.id = fs.shared_by_user_id
          WHERE fs.file_id = fpd.id
            AND fs.shared_to_user_id = %(user_id)s
-         ORDER BY fs.created_at DESC LIMIT 1)         AS shared_by_avatar_url_raw
+         ORDER BY fs.created_at DESC LIMIT 1)         AS shared_by_avatar_url_raw,
+        CASE
+          WHEN ps."user" = %(username)s THEN
+            COALESCE(
+              (
+                SELECT json_agg(
+                  json_build_object(
+                    'user_id', u_to.id,
+                    'username', u_to.username,
+                    'avatar_url', u_to.avatar_url
+                  )
+                  ORDER BY fs_to.created_at
+                )
+                FROM file_shares fs_to
+                JOIN users u_to ON u_to.id = fs_to.shared_to_user_id
+                WHERE fs_to.file_id = fpd.id
+              ),
+              '[]'::json
+            )
+          ELSE NULL
+        END                                           AS shared_to_recipients_raw
     FROM file_processing_details fpd
     JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
     LEFT JOIN file_tags ft ON ft.file_id = fpd.id
@@ -263,7 +286,8 @@ _FEED_SQL = """
         sc.published_at                               AS published_at,
         NULL::text                                    AS shared_by_username,
         NULL::integer                                 AS shared_by_user_id,
-        NULL::text                                    AS shared_by_avatar_url_raw
+        NULL::text                                    AS shared_by_avatar_url_raw,
+        NULL::json                                    AS shared_to_recipients_raw
     FROM subscription_content sc
     LEFT JOIN subscription_content_tags sct
         ON sct.subscription_content_id = sc.id
@@ -383,6 +407,41 @@ def _resolve_subscription_ids(
     return out
 
 
+def _parse_shared_to_recipients_json(raw: Any) -> List[DailyShareRecipient]:
+    """将 SQL json_agg 结果解析为 DailyShareRecipient 列表 (头像 URL 经 resolve)."""
+    if raw is None:
+        return []
+    data: Any = raw
+    if isinstance(raw, (bytes, memoryview)):
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return []
+    elif isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(data, list):
+        return []
+    out: List[DailyShareRecipient] = []
+    for o in data:
+        if not isinstance(o, dict):
+            continue
+        uid = o.get("user_id")
+        if uid is None:
+            continue
+        uname = o.get("username")
+        out.append(
+            DailyShareRecipient(
+                user_id=int(uid),
+                username=str(uname) if uname is not None else "",
+                avatar_url=_resolve_avatar(o.get("avatar_url")),
+            )
+        )
+    return out
+
+
 def _row_to_item(
     row: tuple,
     subscription_id_map: Dict[tuple, int],
@@ -412,6 +471,7 @@ def _row_to_item(
         shared_by_username,
         shared_by_user_id,
         shared_by_avatar_url_raw,
+        shared_to_recipients_raw,
     ) = row
 
     if source == "upload":
@@ -471,6 +531,9 @@ def _row_to_item(
         shared_by_username=shared_by_username or None,
         shared_by_user_id=int(shared_by_user_id) if shared_by_user_id is not None else None,
         shared_by_avatar_url=_resolve_avatar(shared_by_avatar_url_raw),
+        shared_to=_parse_shared_to_recipients_json(shared_to_recipients_raw)
+        if source == "upload"
+        else [],
     )
 
 
@@ -820,7 +883,8 @@ def _fetch_upload_detail(
             ft.industry,
             ft.ticker,
             ft.concepts,
-            ft.confidence
+            ft.confidence,
+            ps."user"                               AS owner_username
         FROM file_processing_details fpd
         JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
         LEFT JOIN file_tags ft ON ft.file_id = fpd.id
@@ -858,7 +922,55 @@ def _fetch_upload_detail(
         ticker_raw,
         concepts_raw,
         confidence,
+        owner_username,
     ) = row
+
+    if owner_username == current_user.username:
+        cursor.execute(
+            """
+            SELECT COALESCE(
+                json_agg(
+                    json_build_object(
+                        'user_id', u_to.id,
+                        'username', u_to.username,
+                        'avatar_url', u_to.avatar_url
+                    )
+                    ORDER BY fs_to.created_at
+                ),
+                '[]'::json
+            )
+            FROM file_shares fs_to
+            JOIN users u_to ON u_to.id = fs_to.shared_to_user_id
+            WHERE fs_to.file_id = %s
+            """,
+            (item_id,),
+        )
+        r_share = cursor.fetchone()
+        shared_to_list = _parse_shared_to_recipients_json(r_share[0] if r_share else None)
+        shared_by_username = None
+        shared_by_user_id = None
+        shared_by_avatar_url = None
+    else:
+        cursor.execute(
+            """
+            SELECT u.username, fs.shared_by_user_id, u.avatar_url
+            FROM file_shares fs
+            JOIN users u ON u.id = fs.shared_by_user_id
+            WHERE fs.file_id = %s AND fs.shared_to_user_id = %s
+            ORDER BY fs.created_at DESC
+            LIMIT 1
+            """,
+            (item_id, current_user.user_id),
+        )
+        r_in = cursor.fetchone()
+        if r_in:
+            shared_by_username, shared_by_user_id, av_raw = r_in
+            shared_by_avatar_url = _resolve_avatar(av_raw)
+        else:
+            shared_by_username = None
+            shared_by_user_id = None
+            shared_by_avatar_url = None
+        shared_to_list = []
 
     subtype = _UPLOAD_FILE_TYPE_MAP.get(file_type or "document", "document")
     summary_text = summary or None
@@ -903,6 +1015,10 @@ def _fetch_upload_detail(
         published_at=pub,
         reading_time_min=_reading_time_min(content_length),
         navigate=navigate,
+        shared_by_username=shared_by_username,
+        shared_by_user_id=int(shared_by_user_id) if shared_by_user_id is not None else None,
+        shared_by_avatar_url=shared_by_avatar_url,
+        shared_to=shared_to_list,
         upload=upload_payload,
         feed=None,
     )
