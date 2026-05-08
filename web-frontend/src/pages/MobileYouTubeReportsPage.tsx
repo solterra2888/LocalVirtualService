@@ -9,21 +9,17 @@ import {
   List,
   Space,
   Spin,
-  Tag,
   Typography,
   theme as antdTheme,
 } from 'antd';
 import {
   CalendarOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
-  LoadingOutlined,
   MenuOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import { DailyReportStatusTag } from '../components/reports/DailyReportStatusTag';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import {
@@ -33,13 +29,6 @@ import {
 import './MobileFeedsPage.css';
 
 const { Text } = Typography;
-
-const STATUS_MAP: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-  completed: { color: 'success', icon: <CheckCircleOutlined />, label: 'Completed' },
-  generating: { color: 'processing', icon: <LoadingOutlined />, label: 'Generating' },
-  failed: { color: 'error', icon: <CloseCircleOutlined />, label: 'Failed' },
-  pending: { color: 'default', icon: <ClockCircleOutlined />, label: 'Pending' },
-};
 
 /**
  * Mobile Reports: YouTube Daily Report with left drawer (date + list), Feeds-like toolbar.
@@ -169,13 +158,19 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
           <div className="mobile-feeds-toolbar-title" style={{ color: themeColors.text }}>
             YouTube Daily Report
           </div>
-          <div className="mobile-feeds-toolbar-sub" style={{ color: themeColors.textSecondary }}>
-            {selectedDate.format('YYYY-MM-DD')}
+          <div
+            className="mobile-feeds-toolbar-sub"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              color: themeColors.textSecondary,
+            }}
+          >
+            <span>{selectedDate.format('YYYY-MM-DD')}</span>
             {selectedReport?.status && (
-              <>
-                {' · '}
-                {(STATUS_MAP[selectedReport.status] || STATUS_MAP.pending).label}
-              </>
+              <DailyReportStatusTag status={selectedReport.status} dark={isDark} compact />
             )}
           </div>
         </div>
@@ -216,10 +211,11 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
                 gap: 8,
               }}
             >
-              <Space wrap>
-                <Tag color={STATUS_MAP[selectedReport.status]?.color}>
+              <Space wrap align="center">
+                <Text strong style={{ fontSize: 13, color: themeColors.text }}>
                   {selectedReport.report_date}
-                </Tag>
+                </Text>
+                <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
                 {selectedReport.metadata?.video_count != null && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {selectedReport.metadata.video_count} videos · {selectedReport.metadata.channel_count} channels
@@ -310,7 +306,6 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
               ),
             }}
             renderItem={(item) => {
-              const status = STATUS_MAP[item.status] || STATUS_MAP.pending;
               const isSelected = selectedReport?.id === item.id;
               const meta = item.metadata;
               return (
@@ -341,9 +336,7 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
                         <Text strong style={{ fontSize: 14, color: themeColors.text }}>
                           {item.report_date}
                         </Text>
-                        <Tag color={status.color} icon={status.icon} style={{ margin: 0, fontSize: 11 }}>
-                          {status.label}
-                        </Tag>
+                        <DailyReportStatusTag status={item.status} dark={isDark} compact />
                       </div>
                       {meta && item.status === 'completed' && (
                         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>

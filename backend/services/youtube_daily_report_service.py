@@ -273,16 +273,19 @@ class YouTubeDailyReportService:
             cursor.close()
 
     def _get_enabled_youtube_user_ids(self) -> List[int]:
-        """获取所有有活跃 YouTube 订阅的用户 ID。"""
+        """获取所有有活跃 YouTube 订阅且未关闭自动生成的用户 ID。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT DISTINCT user_id
-                FROM subscription_list
-                WHERE channel_type = 'youtube'
-                  AND enabled = true
-                ORDER BY user_id
+                SELECT DISTINCT sl.user_id
+                FROM subscription_list sl
+                LEFT JOIN user_daily_report_auto_settings udras
+                    ON udras.user_id = sl.user_id
+                WHERE sl.channel_type = 'youtube'
+                  AND sl.enabled = true
+                  AND COALESCE(udras.youtube_auto_enabled, false) = true
+                ORDER BY sl.user_id
             """)
             return [row[0] for row in cursor.fetchall()]
         finally:

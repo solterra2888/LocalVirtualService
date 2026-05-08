@@ -1983,6 +1983,55 @@
   border-color: rgba(255, 255, 255, 0.06);
 }
 
+/* 与 My Feeds 左栏图标按钮同构（不依赖 .feed-page-layout），供 Daily Report 等侧栏复用 */
+.feed-toolbar-icon-btn {
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--files-panel-meta, rgba(0, 0, 0, 0.5));
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.feed-toolbar-icon-btn .feed-toolbar-icon-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: inherit;
+}
+
+.feed-toolbar-icon-btn .feed-toolbar-icon-btn__icon .anticon {
+  color: inherit;
+}
+
+.feed-toolbar-icon-btn:hover:not(:disabled) {
+  color: var(--files-panel-text, rgba(0, 0, 0, 0.88));
+  background: var(--files-batch-bar-bg, #f1f5f9);
+}
+
+.feed-toolbar-icon-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.app-dark .feed-toolbar-icon-btn {
+  color: #a0a3ad;
+}
+
+.app-dark .feed-toolbar-icon-btn:hover:not(:disabled) {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
 /* Feed 右侧：Original / AI Analysis — 浅/深同一结构：外轨道 + 透明 Segmented + #1677ff 选中块（class: feed-page-layout__view-mode-tabs） */
 .feed-page-layout__view-mode-tabs {
   width: 100%;
