@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   App,
   Button,
@@ -9,13 +9,16 @@ import {
   List,
   Space,
   Spin,
+  Switch,
+  Tooltip,
   Typography,
   theme as antdTheme,
 } from 'antd';
 import {
   CalendarOutlined,
+  LoadingOutlined,
   MenuOutlined,
-  ReloadOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import MarkdownRenderer from '../components/MarkdownRenderer';
@@ -26,13 +29,13 @@ import {
   twitterDailyReportsAPI,
   TwitterDailyReport,
 } from '../services/twitterDailyReports';
+import { useDailyReportStatusPoll } from '../hooks/useDailyReportStatusPoll';
 import './MobileFeedsPage.css';
 
 const { Text } = Typography;
 
 /**
  * Mobile Reports: Twitter Daily Report with left drawer (date + list), Feeds-like toolbar.
- * Reports are generated automatically by the scheduler — this page is read-only.
  */
 const MobileReportsPageInner: React.FC = () => {
   const { message } = App.useApp();
@@ -46,6 +49,37 @@ const MobileReportsPageInner: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(() => dayjs().subtract(1, 'day'));
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoToggling, setAutoToggling] = useState(false);
+
+  const selectedReportDateRef = useRef<string | null>(null);
+  selectedReportDateRef.current = selectedReport?.report_date ?? null;
+  const { startPoll, clearPoll } = useDailyReportStatusPoll();
+
+  const loadAutoSettings = useCallback(async () => {
+    try {
+      const res = await twitterDailyReportsAPI.getAutoSettings();
+      if (res.success && res.data) setAutoEnabled(res.data.auto_enabled);
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleAutoToggle = useCallback(async (checked: boolean) => {
+    setAutoToggling(true);
+    try {
+      const res = await twitterDailyReportsAPI.updateAutoSettings(checked);
+      if (res.success && res.data) {
+        setAutoEnabled(res.data.auto_enabled);
+        message.success(checked ? 'Auto-generation enabled' : 'Auto-generation disabled');
+      } else {
+        message.error(res.error || 'Failed to update setting');
+      }
+    } catch {
+      message.error('Failed to update setting');
+    } finally {
+      setAutoToggling(false);
+    }
+  }, [message]);
 
   const loadReportDetail = useCallback(async (dateStr: string) => {
     setDetailLoading(true);
@@ -61,19 +95,48 @@ const MobileReportsPageInner: React.FC = () => {
     }
   }, [message]);
 
-  const loadReports = useCallback(async () => {
-    setLoading(true);
+  const loadReports = useCallback(async (options?: { quiet?: boolean }) => {
+    const quiet = options?.quiet === true;
+    if (!quiet) setLoading(true);
     try {
       const res = await twitterDailyReportsAPI.listReports(60, 0);
       if (res.success && res.data) {
         setReports(res.data.reports);
       }
     } catch {
-      message.error('Failed to load report list');
+      if (!quiet) message.error('Failed to load report list');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [message]);
+
+  const handleGenerate = useCallback(async () => {
+    const dateStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
+    clearPoll();
+    setGenerating(true);
+    try {
+      const res = await twitterDailyReportsAPI.generateReport(dateStr, false);
+      if (!res.success) {
+        message.error(res.error || 'Failed to trigger report generation');
+        setGenerating(false);
+        return;
+      }
+      message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
+      setSelectedDate(dayjs(dateStr));
+      await loadReports();
+      await loadReportDetail(dateStr);
+      startPoll(dateStr, {
+        fetchReport: twitterDailyReportsAPI.getReportByDate,
+        refreshList: () => loadReports({ quiet: true }),
+        syncDetailIfViewing: () => selectedReportDateRef.current === dateStr,
+        setDetail: (r) => setSelectedReport(r as TwitterDailyReport),
+        onDone: () => setGenerating(false),
+      });
+    } catch {
+      message.error('Failed to trigger report generation');
+      setGenerating(false);
+    }
+  }, [message, loadReports, loadReportDetail, clearPoll, startPoll]);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +170,10 @@ const MobileReportsPageInner: React.FC = () => {
       cancelled = true;
     };
   }, [message]);
+
+  useEffect(() => {
+    loadAutoSettings();
+  }, [loadAutoSettings]);
 
   const handleDateChange = (date: dayjs.Dayjs | null) => {
     if (!date) return;
@@ -160,30 +227,43 @@ const MobileReportsPageInner: React.FC = () => {
           </div>
           <div
             className="mobile-feeds-toolbar-sub"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-              color: themeColors.textSecondary,
-            }}
+            style={{ color: themeColors.textSecondary }}
           >
-            <span>{selectedDate.format('YYYY-MM-DD')}</span>
-            {selectedReport?.status && (
-              <DailyReportStatusTag status={selectedReport.status} dark={isDark} compact />
-            )}
+            {selectedDate.format('YYYY-MM-DD')}
           </div>
         </div>
-        <Space size={4}>
-          <Button
-            type="text"
-            icon={<ReloadOutlined />}
-            onClick={() => loadReports()}
-            loading={loading}
-            style={{ color: themeColors.textSecondary }}
-            aria-label="Refresh list"
-          />
-        </Space>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
+          <Tooltip title={autoEnabled ? 'Auto-generation ON — tap to disable' : 'Auto-generation OFF — tap to enable'}>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <Switch
+                size="small"
+                checked={autoEnabled}
+                loading={autoToggling}
+                onChange={handleAutoToggle}
+                aria-label="Auto-generate daily reports"
+              />
+            </span>
+          </Tooltip>
+          <button
+            type="button"
+            className="feed-toolbar-icon-btn"
+            onClick={() => void handleGenerate()}
+            disabled={generating}
+            aria-label="Generate yesterday's report"
+            title="Generate yesterday's report"
+          >
+            <span className="feed-toolbar-icon-btn__icon">
+              {generating ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+            </span>
+          </button>
+        </div>
       </div>
 
       <div
@@ -215,7 +295,6 @@ const MobileReportsPageInner: React.FC = () => {
                 <Text strong style={{ fontSize: 13, color: themeColors.text }}>
                   {selectedReport.report_date}
                 </Text>
-                <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
                 {selectedReport.metadata?.tweet_count != null && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {selectedReport.metadata.tweet_count} tweets · {selectedReport.metadata.author_count} authors
@@ -237,7 +316,7 @@ const MobileReportsPageInner: React.FC = () => {
             <Empty
               description={
                 <span style={{ color: themeColors.textSecondary }}>
-                  No report for this date. Reports are generated automatically by the scheduler.
+                  No report for this date. Use the play button in the toolbar to generate yesterday&apos;s report.
                 </span>
               }
             />

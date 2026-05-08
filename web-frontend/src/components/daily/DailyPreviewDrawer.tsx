@@ -537,32 +537,28 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
         style={dailyNavFabPortalStyle}
       >
         <div className="daily-preview-nav-fabs" aria-label="Daily item navigation">
-          <Tooltip title="Previous (↑ / K)" placement="right">
-            <span className="daily-preview-nav-fab-tooltip-wrap">
-              <button
-                type="button"
-                className="daily-preview-nav-fab"
-                disabled={!hasPrev}
-                onClick={() => hasPrev && onNavigate?.(items[currentIndex - 1])}
-                aria-label="Previous item"
-              >
-                {'<'}
-              </button>
-            </span>
-          </Tooltip>
-          <Tooltip title="Next (↓ / J)" placement="left">
-            <span className="daily-preview-nav-fab-tooltip-wrap">
-              <button
-                type="button"
-                className="daily-preview-nav-fab"
-                disabled={!hasNext}
-                onClick={() => hasNext && onNavigate?.(items[currentIndex + 1])}
-                aria-label="Next item"
-              >
-                {'>'}
-              </button>
-            </span>
-          </Tooltip>
+          <span className="daily-preview-nav-fab-tooltip-wrap">
+            <button
+              type="button"
+              className="daily-preview-nav-fab"
+              disabled={!hasPrev}
+              onClick={() => hasPrev && onNavigate?.(items[currentIndex - 1])}
+              aria-label="Previous item"
+            >
+              {'<'}
+            </button>
+          </span>
+          <span className="daily-preview-nav-fab-tooltip-wrap">
+            <button
+              type="button"
+              className="daily-preview-nav-fab"
+              disabled={!hasNext}
+              onClick={() => hasNext && onNavigate?.(items[currentIndex + 1])}
+              aria-label="Next item"
+            >
+              {'>'}
+            </button>
+          </span>
         </div>
       </div>,
       document.body

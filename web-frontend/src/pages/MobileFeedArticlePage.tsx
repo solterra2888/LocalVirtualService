@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { App, Button, Empty, Segmented, Spin, Tooltip, Typography } from 'antd';
+import { App, Button, Empty, Segmented, Spin, Typography } from 'antd';
 import { ArrowLeftOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useMobileFeeds } from '../contexts/MobileFeedsContext';
@@ -217,32 +217,28 @@ const MobileFeedArticlePage: React.FC = () => {
         style={navFabPortalStyle}
       >
         <div className="mobile-feeds-article-nav-fabs" aria-label="Feed item navigation">
-          <Tooltip title="Newer in this subscription" placement="right">
-            <span className="mobile-feeds-article-nav-fab-tooltip-wrap">
-              <button
-                type="button"
-                className="mobile-feeds-article-nav-fab"
-                disabled={!canGoNewer}
-                onClick={handleNavNewer}
-                aria-label="Newer in this subscription"
-              >
-                {'<'}
-              </button>
-            </span>
-          </Tooltip>
-          <Tooltip title="Older in this subscription" placement="left">
-            <span className="mobile-feeds-article-nav-fab-tooltip-wrap">
-              <button
-                type="button"
-                className={`mobile-feeds-article-nav-fab${loadingMore ? ' mobile-feeds-article-nav-fab--loading' : ''}`}
-                disabled={!canGoOlder || loadingMore}
-                onClick={() => void handleNavOlder()}
-                aria-label="Older in this subscription"
-              >
-                {loadingMore ? <LoadingOutlined spin aria-hidden /> : '>'}
-              </button>
-            </span>
-          </Tooltip>
+          <span className="mobile-feeds-article-nav-fab-tooltip-wrap">
+            <button
+              type="button"
+              className="mobile-feeds-article-nav-fab"
+              disabled={!canGoNewer}
+              onClick={handleNavNewer}
+              aria-label="Newer in this subscription"
+            >
+              {'<'}
+            </button>
+          </span>
+          <span className="mobile-feeds-article-nav-fab-tooltip-wrap">
+            <button
+              type="button"
+              className={`mobile-feeds-article-nav-fab${loadingMore ? ' mobile-feeds-article-nav-fab--loading' : ''}`}
+              disabled={!canGoOlder || loadingMore}
+              onClick={() => void handleNavOlder()}
+              aria-label="Older in this subscription"
+            >
+              {loadingMore ? <LoadingOutlined spin aria-hidden /> : '>'}
+            </button>
+          </span>
         </div>
       </div>,
       document.body

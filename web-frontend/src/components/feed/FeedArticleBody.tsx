@@ -55,6 +55,7 @@ import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import type { FeedArticleViewMode } from './feedArticleViewMode';
+import { getModalStyles } from '../../utils/modalStyles';
 
 export type { FeedArticleViewMode } from './feedArticleViewMode';
 
@@ -1013,6 +1014,13 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         confirmLoading={personalizeLoading}
         cancelText="Cancel"
         width={620}
+        centered
+        styles={getModalStyles(themeMode)}
+        maskStyle={{
+          background: isDark ? 'rgba(0, 0, 0, 0.6)' : undefined,
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
         destroyOnClose
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>

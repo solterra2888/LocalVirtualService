@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout, Typography, Spin, Empty, Space,
-  List, App, Tooltip, ConfigProvider, theme as antdTheme, Switch,
+  List, App, Tooltip, ConfigProvider, theme as antdTheme, Switch, DatePicker,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -37,6 +37,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState<boolean>(false);
   const [autoToggling, setAutoToggling] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(() => dayjs().subtract(1, 'day'));
 
   const selectedReportDateRef = useRef<string | null>(null);
   selectedReportDateRef.current = selectedReport?.report_date ?? null;
@@ -72,7 +73,12 @@ const TwitterDailyReportPageInner: React.FC = () => {
     setDetailLoading(true);
     try {
       const res = await twitterDailyReportsAPI.getReportByDate(dateStr);
-      if (res.success) setSelectedReport(res.data ?? null);
+      if (res.success) {
+        setSelectedReport(res.data ?? null);
+        if (res.data?.report_date) {
+          setSelectedDate(dayjs(res.data.report_date));
+        }
+      }
     } catch {
       message.error('Failed to load report');
     } finally {
@@ -132,11 +138,18 @@ const TwitterDailyReportPageInner: React.FC = () => {
   }, [loadReports, loadReportDetail, message, clearPoll, startPoll]);
 
   const handleSelectReport = (report: TwitterDailyReport) => {
+    setSelectedDate(dayjs(report.report_date));
     if (report.report_content) {
       setSelectedReport(report);
     } else {
       loadReportDetail(report.report_date);
     }
+  };
+
+  const handleDateChange = (date: dayjs.Dayjs | null) => {
+    if (!date) return;
+    setSelectedDate(date);
+    loadReportDetail(date.format('YYYY-MM-DD'));
   };
 
   // ── Styling ────────────────────────────────────────────────────────────
@@ -204,6 +217,17 @@ const TwitterDailyReportPageInner: React.FC = () => {
               />
             </div>
           </Tooltip>
+
+          <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 12, color: themeColors.text }}>
+            <CalendarOutlined style={{ marginRight: 6 }} />
+            Select date
+          </Text>
+          <DatePicker
+            value={selectedDate}
+            onChange={handleDateChange}
+            style={{ width: '100%', marginBottom: 12 }}
+            allowClear={false}
+          />
         </div>
 
         <List

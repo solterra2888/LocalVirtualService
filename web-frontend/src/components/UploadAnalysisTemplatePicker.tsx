@@ -421,9 +421,9 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
         }
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setDrawerOpen(false)}>取消</Button>
+            <Button onClick={() => setDrawerOpen(false)}>Cancel</Button>
             <Button type="primary" loading={saving} onClick={() => form.submit()}>
-              保存
+              Save
             </Button>
           </Space>
         }
