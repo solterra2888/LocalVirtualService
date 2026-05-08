@@ -440,7 +440,10 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 
 ## 10. LLM 调用详解
 
-Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：3 条自动 / 调度触发 + 1 条用户主动个性化。
+Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：
+- **全局打标（baseline）**：抓取后自动派发（`AUTO_FEED_TAG_ENABLED` 控制，默认开）
+- **Per-user 个性化摘要**：**默认手动触发**（`FEED_SUMMARY_AUTO_FANOUT_ENABLED` 控制，**默认关**）；用户在文章页点击 "Generate AI Analysis" 主动触发
+- **Twitter / YouTube Daily Report**：定时调度触发（独立链路）
 
 ### 10.1 Feed 内容打标 & 全局摘要（baseline）
 
@@ -454,7 +457,7 @@ Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：3 条自动 
 | 输出字段 | `sector` / `sector_en` / `industry` / `industry_en` / `tickers[]` / `concepts[]` / `summary` / `confidence` / `reasoning` |
 | 存储表 | `subscription_content_tags`（UPSERT on `subscription_content_id`，**全局共享，跨用户复用**）|
 | Celery 任务 | `tag_feed_content`（单条）/ `batch_tag_feed_content`（批量梯度派发）均在 `file_processing` 队列 |
-| 触发方式 | 用户在前端手动触发 / 运维批量回填；**不自动随抓取触发** |
+| 触发方式 | Twitter 新推文落库 / YouTube 字幕写入后**自动派发**（`AUTO_FEED_TAG_ENABLED=true`）；也可在前端手动 Re-tag 或运维批量回填 |
 | 幂等 | 默认已有标签则跳过，`force=True` 可强制重跑 |
 | 环境变量 | `AUTO_FEED_TAG_ENABLED`（开关，默认 true）/ `AUTO_FEED_TAG_CHANNELS`（白名单，默认 twitter,youtube）/ `AUTO_FEED_TAG_MAX_CHARS`（最大输入字符，默认 6000）/ `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` / `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` |
 | API | `GET/POST/PATCH/DELETE /api/subscriptions/contents/{id}/tags`（见 `backend/api/subscription_content_tags.py`）|
@@ -464,6 +467,8 @@ Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：3 条自动 
 > 来源：[LLM_REFACTOR_PLAN.md §5](./LLM_REFACTOR_PLAN.md#5-阶段-3feed-summary-个性化4-5-工作日)
 >
 > **设计目标**：在不破坏 Feeds 跨用户内容复用机制的前提下，让每个用户用自己的模板生成专属 summary。
+>
+> ⚠ **当前默认行为（节省成本）**：自动 fan-out 链路已关闭（`FEED_SUMMARY_AUTO_FANOUT_ENABLED=false`），个性化摘要改为**纯手动触发**。用户在文章页点击 "Generate AI Analysis" 主按钮触发单条分析。如需恢复旧的抓取后自动派发行为，将 env 设为 `true` 即可，无需重新部署。
 
 #### 双层模型
 
@@ -474,12 +479,13 @@ subscription_content_user_summaries (per-user, 1:N with user) ← 主观字段�
 
 **关键设计**：客观字段（sector / industry / ticker）保持全局共享，避免不同用户对同一条 feed 标到不同行业导致跨用户筛选体验不一致。仅 summary / reasoning / custom_concepts 实现 per-user。
 
-#### 链路
+#### 手动触发链路（当前默认）
 
 ```
-用户在 FeedArticleBody 点 "Personalize" 按钮
+用户在文章页点击 "Generate AI Analysis" 主按钮
     ↓
-弹窗选 feed_summary 模板 (UploadAnalysisTemplatePicker moduleCode='feed_summary')
+弹窗选 feed_summary / youtube_summary 模板
+(UploadAnalysisTemplatePicker; 不选则走 user_feed_summary_settings 已保存的偏好)
     ↓
 POST /api/subscriptions/contents/{id}/personalize
     ↓
@@ -487,7 +493,7 @@ personalize_feed_summary_task (Celery, queue: file_processing)
     ↓
 FeedSummaryPersonalizationService.generate_for_user(content_id, user_id, runtime_template_id)
     ├─ LLMTemplateResolver: runtime > user_template_preferences[feed_summary] > 抛 ResolveError
-    │   (feed_summary 无系统默认; 必须用户主动选模板或先设偏好)
+    │   (feed_summary 无系统默认; 必须用户主动选模板或先在右上角齿轮中设偏好)
     ├─ FeedContentTaggingService._build_tagging_text() (复用 channel adapter)
     └─ LocalLLMAnalysisService → chat_completion_with_template → usage_log (含 user_id)
     ↓
@@ -495,6 +501,18 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
     ↓
 前端轮询 GET /personalized-summary 拿结果, 局部刷新 + 显示 ✨ Personalized 徽标
 ```
+
+#### 旧的自动 fan-out 链路（需 FEED_SUMMARY_AUTO_FANOUT_ENABLED=true 才生效）
+
+```
+tag_feed_content_task 全局打标成功
+    ↓ (仅当 FEED_SUMMARY_AUTO_FANOUT_ENABLED=true)
+fan_out_personalize_summary_task (Celery, 读 user_feed_summary_settings)
+    ↓ 对每个 enabled=true 的用户
+personalize_feed_summary_task (per-user)
+```
+
+**成本警示**：自动 fan-out 的 LLM 调用量 = 新内容条数 × 订阅用户数 × 渠道开关数，规模可观。生产环境建议保持默认关闭，仅在充分评估后开启。
 
 #### API（PR-7 新增）
 
@@ -531,8 +549,9 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
 | `feed_summary` 无系统默认模板 | 防止"个性化"沦为"二次跑全局模板"；用户必须先在 PromptTemplatesPage 创建 `feed_summary` 模板，或在 Settings 设偏好 |
 | 仅覆盖主观字段 | 客观字段（sector/industry/ticker）从不 per-user，保护跨用户筛选一致性 |
 | 不影响其他用户视图 | 用户 A 的个性化 summary 仅 user_id=A 可见，B/C/... 看到的还是全局 baseline |
-| 成本可控 | 仅用户主动 "Re-summarize" 才触发，N 条收藏 ≠ N 条订阅 ×N 用户的爆炸 |
-| 环境变量 | `FEED_SUMMARY_PERSONALIZATION_ENABLED`（默认 true，紧急回滚开关）|
+| 成本可控 | 默认纯手动触发（`FEED_SUMMARY_AUTO_FANOUT_ENABLED=false`），N 条订阅 ×N 用户的 fan-out 爆炸已避免 |
+| 环境变量（自动 fan-out）| `FEED_SUMMARY_AUTO_FANOUT_ENABLED`（**默认 false**）：仅控制「抓取后是否自动 fan-out」，手动入口不受影响 |
+| 环境变量（功能总闸）| `FEED_SUMMARY_PERSONALIZATION_ENABLED`（默认 true）：关闭时连手动触发也被拦截，仅紧急回滚时使用 |
 
 ### 10.2 Twitter Daily Report
 
@@ -598,7 +617,7 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
 | 维度 | ① Feed 内容打标 | ② Twitter Daily Report | ③ YouTube Daily Report |
 |------|----------------|------------------------|------------------------|
 | 粒度 | 单条内容 | 每用户每天 | 每用户每天 |
-| 触发 | 手动/批量 | 定时（阶段A→B链式）| 定时（阶段A→B链式）|
+| 触发 | **全局打标**：抓取后自动；**个性化**：手动（`FEED_SUMMARY_AUTO_FANOUT_ENABLED=false` 默认） | 定时（阶段A→B链式）| 定时（阶段A→B链式）|
 | LLM 调用次数 | 每条内容 1 次 | 每作者每天 1 次（阶段A全局共享）→ 每用户 1 次（阶段B）| 每频道每天 1 次（阶段A全局共享）→ 每用户 1 次（阶段B）|
 | 存储目标 | `subscription_content_tags` | `twitter_author_daily_summaries` + `twitter_daily_reports` | `youtube_author_daily_summaries` + `youtube_daily_reports` |
 | 与订阅内容关系 | 直接标注内容本身 | 汇总内容后二次分析 | 汇总内容后二次分析 |
@@ -608,6 +627,8 @@ UPSERT subscription_content_user_summaries (UNIQUE content_id+user_id)
 
 | 变量 | 位置 | 默认 | 说明 |
 |------|------|------|------|
+| `FEED_SUMMARY_AUTO_FANOUT_ENABLED` | 远程主服务器 `.env` | **`false`** | 全局打标成功后是否自动派发 per-user 个性化摘要 fan-out（`tag_feed_content_task` → `fan_out_personalize_summary_task`）。**默认关闭，节省 LLM 成本**；改为 `true` 可恢复旧的抓取后自动生成行为，无需重新部署。手动触发入口（`POST /api/subscriptions/contents/{id}/personalize`）**不受此开关影响**。|
+| `FEED_SUMMARY_PERSONALIZATION_ENABLED` | 远程主服务器 `.env` | `true` | 个性化摘要功能本身的总闸（包括手动触发）；通常不动，仅紧急回滚时设为 `false`。与 `FEED_SUMMARY_AUTO_FANOUT_ENABLED` 的区别：本开关连手动都挡，后者仅挡自动 fan-out。|
 | `TWITTER_API_KEY` | 远程主服务器 `.env` | （代码内仅作开发兜底，生产务必显式配置）| twitterapi.io 的 `X-API-Key` |
 | `TWITTER_DEFAULT_QUERY_HOURS` | 同上 | `48` | 单次查询向过去的最大跨度（小时），见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) 回看窗口说明 |
 | `TWITTER_MIN_LOOKBACK_HOURS` | 同上 | `24` | 增量任务最小回看窗口，兜索引延迟；调度很密时可评估改为 `6`，见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |

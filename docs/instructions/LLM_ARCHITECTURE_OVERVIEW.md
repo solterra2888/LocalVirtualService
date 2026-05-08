@@ -89,10 +89,12 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 
 ### 0.5 Feeds：Hybrid（全局 Tag + Per-user 摘要）
 
-- **打标 `feed_tagging`**：走 **SYSTEM_FIXED** 模板（如 `content_tag_feeds_v1`），结果写入 **`subscription_content_tags`**，全站订阅者共用同一套客观标签/summary 基线。
+- **打标 `feed_tagging`**：走 **SYSTEM_FIXED** 模板（如 `content_tag_feeds_v1`），结果写入 **`subscription_content_tags`**，全站订阅者共用同一套客观标签/summary 基线。**抓取后自动派发**（`AUTO_FEED_TAG_ENABLED=true` 默认开启）。
 - **个性化摘要**：写入 **`subscription_content_user_summaries`**。按内容渠道选择 **USER_OWNED** 模块：
   - Twitter 类 → `feed_summary`（系统种子 `feed_summary_v1`）
   - YouTube 视频 → `youtube_summary`（系统种子 `youtube_summary_v1`，per-video、per-user，**仅用于 Feeds**；Upload YouTube Link 使用独立的 `youtube_analysis` 模块）
+
+  > ⚠ **个性化摘要默认为手动触发**（`FEED_SUMMARY_AUTO_FANOUT_ENABLED=false`）。用户在文章页点击 "Generate AI Analysis" 主按钮手动触发单条。如需恢复抓取后自动 fan-out，将 env 改为 `true`（无需重新部署）。
 
 读取侧仍可采用 `COALESCE(用户摘要, 全局 tags.summary)` 一类策略；路由逻辑见 `FeedSummaryPersonalizationService` 中 `_CHANNEL_TO_MODULE`。
 
@@ -421,7 +423,7 @@ tag_file_content_task(file_id, username, force=False, template_id=None, ...)
 
 #### 4.2.1 全局打标（SYSTEM_FIXED：`feed_tagging`）
 
-Feeds 的 LLM 打标**不随抓取自动触发**，需手动或批量触发。
+Feeds 的全局 LLM 打标**在 Twitter 新推文入库 / YouTube 字幕写入后自动触发**（`trigger_auto_feed_tagging` → `tag_feed_content_task`，受 `AUTO_FEED_TAG_ENABLED=true` 控制）；也可在前端手动触发 Re-tag 或由运维批量回填。
 
 ```
 【触发方式】
@@ -450,7 +452,7 @@ FeedContentTaggingService
 
 #### 4.2.2 个性化摘要（USER_OWNED：`feed_summary` / `youtube_summary`） — PR-N 重构
 
-**原（PR-7）懒触发** → **现（PR-N）齿轮配置 + 全局打标完成后自动 fan-out**。
+**默认行为（成本优先）：手动触发**（`FEED_SUMMARY_AUTO_FANOUT_ENABLED=false`）。用户在文章页点击 "Generate AI Analysis" 按钮触发单条个性化，无自动 fan-out 成本。如需恢复自动批量模式，将该 env 设为 `true`。
 
 由 `FeedSummaryPersonalizationService` 根据 **`channel_type`** 选择模块：
 
@@ -459,15 +461,15 @@ FeedContentTaggingService
 
 模板解析：`LLMTemplateResolver.resolve(module_code, user_id, runtime_template_id?)`。结果写入 **`subscription_content_user_summaries`**，读取时可与 `subscription_content_tags.summary` 组合展示（例如用户无摘要时回退全局基线）。
 
-##### 数据流（PR-N）
+##### 数据流（PR-N，默认手动触发模式）
 
 ```
 抓取 feed → upsert subscription_content
         ↓
-        tag_feed_content_task                                 (全局, 1 次)
+        tag_feed_content_task                                 (全局, 1 次, 自动)
             写 subscription_content_tags  + baseline summary
-                ↓ 成功后 .apply_async (countdown=2s, 解耦不阻塞)
-        fan_out_personalize_summary_task                      (新增, 分发器)
+                ↓ 仅当 FEED_SUMMARY_AUTO_FANOUT_ENABLED=true 时才继续
+        fan_out_personalize_summary_task                      (分发器, 默认跳过)
             ├─ 读 subscription_content (channel_type / user_ids / 长度)
             ├─ JOIN  user_feed_summary_settings
             │         WHERE channel_type=$ch AND enabled=TRUE
@@ -477,7 +479,13 @@ FeedContentTaggingService
                   personalize_feed_summary_task.apply_async(content_id, user_id)
                     ↓
                     写 subscription_content_user_summaries
-                    (受 LLM_USER_RATE_LIMIT_PER_MIN 速率限制保护)
+
+【手动触发路径（默认模式）】
+用户在文章页点 "Generate AI Analysis"
+        ↓
+POST /api/subscriptions/contents/{id}/personalize
+        ↓
+personalize_feed_summary_task (同上, 仅对当前用户 × 当前内容)
 ```
 
 ##### 用户控制：`user_feed_summary_settings`（PR-N1 新表）
@@ -494,12 +502,11 @@ FeedContentTaggingService
 
 ##### 前端 UX（PR-N3 / N4）
 
-- **Feeds 页右上角齿轮 → `FeedSummarySettingsDrawer`**：按渠道独立开关 + 模板选择 + 长度门槛
-- 文章页 `FeedArticleBody` 中的「Personalize」按钮**降级为兜底**：
-  - 自动开关 ON + 已有 personalized → "Regenerate"（手动换模板重跑）
-  - 自动开关 ON + 还没生成 / 失败 → "Generate now"（手动触发，避免等下一次）
-  - 自动开关 OFF + 历史已有 personalized → "Generate"（一次性手动）
-  - 自动开关 OFF + 无历史 → 完全隐藏（引导用户去齿轮里开）
+- **Feeds 页右上角齿轮 → `FeedSummarySettingsDrawer`**：保存模板偏好与长度门槛（手动触发时使用）。Drawer 顶部提示条注明集群已默认关闭自动 fan-out，开关仅在 `FEED_SUMMARY_AUTO_FANOUT_ENABLED=true` 时生效。
+- **文章页 `FeedArticleBody` 中「Generate AI Analysis」主按钮**（Twitter / YouTube 渠道始终可见）：
+  - 未生成 → **"Generate AI Analysis"**（蓝色主按钮）
+  - 已生成 → **"Re-analyze"**（灰色默认按钮）
+  - 点击后弹出模板选择，提交 `POST /api/subscriptions/contents/{id}/personalize`，前端轮询直至结果落库
 
 ##### 模板变量映射（PR-A 方案 B）
 
@@ -516,17 +523,18 @@ FeedContentTaggingService
 
 | 层级 | 机制 |
 |------|------|
-| 全局 | env `FEED_SUMMARY_PERSONALIZATION_ENABLED`（fan-out 头一行检查） |
-| 用户级 | `user_feed_summary_settings.enabled = FALSE` 直接跳过 |
-| 内容级 | `max(env_min, user.min_length)` 长度门槛 |
-| 时序 | fan-out 内 `countdown = 2 + i*2` 阶梯派发 |
+| **集群级（主要）** | `FEED_SUMMARY_AUTO_FANOUT_ENABLED=false`（**默认**）：完全阻断 fan-out，个性化 LLM 调用降为零 |
+| 全局总闸 | `FEED_SUMMARY_PERSONALIZATION_ENABLED=true`：连手动入口也挡；关则整个功能停 |
+| 用户级 | `user_feed_summary_settings.enabled = FALSE`：仅在 fan-out 启用时才有意义 |
+| 内容级 | `max(env_min, user.min_length)` 长度门槛：短内容直接跳过 |
+| 时序 | fan-out 内 `countdown = 2 + i*2` 阶梯派发（防雪崩，仅 fan-out 启用时） |
 | LLM 级 | 复用现有 `LLM_USER_RATE_LIMIT_PER_MIN`（per-user × per-provider，§7.4） |
 
 ##### 失败兜底
 
 - `tag_feed_content_task` 失败 → 不派发 fan-out（只在 `result.skipped == false` 才派发）
 - `fan_out_personalize_summary_task` 失败 → 自身 autoretry 2 次，不影响 tag 主链
-- `personalize_feed_summary_task` 失败 → autoretry 3 次，最终失败时 `subscription_content_user_summaries` 无新行，前端兜底按钮自动出现 "Generate now" 让用户重试
+- `personalize_feed_summary_task` 失败 → autoretry 3 次，最终失败时 `subscription_content_user_summaries` 无新行，用户可在文章页再次点击 "Generate AI Analysis" 重试
 
 ##### Daily 模块的消费方式（PR-D1 / PR-D2）
 
@@ -796,14 +804,21 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `AUTO_FEED_TAG_ENABLED` | `true` | Feeds **全局打标**总开关 |
+| `AUTO_FEED_TAG_ENABLED` | `true` | Feeds **全局打标**总开关（twitter/youtube 抓取后自动派发 `tag_feed_content_task`） |
 | `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube` | 参与打标的渠道白名单 |
 | `AUTO_FEED_TAG_MAX_CHARS` | `6000` | 最大输入字符 |
-| `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 内容最小字符门槛（fan-out 也复用） |
-| `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube 内容最小字符门槛（fan-out 也复用） |
-| `FEED_SUMMARY_PERSONALIZATION_ENABLED` | `true` | **(PR-N)** 个性化摘要 fan-out 总开关；关则任何用户都不自动派发 |
+| `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 内容最小字符门槛 |
+| `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube 内容最小字符门槛 |
+| `FEED_SUMMARY_AUTO_FANOUT_ENABLED` | **`false`** | **(新增)** 全局打标成功后是否自动 fan-out per-user 个性化摘要。**默认关闭，节省 LLM 成本**。改为 `true` 恢复旧自动批量行为，无需重部署。**手动触发入口不受此开关影响**。 |
+| `FEED_SUMMARY_PERSONALIZATION_ENABLED` | `true` | 个性化摘要功能本身总闸；关则连手动入口也被拦截（仅紧急回滚用）。与 `FEED_SUMMARY_AUTO_FANOUT_ENABLED` 区别：本开关连手动都挡，后者仅挡自动 fan-out。 |
 
-> 用户级 enable 在 `user_feed_summary_settings.enabled`（前端齿轮配置），与 env 总开关是 AND 关系：env 关闭 → 整个集群停；env 开 + 用户关 → 仅该用户跳过。
+> **三层开关关系**（AND 逻辑，从外到内）：
+>
+> `FEED_SUMMARY_PERSONALIZATION_ENABLED`（功能总闸）
+> → `FEED_SUMMARY_AUTO_FANOUT_ENABLED`（自动 fan-out 子开关，**默认 false**）
+> → `user_feed_summary_settings.enabled`（用户级，仅在 fan-out 启用时才有意义）
+>
+> 当前默认配置：全局打标自动 ✓，个性化摘要手动 ✓（零自动 LLM 成本）。
 
 ### 7.4 LLM 调用限速（可选，默认关闭）
 

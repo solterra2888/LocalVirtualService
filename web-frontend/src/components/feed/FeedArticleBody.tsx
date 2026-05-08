@@ -382,6 +382,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     setPersonalizeModalOpen(false);
     setPersonalizePicker({});
     setPersonalizeLoading(false);
+    personalizeTaskIdRef.current = null;
     // viewMode 不在此重置 — 由父组件决定是否跨内容持久化
   }, [selectedContent?.id, clearRetagPoll, clearTranscriptPoll]);
 
@@ -472,38 +473,27 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     }
   }, [selectedContent, retagStatus, message, pollRetagStatus]);
 
-  // PR-7: 提交个性化任务. 派发后短暂轮询 (~1.5-3s 后) 拉最新 personalized_summary
-  // 来局部刷新 UI, 不阻塞用户操作.
-  const handlePersonalize = useCallback(async () => {
-    if (!selectedContent || personalizeLoading) return;
-    const contentId = selectedContent.id;
-    setPersonalizeLoading(true);
-    try {
-      const res = await subscriptionsAPI.personalizeContentSummary(contentId, {
-        templateId: personalizePicker.templateId ?? null,
-        templateVariables: personalizePicker.templateVariables,
-        force: true,
-      });
-      if (!res.success) {
-        message.error(res.error || 'Failed to dispatch personalization');
-        setPersonalizeLoading(false);
-        return;
-      }
-      message.info('Personalization dispatched, refreshing in a moment...');
-      setPersonalizeModalOpen(false);
-
-      // 简化轮询: 间隔 1.5s 拉一次, 最多 8 次 (~12s)
-      let attempt = 0;
-      const MAX = 8;
-      const tick = async () => {
-        attempt += 1;
-        try {
-          const data = await api.get<{
-            id: number;
-            template_id: number | null;
-            summary: string | null;
-            reasoning: string | null;
-          }>(`/subscriptions/contents/${contentId}/personalized-summary`);
+  // 个性化任务完成时从 DB 拉最新 summary，局部刷新 UI.
+  // 由 NavBar 进度条轮询完成后触发 (监听 tasks 变化).
+  const personalizeTaskIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const taskId = personalizeTaskIdRef.current;
+    if (!taskId) return;
+    const task = tasks.get(taskId);
+    if (!task) return;
+    const s = task.status.status;
+    if (s === 'completed') {
+      personalizeTaskIdRef.current = null;
+      const contentId = selectedContent?.id;
+      if (!contentId) return;
+      // 从 DB 拉最新 personalized summary 写入本地 state
+      api.get<{
+        id: number;
+        template_id: number | null;
+        summary: string | null;
+        reasoning: string | null;
+      }>(`/subscriptions/contents/${contentId}/personalized-summary`)
+        .then((data) => {
           if (data?.summary) {
             setLocalPersonalized({
               summary: data.summary,
@@ -511,40 +501,51 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
               template_id: data.template_id ?? null,
             });
             setPersonalizeLoading(false);
-            message.success('Personalized summary ready');
-            return;
+            message.success('AI Analysis ready');
+          } else {
+            setPersonalizeLoading(false);
+            message.warning('AI Analysis completed but summary not found. Refresh to see results.');
           }
-        } catch (_) {
-          // 404 表示尚未生成 - 继续轮询
-        }
-        if (attempt < MAX) {
-          setTimeout(tick, 1500);
-        } else {
+        })
+        .catch(() => {
           setPersonalizeLoading(false);
-          message.warning(
-            'Personalization is still processing. Refresh later to see the result.'
-          );
-        }
-      };
-      setTimeout(tick, 1500);
+          message.warning('AI Analysis completed. Refresh to see results.');
+        });
+    } else if (s === 'failed') {
+      personalizeTaskIdRef.current = null;
+      setPersonalizeLoading(false);
+      message.error('AI Analysis failed. Please try again.');
+    }
+  }, [tasks, selectedContent?.id, message]);
+
+  // PR-7: 提交个性化任务. 派发成功后注册到 NavBar 进度条轮询, 不阻塞用户操作.
+  const handlePersonalize = useCallback(async () => {
+    if (!selectedContent || personalizeLoading) return;
+    const contentId = selectedContent.id;
+    const contentTitle = selectedContent.title || selectedContent.author_name || `Feed #${contentId}`;
+    setPersonalizeLoading(true);
+    try {
+      const res = await subscriptionsAPI.personalizeContentSummary(contentId, {
+        templateId: personalizePicker.templateId ?? null,
+        templateVariables: personalizePicker.templateVariables,
+        force: true,
+      });
+      if (!res.success || !res.data?.task_id) {
+        message.error(res.error || 'Failed to dispatch AI Analysis');
+        setPersonalizeLoading(false);
+        return;
+      }
+      setPersonalizeModalOpen(false);
+      const taskId = res.data.task_id;
+      // 注册到 NavBar 进度条，由 FileProcessingContext 统一轮询
+      personalizeTaskIdRef.current = taskId;
+      addTask(taskId, contentTitle, 'feed_analysis');
     } catch (e: any) {
       setPersonalizeLoading(false);
-      message.error(e?.response?.data?.detail || 'Failed to dispatch personalization');
+      message.error(e?.response?.data?.detail || 'Failed to dispatch AI Analysis');
     }
-  }, [selectedContent, personalizeLoading, personalizePicker, message]);
+  }, [selectedContent, personalizeLoading, personalizePicker, message, addTask]);
 
-  // PR-7: 取消个性化, 回退到全局 summary
-  const handleRemovePersonalization = useCallback(async () => {
-    if (!selectedContent) return;
-    const res = await subscriptionsAPI.deletePersonalizedSummary(selectedContent.id);
-    if (res.success) {
-      setLocalPersonalized(null);
-      // 父组件 selectedContent.personalized_* 字段也置空
-      message.success('Reverted to global summary');
-    } else {
-      message.error(res.error || 'Failed to remove personalization');
-    }
-  }, [selectedContent, message]);
 
   if (!selectedContent) {
     return null;
@@ -572,26 +573,19 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   // AI Summary 块只展示全局 baseline；个性化内容移至 AIAnalysisSection
   const effectiveSummary = displayTags?.summary || null;
 
-  // PR-N4: 兜底按钮可见性
-  // 自动个性化开关 ON  → 全局打标完成后会自动跑; 用户主要看自动结果, 仅在 (a) 还没生成 / 失败  (b) 手动想换模板重跑 时露出按钮.
-  // 自动个性化开关 OFF → 默认隐藏; 仅当历史已有 personalized 记录时让用户能 Re-generate.
+  // 个性化摘要按钮可见性 (FEED_SUMMARY_AUTO_FANOUT_ENABLED=false, 纯手动模式):
+  // 对所有 twitter/youtube 渠道始终显示 "Generate AI Analysis" 主按钮.
+  // autoSummaryEnabled 仅用于 Modal 内的文案描述, 不再控制按钮是否出现.
   const channelSetting =
     channelType === 'twitter' || channelType === 'youtube'
       ? feedSummarySettings[channelType as FeedSummaryChannel]
       : null;
   const autoSummaryEnabled = !!channelSetting?.enabled;
-  const showPersonalizeButton =
-    showAiTagsPanel && (autoSummaryEnabled || isPersonalized);
-  const personalizeButtonLabel = isPersonalized
-    ? 'Regenerate'
-    : autoSummaryEnabled
-    ? 'Generate now'
-    : 'Generate';
-  const personalizeButtonTooltip = autoSummaryEnabled
-    ? (isPersonalized
-        ? 'Regenerate this feed\'s personalized summary using your current template.'
-        : 'Auto personalization is on but this content has no per-user summary yet — generate it now.')
-    : 'Generate a personalized summary for this content (one-off, auto personalization is off).';
+  const showPersonalizeButton = showAiTagsPanel;
+  const personalizeButtonLabel = isPersonalized ? 'Re-analyze' : 'Generate AI Analysis';
+  const personalizeButtonTooltip = isPersonalized
+    ? 'Re-generate personalized AI analysis for this content using your template.'
+    : 'Generate a personalized AI analysis for this content using your private template.';
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -776,38 +770,22 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           }}
           reasoning={personalizedReasoning}
           actionsSlot={
-            showPersonalizeButton || isPersonalized ? (
-              <Space size={4}>
-                {showPersonalizeButton && (
-                  <Tooltip title={personalizeButtonTooltip}>
-                    <Button
-                      size="small"
-                      icon={<RobotOutlined />}
-                      loading={personalizeLoading}
-                      onClick={() => {
-                        setPersonalizePicker({});
-                        setPersonalizeModalOpen(true);
-                      }}
-                      style={{ fontSize: 12, borderRadius: 6 }}
-                    >
-                      {personalizeButtonLabel}
-                    </Button>
-                  </Tooltip>
-                )}
-                {isPersonalized && (
-                  <Tooltip title="Remove personalized summary, revert to the global one.">
-                    <Button
-                      size="small"
-                      type="text"
-                      danger
-                      onClick={handleRemovePersonalization}
-                      style={{ fontSize: 12, padding: '0 6px' }}
-                    >
-                      Reset
-                    </Button>
-                  </Tooltip>
-                )}
-              </Space>
+            showPersonalizeButton ? (
+              <Tooltip title={personalizeButtonTooltip}>
+                <Button
+                  size="small"
+                  type={isPersonalized ? 'default' : 'primary'}
+                  icon={<RobotOutlined />}
+                  loading={personalizeLoading}
+                  onClick={() => {
+                    setPersonalizePicker({});
+                    setPersonalizeModalOpen(true);
+                  }}
+                  style={{ fontSize: 12, borderRadius: 6 }}
+                >
+                  {personalizeButtonLabel}
+                </Button>
+              </Tooltip>
             ) : undefined
           }
         />
@@ -1038,9 +1016,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         destroyOnClose
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-          {autoSummaryEnabled
-            ? '一次性手动触发: 用你的私有模板为这一条 feed 生成 per-user 摘要 (其他用户不受影响). 自动批量个性化已在齿轮中开启, 通常无需手动点击.'
-            : '一次性手动触发: 用你的私有模板生成 per-user 摘要. 想为该渠道所有新 feed 自动个性化, 请到右上角齿轮中开启.'}
+          手动触发: 用你的私有模板为这一条 feed 生成个性化 AI Analysis (per-user, 其他用户不受影响).
+          可在右上角齿轮中选择默认模板, 此处选择的模板仅对本次触发生效.
         </Text>
         <UploadAnalysisTemplatePicker
           value={personalizePicker}

@@ -1,17 +1,17 @@
 /**
  * FeedSummarySettingsDrawer (PR-N3)
  *
- * Feeds 页右上角齿轮 → 用户对每条 feed 的自动个性化摘要配置:
+ * Feeds 页右上角齿轮 → 用户对每条 feed 的个性化摘要配置:
  *   - 按渠道 (Twitter / YouTube) 独立开关
  *   - 选用户的私有模板 (复用 UploadAnalysisTemplatePicker)
  *   - 长度门槛 (字符数, 不填走 env 默认)
  *
  * 后端: /api/feeds/summary-settings/{channel}
  *
- * 与 PR-7 主动 Personalize 弹窗的区别:
- *   - 主动 Personalize: 单条 feed × 一次性触发, 已被 PR-N4 降级为兜底
- *   - 本组件:           用户级偏好 + 自动派发, 由 fan_out_personalize_summary_task
- *                       在每条 feed 全局打标完成后自动执行
+ * 注意: 当前集群 FEED_SUMMARY_AUTO_FANOUT_ENABLED=false (默认),
+ * 个性化摘要为纯手动模式. 这里的开关仅在管理员将该 env 设为 true 后才会控制自动派发.
+ * 用户应在文章页点击 "Generate AI Analysis" 手动触发单条个性化.
+ * 本组件保留用于保存模板偏好与长度门槛 (手动触发时也会使用这些设置).
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -57,7 +57,7 @@ const CHANNELS: ChannelMeta[] = [
     moduleCode: 'feed_summary',
     label: 'Twitter Summary Template',
     hint:
-      '开启后, 每条新抓到的 Twitter feed 会在全局打标完成后自动用你的私有模板生成个性化摘要.',
+      '选择你的私有模板与长度门槛. 在文章页点击 "Generate AI Analysis" 手动触发单条个性化摘要. 当集群开启自动派发 (FEED_SUMMARY_AUTO_FANOUT_ENABLED=true) 时, 此开关还会控制是否对每条新 Twitter feed 自动运行.',
     defaultMinLengthHint: '默认 50 字 (env AUTO_FEED_TAG_MIN_LENGTH_TWITTER)',
   },
   {
@@ -66,7 +66,7 @@ const CHANNELS: ChannelMeta[] = [
     moduleCode: 'youtube_summary',
     label: 'YouTube Summary Template',
     hint:
-      '开启后, 每条新抓到的 YouTube 视频 (含字幕) 会在全局打标完成后自动用你的私有模板生成个性化摘要.',
+      '选择你的私有模板与长度门槛. 在文章页点击 "Generate AI Analysis" 手动触发单条个性化摘要. 当集群开启自动派发 (FEED_SUMMARY_AUTO_FANOUT_ENABLED=true) 时, 此开关还会控制是否对每条含字幕的 YouTube 视频自动运行.',
     defaultMinLengthHint: '默认 200 字 (env AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE)',
   },
 ];
@@ -286,14 +286,15 @@ const FeedSummarySettingsDrawer: React.FC<FeedSummarySettingsDrawerProps> = ({
       destroyOnClose
     >
       <Alert
-        type="info"
+        type="warning"
         showIcon
-        message="自动个性化摘要 (Per-user)"
+        message="个性化摘要为手动触发模式"
         description={
           <span style={{ fontSize: 12 }}>
-            开启后, 每条新 Feed 在<b>全局打标完成后</b>会用你的私有模板自动生成 per-user 摘要.
-            其他用户仍看全局 baseline summary, 不互相影响.
-            模板可在 Prompt Templates → My Templates 中自由编辑.
+            当前集群已关闭自动个性化 AI Analysis (<code>FEED_SUMMARY_AUTO_FANOUT_ENABLED=false</code>).
+            请在<b>文章页点击 "Generate AI Analysis"</b> 手动触发单条分析.
+            下方设置用于保存你的模板偏好与长度门槛, 手动触发时会自动使用这些配置.
+            如需为所有新 Feed 自动运行, 请联系管理员开启集群开关.
           </span>
         }
         style={{ marginBottom: 16 }}

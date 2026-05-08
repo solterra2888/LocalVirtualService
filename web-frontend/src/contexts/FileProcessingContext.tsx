@@ -2,11 +2,12 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { Modal } from 'antd';
 import { filesAPI } from '../services/files';
 import type { TaskStatusResponse } from '../services/files';
+import { api } from '../services/api';
 
 export interface TaskInfo {
   taskId: string;
   fileName: string;
-  fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text';
+  fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis';
   /** YouTube Upload Link 专用：后端 file_processing_details.id，用于 DB 侧轮询以替代 Celery 轮询 */
   fileId?: number;
   status: TaskStatusResponse;
@@ -16,7 +17,7 @@ export interface TaskInfo {
 interface FileProcessingContextType {
   // 新增：多任务管理
   tasks: Map<string, TaskInfo>;
-  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text', fileId?: number) => void;
+  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => void;
   updateTaskStatus: (taskId: string, status: Partial<TaskStatusResponse> & { status: string; progress: number; files_processed: number; total_files: number; logs: Array<{ timestamp: string; level: string; message: string; }> }) => void;
   removeTask: (taskId: string) => void;
   clearAllTasks: () => void;
@@ -134,7 +135,7 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   // 新增：添加任务
-  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text', fileId?: number) => {
+  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => {
     setTasks(prev => {
       const newTasks = new Map(prev);
       newTasks.set(taskId, {
@@ -309,6 +310,53 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
         if (task.status.status === 'completed' || task.status.status === 'failed') continue;
 
         try {
+          // Feed AI Analysis 任务 (feed_analysis): 调订阅任务状态接口，映射 Celery 原始字段
+          if (task.fileType === 'feed_analysis') {
+            interface FeedTaskState {
+              task_id: string;
+              state: string;
+              ready: boolean;
+              successful?: boolean | null;
+              failed?: boolean | null;
+              result?: { status?: string; summary?: string } | null;
+              info?: { status?: string; progress?: number } | null;
+              error?: string | null;
+            }
+            const st = await api.get<FeedTaskState>(`/subscriptions/tasks/${taskId}/status`);
+            if (st.ready) {
+              if (st.successful) {
+                updateTaskStatus(taskId, {
+                  status: 'completed',
+                  progress: 100,
+                  files_processed: 1,
+                  files_failed: 0,
+                  total_files: 1,
+                  logs: [],
+                });
+              } else {
+                updateTaskStatus(taskId, {
+                  status: 'failed',
+                  progress: 0,
+                  files_processed: 0,
+                  files_failed: 1,
+                  total_files: 1,
+                  logs: [],
+                });
+              }
+            } else {
+              const progress = st.info?.progress ?? 10;
+              updateTaskStatus(taskId, {
+                status: 'ai_processing',
+                progress,
+                files_processed: 0,
+                files_failed: 0,
+                total_files: 1,
+                logs: [],
+              });
+            }
+            continue;
+          }
+
           // YouTube Upload Link 任务（有 fileId）：改用 DB 侧轮询
           // 原因：Celery caption 任务在派发 ASR 后即标记 SUCCESS，若直接读 Celery 状态
           // 会误判为完成（NavBar 消失、列表刷新过早），而 DB 轮询能真实反映全链路进度。

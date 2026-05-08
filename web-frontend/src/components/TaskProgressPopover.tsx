@@ -4,6 +4,7 @@ import {
   FileTextOutlined, 
   SoundOutlined,
   YoutubeOutlined,
+  RobotOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined 
@@ -26,6 +27,12 @@ const getStatusIcon = (status: string, isDark?: boolean) => {
 };
 
 const getStatusText = (status: string, currentFile?: string, fileType?: string, progress?: number) => {
+  // Feed AI Analysis 状态文案
+  if (fileType === 'feed_analysis') {
+    if (status === 'completed') return 'AI Analysis ready';
+    if (status === 'failed') return 'AI Analysis failed';
+    return 'Generating AI Analysis…';
+  }
   // 自动 AI 分析的中间态: NavBar 在主任务结束 + analyze_*_task 还在跑时显示
   if (status === 'ai_processing') {
     return 'AI analyzing…';
@@ -123,6 +130,8 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
                 <SoundOutlined style={{ fontSize: 16, color: '#1890ff' }} />
               ) : task.fileType === 'youtube' ? (
                 <YoutubeOutlined style={{ fontSize: 16, color: '#ff4444' }} />
+              ) : task.fileType === 'feed_analysis' ? (
+                <RobotOutlined style={{ fontSize: 16, color: '#722ed1' }} />
               ) : (
                 <FileTextOutlined style={{ fontSize: 16, color: '#1890ff' }} />
               )}
@@ -143,9 +152,13 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
             {/* Progress Bar */}
             <Progress
               percent={Math.round(task.status.progress)}
-              status={task.status.status === 'failed' ? 'exception' : 'active'}
+              status={task.status.status === 'failed' ? 'exception' : task.status.status === 'completed' ? 'success' : 'active'}
               size="small"
-              strokeColor={isDark ? '#1890ff' : undefined}
+              strokeColor={
+                task.fileType === 'feed_analysis'
+                  ? (isDark ? '#b37feb' : '#722ed1')
+                  : (isDark ? '#1890ff' : undefined)
+              }
               style={{ marginBottom: 6 }}
             />
 
