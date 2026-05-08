@@ -1401,8 +1401,17 @@ async def trigger_youtube_asr_transcription(
     current_user: TokenData = Depends(get_current_user)
 ):
     """
-    对 Feed 中没有字幕的 YouTube 视频，触发 Fun-ASR 转写任务。
-    任务进度可通过 GET /api/files/tasks/{task_id}/status 查询。
+    对 Feed 中尚无可用字幕的 YouTube 条目，触发与 Upload YouTube Link / 订阅补字幕
+    相同的本地 Worker 流水线（见 UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md §2.3）：
+
+    1. `fetch_youtube_transcripts_batch` → `youtube_fetching` 队列（家用 Worker）：
+       youtube-transcript-api → yt-dlp 字幕兜底 → 成功则写入 subscription_content；
+    2. 仍无可用时由本地 Worker 派发 `transcribe_youtube_feed_task`（Fun-ASR），
+       不在云服务器上直连 YouTube，避免机房 IP 被封。
+
+    任务进度：GET /api/files/tasks/{task_id}/status。
+    若响应 result.asr_dispatched > 0，表示已降级 ASR，Celery 主任务会很快 SUCCESS，
+    需继续轮询 GET .../contents/{id}/transcript 或刷新列表直至 has_transcript 为真。
     """
     user_id = current_user.user_id
     db_manager = get_db_manager()
@@ -1424,7 +1433,7 @@ async def trigger_youtube_asr_transcription(
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        _, channel_type, video_id, existing_transcript = row
+        _, channel_type, video_id, _ = row
 
         if channel_type != 'youtube':
             raise HTTPException(
@@ -1434,23 +1443,38 @@ async def trigger_youtube_asr_transcription(
 
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        # 派发 Celery 任务
-        from backend.tasks.file_tasks import transcribe_youtube_feed_task
-        task = transcribe_youtube_feed_task.apply_async(
-            args=(content_db_id, video_url, video_id),
-            queue='file_processing'
+        # 与 youtube_subscription_service 新视频补字幕、Upload Sources 一致：派发到本地
+        # `fetch_youtube_transcripts_batch`（路由 youtube_fetching），禁止 queue=file_processing
+        # 以免在云 worker 上跑 file_tasks.transcribe_youtube_feed_task（yt-dlp 封 IP）。
+        from celery import current_app as _celery_app
+
+        video_items = [
+            {
+                "content_db_id": content_db_id,
+                "video_id": video_id,
+                "video_url": video_url,
+            }
+        ]
+        task = _celery_app.send_task(
+            "fetch_youtube_transcripts_batch",
+            args=(video_items,),
+            countdown=0,
         )
 
         logger.info(
-            f"YouTube ASR task dispatched: content_db_id={content_db_id}, "
-            f"video_id={video_id}, task_id={task.id}, user_id={user_id}"
+            f"YouTube feed transcript pipeline dispatched (local batch): "
+            f"content_db_id={content_db_id}, video_id={video_id}, task_id={task.id}, user_id={user_id}"
         )
 
         return {
             "task_id": task.id,
             "video_id": video_id,
             "content_db_id": content_db_id,
-            "message": "ASR transcription started. Use task_id to poll progress."
+            "message": (
+                "YouTube caption/ASR pipeline started on local worker. "
+                "Poll GET /api/files/tasks/{task_id}/status; if result.asr_dispatched > 0, "
+                "poll transcript until available."
+            ),
         }
 
     except HTTPException:

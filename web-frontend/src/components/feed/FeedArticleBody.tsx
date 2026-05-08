@@ -135,6 +135,15 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     }
   }, []);
 
+  /** Local-worker batch 已派发 ASR 时 Celery 会很快 SUCCESS，需轮询 DB 直至 transcript 落库 */
+  const transcriptPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clearTranscriptPoll = useCallback(() => {
+    if (transcriptPollIntervalRef.current) {
+      clearInterval(transcriptPollIntervalRef.current);
+      transcriptPollIntervalRef.current = null;
+    }
+  }, []);
+
   // PR-7: per-user 个性化 summary 状态
   // localPersonalized: 本地最新拿到的个性化 summary (覆盖父组件 selectedContent.personalized_summary)
   const [localPersonalized, setLocalPersonalized] = useState<{
@@ -258,7 +267,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     const videoTitle = selectedContent.title || `YouTube: ${selectedContent.content_id || 'video'}`;
     setAsrTaskId(taskId);
     addTask(taskId, videoTitle, 'youtube');
-    message.info('ASR transcription started — progress shown in the top bar');
+    message.info('Transcript pipeline started — progress in the top bar; ASR may take several minutes.');
   };
 
   useEffect(() => {
@@ -268,21 +277,88 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     if (!task) return;
 
     const s = task.status.status;
-    const resultStatus = (task.status as { result?: { status?: string; error?: string } }).result?.status;
-    const isCompleted = s === 'completed' && resultStatus !== 'failed';
-    const isFailed = s === 'failed' || (s === 'completed' && resultStatus === 'failed');
+    const rawResult = task.status.result as
+      | {
+          status?: string;
+          error?: string;
+          transcripts_ok?: number;
+          transcripts_failed?: number;
+          asr_dispatched?: number;
+        }
+      | undefined;
+    const resultStatus = rawResult?.status;
+    const isBatchResult = !!rawResult && typeof rawResult === 'object' && 'asr_dispatched' in rawResult;
 
-    if (isCompleted) {
+    const finishSuccess = (contentDbId: number) => {
+      clearTranscriptPoll();
       setAsrStatus('completed');
       setAsrProgress(100);
       message.success('Transcription completed!');
+      onTranscriptReady?.(contentDbId);
+    };
+
+    if (s === 'completed' && isBatchResult) {
+      const ok = Number(rawResult!.transcripts_ok) || 0;
+      const asrD = Number(rawResult!.asr_dispatched) || 0;
+      const failed = Number(rawResult!.transcripts_failed) || 0;
+      if (ok > 0) {
+        if (selectedContent) finishSuccess(selectedContent.id);
+        return;
+      }
+      if (asrD > 0) {
+        if (!selectedContent) return;
+        setAsrProgress((p) => (p < 80 ? 80 : p));
+        if (!transcriptPollIntervalRef.current) {
+          let attempts = 0;
+          const contentDbId = selectedContent.id;
+          const MAX_ATTEMPTS = 120;
+          transcriptPollIntervalRef.current = setInterval(async () => {
+            attempts += 1;
+            if (attempts > MAX_ATTEMPTS) {
+              clearTranscriptPoll();
+              setAsrStatus('failed');
+              message.error('Timed out waiting for transcript after ASR.');
+              return;
+            }
+            const tr = await subscriptionsAPI.getSubscriptionContentTranscript(contentDbId);
+            if (tr.success && (tr.data?.transcript ?? '').trim()) {
+              finishSuccess(contentDbId);
+            }
+          }, 8000);
+        }
+        return;
+      }
+      if (failed > 0 && asrD === 0) {
+        clearTranscriptPoll();
+        setAsrStatus('failed');
+        message.error(
+          'Transcript unavailable (captions restricted, private video, or not eligible for ASR).'
+        );
+        return;
+      }
+      clearTranscriptPoll();
+      setAsrStatus('failed');
+      message.error('Transcript pipeline finished without usable text.');
+      return;
+    }
+
+    const isFailed = s === 'failed' || (s === 'completed' && resultStatus === 'failed');
+    const isCompleted = s === 'completed' && resultStatus !== 'failed' && !isBatchResult;
+
+    if (isCompleted) {
       if (selectedContent) {
-        onTranscriptReady?.(selectedContent.id);
+        finishSuccess(selectedContent.id);
+      } else {
+        clearTranscriptPoll();
+        setAsrStatus('completed');
+        setAsrProgress(100);
+        message.success('Transcription completed!');
       }
     } else if (isFailed) {
+      clearTranscriptPoll();
       setAsrStatus('failed');
       const errMsg =
-        (task.status as { result?: { error?: string }; message?: string }).result?.error ||
+        rawResult?.error ||
         task.status.message ||
         'Transcription failed';
       message.error(`ASR failed: ${errMsg}`);
@@ -290,12 +366,13 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
       setAsrProgress(task.status.progress || 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- message API stable; avoid re-running ASR listener
-  }, [tasks, asrTaskId, asrStatus, selectedContent, onTranscriptReady]);
+  }, [tasks, asrTaskId, asrStatus, selectedContent, onTranscriptReady, clearTranscriptPoll]);
 
   useEffect(() => {
     setAsrStatus('idle');
     setAsrProgress(0);
     setAsrTaskId(null);
+    clearTranscriptPoll();
     // 切换内容时清理 AI 打标本地状态 (使用父 selectedContent.tags 重新渲染)
     setLocalTags(null);
     setRetagStatus('idle');
@@ -306,14 +383,15 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     setPersonalizePicker({});
     setPersonalizeLoading(false);
     // viewMode 不在此重置 — 由父组件决定是否跨内容持久化
-  }, [selectedContent?.id, clearRetagPoll]);
+  }, [selectedContent?.id, clearRetagPoll, clearTranscriptPoll]);
 
   // 组件卸载时清理轮询定时器, 防止 setState on unmounted.
   useEffect(() => {
     return () => {
       clearRetagPoll();
+      clearTranscriptPoll();
     };
-  }, [clearRetagPoll]);
+  }, [clearRetagPoll, clearTranscriptPoll]);
 
   const displayTags = localTags ?? selectedContent?.tags ?? null;
 
