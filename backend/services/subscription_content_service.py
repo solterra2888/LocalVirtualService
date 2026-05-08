@@ -175,7 +175,11 @@ class SubscriptionContentService:
                     duration_seconds = EXCLUDED.duration_seconds,
                     channel_id = EXCLUDED.channel_id,
                     heat_level = EXCLUDED.heat_level,
-                    fetched_at = EXCLUDED.fetched_at
+                    fetched_at = EXCLUDED.fetched_at,
+                    -- 允许 Snowflake 校正在重新抓取时修复曾错存的 published_at（twitterapi.io +0000 误标 bug）。
+                    -- twitter_adapter 对每次抓取都用 Snowflake ID 交叉校验 createdAt；
+                    -- 若发现偏差 > 60s 则以 Snowflake 时间覆盖，这里再写回 DB 保证永久生效。
+                    published_at = EXCLUDED.published_at
                 RETURNING id, (xmax = 0) AS inserted
             """
             

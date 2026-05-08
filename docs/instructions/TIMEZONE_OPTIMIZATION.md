@@ -531,6 +531,71 @@ News / Twitter 走主仓库路径, 不受影响.
 
 ---
 
+## 7.10 Daily Module 显示"未来时间"复发（2026-05-08）
+
+### 症状
+
+香港时间 14:09，Daily Module 中部分 Twitter 卡片显示当日 15:xx 以后（约 +1-2h 未来时刻）。
+
+### 数据库验证
+
+```sql
+-- 发现 45 条推文 published_at 在未来（约 06:43–07:58 UTC = 14:43–15:58 HKT）
+SELECT id, content_id, author_name, published_at, fetched_at
+FROM subscription_content
+WHERE channel_type = 'twitter'
+  AND published_at > NOW() AT TIME ZONE 'UTC'
+LIMIT 10;
+```
+
+Snowflake ID 反算确认：DB 存储值 = Snowflake 真实 UTC 时间 **+ 精确 8h**，即 HKT 本地时间被错存为 UTC。
+
+### 根因：两个 Bug 叠加
+
+| Bug | 说明 |
+|-----|------|
+| **① twitterapi.io `+0000` 误标**（§7.9 已知 bug）| API 偶发将推文 HKT 本地时间（UTC+8）误标为 `+0000 UTC`，例如实际 `23:58 UTC 5/7` 被返回为 `07:58 +0000 5/8`。Snowflake 校正码应拦截此情况（diff = 8h > 60s）。 |
+| **② `ON CONFLICT DO UPDATE` 不含 `published_at`**（新发现）| `subscription_content_service.py` 的 UPSERT 语句 `DO UPDATE SET` 中缺少 `published_at`。即使后续批次 Snowflake 校正算出了正确 UTC，ON CONFLICT 路径也不更新 `published_at`，导致初次错误入库后永久固化。 |
+
+两者叠加：① 导致初次入库时 `published_at = 07:58 UTC`（错），② 导致任何后续正确值都无法写回。
+
+### 修复
+
+**SQL 历史数据修正**（2026-05-08 执行，修正 45 条）：
+```sql
+UPDATE subscription_content
+SET 
+  published_at = published_at - INTERVAL '8 hours',
+  fetched_at = CASE 
+    WHEN fetched_at > NOW() AT TIME ZONE 'UTC' 
+    THEN fetched_at - INTERVAL '8 hours'
+    ELSE fetched_at
+  END
+WHERE channel_type = 'twitter'
+  AND published_at > NOW() AT TIME ZONE 'UTC'
+  AND published_at <= NOW() AT TIME ZONE 'UTC' + INTERVAL '12 hours';
+```
+
+**代码修正**（`backend/services/subscription_content_service.py`）：
+```sql
+ON CONFLICT (channel_type, content_id) DO UPDATE SET
+    ...
+    fetched_at = EXCLUDED.fetched_at,
+    -- 新增：允许 Snowflake 校正在重取时修复错误的 published_at
+    published_at = EXCLUDED.published_at
+```
+
+### 诊断检查清单
+
+若再次出现 Daily Module 显示未来时间，按以下顺序排查：
+
+1. **DB 验证**：`WHERE channel_type='twitter' AND published_at > NOW() AT TIME ZONE 'UTC'`
+2. **Snowflake 校正日志**：搜索 `celery_data_worker.log` 中 `createdAt/Snowflake mismatch`；若静默（无此 WARNING）说明校正未触发或未记录
+3. **差值计算**：`published_at - Snowflake_UTC`；若恰好 +8h 则为 twitterapi.io `+0000 mislabel`；若是其他值则另有原因
+4. **修复命令**：同上 SQL，条件改为当天时间范围
+
+---
+
 ## 八、相关文件索引
 
 - `backend/utils/datetime_utils.py` — 后端时区工具库 + psycopg2 UTC 适配器 + UtcDateTime
