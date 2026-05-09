@@ -140,6 +140,7 @@ const FeedReaderPageInner: React.FC = () => {
   const [subscriptionFilter, setSubscriptionFilter] = useState<'active' | 'disabled'>('active');
   const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
   const [contentSearchQuery, setContentSearchQuery] = useState('');
+  const [selectedShowFilter, setSelectedShowFilter] = useState<string | null>(null);
 
   // ☑️ Batch mode
   const [batchMode, setBatchMode] = useState(false);
@@ -162,11 +163,31 @@ const FeedReaderPageInner: React.FC = () => {
     [statusFilteredSubscriptions, feedChannelTypeFilter]
   );
 
+  // Reset show filter when switching subscriptions
+  const selectedSubscriptionId = selectedSubscription?.id;
+  useEffect(() => {
+    setSelectedShowFilter(null);
+    setContentSearchQuery('');
+  }, [selectedSubscriptionId]);
+
+  // Distinct show names present in the current content list (YouTube only)
+  const availableShows = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of contents) {
+      if (c.channel_type === 'youtube' && c.metadata?.show_name) {
+        names.add(c.metadata.show_name as string);
+      }
+    }
+    return Array.from(names).sort();
+  }, [contents]);
+
   const filteredContents = useMemo(() => {
+    let result = contents;
     const q = contentSearchQuery.trim();
-    if (!q) return contents;
-    return contents.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
-  }, [contents, contentSearchQuery]);
+    if (q) result = result.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
+    if (selectedShowFilter) result = result.filter((c) => c.metadata?.show_name === selectedShowFilter);
+    return result;
+  }, [contents, contentSearchQuery, selectedShowFilter]);
 
   const showTranscriptTabInFeeds = selectedContent?.channel_type === 'youtube';
 
@@ -263,10 +284,6 @@ const FeedReaderPageInner: React.FC = () => {
   }, [subscriptions, selectedSubscription]);
 
   // 加载选中订阅的内容（仅依赖 subscription id，避免 markAsRead 更新 unread_count 时触发重新加载造成循环）
-  const selectedSubscriptionId = selectedSubscription?.id;
-  useEffect(() => {
-    setContentSearchQuery('');
-  }, [selectedSubscriptionId]);
 
   useEffect(() => {
     if (selectedSubscriptionId != null) {
@@ -1285,22 +1302,33 @@ const FeedReaderPageInner: React.FC = () => {
                     {selectedSubscription.channel_name ||
                       selectedSubscription.channel_identifier}
                   </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {searchActive ? `${filteredContents.length} / ` : ''}
-                    {contents.length} articles
-                  </Text>
-                  {contents.length > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        Keyboard
-                      </Text>
-                      <kbd style={kbdKeyStyle}>↑</kbd>
-                      <kbd style={kbdKeyStyle}>↓</kbd>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        prev / next article
-                      </Text>
-                    </div>
-                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      width: '100%',
+                    }}
+                  >
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {searchActive ? `${filteredContents.length} / ` : ''}
+                      {contents.length} articles
+                    </Text>
+                    {contents.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          Keyboard
+                        </Text>
+                        <kbd style={kbdKeyStyle}>↑</kbd>
+                        <kbd style={kbdKeyStyle}>↓</kbd>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          prev / next article
+                        </Text>
+                      </div>
+                    )}
+                  </div>
                   <Input.Search
                     allowClear
                     placeholder="Search articles…"
@@ -1311,6 +1339,53 @@ const FeedReaderPageInner: React.FC = () => {
                   />
                 </Space>
               </div>
+
+              {/* 节目筛选 chip 行：仅当前订阅有 show_name 时渲染 */}
+              {availableShows.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 16px',
+                    overflowX: 'auto',
+                    borderBottom: `1px solid ${themeColors.cardBorder}`,
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none',
+                  } as React.CSSProperties}
+                >
+                  {(['All', ...availableShows] as const).map((show) => {
+                    const isActive = show === 'All' ? selectedShowFilter === null : selectedShowFilter === show;
+                    return (
+                      <button
+                        key={show}
+                        onClick={() => setSelectedShowFilter(show === 'All' ? null : show)}
+                        style={{
+                          flexShrink: 0,
+                          padding: '2px 10px',
+                          fontSize: 11,
+                          lineHeight: '18px',
+                          borderRadius: 10,
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontWeight: isActive ? 600 : 400,
+                          backgroundColor: isActive
+                            ? themeColors.selectedBorder
+                            : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                          color: isActive
+                            ? '#fff'
+                            : themeColors.textSecondary,
+                          transition: 'background-color 0.15s, color 0.15s',
+                          letterSpacing: '0.01em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {show}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {contentsLoading ? (
                 <div style={{ 
@@ -1506,9 +1581,25 @@ const FeedReaderPageInner: React.FC = () => {
                                 <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />
                               </Tooltip>
                             )}
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              {content.author_name || (content.author_identifier ? `@${content.author_identifier}` : '')}
-                            </Text>
+                            <Tooltip
+                              title={
+                                content.channel_type === 'youtube' &&
+                                content.metadata?.show_name &&
+                                content.author_name
+                                  ? content.author_name
+                                  : undefined
+                              }
+                            >
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {content.channel_type === 'youtube' &&
+                                content.metadata?.show_name
+                                  ? content.metadata.show_name
+                                  : content.author_name ||
+                                    (content.author_identifier
+                                      ? `@${content.author_identifier}`
+                                      : '')}
+                              </Text>
+                            </Tooltip>
                             <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
                             <Text type="secondary" style={{ fontSize: 12 }}>
                               {content.published_at

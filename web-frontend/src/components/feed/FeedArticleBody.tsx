@@ -612,7 +612,14 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           <div>
             <div>
               <Text strong style={{ color: themeColors.text }}>
-                {selectedContent.author_name || selectedContent.author_identifier}
+                {selectedContent.channel_type === 'youtube'
+                  ? [
+                      selectedContent.author_name || selectedContent.author_identifier,
+                      selectedContent.metadata?.show_name,
+                    ]
+                      .filter(Boolean)
+                      .join(' - ')
+                  : selectedContent.author_name || selectedContent.author_identifier}
               </Text>
             </div>
             <Text type="secondary" style={{ fontSize: 12 }}>

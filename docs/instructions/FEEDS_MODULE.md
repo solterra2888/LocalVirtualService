@@ -150,6 +150,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `heat_level` | int | 热度等级（News/Twitter 用）|
 | `categories` | text[] | 分类标签（News 用）|
 | YouTube 专用 | — | `transcript`（原始字幕）/ `transcript_cleaned`（可读清洗版，见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）/ `transcript_data` / `duration_seconds` / `channel_id` / `feed_url` |
+| `metadata.show_name` (YouTube) | varchar \| null | **节目名**：`_extract_show_name_raw` 从标题解析后经 `_TRANSCRIPTA_CANONICAL` 与 [Transcripta](https://dashboard.cntlabs.io/transcripta.html)（`podcast_data.js`）展示名对齐（如 `The Close`→`Bloomberg The Close`、`Odd Lots`→`OddLots`）。存于 `metadata` jsonb；无节目名为 `null`。前端卡片与正文顶部红色 badge。详见 [§7.5](#75-youtube-节目名提取-metadata-show_name) |
 | Twitter 专用 | — | `retweet_*` / `quote_*` / `reply_*` / `media_urls` / … |
 | `UNIQUE (channel_type, content_id)` | | 跨用户去重的关键 |
 
@@ -399,7 +400,31 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 
 因此 "用户上传一条 YouTube 链接" 永远不会被 Feeds 的 30–60 min 批量任务排队阻塞，反之亦然。这是理解 local Worker 架构图的关键。
 
-## 8. 前端结构
+### 7.5 YouTube 节目名提取（`metadata.show_name`）
+
+部分 YouTube 频道（Bloomberg Television、Bloomberg Podcasts 等）会在视频标题里内嵌节目名。入库时 `YouTubeAdapter` 先按 `_CHANNEL_CONFIGS` 从标题提取**原始**节目名，再经 `_TRANSCRIPTA_CANONICAL` 与 [Transcripta](https://dashboard.cntlabs.io/transcripta.html)（`podcast_data.js` 中的 `PODCAST_DATA.podcasts[].name`）对齐展示名，写入 `metadata.show_name`，前端以红色 badge 呈现。示例：`The Close` → `Bloomberg The Close`，`Odd Lots` → `OddLots`，`Goldman Sachs Exchanges: …` → `Exchanges`。
+
+#### 支持的频道与标题格式
+
+| 频道 | channelId | 标题格式 | 提取方式 |
+|------|-----------|---------|---------|
+| Bloomberg Television | `UCIALMKvObZNtJ6AmdCLP7Lg` | `Topic \| Show [Date]` 或 `Show \| Topics` 或 `Show [Date]` | 后缀优先，失败则前缀；独立标题匹配已知列表 |
+| Bloomberg Podcasts | `UChF5O40UBqAc82I7-i5ig6A` | `Topic \| Show` | 后缀提取 |
+| Bloomberg Originals | `UCUMZ7gohGI9HcU9VNsr2FJQ` | `Topic \| Bloomberg Primer / The Deal / Bloomberg Investigates` | 后缀提取（忽略频道名本身）|
+| Morgan Stanley | `UCz6RzD6KG_hH_oHb2kyW5jQ` | `Show: Topic` | 已知前缀列表匹配 |
+| Goldman Sachs | `UCyz6-taovlaOkPsPtK4KNEg` | `Goldman Sachs Exchanges: …`、`Talks at GS: …`、`The Markets: …` | 已知前缀列表匹配 |
+| Norges Bank Investment Management | `UCRhQsN8AVIfZuBNeRV1A37w` | `Topic \| In Good Company / Investment Conference...` | 后缀提取 |
+| WSJ News | `UCMliswJ7oukCeW35GSayhRA` | `Topic \| WSJ Leadership Institute`（忽略通用 `WSJ News`）| 后缀提取 |
+| The Economist | `UC0p5jTq6Xx_DosDFxVXnWaQ` | `\| The Economist`（频道名）→ 忽略 | — |
+| Bloomberg Live / 其余中文频道 | — | 标题规律不一或未定配置 | 按 `_CHANNEL_CONFIGS`；未配置则不提取 |
+
+#### 实现位置
+
+`backend/services/content_adapters/youtube_adapter.py` — `_extract_show_name_raw` + `_normalize_show_name_transcripta` + `_CHANNEL_CONFIGS` + `_TRANSCRIPTA_CANONICAL`。扩展新频道时在 `_CHANNEL_CONFIGS` 增加记录；若需与 Transcripta 展示名一致，在同一文件的 `_TRANSCRIPTA_CANONICAL` 增加映射。
+
+#### 历史数据
+
+历史视频的 `metadata.show_name` 可能为 `null` 或为旧版未规范化的字符串；更新映射后如需统一 badge 文案，可对 `subscription_content` 重新跑一次基于当前适配器逻辑的回填（按需）。
 
 | 文件 | 作用 |
 |------|------|
