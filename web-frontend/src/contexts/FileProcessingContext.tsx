@@ -7,7 +7,7 @@ import { api } from '../services/api';
 export interface TaskInfo {
   taskId: string;
   fileName: string;
-  fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis';
+  fileType: 'document' | 'audio' | 'youtube' | 'podcast' | 'weblink' | 'text' | 'feed_analysis';
   /** YouTube Upload Link 专用：后端 file_processing_details.id，用于 DB 侧轮询以替代 Celery 轮询 */
   fileId?: number;
   status: TaskStatusResponse;
@@ -17,7 +17,7 @@ export interface TaskInfo {
 interface FileProcessingContextType {
   // 新增：多任务管理
   tasks: Map<string, TaskInfo>;
-  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => void;
+  addTask: (taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'podcast' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => void;
   updateTaskStatus: (taskId: string, status: Partial<TaskStatusResponse> & { status: string; progress: number; files_processed: number; total_files: number; logs: Array<{ timestamp: string; level: string; message: string; }> }) => void;
   removeTask: (taskId: string) => void;
   clearAllTasks: () => void;
@@ -135,7 +135,7 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   // 新增：添加任务
-  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => {
+  const addTask = useCallback((taskId: string, fileName: string, fileType: 'document' | 'audio' | 'youtube' | 'podcast' | 'weblink' | 'text' | 'feed_analysis', fileId?: number) => {
     setTasks(prev => {
       const newTasks = new Map(prev);
       newTasks.set(taskId, {
@@ -224,11 +224,13 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
       setTasks(prev => {
         if (!prev.has(id)) {
           const newTasks = new Map(prev);
-          let fileType: 'document' | 'audio' | 'youtube' | 'weblink' | 'text' = 'document';
+          let fileType: 'document' | 'audio' | 'youtube' | 'podcast' | 'weblink' | 'text' = 'document';
           if (id.startsWith('audio-')) {
             fileType = 'audio';
           } else if (id.startsWith('youtube-')) {
             fileType = 'youtube';
+          } else if (id.startsWith('podcast-')) {
+            fileType = 'podcast';
           } else if (id.startsWith('weblink-')) {
             fileType = 'weblink';
           }
@@ -397,19 +399,19 @@ export const FileProcessingProvider: React.FC<{ children: ReactNode }> = ({ chil
           if (status.asr_fallback_notice && !asrFallbackNoticeShownRef.current.has(taskId)) {
             asrFallbackNoticeShownRef.current.add(taskId);
             Modal.info({
-              title: '无法自动获取 YouTube 字幕',
+              title: 'Unable to automatically fetch subtitles',
               content:
-                '该视频未提供可拉取的字幕，已改为下载音频并用 Fun-ASR 转写。处理时间较长（可能数分钟），请耐心等待，勿关闭页面。',
-              okText: '知道了',
+                'This video does not provide a caption track, so it has been switched to downloading the audio and using Fun-ASR for transcription. The processing time may be较长（可能数分钟），请耐心等待，勿关闭页面。',
+              okText: 'OK',
             });
           }
           if (status.asr_wait_notice && !asrWaitNoticeShownRef.current.has(taskId)) {
             asrWaitNoticeShownRef.current.add(taskId);
             Modal.info({
-              title: '语音识别进行中',
+              title: 'Speech Recognition in Progress',
               content:
-                '已提交 Fun-ASR，大文件或长音频可能需要较长时间，请耐心等待。',
-              okText: '知道了',
+                'Fun-ASR has been submitted, large files or long audio may take a while, please wait patiently.',
+              okText: 'OK',
             });
           }
           // 自动 AI 分析中间态: Celery 主任务已 'completed', 但 trigger_auto_analyze 已投递

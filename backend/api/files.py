@@ -902,6 +902,7 @@ async def get_task_status(
                     "status": "failed",
                     "progress": 0,
                     "message": str(result.get("error", "Processing failed")),
+                    "error_type": result.get("error_type"),
                     "files_processed": result.get("files_processed", 0),
                     "files_failed": result.get("files_failed", 1),
                     "total_files": result.get("total_files", 1),
@@ -4323,6 +4324,115 @@ async def upload_youtube_link(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process YouTube link: {str(e)}"
         )
+
+@router.post("/upload-apple-podcast", summary="Upload Apple Podcast episode link")
+async def upload_apple_podcast_link(
+    request: Dict[str, Any] = Body(...),
+    current_user = Depends(get_current_user),
+):
+    """
+    上传 Apple Podcasts 单集链接并异步处理。
+
+    远程服务器直接通过 yt-dlp 访问 iTunes 公开 API + 第三方 Podcast CDN，
+    无需本地家庭 Worker（与 YouTube 不同，Apple 不存在 IP 封锁问题）。
+
+    流程：
+      1. 校验 URL 并提取 episode_id
+      2. 派发 upload_and_transcribe_apple_podcast_task 到 file_processing 队列
+      3. 立即返回 task_id，前端通过 GET /api/files/tasks/{task_id}/status 轮询
+
+    请求参数：
+    - apple_url: Apple Podcasts 单集链接（必填，需含 ?i=episode_id）
+    - auto_analyze_template_id: 可选，AI 分析模板 ID
+    - auto_analyze_template_variables: 可选，模板变量
+    - auto_analyze_enabled: 可选，是否开启自动分析（默认 true）
+    - auto_tag_template_id: 可选，AI 打标签模板 ID
+    - auto_tag_template_variables: 可选，打标签模板变量
+    - auto_tag_enabled: 可选，是否开启自动打标签（默认 true）
+    """
+    from backend.services.apple_podcast_service import ApplePodcastService
+    from backend.tasks.file_tasks import upload_and_transcribe_apple_podcast_task
+
+    try:
+        apple_url = request.get('apple_url')
+        if not apple_url or not apple_url.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required parameter: apple_url",
+            )
+        apple_url = apple_url.strip()
+
+        episode_id = ApplePodcastService.extract_episode_id(apple_url)
+        if not episode_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Invalid Apple Podcasts URL. "
+                    "Please provide a valid episode link containing ?i=<episode_id>, "
+                    "e.g. https://podcasts.apple.com/us/podcast/.../id...?i=..."
+                ),
+            )
+
+        auto_analyze_template_id = request.get('auto_analyze_template_id')
+        auto_analyze_template_variables = request.get('auto_analyze_template_variables') or {}
+        try:
+            auto_analyze_template_id = int(auto_analyze_template_id) if auto_analyze_template_id else None
+        except (TypeError, ValueError):
+            auto_analyze_template_id = None
+        if not isinstance(auto_analyze_template_variables, dict):
+            auto_analyze_template_variables = {}
+        auto_analyze_enabled = bool(request.get('auto_analyze_enabled', True))
+
+        auto_tag_template_id = request.get('auto_tag_template_id')
+        auto_tag_template_variables = request.get('auto_tag_template_variables') or {}
+        try:
+            auto_tag_template_id = int(auto_tag_template_id) if auto_tag_template_id else None
+        except (TypeError, ValueError):
+            auto_tag_template_id = None
+        if not isinstance(auto_tag_template_variables, dict):
+            auto_tag_template_variables = {}
+        auto_tag_enabled = bool(request.get('auto_tag_enabled', True))
+
+        username = current_user.username if hasattr(current_user, 'username') else 'guest'
+
+        info(
+            f"Received Apple Podcast link: episode_id={episode_id}, user={username}",
+            source="api",
+        )
+
+        task = upload_and_transcribe_apple_podcast_task.apply_async(
+            args=(apple_url, episode_id, username),
+            kwargs={
+                'auto_analyze_template_id': auto_analyze_template_id,
+                'auto_analyze_template_variables': auto_analyze_template_variables,
+                'auto_analyze_enabled': auto_analyze_enabled,
+                'auto_tag_template_id': auto_tag_template_id,
+                'auto_tag_template_variables': auto_tag_template_variables,
+                'auto_tag_enabled': auto_tag_enabled,
+            },
+            queue='file_processing',
+        )
+
+        info(
+            f"Apple Podcast task dispatched: task_id={task.id} episode_id={episode_id}",
+            source="api",
+        )
+
+        return {
+            "task_id": task.id,
+            "episode_id": episode_id,
+            "message": "Apple Podcast processing started. Use GET /api/files/tasks/{task_id}/status to poll.",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"Apple Podcast upload failed: {str(e)}", source="api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process Apple Podcast link: {str(e)}",
+        )
+
 
 @router.get(
     "/upload-youtube/status/{file_id}",

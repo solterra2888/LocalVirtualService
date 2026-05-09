@@ -44,6 +44,7 @@ import {
   InboxOutlined,
   AppstoreOutlined,
   GlobalOutlined,
+  AppleOutlined,
 } from '@ant-design/icons';
 import { filesAPI, FolderResponse } from '../services/files';
 import { fileTagsService } from '../services/fileTags';
@@ -56,6 +57,7 @@ import { getExecutionStatusDisplay } from '../utils/rcAgentStatus';
 import UploadFilesModal from '../components/UploadFilesModal';
 import UploadAudioModal from '../components/UploadAudioModal';
 import UploadYouTubeLinkModal from '../components/UploadYouTubeLinkModal';
+import UploadApplePodcastModal from '../components/UploadApplePodcastModal';
 import UploadWebLinkModal from '../components/UploadWebLinkModal';
 import CreateTextNoteModal, { TASK_EXECUTIONS_REFRESH_EVENT } from '../components/CreateTextNoteModal';
 import ReportTickerTags, { parseReportTickers } from '../components/ReportTickerTags';
@@ -110,6 +112,9 @@ function getFileTypeIconDisplay(firstFileType: string | undefined): {
   }
   if (['audio'].includes(t)) {
     return { tooltip: 'Audio', icon: <SoundOutlined />, color: '#722ed1' };
+  }
+  if (['podcast'].includes(t)) {
+    return { tooltip: 'Podcast', icon: <AppleOutlined />, color: '#7224d8' };
   }
   if (['youtube'].includes(t)) {
     return { tooltip: 'YouTube', icon: <VideoCameraOutlined />, color: '#ff4d4f' };
@@ -168,6 +173,7 @@ const MobileSourcesInner: React.FC = () => {
   const [showUploadDocModal, setShowUploadDocModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showYouTubeModal, setShowYouTubeModal] = useState(false);
+  const [showApplePodcastModal, setShowApplePodcastModal] = useState(false);
   const [showWebLinkModal, setShowWebLinkModal] = useState(false);
   const [showCreateTextNoteModal, setShowCreateTextNoteModal] = useState(false);
 
@@ -1309,6 +1315,24 @@ const MobileSourcesInner: React.FC = () => {
           <Button
             type="text"
             size="large"
+            icon={<AppleOutlined style={{ fontSize: '18px', color: '#7224d8' }} />}
+            onClick={() => {
+              setUploadSheetOpen(false);
+              setShowApplePodcastModal(true);
+            }}
+            style={uploadOptionButtonStyle}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = isDark ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = isDark ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Apple Podcast</span>
+          </Button>
+          <Button
+            type="text"
+            size="large"
             icon={<GlobalOutlined style={{ fontSize: '18px' }} />}
             onClick={() => {
               setUploadSheetOpen(false);
@@ -1341,6 +1365,11 @@ const MobileSourcesInner: React.FC = () => {
       <UploadYouTubeLinkModal
         visible={showYouTubeModal}
         onCancel={() => setShowYouTubeModal(false)}
+        themeMode={themeMode}
+      />
+      <UploadApplePodcastModal
+        visible={showApplePodcastModal}
+        onCancel={() => setShowApplePodcastModal(false)}
         themeMode={themeMode}
       />
       <UploadWebLinkModal

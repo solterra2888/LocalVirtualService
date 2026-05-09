@@ -69,7 +69,8 @@ import {
   UpOutlined,
   GlobalOutlined,
   InfoCircleOutlined,
-  PrinterOutlined
+  PrinterOutlined,
+  AppleOutlined,
 } from '@ant-design/icons';
 import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../services/files';
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
@@ -328,6 +329,8 @@ interface ProcessingResult {
   final_report?: string;
 }
 
+const AUDIO_LIKE_TYPES: ReadonlyArray<string> = ['audio', 'podcast'];
+
 const FilesPageInner: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const executionFromUrl = searchParams.get('execution');
@@ -423,8 +426,7 @@ const FilesPageInner: React.FC = () => {
   // 保留 backward compat aliases (部分旧路径仍引用)
   const modalSelectedTemplateId = modalAnalyzeDocPicker.templateId;
   const modalTemplateVariables = modalAnalyzeDocPicker.templateVariables || {};
-  const [audioTemplateId, setAudioTemplateId] = useState<number | undefined>(undefined);
-  const [modalAudioTemplateVars, setModalAudioTemplateVars] = useState<Record<string, any>>({});
+  const [modalAudioAnalyzePicker, setModalAudioAnalyzePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   
   // 新布局相关状态
   const [selectedExecutionForView, setSelectedExecutionForView] = useState<TaskExecution | null>(null);
@@ -501,23 +503,6 @@ const FilesPageInner: React.FC = () => {
       setRightPanelView('info');
     }
   }, [ibReportDataForReview, rightPanelView]);
-
-  // 获取 audio_analysis_v1 模板ID（供音频分析的可选参数编辑器使用）
-  useEffect(() => {
-    const fetchAudioTemplateId = async () => {
-      try {
-        const templates = await promptTemplateService.listTemplates({ search: 'audio_analysis_v1' });
-        const audioTemplate = templates.find(t => t.template_code === 'audio_analysis_v1');
-        if (audioTemplate) {
-          setAudioTemplateId(audioTemplate.id);
-        }
-      } catch (error) {
-        console.error('Failed to fetch audio_analysis_v1 template:', error);
-      }
-    };
-    fetchAudioTemplateId();
-  }, []);
-
 
   // 加载任务执行历史的函数 - 将在状态声明后重新定义
 
@@ -636,12 +621,17 @@ const FilesPageInner: React.FC = () => {
   const maxTaskHistoryRetries = 3; // 最大重试次数
   const taskHistoryRetryInterval = 30000; // 重试间隔30秒
 
+  // 文件类型筛选（'podcast' | 'audio' | 'youtube' | 'document' | '' = 全部）
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>('');
+
   // 分页与无限滚动
   const EXECUTIONS_PAGE_SIZE = 20;
   const [executionsPage, setExecutionsPage] = useState(1);
   const [hasMoreExecutions, setHasMoreExecutions] = useState(true);
   const [loadingMoreExecutions, setLoadingMoreExecutions] = useState(false);
   const filesListScrollRef = useRef<HTMLDivElement>(null);
+  /** 文件类型筛选横条：与 FeedReader 节目条一致，竖滚轮映射为横向滚动 */
+  const fileTypeStripRef = useRef<HTMLDivElement>(null);
   /** Watchlist `/files?execution=` 进入后：左侧列表需滚动到已定位的条目 */
   const pendingScrollToExecutionFromDeepLinkRef = useRef(false);
   const scrollDeepLinkTargetExecutionIdRef = useRef<string | null>(null);
@@ -675,6 +665,7 @@ const FilesPageInner: React.FC = () => {
         ...(searchType === 'content' && searchQuery.trim() ? { search_type: 'content', q: searchQuery.trim() } : {}),
         ...(searchType === 'ticker' && tickerFilter ? { ticker: tickerFilter } : {}),
         ...(selectedFolderId ? { folder_id: selectedFolderId } : {}),
+        ...(fileTypeFilter ? { file_type: fileTypeFilter } : {}),
       });
       
       if (append) {
@@ -737,7 +728,7 @@ const FilesPageInner: React.FC = () => {
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId]);
+  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId, fileTypeFilter]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -974,6 +965,44 @@ const FilesPageInner: React.FC = () => {
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFolderId]);
+
+  // Refresh executions when file_type filter changes
+  const isFileTypeMountRef = useRef(true);
+  useEffect(() => {
+    if (isFileTypeMountRef.current) { isFileTypeMountRef.current = false; return; }
+    const t = setTimeout(() => {
+      loadTaskExecutionsFuncRef.current(false, false, false).catch(() => {});
+    }, 50);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTypeFilter]);
+
+  /** 文件类型 chip 横条：与 FeedReader Programme 条一致，deltaY → scrollLeft；触控板横向手势走 deltaX 分支不拦截 */
+  useEffect(() => {
+    const el = fileTypeStripRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return;
+
+      if (!e.shiftKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        return;
+      }
+
+      const scrollDelta = e.shiftKey ? e.deltaY + e.deltaX : e.deltaY;
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const prev = el.scrollLeft;
+      const next = Math.max(0, Math.min(maxScroll, prev + scrollDelta));
+
+      if (next !== prev) {
+        el.scrollLeft = next;
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   /** Watchlist 等外链：`/files?execution=<processing_stats_id>` 打开并选中对应来源任务，并重置筛选以便列表能显示该条 */
   useEffect(() => {
@@ -1266,6 +1295,7 @@ const FilesPageInner: React.FC = () => {
       setAiAnalysisLoading(true);
       setAiAnalysisVisible(true);
       setAiAnalysisExecution(execution);
+      setModalAudioAnalyzePicker({});
       
       logger.logInfo(`view AI analysis report: ${execution.task_name}`, 'file-processing');
       
@@ -1319,7 +1349,11 @@ const FilesPageInner: React.FC = () => {
 
 
   // 音频AI分析 - 触发分析
-  const handleAnalyzeAudio = async (record: TaskExecution, templateVariables?: Record<string, any>) => {
+  const handleAnalyzeAudio = async (
+    record: TaskExecution,
+    templateVariables?: Record<string, any>,
+    templateId?: number,
+  ) => {
     const executionId = Number(record.id);
     const fileName = record.first_display_name || record.first_filename || record.task_name || 'Audio file';
     
@@ -1334,6 +1368,7 @@ const FilesPageInner: React.FC = () => {
 
       const result = await filesAPI.analyzeAudio({
         execution_id: executionId,
+        ...(templateId != null ? { template_id: templateId } : {}),
         ...(filteredVars && Object.keys(filteredVars).length > 0 ? { template_variables: filteredVars } : {}),
       });
 
@@ -2470,7 +2505,7 @@ const FilesPageInner: React.FC = () => {
       width: 220,
       render: (_: any, record: TaskExecution) => {
         const isUploadOnly = record.rc_agent_status === 'uploaded';
-        const isAudioFile = record.first_file_type === 'audio';
+        const isAudioFile = AUDIO_LIKE_TYPES.includes(record.first_file_type ?? '');
         const isYouTubeFile = record.first_file_type === 'youtube';
         const isAudioAnalyzing = record.rc_agent_status === 'analyzing' || audioAnalyzingIds.has(record.id);
         const isDocAnalyzing = record.rc_agent_status === 'analyzing' || docAnalyzingIds.has(record.id);
@@ -2573,12 +2608,14 @@ const FilesPageInner: React.FC = () => {
         onCancel={() => {
           setAiAnalysisVisible(false);
           setAiAnalysisData(null);
+          setModalAudioAnalyzePicker({});
         }}
         styles={getModalStyles(themeMode)}
         footer={[
           <Button key="cancel" onClick={() => {
             setAiAnalysisVisible(false);
             setAiAnalysisData(null);
+            setModalAudioAnalyzePicker({});
           }}>
             Close
           </Button>,
@@ -2637,7 +2674,7 @@ const FilesPageInner: React.FC = () => {
           </div>
         </div>
       ) : (() => {
-        const isAudioModal = aiAnalysisExecution?.first_file_type === 'audio';
+        const isAudioModal = AUDIO_LIKE_TYPES.includes(aiAnalysisExecution?.first_file_type ?? '');
         
         // 音频分析：只有转写完成(completed，含旧 skipped)或失败(failed)时才允许AI分析
         const stModal = aiAnalysisExecution?.rc_agent_status;
@@ -2671,6 +2708,9 @@ const FilesPageInner: React.FC = () => {
           : false;
         const isAnalyzingModal = isAudioAnalyzingModal || isDocAnalyzingModal;
 
+        const modalAudioTemplateModule =
+          aiAnalysisExecution?.first_file_type === 'podcast' ? 'youtube_analysis' : 'audio_analysis';
+
         return (
           <div style={{ textAlign: 'center', padding: '40px 0' }}>
             {isAnalyzingModal ? (
@@ -2699,25 +2739,45 @@ const FilesPageInner: React.FC = () => {
                   No AI analysis report available for this execution.
                 </div>
                 {canAnalyzeAudioModal && aiAnalysisExecution && (
-                  <div style={{ maxWidth: '420px', textAlign: 'center' }}>
-                    {audioTemplateId != null && (
-                      <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-                        <TemplateVariablesEditor
-                          templateId={audioTemplateId}
-                          values={modalAudioTemplateVars}
-                          onChange={(values) => setModalAudioTemplateVars(values ?? {})}
-                        />
-                      </div>
-                    )}
+                  <div style={{ maxWidth: '480px', textAlign: 'center' }}>
+                    <div style={{ marginBottom: '14px', color: '#999', fontSize: '13px', textAlign: 'left' }}>
+                      {modalAudioTemplateModule === 'youtube_analysis'
+                        ? 'Apple Podcast episodes use the same deep-analysis template as Upload YouTube Link (youtube_analysis). Use Edit my template to adjust prompts, set variables when needed, then click Analyze Audio.'
+                        : 'Choose your private audio analysis template (optional). Use Edit my template to adjust prompts, set variables when needed, then click Analyze Audio.'}
+                    </div>
+                    <UploadAnalysisTemplatePicker
+                      value={modalAudioAnalyzePicker}
+                      onChange={setModalAudioAnalyzePicker}
+                      mode="audio-default"
+                      moduleCode={modalAudioTemplateModule}
+                      label={
+                        modalAudioTemplateModule === 'youtube_analysis'
+                          ? 'YouTube analysis template'
+                          : 'Audio analysis template'
+                      }
+                      hint={
+                        modalAudioTemplateModule === 'youtube_analysis'
+                          ? 'When the switch is on, your private youtube_analysis template is used (same module as Upload YouTube Link). Toggle off for the system default.'
+                          : 'When the switch is on, your private audio template is used. Toggle off to use the system default.'
+                      }
+                      showVariablesEditor
+                    />
                     <Button
                       type="primary"
                       icon={<SoundOutlined />}
-                      onClick={() => handleAnalyzeAudio(aiAnalysisExecution, modalAudioTemplateVars)}
+                      onClick={() =>
+                        handleAnalyzeAudio(
+                          aiAnalysisExecution,
+                          modalAudioAnalyzePicker.templateVariables || {},
+                          modalAudioAnalyzePicker.enabled !== false ? modalAudioAnalyzePicker.templateId : undefined,
+                        )
+                      }
                       style={{
                         height: '40px',
                         paddingInline: '24px',
                         fontSize: '14px',
                         borderRadius: '8px',
+                        marginTop: 16,
                       }}
                     >
                       Analyze Audio
@@ -2727,14 +2787,17 @@ const FilesPageInner: React.FC = () => {
                 {canAnalyzeDocModal && aiAnalysisExecution && (
                   <div style={{ maxWidth: '460px', marginTop: '20px', textAlign: 'left' }}>
                     <div style={{ marginBottom: '12px', color: '#999', fontSize: '13px' }}>
-                      Run AI analysis on this document using your private template.
+                      {aiAnalysisExecution.rc_agent_status === 'failed'
+                        ? 'The previous AI analysis failed. Turn on your private template below, adjust variables if needed, then run analysis again.'
+                        : 'Choose your private document analysis template below: enable the switch, set any template variables, then click Analyze Document.'}
                     </div>
                     <UploadAnalysisTemplatePicker
                       value={modalAnalyzeDocPicker}
                       onChange={setModalAnalyzeDocPicker}
                       mode="optional"
                       moduleCode="file_analysis"
-                      label="Document Analysis Template"
+                      label="Document analysis template"
+                      hint="When the switch is on, your private template is used. Fill in variables if your template defines them, then click Analyze Document."
                       showVariablesEditor
                     />
                     <div style={{ marginTop: '16px', textAlign: 'center' }}>
@@ -2992,6 +3055,9 @@ const FilesPageInner: React.FC = () => {
     }
     if (['audio'].includes(t) || t.startsWith('audio/')) {
       return { tooltip: 'Audio', icon: <SoundOutlined />, color: '#722ed1' };
+    }
+    if (['podcast'].includes(t)) {
+      return { tooltip: 'Podcast', icon: <AppleOutlined />, color: '#7224d8' };
     }
     if (['youtube'].includes(t)) {
       return { tooltip: 'YouTube', icon: <VideoCameraOutlined />, color: '#ff4d4f' };
@@ -3338,6 +3404,44 @@ const FilesPageInner: React.FC = () => {
             </div>
               )}
             </div>
+            {/* File-type filter chips：单行横滚；与 FeedReader 节目条相同 wheel 逻辑（竖滚轮映射横向） */}
+            <div
+              ref={fileTypeStripRef}
+              className="files-file-type-strip-scroll"
+              style={{
+                padding: '4px 8px',
+                borderBottom: `1px solid ${themeColors.cardBorder}`,
+              }}
+            >
+              {[
+                { label: 'All', value: '' },
+                { label: 'Document', value: 'document' },
+                { label: 'Audio', value: 'audio' },
+                { label: 'YouTube', value: 'youtube' },
+                { label: 'Podcast', value: 'podcast' },
+                { label: 'Web', value: 'web' },
+                { label: 'Note', value: 'text' },
+              ].map(({ label, value }) => {
+                const isActive = fileTypeFilter === value;
+                return (
+                  <button
+                    key={value || 'all'}
+                    type="button"
+                    className={`files-folder-chip${isActive ? ' is-active' : ''}`}
+                    onClick={() => setFileTypeFilter(isActive ? '' : value)}
+                    style={{
+                      background: isActive ? (isDark ? 'rgba(33,150,243,0.18)' : 'rgba(24,144,255,0.08)') : 'transparent',
+                      color: isActive ? (isDark ? '#64B5F6' : '#1890ff') : themeColors.textSecondary,
+                      border: isActive ? `1px solid ${isDark ? 'rgba(33,150,243,0.35)' : 'rgba(24,144,255,0.25)'}` : '1px solid transparent',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
             {batchMode && selectedExecutionIds.length > 0 && (
               <div className="files-list-batch-bar">
                 <span className="files-list-batch-count">{selectedExecutionIds.length} selected</span>
@@ -3417,7 +3521,7 @@ const FilesPageInner: React.FC = () => {
                 const isSelected = selectedExecutionForView?.id === execution.id;
                 const isUploadOnly = execution.rc_agent_status === 'uploaded';
                 const isFailed = execution.rc_agent_status === 'failed';
-                const isAudioFile = execution.first_file_type === 'audio';
+                const isAudioFile = AUDIO_LIKE_TYPES.includes(execution.first_file_type ?? '');
                 const canAnalyze = isUploadOnly || execution.rc_agent_status === 'failed';
                 const fileTypeDisplay = getFileTypeIconDisplay(execution.first_file_type);
                 const isDocAnalyzing = docAnalyzingIds.has(execution.id);
@@ -3670,51 +3774,47 @@ const FilesPageInner: React.FC = () => {
                     ) : (
                       <>
                         <div className="files-detail-right-header">
-                          <Tooltip title="Info">
-                            <div
-                              className={`files-detail-tab ${rightPanelView === 'info' ? 'is-active' : ''}`}
-                              onClick={() => setRightPanelView('info')}
-                              role="tab"
-                              aria-label="Info"
-                            >
-                              <InfoCircleOutlined />
-                            </div>
-                          </Tooltip>
+                          <div
+                            className={`files-detail-tab ${rightPanelView === 'info' ? 'is-active' : ''}`}
+                            onClick={() => setRightPanelView('info')}
+                            role="tab"
+                            aria-label="Info"
+                          >
+                            <InfoCircleOutlined />
+                            <span className="files-detail-tab-label">Info</span>
+                          </div>
                           {!ibReportDataForReview && (
-                            <Tooltip title="AI Analysis">
-                              <div
-                                className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
-                                onClick={() => setRightPanelView('analysis')}
-                                role="tab"
-                                aria-label="AI Analysis"
-                              >
-                                <RobotOutlined />
-                              </div>
-                            </Tooltip>
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'analysis' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('analysis')}
+                              role="tab"
+                              aria-label="AI Analysis"
+                            >
+                              <RobotOutlined />
+                              <span className="files-detail-tab-label">AI Analysis</span>
+                            </div>
                           )}
                           {!ibReportDataForReview && (
-                            <Tooltip title="Markdown">
-                              <div
-                                className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
-                                onClick={() => setRightPanelView('content')}
-                                role="tab"
-                                aria-label="Markdown"
-                              >
-                                <FileTextOutlined />
-                              </div>
-                            </Tooltip>
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'content' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('content')}
+                              role="tab"
+                              aria-label="Markdown"
+                            >
+                              <FileTextOutlined />
+                              <span className="files-detail-tab-label">Markdown</span>
+                            </div>
                           )}
                           {ibReportDataForReview && (
-                            <Tooltip title="Trade Review">
-                              <div
-                                className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
-                                onClick={() => setRightPanelView('review')}
-                                role="tab"
-                                aria-label="Trade Review"
-                              >
-                                <ThunderboltOutlined />
-                              </div>
-                            </Tooltip>
+                            <div
+                              className={`files-detail-tab ${rightPanelView === 'review' ? 'is-active' : ''}`}
+                              onClick={() => setRightPanelView('review')}
+                              role="tab"
+                              aria-label="Trade Review"
+                            >
+                              <ThunderboltOutlined />
+                              <span className="files-detail-tab-label">Trade Review</span>
+                            </div>
                           )}
                           <div style={{ flex: 1 }} />
                           <Tooltip title="Collapse panel">
@@ -3769,15 +3869,14 @@ const FilesPageInner: React.FC = () => {
                               }}
                               audioAnalyzing={
                                 audioAnalyzingIds.has(selectedExecutionForView.id) ||
-                                (selectedExecutionForView.first_file_type === 'audio' &&
+                                (AUDIO_LIKE_TYPES.includes(selectedExecutionForView.first_file_type ?? '') &&
                                   selectedExecutionForView.rc_agent_status === 'analyzing')
                               }
                               docAnalyzing={
                                 docAnalyzingIds.has(selectedExecutionForView.id) ||
-                                (selectedExecutionForView.first_file_type !== 'audio' &&
+                                (!AUDIO_LIKE_TYPES.includes(selectedExecutionForView.first_file_type ?? '') &&
                                   selectedExecutionForView.rc_agent_status === 'analyzing')
                               }
-                              audioTemplateId={audioTemplateId}
                             />
                           )}
                           {rightPanelView === 'content' && !ibReportDataForReview && (
@@ -6056,8 +6155,8 @@ export const OriginalContentView: React.FC<{
               />
             </div>
           );
-        } else if (fileType === 'audio' && fileContent.asr_with_diarization) {
-          // 音频文件：显示说话人分离可视化界面（手机端内联原生播放条，避免仅依赖 Modal 内 controls）
+        } else if (AUDIO_LIKE_TYPES.includes(fileType ?? '') && fileContent.asr_with_diarization) {
+          // 音频 / Podcast 文件：显示说话人分离可视化界面（手机端内联原生播放条）
           return (
             <AudioDiarizationView
               fileContent={fileContent}
@@ -7226,13 +7325,16 @@ export const AIAnalysisView: React.FC<{
   onLoadAnalysis: () => Promise<void>;
   onDownloadPdf?: () => void;
   pdfDownloading?: boolean;
-  onAnalyzeAudio?: (record: TaskExecution, templateVariables?: Record<string, any>) => void;
+  onAnalyzeAudio?: (
+    record: TaskExecution,
+    templateVariables?: Record<string, any>,
+    templateId?: number,
+  ) => void;
   onAnalyzeDocument?: (record: TaskExecution, templateId: number, templateVariables?: Record<string, any>) => void;
   onAnalysisSaved?: (newContent: string) => void;
   audioAnalyzing?: boolean;
   docAnalyzing?: boolean;
-  audioTemplateId?: number;
-  /** 手机端：除含「Re-analyze」文案的按钮外，其余仅显示图标（配 Tooltip） */
+  /** Mobile: tighter header row */
   mobileCompactActions?: boolean;
 }> = ({
   execution,
@@ -7248,7 +7350,6 @@ export const AIAnalysisView: React.FC<{
   onAnalysisSaved,
   audioAnalyzing,
   docAnalyzing,
-  audioTemplateId,
   mobileCompactActions = false,
 }) => {
   // Phase 2: 用 UploadAnalysisTemplatePicker value 取代旧 selectedTemplateId + templateVariables
@@ -7259,20 +7360,20 @@ export const AIAnalysisView: React.FC<{
   // 保留用于向下兼容已有逻辑 (部分地方直接用 selectedTemplateId)
   const selectedTemplateId = analyzeDocPicker.templateId;
   const templateVariables = analyzeDocPicker.templateVariables || {};
-  const [audioTemplateVars, setAudioTemplateVars] = useState<Record<string, any>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [reAnalyzeModalVisible, setReAnalyzeModalVisible] = useState(false);
-  const [reAnalyzeTemplateId, setReAnalyzeTemplateId] = useState<number | undefined>(undefined);
-  const [reAnalyzeTemplateVars, setReAnalyzeTemplateVars] = useState<Record<string, any>>({});
-  const [reAnalyzeAudioVars, setReAnalyzeAudioVars] = useState<Record<string, any>>({});
 
-  // Phase 2: 模板变量清空已由 UploadAnalysisTemplatePicker 内部处理 (切换 moduleCode 时 reset)
-  // 保留 reAnalyzeTemplateId effect 兼容音频那侧的 audio vars 逻辑
+  const audioLikeAnalyzeModule: 'youtube_analysis' | 'audio_analysis' =
+    execution.first_file_type === 'podcast' ? 'youtube_analysis' : 'audio_analysis';
+
   useEffect(() => {
-    setReAnalyzeTemplateVars({});
-  }, [reAnalyzeTemplateId]);
+    setAnalyzeDocPicker({});
+    setAnalyzeAudioPicker({});
+    setReAnalyzeDocPicker({});
+    setReAnalyzeAudioPicker({});
+  }, [execution.id]);
 
   /** 切换 execution 时重置，避免把上一条记录的 rc 状态当成「上一次」 */
   const prevRcAgentForAnalysisRef = useRef<string | undefined>(undefined);
@@ -7343,9 +7444,9 @@ export const AIAnalysisView: React.FC<{
     );
   }
 
-  // 正在分析中：显示分析进度（音频或文档）
+  // 正在分析中：显示分析进度（音频 / Podcast 或文档）
   if (audioAnalyzing || docAnalyzing) {
-    const isAudio = execution.first_file_type === 'audio';
+    const isAudio = AUDIO_LIKE_TYPES.includes(execution.first_file_type ?? '');
     return (
       <div style={emptyStateWrapperStyle}>
         <div style={{ textAlign: 'center', padding: '40px' }}>
@@ -7364,7 +7465,7 @@ export const AIAnalysisView: React.FC<{
   }
 
   if (!aiAnalysisData?.execution?.final_report) {
-    const isAudioFile = execution.first_file_type === 'audio';
+    const isAudioFile = AUDIO_LIKE_TYPES.includes(execution.first_file_type ?? '');
     const canAnalyzeAudio =
       isAudioFile &&
       onAnalyzeAudio &&
@@ -7398,69 +7499,88 @@ export const AIAnalysisView: React.FC<{
           <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
 
           {canAnalyzeAudio && (
-            <div style={{ maxWidth: '420px', textAlign: 'center' }}>
-              {audioTemplateId != null && (
-                <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-                  <TemplateVariablesEditor
-                    templateId={audioTemplateId}
-                    values={audioTemplateVars}
-                    onChange={(values) => setAudioTemplateVars(values ?? {})}
-                  />
-                </div>
-              )}
-              <Tooltip title="Analyze audio">
-                <Button
-                  type="primary"
-                  icon={<SoundOutlined />}
-                  onClick={() => onAnalyzeAudio(execution, audioTemplateVars)}
-                  aria-label="Analyze audio"
-                  style={{
-                    height: '40px',
-                    width: '40px',
-                    paddingInline: 0,
-                    borderRadius: '8px',
-                    maxWidth: '100%',
-                  }}
-                />
-              </Tooltip>
+            <div style={{ maxWidth: '480px', textAlign: 'center' }}>
+              <div style={{ marginBottom: '14px', color: themeColors.textSecondary, fontSize: '13px', textAlign: 'left' }}>
+                {audioLikeAnalyzeModule === 'youtube_analysis'
+                  ? 'Apple Podcast episodes use the same deep-analysis template as Upload YouTube Link after transcription. Use Edit my template to customize prompts, set variables when the switch is on, then click Analyze Audio.'
+                  : 'Choose your private audio analysis template (optional). Use Edit my template to customize prompts, set variables when the switch is on, then click Analyze Audio.'}
+              </div>
+              <UploadAnalysisTemplatePicker
+                value={analyzeAudioPicker}
+                onChange={setAnalyzeAudioPicker}
+                mode="audio-default"
+                moduleCode={audioLikeAnalyzeModule}
+                label={
+                  audioLikeAnalyzeModule === 'youtube_analysis'
+                    ? 'YouTube analysis template'
+                    : 'Audio analysis template'
+                }
+                hint={
+                  audioLikeAnalyzeModule === 'youtube_analysis'
+                    ? 'When the switch is on, your private youtube_analysis template is used (same module as Upload YouTube Link). Toggle off for the system default.'
+                    : 'When the switch is on, your private audio template is used. Toggle off to use the system default.'
+                }
+                showVariablesEditor
+                textColor={themeColors.text}
+                textSecondaryColor={themeColors.textSecondary}
+              />
+              <Button
+                type="primary"
+                icon={<SoundOutlined />}
+                onClick={() =>
+                  onAnalyzeAudio?.(
+                    execution,
+                    analyzeAudioPicker.templateVariables || {},
+                    analyzeAudioPicker.enabled !== false ? analyzeAudioPicker.templateId : undefined,
+                  )
+                }
+                aria-label="Analyze audio"
+                style={{
+                  height: '40px',
+                  paddingInline: '20px',
+                  borderRadius: '8px',
+                  marginTop: 16,
+                }}
+              >
+                Analyze Audio
+              </Button>
             </div>
           )}
           {canAnalyzeDoc && (
             <div style={{ maxWidth: '460px', marginTop: canAnalyzeAudio ? '20px' : 0, textAlign: 'left' }}>
               <div style={{ marginBottom: '12px', color: themeColors.textSecondary, fontSize: '13px' }}>
                 {execution.rc_agent_status === 'failed'
-                  ? 'The previous AI analysis failed. Use your private template to retry.'
-                  : 'Run AI analysis on this document using your private template.'}
+                  ? 'The previous AI analysis failed. Turn on your private template below, adjust variables if needed, then run analysis again.'
+                  : 'Choose your private document analysis template below: enable the switch, set any template variables, then click Analyze Document.'}
               </div>
               <UploadAnalysisTemplatePicker
                 value={analyzeDocPicker}
                 onChange={setAnalyzeDocPicker}
                 mode="optional"
                 moduleCode="file_analysis"
-                label="Document Analysis Template"
+                label="Document analysis template"
+                hint="When the switch is on, your private template is used. Fill in variables if your template defines them, then click Analyze Document."
                 showVariablesEditor
               />
               <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                <Tooltip title="Analyze document">
-                  <Button
-                    type="primary"
-                    icon={<RobotOutlined />}
-                    disabled={!analyzeDocPicker.templateId || analyzeDocPicker.enabled === false}
-                    onClick={() => {
-                      if (analyzeDocPicker.templateId != null) {
-                        onAnalyzeDocument?.(execution, analyzeDocPicker.templateId, analyzeDocPicker.templateVariables || {});
-                      }
-                    }}
-                    aria-label="Analyze document"
-                    style={{
-                      height: '40px',
-                      width: '40px',
-                      paddingInline: 0,
-                      borderRadius: '8px',
-                      maxWidth: '100%',
-                    }}
-                  />
-                </Tooltip>
+                <Button
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  disabled={!analyzeDocPicker.templateId || analyzeDocPicker.enabled === false}
+                  onClick={() => {
+                    if (analyzeDocPicker.templateId != null) {
+                      onAnalyzeDocument?.(execution, analyzeDocPicker.templateId, analyzeDocPicker.templateVariables || {});
+                    }
+                  }}
+                  aria-label="Analyze document"
+                  style={{
+                    height: '40px',
+                    paddingInline: '20px',
+                    borderRadius: '8px',
+                  }}
+                >
+                  Analyze Document
+                </Button>
               </div>
             </div>
           )}
@@ -7469,7 +7589,7 @@ export const AIAnalysisView: React.FC<{
     );
   }
 
-  const isAudioFile = execution.first_file_type === 'audio';
+  const isAudioFile = AUDIO_LIKE_TYPES.includes(execution.first_file_type ?? '');
   const isProcessingDoc = execution.rc_agent_status === 'processing' ||
     execution.rc_agent_status === 'initializing' ||
     (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
@@ -7499,15 +7619,15 @@ export const AIAnalysisView: React.FC<{
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
               {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
-                <Tooltip title="Re-analyze">
-                  <Button
-                    type="default"
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => setReAnalyzeModalVisible(true)}
-                    aria-label="Re-analyze"
-                  />
-                </Tooltip>
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReAnalyzeModalVisible(true)}
+                  aria-label="Re-analyze"
+                >
+                  Re-analyze
+                </Button>
               )}
               {!isEditing && (
                 <Tooltip title="Edit">
@@ -7542,15 +7662,15 @@ export const AIAnalysisView: React.FC<{
             </Col>
             <Col span={12} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
               {!isEditing && (canReAnalyzeDoc || canReAnalyzeAudio) && (
-                <Tooltip title="Re-analyze">
-                  <Button
-                    type="default"
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => setReAnalyzeModalVisible(true)}
-                    aria-label="Re-analyze"
-                  />
-                </Tooltip>
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReAnalyzeModalVisible(true)}
+                  aria-label="Re-analyze"
+                >
+                  Re-analyze
+                </Button>
               )}
               {!isEditing && (
                 <Tooltip title="Edit">
@@ -7589,10 +7709,8 @@ export const AIAnalysisView: React.FC<{
           }}
           onClick={() => {
             setReAnalyzeModalVisible(false);
-            setReAnalyzeTemplateId(undefined);
-            setReAnalyzeTemplateVars({});
             setReAnalyzeDocPicker({});
-            setReAnalyzeAudioVars({});
+            setReAnalyzeAudioPicker({});
           }}
         >
           <div
@@ -7627,10 +7745,8 @@ export const AIAnalysisView: React.FC<{
                 icon={<CloseOutlined />}
                 onClick={() => {
                   setReAnalyzeModalVisible(false);
-                  setReAnalyzeTemplateId(undefined);
-                  setReAnalyzeTemplateVars({});
                   setReAnalyzeDocPicker({});
-                  setReAnalyzeAudioVars({});
+                  setReAnalyzeAudioPicker({});
                 }}
               />
             </div>
@@ -7638,59 +7754,83 @@ export const AIAnalysisView: React.FC<{
               {canReAnalyzeDoc && (
                 <div style={{ marginBottom: canReAnalyzeAudio ? 24 : 0 }}>
                   <div style={{ marginBottom: 12, color: themeColors.textSecondary, fontSize: 13 }}>
-                    Re-run AI analysis on this document using your private template.
+                    Re-run AI analysis on this document. Enable your private template, set variables if needed, then
+                    confirm below.
                   </div>
                   <UploadAnalysisTemplatePicker
                     value={reAnalyzeDocPicker}
                     onChange={setReAnalyzeDocPicker}
                     mode="optional"
                     moduleCode="file_analysis"
-                    label="Document Analysis Template"
+                    label="Document analysis template"
+                    hint="When the switch is on, your private template is used. Adjust variables if your template defines them, then click Re-analyze Document."
                     showVariablesEditor
                   />
-                  <Tooltip title="Re-analyze document">
-                    <Button
-                      type="primary"
-                      icon={<RobotOutlined />}
-                      disabled={!reAnalyzeDocPicker.templateId || reAnalyzeDocPicker.enabled === false}
-                      style={{ marginTop: 16 }}
-                      onClick={() => {
-                        if (reAnalyzeDocPicker.templateId != null && onAnalyzeDocument) {
-                          onAnalyzeDocument(execution, reAnalyzeDocPicker.templateId, reAnalyzeDocPicker.templateVariables || {});
-                          setReAnalyzeModalVisible(false);
-                          setReAnalyzeDocPicker({});
-                        }
-                      }}
-                      aria-label="Re-analyze document"
-                    />
-                  </Tooltip>
+                  <Button
+                    type="primary"
+                    icon={<RobotOutlined />}
+                    disabled={!reAnalyzeDocPicker.templateId || reAnalyzeDocPicker.enabled === false}
+                    block
+                    style={{ marginTop: 16 }}
+                    onClick={() => {
+                      if (reAnalyzeDocPicker.templateId != null && onAnalyzeDocument) {
+                        onAnalyzeDocument(execution, reAnalyzeDocPicker.templateId, reAnalyzeDocPicker.templateVariables || {});
+                        setReAnalyzeModalVisible(false);
+                        setReAnalyzeDocPicker({});
+                      }
+                    }}
+                    aria-label="Re-analyze document"
+                  >
+                    Re-analyze Document
+                  </Button>
                 </div>
               )}
               {canReAnalyzeAudio && (
                 <div>
-                  {audioTemplateId != null && (
-                    <div style={{ marginBottom: 16 }}>
-                      <TemplateVariablesEditor
-                        templateId={audioTemplateId}
-                        values={reAnalyzeAudioVars}
-                        onChange={(values) => setReAnalyzeAudioVars(values ?? {})}
-                      />
-                    </div>
-                  )}
-                  <Tooltip title="Re-analyze audio">
-                    <Button
-                      type="primary"
-                      icon={<SoundOutlined />}
-                      onClick={() => {
-                        if (onAnalyzeAudio) {
-                          onAnalyzeAudio(execution, reAnalyzeAudioVars);
-                          setReAnalyzeModalVisible(false);
-                          setReAnalyzeAudioVars({});
-                        }
-                      }}
-                      aria-label="Re-analyze audio"
-                    />
-                  </Tooltip>
+                  <div style={{ marginBottom: 12, color: themeColors.textSecondary, fontSize: 13 }}>
+                    {audioLikeAnalyzeModule === 'youtube_analysis'
+                      ? 'Re-run analysis using your YouTube-style deep template (same module as Upload YouTube Link), adjust variables, then confirm.'
+                      : 'Re-run audio analysis. Adjust your private template and variables below, then confirm.'}
+                  </div>
+                  <UploadAnalysisTemplatePicker
+                    value={reAnalyzeAudioPicker}
+                    onChange={setReAnalyzeAudioPicker}
+                    mode="audio-default"
+                    moduleCode={audioLikeAnalyzeModule}
+                    label={
+                      audioLikeAnalyzeModule === 'youtube_analysis'
+                        ? 'YouTube analysis template'
+                        : 'Audio analysis template'
+                    }
+                    hint={
+                      audioLikeAnalyzeModule === 'youtube_analysis'
+                        ? 'When the switch is on, your private youtube_analysis template is used. Toggle off for the system default.'
+                        : 'When the switch is on, your private audio template is used. Toggle off to use the system default.'
+                    }
+                    showVariablesEditor
+                    textColor={themeColors.text}
+                    textSecondaryColor={themeColors.textSecondary}
+                  />
+                  <Button
+                    type="primary"
+                    icon={<SoundOutlined />}
+                    block
+                    style={{ marginTop: 16 }}
+                    onClick={() => {
+                      if (onAnalyzeAudio) {
+                        onAnalyzeAudio(
+                          execution,
+                          reAnalyzeAudioPicker.templateVariables || {},
+                          reAnalyzeAudioPicker.enabled !== false ? reAnalyzeAudioPicker.templateId : undefined,
+                        );
+                        setReAnalyzeModalVisible(false);
+                        setReAnalyzeAudioPicker({});
+                      }
+                    }}
+                    aria-label="Re-analyze audio"
+                  >
+                    Re-analyze Audio
+                  </Button>
                 </div>
               )}
             </div>

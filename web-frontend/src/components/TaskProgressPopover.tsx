@@ -1,13 +1,14 @@
 import React from 'react';
 import { Progress, Tag, Space } from 'antd';
-import { 
-  FileTextOutlined, 
+import {
+  FileTextOutlined,
   SoundOutlined,
   YoutubeOutlined,
   RobotOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined 
+  CloseCircleOutlined,
+  AppleOutlined,
 } from '@ant-design/icons';
 import type { TaskInfo } from '../contexts/FileProcessingContext';
 
@@ -130,6 +131,8 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
                 <SoundOutlined style={{ fontSize: 16, color: '#1890ff' }} />
               ) : task.fileType === 'youtube' ? (
                 <YoutubeOutlined style={{ fontSize: 16, color: '#ff4444' }} />
+              ) : task.fileType === 'podcast' ? (
+                <AppleOutlined style={{ fontSize: 16, color: '#7224d8' }} />
               ) : task.fileType === 'feed_analysis' ? (
                 <RobotOutlined style={{ fontSize: 16, color: '#722ed1' }} />
               ) : (
@@ -157,6 +160,8 @@ export const TaskProgressPopover: React.FC<TaskProgressPopoverProps> = ({ tasks,
               strokeColor={
                 task.fileType === 'feed_analysis'
                   ? (isDark ? '#b37feb' : '#722ed1')
+                  : task.fileType === 'podcast'
+                    ? (isDark ? '#a855f0' : '#7224d8')
                   : (isDark ? '#1890ff' : undefined)
               }
               style={{ marginBottom: 6 }}

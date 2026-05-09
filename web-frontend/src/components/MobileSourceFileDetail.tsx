@@ -57,7 +57,6 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [audioAnalyzingIds, setAudioAnalyzingIds] = useState<Set<string>>(new Set());
   const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
-  const [audioTemplateId, setAudioTemplateId] = useState<number | undefined>(undefined);
   const [allTemplates, setAllTemplates] = useState<PromptTemplate[]>([]);
   /** 活动报告（IB）：与桌面端一致，用于 Trade Review Tab，并隐藏 AI Analysis */
   const [ibReportDataForReview, setIbReportDataForReview] = useState<IBReportData | null>(null);
@@ -107,19 +106,6 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
       .listTemplates({ active_only: true })
       .then(setAllTemplates)
       .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const fetchAudioTemplateId = async () => {
-      try {
-        const templates = await promptTemplateService.listTemplates({ search: 'audio_analysis_v1' });
-        const audioTemplate = templates.find(t => t.template_code === 'audio_analysis_v1');
-        if (audioTemplate) setAudioTemplateId(audioTemplate.id);
-      } catch {
-        /* ignore */
-      }
-    };
-    fetchAudioTemplateId();
   }, []);
 
   const getDisplayAgentName = useCallback(
@@ -187,7 +173,11 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
     }
   };
 
-  const handleAnalyzeAudio = async (record: TaskExecution, templateVariables?: Record<string, unknown>) => {
+  const handleAnalyzeAudio = async (
+    record: TaskExecution,
+    templateVariables?: Record<string, unknown>,
+    templateId?: number,
+  ) => {
     const executionId = Number(record.id);
     const fileName = record.first_display_name || record.first_filename || record.task_name || 'Audio file';
     try {
@@ -198,6 +188,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
         : undefined;
       const result = await filesAPI.analyzeAudio({
         execution_id: executionId,
+        ...(templateId != null ? { template_id: templateId } : {}),
         ...(filteredVars && Object.keys(filteredVars).length > 0 ? { template_variables: filteredVars } : {}),
       });
       if (result.success && result.task_id) {
@@ -452,7 +443,6 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
               }}
               audioAnalyzing={audioAnalyzingIds.has(execution.id)}
               docAnalyzing={docAnalyzingIds.has(execution.id)}
-              audioTemplateId={audioTemplateId}
               mobileCompactActions
             />
           </div>

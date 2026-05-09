@@ -229,14 +229,14 @@ def trigger_auto_analyze(
         )
         return
 
-    is_audio_like = file_type in ('audio', 'youtube')
+    is_audio_like = file_type in ('audio', 'youtube', 'podcast')
 
     resolved_template_id = template_id
 
-    # ── YouTube: 未指定模板时走 LLMTemplateResolver('youtube_analysis')
+    # ── YouTube / Apple Podcast 单集: 未指定模板时走 LLMTemplateResolver('youtube_analysis')
     # 取用户私有 youtube_analysis 行（独立于 Feeds youtube_summary 模块）。
     # fallback 链: runtime → user_owned → youtube_analysis_v1 系统默认。
-    if file_type == 'youtube' and not resolved_template_id:
+    if file_type in ('youtube', 'podcast') and not resolved_template_id:
         try:
             from backend.utils.user_resolver import get_user_id_by_username
             from backend.services.llm_template_resolver import LLMTemplateResolver, ResolveError
@@ -280,7 +280,7 @@ def trigger_auto_analyze(
                 error(f"加载 youtube_analysis_v1 系统默认失败: {e2}", source="auto_analyze")
 
     # ── 纯音频: 未指定模板时降级为 audio_analysis_v1
-    # (例如旧客户端不传 template_id, 但仍想跑分析)
+    # (例如旧客户端不传 template_id, 但仍想跑分析)。Podcast 单集见上走 youtube_analysis。
     if file_type == 'audio' and not resolved_template_id:
         try:
             from backend.services.llm_prompt_template_service import LLMPromptTemplateService
@@ -1951,6 +1951,427 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
             }
         )
         raise Exception(error_msg)
+
+
+@app.task(bind=True, name='upload_and_transcribe_apple_podcast_task', queue='file_processing')
+def upload_and_transcribe_apple_podcast_task(
+    self,
+    apple_url,
+    episode_id,
+    username,
+    auto_analyze_template_id=None,
+    auto_analyze_template_variables=None,
+    auto_analyze_enabled=True,
+    auto_tag_template_id=None,
+    auto_tag_template_variables=None,
+    auto_tag_enabled=True,
+):
+    """
+    从 Apple Podcasts 单集链接下载音频，上传 OSS，然后通过 Fun-ASR 转写。
+    与 upload_and_transcribe_audio_task 流程一致，区别在于用 yt-dlp 替代用户上传文件。
+
+    file_type 写入 'podcast'，后续可通过 POST /api/files/audio/analyze 重新分析。
+    完成后触发 4 路并行 LLM 任务（tag / name / classify / analyze）。
+    """
+    from backend.services.apple_podcast_service import (
+        ApplePodcastService,
+        PermanentDownloadError,
+        TransientDownloadError,
+    )
+    from backend.services.oss_service import OSSService
+    from backend.services.asr_service import ASRService
+    from backend.database.db_manager import DatabaseManager
+
+    task_start_time = time.time()
+    temp_file_path = None
+    celery_task_id = self.request.id
+
+    def update_progress(status_str=None, progress=None, log_message=None, **meta_extra):
+        try:
+            meta = {
+                'status': status_str or 'processing',
+                'progress': progress or 0,
+                'message': log_message or '',
+                'apple_url': apple_url,
+                'episode_id': episode_id,
+                'username': username,
+            }
+            meta.update({k: v for k, v in meta_extra.items() if v is not None})
+            current_task.update_state(state='PROGRESS', meta=meta)
+            if log_message:
+                info(f"ApplePodcast {celery_task_id}: {log_message}", source="celery_apple_podcast")
+        except Exception:
+            pass
+
+    try:
+        # 防御性清理：若 Redis 中残留该 task_id 的损坏 FAILURE 状态（如上次崩溃后重新投递），
+        # 先删除再写入，避免 mark_as_done 内部读取旧状态时级联 ValueError 导致 Worker 崩溃。
+        try:
+            from backend.celery_app import app as _celery_app
+            _celery_app.backend.delete(celery_task_id)
+        except Exception:
+            pass
+
+        info(
+            f"开始 Apple Podcasts 任务 {celery_task_id}, url={apple_url}, episode_id={episode_id}, user={username}",
+            source="celery_apple_podcast",
+        )
+
+        # ── 幂等保护：同一 celery_task_id 已经成功完成过，直接返回已有记录 ──
+        _db_check = DatabaseManager(get_database_config())
+        with _db_check.get_connection_context() as _conn:
+            _cur = _conn.cursor()
+            _cur.execute(
+                """
+                SELECT ps.id, fpd.id
+                FROM processing_stats ps
+                JOIN file_processing_details fpd ON fpd.processing_stats_id = ps.id
+                WHERE ps."user" = %s
+                  AND ps.rc_agent_status = 'completed'
+                  AND fpd.task_id = %s
+                LIMIT 1
+                """,
+                (username, celery_task_id),
+            )
+            _row = _cur.fetchone()
+        if _row:
+            warning(
+                f"任务 {celery_task_id} 已成功完成过 (stats_id={_row[0]}, file_id={_row[1]})，跳过重复执行",
+                source="celery_apple_podcast",
+            )
+            return {
+                'status': 'completed',
+                'processing_stats_id': _row[0],
+                'file_detail_id': _row[1],
+                'skipped_duplicate': True,
+            }
+        update_progress(status_str="fetching_metadata", progress=5, log_message="正在获取 Apple Podcasts 单集元数据...")
+
+        # 1. 元数据提取（同步，用于构造 filename 和 upload_params）
+        try:
+            metadata = ApplePodcastService.fetch_metadata(apple_url)
+        except PermanentDownloadError as exc:
+            err_msg = str(exc)
+            is_subscriber = "付费" in err_msg or "订阅" in err_msg
+            error(f"ApplePodcast {celery_task_id}: 永久性错误（元数据阶段）: {err_msg}", source="celery_apple_podcast")
+            return {
+                'status': 'failed',
+                'error': err_msg,
+                'error_type': 'subscriber_only' if is_subscriber else 'permanent_error',
+                'apple_url': apple_url,
+                'episode_id': episode_id,
+            }
+        except Exception as exc:
+            # 元数据失败不阻断，用 episode_id 作为兜底文件名
+            warning(f"获取元数据失败，使用兜底文件名: {exc}", source="celery_apple_podcast")
+            metadata = {
+                'episode_id': episode_id,
+                'title': f"podcast_{episode_id}",
+                'series': '',
+                'episode': '',
+                'episode_number': None,
+                'duration': None,
+                'thumbnail': None,
+                'webpage_url': apple_url,
+                'ext': 'mp3',
+            }
+
+        safe_title = (metadata.get('title') or f"podcast_{episode_id}")[:80]
+        filename = f"{safe_title} [{episode_id}]"
+
+        update_progress(
+            status_str="downloading", progress=10,
+            log_message=f"开始下载音频: {safe_title}",
+        )
+
+        # 2. 下载音频到临时目录
+        upload_dir = os.getenv("UPLOAD_DIR", "/tmp/uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+
+        last_dl: dict = {"logged_pct": -1}
+
+        def ydl_progress_hook(d: dict) -> None:
+            if d.get("status") == "downloading":
+                pct_str = d.get("_percent_str", "").strip()
+                try:
+                    pct_val = float(pct_str.replace('%', '').strip())
+                except Exception:
+                    return
+                milestone = (int(pct_val) // 10) * 10
+                if milestone <= last_dl["logged_pct"]:
+                    return
+                last_dl["logged_pct"] = milestone
+                # map download 0-100% → task progress 10-38%
+                task_pct = 10 + int(pct_val * 0.28)
+                update_progress(
+                    status_str="downloading", progress=task_pct,
+                    log_message=f"下载中 {milestone}%",
+                )
+
+        try:
+            dl_result = ApplePodcastService.download_audio(
+                apple_url, upload_dir, progress_hook=ydl_progress_hook
+            )
+        except PermanentDownloadError as exc:
+            err_msg = str(exc)
+            is_subscriber = "付费" in err_msg or "订阅" in err_msg
+            error(f"ApplePodcast {celery_task_id}: 永久性下载错误: {err_msg}", source="celery_apple_podcast")
+            return {
+                'status': 'failed',
+                'error': err_msg,
+                'error_type': 'subscriber_only' if is_subscriber else 'permanent_error',
+                'apple_url': apple_url,
+                'episode_id': episode_id,
+            }
+        except TransientDownloadError as exc:
+            raise Exception(f"音频下载失败（可能为网络问题）: {exc}")
+
+        temp_file_path = dl_result['file_path']
+        file_size = os.path.getsize(temp_file_path)
+        file_size_mb = file_size / (1024 * 1024)
+
+        update_progress(
+            status_str="uploading", progress=40,
+            log_message=f"下载完成 ({file_size_mb:.1f} MB)，正在上传到 OSS...",
+        )
+
+        # 3. 上传到 OSS
+        oss_service = OSSService()
+        if not oss_service.is_configured():
+            raise ValueError("OSS 服务未配置")
+
+        upload_result = oss_service.upload_audio_file(
+            file_path=temp_file_path,
+            filename=dl_result['filename'],
+            username=username,
+        )
+        if not upload_result.get("success"):
+            err = upload_result.get("error") or "未知错误"
+            raise Exception(f"上传到 OSS 失败: {err}")
+
+        audio_url = upload_result.get("signed_url") or upload_result["public_url"]
+        object_name = upload_result["object_name"]
+        oss_bucket_name = upload_result.get("bucket")
+
+        update_progress(
+            status_str="transcribing", progress=50,
+            log_message="已上传到 OSS，开始 Fun-ASR 语音识别...",
+        )
+
+        # 4. 提交 ASR 任务
+        asr_service = ASRService()
+        if not asr_service.is_configured():
+            raise ValueError("ASR 服务未配置")
+
+        submit_result = asr_service.submit_transcription_task(
+            audio_url=audio_url,
+            model='fun-asr',
+            language_hints=['zh', 'en'],
+            diarization_enabled=True,
+        )
+        if not submit_result.get("success"):
+            raise ValueError(f"提交 ASR 任务失败: {submit_result.get('error')}")
+
+        asr_task_id = submit_result["task_id"]
+        update_progress(
+            progress=60,
+            log_message=f"ASR 任务已提交: {asr_task_id}，等待转写完成...",
+            asr_wait_notice=True,
+        )
+
+        # 5. 等待 ASR 完成
+        transcription_result = asr_service.get_transcription_results(asr_task_id)
+        if not transcription_result.get("success"):
+            raise ValueError(f"ASR 识别失败: {transcription_result.get('error')}")
+
+        update_progress(progress=88, log_message="语音识别完成，正在格式化结果...")
+
+        # 6. 格式化 ASR 结果
+        formatted_texts = []
+        if transcription_result.get("transcriptions"):
+            for trans_data in transcription_result["transcriptions"]:
+                formatted = asr_service.format_transcription_result(
+                    trans_data,
+                    include_timestamps=True,
+                    include_words=False,
+                    include_speaker=True,
+                    timestamped_only=True,
+                )
+                formatted_texts.append(formatted)
+
+        content_text = "\n".join(formatted_texts) if formatted_texts else ""
+
+        texts = []
+        for trans in transcription_result.get("transcriptions", []):
+            for transcript in trans.get('transcripts', []):
+                t = transcript.get('text', '')
+                if t:
+                    texts.append(t)
+        plain_text = "\n".join(texts)
+
+        # 7. 构建结构化 ASR 数据
+        asr_structured_data = None
+        if transcription_result.get("transcriptions"):
+            try:
+                from backend.api.files import _build_asr_structured_data
+                asr_structured_data = _build_asr_structured_data(
+                    transcription_result["transcriptions"]
+                )
+            except Exception as exc:
+                warning(f"构建结构化 ASR 数据失败: {exc}", source="celery_apple_podcast")
+
+        update_progress(progress=93, log_message="正在保存到数据库...")
+
+        elapsed_seconds = round(time.time() - task_start_time, 2)
+
+        # 8. 写入数据库
+        db_manager = DatabaseManager(get_database_config())
+        conn = db_manager.get_connection()
+        if not conn:
+            raise ValueError("无法连接到数据库")
+
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO processing_stats
+                (timestamp, files_processed, files_failed, total_time,
+                 total_file_processing_time, total_ai_time, task_name,
+                 "user", total_tokens, total_price, upload_params,
+                 final_report, rc_agent_status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+            """,
+            (
+                datetime.now(), 1, 0,
+                elapsed_seconds, elapsed_seconds, 0,
+                'Apple Podcast Processing',
+                username, 0, 0,
+                json.dumps({
+                    "apple_url": apple_url,
+                    "episode_id": episode_id,
+                    "series": metadata.get('series') or '',
+                    "episode": metadata.get('episode') or '',
+                    "podcast_thumbnail": metadata.get('thumbnail'),
+                    "object_name": object_name,
+                    "auto_analyze_template_id": auto_analyze_template_id,
+                    "auto_analyze_template_variables": auto_analyze_template_variables or {},
+                    "auto_analyze_enabled": auto_analyze_enabled,
+                    "auto_tag_template_id": auto_tag_template_id,
+                    "auto_tag_template_variables": auto_tag_template_variables or {},
+                    "auto_tag_enabled": auto_tag_enabled,
+                }),
+                '', 'completed',
+            ),
+        )
+        processing_stats_id = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            INSERT INTO file_processing_details
+                (processing_stats_id, filename, file_type, file_size_mb,
+                 processing_time, ai_time, content_length, status,
+                 total_tokens, cost, content, created_at, task_id,
+                 original_file_path, asr_with_diarization,
+                 file_storage_type, oss_bucket)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+            """,
+            (
+                processing_stats_id,
+                filename,
+                'podcast',
+                file_size_mb,
+                elapsed_seconds, 0,
+                len(content_text),
+                'completed',
+                0, 0,
+                content_text,
+                utcnow(),
+                asr_task_id,
+                object_name,
+                json.dumps(asr_structured_data) if asr_structured_data else None,
+                'oss',
+                oss_bucket_name,
+            ),
+        )
+        file_detail_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+
+        # 9. 清理临时文件
+        try:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                info(f"已删除临时文件: {temp_file_path}", source="celery_apple_podcast")
+        except Exception as exc:
+            warning(f"删除临时文件失败: {exc}", source="celery_apple_podcast")
+
+        update_progress(status_str="completed", progress=100, log_message="Apple Podcast 处理完成！")
+
+        info(
+            f"Apple Podcast 任务 {celery_task_id} 完成: "
+            f"file_id={file_detail_id} stats_id={processing_stats_id}",
+            source="celery_apple_podcast",
+        )
+
+        # 10. 触发 4 路并行 LLM 任务
+        try:
+            trigger_auto_tagging(
+                file_detail_id, username,
+                delay=int(os.getenv('AUTO_TAG_DELAY', '2')),
+                template_id=auto_tag_template_id,
+                template_variables=auto_tag_template_variables,
+                enabled=auto_tag_enabled,
+            )
+            trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
+            trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            trigger_auto_analyze(
+                file_detail_id=file_detail_id,
+                execution_id=processing_stats_id,
+                file_type='podcast',
+                template_id=auto_analyze_template_id,
+                template_variables=auto_analyze_template_variables,
+                username=username,
+                delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+                enabled=auto_analyze_enabled,
+            )
+        except Exception as exc:
+            error(f"触发自动并行 LLM 任务失败: {exc}", source="celery_apple_podcast")
+
+        return {
+            'status': 'completed',
+            'filename': filename,
+            'file_detail_id': file_detail_id,
+            'processing_stats_id': processing_stats_id,
+            'episode_id': episode_id,
+            'text_length': len(plain_text),
+        }
+
+    except Exception as e:
+        err_msg = f"Apple Podcast 任务失败: {e}"
+        error(f"ApplePodcast {celery_task_id}: {err_msg}", source="celery_apple_podcast")
+        # 清理临时文件
+        try:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        except Exception:
+            pass
+        # 用软失败（返回 dict）代替 re-raise，避免 Celery 序列化 yt-dlp 内部异常时写入
+        # 格式错误的 FAILURE 状态，从而导致 mark_as_failure → decode_result → KeyError: exc_type
+        # → CRITICAL Unrecoverable error → Worker 崩溃循环。
+        err_str = str(e)
+        if "No video formats found" in err_str or "付费" in err_str or "订阅" in err_str:
+            error_type = "subscriber_only"
+        else:
+            error_type = "download_error"
+        return {
+            'status': 'failed',
+            'error': err_msg,
+            'error_type': error_type,
+            'apple_url': apple_url,
+            'episode_id': episode_id,
+        }
 
 
 @app.task(bind=True, name='upload_and_process_document_async', queue='file_processing')

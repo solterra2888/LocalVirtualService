@@ -28,6 +28,7 @@ import {
   ProfileOutlined,
   GlobalOutlined,
   ThunderboltOutlined,
+  AppleOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -41,6 +42,7 @@ import TimeDisplay from './TimeDisplay';
 import UploadFilesModal from './UploadFilesModal';
 import UploadAudioModal from './UploadAudioModal';
 import UploadYouTubeLinkModal from './UploadYouTubeLinkModal';
+import UploadApplePodcastModal from './UploadApplePodcastModal';
 import UploadWebLinkModal from './UploadWebLinkModal';
 import CreateTextNoteModal from './CreateTextNoteModal';
 import { TaskProgressPopover } from './TaskProgressPopover';
@@ -86,6 +88,7 @@ const Layout: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showUploadAudioModal, setShowUploadAudioModal] = useState(false);
   const [showUploadYouTubeModal, setShowUploadYouTubeModal] = useState(false);
+  const [showUploadApplePodcastModal, setShowUploadApplePodcastModal] = useState(false);
   const [showUploadWebLinkModal, setShowUploadWebLinkModal] = useState(false);
   const [showCreateTextNoteModal, setShowCreateTextNoteModal] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -569,7 +572,38 @@ const Layout: React.FC = () => {
               e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
             }}
           >
-            <span style={{ marginLeft: '12px' }}>YouTube Link</span>
+            <span             style={{ marginLeft: '12px' }}>YouTube Link</span>
+          </Button>
+          <Button
+            type="text"
+            size="large"
+            icon={<AppleOutlined style={{ fontSize: '18px', color: '#7224d8' }} />}
+            onClick={() => {
+              setShowUploadOptions(false);
+              setShowUploadApplePodcastModal(true);
+            }}
+            style={{
+              height: '52px',
+              fontSize: '15px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              paddingLeft: '20px',
+              background: themeMode === 'dark' ? '#212936' : '#fafafa',
+              color: themeMode === 'dark' ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)',
+              border: 'none',
+              borderRadius: '26px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#2a3544' : '#e6f7ff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = themeMode === 'dark' ? '#212936' : '#fafafa';
+            }}
+          >
+            <span style={{ marginLeft: '12px' }}>Apple Podcast</span>
           </Button>
           <Button
             type="text"
@@ -623,6 +657,13 @@ const Layout: React.FC = () => {
       <UploadYouTubeLinkModal
         visible={showUploadYouTubeModal}
         onCancel={() => setShowUploadYouTubeModal(false)}
+        themeMode={themeMode}
+      />
+
+      {/* Upload Apple Podcast Modal */}
+      <UploadApplePodcastModal
+        visible={showUploadApplePodcastModal}
+        onCancel={() => setShowUploadApplePodcastModal(false)}
         themeMode={themeMode}
       />
 

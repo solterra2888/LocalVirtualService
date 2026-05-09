@@ -24,6 +24,19 @@ from backend.utils.avatar import resolve_avatar_url
 router = APIRouter()
 
 
+# Sources「Document」筛选：file_processing_details.file_type 存的是扩展名大类（upload_and_process_document_task 等），不是字面量 document
+SOURCES_DOCUMENT_FILE_TYPES = (
+    'pdf',
+    'word',
+    'doc',
+    'excel',
+    'csv',
+    'image',
+    'other',
+    'document',
+)
+
+
 
 def _fetch_ticker_tags_for_processing_stats_ids(cursor, ps_ids: List) -> Dict[Any, List[str]]:
     """按 processing_stats_id 聚合 file_tags.ticker（jsonb 数组），去重并保持顺序。"""
@@ -291,6 +304,10 @@ async def get_task_executions(
     q: Optional[str] = Query(None, description="搜索关键词"),
     ticker: Optional[str] = Query(None, description="按ticker筛选（精确匹配file_tags中的ticker数组元素）"),
     folder_id: Optional[str] = Query(None, description="按文件夹筛选: 数字=指定文件夹, 'uncategorized'=未分类, 不传=全部"),
+    file_type: Optional[str] = Query(
+        None,
+        description="按文件类型筛选。audio/youtube/podcast/web/text 等为精确匹配；document 表示全部文档类（pdf/word/excel/csv/image 等）",
+    ),
 ):
     """
     获取任务执行历史
@@ -301,6 +318,7 @@ async def get_task_executions(
     - **q**: 搜索关键词，与 search_type 配合使用
     - **ticker**: 按股票代码筛选，匹配file_tags中包含该ticker的执行记录
     - **folder_id**: 按文件夹筛选，数字=指定文件夹ID，'uncategorized'=未分类文件
+    - **file_type**: `document` 匹配文档扩展名大类（pdf/word/excel 等）；其余值精确匹配 file_processing_details.file_type
     """
     db_conn_params = get_database_config()
     db_manager = DatabaseManager(db_conn_params)
@@ -366,6 +384,20 @@ async def get_task_executions(
                     params.extend([current_user.username, fid])
                 except ValueError:
                     pass
+
+        if file_type and file_type.strip():
+            ft_key = file_type.strip().lower()
+            if ft_key == 'document':
+                placeholders = ','.join(['%s'] * len(SOURCES_DOCUMENT_FILE_TYPES))
+                where_conditions.append(
+                    f"EXISTS (SELECT 1 FROM file_processing_details fpd_ft WHERE fpd_ft.processing_stats_id = ps.id AND fpd_ft.file_type IN ({placeholders}))"
+                )
+                params.extend(SOURCES_DOCUMENT_FILE_TYPES)
+            else:
+                where_conditions.append(
+                    "EXISTS (SELECT 1 FROM file_processing_details fpd_ft WHERE fpd_ft.processing_stats_id = ps.id AND fpd_ft.file_type = %s)"
+                )
+                params.append(ft_key)
 
         where_clause = ("WHERE " + " AND ".join(where_conditions)) if where_conditions else ""
         

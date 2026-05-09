@@ -1047,6 +1047,25 @@
   align-items: center;
 }
 
+/* Sources 文件类型筛选横条：单行横向滚动；竖滚→横移由 FilesPage wheel 监听实现（与 FeedReader 一致）；隐藏原生滚动条 */
+.files-page-layout .files-file-type-strip-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+}
+
+.files-page-layout .files-file-type-strip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .files-page-layout .files-folder-chip {
   display: inline-flex;
   align-items: center;
@@ -1433,16 +1452,35 @@
   font-weight: 600;
 }
 
-/* 右侧面板 Info / AI Analysis / Markdown：仅图标 Tab */
+/* 右侧面板 Info / AI Analysis / Markdown：图标 + 文案 Tab */
 .files-page-layout .files-detail-right-header .files-detail-tab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
-  padding: 6px 10px;
-  margin-right: 8px;
-  font-size: 18px;
-  line-height: 1;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  margin-right: 4px;
+  font-size: 14px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.files-page-layout .files-detail-right-header .files-detail-tab .anticon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.files-page-layout .files-detail-right-header .files-detail-tab-label {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-page-layout .files-detail-right-header .files-detail-tab.is-active .files-detail-tab-label {
+  font-weight: 600;
 }
 
 .app-dark .files-page-layout .files-detail-tab.is-active {

@@ -323,6 +323,32 @@ export const filesAPI = {
     return api.get(`/files/upload-youtube/status/${fileId}`);
   },
 
+  // 上传 Apple Podcasts 单集链接并异步处理（远程服务器直接下载 + Fun-ASR 转写）
+  uploadApplePodcastLink: async (
+    appleUrl: string,
+    analyzeOptions?: UploadAnalyzeOptions,
+  ): Promise<{
+    task_id: string;
+    episode_id: string;
+    message: string;
+  }> => {
+    return api.post<{
+      task_id: string;
+      episode_id: string;
+      message: string;
+    }>('/files/upload-apple-podcast', {
+      apple_url: appleUrl,
+      auto_analyze_template_id: analyzeOptions?.auto_analyze_template_id ?? null,
+      auto_analyze_template_variables:
+        analyzeOptions?.auto_analyze_template_variables || {},
+      auto_analyze_enabled: analyzeOptions?.auto_analyze_enabled !== false,
+      auto_tag_template_id: analyzeOptions?.auto_tag_template_id ?? null,
+      auto_tag_template_variables:
+        analyzeOptions?.auto_tag_template_variables || {},
+      auto_tag_enabled: analyzeOptions?.auto_tag_enabled !== false,
+    });
+  },
+
   // 提交 Web Link 并异步抓取处理
   uploadWebLink: async (
     url: string,

@@ -111,6 +111,8 @@ export interface PaginationParams {
   q?: string;
   ticker?: string;
   folder_id?: string;
+  /** 按文件类型筛选；后端对 document 会展开为 pdf/word/excel/csv/image 等文档大类 */
+  file_type?: string;
 }
 
 export const tasksAPI = {

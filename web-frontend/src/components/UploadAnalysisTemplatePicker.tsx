@@ -266,12 +266,12 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
         max_tokens: values.max_tokens,
       };
       await promptTemplateService.updateMyTemplate(moduleCode, payload);
-      message.success(`"${resolvedLabel}" 模板已保存`);
+      message.success(`Template "${resolvedLabel}" saved`);
       setDrawerOpen(false);
       // 刷新本地 template 信息 (e.g. 模板名可能变)
       await loadTemplate(true);
     } catch (err: any) {
-      message.error(`保存失败: ${err?.response?.data?.detail || err?.message || ''}`);
+      message.error(`Save failed: ${err?.response?.data?.detail || err?.message || ''}`);
     } finally {
       setSaving(false);
     }
@@ -282,7 +282,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
     setResetting(true);
     try {
       await promptTemplateService.resetMyTemplate(moduleCode);
-      message.success(`已重置为系统默认`);
+      message.success('Reset to system default');
       // 重新拉最新 template 并回填表单
       const refreshed = await promptTemplateService.getMyTemplate(moduleCode);
       setMyTemplate(refreshed);
@@ -295,7 +295,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
         max_tokens: refreshed.max_tokens ?? 2000,
       });
     } catch (err: any) {
-      message.error(`重置失败: ${err?.response?.data?.detail || err?.message || ''}`);
+      message.error(`Reset failed: ${err?.response?.data?.detail || err?.message || ''}`);
     } finally {
       setResetting(false);
     }
@@ -355,7 +355,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
             >
               <RobotOutlined /> {myTemplate.template_name}
             </Tag>
-            <Tooltip title="编辑你的私有模板 (在此页面直接编辑, 不跳转)">
+            <Tooltip title="Edit your private template inline on this page">
               <Button
                 size="small"
                 type="link"
@@ -369,7 +369,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           </Space>
         ) : (
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-            （无法加载该模块的私有模板）
+            Unable to load a private template for this module.
           </Text>
         ))}
 
@@ -402,7 +402,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           <Space direction="vertical" size={2}>
             <Space>
               <EditOutlined />
-              <span>编辑: {myTemplate?.template_name}</span>
+              <span>Edit: {myTemplate?.template_name}</span>
             </Space>
             {myTemplate?.template_code && (
               <Text type="secondary" style={{ fontSize: 12 }}>
@@ -419,7 +419,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
         onClose={() => setDrawerOpen(false)}
         destroyOnClose
         extra={
-          <Tooltip title="将 prompt 内容重置为系统默认（覆盖当前内容，不可撤销）">
+          <Tooltip title="Reset prompt content to the system default (overwrites current content; cannot be undone)">
             <Button
               icon={<ReloadOutlined />}
               size="small"
@@ -445,13 +445,13 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           style={{ marginBottom: 16 }}
           message={
             <>
-              这是你在「{resolvedLabel}」模块下的私有模板。修改只影响你自己。
+              This is your private template for &quot;{resolvedLabel}&quot;. Changes apply only to your account.
               <br />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                Prompt 里用{' '}
+                Use{' '}
                 <Text code style={{ fontSize: 11 }}>{'{{variable_name}}'}</Text>{' '}
-                引用变量（如文件正文、文件名），运行时由系统填充。
-                点击下方编辑器右上角 <Text strong>Insert Variable</Text> 查看可用变量。
+                in the prompt for placeholders (e.g. file body, file name); the system fills them at runtime.
+                Use <Text strong>Insert Variable</Text> above the editor to see available variables.
               </Text>
             </>
           }
@@ -461,9 +461,9 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           <Form.Item
             label="System Prompt"
             name="system_prompt"
-            extra="定义 AI 的角色与基调（可留空）"
+            extra="Defines the model's role and tone (optional)"
           >
-            <TextArea rows={3} placeholder="（可选）" />
+            <TextArea rows={3} placeholder="(optional)" />
           </Form.Item>
 
           <div
@@ -484,8 +484,8 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           </div>
           <Form.Item
             name="user_prompt_template"
-            rules={[{ required: true, message: '不能为空' }]}
-            extra="支持 {{变量}} 占位符，调用时自动填充"
+            rules={[{ required: true, message: 'Required' }]}
+            extra="Supports {{variable}} placeholders; values are filled when the analysis runs"
           >
             <TextArea ref={promptTextAreaRef} rows={10} />
           </Form.Item>
@@ -505,7 +505,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
               <Form.Item label="Model" name="recommended_model">
                 <Select
                   options={availableModels.map((m) => ({ label: m, value: m }))}
-                  placeholder="选 Provider 后可选 Model"
+                  placeholder="Pick a model after choosing a provider"
                 />
               </Form.Item>
             </Col>
@@ -535,6 +535,7 @@ function defaultLabel(moduleCode: string): string {
   switch (moduleCode) {
     case 'file_analysis':   return 'AI Analysis Template';
     case 'audio_analysis':  return 'Audio Analysis Template';
+    case 'youtube_analysis': return 'YouTube Analysis Template';
     case 'file_tagging':    return 'AI Tagging Template';
     case 'feed_summary':    return 'Feed Summary Template';
     case 'youtube_summary': return 'YouTube Summary Template';
@@ -546,6 +547,7 @@ function displayModuleName(moduleCode: string): string {
   switch (moduleCode) {
     case 'file_analysis':   return 'AI document analysis';
     case 'audio_analysis':  return 'audio analysis';
+    case 'youtube_analysis': return 'YouTube link deep analysis';
     case 'file_tagging':    return 'auto tagging';
     case 'feed_summary':    return 'feed personalization';
     case 'youtube_summary': return 'YouTube summarization';

@@ -1,8 +1,8 @@
 # Upload Files 模块 & LLM 分析流程说明
 
-> 最后更新：2026-05-02（新增 `youtube_analysis` 独立模块，Upload YouTube Link 与 Feeds `youtube_summary` 完全解耦）
+> 最后更新：2026-05-09（新增 `podcast` 文件类型，Apple Podcasts 单集上传链路；远程服务器直接 yt-dlp 下载，无需本地 Worker）
 
-本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、网页链接）以及 **用户直接撰写的文本笔记（My Notes / Thoughts，`file_type='text'`）** 的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
+本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、Apple Podcasts、网页链接）以及 **用户直接撰写的文本笔记（My Notes / Thoughts，`file_type='text'`）** 的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
 
 ---
 
@@ -15,6 +15,7 @@
    - 2.3 [YouTube 链接](#23-youtube-链接)
    - 2.4 [网页链接（Web Link）](#24-网页链接web-link)
    - 2.5 [文本笔记（My Notes / Thoughts）](#25-文本笔记my-notes--thoughts)
+   - 2.6 [Apple Podcasts 单集链接](#26-apple-podcasts-单集链接)
 3. [数据存储模型](#3-数据存储模型)
 4. [Prompt Template 与 LLM 分析流程](#4-prompt-template-与-llm-分析流程)
    - 4.1 [用户主动触发的内容分析](#41-用户主动触发的内容分析)
@@ -315,6 +316,74 @@ POST /api/files/create-text-note
 
 ---
 
+### 2.6 Apple Podcasts 单集链接
+
+#### 设计决策：无需本地 Worker
+
+Apple Podcasts 走的是 **iTunes 公开 API + 第三方 Podcast CDN**，CDN 对数据中心 IP 无封锁，与 YouTube（对数据中心 IP 有严格封锁）截然不同。因此 Apple Podcast 处理链路**无需**走本地家庭 IP Worker，远程服务器直接 yt-dlp 下载即可。
+
+#### 上传入口
+
+`POST /api/files/upload-apple-podcast`
+
+- URL 必须包含 `?i=<episode_id>`（Apple 单集标识）
+- 支持格式：`https://podcasts.apple.com/{locale}/podcast/{title}/id{podcast_id}?i={episode_id}`
+
+#### 处理流程
+
+```
+前端 UploadApplePodcastModal
+    │  POST /api/files/upload-apple-podcast
+    │  Body: { apple_url, auto_analyze_template_id, auto_analyze_enabled,
+    │          auto_tag_template_id, auto_tag_enabled, ... }
+    ▼
+backend/api/files.py: upload_apple_podcast_link()
+    ├─ ApplePodcastService.extract_episode_id(url)  # 正则校验 + 提取 episode_id
+    └─ upload_and_transcribe_apple_podcast_task.apply_async(queue='file_processing')
+                │
+                ├─ Step 5%   ApplePodcastService.fetch_metadata() → title / series / duration
+                ├─ Step 10%  ApplePodcastService.download_audio() → /tmp/uploads/{episode}.mp3
+                │               └─ yt-dlp + iTunes API + 第三方 CDN（无 IP 封锁）
+                ├─ Step 40%  OSSService.upload_audio_file() → object_name + signed_url
+                ├─ Step 50%  ASRService.submit_transcription_task(diarization_enabled=True)
+                ├─ Step 60-90% get_transcription_results() 轮询
+                ├─ Step 93%  格式化 ASR + 构建 asr_with_diarization 结构化数据
+                ├─ Step 95%  INSERT processing_stats (task_name='Apple Podcast Processing')
+                │            INSERT file_processing_details (file_type='podcast', file_storage_type='oss')
+                ├─ Step 100% 清理临时文件
+                │
+                └─ 触发 4 路并行 LLM 任务（与 audio 一致）：
+                        trigger_auto_tagging  (模板: content_tag_v1)
+                        trigger_auto_naming   (模板: auto_name_v1)
+                        trigger_auto_classify (模板: auto_classify_v1)
+                        trigger_auto_analyze  (runtime 或缺省 audio_analysis_v1)
+```
+
+#### 错误分类
+
+| 错误类型 | 示例 | 处理方式 |
+|----------|------|----------|
+| `PermanentDownloadError` | 付费内容、地区锁、404 | 任务标记 `failed`，不重试 |
+| `TransientDownloadError` | 网络超时、CDN 5xx | 任务标记 `failed`，可手动重试 |
+
+#### `upload_params` 字段（`processing_stats` 内）
+
+| 字段 | 说明 |
+|------|------|
+| `apple_url` | 原始链接 |
+| `episode_id` | Apple 单集 ID |
+| `series` | Podcast 节目名称（来自 yt-dlp metadata） |
+| `episode` | Episode 标题 |
+| `podcast_thumbnail` | 封面图 URL |
+| `object_name` | OSS 对象键 |
+| `auto_analyze_template_id` / `auto_tag_template_id` 等 | 与 audio/youtube 一致 |
+
+#### 重分析（Re-analyze）
+
+`POST /api/files/audio/analyze` 接受 `file_type='podcast'`（等同 `audio`），使用 `audio_analysis_v1` 或用户指定模板。
+
+---
+
 ## 3. 数据存储模型
 
 ### `processing_stats`（每次执行一行）
@@ -341,7 +410,7 @@ POST /api/files/create-text-note
 | `original_file_path` | OSS 对象键或 URL |
 | `file_storage_type` | `'oss'` / `'local'` |
 | `oss_bucket` | OSS Bucket 名称 |
-| `file_type` | `'document'` / `'audio'` / `'youtube'` / `'web'` / `'text'`（用户撰写的文本笔记，无 OSS 原文） |
+| `file_type` | `'document'` / `'audio'` / `'youtube'` / `'podcast'` / `'web'` / `'text'`（用户撰写的文本笔记，无 OSS 原文） |
 | `status` | `'uploaded'` / `'processing'` / `'completed'` / `'failed'` |
 | `task_id` | Celery 任务 ID |
 | `processing_time` | 处理耗时（秒） |
@@ -585,6 +654,7 @@ classify_file_content_task(file_id, username, force=False)
 | `process_files_task`（批量解析文档，`POST /api/files/process`） | 解析完成，查 `file_processing_details` where `task_id=self.request.id AND status='completed' AND content != ''` | **仅** `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify`（当前实现**未**调用 `trigger_auto_analyze`；需深度分析请走 FilesPage 手动 Re-analyze 或上传并解析弹窗） |
 | `upload_and_process_document_task`（上传并解析） | 解析完成，查 `file_processing_details` where `task_id=self.request.id AND status='completed' AND content != ''` | 四路：`trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（弹窗 runtime 或 `LLMTemplateResolver('file_analysis')`） |
 | `upload_and_transcribe_audio_task`（音频转写） | ASR 写入 `content` 后 | 四路；`trigger_auto_analyze` 为弹窗 runtime 或缺省 `audio_analysis_v1` |
+| `upload_and_transcribe_apple_podcast_task`（Apple Podcasts 下载+转写） | ASR 写入 `content` 后；`file_type='podcast'` | 四路齐全；`trigger_auto_analyze` 为弹窗 runtime 或缺省 `audio_analysis_v1` |
 | `scrape_and_process_web_link_task`（网页抓取） | HTML 转纯文本写入 `content` 后 | 四路；`trigger_auto_analyze` 为弹窗 runtime 或 `LLMTemplateResolver('file_analysis')` |
 | `process_web_clip_task`（Chrome 剪藏） | 去标签写入 `content` 后 | 四路齐全：`trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（无弹窗 runtime，`trigger_auto_analyze` 内走 `LLMTemplateResolver('file_analysis')`） |
 | `finalize_youtube_file_task`（YouTube 链接，由本地 Worker 回调） | 字幕/ASR 写入 `content` 后，仅 outcome='completed' 触发；从 `processing_stats.upload_params.auto_analyze_template_id` 读模板 | `trigger_auto_tagging` + `trigger_auto_naming` + `trigger_auto_classify` + `trigger_auto_analyze`（默认 `LLMTemplateResolver('youtube_analysis')` → `youtube_analysis_v1`）|
@@ -675,6 +745,7 @@ POST /api/llm-prompt-templates/templates/test
 | `uploadAndProcessDocument(payload, analyzeOptions?)` | `POST /api/files/upload-and-process-document` |
 | `uploadAudioFile(file, analyzeOptions?)` | `POST /api/files/upload-audio` |
 | `uploadYouTubeLink(payload, analyzeOptions?)` | `POST /api/files/upload-youtube` |
+| `uploadApplePodcastLink(appleUrl, analyzeOptions?)` | `POST /api/files/upload-apple-podcast` |
 | `uploadWebLink(payload, analyzeOptions?)` | `POST /api/files/upload-web-link` |
 | `createTextNote(payload, analyzeOptions?)` | `POST /api/files/create-text-note` |
 
@@ -712,6 +783,7 @@ POST /api/llm-prompt-templates/templates/test
 | 批量解析已上传文件 | `POST /api/files/process` | `process_files_task` |
 | 上传音频并转写（ASR） | `POST /api/files/upload-audio` | `upload_and_transcribe_audio_task` |
 | 上传 YouTube 链接 | `POST /api/files/upload-youtube` | 默认：本地 `fetch_youtube_file_transcript_task` → 必要时 `transcribe_youtube_file_asr_task` → 远程 `finalize_youtube_file_task`；`YOUTUBE_UPLOAD_USE_LOCAL=false` 回滚到远程 `upload_and_process_youtube_task` |
+| 上传 Apple Podcasts 单集链接 | `POST /api/files/upload-apple-podcast` | `upload_and_transcribe_apple_podcast_task`（远程直接 yt-dlp，无需本地 Worker）|
 | 上传网页链接 | `POST /api/files/upload-web-link` | `scrape_and_process_web_link_task` |
 | 上传 Chrome 剪藏 | `POST /api/files/upload-web-clip` | `process_web_clip_task` |
 | 创建文本笔记（无上传文件） | `POST /api/files/create-text-note` | —（同步 API，成功后 API 内触发并行 LLM 任务） |
@@ -798,6 +870,11 @@ POST /api/llm-prompt-templates/templates/test
 
 12. **`GET /api/tasks/executions/{id}` 与文件夹字段**  
     与列表接口一致返回 `folder_id` / `folder_name`，供 **Info → Folder Type** 与侧边栏筛选对齐；若仅依赖列表刷新而不同步单条详情，会出现 Folder Type 空白，故单条 API 必须带齐该字段。
+
+13. **Apple Podcasts 与 YouTube 的架构差异**  
+    YouTube 对数据中心 IP 有严格封锁，故 `upload-youtube` 通过本地家庭 IP Worker 下载；Apple Podcasts 使用公开 iTunes API + 第三方 Podcast CDN，无此限制，`upload-apple-podcast` 直接在远程服务器由 Celery 任务调用 yt-dlp 下载，**不需要** `local_virtual_service` Worker 参与。
+    - `file_type='podcast'` 在 `trigger_auto_analyze` 中被视为与 `audio` 同类（`is_audio_like`），缺省模板为 `audio_analysis_v1`。
+    - FilesPage 通过常量 `AUDIO_LIKE_TYPES = ['audio', 'podcast']` 让 podcast 文件复用 ASR 转写视图、重分析面板、音频播放器。
 
 ---
 
