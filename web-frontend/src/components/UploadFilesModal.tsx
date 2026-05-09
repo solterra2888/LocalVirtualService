@@ -397,7 +397,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           <div style={{
             fontSize: '14px',
             fontWeight: 600,
-            marginBottom: '12px',
+            marginBottom: '16px',
             color: colors.text,
           }}>
             Document Processing
@@ -634,6 +634,28 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           )}
         </div>
 
+        {/* 主操作：置于 AI Analysis Template 之上；无选中文件时禁用（与 YouTube 弹窗一致） */}
+        <Divider style={{ margin: '20px 0 16px', borderColor: colors.cardBorder }} />
+        <div
+          style={{
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: compactDocumentProcessing ? 'flex-start' : 'flex-end',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            onClick={handleStartProcessing}
+            disabled={!selectedFile}
+          >
+            Start Processing
+          </Button>
+        </div>
+
         {/* AI 分析模板 (可选, 选中后上传完成自动并行触发 analyze_document_task) */}
         <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
         <UploadAnalysisTemplatePicker
@@ -656,51 +678,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           textColor={colors.text}
           textSecondaryColor={colors.textSecondary}
         />
-
-        {/* 操作按钮（手机端 compact：不展示 Close，与右上角关闭重复） */}
-        <div
-          style={{
-            marginTop: '20px',
-            display: 'flex',
-            justifyContent: compactDocumentProcessing ? 'flex-start' : 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          {!compactDocumentProcessing && (
-            <Button
-              onClick={handleClose}
-              style={{
-                borderRadius: 8,
-                ...(isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
-              }}
-            >
-              Close
-            </Button>
-          )}
-          <Space wrap>
-            {/* 选中文件后显示 Start Processing；点击后上传并解析文档 */}
-            {selectedFile && (
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                onClick={handleStartProcessing}
-                style={{
-                  borderRadius: 10,
-                  fontWeight: 500,
-                  height: 36,
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
-                }}
-              >
-                Start Processing
-              </Button>
-            )}
-
-          </Space>
-        </div>
       </Form>
     </Modal>
     </ConfigProvider>

@@ -102,8 +102,14 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
 
   const renderVariableInput = (
     varName: string,
-    varDef: VariableDefinition
+    varDef: VariableDefinition,
+    opts?: { compact?: boolean },
   ) => {
+    const compact = opts?.compact === true;
+    const compactStyle: React.CSSProperties | undefined = compact
+      ? { fontSize: 12 }
+      : undefined;
+
     const commonProps = {
       disabled,
       placeholder: varDef.description || `请输入${varName}`,
@@ -111,19 +117,26 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
 
     switch (varDef.type) {
       case 'integer':
-        return <InputNumber {...commonProps} style={{ width: '100%' }} />;
+        return (
+          <InputNumber
+            {...commonProps}
+            size={compact ? 'small' : undefined}
+            style={{ width: '100%', ...compactStyle }}
+          />
+        );
 
       case 'float':
         return (
           <InputNumber
             {...commonProps}
             step={0.1}
-            style={{ width: '100%' }}
+            size={compact ? 'small' : undefined}
+            style={{ width: '100%', ...compactStyle }}
           />
         );
 
       case 'boolean':
-        return <Switch disabled={disabled} />;
+        return <Switch disabled={disabled} size={compact ? 'small' : undefined} />;
 
       case 'array':
         if (varDef.options && varDef.options.length > 0) {
@@ -131,6 +144,8 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
             <Select
               {...commonProps}
               mode="multiple"
+              size={compact ? 'small' : undefined}
+              style={compactStyle}
               options={varDef.options.map((opt) => ({
                 label: opt,
                 value: opt,
@@ -143,6 +158,8 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
             {...commonProps}
             mode="tags"
             tokenSeparators={[',']}
+            size={compact ? 'small' : undefined}
+            style={compactStyle}
           />
         );
 
@@ -157,6 +174,8 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
                 label: opt,
                 value: opt,
               }))}
+              size={compact ? 'small' : undefined}
+              style={compactStyle}
             />
           );
         }
@@ -172,11 +191,14 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
               rows={4}
               showCount
               maxLength={2000}
+              style={compactStyle}
             />
           );
         }
 
-        return <Input {...commonProps} />;
+        return (
+          <Input {...commonProps} size={compact ? 'small' : undefined} style={compactStyle} />
+        );
     }
   };
 
@@ -300,7 +322,7 @@ const TemplateVariablesEditor: React.FC<TemplateVariablesEditorProps> = ({
                     )
                   }
                 >
-                  {renderVariableInput(varName, varDef)}
+                  {renderVariableInput(varName, varDef, { compact: true })}
                 </Form.Item>
               ))}
             </Panel>

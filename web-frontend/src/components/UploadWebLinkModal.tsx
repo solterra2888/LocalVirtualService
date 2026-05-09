@@ -284,6 +284,25 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
             </ul>
           </div>
 
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              marginBottom: '20px',
+            }}
+          >
+            <Button
+              type="primary"
+              onClick={handleStartProcessing}
+              icon={<SendOutlined />}
+              disabled={!webUrl.trim() || isProcessing}
+              loading={isProcessing}
+            >
+              Start Scraping
+            </Button>
+          </div>
+
           {/* AI 分析模板 (可选, 选中后抓取完成自动触发 analyze_document_task) */}
           <div style={{ marginBottom: '20px' }}>
             <UploadAnalysisTemplatePicker
@@ -309,29 +328,6 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
               disabled={isProcessing}
             />
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-              marginTop: '24px',
-              gap: '8px',
-            }}
-          >
-            <Button onClick={handleClose} disabled={isProcessing}>
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              onClick={handleStartProcessing}
-              icon={<SendOutlined />}
-              disabled={!webUrl.trim() || isProcessing}
-              loading={isProcessing}
-            >
-              Start Scraping
-            </Button>
           </div>
         </div>
       </Modal>

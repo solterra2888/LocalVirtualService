@@ -60,6 +60,7 @@ import UploadWebLinkModal from '../components/UploadWebLinkModal';
 import CreateTextNoteModal, { TASK_EXECUTIONS_REFRESH_EVENT } from '../components/CreateTextNoteModal';
 import ReportTickerTags, { parseReportTickers } from '../components/ReportTickerTags';
 import './MobileSourcesPage.css';
+import '../styles/mobilePageLoading.css';
 
 const { Text } = Typography;
 
@@ -806,13 +807,17 @@ const MobileSourcesInner: React.FC = () => {
         </div>
       )}
 
-      <Spin spinning={listLoading}>
+      {listLoading ? (
+        <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
+          <Spin size="large" />
+        </div>
+      ) : (
         <div
           ref={filesListScrollRef}
           className="mobile-sources-list"
           style={{ maxHeight: 'calc(100vh - 268px)', overflowY: 'auto' }}
         >
-          {filteredExecutions.length === 0 && !listLoading ? (
+          {filteredExecutions.length === 0 ? (
             <Empty
               description={
                 taskExecutions.length === 0
@@ -1021,7 +1026,7 @@ const MobileSourcesInner: React.FC = () => {
             <div className="mobile-sources-loading-more">Loading more…</div>
           )}
         </div>
-      </Spin>
+      )}
 
       <Drawer
         title={<span style={{ color: themeColors.text }}>Folders</span>}

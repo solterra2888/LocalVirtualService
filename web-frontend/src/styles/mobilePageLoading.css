@@ -1,0 +1,8 @@
+/* Shared full-width loading region for mobile shell tabs (Daily / Sources / Feeds / Reports). */
+.mobile-page-loading-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 56px 24px;
+  min-height: 40vh;
+}

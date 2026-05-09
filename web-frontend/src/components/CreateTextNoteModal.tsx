@@ -175,6 +175,25 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
             />
           </div>
 
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              marginBottom: '16px',
+            }}
+          >
+            <Button
+              type="primary"
+              onClick={handleSave}
+              icon={<SaveOutlined />}
+              disabled={!content.trim() || saving}
+              loading={saving}
+            >
+              Save
+            </Button>
+          </div>
+
           <div style={{ marginBottom: '16px' }}>
             <UploadAnalysisTemplatePicker
               value={analyzePicker}
@@ -209,28 +228,6 @@ const CreateTextNoteModal: React.FC<CreateTextNoteModalProps> = ({ visible, onCa
             }}
           >
             After saving, the system will automatically run content analysis (tagging, naming, classification).
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <Button onClick={handleClose} disabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              onClick={handleSave}
-              icon={<SaveOutlined />}
-              disabled={!content.trim() || saving}
-              loading={saving}
-            >
-              Save
-            </Button>
           </div>
         </div>
       </Modal>

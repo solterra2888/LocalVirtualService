@@ -322,6 +322,26 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
             </ul>
           </div>
 
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              marginTop: 20,
+              marginBottom: '20px',
+            }}
+          >
+            <Button
+              type="primary"
+              onClick={handleStartProcessing}
+              icon={<PlayCircleOutlined />}
+              disabled={!youtubeUrl.trim() || isProcessing}
+              loading={isProcessing}
+            >
+              Start Processing
+            </Button>
+          </div>
+
           {/* YouTube 使用独立的 youtube_analysis 模块（与 Feeds youtube_summary 完全解耦） */}
           <div style={{ marginBottom: '20px' }}>
             <UploadAnalysisTemplatePicker
@@ -349,30 +369,6 @@ const UploadYouTubeLinkModal: React.FC<UploadYouTubeLinkModalProps> = ({ visible
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
               disabled={isProcessing}
             />
-          </div>
-
-          {/* 底部按钮 */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-              marginTop: '24px',
-              gap: '8px',
-            }}
-          >
-            <Button onClick={handleClose} disabled={isProcessing}>
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              onClick={handleStartProcessing}
-              icon={<PlayCircleOutlined />}
-              disabled={!youtubeUrl.trim() || isProcessing}
-              loading={isProcessing}
-            >
-              Start Processing
-            </Button>
           </div>
         </div>
       </Modal>

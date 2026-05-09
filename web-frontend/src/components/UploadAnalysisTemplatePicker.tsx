@@ -312,55 +312,66 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={style}>
-      {/* Label row */}
-      <Space size={6} style={{ marginBottom: 6 }}>
-        <Text strong style={textColor ? { color: textColor } : undefined}>
-          {resolvedLabel}
-        </Text>
-        <Tooltip title={resolvedHint}>
-          <InfoCircleOutlined
-            style={{ color: textSecondaryColor || '#8c8c8c', fontSize: 13 }}
-          />
-        </Tooltip>
-      </Space>
-
-      {/* Toggle + template name + edit button */}
-      {loadingTpl ? (
-        <Skeleton.Input active size="small" style={{ width: 260 }} />
-      ) : (
-        <Space size={10} align="center" wrap>
+      {/* 标题与 Switch 分列两侧，避免与「AI xx Template」挤在一起 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginBottom: 10,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Space size={6} align="center" style={{ flex: '1 1 auto', minWidth: 0 }}>
+          <Text strong style={textColor ? { color: textColor } : undefined}>
+            {resolvedLabel}
+          </Text>
+          <Tooltip title={resolvedHint}>
+            <InfoCircleOutlined
+              style={{ color: textSecondaryColor || '#8c8c8c', fontSize: 13 }}
+            />
+          </Tooltip>
+        </Space>
+        {loadingTpl ? (
+          <Skeleton.Button active size="default" style={{ flexShrink: 0 }} />
+        ) : (
           <Switch
             checked={enabled}
             disabled={disabled || !myTemplate}
             onChange={handleToggle}
+            style={{ flexShrink: 0 }}
           />
-          {myTemplate ? (
-            <>
-              <Tag
-                color={enabled ? 'blue' : 'default'}
-                style={{ margin: 0, fontSize: 11 }}
+        )}
+      </div>
+
+      {/* 模板名 + 编辑（Switch 下方） */}
+      {!loadingTpl &&
+        (myTemplate ? (
+          <Space size={10} align="center" wrap style={{ marginBottom: 4 }}>
+            <Tag
+              color={enabled ? 'blue' : 'default'}
+              style={{ margin: 0, fontSize: 11 }}
+            >
+              <RobotOutlined /> {myTemplate.template_name}
+            </Tag>
+            <Tooltip title="编辑你的私有模板 (在此页面直接编辑, 不跳转)">
+              <Button
+                size="small"
+                type="link"
+                icon={<EditOutlined />}
+                onClick={handleOpenEdit}
+                disabled={disabled}
               >
-                <RobotOutlined /> {myTemplate.template_name}
-              </Tag>
-              <Tooltip title="编辑你的私有模板 (在此页面直接编辑, 不跳转)">
-                <Button
-                  size="small"
-                  type="link"
-                  icon={<EditOutlined />}
-                  onClick={handleOpenEdit}
-                  disabled={disabled}
-                >
-                  Edit my template
-                </Button>
-              </Tooltip>
-            </>
-          ) : (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              （无法加载该模块的私有模板）
-            </Text>
-          )}
-        </Space>
-      )}
+                Edit my template
+              </Button>
+            </Tooltip>
+          </Space>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+            （无法加载该模块的私有模板）
+          </Text>
+        ))}
 
       {/* Hint text */}
       <div

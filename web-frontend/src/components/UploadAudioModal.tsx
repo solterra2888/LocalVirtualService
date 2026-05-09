@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Upload, Button, message, Space, ConfigProvider, theme as antdTheme, Tag } from 'antd';
-import { InboxOutlined, SoundOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlayCircleOutlined, SoundOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
@@ -372,8 +372,27 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
             </div>
           )}
 
+          <div
+            style={{
+              marginTop: 20,
+              marginBottom: 20,
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+            }}
+          >
+            <Button
+              type="primary"
+              onClick={handleUpload}
+              icon={<PlayCircleOutlined />}
+              disabled={!audioFile}
+            >
+              Start Processing
+            </Button>
+          </div>
+
           {/* PR-A: 音频专属 audio_analysis 模块 (从 file_analysis 拆出) */}
-          <div style={{ marginTop: '16px' }}>
+          <div>
             <UploadAnalysisTemplatePicker
               value={analyzePicker}
               onChange={setAnalyzePicker}
@@ -397,28 +416,6 @@ const UploadAudioModal: React.FC<UploadAudioModalProps> = ({ visible, onCancel, 
               textColor={isDark ? '#e0e6f1' : 'rgba(0, 0, 0, 0.88)'}
               textSecondaryColor={isDark ? '#94a3b8' : 'rgba(0, 0, 0, 0.45)'}
             />
-          </div>
-
-          {/* 底部按钮 */}
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'flex-end', 
-            alignItems: 'center',
-            marginTop: '16px',
-            gap: '8px'
-          }}>
-            <Button onClick={handleClose}>
-              Cancel
-            </Button>
-            {audioFile && (
-              <Button
-                type="primary"
-                onClick={handleUpload}
-                icon={<SoundOutlined />}
-              >
-                Upload
-              </Button>
-            )}
           </div>
         </div>
       </Modal>

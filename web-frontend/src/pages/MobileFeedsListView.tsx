@@ -69,6 +69,7 @@ import {
   SubscriptionContent,
 } from '../services/subscriptions';
 import './MobileFeedsPage.css';
+import '../styles/mobilePageLoading.css';
 
 dayjs.extend(relativeTime);
 
@@ -448,7 +449,7 @@ const MobileFeedsListView: React.FC = () => {
       )}
 
       {loading && subscriptions.length === 0 ? (
-        <div className="mobile-feeds-spin-wrap">
+        <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
           <Spin size="large" />
         </div>
       ) : !selectedSubscription ? (
@@ -462,7 +463,7 @@ const MobileFeedsListView: React.FC = () => {
           />
         </div>
       ) : contentsLoading ? (
-        <div className="mobile-feeds-spin-wrap">
+        <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
           <Spin size="large" />
         </div>
       ) : contents.length === 0 ? (

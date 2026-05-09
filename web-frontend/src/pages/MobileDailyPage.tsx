@@ -26,6 +26,7 @@ import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
+import '../styles/mobilePageLoading.css';
 
 const { Title, Text } = Typography;
 
@@ -318,7 +319,7 @@ const MobileDailyPageInner: React.FC = () => {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+        <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
           <Spin size="large" />
         </div>
       ) : items.length === 0 ? (

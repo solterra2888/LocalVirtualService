@@ -31,6 +31,7 @@ import {
 } from '../services/twitterDailyReports';
 import { useDailyReportStatusPoll } from '../hooks/useDailyReportStatusPoll';
 import './MobileFeedsPage.css';
+import '../styles/mobilePageLoading.css';
 
 const { Text } = Typography;
 
@@ -276,8 +277,8 @@ const MobileReportsPageInner: React.FC = () => {
         }}
       >
         {detailLoading ? (
-          <div className="mobile-feeds-spin-wrap">
-            <Spin size="large" tip="Loading report..." />
+          <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
+            <Spin size="large" />
           </div>
         ) : selectedReport?.report_content ? (
           <div style={{ maxWidth: 720, margin: '0 auto' }}>
