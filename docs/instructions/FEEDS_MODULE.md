@@ -149,7 +149,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `engagement_stats` | jsonb | 点赞/评论/观看等渠道指标 |
 | `heat_level` | int | 热度等级（News/Twitter 用）|
 | `categories` | text[] | 分类标签（News 用）|
-| YouTube 专用 | — | `transcript` / `transcript_data` / `duration_seconds` / `channel_id` / `feed_url` |
+| YouTube 专用 | — | `transcript`（原始字幕）/ `transcript_cleaned`（可读清洗版，见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）/ `transcript_data` / `duration_seconds` / `channel_id` / `feed_url` |
 | Twitter 专用 | — | `retweet_*` / `quote_*` / `reply_*` / `media_urls` / … |
 | `UNIQUE (channel_type, content_id)` | | 跨用户去重的关键 |
 
@@ -184,7 +184,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `GET` | `/tasks/{task_id}/status` | 查询抓取任务 `AsyncResult`（前端轮询 "抓取中"）|
 | `GET` | `/{subscription_id}/contents` | 分页内容列表，支持 `only_unread`；YouTube 只返回 `has_transcript` 不返回全文 |
 | `POST` | `/contents/{content_id}/mark-read` | 标记已读 / 未读（修改 `read_status.{user_id}`）|
-| `GET` | `/contents/{content_db_id}/transcript` | **YouTube 字幕懒加载**：返回 `transcript` + `language` + `source`（api/ytdlp/asr）|
+| `GET` | `/contents/{content_db_id}/transcript` | **YouTube 字幕懒加载**：JSON `{ "transcript": "<正文>" }`。正文**优先**取库内 `transcript_cleaned`，为空则回退 `transcript`（详见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）|
 | `GET` | `/contents/tweet/{tweet_id}` | Twitter：按 `content_id` 取一条（用于引用/回复上下文）|
 | `POST` | `/contents/{content_db_id}/transcribe` | **YouTube 手动重转 ASR**，派发 `transcribe_youtube_feed_task`，返回 `task_id` 供前端轮询 |
 
@@ -203,6 +203,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | 文件 | 职责 |
 |------|------|
 | `backend/services/subscription_content_service.py` | **归一化存储层**。`save_content` / `_save_normalized_content`（根据 `channel_type` 分发到 `ContentAdapter`，`ON CONFLICT (channel_type, content_id)` 合并 `user_ids`）；`update_transcript`（写 YouTube 字幕）；`mark_as_read`；`update_subscription_unread_count` 调用等。所有渠道统一出入口。|
+| `backend/services/transcript_cleaner.py` | YouTube 字幕清洗：`transcript` → `transcript_cleaned`（规则 + spaCy 兜底）；由 `scripts/run_transcript_cleaning.py` 批量写库；详见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`。|
 | `backend/services/youtube_subscription_service.py` | **服务器端** YouTube feed 实现：RSS → Data API v3 fallback、频道校验、`fetch_all_subscriptions()`（在远程家用 Worker 上执行，详见第 6 节）。 |
 | `backend/services/twitter_subscription_service.py` | **twitterapi.io** 拉取（`since_time`/`until_time` 时间切片，禁用 cursor 分页）、聚合多用户订阅、写入 `subscription_content`；回看窗口由 `TWITTER_*` 环境变量与 `last_fetched_at` 共同决定（见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区)）|
 | `backend/services/eodhd_news_feed_service.py` | 从 EODHD News API 拉取 → 经 `NewsAdapter` → 写入 `subscription_content`。暴露 `AVAILABLE_NEWS_SOURCES` 给前端 News 源下拉 |

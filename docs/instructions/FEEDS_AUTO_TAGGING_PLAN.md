@@ -33,6 +33,8 @@
 1. **Twitter 中位 114 字符**—几乎全是短推文，LLM 打标必须把 `content + [引用] quoted_content + [转推] retweeted_content` 拼成完整上下文才喂，否则纯 RT 或引用推几乎是空值。
 2. **YouTube 打标基于 `transcript` 不是 `content`**—`content` 字段存的是视频简介（有 2849 条）；真正能产出标签的是字幕（只 783 条），需要先判空 + 长度门槛。
 
+> **与 `transcript_cleaned` 的区分**（`docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）：`transcript_cleaned` 是面向**阅读端**的清洗副本；**打标/摘要拼接若仍从 `subscription_content` 直读，默认使用 `transcript` 原始列**。若希望 LLM 输入也使用清洗版，需要在 `FeedContentTaggingService` 等调用处显式改为读 `transcript_cleaned`（并处理 NULL 回退）。
+
 ## 3. 架构决策（核心：YouTube Feed 必须走远程回调）
 
 ### 3.1 Upload Link 与 Feeds 的对比

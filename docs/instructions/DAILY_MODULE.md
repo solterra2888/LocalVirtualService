@@ -101,7 +101,7 @@ Daily 模块（前端 `/daily`，是登录后的**默认落地页**）是一个*
 【二进制 / 大资源懒加载（只在抽屉打开后按需取）】
     ├─ image / audio / pdf / youtube(upload) → GET /api/files/original/{file_id}
     │                                          (file_url + asr_with_diarization)
-    └─ youtube(feed) transcript               → GET /api/subscriptions/contents/{id}/transcript
+    └─ youtube(feed) transcript               → GET /api/subscriptions/contents/{id}/transcript（正文优先 `transcript_cleaned`，见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）
 ```
 
 ## 2. 数据库表结构
@@ -133,7 +133,7 @@ Daily 模块本身**只新增了一张 per-user 偏好表**，其它都是只读
 | `file_processing_details` | Upload Files 链路 | 标题、内容片段、`file_type` → source_subtype 映射、外链 |
 | `processing_stats` | 同上 | 鉴权（`ps."user" = current_user.username`），并提供跳转用的 `execution_id` |
 | `file_tags` | 同上 | LLM 标签：`summary` / `reasoning` / `sector` / `industry` / `ticker` / `concepts` / `confidence` |
-| `subscription_content` | Feeds 链路 | 标题、正文 / transcript、`channel_type` → source_subtype 映射、`author_*`、`url` |
+| `subscription_content` | Feeds 链路 | 标题、正文、`transcript` / **`transcript_cleaned`**（YouTube 清洗字幕）、`channel_type` → source_subtype 映射、`author_*`、`url` |
 | `subscription_content_tags` | 同上 | LLM 标签：`summary` / `sector` / `industry` / `ticker` / `concepts` / `confidence` |
 | `subscription_list` | 同上 | 单查询批量反查 `id`（为 Feed 卡片提供跳转目标）|
 
@@ -312,7 +312,7 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
 **注意（不返回的字段）：**
 
 - 二进制 / 大资源（image / audio / pdf 的 `file_url` + audio / youtube 的 ASR JSON）**不在此返回**，前端打开抽屉后按需调 `GET /api/files/original/{file_id}` 懒加载（与现有 Sources 详情页同口径）
-- YouTube 的 transcript 同样懒加载 `GET /api/subscriptions/contents/{id}/transcript`，由抽屉里的 "Load transcript" 按钮触发
+- YouTube 的 transcript 同样懒加载 `GET /api/subscriptions/contents/{id}/transcript`，由抽屉里的 "Load transcript" 按钮触发；响应正文优先为 **`transcript_cleaned`**（详见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）
 
 ## 5. 关键 SQL 设计
 
