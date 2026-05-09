@@ -3,7 +3,7 @@
  * 参考 Feeder.co 的设计
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Layout,
   List,
@@ -41,6 +41,7 @@ import {
   CheckSquareOutlined,
   CloseOutlined,
   SettingOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -62,6 +63,7 @@ import {
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
   subscriptionContentMatchesSearchQuery,
+  estimateSubscriptionContentReadingMinutes,
 } from '../components/feed/feedUtils';
 import {
   getChannelIcon,
@@ -78,6 +80,7 @@ import {
 } from '../components/feed/feedArticleViewMode';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import FeedSummarySettingsDrawer from '../components/feed/FeedSummarySettingsDrawer';
+import SubscriptionDigestButton from '../components/feed/SubscriptionDigestButton';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
 dayjs.extend(relativeTime);
@@ -141,6 +144,7 @@ const FeedReaderPageInner: React.FC = () => {
   const [feedChannelTypeFilter, setFeedChannelTypeFilter] = useState<FeedChannelTypeFilterKey>('all');
   const [contentSearchQuery, setContentSearchQuery] = useState('');
   const [selectedShowFilter, setSelectedShowFilter] = useState<string | null>(null);
+  const showFilterStripRef = useRef<HTMLDivElement>(null);
 
   // ☑️ Batch mode
   const [batchMode, setBatchMode] = useState(false);
@@ -180,6 +184,33 @@ const FeedReaderPageInner: React.FC = () => {
     }
     return Array.from(names).sort();
   }, [contents]);
+
+  /** 节目 chip 横条：鼠标滚轮主要是 deltaY，映射为横向滚动；触控板横向手势保留 deltaX 默认行为；须 native listener + passive:false 才能 preventDefault */
+  useEffect(() => {
+    const el = showFilterStripRef.current;
+    if (!el || availableShows.length === 0) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return;
+
+      if (!e.shiftKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        return;
+      }
+
+      const scrollDelta = e.shiftKey ? e.deltaY + e.deltaX : e.deltaY;
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const prev = el.scrollLeft;
+      const next = Math.max(0, Math.min(maxScroll, prev + scrollDelta));
+
+      if (next !== prev) {
+        el.scrollLeft = next;
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [availableShows.length]);
 
   const filteredContents = useMemo(() => {
     let result = contents;
@@ -1297,52 +1328,65 @@ const FeedReaderPageInner: React.FC = () => {
                   borderBottom: `1px solid ${themeColors.cardBorder}`,
                 }}
               >
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <Text strong style={{ color: themeColors.text, fontSize: 16 }}>
-                    {selectedSubscription.channel_name ||
-                      selectedSubscription.channel_identifier}
-                  </Text>
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      gap: 8,
-                      flexWrap: 'wrap',
+                      gap: 12,
                       width: '100%',
+                      minWidth: 0,
                     }}
                   >
-                    <Text type="secondary" style={{ fontSize: 12 }}>
+                    <Text
+                      strong
+                      style={{
+                        color: themeColors.text,
+                        fontSize: 16,
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {selectedSubscription.channel_name ||
+                        selectedSubscription.channel_identifier}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
                       {searchActive ? `${filteredContents.length} / ` : ''}
                       {contents.length} articles
                     </Text>
-                    {contents.length > 0 && (
-                      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          Keyboard
-                        </Text>
-                        <kbd style={kbdKeyStyle}>↑</kbd>
-                        <kbd style={kbdKeyStyle}>↓</kbd>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          prev / next article
-                        </Text>
-                      </div>
-                    )}
                   </div>
-                  <Input.Search
-                    allowClear
-                    placeholder="Search articles…"
-                    value={contentSearchQuery}
-                    onChange={(e) => setContentSearchQuery(e.target.value)}
-                    aria-label="Search bar"
-                    style={{ marginTop: 10 }}
-                  />
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Input.Search
+                        allowClear
+                        size="small"
+                        placeholder="Search articles…"
+                        value={contentSearchQuery}
+                        onChange={(e) => setContentSearchQuery(e.target.value)}
+                        aria-label="Search bar"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <SubscriptionDigestButton
+                      subscriptionId={selectedSubscription?.id}
+                      channelName={
+                        selectedSubscription?.channel_name ||
+                        selectedSubscription?.channel_identifier
+                      }
+                      themeMode={themeMode}
+                    />
+                  </div>
                 </Space>
               </div>
 
               {/* 节目筛选 chip 行：仅当前订阅有 show_name 时渲染 */}
               {availableShows.length > 0 && (
                 <div
+                  ref={showFilterStripRef}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1487,6 +1531,7 @@ const FeedReaderPageInner: React.FC = () => {
                     dataSource={filteredContents}
                     renderItem={(content) => {
                       const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(content);
+                      const readingMin = estimateSubscriptionContentReadingMinutes(content);
                       return (
                       <List.Item
                         key={content.id}
@@ -1606,15 +1651,39 @@ const FeedReaderPageInner: React.FC = () => {
                                 ? dayjs(content.published_at).fromNow()
                                 : 'Unknown'}
                             </Text>
+                            {readingMin != null && (
+                              <>
+                                <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
+                                <Tooltip title="Estimated reading time">
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      color: themeColors.textSecondary,
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    <ClockCircleOutlined style={{ fontSize: 10 }} />
+                                    {readingMin} min
+                                  </span>
+                                </Tooltip>
+                              </>
+                            )}
                             {content.heat_level && content.heat_level >= 1 && (
-                              <Tooltip title={getHeatLevelConfig(content.heat_level).text}>
-                                <FireOutlined
-                                  style={{
-                                    color: getHeatLevelConfig(content.heat_level).color,
-                                    fontSize: 13,
-                                  }}
-                                />
-                              </Tooltip>
+                              <>
+                                {readingMin != null && (
+                                  <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
+                                )}
+                                <Tooltip title={getHeatLevelConfig(content.heat_level).text}>
+                                  <FireOutlined
+                                    style={{
+                                      color: getHeatLevelConfig(content.heat_level).color,
+                                      fontSize: 13,
+                                    }}
+                                  />
+                                </Tooltip>
+                              </>
                             )}
                           </Space>
 
@@ -1739,21 +1808,54 @@ const FeedReaderPageInner: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: 6,
+                    gap: 12,
                     marginTop: 8,
                   }}
                 >
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    Keyboard
-                  </Text>
-                  <kbd style={kbdKeyStyle}>←</kbd>
-                  <kbd style={kbdKeyStyle}>→</kbd>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    Switch Original / AI Analysis / Transcript
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    · Use Page Up and Page Down to scroll transcript and other long content.
-                  </Text>
+                  {contents.length > 0 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 6,
+                      }}
+                    >
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        Keyboard
+                      </Text>
+                      <kbd style={kbdKeyStyle}>↑</kbd>
+                      <kbd style={kbdKeyStyle}>↓</kbd>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        prev / next article
+                      </Text>
+                    </div>
+                  )}
+                  {contents.length > 0 && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      ·{' '}
+                    </Text>
+                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 6,
+                    }}
+                  >
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Keyboard
+                    </Text>
+                    <kbd style={kbdKeyStyle}>←</kbd>
+                    <kbd style={kbdKeyStyle}>→</kbd>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Switch Original / AI Analysis / Transcript
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      · Use Page Up and Page Down to scroll transcript and other long content.
+                    </Text>
+                  </div>
                 </div>
               </div>
 

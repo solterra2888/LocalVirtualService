@@ -62,6 +62,26 @@ export function feedListPrimaryLineIsTweetBody(c: SubscriptionContent): boolean 
   return c.channel_type === 'twitter' && !(c.title || '').trim();
 }
 
+/** 与 Daily 模块一致：`max(1, ceil(chars / 400))`。见 `backend/api/daily.py` WORDS_PER_MINUTE */
+const READING_CHARS_PER_MINUTE = 400;
+
+/**
+ * 用列表接口已有字段估算阅读分钟数（与 Daily `reading_time_min` 同一公式）。
+ * Twitter 合并正文与嵌入的 retweet / quote 文本；YouTube / News 仅用 `content`
+ *（列表不含 transcript，详情页字幕另行展示）。
+ */
+export function estimateSubscriptionContentReadingMinutes(
+  c: SubscriptionContent,
+): number | null {
+  let len = (c.content || '').length;
+  if (c.channel_type === 'twitter') {
+    len += (c.retweeted_content || '').length;
+    len += (c.quoted_content || '').length;
+  }
+  if (len <= 0) return null;
+  return Math.max(1, Math.ceil(len / READING_CHARS_PER_MINUTE));
+}
+
 /** Heat level badge config for subscription content */
 export function getHeatLevelConfig(heatLevel?: number) {
   switch (heatLevel) {

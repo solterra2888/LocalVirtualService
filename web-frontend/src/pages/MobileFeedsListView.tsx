@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   App,
@@ -36,6 +36,7 @@ import {
   RetweetOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -59,9 +60,11 @@ import {
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
   subscriptionContentMatchesSearchQuery,
+  estimateSubscriptionContentReadingMinutes,
 } from '../components/feed/feedUtils';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import { getModalStyles } from '../utils/modalStyles';
+import SubscriptionDigestButton from '../components/feed/SubscriptionDigestButton';
 import {
   subscriptionsAPI,
   Subscription,
@@ -112,6 +115,8 @@ const MobileFeedsListView: React.FC = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
   const [contentSearchQuery, setContentSearchQuery] = useState('');
+  const [selectedShowFilter, setSelectedShowFilter] = useState<string | null>(null);
+  const showFilterStripRef = useRef<HTMLDivElement>(null);
 
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -321,13 +326,55 @@ const MobileFeedsListView: React.FC = () => {
   const selectedSubscriptionId = selectedSubscription?.id;
   useEffect(() => {
     setContentSearchQuery('');
+    setSelectedShowFilter(null);
   }, [selectedSubscriptionId]);
 
+  const availableShows = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of contents) {
+      if (c.channel_type === 'youtube' && c.metadata?.show_name) {
+        names.add(c.metadata.show_name as string);
+      }
+    }
+    return Array.from(names).sort();
+  }, [contents]);
+
+  /** 与桌面 FeedReaderPage 一致：触控板纵滚映射为横向滚动节目 chip */
+  useEffect(() => {
+    const el = showFilterStripRef.current;
+    if (!el || availableShows.length === 0) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return;
+
+      if (!e.shiftKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        return;
+      }
+
+      const scrollDelta = e.shiftKey ? e.deltaY + e.deltaX : e.deltaY;
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const prev = el.scrollLeft;
+      const next = Math.max(0, Math.min(maxScroll, prev + scrollDelta));
+
+      if (next !== prev) {
+        el.scrollLeft = next;
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [availableShows.length]);
+
   const filteredContents = useMemo(() => {
+    let result = contents;
     const q = contentSearchQuery.trim();
-    if (!q) return contents;
-    return contents.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
-  }, [contents, contentSearchQuery]);
+    if (q) result = result.filter((c) => subscriptionContentMatchesSearchQuery(c, q));
+    if (selectedShowFilter) result = result.filter((c) => c.metadata?.show_name === selectedShowFilter);
+    return result;
+  }, [contents, contentSearchQuery, selectedShowFilter]);
+
+  const searchActive = Boolean(contentSearchQuery.trim());
 
   const toolbarSubline = (sub: Subscription | null) => {
     if (!sub) return null;
@@ -389,10 +436,29 @@ const MobileFeedsListView: React.FC = () => {
           style={{ color: themeColors.textSecondary }}
         />
         <div className="mobile-feeds-toolbar-title-block">
-          <div className="mobile-feeds-toolbar-title" style={{ color: themeColors.text }}>
-            {selectedSubscription
-              ? selectedSubscription.channel_name || `@${selectedSubscription.channel_identifier}`
-              : 'Feeds'}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              minWidth: 0,
+              width: '100%',
+            }}
+          >
+            <div
+              className="mobile-feeds-toolbar-title"
+              style={{ color: themeColors.text, flex: 1, minWidth: 0 }}
+            >
+              {selectedSubscription
+                ? selectedSubscription.channel_name || `@${selectedSubscription.channel_identifier}`
+                : 'Feeds'}
+            </div>
+            {selectedSubscription && (
+              <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                {searchActive ? `${filteredContents.length} / ` : ''}
+                {contents.length} articles
+              </Text>
+            )}
           </div>
           {selectedSubscription && (
             <div className="mobile-feeds-toolbar-sub" style={{ color: themeColors.textSecondary }}>
@@ -438,13 +504,68 @@ const MobileFeedsListView: React.FC = () => {
 
       {selectedSubscription && (
         <div className="mobile-feeds-search-wrap">
-          <Input.Search
-            allowClear
-            placeholder="Search articles…"
-            value={contentSearchQuery}
-            onChange={(e) => setContentSearchQuery(e.target.value)}
-            aria-label="Search bar"
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Input.Search
+                allowClear
+                size="small"
+                placeholder="Search articles…"
+                value={contentSearchQuery}
+                onChange={(e) => setContentSearchQuery(e.target.value)}
+                aria-label="Search bar"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <SubscriptionDigestButton
+              subscriptionId={selectedSubscription.id}
+              channelName={
+                selectedSubscription.channel_name ||
+                selectedSubscription.channel_identifier
+              }
+              themeMode={themeMode}
+              iconOnly
+            />
+          </div>
+        </div>
+      )}
+
+      {selectedSubscription && availableShows.length > 0 && (
+        <div
+          ref={showFilterStripRef}
+          className="mobile-feeds-show-filter-strip"
+          style={{ borderBottom: `1px solid ${themeColors.cardBorder}` }}
+        >
+          {(['All', ...availableShows] as const).map((show) => {
+            const isActive = show === 'All' ? selectedShowFilter === null : selectedShowFilter === show;
+            return (
+              <button
+                key={show}
+                type="button"
+                onClick={() => setSelectedShowFilter(show === 'All' ? null : show)}
+                style={{
+                  flexShrink: 0,
+                  padding: '2px 10px',
+                  fontSize: 11,
+                  lineHeight: '18px',
+                  borderRadius: 10,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: isActive ? 600 : 400,
+                  backgroundColor: isActive
+                    ? themeColors.selectedBorder
+                    : isDark
+                      ? 'rgba(255,255,255,0.07)'
+                      : 'rgba(0,0,0,0.05)',
+                  color: isActive ? '#fff' : themeColors.textSecondary,
+                  transition: 'background-color 0.15s, color 0.15s',
+                  letterSpacing: '0.01em',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {show}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -482,7 +603,9 @@ const MobileFeedsListView: React.FC = () => {
         <div style={{ padding: '32px 20px', textAlign: 'center' }}>
           <Empty
             description={
-              <span style={{ color: themeColors.textSecondary }}>No articles match your search</span>
+              <span style={{ color: themeColors.textSecondary }}>
+                No articles match your search or filters
+              </span>
             }
           />
         </div>
@@ -490,6 +613,7 @@ const MobileFeedsListView: React.FC = () => {
         <div className="mobile-feeds-list-scroll">
           {filteredContents.map((c) => {
             const primaryIsTweetBody = feedListPrimaryLineIsTweetBody(c);
+            const readingMin = estimateSubscriptionContentReadingMinutes(c);
             return (
             <div
               key={c.id}
@@ -564,17 +688,53 @@ const MobileFeedsListView: React.FC = () => {
                   {c.is_retweet && <RetweetOutlined style={{ color: '#00ba7c', fontSize: 12 }} />}
                   {c.is_quote && <MessageOutlined style={{ color: '#1DA1F2', fontSize: 12 }} />}
                   {c.is_reply && <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />}
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {c.author_name || (c.author_identifier ? `@${c.author_identifier}` : '')}
-                  </Text>
+                  <Tooltip
+                    title={
+                      c.channel_type === 'youtube' &&
+                      c.metadata?.show_name &&
+                      c.author_name
+                        ? c.author_name
+                        : undefined
+                    }
+                  >
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {c.channel_type === 'youtube' && c.metadata?.show_name
+                        ? c.metadata.show_name
+                        : c.author_name || (c.author_identifier ? `@${c.author_identifier}` : '')}
+                    </Text>
+                  </Tooltip>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     ·
                   </Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {c.published_at ? dayjs(c.published_at).fromNow() : ''}
                   </Text>
+                  {readingMin != null && (
+                    <>
+                      <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
+                      <Tooltip title="Estimated reading time">
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            color: themeColors.textSecondary,
+                            fontSize: 12,
+                          }}
+                        >
+                          <ClockCircleOutlined style={{ fontSize: 10 }} />
+                          {readingMin} min
+                        </span>
+                      </Tooltip>
+                    </>
+                  )}
                   {c.heat_level != null && c.heat_level >= 1 && (
-                    <FireOutlined style={{ color: getHeatLevelConfig(c.heat_level).color, fontSize: 13 }} />
+                    <>
+                      {readingMin != null && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>·</Text>
+                      )}
+                      <FireOutlined style={{ color: getHeatLevelConfig(c.heat_level).color, fontSize: 13 }} />
+                    </>
                   )}
                 </Space>
               </div>

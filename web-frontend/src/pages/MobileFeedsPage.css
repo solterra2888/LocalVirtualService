@@ -66,6 +66,25 @@
   padding: 0 max(12px, env(safe-area-inset-left, 0px)) 10px max(12px, env(safe-area-inset-right, 0px));
 }
 
+.mobile-feeds-show-filter-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px max(12px, env(safe-area-inset-left, 0px)) 10px max(12px, env(safe-area-inset-right, 0px));
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--mobile-feeds-card-bg, #fff);
+}
+
+.mobile-feeds-show-filter-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-feeds-page[data-theme='dark'] .mobile-feeds-show-filter-strip {
+  background: var(--mobile-feeds-card-bg, #141414);
+}
+
 .mobile-feeds-search-wrap .ant-input-search .ant-input,
 .mobile-feeds-search-wrap .ant-input-affix-wrapper {
   border-radius: 10px;

@@ -189,6 +189,21 @@ export interface SubscriptionContentTranscriptPayload {
   transcript: string;
 }
 
+/** GET /subscriptions/:id/digest */
+export interface SubscriptionDigestPayload {
+  subscription_id: number;
+  channel_name: string;
+  channel_type: string;
+  days: number;
+  since: string;
+  show_filter: string | null;
+  items_count: number;
+  skipped_count: number;
+  total_chars: number;
+  truncated: boolean;
+  text: string;
+}
+
 // 订阅管理 API
 export const subscriptionsAPI = {
   /**
@@ -374,11 +389,13 @@ export const subscriptionsAPI = {
     subscriptionId: number,
     limit: number = 50,
     offset: number = 0,
-    onlyUnread: boolean = false
+    onlyUnread: boolean = false,
+    publishedAfter?: string
   ): Promise<ApiResponse<SubscriptionContentsResponse>> {
     try {
       const params: any = { limit, offset };
       if (onlyUnread) params.only_unread = true;
+      if (publishedAfter) params.published_after = publishedAfter;
 
       const data = await api.get<SubscriptionContentsResponse>(
         `/subscriptions/${subscriptionId}/contents`,
@@ -440,6 +457,56 @@ export const subscriptionsAPI = {
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to trigger ASR transcription',
+      };
+    }
+  },
+
+  /**
+   * 获取订阅在过去 N 天内出现的 distinct show_name 列表（YouTube only）。
+   * 用于 Digest 配置面板的 Program filter，避免依赖前端已加载的有限列表。
+   */
+  async getSubscriptionShows(
+    subscriptionId: number,
+    days: 1 | 3 | 7,
+  ): Promise<ApiResponse<{ shows: string[] }>> {
+    try {
+      const data = await api.get<{ shows: string[] }>(
+        `/subscriptions/${subscriptionId}/shows`,
+        { days },
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to fetch shows',
+      };
+    }
+  },
+
+  /**
+   * 获取订阅 N 天内主要内容拼接文本（Digest），供用户复制给 LLM 插件。
+   */
+  async getSubscriptionDigest(
+    subscriptionId: number,
+    days: 1 | 3 | 7,
+    options?: {
+      showFilter?: string | null;
+      maxTotalChars?: number;
+    },
+  ): Promise<ApiResponse<SubscriptionDigestPayload>> {
+    try {
+      const params: Record<string, any> = { days };
+      if (options?.showFilter) params.show_filter = options.showFilter;
+      if (options?.maxTotalChars) params.max_total_chars = options.maxTotalChars;
+      const data = await api.get<SubscriptionDigestPayload>(
+        `/subscriptions/${subscriptionId}/digest`,
+        params,
+      );
+      return { success: true, data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to fetch digest',
       };
     }
   },

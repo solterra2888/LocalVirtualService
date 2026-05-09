@@ -952,12 +952,86 @@ async def get_subscription_task_status(
         raise HTTPException(status_code=500, detail=f"Failed to get task status: {str(e)}")
 
 
+@router.get("/{subscription_id}/shows")
+async def get_subscription_shows(
+    subscription_id: int,
+    days: int = Query(default=7, ge=1, le=30, description="时间窗天数"),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    返回指定订阅在过去 N 天内出现的 distinct show_name 列表（YouTube metadata->>'show_name'）。
+    用于 Digest 配置面板的 Program filter 下拉，避免依赖前端已加载的有限列表。
+    """
+    from datetime import timedelta
+    from backend.utils.datetime_utils import utcnow
+
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, channel_type, channel_identifier
+            FROM subscription_list
+            WHERE id = %s AND user_id = %s
+            """,
+            (subscription_id, user_id),
+        )
+        sub_row = cursor.fetchone()
+        if not sub_row:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        channel_type = sub_row[1]
+        channel_identifier = sub_row[2]
+
+        # show_name 只对 YouTube 有意义；其余渠道直接返回空列表
+        if channel_type != "youtube":
+            cursor.close()
+            conn.close()
+            return {"shows": []}
+
+        since = utcnow() - timedelta(days=days)
+
+        cursor.execute(
+            """
+            SELECT DISTINCT metadata->>'show_name'
+            FROM subscription_content
+            WHERE channel_type = 'youtube'
+              AND author_identifier = %s
+              AND %s = ANY(user_ids)
+              AND COALESCE(published_at, fetched_at) >= %s
+              AND metadata->>'show_name' IS NOT NULL
+              AND metadata->>'show_name' != ''
+            ORDER BY 1
+            """,
+            (channel_identifier, user_id, since),
+        )
+        shows = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+
+        return {"shows": shows}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching shows for subscription {subscription_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{subscription_id}/contents")
 async def get_subscription_contents(
     subscription_id: int,
     limit: int = Query(default=50, le=200, description="每页条数"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
     only_unread: bool = Query(default=False, description="仅未读"),
+    published_after: Optional[datetime] = Query(
+        default=None,
+        description="仅返回 published_at >= 该时间的条目（UTC ISO8601）",
+    ),
     current_user: TokenData = Depends(get_current_user)
 ):
     """
@@ -999,7 +1073,14 @@ async def get_subscription_contents(
             where_conditions.append(
                 f"(sc.read_status->>'{user_id}' IS NULL OR (sc.read_status->>'{user_id}')::jsonb->>'is_read' = 'false')"
             )
-        
+
+        if published_after is not None:
+            # 部分渠道入库时 published_at 可能为空，回落到 fetched_at 以免日期筛选误排除
+            where_conditions.append(
+                "COALESCE(sc.published_at, sc.fetched_at) >= %s"
+            )
+            params.append(ensure_utc(published_after))
+
         where_clause = " AND ".join(where_conditions)
         
         # 查询内容 (LEFT JOIN subscription_content_tags 带出 AI 标签 + 摘要,
@@ -1157,6 +1238,131 @@ async def get_subscription_contents(
         raise
     except Exception as e:
         logger.error(f"Error fetching contents for subscription {subscription_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{subscription_id}/digest")
+async def get_subscription_digest(
+    subscription_id: int,
+    days: int = Query(default=1, ge=1, le=7, description="时间窗天数（1/3/7）"),
+    max_chars_per_item: int = Query(default=12000, ge=1000, le=60000, description="单条最大字符数"),
+    max_total_chars: int = Query(default=400000, ge=10000, le=1500000, description="全量最大字符数"),
+    show_filter: Optional[str] = Query(default=None, description="按节目名过滤（YouTube show_name），空则不过滤"),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    返回订阅在过去 N 天内主要内容的拼接纯文本，供用户/外部 LLM 插件消费。
+
+    - twitter: content（含 retweet/quote/reply 结构）
+    - youtube: transcript_cleaned → transcript → content(描述) 三级回退；全空跳过
+    - news:    content → url 兜底
+    """
+    from datetime import timedelta
+    from backend.utils.datetime_utils import utcnow
+    from backend.services.subscription_digest_service import (
+        build_digest,
+        QUERY_ROW_LIMIT,
+    )
+
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+
+        # 1. 验证订阅所有权
+        cursor.execute(
+            """
+            SELECT id, user_id, channel_type, channel_identifier, channel_name
+            FROM subscription_list
+            WHERE id = %s AND user_id = %s
+            """,
+            (subscription_id, user_id),
+        )
+        sub_row = cursor.fetchone()
+        if not sub_row:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        channel_type = sub_row[2]
+        channel_identifier = sub_row[3]
+        channel_name = sub_row[4]
+
+        since = utcnow() - timedelta(days=days)
+
+        # 2. 拉取范围内的内容
+        #    YouTube 需要 transcript / transcript_cleaned；其余渠道只需 content 等基础列
+        #    show_filter 非空时额外过滤 metadata->>'show_name'
+        show_clause = ""
+        params_extra: list = []
+        if show_filter:
+            show_clause = "AND metadata->>'show_name' = %s"
+            params_extra = [show_filter]
+
+        cursor.execute(
+            f"""
+            SELECT
+                id, channel_type, title, content,
+                author_name, author_identifier, url, published_at,
+                is_retweet, retweeted_author, retweeted_content, retweeted_url,
+                is_quote, quoted_author, quoted_content, quoted_url,
+                is_reply, in_reply_to_username,
+                transcript, transcript_cleaned,
+                metadata
+            FROM subscription_content
+            WHERE channel_type = %s
+              AND author_identifier = %s
+              AND %s = ANY(user_ids)
+              AND COALESCE(published_at, fetched_at) >= %s
+              {show_clause}
+            ORDER BY COALESCE(published_at, fetched_at) DESC
+            LIMIT %s
+            """,
+            [channel_type, channel_identifier, user_id, since] + params_extra + [QUERY_ROW_LIMIT],
+        )
+        col_names = [
+            "id", "channel_type", "title", "content",
+            "author_name", "author_identifier", "url", "published_at",
+            "is_retweet", "retweeted_author", "retweeted_content", "retweeted_url",
+            "is_quote", "quoted_author", "quoted_content", "quoted_url",
+            "is_reply", "in_reply_to_username",
+            "transcript", "transcript_cleaned",
+            "metadata",
+        ]
+        rows = [dict(zip(col_names, r)) for r in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        # 3. 构建 digest
+        subscription = {
+            "channel_name": channel_name,
+            "channel_identifier": channel_identifier,
+            "channel_type": channel_type,
+        }
+        result = build_digest(
+            subscription,
+            rows,
+            max_chars_per_item=max_chars_per_item,
+            max_total_chars=max_total_chars,
+            days=days,
+            since=since,
+        )
+
+        return {
+            "subscription_id": subscription_id,
+            "channel_name": channel_name or f"@{channel_identifier}",
+            "channel_type": channel_type,
+            "days": days,
+            "since": since.isoformat(),
+            "show_filter": show_filter,
+            **result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error building digest for subscription {subscription_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

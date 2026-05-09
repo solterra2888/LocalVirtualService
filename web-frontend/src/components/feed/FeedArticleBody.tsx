@@ -24,6 +24,7 @@ import {
   SyncOutlined,
   TwitterOutlined,
   YoutubeOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { api } from '../../services/api';
 import { getNewsSourceColor } from './feedChannelConfig';
@@ -55,6 +56,7 @@ import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import type { FeedArticleViewMode } from './feedArticleViewMode';
+import { estimateSubscriptionContentReadingMinutes } from './feedUtils';
 import { getModalStyles } from '../../utils/modalStyles';
 
 export type { FeedArticleViewMode } from './feedArticleViewMode';
@@ -588,6 +590,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     ? 'Re-generate personalized AI analysis for this content using your template.'
     : 'Generate a personalized AI analysis for this content using your private template.';
 
+  const readingMin = estimateSubscriptionContentReadingMinutes(selectedContent);
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
@@ -624,6 +628,26 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </div>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {selectedContent.published_at ? dayjs(selectedContent.published_at).format('MMM D, YYYY') : 'Unknown'}
+              {readingMin != null && (
+                <>
+                  {' '}
+                  <span style={{ opacity: 0.5 }}>·</span>
+                  {' '}
+                  <Tooltip title="Estimated reading time">
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      <ClockCircleOutlined style={{ fontSize: 10 }} />
+                      {readingMin} min
+                    </span>
+                  </Tooltip>
+                </>
+              )}
             </Text>
           </div>
         </Space>
@@ -641,31 +665,20 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             accent: themeColors.selectedBorder,
           }}
           headerMeta={
-            displayTags?.tagged_at || isLowConfidence ? (
-              <>
-                {displayTags?.tagged_at && (
-                  <Tooltip title={dayjs(displayTags.tagged_at).format('YYYY-MM-DD HH:mm:ss')}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      · {dayjs(displayTags.tagged_at).fromNow()}
-                    </Text>
-                  </Tooltip>
-                )}
-                {isLowConfidence && (
-                  <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
-                    <Tag
-                      color="warning"
-                      style={{
-                        fontSize: AI_TAG_CHIP_FONT_SIZE,
-                        lineHeight: '12px',
-                        padding: '0 4px',
-                        margin: 0,
-                      }}
-                    >
-                      low conf.
-                    </Tag>
-                  </Tooltip>
-                )}
-              </>
+            isLowConfidence ? (
+              <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
+                <Tag
+                  color="warning"
+                  style={{
+                    fontSize: AI_TAG_CHIP_FONT_SIZE,
+                    lineHeight: '12px',
+                    padding: '0 4px',
+                    margin: 0,
+                  }}
+                >
+                  low conf.
+                </Tag>
+              </Tooltip>
             ) : undefined
           }
           headerActions={
