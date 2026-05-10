@@ -862,7 +862,11 @@ def list_daily_calendar(
         ),
         by_day AS (
             SELECT
-                (published_at AT TIME ZONE %(cal_tz)s)::date AS d,
+                -- 契约: uploaded_at / published_at 列为 naive UTC (连接 TimeZone=UTC).
+                -- 若写成 (published_at AT TIME ZONE cal_tz)::date，会把存盘钟面误当成 cal_tz
+                -- 本地时刻 → 与前端 dateKeyInTz(dayjs.utc(...).tz(cal_tz))) 差 ~8h，
+                -- 「今天」桶内 Twitter/YouTube 会落到「昨天」桶。
+                (published_at::timestamptz AT TIME ZONE %(cal_tz)s)::date AS d,
                 source,
                 raw_subtype,
                 COUNT(*) AS cnt

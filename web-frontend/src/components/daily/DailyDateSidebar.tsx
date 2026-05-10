@@ -24,6 +24,7 @@ import {
 } from '../../services/daily';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
+import { todayInTz, yesterdayInTz } from '../../utils/datetime';
 import './dailySubtleScrollbar.css';
 
 const { Text } = Typography;
@@ -64,17 +65,6 @@ function formatSidebarDate(dateStr: string, today: string, yesterday: string): s
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-function getLocalDateStr(tz: string): { today: string; yesterday: string } {
-  const now = new Date();
-  const opts: Intl.DateTimeFormatOptions = { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' };
-  const parts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(now);
-  const todayStr = parts.map(p => p.value).join('');
-  const yest = new Date(now);
-  yest.setDate(yest.getDate() - 1);
-  const yestParts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(yest);
-  return { today: todayStr, yesterday: yestParts.map(p => p.value).join('') };
-}
-
 // ─── Props ──────────────────────────────────────────────────────
 
 export interface DailyDateSidebarProps {
@@ -109,7 +99,9 @@ const DailyDateSidebar: React.FC<DailyDateSidebarProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
-  const { today, yesterday } = getLocalDateStr(userTimezone || 'UTC');
+  const tz = userTimezone || 'UTC';
+  const today = todayInTz(tz);
+  const yesterday = yesterdayInTz(tz);
 
   const fetchCalendar = useCallback(async (numDays: number) => {
     setLoading(true);

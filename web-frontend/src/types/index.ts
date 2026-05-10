@@ -84,22 +84,9 @@ export interface ProcessingParams {
   use_vendor_multimodal_model: boolean;
   vendor_multimodal_api_key?: string;
   polling_interval: number;
-  use_ai_agent: boolean;
-  ai_agent_server_url: string;
 }
 
 // 任务相关类型
-export interface TaskType {
-  id: string;
-  name: string;
-  token: string;
-  creator: string;
-  created_at: string;
-  remarks?: string;
-  input_fields: any[];
-  is_default: boolean;
-}
-
 export interface TaskExecution {
   id: string;
   username: string;
@@ -113,13 +100,6 @@ export interface TaskExecution {
   total_tokens?: number;
   total_cost?: number;
   rc_agent_status?: string;
-}
-
-export interface TaskCreateRequest {
-  name: string;
-  token: string;
-  remarks?: string;
-  input_fields: any[];
 }
 
 // API响应类型

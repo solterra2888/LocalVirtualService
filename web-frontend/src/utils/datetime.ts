@@ -15,6 +15,7 @@
  *   const tz = useUserTimezone();   // from DashboardSettingsContext
  *   formatDateLabel(item.published_at, tz)        // "April 25, 2026"
  *   formatTime(item.published_at, tz)             // "APR 25 03:22"
+ *   formatClockTime(item.published_at, tz)       // "15:30" / "03:30 PM"（仅时刻，用于时间轴）
  *   dateKeyInTz(item.published_at, tz)            // "2026-04-25"
  *   relativeTime(item.published_at)               // "2 hours ago"
  */
@@ -88,6 +89,24 @@ export function formatTime(
   const monthDay = d.format('MMM DD').toUpperCase();
   const time = hour12 ? d.format('hh:mm A') : d.format('HH:mm');
   return `${monthDay} ${time}`;
+}
+
+/**
+ * 仅时刻（日期由分组标题表达时使用）.
+ * en 默认 12 小时制与 formatTime 一致；中文为 24 小时 HH:mm.
+ */
+export function formatClockTime(
+  iso: string,
+  tz: string,
+  opts?: { locale?: 'en' | 'zh'; hour12?: boolean }
+): string {
+  const locale = opts?.locale ?? inferLocale();
+  const hour12 = opts?.hour12 ?? (locale === 'en');
+  const d = inUserTz(iso, tz);
+  if (locale === 'zh') {
+    return d.format('HH:mm');
+  }
+  return hour12 ? d.format('hh:mm A') : d.format('HH:mm');
 }
 
 /** 相对时间, 例如 "2 hours ago". */

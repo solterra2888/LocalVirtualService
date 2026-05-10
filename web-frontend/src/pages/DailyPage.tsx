@@ -28,6 +28,7 @@ import {
   listDailyFeed,
 } from '../services/daily';
 import DailyCard from '../components/daily/DailyCard';
+import DailyTimelineItem from '../components/daily/DailyTimelineItem';
 import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
 import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
@@ -384,13 +385,14 @@ const DailyPageInner: React.FC = () => {
         overflow: 'hidden',
       }}
     >
-      {/* 两栏布局：左侧日期导航栏 + 右侧主内容区 */}
+      {/* 两栏布局：左侧日期导航栏 + 右侧主内容区
+          主内容左缘对齐：paddingLeft + 220(sidebar) + gap = 常数（原 32+220+16），避免列表区整体漂移 */}
       <div
         style={{
           maxWidth: 1180,
           margin: '0 auto',
           display: 'flex',
-          gap: 16,
+          gap: 50,
           height: '100%',
           overflow: 'hidden',
           padding: '24px 32px 0',
@@ -574,16 +576,23 @@ const DailyPageInner: React.FC = () => {
                   </Text>
                 </div>
 
-                {/* 当日卡片列表 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {group.items.map((it) => (
-                    <DailyCard
+                {/* 当日卡片列表（左侧时间轴，参考 AIHOT） */}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {group.items.map((it, idx) => (
+                    <DailyTimelineItem
                       key={it.id}
-                      item={it}
                       themeMode={themeMode}
-                      onClick={handleCardClick}
-                      onTickerClick={(t) => setSearchInput(t.replace(/\.US$/, ''))}
-                    />
+                      publishedAt={it.published_at}
+                      isFirst={idx === 0}
+                      isLast={idx === group.items.length - 1}
+                    >
+                      <DailyCard
+                        item={it}
+                        themeMode={themeMode}
+                        onClick={handleCardClick}
+                        onTickerClick={(t) => setSearchInput(t.replace(/\.US$/, ''))}
+                      />
+                    </DailyTimelineItem>
                   ))}
                 </div>
               </div>

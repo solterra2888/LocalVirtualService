@@ -34,7 +34,6 @@ from backend.schemas.file_tag import (
 )
 from backend.auth.jwt_utils import get_current_user
 from backend.processors.file_processor import FileProcessor
-from backend.processors.task_manager import TaskManager
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import info, error, warning, debug
 from backend.utils.database_config import get_database_config
@@ -698,7 +697,7 @@ async def process_files(
     提交文件处理任务到队列（异步处理）
     
     - **file_paths**: 文件路径列表
-    - **task_type**: RC Agent类型
+    - **task_type**: 可选；local_llm 下可为占位或省略
     - **custom_inputs**: 自定义输入参数
     - **params**: 处理参数
     """
@@ -728,10 +727,15 @@ async def process_files(
     # 获取数据库连接参数
     db_conn_params = get_database_config()
     
-    # 根据分析模式进行不同的验证
+    # 根据分析模式进行不同的验证（仅支持 local_llm）
     task_info = {}
-    analysis_mode = request.analysis_mode
-    
+    analysis_mode = request.analysis_mode or 'local_llm'
+    if analysis_mode != 'local_llm':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only local_llm analysis mode is supported; remote_agent / Dify integration has been removed.",
+        )
+
     if analysis_mode == 'local_llm':
         # 本地LLM模式：验证模板
         if not request.template_id and not request.template_code:
@@ -771,22 +775,6 @@ async def process_files(
             source="api",
             user=current_user.username
         )
-    else:
-        # 远程Agent模式：验证任务选择
-        task_manager = TaskManager(current_user.username, current_user.is_admin, db_conn_params)
-        task_manager.load_agent_credentials()
-        
-        is_valid, message, task_info = task_manager.validate_task_selection(
-            request.task_type, 
-            request.params.get('use_ai_agent', True)
-        )
-        
-        if not is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=message
-            )
-    
     try:
         # 准备处理参数，添加分析模式相关参数
         processing_params = request.params.copy()
@@ -2816,8 +2804,6 @@ async def upload_audio(
 @router.post("/upload-and-process-document", summary="Upload document file and process asynchronously (recommended, avoid OSS slow connection blocking)")
 async def upload_and_process_document(
     file: UploadFile = File(...),
-    analysis_mode: str = Form('local_llm'),
-    task_type: str = Form(None),
     template_id: Optional[int] = Form(None),
     template_variables: str = Form('{}'),  # JSON string
     auto_analyze_enabled: bool = Form(True),
@@ -2843,9 +2829,7 @@ async def upload_and_process_document(
     
     参数：
     - file: 文件（必需）
-    - analysis_mode: 'local_llm' 或 'remote_agent'（可选，默认 local_llm）
-    - task_type: remote_agent 时的任务类型
-    - template_id: local_llm 时的模板 ID
+    - template_id: 上传完成后自动分析时使用的模板 ID（可选）
     - template_variables: 模板变量（JSON 字符串）
     - custom_inputs: 自定义输入（JSON 字符串）
     - params: 处理参数，包含 sector/industry/ticker 等（JSON 字符串）
@@ -2886,6 +2870,7 @@ async def upload_and_process_document(
             custom_inputs_dict = json.loads(custom_inputs) if custom_inputs else {}
             params_dict = json.loads(params) if params else {}
             _strip_llamaindex_key_from_client_params(params_dict)
+            params_dict['analysis_mode'] = 'local_llm'
             # PR-5: 上传弹窗 file_tagging picker 的模板变量
             auto_tag_template_vars = json.loads(auto_tag_template_variables) if auto_tag_template_variables else {}
         except json.JSONDecodeError as e:
@@ -2914,10 +2899,10 @@ async def upload_and_process_document(
         info(f"Document file saved to temporary directory: {file.filename} ({file_size / (1024 * 1024):.2f} MB)", 
              source="api", user=current_user.username)
         
-        # 组装任务信息
+        # 组装任务信息（文档上传固定为 local_llm 管线；解析后主分析由 trigger_auto_analyze 等完成）
         task_info = {
-            'analysis_mode': analysis_mode,
-            'task_type': task_type or 'local_llm_template',
+            'analysis_mode': 'local_llm',
+            'task_type': 'document_upload',
             'template_id': template_id,
             'template_variables': template_vars,
             # 方案 A: 上传弹窗 AI Analysis 开关

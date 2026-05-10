@@ -9,7 +9,6 @@ import {
   Typography,
   Switch,
   Alert,
-  Result,
   message,
   Modal,
   Form,
@@ -54,8 +53,6 @@ import { api } from '../services/api';
 import { getModalStyles } from '../utils/modalStyles';
 import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
-import { useAuthStore } from '../store/authStore';
-import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
@@ -153,8 +150,6 @@ interface NewsTheme {
 
 
 const SchedulerPage: React.FC = () => {
-  const { user } = useAuthStore();
-  const navigate = useNavigate();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
@@ -1326,76 +1321,6 @@ const SchedulerPage: React.FC = () => {
       </div>
     );
   };
-
-  if (!user?.is_admin) {
-    return (
-      <ConfigProvider
-        theme={{
-          algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-          ...(isDark && {
-            token: {
-              colorBgContainer: colors.cardBg,
-              colorBgElevated: colors.cardBg,
-              colorBorderSecondary: colors.cardBorder,
-              colorPrimary: '#2196F3',
-              colorText: colors.text,
-              colorTextSecondary: colors.textSecondary,
-              colorFillQuaternary: colors.inputBg ?? '#1E202B',
-              colorBgLayout: colors.pageBg,
-              borderRadius: 8,
-              borderRadiusLG: 12,
-            },
-          }),
-        }}
-      >
-        <div style={{ padding: '12px 40px 32px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
-          <Card style={cardStyle} bodyStyle={{ padding: '20px 24px' }}>
-            <Result
-              status="info"
-              title="Scheduler configuration requires admin access"
-              subTitle="Task Management and Execution History have moved to Scheduler Logs."
-              extra={
-                <Button
-                  type="primary"
-                  onClick={() => navigate('/scheduler/logs')}
-                  style={{
-                    borderRadius: 20,
-                    fontWeight: 500,
-                    height: 40,
-                    paddingLeft: 24,
-                    paddingRight: 24,
-                    background: isDark ? '#2196F3' : '#1890ff',
-                    borderColor: isDark ? '#2196F3' : '#1890ff',
-                    boxShadow: isDark 
-                      ? '0 4px 16px rgba(33, 150, 243, 0.35)' 
-                      : '0 4px 16px rgba(24, 144, 255, 0.3)',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  }}
-                  onMouseEnter={(e) => {
-                    const btn = e.currentTarget as HTMLButtonElement;
-                    btn.style.transform = 'translateY(-2px)';
-                    btn.style.boxShadow = isDark 
-                      ? '0 6px 20px rgba(33, 150, 243, 0.45)' 
-                      : '0 6px 20px rgba(24, 144, 255, 0.4)';
-                  }}
-                  onMouseLeave={(e) => {
-                    const btn = e.currentTarget as HTMLButtonElement;
-                    btn.style.transform = 'translateY(0)';
-                    btn.style.boxShadow = isDark 
-                      ? '0 4px 16px rgba(33, 150, 243, 0.35)' 
-                      : '0 4px 16px rgba(24, 144, 255, 0.3)';
-                  }}
-                >
-                  Go to Scheduler Logs
-                </Button>
-              }
-            />
-          </Card>
-        </div>
-      </ConfigProvider>
-    );
-  }
-
 
   return (
     <ConfigProvider

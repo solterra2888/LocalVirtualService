@@ -22,6 +22,7 @@ export const DAILY_THEME_COLORS = {
     inputBg: '#ffffff',
     sectionHeader: '#e8f4ff',
     accent: '#1890ff',
+    timelineRail: 'rgba(24, 144, 255, 0.38)',
   },
   dark: {
     pageBg: '#1E202B',
@@ -44,6 +45,7 @@ export const DAILY_THEME_COLORS = {
     inputBg: '#1E202B',
     sectionHeader: 'rgba(33, 150, 243, 0.10)',
     accent: '#2196F3',
+    timelineRail: 'rgba(33, 150, 243, 0.4)',
   },
 } as const;
 

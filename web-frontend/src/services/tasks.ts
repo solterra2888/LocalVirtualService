@@ -1,21 +1,5 @@
 import { api } from './api';
 
-// 本地类型定义
-export interface TaskType {
-  id: string;
-  name: string;
-  token: string;
-  creator: string;
-  created_at: string;
-  remarks?: string;
-  input_fields: Array<{
-    name: string;
-    max_length: number;
-  }>;
-  is_default: boolean;
-  agent_type: 'chatbot' | 'workflow';
-}
-
 export interface TaskExecution {
   id: string;
   username: string;
@@ -46,28 +30,6 @@ export interface TaskExecution {
   folder_id?: number | null;
   folder_name?: string | null;
   first_display_name?: string | null;
-}
-
-export interface TaskCreateRequest {
-  name: string;
-  token: string;
-  remarks?: string;
-  input_fields?: Array<{
-    name: string;
-    max_length: number;
-  }>;
-  agent_type?: 'chatbot' | 'workflow';
-}
-
-export interface TaskUpdateRequest {
-  name?: string;
-  token?: string;
-  remarks?: string;
-  input_fields?: Array<{
-    name: string;
-    max_length: number;
-  }>;
-  agent_type?: 'chatbot' | 'workflow';
 }
 
 export interface TaskExecutionDetail {
@@ -116,58 +78,6 @@ export interface PaginationParams {
 }
 
 export const tasksAPI = {
-  // 获取RC Agent列表
-  getTaskTypes: async (): Promise<TaskType[]> => {
-    try {
-      console.log('正在获取RC Agent列表...');
-      const result = await api.get<TaskType[]>('/tasks/types');
-      console.log('RC Agent获取成功:', result);
-      return result;
-    } catch (error) {
-      console.error('获取RC Agent失败:', error);
-      throw error;
-    }
-  },
-
-  // 创建RC Agent
-  createTaskType: async (request: TaskCreateRequest): Promise<TaskType> => {
-    try {
-      console.log('正在创建RC Agent:', request);
-      const result = await api.post<TaskType>('/tasks/types', request);
-      console.log('RC Agent创建成功:', result);
-      return result;
-    } catch (error) {
-      console.error('创建RC Agent失败:', error);
-      throw error;
-    }
-  },
-
-  // 更新RC Agent
-  updateTaskType: async (taskId: string, request: TaskUpdateRequest): Promise<TaskType> => {
-    try {
-      console.log('正在更新RC Agent:', taskId, request);
-      const result = await api.put<TaskType>(`/tasks/types/${taskId}`, request);
-      console.log('RC Agent更新成功:', result);
-      return result;
-    } catch (error) {
-      console.error('更新RC Agent失败:', error);
-      throw error;
-    }
-  },
-
-  // 删除RC Agent
-  deleteTaskType: async (taskId: string): Promise<{ message: string }> => {
-    try {
-      console.log('正在删除RC Agent:', taskId);
-      const result = await api.delete<{ message: string }>(`/tasks/types/${taskId}`);
-      console.log('RC Agent删除成功:', result);
-      return result;
-    } catch (error) {
-      console.error('删除RC Agent失败:', error);
-      throw error;
-    }
-  },
-
   // 获取任务执行历史（支持分页：page, page_size）
   getTaskExecutions: async (params?: PaginationParams): Promise<TaskExecution[]> => {
     try {
@@ -241,18 +151,6 @@ export const tasksAPI = {
       console.error('认证状态测试失败:', error);
       throw error;
     }
-  },
-
-  // 获取默认RC Agent
-  getDefaultTaskType: async (): Promise<TaskType | null> => {
-    const taskTypes = await tasksAPI.getTaskTypes();
-    return taskTypes.find(task => task.is_default) || null;
-  },
-
-  // 验证RC Agent名称是否唯一
-  validateTaskTypeName: async (name: string, excludeId?: string): Promise<boolean> => {
-    const taskTypes = await tasksAPI.getTaskTypes();
-    return !taskTypes.some(task => task.name === name && task.id !== excludeId);
   },
 
   // 格式化任务执行时间

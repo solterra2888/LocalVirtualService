@@ -234,17 +234,6 @@ interface FileItem {
   };
 }
 
-interface TaskType {
-  id: string;
-  name: string;
-  token: string;
-  input_fields: Array<{
-    name: string;
-    max_length: number;
-  }>;
-  is_default: boolean;
-}
-
 interface TaskExecution {
   id: string;
   username: string;
@@ -289,8 +278,6 @@ interface ProcessingParams {
   use_vendor_multimodal_model: boolean;
   vendor_multimodal_api_key: string;
   polling_interval: number;
-  use_ai_agent: boolean;
-  ai_agent_server_url: string;
   sector?: string;
   industry?: string;
   ticker?: string;
@@ -331,16 +318,11 @@ const FilesPageInner: React.FC = () => {
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
-  const [selectedTaskType, setSelectedTaskType] = useState<string>('');
-  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [processing, setProcessing] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [lastCompletedTaskId, setLastCompletedTaskId] = useState<string | null>(null);
   const [, setTaskStatus] = useState<TaskStatus | null>(null);
   
-  // 新增：分析模式相关状态
-  const [analysisMode, setAnalysisMode] = useState<'remote_agent' | 'local_llm'>('local_llm');
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
   const [templateVariables, setTemplateVariables] = useState<Record<string, any>>({});
   const [, setShowParams] = useState(false);
@@ -462,8 +444,6 @@ const FilesPageInner: React.FC = () => {
     use_vendor_multimodal_model: false,
     vendor_multimodal_api_key: '',
     polling_interval: 8, // 调整为与实际轮询间隔一致（秒）
-    use_ai_agent: true,
-    ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     const [form] = Form.useForm();
 
@@ -487,18 +467,11 @@ const FilesPageInner: React.FC = () => {
   // 加载API密钥等关键配置
   const loadDefaultConfig = useCallback(async () => {
     try {
-      const response = await filesAPI.getProcessingParams();
-      const defaultAgentUrl = response.defaults?.ai_agent_server_url;
-      if (defaultAgentUrl) {
-        setProcessingParams(prev => ({
-          ...prev,
-          ai_agent_server_url: defaultAgentUrl || prev.ai_agent_server_url
-        }));
-      }
+      await filesAPI.getProcessingParams();
     } catch (error: any) {
       console.error('加载默认配置失败:', error);
     }
-  }, [setProcessingParams]);
+  }, []);
 
   // 加载所有模板
   const loadAllTemplates = useCallback(async () => {
@@ -517,12 +490,6 @@ const FilesPageInner: React.FC = () => {
     // 重置文件列表
     setFiles([]);
     
-    // 重置任务类型和自定义输入
-    setSelectedTaskType('');
-    setCustomInputs({});
-    
-    // 重置分析模式相关
-    setAnalysisMode('local_llm');
     setSelectedTemplateId(undefined);
     setTemplateVariables({});
     setModalAnalyzeDocPicker({});
@@ -540,8 +507,6 @@ const FilesPageInner: React.FC = () => {
       use_vendor_multimodal_model: false,
       vendor_multimodal_api_key: '',
       polling_interval: 8,
-      use_ai_agent: true,
-      ai_agent_server_url: process.env.REACT_APP_RC_AGENT_BASE_URL || 'http://localhost:81/v1/chat-messages'
     });
     
     // 重新加载默认配置（包括API密钥等）
@@ -584,12 +549,6 @@ const FilesPageInner: React.FC = () => {
     return taskName;
   }, [allTemplates]);
 
-  // 添加错误重试状态管理
-  const [taskTypesLoadAttempts, setTaskTypesLoadAttempts] = useState(0);
-  const [lastTaskTypesError, setLastTaskTypesError] = useState<number>(0);
-  const maxTaskTypesRetries = 3; // 最大重试次数
-  const retryInterval = 30000; // 重试间隔30秒
-  
   // 任务执行历史错误重试状态管理
   const [taskHistoryLoadAttempts, setTaskHistoryLoadAttempts] = useState(0);
   const [lastTaskHistoryError, setLastTaskHistoryError] = useState<number>(0);
@@ -765,79 +724,6 @@ const FilesPageInner: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickerFilter]);
 
-  // loadTaskTypes 函数定义需要移到这里
-  const loadTaskTypes = useCallback(async (showError = true) => {
-    const now = Date.now();
-    
-    // 如果最近有错误且未超过重试间隔，则跳过
-    if (lastTaskTypesError > 0 && (now - lastTaskTypesError) < retryInterval) {
-      console.log('跳过RC Agent加载，等待重试间隔...');
-      return;
-    }
-    
-    // 如果超过最大重试次数，则停止尝试
-    if (taskTypesLoadAttempts >= maxTaskTypesRetries) {
-      console.log('RC Agent加载失败次数过多，停止尝试');
-      return;
-    }
-
-    try {
-      console.log('开始加载RC Agent...');
-      const types = await tasksAPI.getTaskTypes();
-      setTaskTypes(types);
-      
-      // 重置错误状态
-      setTaskTypesLoadAttempts(0);
-      setLastTaskTypesError(0);
-      
-      // 不再自动选择默认任务，让用户手动选择
-      // 如果用户之前选择了任务且该任务仍然存在，则保持选择
-      if (selectedTaskType && types.find(t => t.id === selectedTaskType)) {
-        // 保持当前选择
-      } else if (types.length > 0) {
-        // 如果没有选择或选择的任务不存在，清空选择
-        setSelectedTaskType('');
-      }
-    } catch (error: any) {
-      console.error('failed to load RC Agent:', error);
-      
-      // 更新错误状态
-      setTaskTypesLoadAttempts(prev => prev + 1);
-      setLastTaskTypesError(now);
-      
-      // 只有在显示错误且重试次数未达到上限时才显示错误消息
-      if (showError && taskTypesLoadAttempts < maxTaskTypesRetries) {
-        // 显示详细的错误信息
-        let errorMessage = 'failed to load RC Agent';
-        if (error.response?.status === 401) {
-          errorMessage += ' - authentication failed, please login again';
-        } else if (error.response?.status === 403) {
-          errorMessage += ' - not enough permissions';
-        } else if (error.response?.status === 404) {
-          errorMessage += ' - API endpoint not found';
-        } else if (error.response?.status >= 500) {
-          errorMessage += ' - server internal error';
-        } else if (error.message === 'Network Error') {
-          errorMessage += ' - network connection failed';
-        } else {
-          errorMessage += ` - ${error.response?.data?.detail || error.message}`;
-        }
-        
-        // 添加重试信息
-        if (taskTypesLoadAttempts < maxTaskTypesRetries - 1) {
-          errorMessage += ` (${taskTypesLoadAttempts + 1}/${maxTaskTypesRetries})`;
-        } else {
-          errorMessage += ' - maximum number of retries reached, please check network connection';
-        }
-        
-        message.error(errorMessage);
-      } else if (taskTypesLoadAttempts >= maxTaskTypesRetries) {
-        // 最后一次重试失败，显示最终错误消息
-        message.error('failed to load RC Agent, please check network connection or contact administrator');
-      }
-    }
-  }, [setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
-
   // ── Folder helpers ────────────────────────────────────────
   const loadFolders = useCallback(async () => {
     try {
@@ -903,7 +789,6 @@ const FilesPageInner: React.FC = () => {
 
   // 初始化加载：仅在组件挂载时执行一次
   useEffect(() => {
-    loadTaskTypes();
     loadTaskExecutionsFunc();
     loadDefaultConfig();
     loadAllTemplates();
@@ -1842,17 +1727,9 @@ const FilesPageInner: React.FC = () => {
   };
 
   const _handleStartProcessing = async () => {
-    // 根据分析模式进行不同的验证
-    if (analysisMode === 'remote_agent') {
-      if (!selectedTaskType) {
-        message.error('please select reverse capital agent');
-        return;
-      }
-    } else if (analysisMode === 'local_llm') {
-      if (!selectedTemplateId) {
-        message.error('please select Prompt Template');
-        return;
-      }
+    if (!selectedTemplateId) {
+      message.error('please select Prompt Template');
+      return;
     }
 
     try {
@@ -1875,14 +1752,16 @@ const FilesPageInner: React.FC = () => {
       
       const response = await filesAPI.processFiles({
         file_paths: files.map(f => f.path),
-        task_type: analysisMode === 'local_llm' ? 'local_llm_template' : selectedTaskType,
-        custom_inputs: customInputs,
-        params: processingParams,
-        // 新增：分析模式相关参数
-        analysis_mode: analysisMode,
-        template_id: analysisMode === 'local_llm' ? selectedTemplateId : undefined,
+        task_type: 'local_llm_template',
+        params: {
+          ...processingParams,
+          use_ai_agent: true,
+          analysis_mode: 'local_llm',
+        },
+        analysis_mode: 'local_llm',
+        template_id: selectedTemplateId,
         template_code: undefined, // 可选：如果需要使用template_code
-        template_variables: analysisMode === 'local_llm' ? templateVariables : {},
+        template_variables: templateVariables,
         llm_provider: undefined, // 可选：指定LLM提供商
         llm_model: undefined, // 可选：指定LLM模型
       });
@@ -1928,19 +1807,6 @@ const FilesPageInner: React.FC = () => {
     }
   };
 
-  const _handleTaskTypeChange = (taskId: string) => {
-    setSelectedTaskType(taskId);
-    const taskType = taskTypes.find(t => t.id === taskId);
-    if (taskType) {
-      // 重置自定义输入
-      const newCustomInputs: Record<string, string> = {};
-      taskType.input_fields.forEach(field => {
-        newCustomInputs[field.name] = '';
-      });
-      setCustomInputs(newCustomInputs);
-    }
-  };
-
   // 新增：重新处理函数
   const _handleReprocess = () => {
     setShowResult(false);
@@ -1974,39 +1840,6 @@ const FilesPageInner: React.FC = () => {
     if (showResult && processingResult) return 'completed';
     if (files.length === 0) return 'empty';
     return 'ready';
-  };
-
-  const _renderCustomInputs = () => {
-    const selectedTask = taskTypes.find(t => t.id === selectedTaskType);
-    if (!selectedTask || !selectedTask.input_fields.length) {
-      return null;
-    }
-
-    return (
-      <div style={{ marginTop: 16 }}>
-        <Form layout="vertical">
-          {selectedTask.input_fields.map(field => (
-            <Form.Item
-              key={field.name}
-              label={field.name}
-            >
-              <Input.TextArea
-                value={customInputs[field.name] || ''}
-                onChange={(e) => setCustomInputs(prev => ({
-                  ...prev,
-                  [field.name]: e.target.value
-                }))}
-                placeholder={`enter ${field.name}`}
-                maxLength={field.max_length}
-                showCount
-                rows={2}
-                disabled={processing}
-              />
-            </Form.Item>
-          ))}
-        </Form>
-      </div>
-    );
   };
 
   const _renderProcessingParams = () => (
@@ -2073,25 +1906,10 @@ const FilesPageInner: React.FC = () => {
         </Col>
       </Row>
       
-      <Row gutter={16}>
-        <Col span={24}>
-          <Form.Item label="RC Agent Server URL">
-            <Input
-              value={processingParams.ai_agent_server_url}
-              onChange={(e) => setProcessingParams(prev => ({
-                ...prev,
-                ai_agent_server_url: e.target.value
-              }))}
-              placeholder="Enter RC Agent server URL"
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-      
       <Divider />
       
       <Row gutter={16}>
-        <Col span={8}>
+        <Col span={12}>
           <Form.Item label="Fast Mode">
             <Switch
               checked={processingParams.fast_mode}
@@ -2102,7 +1920,7 @@ const FilesPageInner: React.FC = () => {
             />
           </Form.Item>
         </Col>
-        <Col span={8}>
+        <Col span={12}>
           <Form.Item label="Disable OCR">
             <Switch
               checked={processingParams.disable_ocr}
@@ -2110,17 +1928,6 @@ const FilesPageInner: React.FC = () => {
                 ...prev,
                 disable_ocr: checked
               }))}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item label="Use RC Agent">
-            <Switch
-                          checked={processingParams.use_ai_agent}
-            onChange={(checked) => setProcessingParams(prev => ({
-              ...prev,
-              use_ai_agent: checked
-            }))}
             />
           </Form.Item>
         </Col>
@@ -4860,8 +4667,6 @@ const ContentMarkdownView: React.FC<{
     use_vendor_multimodal_model: false,
     vendor_multimodal_api_key: '',
     polling_interval: 10,
-    use_ai_agent: false,
-    ai_agent_server_url: ''
   });
   const [reparsing, setReparsing] = useState(false);
 

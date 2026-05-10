@@ -3,7 +3,6 @@ import type { MenuProps } from 'antd';
 import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Switch, Modal, Popover } from 'antd';
 import {
   FileTextOutlined,
-  AppstoreOutlined,
   LogoutOutlined,
   TeamOutlined,
   CodeOutlined,
@@ -177,11 +176,14 @@ const Layout: React.FC = () => {
     { type: 'divider' as const },
     { key: '/prompt-templates', icon: <BuildOutlined />, label: 'Prompt Templates', onClick: () => navigate('/prompt-templates') },
     { key: '/investment-themes', icon: <FundOutlined />, label: 'Themes Settings', onClick: () => navigate('/investment-themes') },
-    { key: '/tasks', icon: <AppstoreOutlined />, label: 'AI Agent Settings', onClick: () => navigate('/tasks') },
     ...(user?.is_admin ? [{ key: '/llm-config', icon: <RobotOutlined />, label: 'LLM Settings', onClick: () => navigate('/llm-config') }] : []),
     { type: 'divider' as const },
-    { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
-    { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
+    ...(user?.is_admin
+      ? [
+          { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
+          { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
+        ]
+      : []),
     ...(user?.is_admin ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }] : []),
     ...(user?.is_admin ? [{ key: '/users', icon: <TeamOutlined />, label: 'User Management', onClick: () => navigate('/users') }] : []),
     { type: 'divider' as const },

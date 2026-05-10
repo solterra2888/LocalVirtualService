@@ -34,8 +34,6 @@ interface ProcessingParams {
   use_vendor_multimodal_model: boolean;
   vendor_multimodal_api_key: string;
   polling_interval: number;
-  use_ai_agent: boolean;
-  ai_agent_server_url: string;
 }
 
 // 移除未使用的接口：FileItem, TaskStatus, ProcessingResult
@@ -120,8 +118,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
     use_vendor_multimodal_model: false,
     vendor_multimodal_api_key: '',
     polling_interval: 10,
-    use_ai_agent: false,
-    ai_agent_server_url: ''
   });
 
   // 加载初始数据 - 不再需要加载任务类型和模板
@@ -168,8 +164,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
       // 调用新的异步端点: 立即返回, 后台上传到 OSS + 文档解析,
       // 并在 content 写入完成后自动触发 4 路并行 LLM (含 analyze, 仅当用户选了模板).
       const response = await filesAPI.uploadAndProcessDocument(file, {
-        analysis_mode: 'local_llm',
-        task_type: 'document_upload',
         template_id: analyzePicker.templateId, // 用户在 picker 选的模板, 上传完成后后端 trigger_auto_analyze
         template_variables: analyzePicker.templateVariables || {},
         // 方案 A: AI Analysis 开关
@@ -177,7 +171,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
         custom_inputs: {},
         params: {
           ...params,
-          use_ai_agent: false,
         },
         // PR-5: file_tagging picker 选择, 上传完成后后端 trigger_auto_tagging
         auto_tag_template_id: tagPicker.templateId,
@@ -220,8 +213,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
       use_vendor_multimodal_model: false,
       vendor_multimodal_api_key: '',
       polling_interval: 10,
-      use_ai_agent: false,
-      ai_agent_server_url: ''
     });
     form.resetFields();
     onCancel();

@@ -34,11 +34,11 @@ export interface FileUploadResponse {
 
 export interface FileProcessRequest {
   file_paths: string[];
-  task_type: string;
-  custom_inputs: Record<string, any>;
+  task_type?: string;
+  custom_inputs?: Record<string, any>;
   params: Record<string, any>;
-  // 新增：分析模式相关字段
-  analysis_mode?: 'remote_agent' | 'local_llm';
+  // 分析模式（仅支持 local_llm）
+  analysis_mode?: 'local_llm';
   template_id?: number;
   template_code?: string;
   template_variables?: Record<string, any>;
@@ -140,9 +140,6 @@ export interface ProcessingParamsOptions {
     type?: string;
     default?: string;
   }>;
-  defaults?: {
-    ai_agent_server_url: string;
-  };
 }
 
 export interface SupportedFileTypesResponse {
@@ -382,8 +379,6 @@ export const filesAPI = {
   uploadAndProcessDocument: async (
     file: File,
     options: {
-      analysis_mode?: 'remote_agent' | 'local_llm';
-      task_type?: string;
       template_id?: number;
       template_variables?: Record<string, any>;
       /** 方案 A: 上传弹窗 AI Analysis 开关 (默认 true) */
@@ -408,10 +403,6 @@ export const filesAPI = {
   }> => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('analysis_mode', options.analysis_mode || 'local_llm');
-    if (options.task_type) {
-      formData.append('task_type', options.task_type);
-    }
     if (options.template_id) {
       formData.append('template_id', options.template_id.toString());
     }

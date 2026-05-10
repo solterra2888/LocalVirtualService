@@ -9,7 +9,7 @@ import requests
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from typing import Any, Dict, Optional
-from backend.auth.jwt_utils import get_current_user
+from backend.auth.jwt_utils import get_current_user, get_current_admin_user
 from backend.utils.logger import get_logger
 from config.settings import config
 
@@ -597,7 +597,13 @@ async def execute_fundamentals_update_proxy(request: Request, current_user=Depen
         raise HTTPException(status_code=500, detail=f"failed to proxy update eodhd fundamentals data manually: {str(e)}")
 
 @router.get("/tasks/{task_id}/logs", summary="get task execution logs")
-async def get_task_logs_proxy(request: Request, task_id: str, limit: int = 50, offset: int = 0, current_user=Depends(get_current_user)):
+async def get_task_logs_proxy(
+    request: Request,
+    task_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    _current_admin=Depends(get_current_admin_user),
+):
     """代理获取任务执行日志"""
     try:
         auth_headers = get_auth_headers(request)
@@ -615,7 +621,7 @@ async def get_all_execution_logs_proxy(
     limit: int = 50, 
     offset: int = 0, 
     task_types: Optional[str] = None,
-    current_user=Depends(get_current_user)
+    _current_admin=Depends(get_current_admin_user),
 ):
     """代理获取所有任务执行日志"""
     try:
@@ -635,7 +641,7 @@ async def get_execution_summary_proxy(
     request: Request,
     days: int = 7,
     timezone: str = "America/New_York",
-    current_user=Depends(get_current_user)
+    _current_admin=Depends(get_current_admin_user),
 ):
     """代理获取任务执行统计摘要"""
     try:
@@ -654,7 +660,7 @@ async def download_execution_logs_csv_proxy(
     task_id: Optional[str] = None, 
     limit: int = 1000, 
     offset: int = 0, 
-    current_user=Depends(get_current_user)
+    _current_admin=Depends(get_current_admin_user),
 ):
     """代理下载执行日志CSV"""
     try:
@@ -690,7 +696,7 @@ async def download_execution_logs_csv_proxy(
         raise HTTPException(status_code=500, detail=f"failed to proxy download csv: {str(e)}")
 
 @router.delete("/execution-logs/clear", summary="clear execution logs")
-async def clear_execution_logs_proxy(request: Request, current_user=Depends(get_current_user)):
+async def clear_execution_logs_proxy(request: Request, _current_admin=Depends(get_current_admin_user)):
     """代理清空执行日志"""
     try:
         auth_headers = get_auth_headers(request)
