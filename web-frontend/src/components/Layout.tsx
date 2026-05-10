@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { MenuProps } from 'antd';
-import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Badge, Switch, Modal, Popover, message } from 'antd';
+import { Layout as AntLayout, Menu, Button, Dropdown, Avatar, Typography, Switch, Modal, Popover } from 'antd';
 import {
   FileTextOutlined,
   AppstoreOutlined,
@@ -33,10 +33,8 @@ import {
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
 import { useAuthStore } from '../store/authStore';
-import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
-import { LogViewer } from '../components/LogViewer';
 import UserProfileModal from './UserProfileModal';
 import TimeDisplay from './TimeDisplay';
 import UploadFilesModal from './UploadFilesModal';
@@ -77,7 +75,6 @@ const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
-  const globalLogger = useGlobalLogger();
   const { themeMode, setThemeMode } = useDashboardSettings();
   const { tasks } = useFileProcessing();
   const navTheme = LAYOUT_NAV_THEME[themeMode];
@@ -93,19 +90,6 @@ const Layout: React.FC = () => {
   const [showCreateTextNoteModal, setShowCreateTextNoteModal] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const openProfileModal = () => setProfileModalOpen(true);
-
-  // 快捷键支持：Ctrl + ` 切换日志窗口
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === '`') {
-        e.preventDefault();
-        globalLogger.actions.setShowFloating(!globalLogger.showFloating);
-      }
-    };
-    
-    document.addEventListener('keydown', handleKeyPress);
-    return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [globalLogger]);
 
   // dark 模式下为根容器设置深色背景，避免露出白色
   useEffect(() => {
@@ -177,12 +161,6 @@ const Layout: React.FC = () => {
     return true;
   });
 
-  // 检查是否有新的错误日志（用于显示红点提示）
-  const hasErrorLogs = globalLogger.logs.some(log =>
-    log.level === 'error' &&
-    Date.now() - new Date(log.timestamp).getTime() < 5 * 60 * 1000 // 5分钟内的错误
-  );
-
   // 用户头像下拉：主题 + 配置类功能 + 登出
   const userMenuItems = [
     {
@@ -205,16 +183,6 @@ const Layout: React.FC = () => {
     { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
     { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
     ...(user?.is_admin ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }] : []),
-    {
-      key: 'runtime-logs',
-      icon: <CodeOutlined />,
-      label: (
-        <Badge dot={hasErrorLogs} size="small">
-          <span>Runtime Logs</span>
-        </Badge>
-      ),
-      onClick: () => globalLogger.actions.setShowFloating(true),
-    },
     ...(user?.is_admin ? [{ key: '/users', icon: <TeamOutlined />, label: 'User Management', onClick: () => navigate('/users') }] : []),
     { type: 'divider' as const },
     { key: 'edit-profile', icon: <EditOutlined />, label: 'Edit Profile', onClick: openProfileModal },
@@ -685,21 +653,6 @@ const Layout: React.FC = () => {
         open={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
         themeMode={themeMode}
-      />
-
-      {/* 全局日志查看器 */}
-      <LogViewer
-        logs={globalLogger.logs}
-        autoScroll={globalLogger.autoScroll}
-        showModal={globalLogger.showModal}
-        showFloating={globalLogger.showFloating}
-        minimizedFloating={globalLogger.minimizedFloating}
-        onAutoScrollChange={globalLogger.actions.setAutoScroll}
-        onModalClose={() => globalLogger.actions.setShowModal(false)}
-        onFloatingClose={() => globalLogger.actions.setShowFloating(false)}
-        onMinimizeToggle={() => globalLogger.actions.setMinimizedFloating(!globalLogger.minimizedFloating)}
-        onClearLogs={globalLogger.actions.clearLogs}
-        onDownloadLogs={globalLogger.actions.downloadLogs}
       />
     </AntLayout>
   );

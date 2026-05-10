@@ -84,7 +84,6 @@ import {
   normalizeRcAgentStatusForAnalyze,
 } from '../utils/rcAgentStatus';
 import { useSearchParams } from 'react-router-dom';
-import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
@@ -361,12 +360,6 @@ const FilesPageInner: React.FC = () => {
   
   // 行业和股票选择功能已移除 - 改用自动打标签（content_tag_v1）
   
-  // 初始化日志系统
-  const logger = useGlobalLogger();
-  
-  // 日志容器引用
-  const logContainerRef = useRef<HTMLDivElement>(null);
-  
   // 根据文件类型获取图标
   const getFileTypeIcon = (type: string) => {
     switch (type) {
@@ -474,13 +467,6 @@ const FilesPageInner: React.FC = () => {
     });
     const [form] = Form.useForm();
 
-  // 自动滚动到底部
-  useEffect(() => {
-    if (logger.autoScroll && logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [logger.logs, logger.autoScroll]);
-
   // 切换 execution 时清空 Original 标签栏的文件信息及 Content 数据（会由对应视图重新加载）
   useEffect(() => {
     setOriginalFileInfoForTabs(null);
@@ -511,9 +497,8 @@ const FilesPageInner: React.FC = () => {
       }
     } catch (error: any) {
       console.error('加载默认配置失败:', error);
-      logger.logWarning('加载默认配置失败，使用硬编码默认值', 'file-processing');
     }
-  }, [logger, setProcessingParams]);
+  }, [setProcessingParams]);
 
   // 加载所有模板
   const loadAllTemplates = useCallback(async () => {
@@ -561,9 +546,7 @@ const FilesPageInner: React.FC = () => {
     
     // 重新加载默认配置（包括API密钥等）
     loadDefaultConfig();
-    
-    logger.logInfo('所有输入项已重置为原始状态', 'file-processing');
-  }, [logger, loadDefaultConfig]);
+  }, [loadDefaultConfig]);
 
   // 获取显示的Agent名称（将template ID映射为template名称）
   const getDisplayAgentName = useCallback((taskName: string): string => {
@@ -711,16 +694,14 @@ const FilesPageInner: React.FC = () => {
         }
         
         message.error(errorMessage);
-        logger.logError(errorMessage, 'file-processing', error);
       } else if (taskHistoryLoadAttempts >= maxTaskHistoryRetries && !isAutoRefresh) {
         // 最后一次重试失败，显示最终错误消息
         message.error('任务执行历史加载失败，请检查网络连接或联系管理员');
-        logger.logError('任务执行历史加载失败，已达到最大重试次数', 'file-processing', error);
       }
     } finally {
       if (append) setLoadingMoreExecutions(false);
     }
-  }, [logger, taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId, fileTypeFilter]);
+  }, [taskHistoryLoadAttempts, lastTaskHistoryError, maxTaskHistoryRetries, taskHistoryRetryInterval, executionsPage, hasMoreExecutions, loadingMoreExecutions, searchType, searchQuery, tickerFilter, selectedExecutionForView, selectedFolderId, fileTypeFilter]);
 
   // 无限滚动：接近底部时加载更多
   // 使用 ref 来避免 loadTaskExecutionsFunc 变化导致的重复绑定
@@ -850,14 +831,12 @@ const FilesPageInner: React.FC = () => {
         }
         
         message.error(errorMessage);
-        logger.logError(errorMessage, 'file-processing', error);
       } else if (taskTypesLoadAttempts >= maxTaskTypesRetries) {
         // 最后一次重试失败，显示最终错误消息
         message.error('failed to load RC Agent, please check network connection or contact administrator');
-        logger.logError('failed to load RC Agent, maximum number of retries reached', 'file-processing', error);
       }
     }
-  }, [logger, setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
+  }, [setSelectedTaskType, setTaskTypes, selectedTaskType, taskTypesLoadAttempts, lastTaskTypesError, maxTaskTypesRetries, retryInterval]);
 
   // ── Folder helpers ────────────────────────────────────────
   const loadFolders = useCallback(async () => {
@@ -1149,57 +1128,6 @@ const FilesPageInner: React.FC = () => {
     try {
       const status = await filesAPI.getTaskStatus(currentTaskId);
       
-      // 同步日志到新的日志系统
-      if (status.logs && status.logs.length > 0) {
-        // 定义关键日志的关键词，只显示这些关键节点的日志
-        const keyLogPatterns = [
-          /文件.*处理成功/,
-          /文件.*处理失败/,
-          /✅.*LLM分析完成/,
-          /❌.*失败/,
-          /批量处理完成/,
-          /处理结果已保存/,
-          /文件处理完成/,
-          /任务.*启动/,
-          /任务.*完成/,
-          /任务.*失败/,
-          /错误/,
-          /error/i,
-          /failed/i,
-          /completed/i,
-        ];
-        
-        // 过滤日志，只保留关键节点
-        const filteredLogs = status.logs.filter((log) => {
-          const message = log.message || '';
-          return keyLogPatterns.some(pattern => pattern.test(message));
-        });
-        
-        // 获取当前任务的已存在日志的消息内容集合
-        const existingMessages = new Set(
-          logger.logs
-            .filter(log => log.source === 'file-processing' && log.details?.taskId === currentTaskId)
-            .map(log => log.message)
-        );
-        
-        // 对于关键日志，只添加第一次出现的，通过消息内容去重
-        filteredLogs.forEach((log) => {
-          const message = log.message || '';
-          
-          // 检查消息是否已存在
-          if (!existingMessages.has(message)) {
-            logger.actions.addLog({
-              level: log.level as any,
-              message: log.message,
-              source: 'file-processing',
-              details: { taskId: currentTaskId }
-            });
-            // 立即添加到集合中，避免同一轮询中的重复
-            existingMessages.add(message);
-          }
-        });
-      }
-      
       setTaskStatus(status);
       
       if (status.status === 'completed' || status.status === 'failed') {
@@ -1234,7 +1162,6 @@ const FilesPageInner: React.FC = () => {
           setShowResult(false);
         } else {
           message.error('task processing failed');
-          logger.logError('task processing failed', 'file-processing');
           // 处理失败时，保持原样（继续显示reprocess和clear file list）
         }
         
@@ -1252,11 +1179,10 @@ const FilesPageInner: React.FC = () => {
       }
     } catch (error) {
       console.error('failed to get task status:', error);
-      logger.logError(`failed to get task status: ${error}`, 'file-processing');
     } finally {
       setUpdatingStatus(false);
     }
-  }, [currentTaskId, updateFileStatuses, logger, updatingStatus, resetAllInputs]); // 移除 loadTaskExecutionsFunc 依赖
+  }, [currentTaskId, updateFileStatuses, updatingStatus, resetAllInputs]); // 移除 loadTaskExecutionsFunc 依赖
 
   // 定时更新任务状态
   useEffect(() => {
@@ -1273,15 +1199,6 @@ const FilesPageInner: React.FC = () => {
     };
   }, [processing, currentTaskId, updateTaskStatus]);
 
-  // 开始处理时自动显示浮动日志窗口
-  useEffect(() => {
-    if (processing && !logger.showFloating) {
-      logger.actions.setShowFloating(true);
-    }
-  }, [processing, logger.showFloating, logger.actions]);
-
-
-
   const handleViewAiAnalysis = async (execution: TaskExecution) => {
     try {
       setAiAnalysisLoading(true);
@@ -1289,7 +1206,6 @@ const FilesPageInner: React.FC = () => {
       setAiAnalysisExecution(execution);
       setModalAudioAnalyzePicker({});
       
-      logger.logInfo(`view AI analysis report: ${execution.task_name}`, 'file-processing');
       
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
       console.log('AI Analysis Data:', details);
@@ -1298,7 +1214,6 @@ const FilesPageInner: React.FC = () => {
       
     } catch (error) {
       message.error('Failed to load AI analysis report');
-      logger.logError(`Failed to load AI analysis report: ${execution.task_name}`, 'file-processing', error);
       setAiAnalysisVisible(false);
     } finally {
       setAiAnalysisLoading(false);
@@ -1316,7 +1231,6 @@ const FilesPageInner: React.FC = () => {
       
       const filename = `AI_Analysis_Report_${aiAnalysisData.execution.task_name}_${new Date().toISOString().split('T')[0]}.pdf`;
       
-      logger.logInfo(`Starting PDF download: ${filename}`, 'file-processing');
       
       // 等待一小段时间确保MarkdownRenderer完全渲染
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1329,11 +1243,9 @@ const FilesPageInner: React.FC = () => {
       });
       
       message.success('PDF report downloaded successfully');
-      logger.logInfo(`PDF report downloaded successfully: ${filename}`, 'file-processing');
       
     } catch (error) {
       message.error('PDF download failed, please try again');
-      logger.logError(`PDF download failed: ${error}`, 'file-processing', error);
     } finally {
       setPdfDownloading(false);
     }
@@ -1366,7 +1278,6 @@ const FilesPageInner: React.FC = () => {
 
       if (result.success && result.task_id) {
         message.loading({ content: 'AI analyzing audio...', key: 'audioAnalyze', duration: 0 });
-        logger.logInfo(`Audio analysis task submitted: ${result.task_id}`, 'audio-analysis');
 
         // 添加任务到全局进度显示
         addTask(result.task_id, fileName, 'audio');
@@ -1458,7 +1369,6 @@ const FilesPageInner: React.FC = () => {
 
       if (result.success && result.task_id) {
         message.destroy('docAnalyze'); // 关闭 "Submitting..."，进度由 NavBar Processing Tasks 展示
-        logger.logInfo(`Document analysis task submitted: ${result.task_id}`, 'doc-analysis');
 
         // 添加任务到全局进度显示
         addTask(result.task_id, fileName, 'document');
@@ -1534,13 +1444,11 @@ const FilesPageInner: React.FC = () => {
   const handleViewFileContent = (fileData: any) => {
     setSelectedFileContent(fileData);
     setFileContentVisible(true);
-    logger.logInfo(`view AI processed content: ${fileData.filename}`, 'file-processing');
   };
 
   const handleViewOriginalFile = async (fileData: any) => {
     try {
       const originalFileInfo = await filesAPI.getOriginalFileInfo(fileData.id);
-      logger.logInfo(`view original file: ${fileData.filename}`, 'file-processing');
       
       // 根据文件类型决定如何打开
       const fileType = originalFileInfo.file_type.toLowerCase();
@@ -1578,18 +1486,15 @@ const FilesPageInner: React.FC = () => {
       // 提供更友好的错误信息
       if (error.response?.status === 404) {
         message.error(`File not found (ID: ${fileData.id}). The file may have been deleted or the database record is missing.`);
-        logger.logError(`File not found in database: ${fileData.filename} (ID: ${fileData.id})`, 'file-processing', error);
       } else {
         const errorMsg = getErrorMessage(error, 'Failed to load original file');
         message.error(errorMsg);
-        logger.logError(`Failed to load original file: ${fileData.filename}`, 'file-processing', error);
       }
     }
   };
 
   const handleShowOriginalFiles = async (execution: any) => {
     try {
-      logger.logInfo(`view task original files: ${execution.task_name}`, 'file-processing');
       
       // 获取该执行任务的文件详情
       const details = await tasksAPI.getTaskExecutionDetails(execution.id);
@@ -1620,7 +1525,6 @@ const FilesPageInner: React.FC = () => {
   const handleDeleteExecution = (execution: TaskExecution) => {
     setExecutionToDelete(execution);
     setDeleteExecutionVisible(true);
-    logger.logInfo(`prepare to delete task execution: ${execution.task_name}`, 'file-processing');
   };
 
   const handleOpenShareModal = async (execution: TaskExecution) => {
@@ -1752,7 +1656,6 @@ const FilesPageInner: React.FC = () => {
       console.error('failed to delete execution record:', error);
       const errorMessage = getErrorMessage(error, 'Failed to delete execution record');
       message.error(errorMessage);
-      logger.logError(errorMessage, 'file-processing', error);
       
       // API失败时不更新本地状态，保持原有数据
     } finally {
@@ -1818,7 +1721,6 @@ const FilesPageInner: React.FC = () => {
 
           if (failed.length > 0) {
             message.warning(`Deleted ${succeeded.length} of ${ids.length} records. ${failed.length} failed.`);
-            logger.logError(`Batch delete partial failure: ${failed.length}/${ids.length} failed`, 'file-processing', failed);
           } else {
             message.success(`Successfully deleted ${idsToDelete.length} execution record(s)`);
           }
@@ -1827,7 +1729,6 @@ const FilesPageInner: React.FC = () => {
           console.error('failed to batch delete execution records:', error);
           const errorMessage = getErrorMessage(error, 'Failed to batch delete execution records');
           message.error(errorMessage);
-          logger.logError(errorMessage, 'file-processing', error);
           
           // API失败时不更新本地状态，保持选中状态让用户可以重试
         } finally {
@@ -1847,12 +1748,10 @@ const FilesPageInner: React.FC = () => {
         message.success('file status refreshed');
       } else {
         message.info('no tasks to refresh');
-        logger.logWarning('no tasks to refresh', 'file-processing');
       }
     } catch (error) {
       console.error('failed to refresh file status:', error);
       message.error('failed to refresh file status, please try again');
-      logger.logError('failed to refresh file status', 'file-processing', error);
     } finally {
       setRefreshingStatus(false);
     }
@@ -1888,12 +1787,10 @@ const FilesPageInner: React.FC = () => {
       
       // 文件上传成功，自动打标签会在文件处理完成后自动触发
       message.success('files uploaded successfully');
-      logger.logInfo('file uploaded successfully', 'file-processing');
       
     } catch (error: any) {
       console.error('failed to upload file:', error);
       const errorMessage = getErrorMessage(error, 'failed to upload file');
-      logger.logError(errorMessage, 'file-processing', error);
       // 避免与 api 拦截器的 toast 重复：拦截器已对带 response 的请求展示过错误
       if (!error.response) message.error(errorMessage);
     } finally {
@@ -1921,12 +1818,10 @@ const FilesPageInner: React.FC = () => {
       // 从本地状态中移除文件
       setFiles(prev => prev.filter(f => f.id !== fileId));
       message.success(`file ${file.name} deleted successfully`);
-      logger.logInfo(`remove file: ${file.name}`, 'file-processing');
     } catch (error: any) {
       console.error('Failed to delete file:', error);
       const errorMessage = getErrorMessage(error, 'Failed to delete file');
       message.error(errorMessage);
-      logger.logError(`Failed to delete file ${file.name}: ${errorMessage}`, 'file-processing', error);
     }
   };
 
@@ -1940,7 +1835,6 @@ const FilesPageInner: React.FC = () => {
       
       if (targetIndex >= 0 && targetIndex < newFiles.length) {
         [newFiles[index], newFiles[targetIndex]] = [newFiles[targetIndex], newFiles[index]];
-        logger.logInfo(`file position adjusted: ${newFiles[targetIndex].name} ${direction === 'up' ? 'up' : 'down'}`, 'file-processing');
       }
       
       return newFiles;
@@ -1952,13 +1846,11 @@ const FilesPageInner: React.FC = () => {
     if (analysisMode === 'remote_agent') {
       if (!selectedTaskType) {
         message.error('please select reverse capital agent');
-        logger.logWarning('no RC Agent selected', 'file-processing');
         return;
       }
     } else if (analysisMode === 'local_llm') {
       if (!selectedTemplateId) {
         message.error('please select Prompt Template');
-        logger.logWarning('no template selected', 'file-processing');
         return;
       }
     }
@@ -1974,7 +1866,6 @@ const FilesPageInner: React.FC = () => {
       setCurrentTaskId(null);
       setTaskStatus(null);
       
-      logger.logInfo(`tranforming to markdown, please wait 30-60 seconds`, 'file-processing');
       
       // 将所有文件状态设置为ready
       setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
@@ -2012,7 +1903,6 @@ const FilesPageInner: React.FC = () => {
       console.error('failed to start file processing:', error);
       const errorMessage = getErrorMessage(error, 'failed to start file processing');
       message.error(errorMessage);
-      logger.logError(`failed to start file processing: ${errorMessage}`, 'file-processing', error);
     }
   };
 
@@ -2023,7 +1913,6 @@ const FilesPageInner: React.FC = () => {
     try {
       await filesAPI.stopTask(currentTaskId);
       message.info('stop task request sent');
-      logger.logInfo('stop task request sent', 'file-processing');
       
       // 停止任务后，等待一段时间再刷新执行历史列表（重置为第一页）
       setTimeout(() => {
@@ -2034,7 +1923,6 @@ const FilesPageInner: React.FC = () => {
       console.error('failed to stop task:', error);
       const errorMessage = getErrorMessage(error, 'failed to stop task');
       message.error(errorMessage);
-      logger.logError(errorMessage, 'file-processing', error);
     } finally {
       setStoppingTask(false);
     }
@@ -2050,7 +1938,6 @@ const FilesPageInner: React.FC = () => {
         newCustomInputs[field.name] = '';
       });
       setCustomInputs(newCustomInputs);
-      logger.logInfo(`switch RC Agent: ${taskType.name}`, 'file-processing');
     }
   };
 
@@ -2059,7 +1946,6 @@ const FilesPageInner: React.FC = () => {
     setShowResult(false);
     setProcessingResult(null);
     setFiles(prev => prev.map(file => ({ ...file, status: 'ready' as const })));
-    logger.logInfo('reprocess files', 'file-processing');
     
           // 重新处理时也刷新执行历史列表
       setTimeout(() => {
@@ -2073,7 +1959,6 @@ const FilesPageInner: React.FC = () => {
     setShowResult(false);
     setProcessingResult(null);
     setLastCompletedTaskId(null);
-    logger.logInfo('clear file list', 'file-processing');
     
           // 清除文件列表时也刷新执行历史列表
       setTimeout(() => {

@@ -88,7 +88,6 @@ import {
   HolderOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons';
-import { useGlobalLogger } from '../contexts/LoggerContext';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
@@ -424,7 +423,6 @@ const restrictToVerticalAxis: Modifier = ({ transform }) => {
 };
 
 const FinvizDashboard: React.FC = () => {
-  const logger = useGlobalLogger();
   const { themeMode } = useDashboardSettings();
   
   // 状态管理
@@ -706,7 +704,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     loadUserWatchlist();
     loadThemes();
     loadCustomGroups();
-    logger.logInfo('FinvizDashboard页面已加载', 'finviz-dashboard');
     
     // 定期清理过期缓存
     const cleanupInterval = setInterval(cleanupExpiredCache, 60000); // 每分钟清理一次
@@ -824,10 +821,9 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
           setOverviewLoading(false);
         }
 
-        logger.logInfo(`自动选择第一个股票: ${firstStock.custom_name || firstStock.company} (${firstStock.symbol})`, 'finviz-dashboard');
       }
     }
-  }, [watchlistGroups, loading, selectedStock, overviewCache, logger]);
+  }, [watchlistGroups, loading, selectedStock, overviewCache]);
 
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
@@ -862,9 +858,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       // 成功加载后清除错误状态
       setLastError(null);
       
-      const totalStocks = watchlistData.reduce((sum, group) => sum + group.items.length, 0);
-      logger.logInfo(`加载了 ${watchlistData.length} 个分组，${totalStocks} 支股票`, 'finviz-dashboard');
-      
     } catch (error) {
       const errorMessage = 'Failed to load user watchlist';
       
@@ -874,7 +867,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setLastError(errorMessage);
       }
       
-      logger.logError('Failed to load user watchlist', 'finviz-dashboard', error);
     } finally {
       setLoading(false);
     }
@@ -892,9 +884,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     try {
       const themesResponse = await newsAPI.getThemes();
       setThemes(themesResponse.data.filter(t => t.is_active)); // 只加载激活的主题
-      logger.logInfo(`加载了 ${themesResponse.data.length} 个主题`, 'finviz-dashboard');
     } catch (error) {
-      logger.logError('Failed to load themes', 'finviz-dashboard', error);
       // 主题加载失败不阻塞页面，不显示错误消息
     }
   };
@@ -915,10 +905,8 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
           pricesMap.set(symbolWithoutExchange, priceData);
         });
         setStockPrices(pricesMap);
-        logger.logInfo(`加载了 ${response.data.length} 个股票的价格数据`, 'finviz-dashboard');
       }
     } catch (error) {
-      logger.logError('Failed to load stock prices', 'finviz-dashboard', error);
       // 不显示错误消息，因为价格数据不是必需的
     } finally {
       setPricesLoading(false);
@@ -971,7 +959,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         });
         setOverviewLastError(null);
       } catch (error: unknown) {
-        logger.logError('Failed to load company overview', 'finviz-dashboard', error);
         const errorMessage =
           error instanceof Error ? error.message : 'Failed to load company overview';
         setOverviewError(errorMessage);
@@ -983,7 +970,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setOverviewLoading(false);
       }
     },
-    [overviewCache, overviewLastError, logger, getOverviewQueryForStock]
+    [overviewCache, overviewLastError, getOverviewQueryForStock]
   );
 
   const resolvePriceData = useCallback((stock: WatchlistItem): StockPriceData | undefined => {
@@ -1107,8 +1094,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
 
     setActiveTab('news');
-    logger.logInfo(`选择了股票: ${stock.custom_name || stock.company} (${stock.symbol})`, 'finviz-dashboard');
-  }, [logger, overviewCache, getOverviewQueryForStock]);
+  }, [overviewCache, getOverviewQueryForStock]);
 
   const formatPrice = (price?: number) => {
     if (price === undefined || price === null) return '--';
@@ -1153,7 +1139,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       setNewsData(cachedNews);
       setNewsOffset(NEWS_PAGE_SIZE);
       setHasMoreNews(cachedNews.length === NEWS_PAGE_SIZE);
-      logger.logInfo(`使用缓存数据: ${cacheKey}`, 'finviz-dashboard');
       return;
     }
     
@@ -1162,7 +1147,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       await loadStockNews(selectedStock.symbol, cacheKey, true);
     } catch (error) {
       message.error('Failed to load related news');
-      logger.logError('Failed to load related news', 'finviz-dashboard', error);
     } finally {
       setContentLoading(false);
     }
@@ -1193,14 +1177,12 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setCachedNews(cacheKey, news);
       }
       
-      logger.logInfo(`加载股票新闻: ${ticker}, ${news.length} 条 (offset: ${offset})`, 'finviz-dashboard');
     } catch (error) {
-      logger.logError(`加载股票新闻失败: ${ticker}`, 'finviz-dashboard', error);
       if (reset) {
         setNewsData([]);
       }
     }
-  }, [newsOffset, NEWS_PAGE_SIZE, setCachedNews, logger]);
+  }, [newsOffset, NEWS_PAGE_SIZE, setCachedNews]);
 
   // 加载更多新闻
   const loadMoreNews = useCallback(async () => {
@@ -1210,12 +1192,11 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     try {
       await loadStockNews(selectedStock.symbol, null, false);
     } catch (error) {
-      logger.logError('Failed to load more news', 'finviz-dashboard', error);
       message.error('Failed to load more news');
     } finally {
       setLoadingMoreNews(false);
     }
-  }, [hasMoreNews, loadingMoreNews, selectedStock, loadStockNews, logger]);
+  }, [hasMoreNews, loadingMoreNews, selectedStock, loadStockNews]);
 
   // 滚动检测和自动加载更多新闻（使用右侧 Tab 内容区作为滚动容器）
   useEffect(() => {
@@ -1242,9 +1223,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       setContentLoading(true);
       const result = await dashboardAPI.getTickerResearchReports(ticker);
       setResearchReports(result.reports);
-      logger.logInfo(`加载研究报告: ${ticker}, ${result.count} 个文件`, 'finviz-dashboard');
     } catch (error) {
-      logger.logError(`加载研究报告失败: ${ticker}`, 'finviz-dashboard', error);
       setResearchReports([]);
       message.error('加载研究报告失败');
     } finally {
@@ -1273,12 +1252,10 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         setActiveTab('news');
       }
       
-      logger.logInfo(`从watchlist移除: ${symbol}`, 'finviz-dashboard');
     } catch (error) {
       message.error('Failed to remove');
-      logger.logError(`Failed to remove watchlist item: ${symbol}`, 'finviz-dashboard', error);
     }
-  }, [selectedStock, logger]);
+  }, [selectedStock]);
 
   const handleWatchlistAction = useCallback((action: string, item: WatchlistItem) => {
     if (action === 'edit') {
@@ -1419,19 +1396,17 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     try {
       setIsReordering(true);
       await dashboardAPI.reorderWatchlist(reorderPayload);
-      logger.logInfo('Watchlist order updated', 'finviz-dashboard');
       message.success('Watchlist order updated');
     } catch (error) {
       setWatchlistGroups(previousGroups);
       if (previousSelected) {
         setSelectedStock(previousSelected);
       }
-      logger.logError('Failed to reorder watchlist', 'finviz-dashboard', error);
       message.error('Failed to update watchlist order');
     } finally {
       setIsReordering(false);
     }
-  }, [logger, normalizeGroupName, selectedStock, watchlistGroups]);
+  }, [normalizeGroupName, selectedStock, watchlistGroups]);
 
   const renderWatchlistList = () => {
     if (!loading && watchlistGroups.length === 0) {

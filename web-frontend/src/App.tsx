@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useAuthStore } from './store/authStore';
-import { LoggerProvider } from './contexts/LoggerContext';
 import { useDeviceDetection } from './hooks/useDeviceDetection';
 import Layout from './components/Layout';
 import MobileLayout from './components/MobileLayout';
@@ -216,15 +215,13 @@ const App: React.FC = () => {
         },
       }}
     >
-      <LoggerProvider>
-        <Router>
-          <DashboardSettingsProvider>
-            <FileProcessingProvider>
-              <AppContent />
-            </FileProcessingProvider>
-          </DashboardSettingsProvider>
-        </Router>
-      </LoggerProvider>
+      <Router>
+        <DashboardSettingsProvider>
+          <FileProcessingProvider>
+            <AppContent />
+          </FileProcessingProvider>
+        </DashboardSettingsProvider>
+      </Router>
     </ConfigProvider>
   );
 };
