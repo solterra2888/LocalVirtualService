@@ -2,11 +2,12 @@
  * Daily 抽屉预览 — 原文区分发器.
  *
  * 抽屉里 "上半部 = 通用 (标题/作者/AI Summary/标签)" + "下半部 = 类型专属原文区".
- * 这个文件只负责"下半部分", 按 source_subtype 路由到 9 种渲染器:
+ * 这个文件只负责"下半部分", 按 source_subtype 路由到各渲染器:
  *
  *   document   → DocumentOriginalView   (PDF / Word / Excel / CSV: PDF iframe + 解析 Markdown)
  *   image      → ImageOriginalView      (img 内嵌 + OCR Markdown)
  *   audio      → AudioOriginalView      (audio 播放器 + ASR 文本浏览)
+ *   podcast    → AudioOriginalView      (与 audio 同：OSS 音频 + ASR / content 转写)
  *   youtube    → YoutubeUploadOriginalView (嵌入 + 标题 + 描述; 有 Transcript Tab 时字幕在 Tab 内)
  *   web        → WebOriginalView        (解析 Markdown + Open original)
  *   text       → TextNoteOriginalView   (笔记 Markdown)
@@ -34,6 +35,8 @@ import {
 } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { filesAPI } from '../../services/files';
+import { useAuthStore } from '../../store/authStore';
+import { appendServeAuthToken } from '../../utils/appendServeAuthToken';
 import YoutubeFeedOriginalBlock from '../feed/YoutubeFeedOriginalBlock';
 import TwitterOriginalView from '../shared/content-viewer/original-views/TwitterOriginalView';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
@@ -81,6 +84,8 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
       case 'image':
         return <ImageOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />;
       case 'audio':
+        return <AudioOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />;
+      case 'podcast':
         return <AudioOriginalView upload={detail.upload} colors={colors} themeMode={themeMode} />;
       case 'youtube':
         return (
@@ -237,6 +242,7 @@ interface OriginalFile {
 
 /** 抽屉里需要 file_url / asr 的子类型, 共享同一个懒加载 hook. */
 function useOriginalFileInfo(fileId: number | null | undefined, enabled: boolean) {
+  const token = useAuthStore((s) => s.token);
   const [data, setData] = React.useState<OriginalFile | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -253,7 +259,12 @@ function useOriginalFileInfo(fileId: number | null | undefined, enabled: boolean
     (async () => {
       try {
         const r = await filesAPI.getOriginalFileInfo(fileId);
-        if (!cancelled) setData(r as OriginalFile);
+        const base = r as OriginalFile;
+        const patched: OriginalFile = {
+          ...base,
+          file_url: appendServeAuthToken(base.file_url, token),
+        };
+        if (!cancelled) setData(patched);
       } catch (e: any) {
         if (!cancelled) setError(e?.response?.data?.detail || e?.message || 'Failed to load original');
       } finally {
@@ -263,7 +274,7 @@ function useOriginalFileInfo(fileId: number | null | undefined, enabled: boolean
     return () => {
       cancelled = true;
     };
-  }, [fileId, enabled]);
+  }, [fileId, enabled, token]);
 
   return { data, loading, error };
 }

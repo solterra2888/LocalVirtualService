@@ -200,6 +200,11 @@ def _legacy_oss_buckets_to_try(file_path: str, oss_bucket_db: Optional[str], svc
     return out
 
 
+def _is_audio_like_file_type(file_type: Optional[str]) -> bool:
+    """audio 与 podcast（Apple 单集音频）共用播放器、HTTP Range、inline 预览与 MIME 兜底。"""
+    return (file_type or "").lower() in ("audio", "podcast")
+
+
 def _serve_file_bytes_response(content: bytes, filename: str, file_type: Optional[str]):
     """
     将 OSS/本地读取的文件字节返回给浏览器（PDF/图片 inline，其余 attachment）。
@@ -226,14 +231,15 @@ def _serve_file_bytes_response(content: bytes, filename: str, file_type: Optiona
         "image": "image/jpeg",
         # DB 常为 audio；无扩展名时避免 octet-stream，否则部分浏览器 <audio> 解码失败
         "audio": "audio/mpeg",
+        "podcast": "audio/mpeg",
         "web": "text/html",
     }
     media_type = guessed or fallback_types.get(ft, "application/octet-stream")
-    if ft == "audio" and (not media_type or media_type == "application/octet-stream"):
+    if _is_audio_like_file_type(file_type) and (not media_type or media_type == "application/octet-stream"):
         media_type = guessed or "audio/mpeg"
     encoded_fn = quote(filename or "file")
     # 音频需 inline + 正确 MIME，否则 <audio> 表现不一致（有的能播、有的触发下载或 MEDIA_ERR）
-    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image", "audio", "web"]
+    is_previewable = ft in ["pdf", "jpg", "jpeg", "png", "gif", "bmp", "image", "audio", "podcast", "web"]
     disposition = "inline" if is_previewable else "attachment"
     return RawResponse(
         content=content,
@@ -1533,7 +1539,8 @@ async def get_original_file_info(
                         # 导致 iframe 内无法预览、只能下载。PDF/图片/音频改为走后端 serve 代理（inline 或可下载流）。
                         # Word/Excel 需公网 HTTPS URL 供 Microsoft Office Online Viewer 拉取，故仍用签名 URL。
                         preview_via_serve = (file_type or '').lower() in (
-                            'pdf', 'application/pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio', 'web'
+                            'pdf', 'application/pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image',
+                            'audio', 'podcast', 'web',
                         )
                         if preview_via_serve:
                             file_url = f"/api/files/serve/{file_id}"
@@ -2339,7 +2346,7 @@ async def serve_file(
                     # 通过后端从 OSS 下载并返回，设置 inline 头实现预览。
                     try:
                         total_size = int(oss_service.bucket.head_object(file_path).content_length or 0)
-                        parsed_range = _parse_http_range(range_header, total_size) if (file_type or '').lower() == 'audio' else None
+                        parsed_range = _parse_http_range(range_header, total_size) if _is_audio_like_file_type(file_type) else None
                         if parsed_range:
                             start, end = parsed_range
                             oss_result = oss_service.bucket.get_object(file_path, byte_range=(start, end))
@@ -2392,7 +2399,7 @@ async def serve_file(
                     for ob in _legacy_oss_buckets_to_try(file_path, oss_bucket, oss_legacy):
                         try:
                             total_size = int(ob.head_object(legacy_key).content_length or 0)
-                            parsed_range = _parse_http_range(range_header, total_size) if (file_type or '').lower() == 'audio' else None
+                            parsed_range = _parse_http_range(range_header, total_size) if _is_audio_like_file_type(file_type) else None
                             if parsed_range:
                                 start, end = parsed_range
                                 oss_result = ob.get_object(legacy_key, byte_range=(start, end))
@@ -2465,13 +2472,14 @@ async def serve_file(
             'gif': 'image/gif',
             'bmp': 'image/bmp',
             'audio': 'audio/mpeg',
+            'podcast': 'audio/mpeg',
             'web': 'text/html',
         }
 
         ft_lower = (file_type or "").lower()
         guessed_mt, _ = _mimetypes.guess_type(filename or "")
         media_type = mime_types.get(ft_lower, 'application/octet-stream')
-        if ft_lower == 'audio':
+        if _is_audio_like_file_type(file_type):
             media_type = guessed_mt or media_type
             if not media_type or media_type == 'application/octet-stream':
                 media_type = 'audio/mpeg'
@@ -2483,7 +2491,7 @@ async def serve_file(
 
         # 使用FileResponse直接返回文件
         # PDF/图片/音频：inline，便于浏览器内预览与 <audio> 播放；其余默认 attachment
-        if ft_lower in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio', 'web']:
+        if ft_lower in ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'image', 'audio', 'podcast', 'web']:
             # inline模式 - 浏览器直接显示
             return FileResponse(
                 path=file_path,

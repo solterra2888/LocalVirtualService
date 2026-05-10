@@ -33,6 +33,7 @@ SourceSubtype = Literal[
     "youtube",  # Upload YouTube Link
     "web",  # Upload Web Link
     "text",  # My Notes / Thoughts
+    "podcast",  # Apple Podcast Episode (Upload)
     # Feed
     "twitter",
     "news",

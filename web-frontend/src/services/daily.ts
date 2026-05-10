@@ -15,14 +15,15 @@ import { api } from './api';
 export type DailySource = 'upload' | 'feed';
 
 export type DailySourceSubtype =
-  | 'document'   // PDF / Word / Excel / CSV (Upload)
-  | 'image'      // Image (Upload)
-  | 'audio'      // Audio (Upload)
-  | 'youtube'    // Upload YouTube Link
-  | 'web'        // Upload Web Link
-  | 'text'       // My Notes / Thoughts (Upload)
-  | 'twitter'    // Feed Twitter/X
-  | 'news'       // Feed News
+  | 'document'    // PDF / Word / Excel / CSV (Upload)
+  | 'image'       // Image (Upload)
+  | 'audio'       // Audio (Upload)
+  | 'youtube'     // Upload YouTube Link
+  | 'web'         // Upload Web Link
+  | 'text'        // My Notes / Thoughts (Upload)
+  | 'podcast'     // Apple Podcast Episode (Upload)
+  | 'twitter'     // Feed Twitter/X
+  | 'news'        // Feed News
   | 'youtube_feed'; // Feed YouTube Subscription
 
 export type DailyNavigateType = 'execution' | 'feed_article' | 'external_url';
@@ -147,6 +148,7 @@ export const ALL_DAILY_SOURCE_SUBTYPES: DailySourceSubtype[] = [
   'youtube',
   'web',
   'text',
+  'podcast',
   'twitter',
   'news',
   'youtube_feed',

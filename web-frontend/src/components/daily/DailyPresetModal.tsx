@@ -38,7 +38,7 @@ interface DailyPresetModalProps {
 
 // 桌面端 NavBar 顺序: Upload 在前, Feed 在后. modal 也按此分组以减轻认知负担.
 const UPLOAD_GROUP: DailySourceSubtype[] = SOURCE_BADGE_DISPLAY_ORDER.filter(
-  (s) => ['document', 'image', 'audio', 'youtube', 'web', 'text'].includes(s)
+  (s) => ['document', 'image', 'audio', 'youtube', 'web', 'text', 'podcast'].includes(s)
 );
 const FEED_GROUP: DailySourceSubtype[] = SOURCE_BADGE_DISPLAY_ORDER.filter((s) =>
   ['twitter', 'news', 'youtube_feed'].includes(s)

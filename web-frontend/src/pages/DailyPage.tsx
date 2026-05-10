@@ -32,6 +32,7 @@ import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
 import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
 import DailyDateSidebar from '../components/daily/DailyDateSidebar';
+import '../components/daily/dailySubtleScrollbar.css';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
@@ -95,6 +96,9 @@ const DailyPageInner: React.FC = () => {
   // 由 IntersectionObserver 监听主区各 .daily-date-anchor 元素维护。
   const [activeDateKey, setActiveDateKey] = useState<string | null>(null);
   const dateAnchorObserverRef = useRef<IntersectionObserver | null>(null);
+
+  // 右侧内容区独立滚动容器：与侧栏完全解耦，滚动条不出现在页面顶级
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -197,34 +201,37 @@ const DailyPageInner: React.FC = () => {
     loadMoreRef.current = loadMore;
   });
 
-  // IntersectionObserver：items 从空到非空时挂载，之后保持稳定
+  // IntersectionObserver：items 从空到非空时挂载，root 指向内容滚动容器
   useEffect(() => {
     const el = sentinelRef.current;
+    const container = contentScrollRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) loadMoreRef.current();
       },
-      { rootMargin: '400px', threshold: 0 }
+      { root: container, rootMargin: '400px', threshold: 0 }
     );
     observer.observe(el);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length > 0]); // 只在"有无数据"切换时重连，不依赖 loadMore 引用
+  }, [items.length > 0]);
 
-  // 滚动兜底：覆盖 Ant Design Content 内部滚动容器（window.scroll 监听不到）
+  // 滚动兜底：监听内容容器的 scroll 事件
   useEffect(() => {
+    const container = contentScrollRef.current;
+    if (!container) return;
     const handleScroll = () => {
       const sentinel = sentinelRef.current;
       if (!sentinel) return;
+      const containerRect = container.getBoundingClientRect();
       const rect = sentinel.getBoundingClientRect();
-      if (rect.top <= window.innerHeight + 400) {
+      if (rect.top <= containerRect.bottom + 400) {
         loadMoreRef.current();
       }
     };
-    // capture: true → 能捕获任意子容器的 scroll 冒泡
-    document.addEventListener('scroll', handleScroll, { capture: true, passive: true });
-    return () => document.removeEventListener('scroll', handleScroll, true);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
   }, []); // 稳定，只挂载/卸载一次
 
   // ─── 日期锚点 IntersectionObserver ──────────────────────────
@@ -244,7 +251,7 @@ const DailyPageInner: React.FC = () => {
           if (key) setActiveDateKey(key);
         }
       },
-      { rootMargin: '0px 0px -70% 0px', threshold: 0 }
+      { root: contentScrollRef.current, rootMargin: '0px 0px -70% 0px', threshold: 0 }
     );
     dateAnchorObserverRef.current = observer;
     document.querySelectorAll<HTMLElement>('.daily-date-anchor').forEach((el) =>
@@ -255,18 +262,18 @@ const DailyPageInner: React.FC = () => {
   }, [items.length]);
 
   // ─── 点击日期侧栏跳转主区 ────────────────────────────────────
-  // 注意：不能对 position:sticky 的元素用 scrollIntoView —— sticky 元素永远"在视口里"
-  // （它已经贴在顶部），所以 scrollIntoView 不会向上滚动。
-  // 解决方案：用非 sticky 的 #daily-scroll-anchor-{dateKey} 定位节点，
-  // 通过 getBoundingClientRect + window.scrollTo 手动算坐标，并减去固定导航栏高度。
-  // 64px 导航栏 + ~100px sticky 搜索+chip 区 + 8px 间距
-  const DESKTOP_STICKY_OFFSET = 172;
+  // 用 #daily-scroll-anchor-{dateKey} 定位节点，在列表滚动容器内 scrollTo；
+  // 标题+搜索在容器外，锚点相对列表区顶部对齐即可。
+  const DESKTOP_SCROLL_ANCHOR_GAP = 8;
   const scrollToAnchor = useCallback((dateKey: string) => {
     const anchor = document.getElementById(`daily-scroll-anchor-${dateKey}`);
-    if (!anchor) return false;
-    const rect = anchor.getBoundingClientRect();
-    const target = window.scrollY + rect.top - DESKTOP_STICKY_OFFSET;
-    window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    const container = contentScrollRef.current;
+    if (!anchor || !container) return false;
+    const containerRect = container.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const target =
+      container.scrollTop + anchorRect.top - containerRect.top - DESKTOP_SCROLL_ANCHOR_GAP;
+    container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
     setActiveDateKey(dateKey);
     return true;
   }, []);
@@ -341,9 +348,10 @@ const DailyPageInner: React.FC = () => {
   // (preset 为空数组时无需限制 — 表示 "全部")
   const handlePresetSaved = useCallback((next: DailySourceSubtype[]) => {
     setPresetSubtypes(next);
-    setActiveSubtypes((prev) =>
-      next.length === 0 ? prev : prev.filter((s) => next.includes(s))
-    );
+    // 保存 preset 后清空 chip 临时筛选。否则若此前只点了例如 Twitter，
+    // activeSubtypes 仍为 ['twitter']，effectiveSubtypes 只会传 twitter，
+    // 新勾选的 podcast 等类型永远不会进 /daily/feed 请求。
+    setActiveSubtypes([]);
     setPresetModalOpen(false);
   }, []);
 
@@ -368,10 +376,12 @@ const DailyPageInner: React.FC = () => {
 
   return (
     <div
+      className="daily-page-scroll-root"
       style={{
         background: colors.pageBg,
-        minHeight: '100%',
-        padding: '24px 32px 60px',
+        // 对齐 App.css .layout-content：margin-top 88px + margin-bottom 24px，避免整块超高触发 window 滚动
+        height: 'calc(100vh - 112px)',
+        overflow: 'hidden',
       }}
     >
       {/* 两栏布局：左侧日期导航栏 + 右侧主内容区 */}
@@ -381,7 +391,9 @@ const DailyPageInner: React.FC = () => {
           margin: '0 auto',
           display: 'flex',
           gap: 16,
-          alignItems: 'flex-start',
+          height: '100%',
+          overflow: 'hidden',
+          padding: '24px 32px 0',
         }}
       >
         {/* 左侧日期导航栏 */}
@@ -396,125 +408,127 @@ const DailyPageInner: React.FC = () => {
           variant="desktop"
         />
 
-        {/* 右侧主内容区（原有逻辑不变，只是 maxWidth 约束移到此层）*/}
-        <div style={{ flex: 1, minWidth: 0 }}>
-      {/* 顶部标题区 */}
-      <div>
+        {/* 右侧：标题+搜索+筛选固定，仅列表区滚动 */}
         <div
           style={{
+            flex: 1,
+            minWidth: 0,
+            height: '100%',
+            minHeight: 0,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 16,
-            marginBottom: 16,
+            flexDirection: 'column',
+            overflow: 'hidden',
           }}
         >
-          <Title level={3} style={{ margin: 0, color: colors.text, fontWeight: 600 }}>
-            Daily
-          </Title>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-              {total.toLocaleString()} {total === 1 ? 'item' : 'items'}
-              {(activeSubtypes.length > 0 || searchQuery) && ' (filtered)'}
-            </Text>
-            <Tooltip
-              title={
-                presetActive
-                  ? `Preset: ${presetSubtypes!.length} types · click to edit`
-                  : 'Configure Daily preset'
-              }
-              mouseEnterDelay={0.4}
+          <div style={{ flexShrink: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                marginBottom: 16,
+              }}
             >
-              <Button
-                type="text"
-                size="small"
-                aria-label="Configure Daily preset"
-                onClick={() => setPresetModalOpen(true)}
-                icon={
-                  <SettingOutlined
-                    style={{
-                      fontSize: 16,
-                      color: presetActive ? colors.accent : colors.textMuted,
-                    }}
+              <Title level={3} style={{ margin: 0, color: colors.text, fontWeight: 600 }}>
+                Daily
+              </Title>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+                  {total.toLocaleString()} {total === 1 ? 'item' : 'items'}
+                  {(activeSubtypes.length > 0 || searchQuery) && ' (filtered)'}
+                </Text>
+                <Tooltip
+                  title={
+                    presetActive
+                      ? `Preset: ${presetSubtypes!.length} types · click to edit`
+                      : 'Configure Daily preset'
+                  }
+                  mouseEnterDelay={0.4}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="Configure Daily preset"
+                    onClick={() => setPresetModalOpen(true)}
+                    icon={
+                      <SettingOutlined
+                        style={{
+                          fontSize: 16,
+                          color: presetActive ? colors.accent : colors.textMuted,
+                        }}
+                      />
+                    }
                   />
-                }
-              />
-            </Tooltip>
-          </div>
-        </div>
+                </Tooltip>
+              </div>
+            </div>
 
-        {/* 搜索栏 + 来源筛选 chip：sticky 固定在导航栏正下方 */}
-        <div
-          style={{
-            position: 'sticky',
-            top: 64,
-            zIndex: 20,
-            background: colors.pageBg,
-            paddingBottom: 12,
-            paddingTop: 4,
-            marginBottom: 8,
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <Input
-            allowClear
-            size="large"
-            prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
-            placeholder="Search tickers, themes, titles or content..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            style={{
-              background: colors.inputBg,
-              borderColor: colors.cardBorder,
-              color: colors.text,
-              marginBottom: 10,
-            }}
-          />
-
-          {/* 来源筛选 chip 行 */}
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            {visibleSubtypeOrder.map((sub) => {
-              const cnt = statsMap.get(sub) ?? 0;
-              if (cnt === 0 && !activeSubtypes.includes(sub)) return null;
-              return (
-                <SourceBadge
-                  key={sub}
-                  subtype={sub}
-                  themeMode={themeMode}
-                  clickable
-                  active={activeSubtypes.includes(sub)}
-                  count={cnt}
-                  onClick={() => toggleSubtype(sub)}
-                />
-              );
-            })}
-            {(activeSubtypes.length > 0 || searchQuery) && (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={clearFilters}
+            <div style={{ marginBottom: 8 }}>
+              <Input
+                allowClear
+                size="large"
+                prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
+                placeholder="Search tickers, themes, titles or content..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 style={{
-                  fontSize: 12,
-                  color: colors.textMuted,
-                  cursor: 'pointer',
-                  marginLeft: 6,
-                  textDecoration: 'underline',
-                  userSelect: 'none',
+                  background: colors.inputBg,
+                  borderColor: colors.cardBorder,
+                  color: colors.text,
+                  marginBottom: 10,
+                }}
+              />
+
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 8,
                 }}
               >
-                Clear
-              </span>
-            )}
+                {visibleSubtypeOrder.map((sub) => {
+                  const cnt = statsMap.get(sub) ?? 0;
+                  if (cnt === 0 && !activeSubtypes.includes(sub)) return null;
+                  return (
+                    <SourceBadge
+                      key={sub}
+                      subtype={sub}
+                      themeMode={themeMode}
+                      clickable
+                      active={activeSubtypes.includes(sub)}
+                      count={cnt}
+                      onClick={() => toggleSubtype(sub)}
+                    />
+                  );
+                })}
+                {(activeSubtypes.length > 0 || searchQuery) && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={clearFilters}
+                    style={{
+                      fontSize: 12,
+                      color: colors.textMuted,
+                      cursor: 'pointer',
+                      marginLeft: 6,
+                      textDecoration: 'underline',
+                      userSelect: 'none',
+                    }}
+                  >
+                    Clear
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
 
+          <div
+            ref={contentScrollRef}
+            className={`daily-subtle-scrollbar${themeMode === 'dark' ? ' daily-subtle-scrollbar--dark' : ''}`}
+            style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 60 }}
+          >
         {/* 内容主区 */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
@@ -596,9 +610,9 @@ const DailyPageInner: React.FC = () => {
             )}
           </>
         )}
-        </div>{/* /内容包裹 div */}
-        </div>{/* /右侧主内容区 */}
-        </div>{/* /两栏 flex 容器 */}
+          </div>
+        </div>
+        </div>
 
       {/* Preset 配置弹窗 */}
       <DailyPresetModal

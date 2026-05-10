@@ -85,6 +85,18 @@
   margin-top: 88px; /* 为固定 header 留出空间 */
 }
 
+/* Daily：页面自建侧栏 + 内容两栏滚动，禁止 layout-content 再滚一层（避免出现 triple-scroll） */
+.layout-content:has(.daily-page-scroll-root) {
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  /* 与上方 .layout-content 移动端 margin 对齐（margin-top 80 + bottom 16） */
+  .layout-content:has(.daily-page-scroll-root) > .daily-page-scroll-root {
+    height: calc(100vh - 96px) !important;
+  }
+}
+
 /* 页面内容样式 */
 .page-header {
   padding: 24px 24px 0;

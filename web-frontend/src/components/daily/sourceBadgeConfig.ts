@@ -64,6 +64,12 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     light: { bg: '#e6fffb', fg: '#08979c' },
     dark: { bg: 'rgba(19, 194, 194, 0.18)', fg: '#5cdbd3' },
   },
+  podcast: {
+    label: 'Podcast',
+    fullName: 'Apple Podcast',
+    light: { bg: '#f4e6ff', fg: '#7224d8' },
+    dark: { bg: 'rgba(114, 36, 216, 0.22)', fg: '#c084fc' },
+  },
 
   // ─── Feeds ───
   twitter: {
@@ -96,6 +102,7 @@ export const SOURCE_BADGE_DISPLAY_ORDER: DailySourceSubtype[] = [
   'youtube',
   'web',
   'text',
+  'podcast',
   'twitter',
   'youtube_feed',
   'news',

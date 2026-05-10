@@ -76,6 +76,7 @@ import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../service
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { fileTagsService } from '../services/fileTags';
 import { getErrorMessage } from '../utils/errorHandler';
+import { appendServeAuthToken } from '../utils/appendServeAuthToken';
 import { getModalStyles } from '../utils/modalStyles';
 import {
   getExecutionStatusDisplay,
@@ -124,15 +125,6 @@ function highlightTranscriptText(text: string, query: string, markStyle: React.C
       <React.Fragment key={i}>{part}</React.Fragment>
     )
   );
-}
-
-/** 仅对后端 `/api/files/serve/{id}` 追加 token；OSS 等签名 URL 上追加 query 会破坏签名 */
-function appendServeAuthToken(fileUrl: string, token: string | null): string {
-  if (!token || !fileUrl) return fileUrl;
-  const pathOnly = fileUrl.split('?')[0];
-  if (!pathOnly.includes('/api/files/serve/')) return fileUrl;
-  const separator = fileUrl.includes('?') ? '&' : '?';
-  return `${fileUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
 /** Original 面板：与后端枚举 / MIME 对齐，避免 application/pdf 等落入「无法在线预览」分支 */

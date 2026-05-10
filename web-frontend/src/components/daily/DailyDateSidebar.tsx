@@ -23,7 +23,8 @@ import {
   getDailyCalendar,
 } from '../../services/daily';
 import { DAILY_THEME_COLORS } from './dailyTheme';
-import { SOURCE_BADGE_STYLES, SOURCE_BADGE_DISPLAY_ORDER } from './sourceBadgeConfig';
+import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
+import './dailySubtleScrollbar.css';
 
 const { Text } = Typography;
 
@@ -146,7 +147,17 @@ const DailyDateSidebar: React.FC<DailyDateSidebarProps> = ({
     const level = activityLevel(day.total, data?.max_total ?? 1);
     const isActive = activeDateKey === day.date;
     const isEmpty = day.total === 0;
+    /** 当天无条目时仍保留「今天」可读性，不与历史空日混用淡化样式 */
+    const isTodayRow = day.date === today;
+    const fadeEmptyRow = isEmpty && !isTodayRow;
     const label = formatSidebarDate(day.date, today, yesterday);
+
+    const activitySwatchBg =
+      isTodayRow && level === 0
+        ? isDark
+          ? 'rgba(33,150,243,0.28)'
+          : '#91caff'
+        : activityColors[level];
 
     const rowStyle: React.CSSProperties = {
       display: 'flex',
@@ -162,7 +173,7 @@ const DailyDateSidebar: React.FC<DailyDateSidebarProps> = ({
         ? `3px solid ${colors.accent}`
         : '3px solid transparent',
       transition: 'background 0.15s, border-color 0.15s',
-      opacity: isEmpty ? 0.45 : 1,
+      opacity: fadeEmptyRow ? 0.45 : 1,
     };
 
     const topRow = (
@@ -174,15 +185,15 @@ const DailyDateSidebar: React.FC<DailyDateSidebarProps> = ({
             height: 10,
             borderRadius: 2,
             flexShrink: 0,
-            background: activityColors[level],
+            background: activitySwatchBg,
           }}
         />
         {/* 日期标签 */}
         <Text
           style={{
             fontSize: 12,
-            color: isActive ? colors.accent : isEmpty ? colors.textMuted : colors.text,
-            fontWeight: isActive ? 600 : 400,
+            color: isActive ? colors.accent : fadeEmptyRow ? colors.textMuted : colors.text,
+            fontWeight: isActive ? 600 : isTodayRow ? 500 : 400,
             flex: 1,
             overflow: 'hidden',
             whiteSpace: 'nowrap',
@@ -308,14 +319,14 @@ const DailyDateSidebar: React.FC<DailyDateSidebarProps> = ({
         borderRight: `1px solid ${colors.divider}`,
         overflowY: 'auto',
         paddingBottom: 24,
-        position: 'sticky' as const,
-        top: 0,
-        alignSelf: 'flex-start',
-        maxHeight: 'calc(100vh - 64px)',
+        height: '100%',
       };
 
   return (
-    <div style={containerStyle}>
+    <div
+      className={`daily-subtle-scrollbar${isDark ? ' daily-subtle-scrollbar--dark' : ''}`}
+      style={containerStyle}
+    >
       {/* 标题行（仅 desktop 显示）*/}
       {!isMobile && (
         <div

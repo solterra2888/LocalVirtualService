@@ -1,15 +1,16 @@
 /**
  * Daily 页面 (移动端 /daily).
  *
- * 单列卡片信息流, 按日期分组. 顶部固定搜索 + 横向滚动来源 chip.
+ * 单列卡片信息流, 按日期分组. 标题 + 搜索 + 来源 chip 整块 sticky（顶栏下，有任务时含任务条高度）.
  * 跳转策略与桌面端一致, 但 Feed 跳转用移动端的深链路由
  * /feeds/article/:subscriptionId/:contentId.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, ConfigProvider, Drawer, Empty, Input, Spin, Typography, message, theme as antdTheme } from 'antd';
 import { CalendarOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useFileProcessing } from '../contexts/FileProcessingContext';
 import {
   ALL_DAILY_SOURCE_SUBTYPES,
   DailyFeedItem,
@@ -28,6 +29,7 @@ import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfi
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
 import '../styles/mobilePageLoading.css';
+import { MOBILE_TASK_PROGRESS_BAR_HEIGHT } from '../components/mobile/MobileTaskProgressBar';
 
 const { Title, Text } = Typography;
 
@@ -60,7 +62,24 @@ const groupByDate = (items: DailyFeedItem[], tz: string): DateGroup[] => {
 
 const MobileDailyPageInner: React.FC = () => {
   const { themeMode, userTimezone } = useDashboardSettings();
+  const { tasks } = useFileProcessing();
   const colors = DAILY_THEME_COLORS[themeMode];
+
+  /** 顶栏 56px + 可选任务进度条，与 MobileLayout / MobileTaskProgressBar 对齐 */
+  const mobileStickyTop =
+    tasks.size > 0 ? 56 + MOBILE_TASK_PROGRESS_BAR_HEIGHT : 56;
+  const mobilePageHeaderRef = useRef<HTMLDivElement | null>(null);
+  const [mobileHeaderHeight, setMobileHeaderHeight] = useState(160);
+
+  useLayoutEffect(() => {
+    const el = mobilePageHeaderRef.current;
+    if (!el) return;
+    const measure = () => setMobileHeaderHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const [items, setItems] = useState<DailyFeedItem[]>([]);
   const [stats, setStats] = useState<DailySourceCount[]>([]);
@@ -210,23 +229,70 @@ const MobileDailyPageInner: React.FC = () => {
     setPreviewItem(item);
   }, []);
 
-  // 点击日期导航栏的日期 → 关闭 bottom-sheet，滚动到对应日期锚点
-  // 使用 getBoundingClientRect + window.scrollTo 而非 scrollIntoView，
-  // 以便减去移动端固定顶部导航栏高度（56px），避免日期 header 被遮住。
-  // 56px 顶栏 + ~88px sticky 搜索+chip 区 = ~144px 总偏移
-  const MOBILE_STICKY_OFFSET = 144;
+  // iOS Safari 兼容的 scrollY 读取
+  const getScrollY = () =>
+    window.scrollY ?? window.pageYOffset ?? document.documentElement.scrollTop ?? 0;
+
+  const scrollToMobileAnchor = useCallback(
+    (dateKey: string): boolean => {
+      const anchor = document.getElementById(`mobile-scroll-anchor-${dateKey}`);
+      if (!anchor) return false;
+      const rect = anchor.getBoundingClientRect();
+      const offset = mobileStickyTop + mobileHeaderHeight + 8;
+      const target = getScrollY() + rect.top - offset;
+      window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+      setActiveDateKey(dateKey);
+      return true;
+    },
+    [mobileStickyTop, mobileHeaderHeight]
+  );
+
+  // 点击日期导航栏 → 关闭 bottom-sheet，滚动到对应日期锚点
+  // 若当天数据尚未加载（anchor 不存在），先拉取该日数据再跳转（与桌面端对齐）
   const handleJumpToDate = useCallback((dateKey: string) => {
     setCalendarOpen(false);
-    setActiveDateKey(dateKey);
-    // 关闭动画结束后再滚动（避免被 drawer 遮住）
-    setTimeout(() => {
-      const anchor = document.getElementById(`mobile-scroll-anchor-${dateKey}`);
-      if (!anchor) return;
-      const rect = anchor.getBoundingClientRect();
-      const target = window.scrollY + rect.top - MOBILE_STICKY_OFFSET - 8;
-      window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    // 等 Drawer 关闭动画结束（300ms）再滚动，避免 rect 被遮挡影响
+    setTimeout(async () => {
+      // 优先命中已加载的锚点
+      if (scrollToMobileAnchor(dateKey)) return;
+
+      // anchor 不存在 → 该日数据未加载，按日期拉取补插入
+      const seq = ++requestSeqRef.current;
+      setLoading(true);
+      try {
+        const resp = await listDailyFeed({
+          ...baseQuery,
+          date_from: `${dateKey}T00:00:00Z`,
+          date_to: `${dateKey}T23:59:59Z`,
+          limit: 100,
+          offset: 0,
+        });
+        if (seq !== requestSeqRef.current) return;
+        if (resp.items.length > 0) {
+          setItems((prev) => {
+            const merged = [...resp.items, ...prev];
+            const seen = new Set<string>();
+            const deduped = merged.filter((it) => {
+              if (seen.has(it.id)) return false;
+              seen.add(it.id);
+              return true;
+            });
+            deduped.sort(
+              (a, b) =>
+                new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+            );
+            return deduped;
+          });
+          // 等 DOM 更新后再滚动
+          requestAnimationFrame(() => scrollToMobileAnchor(dateKey));
+        }
+      } catch {
+        // 静默处理
+      } finally {
+        if (seq === requestSeqRef.current) setLoading(false);
+      }
     }, 320);
-  }, []);
+  }, [baseQuery, scrollToMobileAnchor]);
 
   const toggleSubtype = useCallback((sub: DailySourceSubtype) => {
     setActiveSubtypes((prev) =>
@@ -237,9 +303,8 @@ const MobileDailyPageInner: React.FC = () => {
   // Preset 保存回调: 同步状态 + 清除落在新 preset 之外的临时 chip 选择
   const handlePresetSaved = useCallback((next: DailySourceSubtype[]) => {
     setPresetSubtypes(next);
-    setActiveSubtypes((prev) =>
-      next.length === 0 ? prev : prev.filter((s) => next.includes(s))
-    );
+    // 与桌面端一致：保存 preset 后清空 chip 临时筛选，避免仍只传部分 source_subtypes
+    setActiveSubtypes([]);
     setPresetModalOpen(false);
   }, []);
 
@@ -269,51 +334,12 @@ const MobileDailyPageInner: React.FC = () => {
         padding: '12px 12px 40px',
       }}
     >
+      {/* 标题 + 搜索 + chip：整块 sticky，滚动时与顶栏（及任务条）对齐 */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 10,
-        }}
-      >
-        <Title level={4} style={{ margin: 0, color: colors.text, fontWeight: 600 }}>
-          Daily
-        </Title>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-            {total.toLocaleString()} items
-          </Text>
-          <Button
-            type="text"
-            size="small"
-            aria-label="Open date navigator"
-            onClick={() => setCalendarOpen(true)}
-            icon={
-              <CalendarOutlined
-                style={{ fontSize: 16, color: activeDateKey ? colors.accent : colors.textMuted }}
-              />
-            }
-          />
-          <Button
-            type="text"
-            size="small"
-            aria-label="Configure Daily preset"
-            onClick={() => setPresetModalOpen(true)}
-            icon={
-              <SettingOutlined
-                style={{ fontSize: 16, color: presetActive ? colors.accent : colors.textMuted }}
-              />
-            }
-          />
-        </div>
-      </div>
-
-      {/* 搜索栏 + chip 行：sticky 固定在移动端顶栏正下方 */}
-      <div
+        ref={mobilePageHeaderRef}
         style={{
           position: 'sticky',
-          top: 56,
+          top: mobileStickyTop,
           zIndex: 20,
           background: colors.pageBg,
           paddingBottom: 8,
@@ -322,6 +348,46 @@ const MobileDailyPageInner: React.FC = () => {
           backdropFilter: 'blur(8px)',
         }}
       >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 10,
+          }}
+        >
+          <Title level={4} style={{ margin: 0, color: colors.text, fontWeight: 600 }}>
+            Daily
+          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+              {total.toLocaleString()} items
+            </Text>
+            <Button
+              type="text"
+              size="small"
+              aria-label="Open date navigator"
+              onClick={() => setCalendarOpen(true)}
+              icon={
+                <CalendarOutlined
+                  style={{ fontSize: 16, color: activeDateKey ? colors.accent : colors.textMuted }}
+                />
+              }
+            />
+            <Button
+              type="text"
+              size="small"
+              aria-label="Configure Daily preset"
+              onClick={() => setPresetModalOpen(true)}
+              icon={
+                <SettingOutlined
+                  style={{ fontSize: 16, color: presetActive ? colors.accent : colors.textMuted }}
+                />
+              }
+            />
+          </div>
+        </div>
+
         <Input
           allowClear
           prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
@@ -362,8 +428,8 @@ const MobileDailyPageInner: React.FC = () => {
           />
           );
         })}
-        </div>{/* /chip 行 */}
-      </div>{/* /sticky 搜索+chip 区 */}
+        </div>
+      </div>
 
       {loading ? (
         <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">

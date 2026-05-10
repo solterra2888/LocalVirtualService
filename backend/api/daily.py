@@ -57,7 +57,8 @@ router = APIRouter()
 WORDS_PER_MINUTE = 400
 
 # Upload 链路 file_type 的标准化映射
-# file_processing_details.file_type 实际可能值: pdf/word/excel/csv/image/audio/youtube/web/text
+# file_processing_details.file_type 实际可能值:
+#   pdf/word/excel/csv/image/audio/youtube/web/text/podcast
 # 前端 source_subtype 把 pdf/word/excel/csv 统一归并为 'document'，image 单独保留
 _UPLOAD_FILE_TYPE_MAP = {
     "pdf": "document",
@@ -70,6 +71,7 @@ _UPLOAD_FILE_TYPE_MAP = {
     "youtube": "youtube",
     "web": "web",
     "text": "text",
+    "podcast": "podcast",  # Apple Podcast Episode
 }
 
 # 反向映射：前端 source_subtype → DB file_type 集合（用于 WHERE IN 过滤）
@@ -80,6 +82,7 @@ _UPLOAD_SUBTYPE_TO_DB_TYPES: Dict[str, List[str]] = {
     "youtube": ["youtube"],
     "web": ["web"],
     "text": ["text"],
+    "podcast": ["podcast"],
 }
 
 # Feed 链路 channel_type 的标准化映射
@@ -101,10 +104,39 @@ ALL_SOURCE_SUBTYPES = [
     "youtube",
     "web",
     "text",
+    "podcast",
     "twitter",
     "news",
     "youtube_feed",
 ]
+
+# podcast 上线前 Daily 已有的 6 类 Upload 子类型（旧「全选 Upload」preset 不含 podcast）
+_LEGACY_UPLOAD_SUBTYPES_NO_PODCAST = frozenset(
+    {"document", "image", "audio", "youtube", "web", "text"}
+)
+
+
+def _expand_preset_for_legacy_full_upload(subtypes: List[str]) -> List[str]:
+    """若 preset 已包含上述 6 类 Upload 但未含 podcast，自动并入 podcast。
+
+    避免新增 source_subtype 后，旧 preset 仍按旧列表过滤，导致 Daily 永远不展示 Podcast。
+    在首个 ``text`` 之后插入 ``podcast``；若无 ``text``（脏数据）则追加到末尾。
+    其余 subtype 顺序保持不变（含 Feeds 各项）。
+    """
+    if not subtypes or "podcast" in subtypes:
+        return subtypes
+    if not _LEGACY_UPLOAD_SUBTYPES_NO_PODCAST.issubset(frozenset(subtypes)):
+        return subtypes
+    out: List[str] = []
+    inserted = False
+    for s in subtypes:
+        out.append(s)
+        if s == "text" and not inserted:
+            out.append("podcast")
+            inserted = True
+    if not inserted:
+        out.append("podcast")
+    return out
 
 
 def get_db() -> DatabaseManager:
@@ -181,7 +213,7 @@ def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
 _UPLOAD_SQL = """
     SELECT
         'upload'::text                                AS source,
-        fpd.file_type                                 AS raw_subtype,
+        lower(fpd.file_type::text)                    AS raw_subtype,
         fpd.id                                        AS item_id,
         fpd.processing_stats_id                       AS processing_stats_id,
         NULL::integer                                 AS subscription_id,
@@ -192,11 +224,14 @@ _UPLOAD_SQL = """
         COALESCE(fpd.content_length, 0)               AS content_length,
         ft.summary                                    AS summary,
         ft.reasoning                                  AS reasoning,
-        LEFT(COALESCE(fpd.content, ''), 400)          AS content_snippet,
+        LEFT(COALESCE(NULLIF(trim(fpd.content), ''),
+                      NULLIF(trim(COALESCE(fpd.display_name, fpd.filename, '')), ''),
+                      ''),
+             400)          AS content_snippet,
         NULL::text                                    AS author_name,
         NULL::text                                    AS author_identifier,
         CASE
-            WHEN fpd.file_type IN ('youtube', 'web')
+            WHEN lower(fpd.file_type::text) IN ('youtube', 'web')
                  AND fpd.original_file_path LIKE 'http%%'
                 THEN fpd.original_file_path
             ELSE NULL
@@ -256,7 +291,14 @@ _UPLOAD_SQL = """
         )
     )
       AND fpd.status = 'completed'
-      AND COALESCE(fpd.content, '') <> ''
+      AND (
+          COALESCE(fpd.content, '') <> ''
+          OR (
+              lower(fpd.file_type::text) IN ('audio', 'youtube')
+              AND fpd.asr_with_diarization IS NOT NULL
+          )
+          OR lower(fpd.file_type::text) = 'podcast'
+      )
 """
 
 _FEED_SQL = """
@@ -350,7 +392,9 @@ def _build_filter_clauses(
             upload_parts.append("AND FALSE")
         else:
             params["upload_subtypes"] = tuple(upload_subtypes_pg)
-            upload_parts.append("AND fpd.file_type IN %(upload_subtypes)s")
+            upload_parts.append(
+                "AND lower(fpd.file_type::text) IN %(upload_subtypes)s"
+            )
         if not feed_subtypes_pg:
             feed_parts.append("AND FALSE")
         else:
@@ -550,7 +594,7 @@ def list_daily_feed(
     source_subtypes: Optional[List[str]] = Query(
         None,
         description=(
-            "按来源子类型过滤（多选）: document, audio, youtube, web, text, "
+            "按来源子类型过滤（多选）: document, image, audio, youtube, web, text, podcast, "
             "twitter, news, youtube_feed"
         ),
     ),
@@ -914,7 +958,8 @@ def get_daily_preset(
         raw = list(row[0]) if row and row[0] else []
         # 防御性过滤：剔除非法值（schema 升级或脏数据兜底）
         cleaned = [s for s in raw if s in ALL_SOURCE_SUBTYPES]
-        return DailyPresetResponse(source_subtypes=cleaned)  # type: ignore[arg-type]
+        expanded = _expand_preset_for_legacy_full_upload(cleaned)
+        return DailyPresetResponse(source_subtypes=expanded)  # type: ignore[arg-type]
     except Exception as exc:
         logger.error(f"[daily.get_daily_preset] 读取失败: {exc}")
         raise HTTPException(status_code=500, detail=f"读取失败: {exc}")
