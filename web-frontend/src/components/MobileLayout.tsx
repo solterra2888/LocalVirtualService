@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import type { MenuProps } from 'antd';
 import { Layout as AntLayout, Button, Dropdown, Avatar, Typography, Switch } from 'antd';
-import { LogoutOutlined, EditOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
+import {
+  LogoutOutlined,
+  EditOutlined,
+  SunOutlined,
+  MoonOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
@@ -61,6 +67,7 @@ const MobileLayout: React.FC = () => {
     navigate('/login');
   };
 
+  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员仅开放 System Log Files（路由仍由 AdminRoute 校验）
   const userMenuItems = [
     {
       key: 'theme',
@@ -87,6 +94,10 @@ const MobileLayout: React.FC = () => {
       onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
     },
     { type: 'divider' as const },
+    ...(user?.is_admin
+      ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }]
+      : []),
+    ...(user?.is_admin ? [{ type: 'divider' as const }] : []),
     {
       key: 'edit-profile',
       icon: <EditOutlined />,

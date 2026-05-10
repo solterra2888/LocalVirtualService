@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, Space, ConfigProvider, theme as antdTheme, Typography, Button, Select, InputNumber, message, Spin, Input, Tabs } from 'antd';
 import { FileTextOutlined, ReloadOutlined, ClearOutlined, DownloadOutlined, DashboardOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import { readLog, clearLog, LogType } from '../services/logs';
 import MonitoringPanel from '../components/MonitoringPanel';
 
@@ -47,6 +48,7 @@ const CARD_STYLE_BEHANCE_DARK = {
 };
 
 const SystemLogsPage: React.FC = () => {
+  const { isMobile } = useDeviceDetection();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
@@ -129,13 +131,14 @@ const SystemLogsPage: React.FC = () => {
     >
       <div
         style={{
-          padding: '12px 40px 32px',
+          padding: isMobile ? '12px 12px 28px' : '12px 40px 32px',
           backgroundColor: colors.pageBg,
           minHeight: '100%',
+          boxSizing: 'border-box',
         }}
       >
-        <div style={{ marginBottom: 20 }}>
-          <Title level={2} style={{ margin: 0, marginBottom: 4, color: colors.text }}>
+        <div style={{ marginBottom: isMobile ? 14 : 20 }}>
+          <Title level={isMobile ? 3 : 2} style={{ margin: 0, marginBottom: 4, color: colors.text }}>
             <FileTextOutlined style={{ marginRight: 8 }} />
             system logs
           </Title>
@@ -153,14 +156,14 @@ const SystemLogsPage: React.FC = () => {
               children: (
                 <Card
                   style={{ ...cardStyle, overflow: 'hidden' }}
-                  bodyStyle={{ padding: '20px 24px' }}
+                  bodyStyle={{ padding: isMobile ? '14px 12px' : '20px 24px' }}
                 >
                   {/* 控制栏 */}
                   <div style={{ marginBottom: 16 }}>
-                    <Space wrap>
+                    <Space wrap size={isMobile ? 'small' : 'middle'} direction={isMobile ? 'vertical' : 'horizontal'} style={{ width: isMobile ? '100%' : undefined }}>
                       <span style={{ color: colors.text }}>Log Type:</span>
                       <Select
-                        style={{ width: 200 }}
+                        style={{ width: isMobile ? '100%' : 200 }}
                         value={selectedLogType}
                         onChange={setSelectedLogType}
                         options={[
@@ -169,9 +172,9 @@ const SystemLogsPage: React.FC = () => {
                         ]}
                       />
 
-                      <span style={{ color: colors.text, marginLeft: 16 }}>Read Lines:</span>
+                      <span style={{ color: colors.text, ...(isMobile ? {} : { marginLeft: 16 }) }}>Read Lines:</span>
                       <InputNumber
-                        style={{ width: 120 }}
+                        style={{ width: isMobile ? '100%' : 120 }}
                         value={linesToRead}
                         onChange={setLinesToRead}
                         min={0}
@@ -181,31 +184,36 @@ const SystemLogsPage: React.FC = () => {
                         (0 or leave empty to read all)
                       </Text>
 
-                      <Button
-                        type="primary"
-                        icon={<ReloadOutlined />}
-                        onClick={loadLogContent}
-                        loading={loading}
-                      >
-                        Refresh
-                      </Button>
+                      <Space wrap size="small" style={{ width: isMobile ? '100%' : undefined }}>
+                        <Button
+                          type="primary"
+                          icon={<ReloadOutlined />}
+                          onClick={loadLogContent}
+                          loading={loading}
+                          block={isMobile}
+                        >
+                          Refresh
+                        </Button>
 
-                      <Button
-                        icon={<DownloadOutlined />}
-                        onClick={handleDownloadLog}
-                        disabled={!logContent}
-                      >
-                        Download
-                      </Button>
+                        <Button
+                          icon={<DownloadOutlined />}
+                          onClick={handleDownloadLog}
+                          disabled={!logContent}
+                          block={isMobile}
+                        >
+                          Download
+                        </Button>
 
-                      <Button
-                        danger
-                        icon={<ClearOutlined />}
-                        onClick={handleClearLog}
-                        disabled={loading}
-                      >
-                        Clear Log
-                      </Button>
+                        <Button
+                          danger
+                          icon={<ClearOutlined />}
+                          onClick={handleClearLog}
+                          disabled={loading}
+                          block={isMobile}
+                        >
+                          Clear Log
+                        </Button>
+                      </Space>
                     </Space>
                   </div>
 
@@ -235,7 +243,7 @@ const SystemLogsPage: React.FC = () => {
                         color: colors.text,
                         border: `1px solid ${colors.cardBorder}`,
                       }}
-                      rows={30}
+                      rows={isMobile ? 16 : 30}
                       placeholder="The log content will be displayed here..."
                     />
                   </Spin>
