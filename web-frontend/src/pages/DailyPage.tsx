@@ -31,6 +31,7 @@ import DailyCard from '../components/daily/DailyCard';
 import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
 import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
+import DailyDateSidebar from '../components/daily/DailyDateSidebar';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
@@ -88,6 +89,12 @@ const DailyPageInner: React.FC = () => {
 
   // 抽屉预览 (卡片点击不再跳出, 而是就地预览; 详见 docs §1)
   const [previewItem, setPreviewItem] = useState<DailyFeedItem | null>(null);
+
+  // ─── 日期导航栏 (DailyDateSidebar) ──────────────────────────
+  // activeDateKey: 当前视口内第一个可见日期分组的 key（YYYY-MM-DD），
+  // 由 IntersectionObserver 监听主区各 .daily-date-anchor 元素维护。
+  const [activeDateKey, setActiveDateKey] = useState<string | null>(null);
+  const dateAnchorObserverRef = useRef<IntersectionObserver | null>(null);
 
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +227,94 @@ const DailyPageInner: React.FC = () => {
     return () => document.removeEventListener('scroll', handleScroll, true);
   }, []); // 稳定，只挂载/卸载一次
 
+  // ─── 日期锚点 IntersectionObserver ──────────────────────────
+  // 监听主区每个日期分组的 .daily-date-anchor 元素，追踪当前视口最顶可见的日期。
+  // rootMargin '0px 0px -70% 0px' → 进入视口上方 30% 时触发 active。
+  useEffect(() => {
+    if (dateAnchorObserverRef.current) {
+      dateAnchorObserverRef.current.disconnect();
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) {
+          const key = (visible[0].target as HTMLElement).dataset.dateKey;
+          if (key) setActiveDateKey(key);
+        }
+      },
+      { rootMargin: '0px 0px -70% 0px', threshold: 0 }
+    );
+    dateAnchorObserverRef.current = observer;
+    document.querySelectorAll<HTMLElement>('.daily-date-anchor').forEach((el) =>
+      observer.observe(el)
+    );
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+
+  // ─── 点击日期侧栏跳转主区 ────────────────────────────────────
+  // 注意：不能对 position:sticky 的元素用 scrollIntoView —— sticky 元素永远"在视口里"
+  // （它已经贴在顶部），所以 scrollIntoView 不会向上滚动。
+  // 解决方案：用非 sticky 的 #daily-scroll-anchor-{dateKey} 定位节点，
+  // 通过 getBoundingClientRect + window.scrollTo 手动算坐标，并减去固定导航栏高度。
+  // 64px 导航栏 + ~100px sticky 搜索+chip 区 + 8px 间距
+  const DESKTOP_STICKY_OFFSET = 172;
+  const scrollToAnchor = useCallback((dateKey: string) => {
+    const anchor = document.getElementById(`daily-scroll-anchor-${dateKey}`);
+    if (!anchor) return false;
+    const rect = anchor.getBoundingClientRect();
+    const target = window.scrollY + rect.top - DESKTOP_STICKY_OFFSET;
+    window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    setActiveDateKey(dateKey);
+    return true;
+  }, []);
+
+  const handleJumpToDate = useCallback(
+    async (dateKey: string) => {
+      // 先尝试滚动到已加载的锚点
+      if (scrollToAnchor(dateKey)) return;
+
+      // 未命中 → 拉取该日数据补加载
+      const seq = ++requestSeqRef.current;
+      setLoading(true);
+      try {
+        const resp = await listDailyFeed({
+          ...baseQuery,
+          date_from: `${dateKey}T00:00:00Z`,
+          date_to: `${dateKey}T23:59:59Z`,
+          limit: 100,
+          offset: 0,
+        });
+        if (seq !== requestSeqRef.current) return;
+        if (resp.items.length > 0) {
+          setItems((prev) => {
+            const merged = [...resp.items, ...prev];
+            const seen = new Set<string>();
+            const deduped = merged.filter((it) => {
+              if (seen.has(it.id)) return false;
+              seen.add(it.id);
+              return true;
+            });
+            deduped.sort(
+              (a, b) =>
+                new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+            );
+            return deduped;
+          });
+          // 等 DOM 更新后再滚动
+          requestAnimationFrame(() => scrollToAnchor(dateKey));
+        }
+      } catch {
+        // 静默处理
+      } finally {
+        if (seq === requestSeqRef.current) setLoading(false);
+      }
+    },
+    [baseQuery]
+  );
+
   // ─── 卡片点击跳转 ────────────────────────────────────
   // 卡片点击 → 在 Daily 页面内打开右侧抽屉预览, 不再跳出到 Sources/Feeds.
   // 顶栏 "Open in Sources/Feeds" 按钮保留旧的跳转能力 (DailyPreviewDrawer 内部实现).
@@ -279,8 +374,32 @@ const DailyPageInner: React.FC = () => {
         padding: '24px 32px 60px',
       }}
     >
+      {/* 两栏布局：左侧日期导航栏 + 右侧主内容区 */}
+      <div
+        style={{
+          maxWidth: 1180,
+          margin: '0 auto',
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+        }}
+      >
+        {/* 左侧日期导航栏 */}
+        <DailyDateSidebar
+          activeDateKey={activeDateKey}
+          baseQuery={{
+            tz: userTimezone,
+            source_subtypes: effectiveSubtypes,
+            q: searchQuery || undefined,
+          }}
+          onJumpToDate={handleJumpToDate}
+          variant="desktop"
+        />
+
+        {/* 右侧主内容区（原有逻辑不变，只是 maxWidth 约束移到此层）*/}
+        <div style={{ flex: 1, minWidth: 0 }}>
       {/* 顶部标题区 */}
-      <div style={{ maxWidth: 880, margin: '0 auto' }}>
+      <div>
         <div
           style={{
             display: 'flex',
@@ -324,64 +443,76 @@ const DailyPageInner: React.FC = () => {
           </div>
         </div>
 
-        {/* 搜索栏 */}
-        <Input
-          allowClear
-          size="large"
-          prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
-          placeholder="Search tickers, themes, titles or content..."
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          style={{
-            background: colors.inputBg,
-            borderColor: colors.cardBorder,
-            color: colors.text,
-            marginBottom: 14,
-          }}
-        />
-
-        {/* 来源筛选 chip 行 */}
+        {/* 搜索栏 + 来源筛选 chip：sticky 固定在导航栏正下方 */}
         <div
           style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 8,
-            marginBottom: 24,
+            position: 'sticky',
+            top: 64,
+            zIndex: 20,
+            background: colors.pageBg,
+            paddingBottom: 12,
+            paddingTop: 4,
+            marginBottom: 8,
+            backdropFilter: 'blur(8px)',
           }}
         >
-          {visibleSubtypeOrder.map((sub) => {
-            const cnt = statsMap.get(sub) ?? 0;
-            if (cnt === 0 && !activeSubtypes.includes(sub)) return null;
-            return (
-              <SourceBadge
-                key={sub}
-                subtype={sub}
-                themeMode={themeMode}
-                clickable
-                active={activeSubtypes.includes(sub)}
-                count={cnt}
-                onClick={() => toggleSubtype(sub)}
-              />
-            );
-          })}
-          {(activeSubtypes.length > 0 || searchQuery) && (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={clearFilters}
-              style={{
-                fontSize: 12,
-                color: colors.textMuted,
-                cursor: 'pointer',
-                marginLeft: 6,
-                textDecoration: 'underline',
-                userSelect: 'none',
-              }}
-            >
-              Clear
-            </span>
-          )}
+          <Input
+            allowClear
+            size="large"
+            prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
+            placeholder="Search tickers, themes, titles or content..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            style={{
+              background: colors.inputBg,
+              borderColor: colors.cardBorder,
+              color: colors.text,
+              marginBottom: 10,
+            }}
+          />
+
+          {/* 来源筛选 chip 行 */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            {visibleSubtypeOrder.map((sub) => {
+              const cnt = statsMap.get(sub) ?? 0;
+              if (cnt === 0 && !activeSubtypes.includes(sub)) return null;
+              return (
+                <SourceBadge
+                  key={sub}
+                  subtype={sub}
+                  themeMode={themeMode}
+                  clickable
+                  active={activeSubtypes.includes(sub)}
+                  count={cnt}
+                  onClick={() => toggleSubtype(sub)}
+                />
+              );
+            })}
+            {(activeSubtypes.length > 0 || searchQuery) && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={clearFilters}
+                style={{
+                  fontSize: 12,
+                  color: colors.textMuted,
+                  cursor: 'pointer',
+                  marginLeft: 6,
+                  textDecoration: 'underline',
+                  userSelect: 'none',
+                }}
+              >
+                Clear
+              </span>
+            )}
+          </div>
         </div>
 
         {/* 内容主区 */}
@@ -404,8 +535,12 @@ const DailyPageInner: React.FC = () => {
           <>
             {grouped.map((group) => (
               <div key={group.dateKey} style={{ marginBottom: 28 }}>
-                {/* 日期分隔锚点 */}
+                {/* 非 sticky 滚动定位锚点，scrollToAnchor() 依此算坐标 */}
+                <div id={`daily-scroll-anchor-${group.dateKey}`} style={{ height: 0 }} />
+                {/* 日期分隔锚点：sticky 固定在顶部，data-date-key 供 IntersectionObserver 读取 */}
                 <div
+                  className="daily-date-anchor"
+                  data-date-key={group.dateKey}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -461,7 +596,9 @@ const DailyPageInner: React.FC = () => {
             )}
           </>
         )}
-      </div>
+        </div>{/* /内容包裹 div */}
+        </div>{/* /右侧主内容区 */}
+        </div>{/* /两栏 flex 容器 */}
 
       {/* Preset 配置弹窗 */}
       <DailyPresetModal

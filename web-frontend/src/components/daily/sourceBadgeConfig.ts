@@ -69,8 +69,8 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
   twitter: {
     label: 'Twitter',
     fullName: 'Twitter / X',
-    light: { bg: '#e9e9e9', fg: '#262626' },
-    dark:  { bg: 'rgba(255,255,255,0.14)', fg: '#e8e8e8' },
+    light: { bg: '#e8f4fd', fg: '#1d9bf0' },
+    dark:  { bg: 'rgba(29,155,240,0.18)', fg: '#1d9bf0' },
   },
   news: {
     label: 'News',

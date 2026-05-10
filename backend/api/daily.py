@@ -28,6 +28,9 @@ from backend.auth.jwt_utils import get_current_user
 from backend.database.db_manager import DatabaseManager
 from backend.utils.avatar import resolve_avatar_url as _resolve_avatar
 from backend.schemas.daily import (
+    DailyCalendarDay,
+    DailyCalendarDaySource,
+    DailyCalendarResponse,
     DailyFeedItem,
     DailyFeedResponse,
     DailyItemDetail,
@@ -734,6 +737,149 @@ def get_daily_stats(
         )
     except Exception as exc:
         logger.error(f"[daily.get_daily_stats] 统计失败: {exc}")
+        raise HTTPException(status_code=500, detail=f"统计失败: {exc}")
+    finally:
+        conn.close()
+
+
+# ─── Calendar (日期导航栏) ──────────────────────────────────────────
+#
+# 为前端左侧日期导航栏提供按自然日聚合的统计数据。
+# 复用 _UPLOAD_SQL / _FEED_SQL + _build_filter_clauses 逻辑，
+# 按用户时区 (tz) 把 published_at 切到自然日，再补齐 0 条空白日。
+# 详见 docs/instructions/DAILY_MODULE.md §4 (API 表格)
+
+
+@router.get("/calendar", response_model=DailyCalendarResponse)
+def list_daily_calendar(
+    tz: str = Query("UTC", description="用户时区 (IANA)，如 Asia/Hong_Kong"),
+    days: int = Query(30, ge=1, le=180, description="从今天往回看的天数"),
+    source_subtypes: Optional[List[str]] = Query(None),
+    q: Optional[str] = Query(None, max_length=200),
+    tickers: Optional[List[str]] = Query(None),
+    db: DatabaseManager = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    日历聚合：返回最近 N 天每天的卡片总数与 source_subtype 分布。
+
+    前端日期导航栏（DailyDateSidebar）消费本接口，展示活跃度色块、迷你彩条等统计。
+    - 按用户时区切自然日（不依赖服务器本地时区）。
+    - 含 0 条空白日，让用户感知某天无新内容。
+    - 结果随 source_subtypes / q / tickers 联动，与主信息流过滤口径一致。
+    """
+    if current_user.user_id is None or not current_user.username:
+        raise HTTPException(status_code=401, detail="未授权")
+
+    from backend.utils.datetime_utils import parse_user_tz, today_in_tz
+    from datetime import date, datetime as _dt, timedelta, timezone as _tz
+
+    # 解析时区，非法 → 回退 UTC
+    user_tz = parse_user_tz(tz)
+    actual_tz_str = str(user_tz)
+
+    # 计算窗口的 UTC 起点（用户时区的 window_start 日 00:00:00 转 UTC-aware）
+    today_date: date = today_in_tz(actual_tz_str)
+    window_start_date: date = today_date - timedelta(days=days - 1)
+    window_start_local = _dt.combine(window_start_date, _dt.min.time(), tzinfo=user_tz)
+    window_start_utc = window_start_local.astimezone(_tz.utc)
+
+    source_subtypes = _normalize_subtypes(source_subtypes)
+    upload_extra, feed_extra, extra_params = _build_filter_clauses(
+        date_from=None,
+        date_to=None,
+        source_subtypes=source_subtypes,
+        q=q,
+        tickers=tickers,
+    )
+
+    base_params: Dict[str, Any] = {
+        "username": current_user.username,
+        "user_id": current_user.user_id,
+        "window_start_utc": window_start_utc,
+        "cal_tz": actual_tz_str,
+    }
+    base_params.update(extra_params)
+
+    # SQL：按用户时区切自然日分组统计
+    sql = f"""
+        WITH upload_items AS (
+            {_UPLOAD_SQL}
+            {upload_extra}
+        ),
+        feed_items AS (
+            {_FEED_SQL}
+            {feed_extra}
+        ),
+        merged AS (
+            SELECT 'upload'::text AS source, raw_subtype, published_at FROM upload_items
+            UNION ALL
+            SELECT 'feed'::text   AS source, raw_subtype, published_at FROM feed_items
+        ),
+        by_day AS (
+            SELECT
+                (published_at AT TIME ZONE %(cal_tz)s)::date AS d,
+                source,
+                raw_subtype,
+                COUNT(*) AS cnt
+            FROM merged
+            WHERE published_at >= %(window_start_utc)s
+            GROUP BY 1, 2, 3
+        )
+        SELECT d, source, raw_subtype, cnt FROM by_day
+        ORDER BY d DESC
+    """
+
+    conn = db.get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="数据库连接失败")
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, base_params)
+        rows = cursor.fetchall()
+
+        # 聚合：{date_str: {source_subtype: count}}
+        from collections import defaultdict  # noqa: PLC0415
+        day_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for d, source, raw_subtype, cnt in rows:
+            cnt = int(cnt or 0)
+            if source == "upload":
+                key = _UPLOAD_FILE_TYPE_MAP.get(raw_subtype or "document", "document")
+            else:
+                key = _FEED_CHANNEL_TYPE_MAP.get(raw_subtype or "news", "news")
+            day_map[str(d)][key] += cnt
+
+        # 补齐 0 条空日，形成连续 N 天列表（倒序：today → window_start）
+        result_items: List[DailyCalendarDay] = []
+        total_in_window = 0
+        max_total = 0
+        for i in range(days):
+            target = today_date - timedelta(days=i)
+            date_str = target.isoformat()
+            subtype_counts = day_map.get(date_str, {})
+            day_total = sum(subtype_counts.values())
+            total_in_window += day_total
+            if day_total > max_total:
+                max_total = day_total
+            by_source = [
+                DailyCalendarDaySource(source_subtype=k, count=v)  # type: ignore[arg-type]
+                for k, v in sorted(subtype_counts.items(), key=lambda x: -x[1])
+            ]
+            result_items.append(
+                DailyCalendarDay(date=date_str, total=day_total, by_source=by_source)
+            )
+
+        return DailyCalendarResponse(
+            tz=actual_tz_str,
+            days=days,
+            items=result_items,
+            max_total=max_total,
+            total_in_window=total_in_window,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[daily.list_daily_calendar] 统计失败: {exc}")
         raise HTTPException(status_code=500, detail=f"统计失败: {exc}")
     finally:
         conn.close()

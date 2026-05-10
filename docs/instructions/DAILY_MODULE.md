@@ -261,7 +261,48 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
 - PUT 端会**二次去重 + 过滤非法值**，并保留稳定顺序
 - **PUT 空数组 = 清除 preset**（等同未设置 / 展示全部）
 
-### 4.4 `GET /api/daily/items/{item_id}` （Drawer 预览用，NEW）
+### 4.4 `GET /api/daily/calendar` （日期导航栏，NEW）
+
+**功能**：为前端左侧日期导航栏（`DailyDateSidebar`）提供按自然日聚合的内容统计。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `tz` | string | `UTC` | IANA 时区，如 `Asia/Hong_Kong` |
+| `days` | int 1-180 | `30` | 往前回溯天数（含今天） |
+| `source_subtypes` | string[] | - | 可选；与主信息流 chip 过滤一致 |
+| `q` | string | - | 可选；与主信息流搜索一致 |
+| `tickers` | string[] | - | 可选；与主信息流 ticker 过滤一致 |
+
+```json
+{
+  "tz": "Asia/Hong_Kong",
+  "days": 30,
+  "max_total": 42,
+  "total_in_window": 315,
+  "items": [
+    {
+      "date": "2026-05-10",
+      "total": 42,
+      "by_source": [
+        { "source_subtype": "news",     "count": 20 },
+        { "source_subtype": "twitter",  "count": 15 },
+        { "source_subtype": "document", "count":  7 }
+      ]
+    },
+    { "date": "2026-05-09", "total": 0, "by_source": [] },
+    ...
+  ]
+}
+```
+
+**设计要点**：
+- 按用户 `tz` 时区切"自然日"（00:00 ~ 23:59），不依赖服务器本地时区
+- **补齐 0 条空白日**，使前端能感知"某天无内容"
+- `max_total` 用于前端活跃度等级（0-4 级色块）的归一化计算
+- `items` 按日期**倒序**（今天在第一位），长度严格等于 `days`
+- 复用 `_UPLOAD_SQL` / `_FEED_SQL` + `_build_filter_clauses`，与主信息流过滤口径完全一致
+
+### 4.5 `GET /api/daily/items/{item_id}` （Drawer 预览用，NEW）
 
 - `item_id` 形如 `upload_<file_id>` 或 `feed_<content_id>`，与列表 `DailyFeedItem.id` 完全一致
 - 内部按前缀分发到 `file_processing_details` 或 `subscription_content` 的单条查询
@@ -380,15 +421,16 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 
 | 文件 | 作用 |
 |------|------|
-| `web-frontend/src/pages/DailyPage.tsx` | 桌面 `/daily` 主页面：标题区 + 搜索 + 来源 chip + 齿轮入口 + 卡片列表 + 无限滚动；卡片点击 → 打开 `DailyPreviewDrawer`（不再 navigate）|
-| `web-frontend/src/pages/MobileDailyPage.tsx` | 移动 `/daily`：单列紧凑布局 + 横向滚动 chip 行 + 同样的搜索 / 齿轮 / 无限滚动；卡片点击 → 打开 `DailyPreviewDrawer`（`placement="bottom"`）|
-| `web-frontend/src/services/daily.ts` | API 客户端：`listDailyFeed` / `getDailyStats` / `getDailyPreset` / `updateDailyPreset` / `getDailyItemDetail`（NEW）；TS 类型与后端 Pydantic 严格对齐；`buildQueryString` 手工构造 FastAPI 兼容的多值 query（不带 `[]`）|
+| `web-frontend/src/pages/DailyPage.tsx` | 桌面 `/daily` 主页面：**两栏布局**（左侧 `DailyDateSidebar` 220px + 右侧主内容区）；标题区 + 搜索 + 来源 chip + 齿轮入口 + 卡片列表 + 无限滚动；日期分组 header **sticky**（`position: sticky; top: 0`）；`IntersectionObserver` 监听 `.daily-date-anchor` 更新 `activeDateKey`；`handleJumpToDate` 先查 DOM 锚点，未命中则补加载该日数据；卡片点击 → 打开 `DailyPreviewDrawer`（不再 navigate）|
+| `web-frontend/src/pages/MobileDailyPage.tsx` | 移动 `/daily`：单列紧凑布局 + 横向滚动 chip 行；顶部操作区新增 **Calendar 入口按钮**（`CalendarOutlined`），点击打开 Ant Design `Drawer`（`placement="bottom"`）包裹 `DailyDateSidebar variant="mobile"`；点击日期后关闭 bottom-sheet 并平滑滚动到对应 `.mobile-daily-date-anchor`；卡片点击 → 打开 `DailyPreviewDrawer`（`placement="bottom"`）|
+| `web-frontend/src/services/daily.ts` | API 客户端：`listDailyFeed` / `getDailyStats` / `getDailyPreset` / `updateDailyPreset` / `getDailyItemDetail` / **`getDailyCalendar`**（NEW）；新增类型 `DailyCalendarDay` / `DailyCalendarDaySource` / `DailyCalendarResponse` / `DailyCalendarQuery`；`buildQueryString` 手工构造 FastAPI 兼容的多值 query（不带 `[]`）|
 | `web-frontend/src/components/daily/DailyCard.tsx` | 单条卡片渲染：右上角 `SourceBadge` + 标题 + 摘要 / snippet + tickers / concepts + 时间 + reading time |
 | `web-frontend/src/components/daily/SourceBadge.tsx` | 来源徽章：紧凑 / 可点击 / active 状态 / 计数后缀 / Tooltip |
 | `web-frontend/src/components/daily/sourceBadgeConfig.ts` | 9 种 subtype 的配色（浅 / 深主题各一组）+ 短代号 + 完整名称 + 显示顺序 |
 | `web-frontend/src/components/daily/dailyTheme.ts` | Daily 模块独立调色板（与 Sources / Feeds 风格一致但卡片密度更紧凑）|
 | `web-frontend/src/components/daily/DailyPresetModal.tsx` | Preset 配置弹窗：分组（Upload sources / Subscriptions）+ 复用 `SourceBadge` 做整块勾选 + Clear / Select all / Save |
 | `web-frontend/src/components/daily/DailyPreviewDrawer.tsx` | **NEW** 卡片点击预览抽屉：桌面右侧 720px / 移动 bottom sheet (92vh)；顶栏 Prev/Next + Open in Sources/Feeds + Close；中段 AI Summary（缺失降级提示）+ tickers / concepts；下半 dispatch 到 `DailyOriginalView`；键盘快捷键 Esc / ↑↓ / J K |
+| `web-frontend/src/components/daily/DailyDateSidebar.tsx` | **NEW** 日期导航栏：调用 `getDailyCalendar` 拉取最近 N 天统计；每行含活跃度色块（0-4 级，仿 GitHub heatmap）+ 日期标签 + 总数 + per-subtype 迷你彩条（复用 `sourceBadgeConfig` 颜色）；点击日期触发 `onJumpToDate`；支持 "Show more" 渐进加载（30 → 180 天）；`variant="desktop"`（固定 220px 左侧栏）/ `variant="mobile"`（全宽，用于 bottom-sheet）|
 | `web-frontend/src/components/daily/DailyOriginalView.tsx` | **NEW** 原文区分发器：按 9 种 `source_subtype` 路由到内置子组件（`DocumentOriginalView` / `ImageOriginalView` / `AudioOriginalView` / `YoutubeUploadOriginalView` / `WebOriginalView` / `TextNoteOriginalView` / `TwitterOriginalView` / `NewsOriginalView` / `YoutubeFeedOriginalView`）；按需懒加载 `/files/original/{id}` 与 `/subscriptions/contents/{id}/transcript`；只读，不复用 FeedArticleBody 的写入操作 |
 | `web-frontend/src/components/daily/dailyPreviewUtils.ts` | **NEW** 抽屉用小工具：`extractYouTubeId` / `flattenAsr`（兼容 sentences / transcript 两种 ASR JSON 形态）/ `formatTimestampMs` |
 | `web-frontend/src/App.tsx` | 路由：`<Route index>` → `Navigate to /daily`；`<Route path="daily">` 桌面 / 移动二选一组件挂载；admin 与 404 兜底也跳 `/daily` |

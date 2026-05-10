@@ -296,3 +296,45 @@ class DailyItemDetail(DailyFeedItem):
 
     upload: Optional[DailyItemDetailUpload] = None
     feed: Optional[DailyItemDetailFeed] = None
+
+
+# ─── Calendar (日期导航栏) ─────────────────────────────────────────
+#
+# 新增 GET /api/daily/calendar，为前端左侧日期导航栏提供按自然日聚合的统计数据。
+# 按用户时区切桶，包含最近 N 天的每日总数与各 source_subtype 分布。
+# 空白日（0 条）由后端补齐，使前端可感知"今天没有新内容"。
+#
+# 详见: docs/instructions/DAILY_MODULE.md §4 (API 表格)
+
+
+class DailyCalendarDaySource(BaseModel):
+    """某天某类来源的统计."""
+
+    source_subtype: SourceSubtype
+    count: int
+
+
+class DailyCalendarDay(BaseModel):
+    """日历中单天的统计信息."""
+
+    date: str = Field(..., description="YYYY-MM-DD 格式 (按用户时区切桶)")
+    total: int = Field(..., description="当天总条数（0 = 空白日）")
+    by_source: List[DailyCalendarDaySource] = Field(
+        default_factory=list,
+        description="各 source_subtype 分布，按 count 降序，0 条类型省略",
+    )
+
+
+class DailyCalendarResponse(BaseModel):
+    """GET /api/daily/calendar 响应."""
+
+    tz: str = Field(..., description="实际使用的时区 (IANA, 非法时回退 UTC)")
+    days: int = Field(..., description="实际返回的天数")
+    items: List[DailyCalendarDay] = Field(
+        ...,
+        description="按日期倒序排列的日历数据（含 0 条空白日），长度 == days",
+    )
+    max_total: int = Field(
+        ..., description="窗口内单日最大条数，用于前端活跃度等级归一化"
+    )
+    total_in_window: int = Field(..., description="窗口内总条数")

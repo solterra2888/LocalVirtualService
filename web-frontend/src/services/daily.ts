@@ -275,3 +275,65 @@ export interface DailyItemDetail extends DailyFeedItem {
 export async function getDailyItemDetail(itemId: string): Promise<DailyItemDetail> {
   return api.get<DailyItemDetail>(`/daily/items/${encodeURIComponent(itemId)}`);
 }
+
+// ─── Calendar (日期导航栏) ────────────────────────────────────────
+//
+// GET /api/daily/calendar：返回最近 N 天每天的卡片总数与 source_subtype 分布。
+// 前端左侧日期导航栏 DailyDateSidebar 消费本接口。
+// 随 baseQuery（searchQuery / activeSubtypes / tickers）联动，与信息流过滤口径一致。
+
+export interface DailyCalendarDaySource {
+  source_subtype: DailySourceSubtype;
+  count: number;
+}
+
+export interface DailyCalendarDay {
+  /** YYYY-MM-DD，按用户时区切桶 */
+  date: string;
+  /** 当天总条数，0 = 空白日 */
+  total: number;
+  /** 各 source_subtype 分布，按 count 降序，0 条类型省略 */
+  by_source: DailyCalendarDaySource[];
+}
+
+export interface DailyCalendarResponse {
+  /** 实际使用的时区 (IANA) */
+  tz: string;
+  /** 实际返回的天数 */
+  days: number;
+  /**
+   * 按日期倒序排列的日历数据（含 0 条空白日），长度 == days。
+   * 第一条为今天，最后一条为 N 天前。
+   */
+  items: DailyCalendarDay[];
+  /** 窗口内单日最大条数，用于活跃度等级归一化 */
+  max_total: number;
+  /** 窗口内总条数 */
+  total_in_window: number;
+}
+
+export interface DailyCalendarQuery {
+  /** IANA 时区名，如 Asia/Hong_Kong；默认 UTC */
+  tz?: string;
+  /** 从今天往回看的天数，1-180，默认 30 */
+  days?: number;
+  source_subtypes?: DailySourceSubtype[];
+  q?: string;
+  tickers?: string[];
+}
+
+/**
+ * 拉取日历统计（左侧日期导航栏用）。
+ * 随 baseQuery 联动——过滤条件改变时日期栏的各日数字也会同步更新。
+ */
+export async function getDailyCalendar(
+  query: DailyCalendarQuery = {}
+): Promise<DailyCalendarResponse> {
+  const params = new URLSearchParams();
+  if (query.tz)   params.append('tz',   query.tz);
+  if (query.days  !== undefined) params.append('days',  String(query.days));
+  if (query.q)    params.append('q',    query.q);
+  query.source_subtypes?.forEach(st => params.append('source_subtypes', st));
+  query.tickers?.forEach(t => params.append('tickers', t));
+  return api.get<DailyCalendarResponse>(`/daily/calendar?${params.toString()}`);
+}

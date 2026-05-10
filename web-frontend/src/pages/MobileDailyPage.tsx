@@ -7,8 +7,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, ConfigProvider, Empty, Input, Spin, Typography, message, theme as antdTheme } from 'antd';
-import { SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { App, Button, ConfigProvider, Drawer, Empty, Input, Spin, Typography, message, theme as antdTheme } from 'antd';
+import { CalendarOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import {
   ALL_DAILY_SOURCE_SUBTYPES,
@@ -23,6 +23,7 @@ import DailyCard from '../components/daily/DailyCard';
 import SourceBadge from '../components/daily/SourceBadge';
 import DailyPresetModal from '../components/daily/DailyPresetModal';
 import DailyPreviewDrawer from '../components/daily/DailyPreviewDrawer';
+import DailyDateSidebar from '../components/daily/DailyDateSidebar';
 import { SOURCE_BADGE_DISPLAY_ORDER } from '../components/daily/sourceBadgeConfig';
 import { DAILY_THEME_COLORS } from '../components/daily/dailyTheme';
 import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
@@ -78,6 +79,10 @@ const MobileDailyPageInner: React.FC = () => {
 
   // 抽屉预览 (卡片点击不再跳转, 而是就地打开 bottom-sheet 预览; 详见 docs §1)
   const [previewItem, setPreviewItem] = useState<DailyFeedItem | null>(null);
+
+  // 日期导航栏 bottom-sheet
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [activeDateKey, setActiveDateKey] = useState<string | null>(null);
 
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +210,24 @@ const MobileDailyPageInner: React.FC = () => {
     setPreviewItem(item);
   }, []);
 
+  // 点击日期导航栏的日期 → 关闭 bottom-sheet，滚动到对应日期锚点
+  // 使用 getBoundingClientRect + window.scrollTo 而非 scrollIntoView，
+  // 以便减去移动端固定顶部导航栏高度（56px），避免日期 header 被遮住。
+  // 56px 顶栏 + ~88px sticky 搜索+chip 区 = ~144px 总偏移
+  const MOBILE_STICKY_OFFSET = 144;
+  const handleJumpToDate = useCallback((dateKey: string) => {
+    setCalendarOpen(false);
+    setActiveDateKey(dateKey);
+    // 关闭动画结束后再滚动（避免被 drawer 遮住）
+    setTimeout(() => {
+      const anchor = document.getElementById(`mobile-scroll-anchor-${dateKey}`);
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const target = window.scrollY + rect.top - MOBILE_STICKY_OFFSET - 8;
+      window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    }, 320);
+  }, []);
+
   const toggleSubtype = useCallback((sub: DailySourceSubtype) => {
     setActiveSubtypes((prev) =>
       prev.includes(sub) ? prev.filter((x) => x !== sub) : [...prev, sub]
@@ -257,10 +280,21 @@ const MobileDailyPageInner: React.FC = () => {
         <Title level={4} style={{ margin: 0, color: colors.text, fontWeight: 600 }}>
           Daily
         </Title>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Text style={{ color: colors.textMuted, fontSize: 12 }}>
             {total.toLocaleString()} items
           </Text>
+          <Button
+            type="text"
+            size="small"
+            aria-label="Open date navigator"
+            onClick={() => setCalendarOpen(true)}
+            icon={
+              <CalendarOutlined
+                style={{ fontSize: 16, color: activeDateKey ? colors.accent : colors.textMuted }}
+              />
+            }
+          />
           <Button
             type="text"
             size="small"
@@ -275,31 +309,43 @@ const MobileDailyPageInner: React.FC = () => {
         </div>
       </div>
 
-      <Input
-        allowClear
-        prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
-        placeholder="Search tickers, themes..."
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.target.value)}
-        style={{
-          background: colors.inputBg,
-          borderColor: colors.cardBorder,
-          color: colors.text,
-          marginBottom: 10,
-        }}
-      />
-
-      {/* 横向滚动 chip 行 */}
+      {/* 搜索栏 + chip 行：sticky 固定在移动端顶栏正下方 */}
       <div
         style={{
-          display: 'flex',
-          gap: 6,
-          overflowX: 'auto',
+          position: 'sticky',
+          top: 56,
+          zIndex: 20,
+          background: colors.pageBg,
           paddingBottom: 8,
-          marginBottom: 12,
-          WebkitOverflowScrolling: 'touch',
+          paddingTop: 4,
+          marginBottom: 4,
+          backdropFilter: 'blur(8px)',
         }}
       >
+        <Input
+          allowClear
+          prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
+          placeholder="Search tickers, themes..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          style={{
+            background: colors.inputBg,
+            borderColor: colors.cardBorder,
+            color: colors.text,
+            marginBottom: 8,
+          }}
+        />
+
+        {/* 横向滚动 chip 行 */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            overflowX: 'auto',
+            paddingBottom: 4,
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
         {visibleSubtypeOrder.map((sub) => {
           const cnt = statsMap.get(sub) ?? 0;
           if (cnt === 0 && !activeSubtypes.includes(sub)) return null;
@@ -313,10 +359,11 @@ const MobileDailyPageInner: React.FC = () => {
               active={activeSubtypes.includes(sub)}
               count={cnt}
               onClick={() => toggleSubtype(sub)}
-            />
+          />
           );
         })}
-      </div>
+        </div>{/* /chip 行 */}
+      </div>{/* /sticky 搜索+chip 区 */}
 
       {loading ? (
         <div className="mobile-page-loading-wrap" aria-busy="true" aria-live="polite">
@@ -337,11 +384,17 @@ const MobileDailyPageInner: React.FC = () => {
         <>
           {grouped.map((group) => (
             <div key={group.dateKey} style={{ marginBottom: 20 }}>
+              {/* 非 sticky 滚动定位锚点，handleJumpToDate 依此算坐标 */}
+              <div id={`mobile-scroll-anchor-${group.dateKey}`} style={{ height: 0 }} />
               <div
+                className="mobile-daily-date-anchor"
+                data-date-key={group.dateKey}
                 style={{
                   padding: '4px 10px',
-                  background: colors.dateAnchorBg,
-                  borderLeft: `3px solid ${colors.dateLine}`,
+                  background: activeDateKey === group.dateKey
+                    ? (colors.accent + '22')
+                    : colors.dateAnchorBg,
+                  borderLeft: `3px solid ${activeDateKey === group.dateKey ? colors.accent : colors.dateLine}`,
                   borderRadius: 4,
                   marginBottom: 8,
                 }}
@@ -385,6 +438,27 @@ const MobileDailyPageInner: React.FC = () => {
           )}
         </>
       )}
+
+      {/* 日期导航 bottom-sheet */}
+      <Drawer
+        open={calendarOpen}
+        onClose={() => setCalendarOpen(false)}
+        placement="bottom"
+        height="auto"
+        title="Date Navigator"
+        styles={{ body: { padding: 0 } }}
+      >
+        <DailyDateSidebar
+          activeDateKey={activeDateKey}
+          baseQuery={{
+            tz: userTimezone,
+            source_subtypes: effectiveSubtypes,
+            q: searchQuery || undefined,
+          }}
+          onJumpToDate={handleJumpToDate}
+          variant="mobile"
+        />
+      </Drawer>
 
       {/* Preset 配置弹窗 (移动端复用同一组件) */}
       <DailyPresetModal
