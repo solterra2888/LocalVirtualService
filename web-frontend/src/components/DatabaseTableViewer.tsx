@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import type { CSSProperties } from 'react';
 import {
   Card,
   Table,
@@ -25,6 +26,8 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { schedulerAPI } from '../services/scheduler';
+import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { aiTagChipStyle, AI_TAG_CHIP_BASE } from './shared/aiTagChipStyles';
 
 const { Text } = Typography;
 
@@ -41,6 +44,7 @@ interface DatabaseTableViewerProps {
 }
 
 const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigger }) => {
+  const { themeMode } = useDashboardSettings();
   const [tableData, setTableData] = useState<TableData | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedTable] = useState('task_scheduling');
@@ -60,6 +64,16 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
   };
 
   const currentConfig = tableConfigs[selectedTable as keyof typeof tableConfigs];
+
+  const pillDangerStyle = (): CSSProperties =>
+    themeMode === 'dark'
+      ? { ...AI_TAG_CHIP_BASE, background: 'rgba(244, 67, 54, 0.22)', color: '#ffcdd2' }
+      : { ...AI_TAG_CHIP_BASE, background: '#ffebee', color: '#b71c1c' };
+
+  const pillWarningStyle = (): CSSProperties =>
+    themeMode === 'dark'
+      ? { ...AI_TAG_CHIP_BASE, background: 'rgba(255, 193, 7, 0.18)', color: '#ffe082' }
+      : { ...AI_TAG_CHIP_BASE, background: '#fff8e1', color: '#e65100' };
 
   const loadTableData = useCallback(async (tableName: string) => {
     try {
@@ -101,18 +115,47 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
 
   const renderStatusTag = (value: any, column: string) => {
     if (column === 'enabled') {
-      return <Tag color={value ? 'green' : 'red'}>{value ? 'Enabled' : 'Disabled'}</Tag>;
+      return (
+        <Tag bordered={false} style={aiTagChipStyle(value ? 'sector' : 'overflow', themeMode)}>
+          {value ? 'Enabled' : 'Disabled'}
+        </Tag>
+      );
     }
     if (column === 'status') {
-      const statusColors = {
-        'success': 'green',
-        'running': 'blue',
-        'failed': 'red',
-        'error': 'red',
-        'completed': 'green',
-        'pending': 'orange'
-      };
-      return <Tag color={statusColors[value as keyof typeof statusColors] || 'default'}>{value || '-'}</Tag>;
+      const v = String(value || '');
+      if (v === 'success' || v === 'completed') {
+        return (
+          <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
+            {v}
+          </Tag>
+        );
+      }
+      if (v === 'running') {
+        return (
+          <Tag bordered={false} style={aiTagChipStyle('ticker', themeMode)}>
+            {v}
+          </Tag>
+        );
+      }
+      if (v === 'failed' || v === 'error') {
+        return (
+          <Tag bordered={false} style={pillDangerStyle()}>
+            {v}
+          </Tag>
+        );
+      }
+      if (v === 'pending') {
+        return (
+          <Tag bordered={false} style={aiTagChipStyle('concept', themeMode)}>
+            {v}
+          </Tag>
+        );
+      }
+      return (
+        <Tag bordered={false} style={aiTagChipStyle('overflow', themeMode)}>
+          {v || '-'}
+        </Tag>
+      );
     }
     return value;
   };
@@ -130,8 +173,8 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
     // JSON object handling
     if (typeof value === 'object') {
       return (
-        <Tooltip title={<pre style={{ fontSize: '11px' }}>{JSON.stringify(value, null, 2)}</pre>}>
-          <Text code style={{ fontSize: '10px', cursor: 'pointer' }}>
+        <Tooltip title={<pre style={{ fontSize: '12px' }}>{JSON.stringify(value, null, 2)}</pre>}>
+          <Text code style={{ fontSize: '12px', cursor: 'pointer' }}>
             {JSON.stringify(value).slice(0, 50)}...
           </Text>
         </Tooltip>
@@ -140,14 +183,18 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
 
     // Boolean value handling
     if (typeof value === 'boolean') {
-      return <Tag color={value ? 'green' : 'red'}>{value ? 'true' : 'false'}</Tag>;
+      return (
+        <Tag bordered={false} style={aiTagChipStyle(value ? 'sector' : 'overflow', themeMode)}>
+          {value ? 'true' : 'false'}
+        </Tag>
+      );
     }
 
     // Timestamp handling
     if (column.includes('_at') && typeof value === 'string') {
       return (
         <Tooltip title={new Date(value).toLocaleString()}>
-          <Text style={{ fontSize: '11px' }}>
+          <Text style={{ fontSize: '12px' }}>
             {dayjs(value).format('MM-DD HH:mm')}
           </Text>
         </Tooltip>
@@ -157,7 +204,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
     // ID column handling
     if (column === 'id' && typeof value === 'string') {
       return (
-        <Text code style={{ fontSize: '10px' }}>
+        <Text code style={{ fontSize: '12px' }}>
           {value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-8)}` : value}
         </Text>
       );
@@ -168,7 +215,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
     if (stringValue.length > 50) {
       return (
         <Tooltip title={stringValue}>
-          <Text style={{ fontSize: '11px' }}>
+          <Text style={{ fontSize: '12px' }}>
             {stringValue.slice(0, 50)}...
           </Text>
         </Tooltip>
@@ -176,7 +223,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
     }
 
     return (
-      <Text style={{ fontSize: '11px' }}>
+      <Text style={{ fontSize: '12px' }}>
         {stringValue}
       </Text>
     );
@@ -192,53 +239,15 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
           title: 'Name',
           dataIndex: 'name',
           key: 'name',
-          width: 200,
+          ellipsis: true,
+          width: 240,
           render: (value: any) => renderCellContent(value, 'name'),
           sorter: (a: any, b: any) => {
             const aVal = a.name;
             const bVal = b.name;
             if (aVal === null || aVal === undefined) return -1;
             if (bVal === null || bVal === undefined) return 1;
-            return aVal.localeCompare(bVal);
-          }
-        },
-        {
-          title: 'Type',
-          dataIndex: 'type',
-          key: 'type',
-          width: 150,
-          render: (value: any) => {
-            const typeMap: Record<string, string> = {
-              'eodhd_news': 'EODHD News',
-              'economic_events': 'Economic Events',
-              'macro_indicators': 'Macro Indicators'
-            };
-            return (
-              <Tag color="blue" style={{ fontSize: '11px' }}>
-                {typeMap[value] || value}
-              </Tag>
-            );
-          },
-          sorter: (a: any, b: any) => {
-            const aVal = a.type;
-            const bVal = b.type;
-            if (aVal === null || aVal === undefined) return -1;
-            if (bVal === null || bVal === undefined) return 1;
-            return aVal.localeCompare(bVal);
-          }
-        },
-        {
-          title: 'Timezone',
-          dataIndex: 'timezone',
-          key: 'timezone',
-          width: 150,
-          render: (value: any) => renderCellContent(value, 'timezone'),
-          sorter: (a: any, b: any) => {
-            const aVal = a.timezone;
-            const bVal = b.timezone;
-            if (aVal === null || aVal === undefined) return -1;
-            if (bVal === null || bVal === undefined) return 1;
-            return aVal.localeCompare(bVal);
+            return String(aVal).localeCompare(String(bVal));
           }
         },
         {
@@ -246,6 +255,7 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
           dataIndex: 'enabled',
           key: 'enabled',
           width: 100,
+          align: 'center' as const,
           render: (value: any) => renderStatusTag(value, 'enabled'),
           sorter: (a: any, b: any) => {
             const aVal = a.enabled;
@@ -255,28 +265,34 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
           }
         },
         {
-          title: 'Success Rate',
+          title: 'Success rate',
           dataIndex: 'success_rate',
           key: 'success_rate',
-          width: 120,
-          render: (value: any, record: any) => {
+          width: 140,
+          render: (_value: any, record: any) => {
             const successCount = record.success_count || 0;
             const failCount = record.fail_count || 0;
             const total = successCount + failCount;
-            
+
             if (total === 0) {
-              return <Text type="secondary" style={{ fontSize: '11px' }}>No Data</Text>;
+              return <Text type="secondary" style={{ fontSize: '12px' }}>No data</Text>;
             }
-            
-            const rate = (successCount / total * 100).toFixed(1);
-            const color = parseFloat(rate) >= 80 ? 'green' : parseFloat(rate) >= 60 ? 'orange' : 'red';
-            
+
+            const rate = ((successCount / total) * 100).toFixed(1);
+            const rateNum = parseFloat(rate);
+            const rateStyle =
+              rateNum >= 80
+                ? aiTagChipStyle('sector', themeMode)
+                : rateNum >= 60
+                  ? pillWarningStyle()
+                  : pillDangerStyle();
+
             return (
               <Space direction="horizontal" size={4}>
-                <Tag color={color} style={{ fontSize: '11px' }}>
+                <Tag bordered={false} style={rateStyle}>
                   {rate}%
                 </Tag>
-                <Text type="secondary" style={{ fontSize: '10px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
                   {successCount}/{total}
                 </Text>
               </Space>
@@ -287,12 +303,12 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
             const aFail = a.fail_count || 0;
             const aTotal = aSuccess + aFail;
             const aRate = aTotal > 0 ? aSuccess / aTotal : 0;
-            
+
             const bSuccess = b.success_count || 0;
             const bFail = b.fail_count || 0;
             const bTotal = bSuccess + bFail;
             const bRate = bTotal > 0 ? bSuccess / bTotal : 0;
-            
+
             return aRate - bRate;
           }
         }
@@ -304,8 +320,16 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
       title: (
         <Space>
           <Text strong style={{ fontSize: '12px' }}>{col}</Text>
-          {col === currentConfig?.keyColumn && <Tag color="blue" style={{ fontSize: '10px' }}>Primary Key</Tag>}
-          {col === currentConfig?.statusColumn && <Tag color="green" style={{ fontSize: '10px' }}>Status</Tag>}
+          {col === currentConfig?.keyColumn && (
+            <Tag bordered={false} style={aiTagChipStyle('ticker', themeMode)}>
+              Primary Key
+            </Tag>
+          )}
+          {col === currentConfig?.statusColumn && (
+            <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
+              Status
+            </Tag>
+          )}
         </Space>
       ),
       dataIndex: col,
@@ -436,7 +460,9 @@ const DatabaseTableViewer: React.FC<DatabaseTableViewerProps> = ({ refreshTrigge
         extra={
           tableData && (
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              Total {tableData.total_count} records, {tableData.columns.length} fields
+              {selectedTable === 'task_scheduling'
+                ? `Total ${tableData.total_count} records`
+                : `Total ${tableData.total_count} records, ${tableData.columns.length} fields`}
             </Text>
           )
         }

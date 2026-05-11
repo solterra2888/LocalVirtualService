@@ -210,7 +210,7 @@ export interface ExecutionLog {
   started_at: string;
   finished_at?: string;
   duration_ms?: number;
-  status: 'running' | 'success' | 'failed' | 'timeout' | 'cancelled';
+  status: 'running' | 'success' | 'failed' | 'timeout' | 'cancelled' | 'skipped';
   result_message?: string;
   result_data?: any;
   error_message?: string;
@@ -226,6 +226,7 @@ export interface ExecutionSummaryDailyStat {
   running_count: number;
   timeout_count: number;
   cancelled_count: number;
+  skipped_count: number;
   avg_duration_ms?: number | null;
   success_rate?: number | null;
 }
@@ -241,6 +242,7 @@ export interface ExecutionSummaryTask {
     running_count: number;
     timeout_count: number;
     cancelled_count: number;
+    skipped_count: number;
     success_rate?: number | null;
   };
 }

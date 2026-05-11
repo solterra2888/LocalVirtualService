@@ -6,7 +6,6 @@
 import os
 import json
 import pytz
-import redis
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Callable
@@ -46,11 +45,6 @@ class SchedulerService:
         from backend.utils.database_config import get_database_config
         db_config = get_database_config()
         self.db_manager = DatabaseManager(db_config)
-        
-        # 初始化 Redis 客户端（用于分布式锁）
-        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
-        logger.info(f"Redis 客户端初始化完成: {redis_url}")
         
         # 注册任务类型和执行函数
         self.task_handlers = {
@@ -513,15 +507,27 @@ class SchedulerService:
         try:
             logger.info("开始同步调度器状态与数据库...")
             
-            # 获取数据库中的所有任务
+            # 获取数据库中的所有任务（降序，同类型取最新）
             db_tasks = await self._get_all_tasks()
+
+            # 与 _load_saved_tasks 保持一致：按 task_type 去重，同类型只保留最新
+            seen_sync_types: set = set()
+            deduped_db_tasks: list = []
+            for t in db_tasks:
+                if t['type'] in seen_sync_types:
+                    logger.warning(
+                        f"sync_task_states: 发现重复任务类型 {t['type']}，跳过旧记录 {t['id']}"
+                    )
+                    continue
+                seen_sync_types.add(t['type'])
+                deduped_db_tasks.append(t)
             
             # 获取调度器中的所有任务ID
             scheduler_job_ids = {job.id for job in self.scheduler.get_jobs() if not job.id.startswith('_')}
             
             # 统计信息
             stats = {
-                'total_db_tasks': len(db_tasks),
+                'total_db_tasks': len(deduped_db_tasks),
                 'total_scheduler_jobs': len(scheduler_job_ids),
                 'removed_jobs': [],
                 'added_jobs': [],
@@ -529,7 +535,7 @@ class SchedulerService:
             }
             
             # 遍历数据库任务，同步状态
-            for task in db_tasks:
+            for task in deduped_db_tasks:
                 task_id = task['id']
                 enabled = task['enabled']
                 
@@ -554,7 +560,7 @@ class SchedulerService:
                         stats['skipped'].append(f"{task_id} (添加失败)")
             
             # 检查是否有调度器中的任务不在数据库中（孤立任务）
-            db_task_ids = {task['id'] for task in db_tasks}
+            db_task_ids = {task['id'] for task in deduped_db_tasks}
             orphan_jobs = scheduler_job_ids - db_task_ids
             
             for orphan_id in orphan_jobs:
@@ -660,10 +666,13 @@ class SchedulerService:
 
             if isinstance(trigger, CronTrigger):
                 # APScheduler trigger.get_next_fire_time(previous_fire_time, now)
-                # 返回「>= now 的下一次触发」. 我们用 (started_at - 1s) 作为 now, 拿到的
-                # next_fire 即为「当前周期的预定触发时刻」(因为 scheduler 真正 fire 时
-                # started_at 几乎等于该时刻, 通常只大几十毫秒).
-                probe = started_at - timedelta(seconds=1)
+                # 返回「>= now 的下一次触发」. 我们用 (started_at - 60s) 作为 now：
+                # - 60s 足够覆盖 APScheduler 调度延迟（任务极少晚于 fire_time 超过数秒）
+                # - 对于最频繁的 cron（1 分钟周期）, 60s 回溯恰好不跨越上一个窗口
+                #   （probe = fire_time - ~58s，get_next_fire_time 仍返回 fire_time）
+                # - 旧的 1s 回溯在任务仅晚于 fire_time 1~2s 启动时就会算出下一个窗口,
+                #   导致两个重复 job 的 lock_key 不同, Redis 锁无法拦截第二次执行.
+                probe = started_at - timedelta(seconds=60)
                 current_fire = trigger.get_next_fire_time(None, probe)
                 if current_fire is None:
                     return fallback_key, fallback_ttl
@@ -686,59 +695,105 @@ class SchedulerService:
             )
         return fallback_key, fallback_ttl
 
+    def _compute_period_key(
+        self,
+        task_type: str,
+        task_id: str,
+        started_at: datetime,
+    ) -> Optional[str]:
+        """返回当前执行周期的唯一标识字符串，用于 PostgreSQL 分布式锁。
+
+        与 _compute_period_lock_key 逻辑相同，但只返回 period_key 字符串
+        （不含 'scheduler_lock:' 前缀），供 DB INSERT ON CONFLICT 使用。
+
+        - cron 任务: 'cron:YYYYMMDDHHMM'（当前 fire_time）
+        - interval 任务: 'int:{epoch // period_seconds}'
+        - 无法计算时返回 None（退化为无锁保护，不影响正常执行）
+        """
+        try:
+            job = self.scheduler.get_job(task_id)
+            trigger = getattr(job, 'trigger', None) if job else None
+            if trigger is None:
+                return None
+
+            if isinstance(trigger, IntervalTrigger):
+                period = int(trigger.interval.total_seconds())
+                if period <= 0:
+                    return None
+                bucket = int(started_at.timestamp()) // period
+                return f"int:{bucket}"
+
+            if isinstance(trigger, CronTrigger):
+                probe = started_at - timedelta(seconds=60)
+                current_fire = trigger.get_next_fire_time(None, probe)
+                if current_fire is None:
+                    return None
+                return f"cron:{current_fire.strftime('%Y%m%d%H%M')}"
+
+        except Exception as e:
+            logger.warning(
+                f"计算周期键失败: {e}",
+                task_id=task_id,
+                task_type=task_type,
+            )
+        return None
+
     async def _execute_task(self, task_id: str, task_type: str, task_params: Dict[str, Any]):
         """执行任务（带「按周期窗口」分布式锁保护）
 
         语义说明 (重要):
-        以前的实现 lock_key = f"scheduler_lock:{task_type}", 在 finally 中 delete.
-        这只能阻止「同时正在跑的两次」, 但因为很多 handler 只是把任务派发到 Celery 就 return
-        (耗时几十毫秒), 锁会立刻释放, 同周期内 1~2 秒后到来的「重复触发」(双 scheduler 进程 /
-        APScheduler 重复 add_job 等) 仍能拿到锁, 表现为同周期 2 条 success 日志.
+        旧实现用各机器本地 Redis SET NX 做周期锁，无法跨机器协调：
+          - 本地 Mac Mini 和远程服务器各自在自己的 Redis 上成功拿到「周期窗口锁」
+          - 两台机器同一 cron 周期都执行任务，产生两条独立的 Celery 任务
 
-        现改为「周期窗口锁」:
-          - lock_key = f"scheduler_lock:{task_type}:{窗口键}", 窗口键由 trigger 推导
-          - cron 任务: 窗口键 = 该次预定 fire_time 的 'YYYYMMDDHHMM'
-          - interval 任务: 窗口键 = floor(epoch / interval_seconds)
-          - TTL = 周期长度 * 0.9 (最少 60s), 让锁自然过期, finally 不再 delete
-        效果: 同一周期窗口内只允许执行一次, 第二次触发会被记为 'skipped' 立即可见.
-        若任务执行失败也保持锁, 等下一次 cron tick 重试 (避免立刻重试浪费 API 配额).
+        新实现改用 PostgreSQL INSERT ON CONFLICT DO NOTHING 作为真正的分布式锁：
+          - period_key = cron fire_time 的 'cron:YYYYMMDDHHMM' / interval bucket
+          - task_execution_logs 表上有唯一索引 (task_type, period_key) WHERE period_key IS NOT NULL
+          - 第一个执行 INSERT 的调度实例获得锁（RETURNING id 返回行）
+          - 第二个 INSERT 触发唯一冲突，ON CONFLICT DO NOTHING 返回 0 行 → 跳过
+          - 由于所有调度实例共享同一个 PostgreSQL 数据库，该锁天然跨机器生效
         """
         execution_log_id = None
         started_at = datetime.now(tz=timezone.utc)
-        lock_key, lock_ttl = self._compute_period_lock_key(task_type, task_id, started_at)
-        lock_acquired = False
+
+        # 计算周期键（用于 DB 分布式锁）
+        period_key = self._compute_period_key(task_type, task_id, started_at)
 
         try:
-            # 🔒 尝试获取 Redis 周期窗口锁 (SET NX EX)
-            lock_acquired = self.redis_client.set(
-                lock_key,
-                f"{task_id}_{started_at.timestamp()}",
-                nx=True,
-                ex=lock_ttl,
+            # 获取任务配置以获取任务名称（在 DB 锁之前，以便锁记录包含正确名称）
+            task_config = await self._get_task_config(task_id)
+            task_name = task_config.get('name', f'Task-{task_id}') if task_config else f'Task-{task_id}'
+
+            # 🔒 通过 INSERT ON CONFLICT DO NOTHING 尝试获取 DB 周期窗口锁
+            # period_key 非 None 时才启用锁；None 时跳过冲突检测（退化为无保护）
+            execution_log_id = await self._log_task_execution_start(
+                task_id, task_name, task_type, started_at, task_params,
+                period_key=period_key
             )
 
-            if not lock_acquired:
+            if execution_log_id is None:
+                # DB 唯一约束冲突：另一个调度实例已在此周期执行
                 logger.warning(
                     f"⏭️  任务 {task_type} 在当前周期窗口已被其他实例执行, 跳过本次触发",
                     task_id=task_id,
                     task_type=task_type,
-                    lock_key=lock_key,
+                    period_key=period_key,
                 )
 
-                # 记录跳过的执行 (使日志层面能显形重复触发, 便于监控告警)
-                execution_log_id = await self._log_task_execution_start(
-                    task_id, f'Task-{task_id}', task_type, started_at, task_params
+                # 插入 skipped 日志（period_key=None 不触发约束，始终插入）
+                skipped_log_id = await self._log_task_execution_start(
+                    task_id, task_name, task_type, started_at, task_params,
+                    period_key=None
                 )
-
-                if execution_log_id:
+                if skipped_log_id:
                     finished_at = datetime.now(tz=timezone.utc)
                     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
                     await self._log_task_execution_finish(
-                        execution_log_id,
+                        skipped_log_id,
                         finished_at,
                         duration_ms,
                         'skipped',
-                        error_message=f'当前周期窗口已被其他实例执行 (lock_key={lock_key})'
+                        error_message=f'当前周期窗口已被其他实例执行 (period_key={period_key})'
                     )
 
                 return {
@@ -748,22 +803,11 @@ class SchedulerService:
                 }
 
             logger.info(
-                f"🔓 获取周期窗口锁成功: {task_id}, 类型: {task_type}",
-                lock_key=lock_key,
-                lock_ttl=lock_ttl,
+                f"🔓 获取 DB 周期窗口锁成功: {task_id}, 类型: {task_type}",
+                period_key=period_key,
             )
-            
-            # 获取任务配置以获取任务名称
-            task_config = await self._get_task_config(task_id)
-            task_name = task_config.get('name', f'Task-{task_id}') if task_config else f'Task-{task_id}'
-            
-            # 记录任务开始执行到日志表
-            execution_log_id = await self._log_task_execution_start(
-                task_id, task_name, task_type, started_at, task_params
-            )
-            
+
             # 更新最后运行时间, 顺手把 APScheduler 算好的下次触发时间写回 task_scheduling.next_run
-            # (历史 bug: next_run 只在 create_cron_task 写一次, 之后长期停留在过期时刻, 给排查造成误导)
             update_payload: Dict[str, Any] = {'last_run': started_at.isoformat()}
             try:
                 _job = self.scheduler.get_job(task_id)
@@ -772,52 +816,47 @@ class SchedulerService:
             except Exception as _e:
                 logger.warning(f"读取 next_run_time 失败, 仅更新 last_run: {_e}", task_id=task_id)
             await self._update_task_config(task_id, update_payload)
-            
+
             # 执行任务
             handler = self.task_handlers.get(task_type)
             if not handler:
                 error_msg = f"未找到任务类型 {task_type} 的处理器。支持的任务类型: {', '.join(self.task_handlers.keys())}"
                 logger.error(error_msg)
-                
-                # 记录任务执行失败
-                await self._log_task_execution_end(
-                    execution_log_id, 
-                    started_at, 
-                    'failed', 
-                    error_msg, 
+
+                finished_at = datetime.now(tz=timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                await self._log_task_execution_finish(
+                    execution_log_id,
+                    finished_at,
+                    duration_ms,
+                    'failed',
                     error_message=error_msg
                 )
-                
+
                 return {
                     'success': False,
                     'message': error_msg,
                     'data': None
                 }
-            
+
             result = await handler(task_params)
-            
+
             # 计算执行时间
             finished_at = datetime.now(tz=timezone.utc)
             duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-            
+
             if result.get('success', False):
-                # 记录成功执行结果
                 await self._log_task_execution_finish(
                     execution_log_id, finished_at, duration_ms, 'success',
                     result.get('message', '任务执行成功'), result.get('data')
                 )
-                
-                # 增加成功计数
                 await self._increment_success_count(task_id)
                 logger.info(f"任务执行成功: {task_id}, 耗时: {duration_ms}ms")
             else:
-                # 记录失败执行结果
                 await self._log_task_execution_finish(
                     execution_log_id, finished_at, duration_ms, 'failed',
                     error_message=result.get('message', '任务执行失败')
                 )
-                
-                # 增加失败计数
                 await self._increment_fail_count(task_id)
                 logger.error(f"任务执行失败: {task_id}, 错误: {result.get('message', '未知错误')}")
             
@@ -850,14 +889,9 @@ class SchedulerService:
             logger.error(f"任务执行异常: {task_id}, 错误: {str(e)}")
         
         finally:
-            # 周期窗口锁不在此释放: 让 Redis TTL 自然过期, 以保证「同一周期内只执行一次」.
-            # 任务失败时同样不释放, 避免立刻重试浪费 API 配额; 下一次 cron tick 会进入新窗口.
-            if lock_acquired:
-                logger.info(
-                    f"🔒 周期窗口锁保留至 TTL 过期: {task_type}",
-                    lock_key=lock_key,
-                    lock_ttl=lock_ttl,
-                )
+            # DB 周期窗口锁通过唯一索引行持久存在，无需显式释放。
+            # 下一 cron tick 会使用新的 period_key，自然进入新窗口。
+            pass
     
     async def _execute_eodhd_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行EODHD新闻获取任务"""
@@ -2966,16 +3000,32 @@ class SchedulerService:
             logger.error(f"清理现有任务失败: {str(e)}")
     
     async def _load_saved_tasks(self):
-        """加载已保存的任务"""
+        """加载已保存的任务（按 task_type 去重，同类型只注册最新的一条）"""
         try:
             logger.info("加载已保存的定时任务")
-            tasks = await self._get_all_tasks()
-            
+            tasks = await self._get_all_tasks()  # already ORDER BY created_at DESC
+
+            # 同一 task_type 可能因历史操作在 task_scheduling 中存有多行。
+            # 若全部注册到 APScheduler，每行对应独立的 cron/interval job，
+            # 同日可能触发多次，且各自的 period-lock-key 不同，Redis 锁无法拦截。
+            # 解法：按 task_type 去重，只注册 created_at 最新的那条（列表已降序排列）。
+            seen_types: set = set()
+            deduped: list = []
             for task in tasks:
+                t = task['type']
+                if t in seen_types:
+                    logger.warning(
+                        f"检测到重复的任务类型 {t}，跳过旧记录 {task['id']}（仅保留最新）"
+                    )
+                    continue
+                seen_types.add(t)
+                deduped.append(task)
+
+            for task in deduped:
                 if task['enabled']:
                     await self._add_job_to_scheduler(task)
-            
-            logger.info(f"已加载 {len([t for t in tasks if t['enabled']])} 个启用的定时任务")
+
+            logger.info(f"已加载 {len([t for t in deduped if t['enabled']])} 个启用的定时任务")
             
         except Exception as e:
             logger.error(f"加载已保存任务失败: {str(e)}")
@@ -3028,15 +3078,23 @@ class SchedulerService:
             logger.error(f"添加任务到调度器失败: {str(e)}")
     
     # 执行日志记录方法
-    async def _log_task_execution_start(self, task_id: str, task_name: str, task_type: str, 
-                                      started_at: datetime, execution_params: Dict[str, Any]) -> Optional[int]:
-        """记录任务开始执行"""
+    async def _log_task_execution_start(self, task_id: str, task_name: str, task_type: str,
+                                      started_at: datetime, execution_params: Dict[str, Any],
+                                      period_key: Optional[str] = None) -> Optional[int]:
+        """记录任务开始执行，同时充当跨机器分布式锁。
+
+        当 period_key 不为 None 时使用 ON CONFLICT DO NOTHING：
+          - INSERT 成功（RETURNING id 返回一行）→ 当前实例获得锁，继续执行
+          - INSERT 冲突（RETURNING id 返回空）→ 另一实例已在此周期执行，返回 None
+
+        当 period_key 为 None 时（如记录 skipped 日志），不触发冲突约束，始终插入成功。
+        """
         try:
             conn = self.db_manager.get_connection()
             if not conn:
                 logger.error("无法连接到数据库记录执行日志")
                 return None
-            
+
             cursor = conn.cursor()
             try:
                 # 首先检查任务是否存在于 task_scheduling 表中
@@ -3044,25 +3102,34 @@ class SchedulerService:
                 if not cursor.fetchone():
                     logger.warning(f"任务 {task_id} 不存在于 task_scheduling 表中，跳过执行日志记录")
                     return None
-                
+
                 cursor.execute("""
-                    INSERT INTO task_execution_logs 
-                    (task_id, task_name, task_type, started_at, status, execution_params)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO task_execution_logs
+                    (task_id, task_name, task_type, started_at, status, execution_params, period_key)
+                    VALUES (%s, %s, %s, %s, 'running', %s, %s)
+                    ON CONFLICT (task_type, period_key) WHERE period_key IS NOT NULL DO NOTHING
                     RETURNING id
                 """, (
-                    task_id, task_name, task_type, started_at, 
-                    'running', json.dumps(execution_params)
+                    task_id, task_name, task_type, started_at,
+                    json.dumps(execution_params), period_key
                 ))
-                
-                execution_log_id = cursor.fetchone()[0]
+
+                row = cursor.fetchone()
                 conn.commit()
-                logger.info(f"任务执行开始记录已保存: {execution_log_id}")
+                if row is None:
+                    # 另一个调度实例已为此周期创建了记录（分布式锁被抢占）
+                    logger.warning(
+                        f"⏭️  DB 周期锁冲突: task_type={task_type}, period_key={period_key}，"
+                        f"说明另一个调度实例已执行此周期，跳过"
+                    )
+                    return None
+                execution_log_id = row[0]
+                logger.info(f"任务执行开始记录已保存: {execution_log_id}, period_key={period_key}")
                 return execution_log_id
-                
+
             finally:
                 conn.close()
-                
+
         except Exception as e:
             logger.error(f"记录任务执行开始失败: {str(e)}")
             return None
@@ -3240,21 +3307,30 @@ class SchedulerService:
                     for i in range(normalized_days)
                 ]
 
+                # 按 task_type + 本地日历日聚合（不要带 task_name 分组）：
+                # 同一 task_type 可对应多条 task_scheduling（不同 id / 不同 name），
+                # 若 GROUP BY task_name，同一天会产出多行；Python 侧又用 task_type 作唯一键
+                # 追加 daily_stats / 累加 totals，会把「同一逻辑任务类型」在同日重复加总，造成虚高。
+                #
+                # 注意：status='skipped' 表示同一周期内重复触发被周期窗口锁拦截的占位记录，
+                # 不代表真实执行次数，必须从 total_runs / avg_duration_ms 中排除，
+                # 但单独保留 skipped_count 供监控排查使用。
                 query = """
                     SELECT 
                         task_type,
-                        task_name,
+                        MAX(task_name) AS task_name,
                         DATE(timezone(%s, started_at)) AS local_date,
-                        COUNT(*) AS total_runs,
+                        SUM(CASE WHEN status != 'skipped' THEN 1 ELSE 0 END) AS total_runs,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
                         SUM(CASE WHEN status IN ('failed', 'error') THEN 1 ELSE 0 END) AS failure_count,
                         SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_count,
                         SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) AS timeout_count,
                         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
-                        AVG(duration_ms) AS avg_duration_ms
+                        SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count,
+                        AVG(CASE WHEN status != 'skipped' AND duration_ms IS NOT NULL THEN duration_ms END) AS avg_duration_ms
                     FROM task_execution_logs
                     WHERE started_at BETWEEN %s AND %s
-                    GROUP BY task_type, task_name, local_date
+                    GROUP BY task_type, local_date
                     ORDER BY local_date ASC, task_type ASC
                 """
 
@@ -3265,7 +3341,7 @@ class SchedulerService:
                 totals: Dict[str, Dict[str, Any]] = {}
 
                 for row in rows:
-                    task_type, task_name, local_date, total_runs, success_count, failure_count, running_count, timeout_count, cancelled_count, avg_duration = row
+                    task_type, task_name, local_date, total_runs, success_count, failure_count, running_count, timeout_count, cancelled_count, skipped_count, avg_duration = row
                     date_key = local_date.isoformat()
                     task_key = task_type
 
@@ -3282,6 +3358,7 @@ class SchedulerService:
                             "running_count": 0,
                             "timeout_count": 0,
                             "cancelled_count": 0,
+                            "skipped_count": 0,
                         }
 
                     summary[task_key]["daily_stats"].append({
@@ -3292,6 +3369,7 @@ class SchedulerService:
                         "running_count": int(running_count or 0),
                         "timeout_count": int(timeout_count or 0),
                         "cancelled_count": int(cancelled_count or 0),
+                        "skipped_count": int(skipped_count or 0),
                         "avg_duration_ms": float(avg_duration) if avg_duration is not None else None,
                         "success_rate": float(success_count) / total_runs if total_runs else None
                     })
@@ -3303,6 +3381,7 @@ class SchedulerService:
                     totals_info["running_count"] += int(running_count or 0)
                     totals_info["timeout_count"] += int(timeout_count or 0)
                     totals_info["cancelled_count"] += int(cancelled_count or 0)
+                    totals_info["skipped_count"] += int(skipped_count or 0)
 
                 # 确保所有任务都包含在结果中，即使查询范围内没有执行记录
                 for task_type, task_name in task_configs.items():
@@ -3319,6 +3398,7 @@ class SchedulerService:
                             "running_count": 0,
                             "timeout_count": 0,
                             "cancelled_count": 0,
+                            "skipped_count": 0,
                         }
                     elif not summary[task_type].get("task_name"):
                         summary[task_type]["task_name"] = task_name
@@ -3335,6 +3415,7 @@ class SchedulerService:
                                 "running_count": 0,
                                 "timeout_count": 0,
                                 "cancelled_count": 0,
+                                "skipped_count": 0,
                                 "avg_duration_ms": None,
                                 "success_rate": None
                             }

@@ -705,6 +705,8 @@ class DatabaseManager:
             """)
             
             self._ensure_task_execution_logs_status_constraint(cursor)
+            self._ensure_task_execution_period_lock_column(cursor)
+            self._deduplicate_task_scheduling(cursor)
             
             # task_default_configs 表已删除，不再需要创建和插入默认配置
             
@@ -713,6 +715,43 @@ class DatabaseManager:
             print(f"创建调度器表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
+
+    def _ensure_task_execution_period_lock_column(self, cursor):
+        """为 task_execution_logs 添加 period_key 列和唯一索引（跨机器分布式锁）。
+
+        历史原因：旧实现用各机器本地 Redis SET NX 做周期锁，无法跨机器协调——
+        本地 Mac Mini 和远程 43.99.37.76 的调度器各自拿到「各自的 Redis 锁」，
+        同一 cron 周期内都提交了一次 Celery 任务。
+
+        修复：改用 PostgreSQL INSERT ON CONFLICT DO NOTHING 作为真正的分布式锁：
+          - period_key = cron fire_time 的 'YYYYMMDDHHMM' / interval bucket 字符串
+          - 唯一索引 (task_type, period_key) WHERE period_key IS NOT NULL
+          - 第一个执行 INSERT 的调度实例拿到锁（RETURNING id 返回行），
+            第二个 INSERT 触发冲突，ON CONFLICT DO NOTHING 返回 0 行 → 跳过。
+        """
+        try:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'task_execution_logs'
+                )
+            """)
+            if not cursor.fetchone()[0]:
+                return
+
+            cursor.execute("""
+                ALTER TABLE task_execution_logs
+                ADD COLUMN IF NOT EXISTS period_key VARCHAR(30)
+            """)
+
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_task_execution_period
+                ON task_execution_logs (task_type, period_key)
+                WHERE period_key IS NOT NULL
+            """)
+            print("已确保 task_execution_logs.period_key 列和唯一索引存在")
+        except Exception as e:
+            print(f"确保 task_execution_logs.period_key 时出错: {e}")
 
     def _ensure_task_execution_logs_status_constraint(self, cursor):
         """已有库可能仍为旧版 CHECK（不含 skipped）；与 scheduler 跳过并发执行时写入的 status 对齐。"""
@@ -733,6 +772,63 @@ class DatabaseManager:
             print("已确保 task_execution_logs.valid_execution_status 含 skipped")
         except Exception as e:
             print(f"更新 task_execution_logs 状态约束时出错: {e}")
+
+    def _deduplicate_task_scheduling(self, cursor):
+        """清理 task_scheduling 中同一 type 的重复行，保留 created_at 最新的一条。
+
+        根本原因：_save_task_config 在 _get_task_by_type 失败（连接抖动等）时会
+        INSERT 新行而非 UPDATE，导致同一 task_type 存在多行，每行都会在
+        _load_saved_tasks 中注册到 APScheduler，引发同一天多次执行。
+
+        注意：task_execution_logs 有 ON DELETE CASCADE 外键指向 task_scheduling.id，
+        直接删除重复行会同时删除历史执行日志。因此先把日志的 task_id 改为保留行的 id，
+        再删除多余的 task_scheduling 行。
+        """
+        try:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'task_scheduling'
+                )
+            """)
+            if not cursor.fetchone()[0]:
+                return
+
+            # 查询每个 type 保留的 id（created_at 最新）及需要删除的 id 列表
+            cursor.execute("""
+                SELECT
+                    keep.type,
+                    keep.id   AS keep_id,
+                    dup.id    AS dup_id
+                FROM (
+                    SELECT DISTINCT ON (type) id, type
+                    FROM task_scheduling
+                    ORDER BY type, created_at DESC
+                ) keep
+                JOIN task_scheduling dup
+                    ON dup.type = keep.type AND dup.id <> keep.id
+            """)
+            rows = cursor.fetchall()
+            if not rows:
+                print("task_scheduling 无重复任务类型记录")
+                return
+
+            for task_type, keep_id, dup_id in rows:
+                # 将日志的 task_id 指向保留的记录，避免级联删除丢失历史
+                cursor.execute("""
+                    UPDATE task_execution_logs
+                    SET task_id = %s
+                    WHERE task_id = %s
+                """, (keep_id, dup_id))
+                updated = cursor.rowcount
+
+                cursor.execute("DELETE FROM task_scheduling WHERE id = %s", (dup_id,))
+                print(
+                    f"已合并重复任务类型 {task_type}：删除 {dup_id}，"
+                    f"保留 {keep_id}，迁移 {updated} 条执行日志"
+                )
+        except Exception as e:
+            print(f"清理 task_scheduling 重复记录时出错: {e}")
 
     def _update_task_scheduling_constraints(self, cursor):
         """更新现有task_scheduling表的约束"""

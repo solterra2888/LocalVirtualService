@@ -1,11 +1,8 @@
-import React, { useState } from 'react';
-import { Card, Tabs, Space, ConfigProvider, theme as antdTheme, Typography } from 'antd';
-import { ScheduleOutlined, BarChartOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import React from 'react';
+import { Card, ConfigProvider, theme as antdTheme, Typography } from 'antd';
+import { UnorderedListOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
-import DatabaseTableViewer from '../components/DatabaseTableViewer';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
-
-type SchedulerLogsTabKey = 'task_management' | 'execution_history';
 
 // Theme colors per FRONTEND_STYLE_GUIDE §2: Light/Dark + Behance
 const THEME_COLORS = {
@@ -52,17 +49,18 @@ const SchedulerLogsPage: React.FC = () => {
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
   const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
-  const [activeTab, setActiveTab] = useState<SchedulerLogsTabKey>('execution_history');
-
-  const handleTabChange = (key: string) => {
-    const tabKey = key as SchedulerLogsTabKey;
-    setActiveTab(tabKey);
-  };
 
   return (
     <ConfigProvider
       theme={{
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        components: {
+          Table: {
+            cellFontSize: 12,
+            cellFontSizeMD: 12,
+            cellFontSizeSM: 12,
+          },
+        },
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
@@ -92,7 +90,7 @@ const SchedulerLogsPage: React.FC = () => {
             Scheduler Logs
           </Title>
           <Text style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            Execution history and task management for scheduled data sources
+            Execution overview, daily statistics, scheduled task configuration, and execution history
           </Text>
         </div>
 
@@ -105,34 +103,7 @@ const SchedulerLogsPage: React.FC = () => {
             padding: '20px 24px',
           }}
         >
-          <Tabs
-            activeKey={activeTab}
-            onChange={handleTabChange}
-            items={[
-              {
-                key: 'execution_history',
-                label: (
-                  <Space>
-                    <BarChartOutlined />
-                    Execution History
-                  </Space>
-                ),
-                children: (
-                  <TaskExecutionHistory height={600} />
-                ),
-              },
-              {
-                key: 'task_management',
-                label: (
-                  <Space>
-                    <ScheduleOutlined />
-                    Task Management
-                  </Space>
-                ),
-                children: <DatabaseTableViewer />,
-              },
-            ]}
-          />
+          <TaskExecutionHistory height={600} />
         </Card>
       </div>
     </ConfigProvider>

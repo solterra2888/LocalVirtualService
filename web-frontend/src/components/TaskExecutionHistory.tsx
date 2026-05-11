@@ -45,13 +45,29 @@ import {
 } from 'recharts';
 import dayjs, { Dayjs } from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { schedulerAPI, ExecutionLog, ExecutionSummaryData } from '../services/scheduler';
+import {
+  schedulerAPI,
+  ExecutionLog,
+  ExecutionSummaryData,
+  ExecutionSummaryDailyStat
+} from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { getModalStyles } from '../utils/modalStyles';
+import { aiTagChipStyle } from './shared/aiTagChipStyles';
+import DatabaseTableViewer from './DatabaseTableViewer';
 
 dayjs.extend(relativeTime);
 
 const { Text } = Typography;
+
+/** Daily statistics 表：每个单元格 success / failure / total_runs */
+type OverviewSftCell = { success: number; failure: number; total: number };
+
+interface ExecutionOverviewTableRow {
+  key: string;
+  taskLabel: string;
+  cells: Record<string, OverviewSftCell>;
+}
 
 const metricLabelMap: Record<'success_count' | 'total_runs' | 'failure_count', string> = {
   success_count: 'Success Count',
@@ -181,6 +197,71 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
     };
   }, [summaryData, selectedSummaryTasks, chartMetric]);
 
+  /** 最近 3 个日历日：行 = 任务，列 = 日期（与原表行列互换） */
+  const recentOverviewDays = useMemo(() => {
+    if (!hasSummaryChartData || chartData.length === 0) return [];
+    return chartData.slice(-3) as Record<string, any>[];
+  }, [chartData, hasSummaryChartData]);
+
+  const executionOverviewTableRows = useMemo((): ExecutionOverviewTableRow[] => {
+    if (!hasSummaryChartData || selectedSummaryTaskData.length === 0) return [];
+    return selectedSummaryTaskData.map((task) => {
+      const cells: Record<string, OverviewSftCell> = {};
+      recentOverviewDays.forEach((dayRow: Record<string, any>) => {
+        const dateKey = String(dayRow.date);
+        const stat = dayRow.meta?.[task.task_type] as ExecutionSummaryDailyStat | undefined;
+        cells[dateKey] = {
+          success: stat?.success_count ?? 0,
+          failure: stat?.failure_count ?? 0,
+          total: stat?.total_runs ?? 0
+        };
+      });
+      return {
+        key: task.task_type,
+        taskLabel: task.task_name || task.task_type,
+        cells
+      };
+    });
+  }, [hasSummaryChartData, selectedSummaryTaskData, recentOverviewDays]);
+
+  const executionOverviewTableColumns = useMemo(() => {
+    const taskCol = {
+      title: 'Task',
+      dataIndex: 'taskLabel',
+      key: 'taskLabel',
+      fixed: 'left' as const,
+      width: 200,
+      ellipsis: true
+    };
+
+    const dateCols = recentOverviewDays.map((dayRow: Record<string, any>) => {
+      const dateKey = String(dayRow.date);
+      return {
+        title: (
+          <span style={{ lineHeight: 1.35 }}>
+            {dayjs(dayRow.date).format('YYYY-MM-DD')}
+            <br />
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+              success / failure / total
+            </Text>
+          </span>
+        ),
+        key: dateKey,
+        align: 'right' as const,
+        width: 150,
+        render: (_: unknown, record: ExecutionOverviewTableRow) => {
+          const c = record.cells[dateKey];
+          if (!c) return '0 / 0 / 0';
+          return `${c.success} / ${c.failure} / ${c.total}`;
+        },
+        sorter: (a: ExecutionOverviewTableRow, b: ExecutionOverviewTableRow) =>
+          (a.cells[dateKey]?.total ?? 0) - (b.cells[dateKey]?.total ?? 0)
+      };
+    });
+
+    return [taskCol, ...dateCols];
+  }, [recentOverviewDays]);
+
   const renderChartTooltip = useCallback(
     ({ active, payload }: any) => {
       if (!active || !payload || payload.length === 0) {
@@ -227,6 +308,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
                     <div>Success: {taskMeta.success_count}</div>
                     {taskMeta.failure_count > 0 && (
                       <div style={{ color: '#ff4d4f' }}>Failure: {taskMeta.failure_count}</div>
+                    )}
+                    {taskMeta.skipped_count > 0 && (
+                      <div style={{ color: '#8c8c8c' }}>Skipped (dup): {taskMeta.skipped_count}</div>
                     )}
                     {typeof taskMeta.success_rate === 'number' && (
                       <div>Success Rate: {(taskMeta.success_rate * 100).toFixed(1)}%</div>
@@ -364,12 +448,13 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
       error: { color: '#ff7875', icon: <ExclamationCircleOutlined /> },
       running: { color: '#40a9ff', icon: <PlayCircleOutlined /> },
       timeout: { color: '#fa8c16', icon: <ClockCircleOutlined /> },
-      cancelled: { color: '#8c8c8c', icon: <InfoCircleOutlined /> }
+      cancelled: { color: '#8c8c8c', icon: <InfoCircleOutlined /> },
+      skipped: { color: '#bfbfbf', icon: <InfoCircleOutlined /> }
     };
     
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.error;
     return (
-      <span style={{ color: config.color, fontSize: '16px' }}>
+      <span style={{ color: config.color, fontSize: '12px' }}>
         {config.icon}
       </span>
     );
@@ -466,50 +551,28 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
 
   const columns = [
     {
-      title: 'Task Info',
-      key: 'task',
-      render: (log: ExecutionLog) => (
-        <Space>
-          {getTaskTypeIcon(log.task_type)}
-          <div>
-            <div>
-              <Text strong style={{ fontSize: '12px' }}>{log.task_name}</Text>
-            </div>
-            <div>
-              <Text type="secondary" style={{ fontSize: '11px' }}>
-                {log.task_type.replace('_', ' ').toUpperCase()}
-              </Text>
-            </div>
-          </div>
-        </Space>
-      )
-    },
-    {
-      title: 'Execution Time',
-      key: 'time',
-      render: (log: ExecutionLog) => (
-        <div>
-          <div>
-            <Text style={{ fontSize: '11px' }}>
-              {dayjs(log.started_at).format('MM-DD HH:mm:ss')}
-            </Text>
-          </div>
-          <div>
-            <Text type="secondary" style={{ fontSize: '10px' }}>
-              {dayjs(log.started_at).fromNow()}
-            </Text>
-          </div>
-        </div>
-      ),
-      sorter: (a: ExecutionLog, b: ExecutionLog) => 
-        dayjs(a.started_at).valueOf() - dayjs(b.started_at).valueOf()
+      title: 'Scheduler',
+      key: 'scheduler',
+      fixed: 'left' as const,
+      width: 220,
+      ellipsis: true,
+      render: (_: unknown, log: ExecutionLog) => {
+        const name = log.task_name || log.task_id;
+        return (
+          <Text strong ellipsis={{ tooltip: name }} style={{ fontSize: '12px' }}>
+            {name}
+          </Text>
+        );
+      },
+      sorter: (a: ExecutionLog, b: ExecutionLog) =>
+        (a.task_name || '').localeCompare(b.task_name || '', undefined, { sensitivity: 'base' })
     },
     {
       title: 'Duration',
       dataIndex: 'duration_ms',
       key: 'duration',
       render: (duration: number) => (
-        <Text style={{ fontSize: '11px' }}>
+        <Text style={{ fontSize: '12px' }}>
           {formatDuration(duration)}
         </Text>
       ),
@@ -527,48 +590,21 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         { text: 'Error', value: 'error' },
         { text: 'Running', value: 'running' },
         { text: 'Timeout', value: 'timeout' },
-        { text: 'Cancelled', value: 'cancelled' }
+        { text: 'Cancelled', value: 'cancelled' },
+        { text: 'Skipped (dup)', value: 'skipped' }
       ],
       onFilter: (value: any, record: ExecutionLog) => record.status === value
     },
     {
-      title: 'Result',
-      key: 'result',
-      render: (log: ExecutionLog) => (
-        <div style={{ maxWidth: 200 }}>
-          {log.status === 'success' ? (
-            <Text style={{ fontSize: '11px', color: '#52c41a' }}>
-              {log.result_message || 'Execution successful'}
-            </Text>
-          ) : log.status === 'running' ? (
-            <Text style={{ fontSize: '11px', color: '#1890ff' }}>
-              {log.result_message || 'Task is running...'}
-            </Text>
-          ) : log.status === 'cancelled' ? (
-            <Text style={{ fontSize: '11px', color: '#8c8c8c' }}>
-              {log.error_message || log.result_message || 'Task was cancelled'}
-            </Text>
-          ) : log.status === 'timeout' ? (
-            <Text style={{ fontSize: '11px', color: '#fa8c16' }}>
-              {log.error_message || 'Execution timeout'}
-            </Text>
-          ) : (
-            <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
-              {log.error_message || 'Execution failed'}
-            </Text>
-          )}
-        </div>
-      )
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
+      title: 'Details',
+      key: 'details',
       render: (log: ExecutionLog) => (
         <Button
           type="text"
           size="small"
           icon={<InfoCircleOutlined />}
           onClick={() => handleViewDetail(log)}
+          style={{ fontSize: 12 }}
         >
           Details
         </Button>
@@ -660,7 +696,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             size="small"
           />
           {summaryData && (
-            <Tag color="geekblue" style={{ marginLeft: 0 }}>
+            <Tag bordered={false} style={aiTagChipStyle('ticker', themeMode)}>
               Timezone: {summaryData.timezone}
             </Tag>
           )}
@@ -713,71 +749,85 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         {summaryLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : hasSummaryChartData ? (
-          <div style={{ width: '100%', height: 320 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              {chartType === 'line' ? (
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="dateLabel" />
-                  <YAxis
-                    allowDecimals={false}
-                    label={{
-                      value: metricLabelMap[chartMetric],
-                      angle: -90,
-                      position: 'insideLeft'
-                    }}
-                  />
-                  <RechartsTooltip
-                    content={renderChartTooltip}
-                    wrapperStyle={{ zIndex: 2000 }}
-                    allowEscapeViewBox={{ x: false, y: true }}
-                  />
-                  <Legend />
-                  {selectedSummaryTaskData.map((task) => (
-                    <Line
-                      key={task.task_type}
-                      type="monotone"
-                      dataKey={task.task_type}
-                      name={task.task_name || task.task_type}
-                      stroke={taskColorMap[task.task_type] || '#1890ff'}
-                      strokeWidth={2}
-                      dot={{ r: 2 }}
-                      activeDot={{ r: 4 }}
+          <>
+            <div style={{ width: '100%', height: 320 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === 'line' ? (
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="dateLabel" />
+                    <YAxis
+                      allowDecimals={false}
+                      label={{
+                        value: metricLabelMap[chartMetric],
+                        angle: -90,
+                        position: 'insideLeft'
+                      }}
                     />
-                  ))}
-                </LineChart>
-              ) : (
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="dateLabel" />
-                  <YAxis
-                    allowDecimals={false}
-                    label={{
-                      value: metricLabelMap[chartMetric],
-                      angle: -90,
-                      position: 'insideLeft'
-                    }}
-                  />
-                  <RechartsTooltip
-                    content={renderChartTooltip}
-                    wrapperStyle={{ zIndex: 2000 }}
-                    allowEscapeViewBox={{ x: true, y: true }}
-                  />
-                  <Legend />
-                  {selectedSummaryTaskData.map((task) => (
-                    <Bar
-                      key={task.task_type}
-                      dataKey={task.task_type}
-                      name={task.task_name || task.task_type}
-                      stackId="runs"
-                      fill={taskColorMap[task.task_type] || '#1890ff'}
-                      radius={[4, 4, 0, 0]}
+                    <RechartsTooltip
+                      content={renderChartTooltip}
+                      wrapperStyle={{ zIndex: 2000 }}
+                      allowEscapeViewBox={{ x: false, y: true }}
                     />
-                  ))}
-                </BarChart>
-              )}
-            </ResponsiveContainer>
-          </div>
+                    <Legend wrapperStyle={{ fontSize: 9 }} />
+                    {selectedSummaryTaskData.map((task) => (
+                      <Line
+                        key={task.task_type}
+                        type="monotone"
+                        dataKey={task.task_type}
+                        name={task.task_name || task.task_type}
+                        stroke={taskColorMap[task.task_type] || '#1890ff'}
+                        strokeWidth={2}
+                        dot={{ r: 2 }}
+                        activeDot={{ r: 4 }}
+                      />
+                    ))}
+                  </LineChart>
+                ) : (
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="dateLabel" />
+                    <YAxis
+                      allowDecimals={false}
+                      label={{
+                        value: metricLabelMap[chartMetric],
+                        angle: -90,
+                        position: 'insideLeft'
+                      }}
+                    />
+                    <RechartsTooltip
+                      content={renderChartTooltip}
+                      wrapperStyle={{ zIndex: 2000 }}
+                      allowEscapeViewBox={{ x: true, y: true }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 9 }} />
+                    {selectedSummaryTaskData.map((task) => (
+                      <Bar
+                        key={task.task_type}
+                        dataKey={task.task_type}
+                        name={task.task_name || task.task_type}
+                        stackId="runs"
+                        fill={taskColorMap[task.task_type] || '#1890ff'}
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                Daily statistics — last 3 days (success / failure / total runs per cell)
+              </Text>
+              <Table
+                size="small"
+                columns={executionOverviewTableColumns}
+                dataSource={executionOverviewTableRows}
+                pagination={false}
+                scroll={{ x: 'max-content' }}
+              />
+            </div>
+          </>
         ) : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -791,6 +841,9 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             }
           />
         )}
+        <div style={{ marginTop: 24 }}>
+          <DatabaseTableViewer refreshTrigger={refreshTrigger} />
+        </div>
       </Card>
 
       {/* Execution logs table */}
@@ -800,12 +853,12 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             <BarChartOutlined />
             Task Execution History
             {selectedSummaryTasks.length > 0 && (
-              <Tag color="blue">
+              <Tag bordered={false} style={aiTagChipStyle('ticker', themeMode)}>
                 {selectedSummaryTasks.length} task(s) selected
               </Tag>
             )}
             {statusFilter !== 'all' && (
-              <Tag color="green">
+              <Tag bordered={false} style={aiTagChipStyle('sector', themeMode)}>
                 Status: {statusFilter}
               </Tag>
             )}
@@ -847,7 +900,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} records, total ${total}`
             }}
-            scroll={{ y: height - 200 }}
+            scroll={{ x: 'max-content', y: height - 200 }}
             size="small"
           />
         ) : (
@@ -890,7 +943,7 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               </Space>
             </Descriptions.Item>
             <Descriptions.Item label="Task Type">
-              <Tag color="blue">
+              <Tag bordered={false} style={aiTagChipStyle('concept', themeMode)}>
                 {selectedLog.task_type.replace('_', ' ').toUpperCase()}
               </Tag>
             </Descriptions.Item>

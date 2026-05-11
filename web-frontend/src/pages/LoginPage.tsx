@@ -1,5 +1,5 @@
 import React from 'react';
-import { Form, Input, Button, Card, Typography, message, Spin } from 'antd';
+import { Form, Input, Button, Card, Typography, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -92,7 +92,7 @@ const LoginPage: React.FC = () => {
               className="full-width"
               loading={loading}
             >
-              {loading ? <Spin size="small" /> : 'Login'}
+              Login
             </Button>
           </Form.Item>
         </Form>

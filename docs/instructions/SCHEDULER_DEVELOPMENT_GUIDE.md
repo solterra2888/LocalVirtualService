@@ -15,26 +15,103 @@
 
 ---
 
+## ⚠️ 严重警告：禁止两台机器的调度器同时连接同一个数据库
+
+> **这是导致任务重复执行最常见的根本原因，必须在部署前理解清楚。**
+
+### 问题描述
+
+本系统使用**共享 PostgreSQL 数据库**（`DB_HOST` 指向同一台远程服务器）。如果在不同机器上同时运行多个 Scheduler 进程（例如本地 Mac Mini + 远程服务器），且它们连接的是**同一个数据库**，则：
+
+| 机器 | Scheduler | 数据库 | 是否互相感知 |
+|------|-----------|--------|-------------|
+| 本地 Mac Mini | ✅ 运行 | `43.99.37.76:5432`（共享） | ❌ **不互相感知** |
+| 远程 43.99.37.76 | ✅ 运行 | `43.99.37.76:5432`（共享） | ❌ **不互相感知** |
+
+两个 Scheduler 会在**同一 cron 时刻各自独立触发同一任务**，在 `task_execution_logs` 产生两条执行记录，提交两个独立的 Celery Task ID。
+
+### 真实案例
+
+```
+# task_execution_logs 里同一时间出现两条 youtube_subscription 执行记录：
+13:00:00  youtube_subscription  "已提交 Celery 异步任务 e4d28967..."  ← 来自远程服务器
+13:00:01  youtube_subscription  "已提交 Celery 异步任务 ef1dd933..."  ← 来自本地 Mac Mini
+```
+
+`e4d28967` 在本地日志中完全找不到，就是因为它由远程机器的 Scheduler 提交。
+
+### 部署规则
+
+```
+✅ 允许：只有一台机器的 Scheduler 进程运行，其他机器只跑 Celery Worker
+❌ 禁止：多台机器同时运行 Scheduler 且连接同一个 PostgreSQL 数据库
+```
+
+**如果在本地开发测试：必须将远程服务器的 Scheduler 服务进程完全停止（kill 进程），
+而不仅仅是"禁用调度"或"关闭 APScheduler"。**
+
+---
+
 ## 并发与幂等保护（重要）
 
-调度器在生产环境必须**只跑一个进程**。但为了防止「双 scheduler 实例 / lifespan 二次启动 / 手动 trigger 与 cron 撞车」等情况悄悄放大，
-`backend/services/scheduler_service.py::_execute_task` 在每次执行前都会获取一把 **「按周期窗口」的 Redis 分布式锁**：
+调度器在生产环境必须**只跑一个进程**。但为了防止「双 scheduler 实例 / lifespan 二次启动 / 手动 trigger 与 cron 撞车 / 多机器部署误操作」等情况悄悄放大，
+`backend/services/scheduler_service.py::_execute_task` 在每次执行前都会通过 **PostgreSQL 数据库周期窗口锁**来保证幂等性。
 
-| 触发类型 | 锁键格式 | TTL |
-|----------|----------|-----|
-| `cron`     | `scheduler_lock:{type}:cron:{当前 fire_time YYYYMMDDHHMM}` | 周期长度 × 0.9（最少 60s） |
-| `interval` | `scheduler_lock:{type}:int:{floor(epoch / 周期秒)}`         | 周期长度 × 0.9（最少 60s） |
-| 拿不到 trigger 时回退 | `scheduler_lock:{type}` | 600s |
+### 锁机制：PostgreSQL INSERT ON CONFLICT（跨机器分布式锁）
 
-关键性质：
+锁不再依赖 Redis（各机器的 Redis 是本地独立的，无法跨机器协调），改为利用**所有调度实例共享的同一个 PostgreSQL 数据库**来实现真正的分布式互斥：
 
-- **同一个周期窗口内只允许成功执行一次**。第二次触发会拿不到锁，直接在 `task_execution_logs` 写一条 `status='skipped'`，便于在监控/SQL 排查时立刻发现「重复触发」问题。
-- **锁不在 finally 中 delete**：让 Redis TTL 自然过期，从而在 handler「派发到 Celery 即返回」(只耗时几十毫秒) 的场景里依然能拦住周期内的二次触发。
+**原理**：`task_execution_logs` 表上有唯一索引：
+```sql
+CREATE UNIQUE INDEX uq_task_execution_period
+  ON task_execution_logs (task_type, period_key)
+  WHERE period_key IS NOT NULL;
+```
+
+`_execute_task` 在执行任务时执行：
+```sql
+INSERT INTO task_execution_logs (..., period_key)
+VALUES (..., 'cron:202605111300')
+ON CONFLICT (task_type, period_key) WHERE period_key IS NOT NULL DO NOTHING
+RETURNING id;
+```
+
+- **RETURNING id 返回一行** → 当前实例获得锁，继续执行
+- **RETURNING id 返回空（冲突）** → 另一实例已在此周期执行，当前实例跳过，写入一条 `status='skipped'` 日志
+
+| 触发类型 | period_key 格式 |
+|----------|-----------------|
+| `cron`     | `cron:YYYYMMDDHHMM`（当前 cron fire_time） |
+| `interval` | `int:{floor(epoch / 周期秒)}`（时间桶编号） |
+| 拿不到 trigger 时 | `None`（退化为无锁保护，不影响执行） |
+
+### 关键性质
+
+- **跨机器生效**：所有调度实例共享同一个 PostgreSQL，DB 唯一约束天然实现跨机器互斥，彻底解决多机器重复执行问题。
+- **同一个周期窗口内只允许成功执行一次**：第二次触发冲突后直接写一条 `status='skipped'`，便于在监控/SQL 中排查「重复触发」。
+- **下一周期自动解锁**：下一次 cron tick 使用新的 `period_key`，自然进入新窗口，无需手动释放锁。
 - **任务失败也保留锁**：避免立即重试浪费外部 API 配额；下一次正常 cron tick 进入新窗口后会自动重试。
 - **对开发者透明**：只要新任务通过标准 `_add_job_to_scheduler` 注册（Cron/Interval Trigger），就自动享受这一保护。
 
-> 排查重复触发：`SELECT date_trunc('hour', started_at), status, COUNT(*) FROM task_execution_logs WHERE task_type='xxx' GROUP BY 1,2 ORDER BY 1 DESC;`
-> 同一时间窗里如果同时出现 `success` 和 `skipped`，就说明上游有重复触发源（例如双 scheduler 进程），**任务本身是安全的**，但应回到调度层面消除冗余进程。
+### 排查重复触发
+
+```sql
+-- 查看某任务的执行分布
+SELECT date_trunc('hour', started_at), status, COUNT(*)
+FROM task_execution_logs
+WHERE task_type = 'youtube_subscription'
+GROUP BY 1, 2
+ORDER BY 1 DESC;
+
+-- 同一 period_key 下如果同时出现 success + skipped，说明有重复触发
+-- skipped 记录的 error_message 里会记录触发的 period_key 值
+SELECT started_at, status, error_message
+FROM task_execution_logs
+WHERE task_type = 'youtube_subscription'
+ORDER BY started_at DESC LIMIT 20;
+```
+
+> 如果看到同一时间窗里同时出现 `success` 和 `skipped`，说明上游有重复触发源（通常是双 Scheduler 进程），**任务本身是安全的**，但应回到部署层面消除冗余进程（参见上方「严重警告」章节）。
 
 此外，`SchedulerService.start()` 与 `get_scheduler_service()` 都加了幂等/并发保护，单进程内不会因 lifespan 被多次调用而把同一任务 add_job 多次。
 
@@ -946,6 +1023,7 @@ DELETE FROM task_scheduling WHERE type = 'futu_themes';
 1. **数据库** → 2. **服务** → 3. **调度器** → 4. **API** → 5. **代理** → 6. **前端**
 
 关键注意事项：
+- ⚠️ **单调度器原则**：同一个 PostgreSQL 数据库在任意时刻只能有一个 Scheduler 进程在运行，否则同一任务会被重复执行
 - ✅ 独立调度器服务架构：需要同时配置 `scheduler.py` 和 `scheduler_proxy.py`
 - ✅ 线程池执行：同步方法必须用 `run_in_executor`
 - ✅ 类型一致性：前后端类型定义要对应
@@ -962,8 +1040,9 @@ DELETE FROM task_scheduling WHERE type = 'futu_themes';
 
 ---
 
-**版本**: 1.0  
-**最后更新**: 2025-10-19  
+**版本**: 1.1  
+**最后更新**: 2026-05-11  
 **作者**: Development Team  
-**示例项目**: Futu Investment Themes Scheduler
+**示例项目**: Futu Investment Themes Scheduler  
+**变更记录**: v1.1 — 将周期锁从 Redis 改为 PostgreSQL INSERT ON CONFLICT，新增"双调度器陷阱"警告章节
 
