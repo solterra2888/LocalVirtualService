@@ -1,15 +1,41 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Space, ConfigProvider, theme as antdTheme, Typography, Button, Select, InputNumber, message, Spin, Input, Tabs } from 'antd';
-import { FileTextOutlined, ReloadOutlined, ClearOutlined, DownloadOutlined, DashboardOutlined } from '@ant-design/icons';
+import {
+  Card,
+  Space,
+  ConfigProvider,
+  theme as antdTheme,
+  Typography,
+  Button,
+  Select,
+  InputNumber,
+  message,
+  Spin,
+  Input,
+  Tabs,
+} from 'antd';
+import {
+  FileTextOutlined,
+  ReloadOutlined,
+  ClearOutlined,
+  DownloadOutlined,
+  DashboardOutlined,
+  UnorderedListOutlined,
+  LineChartOutlined,
+} from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import { readLog, clearLog, LogType } from '../services/logs';
 import MonitoringPanel from '../components/MonitoringPanel';
+import TaskExecutionHistory from '../components/TaskExecutionHistory';
+import LLMMonitoringStatistics from '../components/monitoring/LLMMonitoringStatistics';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-// Theme colors per FRONTEND_STYLE_GUIDE §2: Light/Dark + Behance
+const MONITORING_TABS = ['logs', 'infrastructure', 'scheduler', 'llm'] as const;
+type MonitoringTabKey = (typeof MONITORING_TABS)[number];
+
 const THEME_COLORS = {
   light: {
     pageBg: '#f5f5f5',
@@ -35,7 +61,6 @@ const THEME_COLORS = {
   },
 } as const;
 
-// Behance-style: rounded corners, soft shadow, minimal border
 const CARD_STYLE_BEHANCE = {
   borderRadius: 12,
   boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
@@ -47,22 +72,36 @@ const CARD_STYLE_BEHANCE_DARK = {
   border: '1px solid rgba(255, 255, 255, 0.06)',
 };
 
-const SystemLogsPage: React.FC = () => {
+const MonitoringPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isMobile } = useDeviceDetection();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
   const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
 
+  const rawTab = searchParams.get('tab');
+  const activeKey: MonitoringTabKey = MONITORING_TABS.includes(rawTab as MonitoringTabKey)
+    ? (rawTab as MonitoringTabKey)
+    : 'logs';
+
+  const handleTabChange = (key: string) => {
+    const k = MONITORING_TABS.includes(key as MonitoringTabKey) ? (key as MonitoringTabKey) : 'logs';
+    if (k === 'logs') {
+      setSearchParams({}, { replace: true });
+    } else {
+      setSearchParams({ tab: k }, { replace: true });
+    }
+  };
+
   const [selectedLogType, setSelectedLogType] = useState<LogType>('app');
   const [logContent, setLogContent] = useState<string>('');
   const [logInfo, setLogInfo] = useState<{ lines: number; size_kb: number } | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [logLoading, setLogLoading] = useState<boolean>(false);
   const [linesToRead, setLinesToRead] = useState<number | null>(1000);
 
-  // 加载日志内容
   const loadLogContent = useCallback(async () => {
-    setLoading(true);
+    setLogLoading(true);
     try {
       const response = await readLog(selectedLogType, linesToRead || undefined);
       setLogContent(response.content);
@@ -75,27 +114,26 @@ const SystemLogsPage: React.FC = () => {
       message.error('failed to load log content');
       console.error(error);
     } finally {
-      setLoading(false);
+      setLogLoading(false);
     }
   }, [selectedLogType, linesToRead]);
 
   useEffect(() => {
+    if (activeKey !== 'logs') return;
     loadLogContent();
-  }, [loadLogContent]);
+  }, [activeKey, loadLogContent]);
 
-  // 清空日志
   const handleClearLog = async () => {
     try {
       await clearLog(selectedLogType);
       message.success('Log has been cleared');
-      loadLogContent(); // reload
+      loadLogContent();
     } catch (error) {
       message.error('failed to clear log');
       console.error(error);
     }
   };
 
-  // download log
   const handleDownloadLog = () => {
     const blob = new Blob([logContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -109,10 +147,19 @@ const SystemLogsPage: React.FC = () => {
     message.success('Log has been downloaded');
   };
 
+  const llmTabActive = activeKey === 'llm';
+
   return (
     <ConfigProvider
       theme={{
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        components: {
+          Table: {
+            cellFontSize: 12,
+            cellFontSizeMD: 12,
+            cellFontSizeSM: 12,
+          },
+        },
         ...(isDark && {
           token: {
             colorBgContainer: colors.cardBg,
@@ -139,28 +186,38 @@ const SystemLogsPage: React.FC = () => {
       >
         <div style={{ marginBottom: isMobile ? 14 : 20 }}>
           <Title level={isMobile ? 3 : 2} style={{ margin: 0, marginBottom: 4, color: colors.text }}>
-            <FileTextOutlined style={{ marginRight: 8 }} />
-            system logs
+            <DashboardOutlined style={{ marginRight: 8 }} />
+            Monitoring
           </Title>
           <Text style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            View and manage system log files & runtime queues (admin only)
+            System logs, infrastructure queues, scheduler execution history, and LLM usage statistics (admin only)
           </Text>
         </div>
 
         <Tabs
-          defaultActiveKey="logs"
+          activeKey={activeKey}
+          onChange={handleTabChange}
           items={[
             {
               key: 'logs',
-              label: <Space><FileTextOutlined />日志文件</Space>,
+              label: (
+                <Space>
+                  <FileTextOutlined />
+                  System Logs
+                </Space>
+              ),
               children: (
                 <Card
                   style={{ ...cardStyle, overflow: 'hidden' }}
                   bodyStyle={{ padding: isMobile ? '14px 12px' : '20px 24px' }}
                 >
-                  {/* 控制栏 */}
                   <div style={{ marginBottom: 16 }}>
-                    <Space wrap size={isMobile ? 'small' : 'middle'} direction={isMobile ? 'vertical' : 'horizontal'} style={{ width: isMobile ? '100%' : undefined }}>
+                    <Space
+                      wrap
+                      size={isMobile ? 'small' : 'middle'}
+                      direction={isMobile ? 'vertical' : 'horizontal'}
+                      style={{ width: isMobile ? '100%' : undefined }}
+                    >
                       <span style={{ color: colors.text }}>Log Type:</span>
                       <Select
                         style={{ width: isMobile ? '100%' : 200 }}
@@ -189,7 +246,7 @@ const SystemLogsPage: React.FC = () => {
                           type="primary"
                           icon={<ReloadOutlined />}
                           onClick={loadLogContent}
-                          loading={loading}
+                          loading={logLoading}
                           block={isMobile}
                         >
                           Refresh
@@ -208,7 +265,7 @@ const SystemLogsPage: React.FC = () => {
                           danger
                           icon={<ClearOutlined />}
                           onClick={handleClearLog}
-                          disabled={loading}
+                          disabled={logLoading}
                           block={isMobile}
                         >
                           Clear Log
@@ -217,7 +274,6 @@ const SystemLogsPage: React.FC = () => {
                     </Space>
                   </div>
 
-                  {/* 日志信息 */}
                   {logInfo && (
                     <div style={{ marginBottom: 12 }}>
                       <Space>
@@ -231,8 +287,7 @@ const SystemLogsPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 日志内容 */}
-                  <Spin spinning={loading}>
+                  <Spin spinning={logLoading}>
                     <TextArea
                       value={logContent}
                       readOnly
@@ -251,10 +306,44 @@ const SystemLogsPage: React.FC = () => {
               ),
             },
             {
-              key: 'monitoring',
-              label: <Space><DashboardOutlined />Redis 队列 & Worker</Space>,
+              key: 'infrastructure',
+              label: (
+                <Space>
+                  <DashboardOutlined />
+                  Infrastructure
+                </Space>
+              ),
+              children: <MonitoringPanel isDark={isDark} colors={colors} cardStyle={cardStyle} />,
+            },
+            {
+              key: 'scheduler',
+              label: (
+                <Space>
+                  <UnorderedListOutlined />
+                  Scheduler Logs
+                </Space>
+              ),
               children: (
-                <MonitoringPanel isDark={isDark} colors={colors} cardStyle={cardStyle} />
+                <Card
+                  style={{ ...cardStyle, overflow: 'hidden' }}
+                  bodyStyle={{ padding: isMobile ? '14px 12px' : '20px 24px' }}
+                >
+                  <TaskExecutionHistory height={isMobile ? 480 : 600} />
+                </Card>
+              ),
+            },
+            {
+              key: 'llm',
+              label: (
+                <Space>
+                  <LineChartOutlined />
+                  LLM Monitoring
+                </Space>
+              ),
+              children: (
+                <div style={{ marginTop: 0 }}>
+                  <LLMMonitoringStatistics active={llmTabActive} />
+                </div>
               ),
             },
           ]}
@@ -264,4 +353,4 @@ const SystemLogsPage: React.FC = () => {
   );
 };
 
-export default SystemLogsPage;
+export default MonitoringPage;

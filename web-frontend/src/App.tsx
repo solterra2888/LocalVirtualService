@@ -19,12 +19,11 @@ import MobileDailyPage from './pages/MobileDailyPage';
 import UsersPage from './pages/UsersPage';
 import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
-import SchedulerLogsPage from './pages/SchedulerLogsPage';
+import MonitoringPage from './pages/MonitoringPage';
 import FeedReaderPage from './pages/FeedReaderPage';
 import MobileFeedsPage from './pages/MobileFeedsPage';
 import MobileFeedsListView from './pages/MobileFeedsListView';
 import MobileFeedArticlePage from './pages/MobileFeedArticlePage';
-import SystemLogsPage from './pages/SystemLogsPage';
 import FundamentalsPage from './pages/FundamentalsPage';
 import EODFetchPage from './pages/EODFetchPage';
 import LLMConfigPage from './pages/LLMConfigPage';
@@ -141,14 +140,7 @@ const AppContent: React.FC = () => {
               </AdminRoute>
             }
           />
-          <Route
-            path="scheduler/logs"
-            element={
-              <AdminRoute>
-                <SchedulerLogsPage />
-              </AdminRoute>
-            }
-          />
+          <Route path="scheduler/logs" element={<Navigate to="/monitoring?tab=scheduler" replace />} />
           {isMobile ? (
             <Route path="feeds" element={<MobileFeedsPage />}>
               <Route index element={<MobileFeedsListView />} />
@@ -191,11 +183,12 @@ const AppContent: React.FC = () => {
               </AdminRoute>
             }
           />
+          <Route path="system-logs" element={<Navigate to="/monitoring" replace />} />
           <Route
-            path="system-logs"
+            path="monitoring"
             element={
               <AdminRoute>
-                <SystemLogsPage />
+                <MonitoringPage />
               </AdminRoute>
             }
           />

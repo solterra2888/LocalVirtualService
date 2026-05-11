@@ -18,9 +18,14 @@ logger = get_logger("scheduler_proxy")
 router = APIRouter(prefix="/scheduler", tags=["Scheduler Proxy"])
 
 # 调度器服务配置
-SCHEDULER_SERVICE_HOST = '127.0.0.1'
-SCHEDULER_SERVICE_PORT = int(os.getenv('SCHEDULER_PORT', '8001'))
-SCHEDULER_BASE_URL = f"http://{SCHEDULER_SERVICE_HOST}:{SCHEDULER_SERVICE_PORT}/api"
+# 优先读取 SCHEDULER_SERVICE_URL，允许本地 webapp 代理到远程 Scheduler（如生产服务器）
+# 未设置时退回到 localhost:SCHEDULER_PORT（本地 Scheduler 服务）
+_scheduler_service_url = os.getenv('SCHEDULER_SERVICE_URL', '').rstrip('/')
+if _scheduler_service_url:
+    SCHEDULER_BASE_URL = f"{_scheduler_service_url}/api"
+else:
+    SCHEDULER_SERVICE_PORT = int(os.getenv('SCHEDULER_PORT', '8001'))
+    SCHEDULER_BASE_URL = f"http://127.0.0.1:{SCHEDULER_SERVICE_PORT}/api"
 
 class SchedulerServiceClient:
     """调度器服务客户端"""

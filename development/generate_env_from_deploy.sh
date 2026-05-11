@@ -78,7 +78,11 @@ else
     REDIS_URL="redis://${REDIS_HOST}:${REDIS_PORT}/0"
 fi
 
-SCHEDULER_SERVICE_URL="http://localhost:${SCHEDULER_PORT}"
+if [ -n "${SCHEDULER_HOST:-}" ] && [ "$SCHEDULER_HOST" != "127.0.0.1" ] && [ "$SCHEDULER_HOST" != "localhost" ]; then
+    SCHEDULER_SERVICE_URL="http://${SCHEDULER_HOST}:${SCHEDULER_PORT}"
+else
+    SCHEDULER_SERVICE_URL="http://localhost:${SCHEDULER_PORT}"
+fi
 WEBAPP_URL="http://localhost:${WEBAPP_PORT}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
 LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"

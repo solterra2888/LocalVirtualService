@@ -6,7 +6,7 @@ import {
   EditOutlined,
   SunOutlined,
   MoonOutlined,
-  FileTextOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -67,7 +67,7 @@ const MobileLayout: React.FC = () => {
     navigate('/login');
   };
 
-  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员仅开放 System Log Files（路由仍由 AdminRoute 校验）
+  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员可进入 Monitoring（路由仍由 AdminRoute 校验）
   const userMenuItems = [
     {
       key: 'theme',
@@ -95,7 +95,7 @@ const MobileLayout: React.FC = () => {
     },
     { type: 'divider' as const },
     ...(user?.is_admin
-      ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }]
+      ? [{ key: '/monitoring', icon: <LineChartOutlined />, label: 'Monitoring', onClick: () => navigate('/monitoring') }]
       : []),
     ...(user?.is_admin ? [{ type: 'divider' as const }] : []),
     {

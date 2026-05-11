@@ -14,7 +14,7 @@ import {
   BuildOutlined,
   CalendarOutlined,
   ControlOutlined,
-  HistoryOutlined,
+  LineChartOutlined,
   FolderOutlined,
   UploadOutlined,
   SoundOutlined,
@@ -181,10 +181,9 @@ const Layout: React.FC = () => {
     ...(user?.is_admin
       ? [
           { key: '/scheduler', icon: <ControlOutlined />, label: 'Scheduler Management', onClick: () => navigate('/scheduler') },
-          { key: '/scheduler/logs', icon: <HistoryOutlined />, label: 'Scheduler Logs', onClick: () => navigate('/scheduler/logs') },
+          { key: '/monitoring', icon: <LineChartOutlined />, label: 'Monitoring', onClick: () => navigate('/monitoring') },
         ]
       : []),
-    ...(user?.is_admin ? [{ key: '/system-logs', icon: <FileTextOutlined />, label: 'System Log Files', onClick: () => navigate('/system-logs') }] : []),
     ...(user?.is_admin ? [{ key: '/users', icon: <TeamOutlined />, label: 'User Management', onClick: () => navigate('/users') }] : []),
     { type: 'divider' as const },
     { key: 'edit-profile', icon: <EditOutlined />, label: 'Edit Profile', onClick: openProfileModal },

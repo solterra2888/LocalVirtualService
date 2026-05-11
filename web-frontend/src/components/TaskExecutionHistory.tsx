@@ -21,7 +21,6 @@ import {
   ClockCircleOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  ReloadOutlined,
   CalendarOutlined,
   BarChartOutlined,
   InfoCircleOutlined,
@@ -568,6 +567,19 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
         (a.task_name || '').localeCompare(b.task_name || '', undefined, { sensitivity: 'base' })
     },
     {
+      title: 'Start Time',
+      dataIndex: 'started_at',
+      key: 'started_at',
+      width: 160,
+      render: (startedAt: string) => (
+        <Text style={{ fontSize: '12px' }}>
+          {startedAt ? dayjs(startedAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
+        </Text>
+      ),
+      sorter: (a: ExecutionLog, b: ExecutionLog) =>
+        dayjs(a.started_at).valueOf() - dayjs(b.started_at).valueOf()
+    },
+    {
       title: 'Duration',
       dataIndex: 'duration_ms',
       key: 'duration',
@@ -623,16 +635,6 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
             {chartType === 'line' ? <LineChartOutlined /> : <BarChartOutlined />}
             Execution Overview
           </Space>
-        }
-        extra={
-          <Button
-            icon={<ReloadOutlined />}
-            size="small"
-            onClick={() => loadExecutionSummary(summaryRange)}
-            loading={summaryLoading}
-          >
-            Refresh
-          </Button>
         }
       >
         <Space wrap size="middle" style={{ marginBottom: 16 }}>
@@ -870,21 +872,21 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
               Total {logs.length} records
             </Text>
             <Button
+              type="primary"
+              size="small"
               icon={<DownloadOutlined />}
               onClick={handleDownloadCSV}
-              size="small"
-              type="primary"
-            >
-              Download CSV
-            </Button>
+              title="Download CSV"
+              aria-label="Download CSV"
+            />
             <Button
+              danger
+              size="small"
               icon={<DeleteOutlined />}
               onClick={handleClearLogs}
-              size="small"
-              danger
-            >
-              Clear
-            </Button>
+              title="Clear execution logs"
+              aria-label="Clear execution logs"
+            />
           </Space>
         }
       >
