@@ -157,16 +157,28 @@ def generate_twitter_daily_report_task(
     user_id: int,
     report_date: str,
     force: bool = False,
+    skip_auto_check: bool = False,
 ):
     """
     为单个用户生成 Twitter Daily Report。
     会从 twitter_author_daily_summaries 读取预计算摘要，
     缺失时自动 fallback 到即时生成。
+
+    Args:
+        skip_auto_check: 为 True 时跳过 auto_enabled 校验（用于手动触发场景）。
+                         批量自动调度时保持默认 False，确保任务执行时仍尊重用户开关。
     """
     task_id = self.request.id
     start = time.time()
     logger.info(f"[Celery Task {task_id}] 开始生成 Twitter Daily Report: "
-                f"user_id={user_id}, report_date={report_date}, force={force}")
+                f"user_id={user_id}, report_date={report_date}, force={force}, "
+                f"skip_auto_check={skip_auto_check}")
+
+    if not skip_auto_check:
+        from backend.services.user_daily_report_settings_service import UserDailyReportSettingsService
+        if not UserDailyReportSettingsService().is_twitter_auto_enabled(user_id):
+            logger.info(f"[Celery Task {task_id}] 用户 {user_id} 已关闭 Twitter 自动生成，跳过本次任务")
+            return {'success': True, 'skipped': True, 'message': 'auto_enabled=False，已跳过'}
 
     current_task.update_state(state='PROGRESS', meta={
         'status': 'generating',
@@ -364,16 +376,28 @@ def generate_youtube_daily_report_task(
     user_id: int,
     report_date: str,
     force: bool = False,
+    skip_auto_check: bool = False,
 ):
     """
     为单个用户生成 YouTube Daily Report。
     会从 youtube_author_daily_summaries 读取预计算摘要，
     缺失时自动 fallback 到即时生成。
+
+    Args:
+        skip_auto_check: 为 True 时跳过 auto_enabled 校验（用于手动触发场景）。
+                         批量自动调度时保持默认 False，确保任务执行时仍尊重用户开关。
     """
     task_id = self.request.id
     start = time.time()
     logger.info(f"[Celery Task {task_id}] 开始生成 YouTube Daily Report: "
-                f"user_id={user_id}, report_date={report_date}, force={force}")
+                f"user_id={user_id}, report_date={report_date}, force={force}, "
+                f"skip_auto_check={skip_auto_check}")
+
+    if not skip_auto_check:
+        from backend.services.user_daily_report_settings_service import UserDailyReportSettingsService
+        if not UserDailyReportSettingsService().is_youtube_auto_enabled(user_id):
+            logger.info(f"[Celery Task {task_id}] 用户 {user_id} 已关闭 YouTube 自动生成，跳过本次任务")
+            return {'success': True, 'skipped': True, 'message': 'auto_enabled=False，已跳过'}
 
     current_task.update_state(state='PROGRESS', meta={
         'status': 'generating',

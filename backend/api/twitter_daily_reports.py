@@ -147,6 +147,7 @@ async def generate_report(
             user_id=current_user.user_id,
             report_date=str(parsed_date),
             force=body.force,
+            skip_auto_check=True,
         )
         logger.info(
             f"用户 {current_user.username} 触发 Twitter Daily Report 生成: "
