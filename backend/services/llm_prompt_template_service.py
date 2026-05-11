@@ -723,11 +723,13 @@ class LLMPromptTemplateService:
         cost: float,
         response_time_ms: int,
         success: bool,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
     ) -> bool:
         """
         记录模板使用日志
-        
+
         Returns:
             成功返回True
         """
@@ -745,13 +747,15 @@ class LLMPromptTemplateService:
                 INSERT INTO llm_prompt_usage_logs (
                     template_id, user_id, rendered_prompt, variables_data,
                     response_content, provider, model, tokens_used, cost,
-                    response_time_ms, success, error_message
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    response_time_ms, success, error_message,
+                    prompt_tokens, completion_tokens
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cursor.execute(query, (
                 template_id, user_id, rendered_prompt, variables_json,
                 response_content, provider, model, tokens_used, cost,
-                response_time_ms, success, error_message
+                response_time_ms, success, error_message,
+                prompt_tokens, completion_tokens,
             ))
             
             # 更新模板的使用计数

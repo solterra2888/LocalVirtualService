@@ -477,7 +477,9 @@ async def test_template(
             tokens_used=response.usage.get('total_tokens', 0),
             cost=response.cost,
             response_time_ms=int(response_time * 1000),
-            success=True
+            success=True,
+            prompt_tokens=response.usage.get('prompt_tokens'),
+            completion_tokens=response.usage.get('completion_tokens'),
         )
         
         return TestTemplateResponse(

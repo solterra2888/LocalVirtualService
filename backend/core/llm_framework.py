@@ -21,6 +21,7 @@ from backend.utils.env_loader import load_project_env
 from backend.utils.processing_timeout import get_file_processing_timeout_seconds
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.core.llm_pricing import calculate_cost
 
 
 class LLMProviderType(Enum):
@@ -189,15 +190,15 @@ class QwenProvider(LLMProvider):
                 # OpenAI兼容格式的响应
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = result.get("usage", {})
-                
+                cost, currency = self._calculate_cost(usage, model)
                 return LLMResponse(
                     content=content,
                     model=model,
                     provider=self.config.provider_type.value,
                     usage=usage,
                     response_time=response_time,
-                    cost=self._calculate_cost(usage),
-                    currency="RMB"
+                    cost=cost,
+                    currency=currency,
                 )
             else:
                 raise Exception(f"API request failed: {response.status_code} - {response.text}")
@@ -267,11 +268,16 @@ class QwenProvider(LLMProvider):
             )
         )
     
-    def _calculate_cost(self, usage: Dict) -> float:
-        """计算成本"""
-        # 简化的成本计算，实际应根据模型定价
-        total_tokens = usage.get("total_tokens", 0)
-        return total_tokens * 0.00001  # 示例价格
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按官方定价表计算本次调用费用。"""
+        prompt_tokens     = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            # 部分响应只返回 total_tokens，按 3:1 比例粗估拆分
+            total = usage.get("total_tokens", 0)
+            prompt_tokens     = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("qwen", model, prompt_tokens, completion_tokens)
     
     async def generate_embeddings(
         self, 
@@ -418,15 +424,15 @@ class DoubaoProvider(LLMProvider):
                 result = response.json()
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = result.get("usage", {})
-                
+                cost, currency = self._calculate_cost(usage, model)
                 return LLMResponse(
                     content=content,
                     model=model,
                     provider=self.config.provider_type.value,
                     usage=usage,
                     response_time=response_time,
-                    cost=self._calculate_cost(usage),
-                    currency="RMB"
+                    cost=cost,
+                    currency=currency,
                 )
             else:
                 raise Exception(f"API request failed: {response.status_code} - {response.text}")
@@ -494,10 +500,15 @@ class DoubaoProvider(LLMProvider):
             )
         )
     
-    def _calculate_cost(self, usage: Dict) -> float:
-        """计算成本"""
-        total_tokens = usage.get("total_tokens", 0)
-        return total_tokens * 0.00002  # 示例价格
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按官方定价表计算本次调用费用。"""
+        prompt_tokens     = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            total = usage.get("total_tokens", 0)
+            prompt_tokens     = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("doubao", model, prompt_tokens, completion_tokens)
 
 
 
@@ -547,15 +558,15 @@ class GLMProvider(LLMProvider):
                 result = response.json()
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = result.get("usage", {})
-                
+                cost, currency = self._calculate_cost(usage, model)
                 return LLMResponse(
                     content=content,
                     model=model,
                     provider=self.config.provider_type.value,
                     usage=usage,
                     response_time=response_time,
-                    cost=self._calculate_cost(usage),
-                    currency="RMB"
+                    cost=cost,
+                    currency=currency,
                 )
             else:
                 raise Exception(f"API request failed: {response.status_code} - {response.text}")
@@ -623,10 +634,15 @@ class GLMProvider(LLMProvider):
             )
         )
     
-    def _calculate_cost(self, usage: Dict) -> float:
-        """计算成本"""
-        total_tokens = usage.get("total_tokens", 0)
-        return total_tokens * 0.00001  # 示例价格
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按官方定价表计算本次调用费用。"""
+        prompt_tokens     = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            total = usage.get("total_tokens", 0)
+            prompt_tokens     = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("glm", model, prompt_tokens, completion_tokens)
 
 
 class LLMService:
@@ -1096,7 +1112,9 @@ class LLMService:
             tokens_used=response.usage.get('total_tokens', 0),
             cost=response.cost,
             response_time_ms=response_time_ms,
-            success=True
+            success=True,
+            prompt_tokens=response.usage.get('prompt_tokens'),
+            completion_tokens=response.usage.get('completion_tokens'),
         )
         
         self.logger.info(
