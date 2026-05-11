@@ -32,6 +32,8 @@ interface MonitoringPanelProps {
   isDark: boolean;
   colors: ThemeColors;
   cardStyle: React.CSSProperties;
+  /** Tab 是否处于激活状态；非激活时暂停轮询 */
+  active?: boolean;
 }
 
 const REFRESH_OPTIONS = [
@@ -52,7 +54,7 @@ const depthColor = (depth: number): { color: string; status: string } => {
   return { color: '#f5222d', status: 'critical' };
 };
 
-const MonitoringPanel: React.FC<MonitoringPanelProps> = ({ isDark, colors, cardStyle }) => {
+const MonitoringPanel: React.FC<MonitoringPanelProps> = ({ isDark, colors, cardStyle, active = true }) => {
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshSec, setRefreshSec] = useState<number>(5);
@@ -77,8 +79,15 @@ const MonitoringPanel: React.FC<MonitoringPanelProps> = ({ isDark, colors, cardS
     }
   }, []);
 
-  // 首次挂载 + 自动刷新
+  // 仅在 tab 激活时加载与轮询，避免后台空轮询
   useEffect(() => {
+    if (!active) {
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
     loadSummary();
     if (refreshSec > 0) {
       timerRef.current = window.setInterval(() => {
@@ -91,7 +100,7 @@ const MonitoringPanel: React.FC<MonitoringPanelProps> = ({ isDark, colors, cardS
         timerRef.current = null;
       }
     };
-  }, [loadSummary, refreshSec]);
+  }, [active, loadSummary, refreshSec]);
 
   // ---------- 清队列弹窗 ----------
   const openPurge = (q: QueueInfo) => {

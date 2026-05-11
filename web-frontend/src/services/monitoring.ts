@@ -35,6 +35,15 @@ export interface WorkersResponse {
   inspect_cache_age_sec: number;
 }
 
+export interface LogFileStats {
+  type: string;
+  filename: string;
+  size_human: string;
+  size_kb: number;
+  mtime?: number | null;
+  exists: boolean;
+}
+
 export interface SummaryResponse {
   queues: QueueInfo[];
   total_depth: number;
@@ -43,6 +52,8 @@ export interface SummaryResponse {
   active_task_count: number;
   fetched_at: number;
   inspect_cache_age_sec: number;
+  log_files: LogFileStats[];
+  recent_errors_1h: number;
 }
 
 export interface PurgeResponse {

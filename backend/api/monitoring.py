@@ -15,10 +15,13 @@ Redis / Celery 运行时监控 API
 """
 from __future__ import annotations
 
+import asyncio
+import collections
 import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -170,6 +173,15 @@ class WorkersResponse(BaseModel):
     inspect_cache_age_sec: float
 
 
+class LogFileStats(BaseModel):
+    type: str
+    filename: str
+    size_human: str
+    size_kb: float
+    mtime: Optional[float] = None
+    exists: bool
+
+
 class SummaryResponse(BaseModel):
     queues: List[QueueInfo]
     total_depth: int
@@ -178,12 +190,93 @@ class SummaryResponse(BaseModel):
     active_task_count: int           # 所有 worker 当前活跃任务总数
     fetched_at: float
     inspect_cache_age_sec: float
+    log_files: List[LogFileStats] = []
+    recent_errors_1h: int = 0        # 最近 1 小时 app.log 中 ERROR 行数
 
 
 class PurgeResponse(BaseModel):
     queue: str
     removed: int
     message: str
+
+
+# ---------------------------------------------------------------------------
+# 日志文件统计（供 /summary 端点聚合）
+# ---------------------------------------------------------------------------
+_LOG_FILES_FOR_OVERVIEW: dict[str, str] = {
+    "app":          "logs/app.log",
+    "celery_ai":    "logs/celery_ai_worker.log",
+    "celery_data":  "logs/celery_data_worker.log",
+    "celery_tasks": "logs/celery_tasks.log",
+}
+_PROJECT_ROOT_MON = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+
+
+def _human_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 ** 3:
+        return f"{size_bytes / 1024 ** 3:.1f} GB"
+    if size_bytes >= 1024 ** 2:
+        return f"{size_bytes / 1024 ** 2:.1f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} B"
+
+
+def _get_log_file_stats() -> List[LogFileStats]:
+    result: list[LogFileStats] = []
+    for log_type, rel in _LOG_FILES_FOR_OVERVIEW.items():
+        path = os.path.join(_PROJECT_ROOT_MON, rel)
+        if os.path.exists(path):
+            stat = os.stat(path)
+            result.append(LogFileStats(
+                type=log_type,
+                filename=rel,
+                size_kb=round(stat.st_size / 1024, 2),
+                size_human=_human_size(stat.st_size),
+                mtime=stat.st_mtime,
+                exists=True,
+            ))
+        else:
+            result.append(LogFileStats(
+                type=log_type,
+                filename=rel,
+                size_kb=0,
+                size_human="0 B",
+                exists=False,
+            ))
+    return result
+
+
+def _count_recent_errors(tail_lines: int = 3000) -> int:
+    """扫描 app.log 最后 tail_lines 行，统计最近 1 小时内 [ERROR] 行数。"""
+    path = os.path.join(_PROJECT_ROOT_MON, "logs/app.log")
+    if not os.path.exists(path):
+        return 0
+    try:
+        lines = list(collections.deque(
+            open(path, "r", encoding="utf-8", errors="ignore"),
+            maxlen=tail_lines,
+        ))
+        now = datetime.now(timezone.utc)
+        count = 0
+        for line in lines:
+            if "[ERROR]" not in line and "/ERROR]" not in line:
+                continue
+            # 尝试解析行首的时间戳（格式 YYYY-MM-DD HH:MM:SS）
+            try:
+                ts_str = line[:19]
+                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                if (now - ts).total_seconds() <= 3600:
+                    count += 1
+            except ValueError:
+                # 无法解析时间戳，降级：凡包含 ERROR 就算
+                count += 1
+        return count
+    except Exception as e:
+        logger.warning("_count_recent_errors 失败: %s", e)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -321,9 +414,23 @@ async def get_summary(
     force_refresh: bool = False,
     current_user: TokenData = Depends(get_current_admin_user),
 ):
-    """一次性返回队列深度 + worker 心跳，前端首屏渲染用。"""
-    queues, total_depth = _fetch_queue_depths()
-    snap = _inspect_snapshot(force_refresh=force_refresh)
+    """一次性返回队列深度 + worker 心跳 + 日志文件概况，前端首屏渲染用。
+
+    Redis LLEN、Celery inspect、磁盘 stat、app.log 扫描原先顺序执行会把延迟叠加；
+    这里用 asyncio.to_thread 并行执行并在独立线程里跑阻塞式 inspect，避免拖死 ASGI 事件循环。
+    """
+    (
+        queues_tuple,
+        snap,
+        log_files,
+        recent_errors,
+    ) = await asyncio.gather(
+        asyncio.to_thread(_fetch_queue_depths),
+        asyncio.to_thread(_inspect_snapshot, force_refresh),
+        asyncio.to_thread(_get_log_file_stats),
+        asyncio.to_thread(_count_recent_errors),
+    )
+    queues, total_depth = queues_tuple
     workers, online = _build_worker_infos(snap)
     active_task_count = sum(w.active_count for w in workers)
     return SummaryResponse(
@@ -334,6 +441,8 @@ async def get_summary(
         active_task_count=active_task_count,
         fetched_at=time.time(),
         inspect_cache_age_sec=round(time.time() - snap.get("inspected_at", 0), 2),
+        log_files=log_files,
+        recent_errors_1h=recent_errors,
     )
 
 

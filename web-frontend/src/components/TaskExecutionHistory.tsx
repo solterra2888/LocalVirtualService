@@ -91,12 +91,15 @@ const colorPalette = [
 
 interface TaskExecutionHistoryProps {
   height?: number;
-  refreshTrigger?: number; // Add refresh trigger prop
+  refreshTrigger?: number;
+  /** Tab 是否处于激活状态；false 时跳过首次数据加载 */
+  active?: boolean;
 }
 
 const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   height = 600,
-  refreshTrigger
+  refreshTrigger,
+  active = true,
 }) => {
   const { themeMode } = useDashboardSettings();
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
@@ -425,12 +428,14 @@ const TaskExecutionHistory: React.FC<TaskExecutionHistoryProps> = ({
   }, [selectedSummaryTasks, statusFilter, dateRange]);
 
   useEffect(() => {
+    if (!active) return;
     loadExecutionLogs();
-  }, [selectedSummaryTasks, dateRange, statusFilter, loadExecutionLogs]);
+  }, [active, selectedSummaryTasks, dateRange, statusFilter, loadExecutionLogs]);
 
   useEffect(() => {
+    if (!active) return;
     loadExecutionSummary(summaryRange);
-  }, [summaryRange, loadExecutionSummary]);
+  }, [active, summaryRange, loadExecutionSummary]);
 
   // Refresh data when refreshTrigger changes
   useEffect(() => {

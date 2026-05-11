@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Card,
   Space,
@@ -12,6 +12,8 @@ import {
   Spin,
   Input,
   Tabs,
+  Modal,
+  Tag,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -21,19 +23,23 @@ import {
   DashboardOutlined,
   UnorderedListOutlined,
   LineChartOutlined,
+  AppstoreOutlined,
+  SearchOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
-import { readLog, clearLog, LogType } from '../services/logs';
+import { getLogList, readLog, clearLog, downloadLog, LogFileInfo } from '../services/logs';
 import MonitoringPanel from '../components/MonitoringPanel';
 import TaskExecutionHistory from '../components/TaskExecutionHistory';
 import LLMMonitoringStatistics from '../components/monitoring/LLMMonitoringStatistics';
+import OverviewPanel from '../components/monitoring/OverviewPanel';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-const MONITORING_TABS = ['logs', 'infrastructure', 'scheduler', 'llm'] as const;
+const MONITORING_TABS = ['overview', 'logs', 'infrastructure', 'scheduler', 'llm'] as const;
 type MonitoringTabKey = (typeof MONITORING_TABS)[number];
 
 const THEME_COLORS = {
@@ -72,6 +78,44 @@ const CARD_STYLE_BEHANCE_DARK = {
   border: '1px solid rgba(255, 255, 255, 0.06)',
 };
 
+const LOG_LEVEL_OPTIONS = [
+  { label: 'All', value: '' },
+  { label: 'ERROR', value: 'ERROR' },
+  { label: 'WARNING', value: 'WARNING' },
+  { label: 'INFO', value: 'INFO' },
+  { label: 'DEBUG', value: 'DEBUG' },
+];
+
+const AUTO_REFRESH_OPTIONS = [
+  { label: 'Off', value: 0 },
+  { label: '10s', value: 10 },
+  { label: '30s', value: 30 },
+  { label: '60s', value: 60 },
+];
+
+/** Color-code log levels inline using simple span replacement */
+function colorizeLogContent(content: string, isDark: boolean): React.ReactNode {
+  if (!content) return null;
+  // Split on lines and render each with color
+  const lines = content.split('\n');
+  return (
+    <>
+      {lines.map((line, i) => {
+        let color: string | undefined;
+        if (line.includes('[ERROR]') || line.includes('/ERROR]')) color = isDark ? '#ff7875' : '#cf1322';
+        else if (line.includes('[WARNING]') || line.includes('/WARNING]')) color = isDark ? '#ffc53d' : '#d46b08';
+        else if (line.includes('[DEBUG]') || line.includes('/DEBUG]')) color = isDark ? '#8c8c8c' : '#595959';
+        return (
+          <React.Fragment key={i}>
+            <span style={color ? { color } : undefined}>{line}</span>
+            {i < lines.length - 1 && '\n'}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 const MonitoringPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isMobile } = useDeviceDetection();
@@ -83,71 +127,136 @@ const MonitoringPage: React.FC = () => {
   const rawTab = searchParams.get('tab');
   const activeKey: MonitoringTabKey = MONITORING_TABS.includes(rawTab as MonitoringTabKey)
     ? (rawTab as MonitoringTabKey)
-    : 'logs';
+    : 'overview';
 
   const handleTabChange = (key: string) => {
-    const k = MONITORING_TABS.includes(key as MonitoringTabKey) ? (key as MonitoringTabKey) : 'logs';
-    if (k === 'logs') {
+    const k = MONITORING_TABS.includes(key as MonitoringTabKey) ? (key as MonitoringTabKey) : 'overview';
+    if (k === 'overview') {
       setSearchParams({}, { replace: true });
     } else {
       setSearchParams({ tab: k }, { replace: true });
     }
   };
 
-  const [selectedLogType, setSelectedLogType] = useState<LogType>('app');
+  // ─── Log list (dynamic from API) ────────────────────────────────────────
+  const [logFileList, setLogFileList] = useState<LogFileInfo[]>([]);
+  const [selectedLogType, setSelectedLogType] = useState<string>('app');
+
+  useEffect(() => {
+    getLogList()
+      .then((resp) => {
+        const available = resp.logs.filter((l) => l.exists);
+        setLogFileList(available);
+        if (available.length > 0 && !available.find((l) => l.type === selectedLogType)) {
+          setSelectedLogType(available[0].type);
+        }
+      })
+      .catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Log viewer state ────────────────────────────────────────────────────
   const [logContent, setLogContent] = useState<string>('');
-  const [logInfo, setLogInfo] = useState<{ lines: number; size_kb: number } | null>(null);
+  const [logInfo, setLogInfo] = useState<{
+    file_total_lines: number;
+    returned_lines: number;
+    size_human: string;
+    truncated: boolean;
+  } | null>(null);
   const [logLoading, setLogLoading] = useState<boolean>(false);
   const [linesToRead, setLinesToRead] = useState<number | null>(1000);
+  const [levelFilter, setLevelFilter] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [autoRefreshSec, setAutoRefreshSec] = useState<number>(0);
+  const autoRefreshRef = useRef<number | null>(null);
+
+  // ─── Clear log confirmation state ───────────────────────────────────────
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearConfirmInput, setClearConfirmInput] = useState('');
+  const [clearLoading, setClearLoading] = useState(false);
 
   const loadLogContent = useCallback(async () => {
     setLogLoading(true);
     try {
-      const response = await readLog(selectedLogType, linesToRead || undefined);
+      const response = await readLog(selectedLogType, {
+        lines: linesToRead || undefined,
+        level: levelFilter || undefined,
+        q: searchQuery || undefined,
+      });
       setLogContent(response.content);
       setLogInfo({
-        lines: response.lines,
-        size_kb: response.size_kb,
+        file_total_lines: response.file_total_lines,
+        returned_lines: response.returned_lines,
+        size_human: response.size_human,
+        truncated: response.truncated,
       });
-      message.success(`already loaded ${response.lines} lines of log`);
     } catch (error) {
-      message.error('failed to load log content');
+      message.error('Failed to load log content');
       console.error(error);
     } finally {
       setLogLoading(false);
     }
-  }, [selectedLogType, linesToRead]);
+  }, [selectedLogType, linesToRead, levelFilter, searchQuery]);
 
+  // Initial load when tab becomes active
   useEffect(() => {
     if (activeKey !== 'logs') return;
     loadLogContent();
   }, [activeKey, loadLogContent]);
 
+  // Auto-refresh interval
+  useEffect(() => {
+    if (autoRefreshRef.current !== null) {
+      window.clearInterval(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+    }
+    if (activeKey === 'logs' && autoRefreshSec > 0) {
+      autoRefreshRef.current = window.setInterval(() => {
+        loadLogContent();
+      }, autoRefreshSec * 1000);
+    }
+    return () => {
+      if (autoRefreshRef.current !== null) {
+        window.clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+    };
+  }, [activeKey, autoRefreshSec, loadLogContent]);
+
   const handleClearLog = async () => {
+    if (clearConfirmInput !== selectedLogType) {
+      message.error('Input does not match the log type');
+      return;
+    }
+    setClearLoading(true);
     try {
       await clearLog(selectedLogType);
       message.success('Log has been cleared');
+      setClearModalOpen(false);
+      setClearConfirmInput('');
       loadLogContent();
     } catch (error) {
-      message.error('failed to clear log');
+      message.error('Failed to clear log');
+      console.error(error);
+    } finally {
+      setClearLoading(false);
+    }
+  };
+
+  const handleDownloadLog = async () => {
+    try {
+      await downloadLog(selectedLogType);
+      message.success('Download started');
+    } catch (error) {
+      message.error('Failed to download log');
       console.error(error);
     }
   };
 
-  const handleDownloadLog = () => {
-    const blob = new Blob([logContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${selectedLogType}_${new Date().toISOString()}.log`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    message.success('Log has been downloaded');
-  };
-
   const llmTabActive = activeKey === 'llm';
+  const infrastructureTabActive = activeKey === 'infrastructure';
+  const schedulerTabActive = activeKey === 'scheduler';
+  const overviewTabActive = activeKey === 'overview';
 
   return (
     <ConfigProvider
@@ -190,7 +299,7 @@ const MonitoringPage: React.FC = () => {
             Monitoring
           </Title>
           <Text style={{ margin: 0, display: 'block', color: colors.textSecondary }}>
-            System logs, infrastructure queues, scheduler execution history, and LLM usage statistics (admin only)
+            System overview, logs, infrastructure queues, scheduler history, and LLM statistics (admin only)
           </Text>
         </div>
 
@@ -198,6 +307,26 @@ const MonitoringPage: React.FC = () => {
           activeKey={activeKey}
           onChange={handleTabChange}
           items={[
+            // ── Overview ──────────────────────────────────────────────────
+            {
+              key: 'overview',
+              label: (
+                <Space>
+                  <AppstoreOutlined />
+                  Overview
+                </Space>
+              ),
+              children: (
+                <OverviewPanel
+                  isDark={isDark}
+                  colors={colors}
+                  cardStyle={cardStyle}
+                  active={overviewTabActive}
+                />
+              ),
+            },
+
+            // ── System Logs ──────────────────────────────────────────────
             {
               key: 'logs',
               label: (
@@ -211,6 +340,7 @@ const MonitoringPage: React.FC = () => {
                   style={{ ...cardStyle, overflow: 'hidden' }}
                   bodyStyle={{ padding: isMobile ? '14px 12px' : '20px 24px' }}
                 >
+                  {/* Controls row */}
                   <div style={{ marginBottom: 16 }}>
                     <Space
                       wrap
@@ -218,93 +348,145 @@ const MonitoringPage: React.FC = () => {
                       direction={isMobile ? 'vertical' : 'horizontal'}
                       style={{ width: isMobile ? '100%' : undefined }}
                     >
-                      <span style={{ color: colors.text }}>Log Type:</span>
-                      <Select
-                        style={{ width: isMobile ? '100%' : 200 }}
-                        value={selectedLogType}
-                        onChange={setSelectedLogType}
-                        options={[
-                          { label: 'App 日志 (app.log)', value: 'app' },
-                          { label: 'Celery Worker 日志 (celery_worker.log)', value: 'celery_worker' },
-                        ]}
-                      />
-
-                      <span style={{ color: colors.text, ...(isMobile ? {} : { marginLeft: 16 }) }}>Read Lines:</span>
-                      <InputNumber
-                        style={{ width: isMobile ? '100%' : 120 }}
-                        value={linesToRead}
-                        onChange={setLinesToRead}
-                        min={0}
-                        placeholder="All"
-                      />
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        (0 or leave empty to read all)
-                      </Text>
-
-                      <Space wrap size="small" style={{ width: isMobile ? '100%' : undefined }}>
-                        <Button
-                          type="primary"
-                          icon={<ReloadOutlined />}
-                          onClick={loadLogContent}
-                          loading={logLoading}
-                          block={isMobile}
-                        >
-                          Refresh
-                        </Button>
-
-                        <Button
-                          icon={<DownloadOutlined />}
-                          onClick={handleDownloadLog}
-                          disabled={!logContent}
-                          block={isMobile}
-                        >
-                          Download
-                        </Button>
-
-                        <Button
-                          danger
-                          icon={<ClearOutlined />}
-                          onClick={handleClearLog}
-                          disabled={logLoading}
-                          block={isMobile}
-                        >
-                          Clear Log
-                        </Button>
+                      {/* Log type selector (dynamic) */}
+                      <Space size="small">
+                        <span style={{ color: colors.text }}>Log File:</span>
+                        <Select
+                          style={{ width: isMobile ? '100%' : 240 }}
+                          value={selectedLogType}
+                          onChange={(v) => { setSelectedLogType(v); }}
+                          options={logFileList.map((l) => ({
+                            label: `${l.type} (${l.size_human})`,
+                            value: l.type,
+                          }))}
+                          placeholder="Loading..."
+                        />
                       </Space>
+
+                      {/* Lines to read */}
+                      <Space size="small">
+                        <span style={{ color: colors.text }}>Read Lines:</span>
+                        <InputNumber
+                          style={{ width: isMobile ? '100%' : 110 }}
+                          value={linesToRead}
+                          onChange={setLinesToRead}
+                          min={0}
+                          max={50000}
+                          placeholder="All"
+                        />
+                      </Space>
+
+                      {/* Level filter */}
+                      <Space size="small">
+                        <span style={{ color: colors.text }}>Level:</span>
+                        <Select
+                          style={{ width: 120 }}
+                          value={levelFilter}
+                          onChange={setLevelFilter}
+                          options={LOG_LEVEL_OPTIONS}
+                        />
+                      </Space>
+
+                      {/* Keyword search */}
+                      <Input
+                        placeholder="Search keyword"
+                        prefix={<SearchOutlined />}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onPressEnter={loadLogContent}
+                        allowClear
+                        style={{ width: isMobile ? '100%' : 180 }}
+                      />
+
+                      {/* Auto-refresh */}
+                      <Space size="small">
+                        <span style={{ color: colors.text }}>Auto Refresh:</span>
+                        <Select
+                          style={{ width: 80 }}
+                          value={autoRefreshSec}
+                          onChange={setAutoRefreshSec}
+                          options={AUTO_REFRESH_OPTIONS}
+                        />
+                      </Space>
+                    </Space>
+
+                    <Space wrap size="small" style={{ marginTop: 10 }}>
+                      <Button
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        onClick={loadLogContent}
+                        loading={logLoading}
+                        block={isMobile}
+                      >
+                        Refresh
+                      </Button>
+
+                      <Button
+                        icon={<DownloadOutlined />}
+                        onClick={handleDownloadLog}
+                        disabled={!logContent}
+                        block={isMobile}
+                      >
+                        Download
+                      </Button>
+
+                      <Button
+                        danger
+                        icon={<ClearOutlined />}
+                        onClick={() => { setClearConfirmInput(''); setClearModalOpen(true); }}
+                        disabled={logLoading}
+                        block={isMobile}
+                      >
+                        Clear Log
+                      </Button>
                     </Space>
                   </div>
 
+                  {/* File info badges */}
                   {logInfo && (
-                    <div style={{ marginBottom: 12 }}>
-                      <Space>
-                        <Text type="secondary">
-                          Total Lines: <strong>{logInfo.lines}</strong>
-                        </Text>
-                        <Text type="secondary">
-                          File Size: <strong>{logInfo.size_kb.toFixed(2)} KB</strong>
-                        </Text>
-                      </Space>
-                    </div>
+                    <Space wrap style={{ marginBottom: 12 }} size="small">
+                      <Tag color="default">
+                        {logInfo.returned_lines.toLocaleString()} lines shown
+                      </Tag>
+                      <Tag color="default">
+                        {logInfo.file_total_lines.toLocaleString()} total lines
+                      </Tag>
+                      <Tag color="default">{logInfo.size_human}</Tag>
+                      {logInfo.truncated && (
+                        <Tag color="warning">Truncated at 50 000 lines</Tag>
+                      )}
+                    </Space>
                   )}
 
+                  {/* Log viewer */}
                   <Spin spinning={logLoading}>
-                    <TextArea
-                      value={logContent}
-                      readOnly
+                    <div
                       style={{
                         fontFamily: 'Monaco, Consolas, "Courier New", monospace',
                         fontSize: 12,
                         backgroundColor: colors.codeBlockBg,
                         color: colors.text,
                         border: `1px solid ${colors.cardBorder}`,
+                        borderRadius: 6,
+                        padding: '10px 14px',
+                        overflowY: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        height: isMobile ? 340 : 520,
+                        lineHeight: '1.6',
                       }}
-                      rows={isMobile ? 16 : 30}
-                      placeholder="The log content will be displayed here..."
-                    />
+                    >
+                      {logContent
+                        ? colorizeLogContent(logContent, isDark)
+                        : <span style={{ color: colors.textSecondary }}>No log content loaded. Click Refresh.</span>
+                      }
+                    </div>
                   </Spin>
                 </Card>
               ),
             },
+
+            // ── Infrastructure ────────────────────────────────────────────
             {
               key: 'infrastructure',
               label: (
@@ -313,8 +495,17 @@ const MonitoringPage: React.FC = () => {
                   Infrastructure
                 </Space>
               ),
-              children: <MonitoringPanel isDark={isDark} colors={colors} cardStyle={cardStyle} />,
+              children: (
+                <MonitoringPanel
+                  isDark={isDark}
+                  colors={colors}
+                  cardStyle={cardStyle}
+                  active={infrastructureTabActive}
+                />
+              ),
             },
+
+            // ── Scheduler Logs ────────────────────────────────────────────
             {
               key: 'scheduler',
               label: (
@@ -328,10 +519,15 @@ const MonitoringPage: React.FC = () => {
                   style={{ ...cardStyle, overflow: 'hidden' }}
                   bodyStyle={{ padding: isMobile ? '14px 12px' : '20px 24px' }}
                 >
-                  <TaskExecutionHistory height={isMobile ? 480 : 600} />
+                  <TaskExecutionHistory
+                    height={isMobile ? 480 : 600}
+                    active={schedulerTabActive}
+                  />
                 </Card>
               ),
             },
+
+            // ── LLM Monitoring ────────────────────────────────────────────
             {
               key: 'llm',
               label: (
@@ -349,6 +545,46 @@ const MonitoringPage: React.FC = () => {
           ]}
         />
       </div>
+
+      {/* ── Clear Log confirmation modal ──────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <ExclamationCircleOutlined style={{ color: '#f5222d' }} />
+            Danger: Clear Log File
+          </Space>
+        }
+        open={clearModalOpen}
+        onOk={handleClearLog}
+        onCancel={() => { setClearModalOpen(false); setClearConfirmInput(''); }}
+        okText="Confirm Clear"
+        cancelText="Cancel"
+        okButtonProps={{
+          danger: true,
+          disabled: clearConfirmInput !== selectedLogType,
+          loading: clearLoading,
+        }}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text>
+            This will permanently truncate <Text code>{selectedLogType}</Text>. This action
+            cannot be undone and will destroy any unread log data.
+          </Text>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <Text type="secondary">
+            To confirm, type the log type name exactly:
+          </Text>
+        </div>
+        <Input
+          placeholder={selectedLogType}
+          value={clearConfirmInput}
+          onChange={(e) => setClearConfirmInput(e.target.value)}
+          onPressEnter={handleClearLog}
+          autoFocus
+        />
+      </Modal>
     </ConfigProvider>
   );
 };
