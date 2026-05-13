@@ -87,6 +87,30 @@ if [ -f "$SCRIPT_DIR/web.conf" ]; then
     echo "   ✅ nginx 配置 (web.conf) 已同步到 Docker 卷"
 fi
 
+# ── 重启前清理 Redis 任务元数据 ───────────────────────────────
+# 防止上次异常停止留下的损坏 meta 导致 Celery worker 重启后立即崩溃
+echo "🧹 清理 Redis 旧任务元数据..."
+SCRIPT_DIR_RS="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE_RS="$SCRIPT_DIR_RS/.env"
+REDIS_URL_RS="redis://localhost:6379/0"
+[ -f "$ENV_FILE_RS" ] && REDIS_URL_RS=$(grep -E '^REDIS_URL=' "$ENV_FILE_RS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_RS")
+PYTHON_BIN_RS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_RS" 2>/dev/null | cut -d= -f2)/bin/python"
+[ ! -x "$PYTHON_BIN_RS" ] && PYTHON_BIN_RS="$(command -v python3 2>/dev/null || echo "")"
+if [ -n "$PYTHON_BIN_RS" ] && [ -x "$PYTHON_BIN_RS" ] && "$PYTHON_BIN_RS" -c "import redis" 2>/dev/null; then
+    "$PYTHON_BIN_RS" - <<PYEOF 2>/dev/null
+import redis, sys
+try:
+    r = redis.from_url('$REDIS_URL_RS', socket_connect_timeout=3)
+    r.ping()
+except Exception as e:
+    print(f"  ⚠️  Redis 连接失败，跳过清理: {e}"); sys.exit(0)
+keys = r.keys('celery-task-meta-*') + r.keys('unacked*')
+for k in keys: r.delete(k)
+print(f"  ✅ 已清除 {len(keys)} 条旧任务元数据" if keys else "  ✅ Redis 无残留任务元数据")
+PYEOF
+fi
+echo ""
+
 SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-scheduler")
 
 for service in "${SERVICES[@]}"; do

@@ -281,7 +281,7 @@ const LLMConfigPage: React.FC = () => {
   // Reset fallback order
   const resetFallbackOrder = () => {
     if (!config) return;
-    const defaultOrder = ['qwen', 'doubao', 'glm'];
+    const defaultOrder = ['qwen', 'doubao', 'glm', 'claude'];
     setFallbackOrder(defaultOrder);
     setHasUnsavedChanges(true);
   };

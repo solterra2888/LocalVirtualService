@@ -1448,12 +1448,17 @@ class DatabaseManager:
                 ('glm', 'glm', 'GLM', '', 'https://open.bigmodel.cn',
                  false, 'glm-4.6', '["glm-4.6", "glm-4", "glm-4-flash"]',
                  8000, 0.7, 0.8, 30, 'Tsinghua Zhipu AI large language model', '🧠',
-                 'system', 'system', false, 3)
+                 'system', 'system', false, 3),
+                ('claude', 'claude', 'Claude', '', 'https://open.cherryin.net',
+                 false, 'anthropic/claude-sonnet-4.6',
+                 '["anthropic/claude-sonnet-4.6","anthropic/claude-opus-4.7","anthropic/claude-opus-4-20250514","anthropic/claude-sonnet-4-20250514","anthropic/claude-3-5-sonnet-20241022","anthropic/claude-3-5-haiku-20241022"]',
+                 4096, 0.7, 0.9, 120, 'Anthropic Claude via CherryIN (open.cherryin.net) - OpenAI-compatible gateway, billed in USD', '🤖',
+                 'system', 'system', false, 4)
             ON CONFLICT (provider_id) DO NOTHING
             """)
             
             print("✅ LLM配置相关表创建/更新完成")
-            print("   - 已插入默认的3个提供商配置（API密钥为空，需要手动配置）")
+            print("   - 已插入默认的4个提供商配置（API密钥为空，需要手动配置）")
         except Exception as e:
             print(f"❌ 创建LLM配置表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行

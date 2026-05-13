@@ -44,6 +44,50 @@ else
     echo "   ⚠️  nginx (Docker) 可能未完全停止"
 fi
 
+# ── 停止 Celery 前清理 Redis 任务元数据 ──────────────────────
+# Redis 由 Docker 管理不会随 stop 停止，旧 task meta 会一直积累。
+# 在此处（Worker 还在接收 ACK 的最后时机）清理，避免下次启动时
+# worker 碰到损坏 meta 而进入无限崩溃重启循环。
+echo ""
+echo "🧹 清理 Redis Celery 任务元数据..."
+ENV_FILE="$(cd "$(dirname "$0")" && pwd)/.env"
+REDIS_URL_VAL="redis://localhost:6379/0"
+[ -f "$ENV_FILE" ] && REDIS_URL_VAL=$(grep -E '^REDIS_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_VAL")
+
+# 优先用 Python（conda env 中已有 redis 包）
+PYTHON_BIN="$(grep -E '^CONDA_ENV=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)/bin/python"
+[ ! -x "$PYTHON_BIN" ] && PYTHON_BIN="$(command -v python3 2>/dev/null || echo "")"
+
+if [ -n "$PYTHON_BIN" ] && [ -x "$PYTHON_BIN" ] && "$PYTHON_BIN" -c "import redis" 2>/dev/null; then
+    "$PYTHON_BIN" - <<PYEOF 2>/dev/null
+import redis, os, sys
+url = os.environ.get('REDIS_URL', '$REDIS_URL_VAL')
+try:
+    r = redis.from_url(url, socket_connect_timeout=3)
+    r.ping()
+except Exception as e:
+    print(f"  ⚠️  Redis 连接失败，跳过清理: {e}")
+    sys.exit(0)
+keys = r.keys('celery-task-meta-*') + r.keys('unacked*')
+for k in keys:
+    r.delete(k)
+print(f"  ✅ 已清除 {len(keys)} 条旧任务元数据" if keys else "  ✅ Redis 无残留任务元数据")
+PYEOF
+elif command -v redis-cli &>/dev/null; then
+    # fallback: redis-cli（解析 REDIS_URL 取 host/port/password）
+    _host=$(echo "$REDIS_URL_VAL" | sed -E 's|redis://([^:@]*:[^@]*@)?([^:/]+).*|\2|')
+    _port=$(echo "$REDIS_URL_VAL" | sed -E 's|.*:([0-9]+)(/.*)?$|\1|')
+    _auth=$(echo "$REDIS_URL_VAL" | sed -En 's|redis://:([^@]+)@.*|\1|p')
+    _cli_args="-h ${_host:-127.0.0.1} -p ${_port:-6379}"
+    [ -n "$_auth" ] && _cli_args="$_cli_args -a $_auth"
+    redis-cli $_cli_args EVAL \
+        "local ks=redis.call('keys','celery-task-meta-*') for _,k in ipairs(ks) do redis.call('del',k) end return #ks" 0 2>/dev/null | \
+        xargs -I{} echo "  ✅ 已清除 {} 条任务元数据（via redis-cli）"
+    echo "  ✅ Redis 清理完成（via redis-cli）"
+else
+    echo "  ⚠️  未找到 Python redis 模块或 redis-cli，跳过清理"
+fi
+
 # 按依赖顺序停止 systemd 服务（先停外层，再停内层）
 stop_service rc-scheduler
 stop_service rc-celery-ai

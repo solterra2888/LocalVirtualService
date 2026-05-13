@@ -116,6 +116,28 @@ else
 fi
 
 # ── 4. Celery AI Worker (file_processing + ai_processing) ────
+# 启动前清理 Redis 旧任务元数据，防止损坏记录导致 worker 启动即崩
+echo "🧹 清理 Redis 旧任务元数据..."
+SCRIPT_DIR_SS="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE_SS="$SCRIPT_DIR_SS/.env"
+REDIS_URL_SS="redis://localhost:6379/0"
+[ -f "$ENV_FILE_SS" ] && REDIS_URL_SS=$(grep -E '^REDIS_URL=' "$ENV_FILE_SS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_SS")
+PYTHON_BIN_SS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_SS" 2>/dev/null | cut -d= -f2)/bin/python"
+[ ! -x "$PYTHON_BIN_SS" ] && PYTHON_BIN_SS="$(command -v python3 2>/dev/null || echo "")"
+if [ -n "$PYTHON_BIN_SS" ] && [ -x "$PYTHON_BIN_SS" ] && "$PYTHON_BIN_SS" -c "import redis" 2>/dev/null; then
+    "$PYTHON_BIN_SS" - <<PYEOF 2>/dev/null
+import redis, sys
+try:
+    r = redis.from_url('$REDIS_URL_SS', socket_connect_timeout=3)
+    r.ping()
+except Exception as e:
+    print(f"  ⚠️  Redis 连接失败，跳过清理: {e}"); sys.exit(0)
+keys = r.keys('celery-task-meta-*') + r.keys('unacked*')
+for k in keys: r.delete(k)
+print(f"  ✅ 已清除 {len(keys)} 条旧任务元数据" if keys else "  ✅ Redis 无残留任务元数据")
+PYEOF
+fi
+
 echo "🤖 启动Celery AI Worker..."
 systemctl start rc-celery-ai
 if wait_for_service rc-celery-ai 15; then

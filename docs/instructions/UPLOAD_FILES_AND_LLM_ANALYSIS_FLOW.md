@@ -878,6 +878,10 @@ POST /api/llm-prompt-templates/templates/test
 
 ---
 
+## 运维提示（分析卡死 / Worker 异常）
+
+若上传后长时间停在「AI analyzing」或 Celery Worker 反复重启，常见原因包括：**Redis 中损坏或过期的 `celery-task-meta-*`**、**模板推荐 Provider 在 DB 中未启用**、**HTTP 层 `timeout` 远小于实际 LLM 耗时**。本地优先用 `development/stop_local_dev.sh` / `start_local_dev.sh`；生产环境用仓库根目录 `restart_services.sh`（或 `stop_services.sh` / `start_services.sh`），并在修改 `deployment/templates/rc-celery-*.service.tpl` 后执行 `sudo bash deployment/deploy.sh && sudo systemctl daemon-reload && sudo ./restart_services.sh`。更完整的说明见 `docs/instructions/LLM_ARCHITECTURE_OVERVIEW.md` §7.5。
+
 ## 相关源码文件
 
 | 文件 | 说明 |

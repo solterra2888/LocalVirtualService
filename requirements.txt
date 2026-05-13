@@ -27,6 +27,7 @@ APScheduler==3.10.4
 pytz==2023.3
 
 # 现有依赖保持
+# requests 同时被 ClaudeProvider 用于调用 Anthropic REST API，无需额外安装 anthropic SDK
 requests==2.31.0
 pandas==3.0.1
 # NumPy 2.x：与 pandas 3.0 一致，且在 Python 3.13 上有官方 wheel（避免从源码编译需 g++）

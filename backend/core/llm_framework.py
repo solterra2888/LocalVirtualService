@@ -29,6 +29,7 @@ class LLMProviderType(Enum):
     QWEN = "qwen"
     DOUBAO = "doubao"
     GLM = "glm"
+    CLAUDE = "claude"
 
 
 class LLMModelStatus(Enum):
@@ -645,6 +646,142 @@ class GLMProvider(LLMProvider):
         return calculate_cost("glm", model, prompt_tokens, completion_tokens)
 
 
+class ClaudeProvider(LLMProvider):
+    """Anthropic Claude provider implementation（通过 OpenAI 兼容网关，如 CherryIN）。
+
+    CherryIN（https://open.cherryin.net）及同类聚合网关均使用 OpenAI 兼容格式：
+      - 端点：/v1/chat/completions
+      - 鉴权：Authorization: Bearer <api_key>
+      - 消息格式：system 写进 messages 数组（与 Qwen/Doubao/GLM 一致）
+      - 模型名：使用网关约定的名称，如 anthropic/claude-sonnet-4.6
+    """
+
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        base = (self.config.base_url or "https://open.cherryin.net").rstrip("/")
+        self.api_url = f"{base}/v1/chat/completions"
+
+    async def chat_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """Claude chat completion（OpenAI 兼容格式）"""
+        start_time = time.time()
+        model = model or self.config.default_model
+
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        # Claude (via AWS Bedrock) 不允许同时传 temperature 和 top_p，只取 temperature
+        data = {
+            "model": model,
+            "messages": formatted_messages,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "temperature": kwargs.get("temperature", self.config.temperature),
+        }
+
+        try:
+            response = await self._make_request(headers, data)
+            response_time = time.time() - start_time
+
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = result.get("usage", {})
+                cost, currency = self._calculate_cost(usage, model)
+                return LLMResponse(
+                    content=content,
+                    model=result.get("model", model),
+                    provider=self.config.provider_type.value,
+                    usage=usage,
+                    response_time=response_time,
+                    cost=cost,
+                    currency=currency,
+                )
+            else:
+                raise Exception(f"API request failed: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            self.logger.error(f"Chat completion failed: {str(e)}")
+            raise
+
+    async def stream_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncIterator[LLMResponse]:
+        """Claude streaming（暂用普通响应包装，TODO: 实现 SSE 流式）"""
+        response = await self.chat_completion(messages, model, **kwargs)
+        yield response
+
+    async def test_connection(self) -> bool:
+        """Test Claude connection"""
+        try:
+            self.status = LLMModelStatus.TESTING
+            self.logger.info(f"Starting Claude connection test, API URL: {self.api_url}")
+            self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
+            self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
+            self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
+            self.logger.info(f"测试参数 - 超时时间: {self.config.timeout}秒")
+            self.logger.info(f"测试参数 - 重试次数: {self.config.retry_count}")
+            self.logger.info(f"测试参数 - 可用模型: {self.config.models}")
+
+            test_messages = [LLMMessage(role="user", content="Hello")]
+            response = await self.chat_completion(test_messages)
+
+            if response.content:
+                self.status = LLMModelStatus.CONNECTED
+                self.logger.info(f"Claude connection test successful, response: {response.content[:50]}...")
+                self.logger.info(f"实际使用模型: {response.model}")
+                self.logger.info(f"响应时间: {response.response_time:.2f}秒")
+                return True
+            else:
+                self.status = LLMModelStatus.ERROR
+                self.logger.error("Claude connection test failed: empty response content")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Claude connection test failed: {str(e)}")
+            import traceback
+            self.logger.error(f"错误堆栈: {traceback.format_exc()}")
+            self.status = LLMModelStatus.ERROR
+            return False
+
+    async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
+        """发送异步请求"""
+        loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, "connect_timeout", 15)
+        return await loop.run_in_executor(
+            None,
+            lambda: self.session.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                timeout=(connect_timeout, self.config.timeout),
+            ),
+        )
+
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按定价表计算本次调用费用（USD）。"""
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            total = usage.get("total_tokens", 0)
+            prompt_tokens = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("claude", model, prompt_tokens, completion_tokens)
+
+
 class LLMService:
     """统一的LLM服务入口"""
     
@@ -724,6 +861,9 @@ class LLMService:
                 elif provider_id == 'glm':
                     provider_type = LLMProviderType.GLM
                     provider_class = GLMProvider
+                elif provider_id == 'claude':
+                    provider_type = LLMProviderType.CLAUDE
+                    provider_class = ClaudeProvider
                 else:
                     self.logger.warning(f"未知的提供商类型: {provider_id}")
                     continue
@@ -782,7 +922,8 @@ class LLMService:
         self._load_qwen_config()
         self._load_doubao_config()
         self._load_glm_config()
-        
+        self._load_claude_config()
+
         # 设置默认提供商和故障转移
         self.default_provider = os.getenv('DEFAULT_LLM_PROVIDER', 'qwen')
         self.fallback_enabled = os.getenv('LLM_FALLBACK_ENABLED', 'true').lower() == 'true'
@@ -871,6 +1012,32 @@ class LLMService:
             )
             self.providers['glm'] = GLMProvider(config)
             self.logger.info(f"已加载提供商: glm (GLM)")
+
+    def _load_claude_config(self):
+        """Load Anthropic Claude configuration（via OpenAI-compatible gateway, e.g. CherryIN）"""
+        api_key = os.getenv('CLAUDE_API_KEY')
+        if api_key and os.getenv('CLAUDE_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
+            config = LLMConfig(
+                provider_type=LLMProviderType.CLAUDE,
+                api_key=api_key,
+                base_url=os.getenv('CLAUDE_BASE_URL', 'https://open.cherryin.net'),
+                default_model=os.getenv('CLAUDE_DEFAULT_MODEL', 'anthropic/claude-sonnet-4.6'),
+                models=[
+                    'anthropic/claude-sonnet-4.6',
+                    'anthropic/claude-opus-4.7',
+                    'anthropic/claude-opus-4-20250514',
+                    'anthropic/claude-sonnet-4-20250514',
+                    'anthropic/claude-3-5-sonnet-20241022',
+                    'anthropic/claude-3-5-haiku-20241022',
+                ],
+                max_tokens=int(os.getenv('CLAUDE_MAX_TOKENS', '4096')),
+                temperature=float(os.getenv('CLAUDE_TEMPERATURE', '0.7')),
+                top_p=float(os.getenv('CLAUDE_TOP_P', '0.9')),
+                timeout=min(120, _cap),
+            )
+            self.providers['claude'] = ClaudeProvider(config)
+            self.logger.info("已加载提供商: claude (Anthropic Claude via CherryIN)")
     
     async def chat_completion(
         self, 

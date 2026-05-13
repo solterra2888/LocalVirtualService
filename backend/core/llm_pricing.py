@@ -224,17 +224,57 @@ _GLM_PRICING: Dict[str, List[PriceTier]] = {
     "glm-4-long":       _flat(0.5, 0.5),
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Anthropic Claude 模型定价
+# 参考：https://www.anthropic.com/pricing
+# 计费单位：美元/百万 tokens（USD）
+# 注意：Claude 以美元计价，与其他 Provider 的人民币（RMB）不同；
+#       calculate_cost 对 claude provider 返回 currency="USD"。
+# ──────────────────────────────────────────────────────────────────────────────
+_CLAUDE_PRICING: Dict[str, List[PriceTier]] = {
+    # ── CherryIN 网关模型名（前缀 anthropic/）────────────────────────────────
+    # 价格以 Anthropic 官方同系列模型为参考，实际以网关账单为准
+    "anthropic/claude-sonnet-4.6":          _flat(3.0,   15.0),
+    "anthropic/claude-opus-4.7":            _flat(15.0,  75.0),
+    "anthropic/claude-opus-4-20250514":     _flat(15.0,  75.0),
+    "anthropic/claude-sonnet-4-20250514":   _flat(3.0,   15.0),
+    "anthropic/claude-3-5-sonnet-20241022": _flat(3.0,   15.0),
+    "anthropic/claude-3-5-haiku-20241022":  _flat(0.8,    4.0),
+    "anthropic/claude-3-haiku-20240307":    _flat(0.25,   1.25),
+
+    # ── Claude 4 系列（直接 API 名称） ────────────────────────────────────────
+    "claude-opus-4.7":            _flat(15.0,  75.0),
+    "claude-opus-4-20250514":     _flat(15.0,  75.0),
+    "claude-opus-4":              _flat(15.0,  75.0),
+    "claude-sonnet-4-20250514":   _flat(3.0,   15.0),
+    "claude-sonnet-4":            _flat(3.0,   15.0),
+    "claude-sonnet-4.6":          _flat(3.0,   15.0),
+
+    # ── Claude 3.7 / 3.5 系列 ────────────────────────────────────────────────
+    "claude-3-7-sonnet-20250219": _flat(3.0,   15.0),
+    "claude-3-5-sonnet-20241022": _flat(3.0,   15.0),
+    "claude-3-5-sonnet-20240620": _flat(3.0,   15.0),
+    "claude-3-5-haiku-20241022":  _flat(0.8,    4.0),
+
+    # ── Claude 3 系列 ─────────────────────────────────────────────────────────
+    "claude-3-opus-20240229":     _flat(15.0,  75.0),
+    "claude-3-sonnet-20240229":   _flat(3.0,   15.0),
+    "claude-3-haiku-20240307":    _flat(0.25,   1.25),
+}
+
 # 价格表最后更新时间（格式：YYYY-MM）
 PRICING_LAST_UPDATED = {
-    "qwen":   "2026-05",
-    "doubao": "2026-05",
-    "glm":    "2026-05",
+    "qwen":    "2026-05",
+    "doubao":  "2026-05",
+    "glm":     "2026-05",
+    "claude":  "2026-05",
 }
 
 _PROVIDER_TABLES: Dict[str, Dict[str, List[PriceTier]]] = {
     "qwen":   _QWEN_PRICING,
     "doubao": _DOUBAO_PRICING,
     "glm":    _GLM_PRICING,
+    "claude": _CLAUDE_PRICING,
 }
 
 
@@ -296,18 +336,19 @@ def calculate_cost(
         - 若模型不在价格表中，降级为旧版固定系数（total_tokens × 0.01/M）并记录警告。
     """
     tiers = _lookup_tiers(provider, model)
+    currency = "USD" if provider.lower() == "claude" else "RMB"
 
     if tiers is None:
-        # 未知模型：保守估算（0.01 元/千 tokens = 10 元/百万）
+        # 未知模型：保守估算（每千 tokens 0.01 RMB 或 0.01 USD）
         total_tokens = prompt_tokens + completion_tokens
-        return total_tokens * 0.00001, "RMB"
+        return total_tokens * 0.00001, currency
 
     tier = _select_tier(tiers, prompt_tokens)
     cost = (
         prompt_tokens     * tier.input_price_per_m  / 1_000_000
         + completion_tokens * tier.output_price_per_m / 1_000_000
     )
-    return cost, "RMB"
+    return cost, currency
 
 
 def get_model_pricing_info(provider: str, model: str) -> Optional[List[PriceTier]]:

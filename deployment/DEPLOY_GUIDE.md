@@ -502,6 +502,17 @@ sudo bash deployment/deploy.sh
 - 同步 `web.conf` 到 Docker Nginx 配置卷 `/opt/nginx/conf/vhosts/`
 - 执行 `systemctl daemon-reload`
 
+> **生成的 Celery service 关键参数**（`rc-celery-ai` / `rc-celery-data`）：
+>
+> | 参数 | AI Worker | Data Worker | 说明 |
+> |------|-----------|-------------|------|
+> | `ExecStartPre` | ✅ | ✅ | 每次启动（含 systemd 自动重启）前自动清理 Redis 旧 task meta，防止损坏记录触发无限崩溃循环 |
+> | `TimeoutStopSec` | `300` | `120` | 给 worker 足够时间在 SIGTERM 后优雅退出（默认 30s 会硬杀长 LLM 任务，导致 Redis meta 损坏） |
+> | `--soft-time-limit` | `290` | `110` | 单任务最长执行时间（秒），超时后 Celery 抛 `SoftTimeLimitExceeded` 并正常写结果，不留损坏 meta |
+> | `--time-limit` | `320` | `130` | 硬截止时间，超时强制杀进程 |
+>
+> 修改模板后须重新执行 `sudo bash deployment/deploy.sh && sudo systemctl daemon-reload && sudo ./restart_services.sh` 才能生效。
+
 ---
 
 ### 4.B 本地开发
@@ -556,10 +567,13 @@ cd /path/to/guanhetech
 
 该脚本会：
 
-- 加载 `development/dev.conf`（Python 环境）
-- 加载项目根目录 `.env`
-- 检查数据库、Redis、Celery 配置
+- 加载 `development/dev.conf`（Python 环境）与项目根目录 `.env`
+- 检查数据库、Redis、Celery 配置；Redis 不可用时尝试启动本地无密码实例
 - 启动本地 Web 后端（默认 `http://localhost:8000`）与前端（默认 `http://localhost:3000`）
+- **启动 Celery Worker 前自动清理 Redis 旧任务元数据**（`celery-task-meta-*` / `unacked*`），防止上次异常退出留下的损坏记录导致 Worker 启动即崩
+- 通过读取日志文件（检测到 `ready.` 字样）判断 Worker 真正就绪，而非仅判断进程存活
+
+> **停止**：`./development/stop_local_dev.sh`（会在关闭 Redis **之前**先清理 Celery 队列与 task meta，确保清理有效）。
 
 ---
 
@@ -570,17 +584,22 @@ cd /opt/guanhetech
 sudo ./start_services.sh
 ```
 
+脚本执行顺序：检查 PostgreSQL / Redis Docker 容器 → **清理 Redis 旧 task meta**（防止损坏记录导致 Worker 启动即崩）→ 启动 Web 应用 → Celery AI Worker → Celery Data Worker → 调度器 → Nginx。
+
 预期输出：
 
 ```
 ✅ PostgreSQL (Docker: postgres) 已在运行
 ✅ Redis (Docker: redis) 已在运行
+  ✅ Redis 无残留任务元数据
 ✅ Web应用已启动
 ✅ Celery AI Worker已启动
 ✅ Celery Data Worker已启动
 ✅ 调度器服务已启动
 ✅ Nginx (Docker: nginx) 已启动
 ```
+
+> `stop_services.sh` 与 `restart_services.sh` 同样内置了 Redis 清理步骤（分别在停止/重启 Celery 前执行），日常运维直接使用这些脚本即可，无需手动清理 Redis。
 
 ---
 
@@ -757,6 +776,64 @@ which npm       # 应在 VOLTA_DIR/ 下
 ```bash
 rm -f logs/celery_*.pid
 sudo systemctl restart rc-celery-ai rc-celery-data
+```
+
+### Celery Worker 反复重启 / Redis 任务元数据异常
+
+**症状**：Worker 日志出现 `Exception information must include the exception type`，或同一任务 ID 日志反复出现"任务失败"；上传 / AI 分析任务卡在「处理中」。
+
+**根本原因**：
+
+- Worker 正常处理任务时，结果写入 Redis `celery-task-meta-<task_id>`。若 Worker 被 SIGKILL 强杀（例如 `TimeoutStopSec` 太短、强制重启），当前任务的 Python 异常对象无法完整序列化，留下一条格式损坏的 meta。
+- 下次 Worker 启动时尝试恢复此 meta → `ValueError: Exception information must include...` → Worker 崩溃 → systemd 自动重启 → 再次崩溃 → 无限循环。
+
+**防御机制（已内置）**：
+
+| 层级 | 机制 | 覆盖场景 |
+|------|------|---------|
+| **治本** | `--soft-time-limit`（AI: 290s，Data: 110s）+ `--time-limit`（AI: 320s，Data: 130s） | 任务超时后由 Celery 自行终止并正常写结果，不留损坏 meta |
+| **第二道** | `TimeoutStopSec`（AI: 300s，Data: 120s） | 给 Worker 足够时间在收到 SIGTERM 后优雅退出 |
+| **第三道** | `ExecStartPre` 启动前清理（两个 Celery service 均已配置） | 即使前两道失守，每次 systemd 启动时自动删除所有旧 meta |
+| **第四道** | `result_expires = 3600`（celery_config.py） | 残留 meta 1 小时后自动过期，不会永久积累 |
+| **运维入口** | start / stop / restart 脚本均内置清理 | 常规运维操作自动保证 Redis 干净 |
+
+**日常运维处理**（优先）：
+
+```bash
+# 生产环境：重启脚本会自动清理 Redis，再重启 Worker
+sudo ./restart_services.sh
+
+# 本地开发：stop 脚本会在关 Redis 前先清理，start 脚本启 Worker 前也会清理
+./development/stop_local_dev.sh
+./development/start_local_dev.sh
+```
+
+**应急手动清理**（当脚本不可用或需要立即解决时）：
+
+```bash
+# 连接 Redis（生产环境带密码时替换 REDIS_URL）
+source /opt/guanhetech/.env   # 加载 REDIS_URL
+
+python3 - <<'EOF'
+import redis, os
+r = redis.from_url(os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
+keys = r.keys('celery-task-meta-*') + r.keys('unacked*')
+for k in keys:
+    r.delete(k)
+print(f"已清除 {len(keys)} 条损坏 meta")
+EOF
+
+# 清理后重启 Worker
+sudo systemctl restart rc-celery-ai rc-celery-data
+# 或本地：bash development/start_celery_worker_dev.sh
+```
+
+**如果 `ExecStartPre` / `TimeoutStopSec` 参数尚未生效**（旧部署未重新执行 deploy.sh）：
+
+```bash
+sudo bash deployment/deploy.sh        # 重新渲染 service 模板
+sudo systemctl daemon-reload          # 让 systemd 读取新配置
+sudo ./restart_services.sh            # 重启所有服务
 ```
 
 ### 数据库连接失败

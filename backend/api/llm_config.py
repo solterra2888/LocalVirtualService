@@ -306,12 +306,13 @@ async def test_provider_connection(
         start_time = time.time()
         
         # 临时创建provider进行测试
-        from backend.core.llm_framework import LLMConfig, QwenProvider, DoubaoProvider, GLMProvider
+        from backend.core.llm_framework import LLMConfig, QwenProvider, DoubaoProvider, GLMProvider, ClaudeProvider
         
         provider_map = {
             "qwen": (QwenProvider, LLMProviderType.QWEN),
             "doubao": (DoubaoProvider, LLMProviderType.DOUBAO),
             "glm": (GLMProvider, LLMProviderType.GLM),
+            "claude": (ClaudeProvider, LLMProviderType.CLAUDE),
         }
         
         if request.providerId not in provider_map:

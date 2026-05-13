@@ -75,8 +75,10 @@ WEBAPP_PID=$!
 echo "Web 应用进程 PID: $WEBAPP_PID"
 
 echo "等待 Web 应用启动..."
+# 与 backend/main.py 一致：健康检查在 /api/health（/health 会 404，导致本步骤一直打点）
+WEB_HEALTH_URL="http://localhost:8000/api/health"
 for i in {1..30}; do
-    if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+    if curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
         echo -e "${GREEN}✅ Web 应用已启动 (http://localhost:8000)${NC}"
         break
     fi
@@ -84,7 +86,7 @@ for i in {1..30}; do
     echo -n "."
 done
 
-if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+if ! curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
     echo -e "${RED}❌ Web 应用启动失败${NC}"
     echo "查看日志: tail -f $DEV_LOGS_DIR/webapp.log"
     exit 1
@@ -124,15 +126,49 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${PURPLE}📤 步骤 4/5: 启动 Celery Worker (file_processing + ai_processing)${NC}"
 echo -e "${BLUE}========================================${NC}"
 
+# ★ 启动 worker 前先清理 Redis 旧任务元数据，防止损坏记录导致 worker 启动即崩
+# （若上次是强制 kill 或 Redis 先于 stop_local_dev 关闭，旧 meta 可能残留）
+echo -e "${BLUE}🧹 清理 Redis 旧任务元数据（防止 worker 崩溃）...${NC}"
+_PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || command -v python)}"
+if [ -n "$_PYTHON_BIN" ] && "$_PYTHON_BIN" -c "import redis" 2>/dev/null; then
+    "$_PYTHON_BIN" - <<PYEOF 2>/dev/null
+import redis, sys
+try:
+    r = redis.Redis(host='127.0.0.1', port=6379, db=0, socket_connect_timeout=2)
+    r.ping()
+except Exception:
+    sys.exit(0)
+keys = r.keys('celery-task-meta-*') + r.keys('unacked*')
+for k in keys:
+    r.delete(k)
+if keys:
+    print(f"  ✅ 已清除 {len(keys)} 条旧任务元数据")
+else:
+    print("  ✅ Redis 无残留任务元数据")
+PYEOF
+fi
+
 nohup bash "$SCRIPT_DIR/start_celery_worker_dev.sh" > /dev/null 2>&1 &
 CELERY_PID=$!
 echo "Celery file/ai Worker 进程 PID: $CELERY_PID"
-sleep 2
-if kill -0 "$CELERY_PID" 2>/dev/null; then
-    echo -e "${GREEN}✅ Celery file/ai Worker 已启动${NC}"
+
+# 等待 worker 实际 ready（检查日志而非仅判断进程存活）
+echo -n "等待 Celery file/ai Worker 就绪..."
+CELERY_READY=0
+for i in {1..15}; do
+    sleep 2
+    if grep -q "ready\." "$LOGS_DIR/celery_worker.log" 2>/dev/null; then
+        CELERY_READY=1
+        break
+    fi
+    echo -n "."
+done
+echo ""
+if [ $CELERY_READY -eq 1 ]; then
+    echo -e "${GREEN}✅ Celery file/ai Worker 已就绪${NC}"
     echo -e "   日志: tail -f $LOGS_DIR/celery_worker.log"
 else
-    echo -e "${YELLOW}⚠️  Celery file/ai Worker 可能启动失败，请查看: tail -f $LOGS_DIR/celery_worker.log${NC}"
+    echo -e "${YELLOW}⚠️  Celery file/ai Worker 未在预期时间内就绪，请查看: tail -f $LOGS_DIR/celery_worker.log${NC}"
 fi
 
 # ── 步骤 5/5: 启动 Celery Worker（data_fetching）──
@@ -145,15 +181,26 @@ echo -e "${BLUE}========================================${NC}"
 nohup bash "$SCRIPT_DIR/start_celery_worker_data_fetching.sh" > /dev/null 2>&1 &
 DATA_CELERY_PID=$!
 echo "Celery data Worker 进程 PID: $DATA_CELERY_PID"
-sleep 2
-if kill -0 "$DATA_CELERY_PID" 2>/dev/null; then
-    echo -e "${GREEN}✅ Celery data Worker 已启动${NC}"
+
+echo -n "等待 Celery data Worker 就绪..."
+DATA_CELERY_READY=0
+for i in {1..15}; do
+    sleep 2
+    if grep -q "ready\." "$LOGS_DIR/celery_worker_data_fetching.log" 2>/dev/null; then
+        DATA_CELERY_READY=1
+        break
+    fi
+    echo -n "."
+done
+echo ""
+if [ $DATA_CELERY_READY -eq 1 ]; then
+    echo -e "${GREEN}✅ Celery data Worker 已就绪${NC}"
     echo -e "   日志: tail -f $LOGS_DIR/celery_worker_data_fetching.log"
 else
-    echo -e "${YELLOW}⚠️  Celery data Worker 可能启动失败，请查看: tail -f $LOGS_DIR/celery_worker_data_fetching.log${NC}"
+    echo -e "${YELLOW}⚠️  Celery data Worker 未在预期时间内就绪，请查看: tail -f $LOGS_DIR/celery_worker_data_fetching.log${NC}"
 fi
 
-# 保存 PID
+# 保存 PID（尽早写入，确保 stop 脚本即使在后续步骤失败时也能找到进程）
 PID_FILE="$SCRIPT_DIR/.dev_pids"
 cat > "$PID_FILE" <<EOF
 WEBAPP_PID=$WEBAPP_PID

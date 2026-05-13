@@ -152,10 +152,11 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
                          │  │  Qwen 通义  │  │ Doubao 豆包  │     │
                          │  │ (DashScope) │  │ (Volcengine) │     │
                          │  └─────────────┘  └──────────────┘     │
-                         │       ┌──────────────┐                  │
-                         │       │  GLM 智谱AI  │                  │
-                         │       │   (Zhipu)    │                  │
-                         │       └──────────────┘                  │
+                         │       ┌──────────────┐  ┌──────────────┐ │
+                         │       │  GLM 智谱AI  │  │ Claude（可选）│ │
+                         │       │   (Zhipu)    │  │ CherryIN 等   │ │
+                         │       └──────────────┘  │ OpenAI 兼容   │ │
+                         │                         └──────────────┘ │
                          │                                         │
                          │  配置来源：DB（优先）→ 环境变量（回退）  │
                          │  降级策略：主Provider失败 → fallback链  │
@@ -174,6 +175,8 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
                          │  Qwen: DashScope Chat + Embedding API  │
                          │  Doubao: Volcengine Ark API v3         │
                          │  GLM: Zhipu PAAS API v4               │
+                         │  Claude: OpenAI 兼容 `/v1/chat/completions` │
+                         │    （如 CherryIN → Bedrock，计费 USD）   │
                          └───────────────────────────────────────┘
 ```
 
@@ -192,6 +195,7 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 | **Qwen（通义千问）** | `qwen` | DashScope `/compatible-mode/v1/chat/completions` | ✅ 支持 Embedding（text-embedding-v3，1024 维）|
 | **Doubao（豆包）** | `doubao` | Volcengine Ark `/api/v3/chat/completions` | — |
 | **GLM（智谱 AI）** | `glm` | Zhipu PAAS `/api/paas/v4/chat/completions` | — |
+| **Claude（Anthropic，经聚合网关）** | `claude` | 网关 `{base_url}/v1/chat/completions`（OpenAI 兼容；生产示例：CherryIN `https://open.cherryin.net`） | 请求体**不传** `top_p`（与 `temperature` 二选一，Bedrock 后端限制）；`llm_pricing` 中按 **USD** 估算；需在 DB `llm_provider_configs` 中 **enabled=true** 且填好 API Key，Celery Worker 进程才会加载该 Provider |
 
 ### 2.3 配置加载顺序
 
@@ -206,8 +210,8 @@ LLMService 启动
     │       └─ 成功 → 使用 DB 配置（管理员可通过 Admin UI 热更新）
     │
     └─ 3. 若 DB 失败 → _load_from_env()
-            ├─ 读取 QWEN_API_KEY / DOUBAO_API_KEY / GLM_API_KEY 等
-            └─ 读取 DEFAULT_LLM_PROVIDER / LLM_FALLBACK_ORDER 等
+            ├─ 读取 QWEN_API_KEY / DOUBAO_API_KEY / GLM_API_KEY / CLAUDE_API_KEY 等
+            └─ 读取 DEFAULT_LLM_PROVIDER / LLM_FALLBACK_ORDER 等（可含 `claude`）
 ```
 
 ### 2.4 调用路由与降级策略
@@ -768,9 +772,9 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 变量 | Provider | 说明 |
 |------|---------|------|
-| `DEFAULT_LLM_PROVIDER` | 全局 | 默认 Provider（`qwen` / `doubao` / `glm`） |
+| `DEFAULT_LLM_PROVIDER` | 全局 | 默认 Provider（`qwen` / `doubao` / `glm` / `claude`） |
 | `LLM_FALLBACK_ENABLED` | 全局 | 是否启用 Provider 降级（默认 `true`） |
-| `LLM_FALLBACK_ORDER` | 全局 | 降级顺序（默认 `qwen,doubao,glm`） |
+| `LLM_FALLBACK_ORDER` | 全局 | 降级顺序（示例含 Claude：`qwen,doubao,glm,claude`；以 DB `llm_global_settings` 为准） |
 | `QWEN_API_KEY` / `QWEN_ENABLED` | Qwen | DashScope API Key |
 | `QWEN_BASE_URL` | Qwen | API 基础 URL |
 | `QWEN_DEFAULT_MODEL` | Qwen | 默认模型名 |
@@ -780,8 +784,12 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `GLM_API_KEY` / `GLM_ENABLED` | GLM | Zhipu API Key |
 | `GLM_BASE_URL` | GLM | API 基础 URL |
 | `GLM_DEFAULT_MODEL` | GLM | 默认模型名 |
+| `CLAUDE_API_KEY` / `CLAUDE_ENABLED` | Claude | 聚合网关 API Key（如 CherryIN） |
+| `CLAUDE_BASE_URL` | Claude | 网关根 URL（默认 `https://open.cherryin.net`，实际请求 `{base}/v1/chat/completions`） |
+| `CLAUDE_DEFAULT_MODEL` | Claude | 默认模型（如 `anthropic/claude-sonnet-4.6`；网关约定名） |
 
-> ⚠️ **DB 配置优先于环境变量**。Admin UI (`/admin/llm-config`) 可热更新 DB 中的 Provider 配置并触发 `reload_from_database()`。
+> ⚠️ **DB 配置优先于环境变量**。Admin UI (`/admin/llm-config`) 可热更新 DB 中的 Provider 配置并触发 `reload_from_database()`。  
+> ⚠️ **Celery Worker** 启动时从 DB 加载 **仅 `enabled=true` 且有 API Key** 的 Provider；若模板 `recommended_provider=claude` 但 Claude 未启用，会出现 `Provider claude not found or not enabled`。保存 LLM 配置后需 **重启 Worker**（或依赖生产环境 systemd 重载）使新 Provider 生效。
 
 ### 7.2 Auto Task 开关（Upload Files 模块）
 
@@ -826,6 +834,18 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 |------|--------|------|
 | `LLM_USER_RATE_LIMIT_PER_MIN` | *未设置* | 仅当设为 **正整数** 时启用：每用户每 Provider 每分钟最大 `chat_completion_with_template` 次数（Redis）；`user_id=None` 的系统调用不计入。未设置或非正数 → 不限速。依赖 `REDIS_URL`。 |
 
+### 7.5 开发与生产：Celery / Redis 与 LLM 排障要点
+
+与「长 LLM / 损坏任务元数据」相关的运维行为（避免损坏的 `celery-task-meta-*` 导致 Worker 启动即崩、或 `TimeoutStopSec` 过短导致长 LLM 被 SIGKILL 后写入异常结果）：
+
+| 场景 | 行为说明 |
+|------|----------|
+| **本地** | `development/stop_local_dev.sh`：在**停止本地 Redis 之前**清理 `celery-task-meta-*`、队列与 `unacked*`；`development/start_local_dev.sh`：启动 file/ai Worker 前再次清理旧 meta，并轮询日志直至 `ready.` |
+| **生产** | `stop_services.sh` / `start_services.sh` / `restart_services.sh`：在启停 Celery 前后清理 Redis 任务元数据；`deployment/templates/rc-celery-ai.service.tpl` / `rc-celery-data.service.tpl`：`ExecStartPre` 每次进程启动前清理；**延长** `TimeoutStopSec` 并为 Worker 配置 `--soft-time-limit` / `--time-limit`，避免 `systemctl stop` 在长 LLM 期间把 Worker 硬杀 |
+| **DB 迁移** | `backend/database/migrations/add_prompt_completion_tokens_to_usage_logs.sql`：若未执行，`llm_prompt_usage_logs` 写入 `prompt_tokens`/`completion_tokens` 会报错（不影响主链路，但日志表写入失败） |
+
+部署后请执行 `sudo bash deployment/deploy.sh && sudo ./restart_services.sh` 以安装更新后的 systemd 单元。
+
 ---
 
 ## 8. 相关源码索引
@@ -844,14 +864,18 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `backend/utils/user_resolver.py` | `username → user_id`（Celery / API 透传 usage_log） |
 | `backend/services/local_llm_analysis_service.py` | 面向文件/正文的分析入口（委托 `chat_completion_with_template`） |
 | `backend/services/llm_prompt_template_service.py` | 模板 CRUD + 调用日志记录 |
-| `backend/api/llm_config.py` | LLM 配置管理 Admin API，Provider 测试，调用日志查询 |
+| `backend/api/llm_config.py` | LLM 配置管理 Admin API，Provider 测试（含 `claude`），调用日志查询 |
 | `backend/api/llm_prompt_templates.py` | 通用模板 API；**`/my-templates`、`/system-templates`**（Phase 2） |
+| `backend/core/llm_pricing.py` | 各 Provider 模型单价（含 Claude USD） |
+| `backend/database/migrations/add_claude_provider.sql` | 插入/更新 `claude` 行（CherryIN 等网关） |
+| `backend/database/migrations/add_prompt_completion_tokens_to_usage_logs.sql` | `llm_prompt_usage_logs` 增加 token 列（未执行则日志写入失败） |
 
 ### 前端（Prompt / Upload）
 
 | 文件 | 说明 |
 |------|------|
 | `web-frontend/src/pages/PromptTemplatesPage.tsx` | 我的模板 / 系统模板 (Admin)、编辑 Drawer |
+| `web-frontend/src/pages/LLMConfigPage.tsx` | Admin LLM 配置、连接测试、降级顺序 |
 | `web-frontend/src/components/UploadAnalysisTemplatePicker.tsx` | 上传/文件页分析或打标：开关 + 侧栏编辑 Drawer |
 | `web-frontend/src/components/InsertVariablePopover.tsx` | 模板编辑器内插入 `{{变量}}` |
 | `web-frontend/src/services/promptTemplateService.ts` | `my-templates` / `system-templates` API 客户端 |
