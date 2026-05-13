@@ -4,7 +4,7 @@
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 from backend.utils.datetime_utils import UtcDateTime
@@ -57,4 +57,8 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     user_id: Optional[int] = None
     is_admin: Optional[bool] = None
-    token_version: Optional[int] = None 
+    token_version: Optional[int] = None
+    # Agent PAT (Personal Access Token) — only set when auth_kind == "pat"
+    auth_kind: str = Field(default="jwt", description="jwt | pat")
+    pat_id: Optional[int] = None
+    pat_scopes: Optional[List[str]] = None

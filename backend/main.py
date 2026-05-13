@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
@@ -98,6 +98,24 @@ app.add_middleware(
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi import Request  # noqa: E402
 from backend.core.llm_rate_limiter import LLMRateLimitExceeded  # noqa: E402
+from backend.core.pat_rate_limiter import PATRateLimitExceeded  # noqa: E402
+
+
+@app.exception_handler(PATRateLimitExceeded)
+async def pat_rate_limit_handler(request: Request, exc: PATRateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": (
+                f"API token rate limit exceeded. Retry in {exc.retry_after_seconds}s "
+                f"({exc.current}/{exc.limit} per minute)."
+            ),
+            "retry_after_seconds": exc.retry_after_seconds,
+            "current": exc.current,
+            "limit": exc.limit,
+        },
+        headers={"Retry-After": str(exc.retry_after_seconds)},
+    )
 
 
 @app.exception_handler(LLMRateLimitExceeded)
@@ -124,6 +142,7 @@ app.include_router(file_tags.router, tags=["文件标签"])
 app.include_router(file_folders.router, prefix="/api/files", tags=["文件夹"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(users.router, prefix="/api/users", tags=["用户管理"])
+app.include_router(personal_tokens.router, prefix="/api/users", tags=["Personal API Tokens"])
 app.include_router(news.router, prefix="/api/news", tags=["新闻管理"])
 app.include_router(markets.router, prefix="/api/markets", tags=["市场数据"])
 # Market Weekly Report API
@@ -144,6 +163,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"]
 # Daily 聚合视图: 把 Upload Files + Feeds 订阅合并成首页时间轴信息流 (/daily 默认页)
 # 详见 backend/api/daily.py 与 docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md
 app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
+# Agent / MCP readonly API (Bearer JWT or PAT ght_...)
+app.include_router(agent_v1.router)
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
 # 图表事件API
@@ -186,6 +207,17 @@ app.include_router(logs.router, tags=["系统日志"])
 app.include_router(monitoring.router, tags=["系统监控"])
 
 # 静态文件服务
+# Agent Skill 文档 (SKILL.md)
+_agent_skill_dir = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "agent"
+)
+if os.path.isdir(_agent_skill_dir):
+    app.mount(
+        "/agent/skill",
+        StaticFiles(directory=_agent_skill_dir, html=False),
+        name="agent_skill_docs",
+    )
+
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

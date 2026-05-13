@@ -4,6 +4,7 @@ import { Layout as AntLayout, Button, Dropdown, Avatar, Typography, Switch } fro
 import {
   LogoutOutlined,
   EditOutlined,
+  KeyOutlined,
   SunOutlined,
   MoonOutlined,
   LineChartOutlined,
@@ -94,6 +95,12 @@ const MobileLayout: React.FC = () => {
       onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
     },
     { type: 'divider' as const },
+    {
+      key: '/settings/api-keys',
+      icon: <KeyOutlined />,
+      label: 'API Keys',
+      onClick: () => navigate('/settings/api-keys'),
+    },
     ...(user?.is_admin
       ? [{ key: '/monitoring', icon: <LineChartOutlined />, label: 'Monitoring', onClick: () => navigate('/monitoring') }]
       : []),

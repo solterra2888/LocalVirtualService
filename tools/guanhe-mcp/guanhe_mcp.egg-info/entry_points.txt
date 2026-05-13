@@ -1,0 +1,2 @@
+[console_scripts]
+guanhe-mcp = guanhe_mcp.server:main

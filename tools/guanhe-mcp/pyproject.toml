@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guanhe-mcp"
+version = "0.1.0"
+description = "MCP server for GuanHe Agent API (Daily + reports)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27.0",
+]
+
+[project.scripts]
+guanhe-mcp = "guanhe_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["guanhe_mcp*"]

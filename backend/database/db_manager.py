@@ -533,6 +533,9 @@ class DatabaseManager:
             
             # 确保用户表存在
             UserAuth.setup_users_table(conn)
+
+            # Agent / MCP 个人访问令牌 (PAT)
+            self._ensure_api_personal_tokens_table(cursor)
             
             # 进行架构迁移
             self.migrate_database_schema(conn)
@@ -586,6 +589,34 @@ class DatabaseManager:
                 conn.close()
             return False
     
+    def _ensure_api_personal_tokens_table(self, cursor):
+        """创建 api_personal_tokens 表 (Agent / MCP PAT)."""
+        cursor.execute("SELECT to_regclass('public.api_personal_tokens')")
+        if cursor.fetchone()[0] is None:
+            cursor.execute(
+                """
+                CREATE TABLE api_personal_tokens (
+                    id           BIGSERIAL PRIMARY KEY,
+                    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name         TEXT NOT NULL,
+                    prefix       TEXT NOT NULL,
+                    token_hash   TEXT NOT NULL,
+                    scopes       JSONB NOT NULL DEFAULT '["daily:read", "reports:read"]'::jsonb,
+                    expires_at   TIMESTAMPTZ,
+                    last_used_at TIMESTAMPTZ,
+                    revoked_at   TIMESTAMPTZ,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_apt_user ON api_personal_tokens(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_apt_prefix ON api_personal_tokens(prefix)"
+            )
+            print("已创建 api_personal_tokens 表")
+
     def _ensure_remarks_column(self, conn):
         """确保agent_credentials表存在remarks列"""
         cursor = conn.cursor()

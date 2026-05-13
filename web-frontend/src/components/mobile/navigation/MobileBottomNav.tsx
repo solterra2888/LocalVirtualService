@@ -1,6 +1,13 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FileTextOutlined, ProfileOutlined, ReadOutlined, StockOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {
+  ApiOutlined,
+  FileTextOutlined,
+  ProfileOutlined,
+  ReadOutlined,
+  StockOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import './MobileBottomNav.css';
 
 /**
@@ -31,6 +38,11 @@ const MobileBottomNav: React.FC = () => {
       key: '/reports',
       icon: <ProfileOutlined />,
       label: 'Reports',
+    },
+    {
+      key: '/agent-integration',
+      icon: <ApiOutlined />,
+      label: 'Agent',
     },
     {
       key: '/dashboard',

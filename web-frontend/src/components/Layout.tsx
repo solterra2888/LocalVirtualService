@@ -24,10 +24,12 @@ import {
   MoonOutlined,
   ReadOutlined,
   EditOutlined,
+  KeyOutlined,
   ProfileOutlined,
   GlobalOutlined,
   ThunderboltOutlined,
   AppleOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getModalStyles } from '../utils/modalStyles';
@@ -141,6 +143,11 @@ const Layout: React.FC = () => {
       label: 'Reports',
     },
     {
+      key: '/agent-integration',
+      icon: <ApiOutlined />,
+      label: 'Agent Integration',
+    },
+    {
       key: 'ug-data',
       icon: <FileTextOutlined />,
       label: 'UG Data',
@@ -174,6 +181,7 @@ const Layout: React.FC = () => {
       onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
     },
     { type: 'divider' as const },
+    { key: '/settings/api-keys', icon: <KeyOutlined />, label: 'API Keys', onClick: () => navigate('/settings/api-keys') },
     { key: '/prompt-templates', icon: <BuildOutlined />, label: 'Prompt Templates', onClick: () => navigate('/prompt-templates') },
     { key: '/investment-themes', icon: <FundOutlined />, label: 'Themes Settings', onClick: () => navigate('/investment-themes') },
     ...(user?.is_admin ? [{ key: '/llm-config', icon: <RobotOutlined />, label: 'LLM Settings', onClick: () => navigate('/llm-config') }] : []),
@@ -236,7 +244,13 @@ const Layout: React.FC = () => {
           <Menu
             mode="horizontal"
             theme={themeMode}
-            selectedKeys={[location.pathname.startsWith('/reports') ? '/reports' : location.pathname]}
+            selectedKeys={[
+              location.pathname.startsWith('/reports')
+                ? '/reports'
+                : location.pathname.startsWith('/agent-integration')
+                  ? '/agent-integration'
+                  : location.pathname,
+            ]}
             items={menuItems}
             onClick={handleMenuClick}
             style={{

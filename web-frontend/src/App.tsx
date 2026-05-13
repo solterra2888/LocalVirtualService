@@ -34,6 +34,8 @@ import MarketWeekly from './pages/MarketWeekly';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import DashboardSettingsPage from './pages/DashboardSettingsPage';
+import ApiKeysPage from './pages/ApiKeysPage';
+import AgentIntegrationPage from './pages/AgentIntegrationPage';
 import TwitterDailyReportPage from './pages/TwitterDailyReportPage';
 import MobileReportsPage from './pages/MobileReportsPage';
 import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
@@ -165,6 +167,8 @@ const AppContent: React.FC = () => {
           <Route path="projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="candlestick-demo" element={<CandlestickDemoPage />} />
           <Route path="settings/dashboard" element={<DashboardSettingsPage />} />
+          <Route path="settings/api-keys" element={<ApiKeysPage />} />
+          <Route path="agent-integration" element={<AgentIntegrationPage />} />
           
           {/* 管理员路由 */}
           <Route
