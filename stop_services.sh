@@ -55,7 +55,7 @@ REDIS_URL_VAL="redis://localhost:6379/0"
 [ -f "$ENV_FILE" ] && REDIS_URL_VAL=$(grep -E '^REDIS_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_VAL")
 
 # 优先用 Python（conda env 中已有 redis 包）
-PYTHON_BIN="$(grep -E '^CONDA_ENV=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)/bin/python"
+PYTHON_BIN="$(grep -E '^CONDA_ENV=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || true)/bin/python"
 [ ! -x "$PYTHON_BIN" ] && PYTHON_BIN="$(command -v python3 2>/dev/null || echo "")"
 
 if [ -n "$PYTHON_BIN" ] && [ -x "$PYTHON_BIN" ] && "$PYTHON_BIN" -c "import redis" 2>/dev/null; then
@@ -101,12 +101,12 @@ echo "🧹 清理残留进程..."
 cleanup_port() {
     local port=$1
     local pids
-    pids=$(lsof -t -i:"$port" 2>/dev/null)
+    pids=$(lsof -t -i:"$port" 2>/dev/null || true)
     if [ -n "$pids" ]; then
         echo "   🔄 发现 $port 端口残留进程 (PID: $pids)，正在清理..."
         kill -15 $pids 2>/dev/null || true
         sleep 2
-        pids=$(lsof -t -i:"$port" 2>/dev/null)
+        pids=$(lsof -t -i:"$port" 2>/dev/null || true)
         if [ -n "$pids" ]; then
             kill -9 $pids 2>/dev/null || true
         fi

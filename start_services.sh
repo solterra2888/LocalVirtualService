@@ -122,7 +122,7 @@ SCRIPT_DIR_SS="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE_SS="$SCRIPT_DIR_SS/.env"
 REDIS_URL_SS="redis://localhost:6379/0"
 [ -f "$ENV_FILE_SS" ] && REDIS_URL_SS=$(grep -E '^REDIS_URL=' "$ENV_FILE_SS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_SS")
-PYTHON_BIN_SS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_SS" 2>/dev/null | cut -d= -f2)/bin/python"
+PYTHON_BIN_SS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_SS" 2>/dev/null | cut -d= -f2 || true)/bin/python"
 [ ! -x "$PYTHON_BIN_SS" ] && PYTHON_BIN_SS="$(command -v python3 2>/dev/null || echo "")"
 if [ -n "$PYTHON_BIN_SS" ] && [ -x "$PYTHON_BIN_SS" ] && "$PYTHON_BIN_SS" -c "import redis" 2>/dev/null; then
     "$PYTHON_BIN_SS" - <<PYEOF 2>/dev/null

@@ -94,7 +94,7 @@ SCRIPT_DIR_RS="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE_RS="$SCRIPT_DIR_RS/.env"
 REDIS_URL_RS="redis://localhost:6379/0"
 [ -f "$ENV_FILE_RS" ] && REDIS_URL_RS=$(grep -E '^REDIS_URL=' "$ENV_FILE_RS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_RS")
-PYTHON_BIN_RS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_RS" 2>/dev/null | cut -d= -f2)/bin/python"
+PYTHON_BIN_RS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_RS" 2>/dev/null | cut -d= -f2 || true)/bin/python"
 [ ! -x "$PYTHON_BIN_RS" ] && PYTHON_BIN_RS="$(command -v python3 2>/dev/null || echo "")"
 if [ -n "$PYTHON_BIN_RS" ] && [ -x "$PYTHON_BIN_RS" ] && "$PYTHON_BIN_RS" -c "import redis" 2>/dev/null; then
     "$PYTHON_BIN_RS" - <<PYEOF 2>/dev/null
