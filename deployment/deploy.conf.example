@@ -75,6 +75,14 @@ CELERY_AI_CONCURRENCY=4
 CELERY_DATA_CONCURRENCY=2
 UVICORN_WORKERS=2
 
+# ===== Agent / MCP =====
+# 前端公网地址，用于 Agent 返回内容中的深链 URL（不含结尾斜杠）
+# 若留空，Agent 响应中 url 字段对内部导航类内容不生成链接
+PUBLIC_WEB_URL=http://你的服务器公网IP
+
+# 每分钟每 PAT 请求限速（0 = 关闭限速，不推荐）
+# AGENT_PAT_RATE_LIMIT_PER_MIN=60
+
 # ===== 其他可选变量 =====
 # 更多可选配置在同目录的 .env.secrets 中设置（合并进 .env）。
 # 例如：OSS 私有桶且 YouTube AI 转写报 FILE_DOWNLOAD_FAILED 时，在 .env.secrets 中增加 OSS_ASR_PUBLIC_READ=true

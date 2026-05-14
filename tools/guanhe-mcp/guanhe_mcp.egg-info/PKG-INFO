@@ -17,33 +17,30 @@ Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent H
 - `httpx` (installed automatically with this package)
 - A **Personal Access Token** (`ght_...`) from the web app: **User menu → API Keys**
 
-## Install (editable from repo root)
+## Install
 
-Use the **same conda env as local dev** (e.g. `rcTool` — see `development/dev.conf.example`):
+MCP 以 stdio 子进程形式运行在 **Cursor / Claude Desktop 所在的本地机器**上，无需克隆整个仓库，一条命令直接从 GitHub 安装：
 
 ```bash
-conda activate rcTool
+pip install "git+ssh://git@github.com/solterra2888/guanhetech.git#subdirectory=tools/guanhe-mcp"
+```
+
+> `httpx` 作为依赖会自动安装，无需单独 `pip install httpx`。
+
+安装后查出 Python 绝对路径，配置 `mcp.json` 时使用：
+
+```bash
+which python   # 激活目标虚拟环境后执行
+```
+
+### 从本地源码安装（开发调试用）
+
+若已克隆仓库并需要修改代码：
+
+```bash
 cd tools/guanhe-mcp
-pip install httpx
 pip install -e .
 ```
-
-若 `pip install -e .` 仍报 *setup.py / setuptools-based build*（多为 **pip 过旧**），任选其一：
-
-```bash
-# 推荐：升级 pip 后再装（支持仅 pyproject 的 editable）
-python -m pip install -U "pip>=22" "setuptools>=61" wheel
-pip install -e .
-```
-
-或：仓库已包含 **`setup.py`**，旧版 pip 也可直接：
-
-```bash
-pip install -e .
-```
-
-`~/.cursor/mcp.json` 里的 `command` 必须指向该环境的 Python，例如  
-`/opt/anaconda3/envs/rcTool/bin/python`（若本机路径不同，用 `which python` 在已激活的 `rcTool` 里查）。
 
 ## Environment
 
@@ -68,12 +65,12 @@ guanhe-mcp
 {
   "mcpServers": {
     "guanhe": {
-      "command": "/opt/anaconda3/envs/rcTool/bin/python",
+      "command": "/path/to/your/python",
       "args": ["-m", "guanhe_mcp.server"],
-      "cwd": "/path/to/guanhetech/tools/guanhe-mcp",
       "env": {
         "GUANHE_TOKEN": "ght_xxxxxxxx",
-        "GUANHE_BASE_URL": "http://localhost:8000"
+        "GUANHE_BASE_URL": "http://43.99.37.76",
+        "PYTHONUNBUFFERED": "1"
       }
     }
   }
@@ -128,4 +125,4 @@ Tool implementations return **JSON strings** (MCP content).
 
 ## Skill
 
-See repository `docs/agent/SKILL.md` (also served at `/agent/skill/SKILL.md` when the API is running).
+See repository `docs/agent/GUANHE_DAILY.md` (also served at `/agent/skill/GUANHE_DAILY.md` when the API is running).

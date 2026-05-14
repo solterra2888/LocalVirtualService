@@ -218,6 +218,17 @@ if os.path.isdir(_agent_skill_dir):
         name="agent_skill_docs",
     )
 
+# MCP 包下载（wheel 文件，供用户 pip install 使用）
+_dist_dir = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist"
+)
+if os.path.isdir(_dist_dir):
+    app.mount(
+        "/downloads",
+        StaticFiles(directory=_dist_dir, html=False),
+        name="downloads",
+    )
+
 # 为上传的文件提供静态文件访问
 if os.path.exists("uploads"):
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

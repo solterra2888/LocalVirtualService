@@ -22,8 +22,6 @@ function suggestedApiOrigin(): string {
 // ─── Small primitives ────────────────────────────────────────────────────────
 
 const TEAL = '#0d9488';
-const TEAL_LIGHT = '#f0fdf9';
-const TEAL_DARK = '#0f766e';
 const DARK_BG = '#0f172a';
 const DARK_SURFACE = '#1e293b';
 const DARK_BORDER = '#334155';
@@ -208,7 +206,7 @@ const IntentTable: React.FC<{ rows: IntentRow[]; dark: boolean }> = ({ rows, dar
   </div>
 );
 
-const SectionLabel: React.FC<{ children: React.ReactNode; dark: boolean }> = ({ children, dark }) => (
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div
     style={{
       fontSize: 11,
@@ -260,13 +258,38 @@ const Divider: React.FC<{ dark: boolean }> = ({ dark }) => (
   />
 );
 
+const StepHeading: React.FC<{ step: number; title: string; dark: boolean; badge?: string }> = ({ step, title, dark, badge }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px' }}>
+    <div style={{
+      width: 26, height: 26, borderRadius: '50%',
+      background: TEAL, color: '#fff',
+      fontSize: 13, fontWeight: 700,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0,
+    }}>
+      {step}
+    </div>
+    <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: dark ? '#e2e8f0' : '#1e293b' }}>
+      {title}
+    </h3>
+    {badge && (
+      <span style={{
+        fontSize: 11, fontWeight: 600, padding: '2px 8px',
+        borderRadius: 99, border: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
+        color: dark ? '#64748b' : '#94a3b8',
+      }}>
+        {badge}
+      </span>
+    )}
+  </div>
+);
+
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type TabKey = 'skill' | 'mcp' | 'http';
+type TabKey = 'mcp' | 'http';
 
 const TABS: { key: TabKey; label: string; sub: string }[] = [
-  { key: 'skill', label: 'Skill', sub: '任意 Agent · SKILL.md 标准' },
-  { key: 'mcp', label: 'MCP', sub: 'Cursor / Claude · stdio 接入' },
+  { key: 'mcp', label: 'MCP + Skill', sub: 'Cursor / Claude · 推荐方式' },
   { key: 'http', label: 'REST API', sub: '开发者 / 自定义集成' },
 ];
 
@@ -277,10 +300,10 @@ const AgentIntegrationPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const dark = themeMode === 'dark';
 
-  const [activeTab, setActiveTab] = useState<TabKey>('skill');
+  const [activeTab, setActiveTab] = useState<TabKey>('mcp');
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const skillUrl = `${origin}/agent/skill/SKILL.md`;
+  const skillUrl = `${origin}/agent/skill/GUANHE_DAILY.md`;
   const apiOrigin = suggestedApiOrigin();
 
   const installZh = useMemo(() => `帮我安装这个 skill：${skillUrl}`, [skillUrl]);
@@ -292,9 +315,8 @@ const AgentIntegrationPage: React.FC = () => {
         {
           mcpServers: {
             guanhe: {
-              command: '/opt/anaconda3/envs/yourEnv/bin/python',
+              command: '/path/to/your/python',
               args: ['-m', 'guanhe_mcp.server'],
-              cwd: '/path/to/guanhetech/tools/guanhe-mcp',
               env: {
                 GUANHE_TOKEN: 'ght_…',
                 GUANHE_BASE_URL: apiOrigin || 'https://your-api-host',
@@ -310,14 +332,14 @@ const AgentIntegrationPage: React.FC = () => {
   );
 
   const intentRows: IntentRow[] = [
-    { intent: '今天有什么值得关注的？', endpoint: 'GET /api/v1/agent/daily?since=24h' },
-    { intent: '这周的内容帮我总结一下', endpoint: 'GET /api/v1/agent/daily（默认 7d）' },
-    { intent: '帮我找找关于 NVDA 的内容', endpoint: 'GET /api/v1/agent/search?q=NVDA' },
-    { intent: '只看我上传的文件', endpoint: 'GET /api/v1/agent/daily?sources=pdf,image,text' },
-    { intent: '只看 Twitter 的内容', endpoint: 'GET /api/v1/agent/daily?sources=twitter' },
-    { intent: '看看今天的 Twitter 日报', endpoint: 'GET /api/v1/agent/reports/twitter-daily/latest' },
-    { intent: '5 月 10 号的 Twitter 日报', endpoint: 'GET /api/v1/agent/reports/twitter-daily/2026-05-10' },
-    { intent: '最新的 YouTube 日报', endpoint: 'GET /api/v1/agent/reports/youtube-daily/latest' },
+    { intent: '今天有什么值得关注的？', endpoint: 'daily_feed  since=24h' },
+    { intent: '这周的内容帮我总结一下', endpoint: 'daily_feed  since=7d（默认）' },
+    { intent: '帮我找找关于 NVDA 的内容', endpoint: 'search  q=NVDA' },
+    { intent: '只看我上传的文件', endpoint: 'daily_feed  sources=pdf,image,text' },
+    { intent: '只看 Twitter 的内容', endpoint: 'daily_feed  sources=twitter' },
+    { intent: '看看今天的 Twitter 日报', endpoint: 'twitter_daily_latest' },
+    { intent: '5 月 10 号的 Twitter 日报', endpoint: 'twitter_daily_by_date  date=2026-05-10' },
+    { intent: '最新的 YouTube 日报', endpoint: 'youtube_daily_latest' },
   ];
 
   const bg = dark ? DARK_BG : '#ffffff';
@@ -425,112 +447,113 @@ const AgentIntegrationPage: React.FC = () => {
 
       {/* ── Tab content ── */}
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px 40px 80px' }}>
-        {activeTab === 'skill' && (
+
+        {/* ══════════════ MCP + Skill tab ══════════════ */}
+        {activeTab === 'mcp' && (
           <div>
-            <SectionLabel dark={dark}>Skill · 任意 Agent · SKILL.md 标准</SectionLabel>
-            <SectionTitle dark={dark}>一份 Skill，任何 Agent 都能用</SectionTitle>
+            <SectionLabel>MCP · Cursor / Claude · stdio</SectionLabel>
+            <SectionTitle dark={dark}>三步接入，自然语言提问</SectionTitle>
             <SectionDesc dark={dark}>
-              SKILL.md 标准格式，跨 Cursor、Claude Code、Codex CLI 等任意 Agent 平台都能装。
-              装好后用最自然的中文一句话拿到 GuanHe 数据，不需要 API Key、不需要手动配 MCP。
+              MCP（Model Context Protocol）让 Cursor / Claude Desktop 以原生工具调用方式读取你的 GuanHe 数据。
+              完成前三步后再可选安装 Skill，实现自然语言自动路由。
             </SectionDesc>
 
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              安装
-            </h3>
-            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
-              在你的 Agent 里直接发这句话，Agent 会自己装到对应目录，不用你操心路径：
-            </p>
-            <CodeBlock dark={dark} label="中文（推荐）">
-              {installZh}
-            </CodeBlock>
-            <div style={{ height: 10 }} />
-            <CodeBlock dark={dark} label="English">
-              {installEn}
-            </CodeBlock>
-
-            <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <a
-                href="/agent/skill/SKILL.md"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 13,
-                  color: TEAL,
-                  textDecoration: 'none',
-                }}
+            {/* Step 1 */}
+            <StepHeading step={1} title="获取 Personal Access Token (PAT)" dark={dark} />
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 12px' }}>
+              在「用户菜单 →{' '}
+              <button
+                onClick={() => navigate('/settings/api-keys')}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: TEAL, fontSize: 14, textDecoration: 'underline' }}
               >
-                <LinkOutlined /> 查看 SKILL.md 原文
-              </a>
+                API Keys
+              </button>
+              」页面生成一个 PAT，复制以{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>ght_</code> 开头的字符串备用。
+            </p>
+
+            <div style={{ height: 32 }} />
+
+            {/* Step 2 */}
+            <StepHeading step={2} title="安装 guanhe-mcp 包" dark={dark} />
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
+              在<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>本地 Cursor / Claude Desktop 所在机器</strong>上执行。
+              直接从服务器下载安装，无需 GitHub 访问权限：
+            </p>
+            <CodeBlock dark={dark} label="终端">
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe-mcp.whl"`}
+            </CodeBlock>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
+              安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
+            </p>
+
+            <div style={{ height: 32 }} />
+
+            {/* Step 3 */}
+            <StepHeading step={3} title="配置 Cursor mcp.json" dark={dark} />
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
+              编辑 <code style={{ color: TEAL, fontSize: 13 }}>~/.cursor/mcp.json</code>，将{' '}
+              <code style={{ color: TEAL, fontSize: 13 }}>command</code> 替换为上一步查到的 Python 绝对路径
+              （Cursor 子进程不继承 PATH，必须填绝对路径）：
+            </p>
+            <CodeBlock dark={dark} label="~/.cursor/mcp.json">
+              {mcpJson}
+            </CodeBlock>
+            <div style={{
+              marginTop: 12,
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: dark ? DARK_SURFACE : '#f8fafc',
+              border: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
+              fontSize: 13.5,
+              color: dark ? '#94a3b8' : '#475569',
+              lineHeight: 1.6,
+            }}>
+              <strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>GUANHE_TOKEN</strong>
+              {' '}— 填第一步复制的 PAT（<code style={{ fontSize: 12, color: TEAL }}>ght_…</code>）
+              <br />
+              <strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>GUANHE_BASE_URL</strong>
+              {' '}— 服务公网地址，不加结尾斜杠，如{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>{apiOrigin || 'https://your-host'}</code>
             </div>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '10px 0 0' }}>
+              保存后<strong>完全退出 Cursor 再重开</strong>（Reload Window 不会重启 MCP 子进程）。
+              在 MCP 面板确认 <code style={{ fontSize: 12, color: TEAL }}>guanhe</code> 绿勾后即可直接调用工具。
+            </p>
 
             <Divider dark={dark} />
 
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              触发示例
+            {/* 数据范围说明 */}
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              数据范围
             </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 12px', lineHeight: 1.65 }}>
+              MCP 工具只返回当前 PAT 所属账号有权限访问的数据，包含以下三类：
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
               {[
-                '今天有什么值得关注的？',
-                '帮我看看最近一周的 Daily',
-                '搜索我关注的内容里有没有关于英伟达的',
-                '我上传的文件里有什么新东西',
-                '只看 Twitter 上的内容',
-                '帮我看看今天的 Twitter 日报',
-                '最新的 YouTube 日报是什么',
-              ].map((t) => (
-                <PromptItem key={t} text={t} dark={dark} />
+                { icon: '📁', title: '自己上传的文件', desc: 'PDF、图片、音频、文档等，经平台处理后的内容' },
+                { icon: '🔗', title: '他人分享给你的文件', desc: '其他用户明确分享到你账号的上传内容' },
+                { icon: '📡', title: '已启用的 Feed 订阅', desc: '订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用（Disabled）的订阅不在结果中' },
+              ].map(({ icon, title, desc }) => (
+                <div key={title} style={{
+                  display: 'flex', gap: 12, padding: '12px 14px',
+                  borderRadius: 8,
+                  border: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
+                  background: dark ? DARK_SURFACE : '#f8fafc',
+                }}>
+                  <span style={{ fontSize: 18, lineHeight: 1.4 }}>{icon}</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: dark ? '#e2e8f0' : '#1e293b', marginBottom: 2 }}>{title}</div>
+                    <div style={{ fontSize: 13, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.5 }}>{desc}</div>
+                  </div>
+                </div>
               ))}
             </div>
 
             <Divider dark={dark} />
 
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              Skill 内部能做的事
-            </h3>
-            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 16px' }}>
-              Skill 根据用户意图智能分流端点。<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>默认走时间线</strong>；
-              用户明确说"上传的文件"才加 <code style={{ fontSize: 12, color: TEAL }}>sources=pdf</code>，
-              明确说"日报"才调日报端点。
-            </p>
-            <IntentTable rows={intentRows} dark={dark} />
-          </div>
-        )}
-
-        {activeTab === 'mcp' && (
-          <div>
-            <SectionLabel dark={dark}>MCP · Cursor / Claude · stdio</SectionLabel>
-            <SectionTitle dark={dark}>原生 MCP 工具调用</SectionTitle>
-            <SectionDesc dark={dark}>
-              对于支持 MCP 的客户端（Cursor、Claude Desktop），运行仓库里的{' '}
-              <code style={{ fontSize: 13, color: TEAL }}>guanhe-mcp</code> stdio 服务，
-              可以直接在 Agent 面板里点名调用任何工具。
-            </SectionDesc>
-
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              第一步：安装 Python 包
-            </h3>
-            <CodeBlock dark={dark} label="在你的 Python 环境里执行">
-              {`# 切到项目目录\ncd /path/to/guanhetech\n\n# 安装（rcTool 环境为例）\npip install httpx\npip install -e tools/guanhe-mcp`}
-            </CodeBlock>
-
-            <div style={{ height: 28 }} />
-
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              第二步：配置 Cursor mcp.json
-            </h3>
-            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
-              编辑 <code style={{ color: TEAL, fontSize: 13 }}>~/.cursor/mcp.json</code>，
-              <code style={{ color: TEAL, fontSize: 13 }}>command</code> 必须填你实际的 Python 绝对路径：
-            </p>
-            <CodeBlock dark={dark} label="~/.cursor/mcp.json">
-              {mcpJson}
-            </CodeBlock>
-
-            <div style={{ height: 28 }} />
-
+            {/* 可用工具 */}
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
               可用工具
             </h3>
@@ -539,7 +562,6 @@ const AgentIntegrationPage: React.FC = () => {
               rows={[
                 { intent: 'daily_feed', endpoint: '获取每日时间线（Feeds + 上传文件合并）' },
                 { intent: 'search', endpoint: '全文关键词搜索' },
-                { intent: 'daily_item', endpoint: '按 id 获取单条内容' },
                 { intent: 'twitter_daily_latest', endpoint: '最新 Twitter 日报' },
                 { intent: 'twitter_daily_by_date', endpoint: '指定日期的 Twitter 日报' },
                 { intent: 'twitter_daily_list', endpoint: '列出所有 Twitter 日报' },
@@ -550,22 +572,114 @@ const AgentIntegrationPage: React.FC = () => {
 
             <Divider dark={dark} />
 
-            {/* Notice */}
-            <div style={{ borderLeft: `3px solid ${dark ? DARK_BORDER : '#e2e8f0'}`, paddingLeft: 16 }}>
-              <p style={{ margin: '0 0 10px', fontSize: 14, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.6 }}>
-                <strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>GUANHE_TOKEN</strong> 填从「用户菜单 → API Keys」生成的 PAT（以 <code style={{ color: TEAL, fontSize: 12 }}>ght_</code> 开头）。
-              </p>
-              <p style={{ margin: 0, fontSize: 14, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.6 }}>
-                <strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>GUANHE_BASE_URL</strong> 填 API 服务地址，结尾不加斜杠，如{' '}
-                <code style={{ color: TEAL, fontSize: 12 }}>{apiOrigin || 'http://localhost:8000'}</code>。
-              </p>
+            {/* Step 4 optional: Skill */}
+            <StepHeading step={4} title="安装 Skill（可选）— 自然语言路由" dark={dark} badge="可选" />
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 12px', lineHeight: 1.65 }}>
+              Skill 是运行在 MCP 之上的语义路由层——它告诉 Agent「用户说"今天有啥新闻"时应该调用哪个工具、传什么参数」。
+              装完后你无需记忆工具名，直接用中文提问即可。
+            </p>
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
+              在 Agent 对话里发这句话，Agent 会自动下载并安装：
+            </p>
+            <CodeBlock dark={dark} label="中文（推荐）">
+              {installZh}
+            </CodeBlock>
+            <div style={{ height: 10 }} />
+            <CodeBlock dark={dark} label="English">
+              {installEn}
+            </CodeBlock>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <a
+                href="/agent/skill/GUANHE_DAILY.md"
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: TEAL, textDecoration: 'none' }}
+              >
+                <LinkOutlined /> 查看 GUANHE_DAILY.md 原文
+              </a>
+            </div>
+
+            <div style={{ height: 32 }} />
+
+            {/* 自然语言路由表 */}
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              自然语言 → 工具路由
+            </h4>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 12px' }}>
+              Skill 根据用户语义自动选择工具和参数，用户无需知道工具名称。
+            </p>
+            <IntentTable rows={intentRows} dark={dark} />
+
+            <div style={{ height: 32 }} />
+
+            {/* daily_feed 参数详情 */}
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              daily_feed / search 常用参数
+            </h4>
+            <IntentTable
+              dark={dark}
+              rows={[
+                { intent: 'since', endpoint: '时间窗口：24h / 7d / 30d / ISO 日期。默认 7d' },
+                { intent: 'sources', endpoint: '来源过滤（逗号分隔），见下方来源类型表' },
+                { intent: 'q', endpoint: '关键词过滤，如 NVDA、英伟达' },
+                { intent: 'ticker', endpoint: '股票代码过滤，如 NVDA' },
+                { intent: 'limit', endpoint: '返回条数，默认 20，最大 100' },
+                { intent: 'cursor', endpoint: '翻页游标，从上次返回的 next_cursor 获取' },
+              ]}
+            />
+
+            <div style={{ height: 32 }} />
+
+            {/* sources 类型参考 */}
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              sources= 参数可用值
+            </h4>
+            <IntentTable
+              dark={dark}
+              rows={[
+                { intent: 'twitter', endpoint: '订阅的 Twitter Feed' },
+                { intent: 'youtube / youtube_feed', endpoint: '订阅的 YouTube Feed' },
+                { intent: 'web / news / podcast', endpoint: '订阅的网页 / 新闻 / 播客 Feed' },
+                { intent: 'pdf', endpoint: '用户上传的 PDF' },
+                { intent: 'image', endpoint: '用户上传的图片' },
+                { intent: 'audio', endpoint: '用户上传的音频' },
+                { intent: 'text', endpoint: '用户上传的文本文件' },
+              ]}
+            />
+
+            <div style={{ height: 32 }} />
+
+            {/* 回答格式指引 */}
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              回答格式指引
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                '用 3–8 条要点，每条格式：标题 — 一句话摘要（来源）[链接]',
+                '提到投资标的时，只引用返回数据中 tickers 字段的内容，不自行推断股票代码',
+                '内容较多时，先给整体概述，再分类展开（「上传文件」「Twitter」「YouTube」各自有什么）',
+                '没有查到内容时，如实告知并建议用户检查订阅设置或扩大时间范围',
+              ].map((tip, i) => (
+                <div key={i} style={{
+                  display: 'flex', gap: 10, padding: '10px 14px',
+                  borderRadius: 8,
+                  border: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
+                  fontSize: 13.5,
+                  color: dark ? '#cbd5e1' : '#334155',
+                  lineHeight: 1.55,
+                }}>
+                  <span style={{ color: TEAL, fontWeight: 700, flexShrink: 0 }}>{i + 1}.</span>
+                  <span>{tip}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
+        {/* ══════════════ REST API tab ══════════════ */}
         {activeTab === 'http' && (
           <div>
-            <SectionLabel dark={dark}>REST API · 开发者 · OpenAPI</SectionLabel>
+            <SectionLabel>REST API · 开发者 · OpenAPI</SectionLabel>
             <SectionTitle dark={dark}>直接对接 JSON API</SectionTitle>
             <SectionDesc dark={dark}>
               Agent API 全部只读，路径前缀{' '}
@@ -589,7 +703,6 @@ const AgentIntegrationPage: React.FC = () => {
               dark={dark}
               rows={[
                 { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线，支持 since / sources / ticker / q / limit / cursor' },
-                { intent: 'GET /api/v1/agent/daily/{id}', endpoint: '单条内容，id 形如 upload_123 / feed_456' },
                 { intent: 'GET /api/v1/agent/search?q=…', endpoint: '全文搜索，支持 since / sources / ticker' },
                 { intent: 'GET /api/v1/agent/reports/twitter-daily/latest', endpoint: '最新 Twitter 日报' },
                 { intent: 'GET /api/v1/agent/reports/twitter-daily/YYYY-MM-DD', endpoint: '指定日期 Twitter 日报' },
@@ -641,7 +754,7 @@ const AgentIntegrationPage: React.FC = () => {
           </div>
           <p style={{ margin: '0 0 6px' }}>
             <strong style={{ color: dark ? '#94a3b8' : '#475569' }}>安全</strong>
-            {' '}— PAT 等同于密码，不要分享或提交到代码仓库。可在「用户菜单 → {''}
+            {' '}— PAT 等同于密码，不要分享或提交到代码仓库。可在「用户菜单 →{' '}
             <button
               onClick={() => navigate('/settings/api-keys')}
               style={{

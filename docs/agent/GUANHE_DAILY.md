@@ -1,6 +1,17 @@
-# GuanHe Agent Skill
+# GuanHe Daily — Agent Skill
 
 这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）和你自己上传的文件（PDF、文档、图片等）——并根据你的自然语言问题给出总结和洞察。
+
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+
+---
+
+## 数据范围
+
+MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
+- **自己上传的文件**：PDF、图片、音频、文档等，经平台处理后的内容
+- **他人分享给你的文件**：其他用户明确分享到你账号的上传内容
+- **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用（Disabled）的订阅不在结果中
 
 ---
 
@@ -51,9 +62,6 @@
 
 参数：`q`（必填）、`since`、`sources`、`ticker`、`limit`、`cursor`（同上）。
 
-### `daily_item` — 获取单条内容
-按 id 获取某条具体内容，id 形如 `upload_123`（上传文件）或 `feed_456`（Feed 订阅）。
-
 ### `twitter_daily_latest` / `twitter_daily_by_date` / `twitter_daily_list`
 获取 Twitter 每日汇总报告。`by_date` 参数为 `date`（`YYYY-MM-DD`）。
 
@@ -64,13 +72,13 @@
 
 ## 来源类型参考
 
-`source` 字段含义（用于 `sources=` 参数过滤）：
+`sources=` 参数可用的值（逗号分隔多个）：
 
 | source 值 | 含义 |
 |---|---|
 | `twitter` | 订阅的 Twitter Feed |
 | `youtube` / `youtube_feed` | 订阅的 YouTube Feed |
-| `web` / `news` / `podcast` | 订阅的网页/新闻/播客 Feed |
+| `web` / `news` / `podcast` | 订阅的网页 / 新闻 / 播客 Feed |
 | `pdf` | 用户上传的 PDF |
 | `image` | 用户上传的图片 |
 | `audio` | 用户上传的音频 |
