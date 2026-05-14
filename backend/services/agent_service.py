@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
@@ -31,6 +32,16 @@ from backend.utils.logger import get_logger
 logger = get_logger("agent_service")
 
 _MD_LIGHT = re.compile(r"[*_#`]+")
+
+# Field-level truncation caps for Agent v1 detail. Kept generous enough to give an LLM
+# real working material (~8K tokens per field) but bounded so a single drill-down can't
+# blow up a 32K/128K context window when several items are fetched in parallel.
+_MAX_CONTENT_CHARS = 32000
+_MAX_TRANSCRIPT_CHARS = 32000
+_MAX_EXCERPT_CHARS = 4000
+
+# Upload file_type values that may carry a flattenable ASR transcript.
+_UPLOAD_TRANSCRIPT_TYPES = {"youtube", "audio", "podcast"}
 
 
 def _strip_md_light(text: str) -> str:
@@ -178,16 +189,121 @@ def _daily_feed_item_to_agent(d: DailyFeedItem) -> AgentDailyItem:
     )
 
 
-def _detail_to_agent_detail(d: DailyItemDetail) -> AgentDailyItemDetail:
+def _truncate_field(text: Optional[str], limit: int) -> Tuple[Optional[str], bool]:
+    """Cut `text` to `limit` chars; return (value_or_none, was_truncated)."""
+    if not text:
+        return None, False
+    if len(text) > limit:
+        return text[:limit], True
+    return text, False
+
+
+def _flatten_asr_text(asr: Any) -> Optional[str]:
+    """Flatten `file_processing_details.asr_with_diarization` JSONB to plain text.
+
+    Mirrors the frontend's `flattenAsr` (web-frontend/src/components/daily/dailyPreviewUtils.ts):
+    prefer `sentences[].text`, fall back to `transcript[]` (string or {text}).
+    Returned text joins one line per sentence.
+    """
+    if not isinstance(asr, dict):
+        return None
+    sentences = asr.get("sentences")
+    if isinstance(sentences, list):
+        lines = [
+            str(s.get("text") or "").strip()
+            for s in sentences
+            if isinstance(s, dict)
+        ]
+        lines = [t for t in lines if t]
+        if lines:
+            return "\n".join(lines)
+    transcript_arr = asr.get("transcript")
+    if isinstance(transcript_arr, list):
+        lines = []
+        for s in transcript_arr:
+            if isinstance(s, str):
+                t = s.strip()
+            elif isinstance(s, dict):
+                t = str(s.get("text") or "").strip()
+            else:
+                t = ""
+            if t:
+                lines.append(t)
+        if lines:
+            return "\n".join(lines)
+    return None
+
+
+def _fetch_upload_asr_text(cursor, file_id: int) -> Optional[str]:
+    """Pull `asr_with_diarization` for an upload file and flatten to plain text."""
+    cursor.execute(
+        "SELECT asr_with_diarization FROM file_processing_details WHERE id = %s",
+        (file_id,),
+    )
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        return None
+    raw = row[0]
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return None
+    return _flatten_asr_text(raw)
+
+
+def _fetch_feed_transcript_text(
+    cursor, content_db_id: int, user_id: int
+) -> Optional[str]:
+    """Pull YouTube transcript for a subscription_content row.
+
+    Same precedence as `GET /api/subscriptions/contents/{id}/transcript`:
+    `transcript_cleaned` first, fall back to raw `transcript`.
+    """
+    cursor.execute(
+        """
+        SELECT transcript_cleaned, transcript
+        FROM subscription_content
+        WHERE id = %s AND %s = ANY(user_ids)
+        """,
+        (content_db_id, user_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    cleaned = (row[0] or "").strip()
+    raw = (row[1] or "").strip()
+    text = cleaned or raw
+    return text or None
+
+
+def _detail_to_agent_detail(
+    d: DailyItemDetail, transcript_text: Optional[str] = None
+) -> AgentDailyItemDetail:
     base = _daily_feed_item_to_agent(d)
-    excerpt: Optional[str] = None
+
+    raw_body: Optional[str] = None
     if d.upload and d.upload.content:
-        excerpt = _strip_md_light(str(d.upload.content)[:4000])
+        raw_body = str(d.upload.content)
     elif d.feed and d.feed.content:
-        excerpt = _strip_md_light(str(d.feed.content)[:4000])
+        raw_body = str(d.feed.content)
+
+    content_field, content_truncated = _truncate_field(raw_body, _MAX_CONTENT_CHARS)
+    transcript_field, transcript_truncated = _truncate_field(
+        transcript_text, _MAX_TRANSCRIPT_CHARS
+    )
+
+    excerpt: Optional[str] = None
+    if raw_body:
+        excerpt = _strip_md_light(raw_body[:_MAX_EXCERPT_CHARS])
+
     return AgentDailyItemDetail(
         **base.model_dump(),
         body_excerpt=excerpt,
+        content=content_field,
+        content_truncated=content_truncated,
+        transcript=transcript_field,
+        transcript_truncated=transcript_truncated,
     )
 
 
@@ -307,11 +423,28 @@ class AgentService:
             raise HTTPException(status_code=500, detail="数据库连接失败")
         try:
             cur = conn.cursor()
+            transcript_text: Optional[str] = None
             if src == "upload":
                 detail = daily_api._fetch_upload_detail(cur, numeric_id, user)
+                if (
+                    detail.upload
+                    and (detail.upload.file_type_raw or "").lower()
+                    in _UPLOAD_TRANSCRIPT_TYPES
+                ):
+                    transcript_text = _fetch_upload_asr_text(
+                        cur, detail.upload.file_id
+                    )
             else:
                 detail = daily_api._fetch_feed_detail(cur, numeric_id, user)
-            return _detail_to_agent_detail(detail)
+                if (
+                    detail.feed
+                    and detail.feed.channel_type == "youtube"
+                    and detail.feed.has_transcript
+                ):
+                    transcript_text = _fetch_feed_transcript_text(
+                        cur, detail.feed.content_db_id, user.user_id
+                    )
+            return _detail_to_agent_detail(detail, transcript_text)
         except HTTPException:
             raise
         except Exception as exc:

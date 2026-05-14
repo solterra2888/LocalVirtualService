@@ -87,10 +87,24 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "daily_item",
-        "description": "Single Daily card by id, e.g. upload_123 or feed_456.",
+        "description": (
+            "Drill down into a single Daily item to read its full body and transcript. "
+            "Pass `id` from a prior daily_feed / search result (e.g. 'upload_123' or 'feed_456'). "
+            "Returns the same fields as daily_feed plus: `content` (main body — "
+            "file_processing_details.content for uploads, subscription_content.content for "
+            "twitter/news, the YouTube description for youtube_feed) and `transcript` "
+            "(YouTube transcript_cleaned or flattened ASR for audio/youtube uploads). "
+            "Use this whenever the user asks for 'details', 'full text', 'original', "
+            "'transcript', or asks a follow-up question that the list-level summary can't answer."
+        ),
         "inputSchema": {
             "type": "object",
-            "properties": {"id": {"type": "string"}},
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Item id from a prior daily_feed/search response, e.g. 'feed_88247' or 'upload_123'.",
+                }
+            },
             "required": ["id"],
         },
     },

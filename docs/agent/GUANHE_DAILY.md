@@ -35,12 +35,28 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 | 我上传的文件里有没有关于 XX 的内容 | `search` | `q=XX, sources=pdf` |
 | 只看 Twitter 上的内容 | `daily_feed` | `sources=twitter` |
 | 只看我上传的文件 | `daily_feed` | `sources=pdf,image,text,audio` |
+| **这条具体讲了什么 / 展开第 N 条 / 给我看原文** | **`daily_item`** | **`id`（取上一轮列表里的 id）** |
+| **那个 Bloomberg / YouTube 视频的 transcript 是什么** | **`daily_item`** | **`id`，读返回里的 `transcript` 字段** |
+| **那份 PDF / 我上传的研报里关于 XX 怎么说** | **先 `search` 拿 id → `daily_item`** | **`q=XX` → `id`** |
 | 帮我看看今天的 Twitter 日报 | `twitter_daily_latest` | — |
 | 帮我看看 5 月 10 号的 Twitter 日报 | `twitter_daily_by_date` | `date=2026-05-10` |
 | 帮我看看最新的 YouTube 日报 | `youtube_daily_latest` | — |
 | 有哪些日报可以看？ | `twitter_daily_list` | — |
 
 > **重要**：用户不会说"调用 daily_feed"——他们只会说"帮我看看今天的内容"。AI 助手负责根据语义自动选择正确的工具和参数。
+
+---
+
+## 列表 → 详情下钻模式（核心）
+
+绝大多数追问都遵循这条路径：
+
+1. 第一轮 `daily_feed` / `search` 返回**轻量列表**（标题 + 摘要 + 链接 + id + tickers/tags）；
+2. AI 助手把整段列表（**特别是每条的 `id`**）记在工作记忆里展示给用户；
+3. 用户对其中一条追问"具体讲了什么 / 全文 / 字幕 / 给我细节"时，**直接用上一轮列表里的 `id` 调 `daily_item`**，**不要**再调 `daily_feed` / `search` 兜圈子；
+4. 如果上下文里已经找不到 id（对话太长被压缩），先 `search` 用关键词重定位拿到 id，再 `daily_item`。
+
+> **何时主动下钻**：用户的问题用列表里的 `summary` 回答不了（要原文、要原话、要时间戳、要数字细节、要"具体怎么说"），就该调 `daily_item`。
 
 ---
 
@@ -61,6 +77,24 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 在所有内容（标题、摘要、正文）中做全文搜索。
 
 参数：`q`（必填）、`since`、`sources`、`ticker`、`limit`、`cursor`（同上）。
+
+### `daily_item` — 单条详情下钻
+按 `id` 取**一条** Daily 内容的完整字段，用于用户对某条追问细节、要原文 / 字幕 / 全文时。
+
+参数：
+- `id`（必填）：来自 `daily_feed` / `search` 返回的 `id`，形如 `feed_88247` 或 `upload_123`。
+
+返回（在列表条目字段之外，额外有）：
+- `content`：主正文。
+  - `upload` → `file_processing_details.content`（Markdown 正文 / OCR / 网页解析 / 笔记）；
+  - `twitter` / `news` → `subscription_content.content`（推文 / 新闻全文）；
+  - `youtube`（订阅）→ `subscription_content.content`（视频描述）。
+- `transcript`：纯文本字幕 / 转写。
+  - `youtube`（订阅）→ `subscription_content.transcript_cleaned`（回退 `transcript`）；
+  - `upload` 的 `youtube` / `audio` / `podcast` → `file_processing_details.asr_with_diarization` 拍平成行；
+  - 没有字幕的类型（推文 / PDF 等）= `null`。
+- `content_truncated` / `transcript_truncated`：`true` 表示字段被截断，需要全文请引导用户跳 `url`。
+- `body_excerpt`（向后兼容字段，旧客户端用，新客户端优先 `content`）。
 
 ### `twitter_daily_latest` / `twitter_daily_by_date` / `twitter_daily_list`
 获取 Twitter 每日汇总报告。`by_date` 参数为 `date`（`YYYY-MM-DD`）。
@@ -86,7 +120,9 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 
 ---
 
-## 返回结构（单条内容）
+## 返回结构
+
+### 列表条目（`daily_feed` / `search`）
 
 ```json
 {
@@ -102,6 +138,29 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 }
 ```
 
+### 详情条目（`daily_item`）
+
+在列表字段基础上额外包含 `content` / `transcript` / `*_truncated`：
+
+```json
+{
+  "id": "feed_88247",
+  "title": "Horizons Middle East — Trump China Visit Special",
+  "summary": "...",
+  "url": "https://youtube.com/watch?v=...",
+  "source": "youtube",
+  "author": "Bloomberg Television",
+  "published_at": "2026-05-13T05:30:00+00:00",
+  "tickers": ["NVDA.US", "AAPL.US", "TSLA.US", "BLK.US"],
+  "tags": ["China", "Tariffs", "CEO"],
+  "content": "本期节目讨论特朗普访华代表团构成 ...",
+  "content_truncated": false,
+  "transcript": "Welcome to Horizons Middle East ...\nJensen Huang said NVIDIA will ...",
+  "transcript_truncated": true,
+  "body_excerpt": "本期节目讨论特朗普访华代表团构成 ..."
+}
+```
+
 ---
 
 ## 回答格式指引
@@ -111,6 +170,13 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 2. 提到投资标的时，只引用 JSON 里 `tickers` 字段的内容，不自行推断股票代码
 3. 若内容较多，先给整体概述，再分类展开（如：「上传文件」「Twitter」「YouTube」各自有什么）
 4. 没有查到内容时，如实告知并建议用户检查订阅设置或扩大时间范围
+
+**追问 / 下钻场景的呈现方式**：
+
+5. 用户对某条追问"具体讲了什么 / 全文 / 字幕"时，先调 `daily_item` 拿 `content` / `transcript`；
+6. 围绕 `content` / `transcript` 字段**直接引用**关键段落或原话，避免再说一遍 `summary`；
+7. 引用 transcript 时优先标注时间戳（若可识别）和讲话人；同时附 `url`，方便用户跳去原视频核对；
+8. 看到 `content_truncated: true` 或 `transcript_truncated: true` 时，明确告知用户"以上为节选，完整内容请打开链接"，不要假装看到了全部。
 
 ---
 

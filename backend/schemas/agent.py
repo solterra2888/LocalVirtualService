@@ -43,7 +43,42 @@ class AgentDailyFeedResponse(BaseModel):
 class AgentDailyItemDetail(AgentDailyItem):
     body_excerpt: Optional[str] = Field(
         None,
-        description="Short excerpt of raw body when available (agents should prefer summary + url)",
+        description=(
+            "[Deprecated, kept for backward compatibility] Short, lightly-stripped excerpt "
+            "of the main body (~4000 chars). Prefer `content` / `transcript` below."
+        ),
+    )
+
+    content: Optional[str] = Field(
+        None,
+        description=(
+            "Main body for the item, suitable for LLM consumption. "
+            "Mapping by source: "
+            "upload (pdf/word/web/text/image/audio/youtube/podcast) → "
+            "file_processing_details.content (Markdown / OCR / web parse / notes); "
+            "twitter / news → subscription_content.content; "
+            "youtube (feed) → subscription_content.content (the YouTube description). "
+            "Truncated when very long (see `content_truncated`)."
+        ),
+    )
+    content_truncated: bool = Field(
+        False,
+        description="True when `content` was truncated; open `url` for the full original.",
+    )
+
+    transcript: Optional[str] = Field(
+        None,
+        description=(
+            "Plain-text transcript / spoken-word body. "
+            "youtube_feed → subscription_content.transcript_cleaned (fallback transcript). "
+            "Upload youtube / audio / podcast → flattened text from "
+            "file_processing_details.asr_with_diarization. "
+            "Null for items that don't have a transcript (e.g. tweets, PDFs)."
+        ),
+    )
+    transcript_truncated: bool = Field(
+        False,
+        description="True when `transcript` was truncated; open `url` for the full original.",
     )
 
 
