@@ -391,7 +391,7 @@ const MobileDailyPageInner: React.FC = () => {
         <Input
           allowClear
           prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
-          placeholder="Search tickers, themes..."
+          placeholder="Search... (space=AND, OR=any)"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           style={{

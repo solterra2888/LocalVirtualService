@@ -19,6 +19,7 @@ Daily 聚合视图 API.
 import json
 import math
 import re
+import shlex
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -348,6 +349,36 @@ _FEED_SQL = """
 """
 
 
+def _parse_q(q: str) -> List[Dict[str, Any]]:
+    """将用户输入的 q 字符串解析为 token 组列表，用于构造多词 ILIKE 查询。
+
+    支持的语法：
+      - 空格分隔 = AND（每个词都必须命中）
+      - OR（大写）分隔 = OR（任一词命中即可）
+      - "双引号短语" = 作为一个整体匹配（短语内部的空格不拆分）
+      - 混合：Trump OR "北京 会晤" 先按 OR 分组，每组内再按空格 AND
+
+    返回结构：[{"op": "or"|"and", "terms": [str, ...]}]
+    - 含 OR 关键字：整体为一个 OR 组
+    - 不含 OR：整体为一个 AND 组
+    """
+    try:
+        tokens = shlex.split(q)
+    except ValueError:
+        tokens = q.split()
+
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return []
+
+    has_or = any(t.upper() == "OR" for t in tokens)
+    if has_or:
+        terms = [t for t in tokens if t.upper() != "OR"]
+        return [{"op": "or", "terms": terms}] if terms else []
+    else:
+        return [{"op": "and", "terms": tokens}]
+
+
 def _build_filter_clauses(
     *,
     date_from: Optional[datetime],
@@ -402,23 +433,33 @@ def _build_filter_clauses(
             feed_parts.append("AND sc.channel_type IN %(feed_subtypes)s")
 
     if q:
-        params["q_like"] = f"%{q}%"
-        upload_parts.append(
-            """AND (
-                COALESCE(fpd.display_name, '') ILIKE %(q_like)s
-                OR COALESCE(fpd.filename, '') ILIKE %(q_like)s
-                OR COALESCE(ft.summary, '') ILIKE %(q_like)s
-                OR COALESCE(fpd.content, '') ILIKE %(q_like)s
-            )"""
-        )
-        feed_parts.append(
-            """AND (
-                COALESCE(sc.title, '') ILIKE %(q_like)s
-                OR COALESCE(sc.author_name, '') ILIKE %(q_like)s
-                OR COALESCE(sct.summary, '') ILIKE %(q_like)s
-                OR COALESCE(sc.content, '') ILIKE %(q_like)s
-            )"""
-        )
+        groups = _parse_q(q)
+        if groups:
+            upload_group_clauses: List[str] = []
+            feed_group_clauses: List[str] = []
+            for gi, group in enumerate(groups):
+                sub_u: List[str] = []
+                sub_f: List[str] = []
+                for ti, term in enumerate(group["terms"]):
+                    key = f"q_{gi}_{ti}"
+                    params[key] = f"%{term}%"
+                    sub_u.append(
+                        f"(COALESCE(fpd.display_name, '') ILIKE %({key})s"
+                        f" OR COALESCE(fpd.filename, '') ILIKE %({key})s"
+                        f" OR COALESCE(ft.summary, '') ILIKE %({key})s"
+                        f" OR COALESCE(fpd.content, '') ILIKE %({key})s)"
+                    )
+                    sub_f.append(
+                        f"(COALESCE(sc.title, '') ILIKE %({key})s"
+                        f" OR COALESCE(sc.author_name, '') ILIKE %({key})s"
+                        f" OR COALESCE(sct.summary, '') ILIKE %({key})s"
+                        f" OR COALESCE(sc.content, '') ILIKE %({key})s)"
+                    )
+                joiner = " OR " if group["op"] == "or" else " AND "
+                upload_group_clauses.append("(" + joiner.join(sub_u) + ")")
+                feed_group_clauses.append("(" + joiner.join(sub_f) + ")")
+            upload_parts.append("AND (" + " AND ".join(upload_group_clauses) + ")")
+            feed_parts.append("AND (" + " AND ".join(feed_group_clauses) + ")")
 
     if tickers:
         # ticker 字段为 JSONB 数组（如 ["NVDA.US", "TSLA.US"]）

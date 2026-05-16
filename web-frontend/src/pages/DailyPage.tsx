@@ -16,7 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, ConfigProvider, Empty, Input, Spin, Tooltip, Typography, message, theme as antdTheme } from 'antd';
-import { SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import {
   ALL_DAILY_SOURCE_SUBTYPES,
@@ -471,7 +471,29 @@ const DailyPageInner: React.FC = () => {
                 allowClear
                 size="large"
                 prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
-                placeholder="Search tickers, themes, titles or content..."
+                suffix={
+                  <Tooltip
+                    title={
+                      <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>搜索语法</div>
+                        <div><span style={{ opacity: 0.6 }}>空格</span> → AND，每个词都要出现</div>
+                        <div><span style={{ opacity: 0.6 }}>OR（大写）</span> → 任一词命中即可</div>
+                        <div><span style={{ opacity: 0.6 }}>"短语"</span> → 精确子串匹配</div>
+                        <div style={{ marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 6, opacity: 0.75 }}>
+                          示例：<br />
+                          <code style={{ fontSize: 11 }}>美国 访华</code> — 同时含两词<br />
+                          <code style={{ fontSize: 11 }}>美国 OR 访华 OR Trump</code> — 含任一<br />
+                          <code style={{ fontSize: 11 }}>"Air Force One"</code> — 精确短语
+                        </div>
+                      </div>
+                    }
+                    overlayStyle={{ maxWidth: 280 }}
+                    placement="bottomRight"
+                  >
+                    <QuestionCircleOutlined style={{ color: colors.textMuted, cursor: 'pointer', fontSize: 14 }} />
+                  </Tooltip>
+                }
+                placeholder="Search... (space=AND, OR=any, &quot;phrase&quot;=exact)"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 style={{
@@ -540,9 +562,11 @@ const DailyPageInner: React.FC = () => {
           <Empty
             description={
               <span style={{ color: colors.textMuted }}>
-                {searchQuery || activeSubtypes.length
-                  ? 'No items match your filters'
-                  : 'No items yet — upload a file or subscribe to a feed to start your Daily.'}
+                {searchQuery
+                  ? <>No results for <strong>"{searchQuery}"</strong> — try fewer words, or join terms with <strong>OR</strong></>
+                  : activeSubtypes.length
+                    ? 'No items match your filters'
+                    : 'No items yet — upload a file or subscribe to a feed to start your Daily.'}
               </span>
             }
             style={{ padding: '60px 0' }}

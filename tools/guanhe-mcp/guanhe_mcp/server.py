@@ -72,7 +72,12 @@ _write_framed = _write_message
 TOOLS: List[Dict[str, Any]] = [
     {
         "name": "daily_feed",
-        "description": "Merged Daily timeline (uploads + feeds). Optional since (24h|7d|30d|ISO), sources (comma subtypes), q, ticker, limit, cursor.",
+        "description": (
+            "Merged Daily timeline (uploads + feeds). "
+            "Optional since (24h|7d|30d|ISO), sources (comma subtypes), ticker, limit, cursor. "
+            "q syntax: space = AND, OR (uppercase) = any match, \"phrase\" = exact. "
+            "E.g. q=`美国 OR 访华` returns items matching either word."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -110,7 +115,17 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "search",
-        "description": "Search Daily (title/summary/body ILIKE).",
+        "description": (
+            "Search Daily content (title / summary / body). "
+            "q syntax: space = AND (all terms must match), "
+            "OR (uppercase) = any term matches, "
+            "double-quoted phrase = exact substring. "
+            "Examples: `美国 访华` (both words), "
+            "`美国 OR 访华 OR Trump` (any word), "
+            '`"Air Force One" China` (phrase + word). '
+            "IMPORTANT: pass one short keyword or a few keywords joined by OR — "
+            "never pass a full sentence or a long Boolean expression as a single token."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
