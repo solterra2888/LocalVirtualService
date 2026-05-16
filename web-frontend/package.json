@@ -49,7 +49,7 @@
     "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/pdf.worker.min.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "deploy": "CI=false react-scripts build && docker exec nginx nginx -s reload",
+    "deploy": "CI=false GENERATE_SOURCEMAP=false NODE_OPTIONS=--max-old-space-size=3072 react-scripts build && docker exec nginx nginx -s reload",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

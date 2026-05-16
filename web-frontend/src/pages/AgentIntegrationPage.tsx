@@ -129,8 +129,14 @@ const PromptItem: React.FC<{ text: string; dark: boolean }> = ({ text, dark }) =
   </div>
 );
 
-type IntentRow = { intent: string; endpoint: string };
-const IntentTable: React.FC<{ rows: IntentRow[]; dark: boolean }> = ({ rows, dark }) => (
+type IntentRow = { intent: string; endpoint: string; params?: string };
+const IntentTable: React.FC<{
+  rows: IntentRow[];
+  dark: boolean;
+  col1?: string;
+  col2?: string;
+  col3?: string;
+}> = ({ rows, dark, col1 = '用户怎么说', col2 = '调用的端点', col3 }) => (
   <div
     style={{
       borderRadius: 10,
@@ -152,7 +158,7 @@ const IntentTable: React.FC<{ rows: IntentRow[]; dark: boolean }> = ({ rows, dar
               borderBottom: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
             }}
           >
-            用户怎么说
+            {col1}
           </th>
           <th
             style={{
@@ -165,8 +171,23 @@ const IntentTable: React.FC<{ rows: IntentRow[]; dark: boolean }> = ({ rows, dar
               borderBottom: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
             }}
           >
-            调用的端点
+            {col2}
           </th>
+          {col3 && (
+            <th
+              style={{
+                padding: '9px 14px',
+                textAlign: 'left',
+                fontSize: 12,
+                fontWeight: 600,
+                color: dark ? '#94a3b8' : '#64748b',
+                letterSpacing: '0.05em',
+                borderBottom: `1px solid ${dark ? DARK_BORDER : '#e2e8f0'}`,
+              }}
+            >
+              {col3}
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -199,6 +220,19 @@ const IntentTable: React.FC<{ rows: IntentRow[]; dark: boolean }> = ({ rows, dar
             >
               {r.endpoint}
             </td>
+            {col3 && (
+              <td
+                style={{
+                  padding: '10px 14px',
+                  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                  fontSize: 12,
+                  color: dark ? '#94a3b8' : '#64748b',
+                  lineHeight: 1.5,
+                }}
+              >
+                {r.params ?? '—'}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -331,15 +365,33 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  const intentRows: IntentRow[] = [
-    { intent: '今天有什么值得关注的？', endpoint: 'daily_feed  since=24h' },
-    { intent: '这周的内容帮我总结一下', endpoint: 'daily_feed  since=7d（默认）' },
-    { intent: '帮我找找关于 NVDA 的内容', endpoint: 'search  q=NVDA' },
-    { intent: '只看我上传的文件', endpoint: 'daily_feed  sources=pdf,image,text' },
-    { intent: '只看 Twitter 的内容', endpoint: 'daily_feed  sources=twitter' },
-    { intent: '看看今天的 Twitter 日报', endpoint: 'twitter_daily_latest' },
-    { intent: '5 月 10 号的 Twitter 日报', endpoint: 'twitter_daily_by_date  date=2026-05-10' },
-    { intent: '最新的 YouTube 日报', endpoint: 'youtube_daily_latest' },
+  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致 */
+  const skillRoutingRows: IntentRow[] = [
+    { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
+    { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
+    { intent: '帮我找找关于 NVDA / 英伟达的内容', endpoint: 'search', params: 'q=NVDA' },
+    { intent: '我上传的文件里有没有关于 XX 的内容', endpoint: 'search', params: 'q=XX, sources=pdf' },
+    { intent: '只看 Twitter 上的内容', endpoint: 'daily_feed', params: 'sources=twitter' },
+    { intent: '只看我上传的文件', endpoint: 'daily_feed', params: 'sources=pdf,image,text,audio' },
+    {
+      intent: '这条具体讲了什么 / 展开第 N 条 / 给我看原文',
+      endpoint: 'daily_item',
+      params: 'id（取上一轮列表里的 id）',
+    },
+    {
+      intent: 'Bloomberg / YouTube 视频的 transcript 是什么',
+      endpoint: 'daily_item',
+      params: 'id，读返回里的 transcript 字段',
+    },
+    {
+      intent: '那份 PDF / 我上传的研报里关于 XX 怎么说',
+      endpoint: 'search → daily_item',
+      params: '先 q=XX 拿 id → daily_item',
+    },
+    { intent: '帮我看看今天的 Twitter 日报', endpoint: 'twitter_daily_latest', params: '—' },
+    { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'twitter_daily_by_date', params: 'date=2026-05-10' },
+    { intent: '帮我看看最新的 YouTube 日报', endpoint: 'youtube_daily_latest', params: '—' },
+    { intent: '有哪些日报可以看？', endpoint: 'twitter_daily_list', params: '—' },
   ];
 
   const bg = dark ? DARK_BG : '#ffffff';
@@ -481,7 +533,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe-mcp.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.1.0-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -551,6 +603,14 @@ const AgentIntegrationPage: React.FC = () => {
               ))}
             </div>
 
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              用户使用场景
+            </h4>
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 24px', lineHeight: 1.65 }}>
+              在 GuanHe 网页端完成「订阅 Feed」与「上传文件」后，内容会合并进每日 Daily 时间线。
+              你可以直接用自然语言向 Agent 提问，无需知道任何 API 或工具名称。
+            </p>
+
             <Divider dark={dark} />
 
             {/* 可用工具 */}
@@ -559,14 +619,20 @@ const AgentIntegrationPage: React.FC = () => {
             </h3>
             <IntentTable
               dark={dark}
+              col1="工具"
+              col2="说明"
               rows={[
-                { intent: 'daily_feed', endpoint: '获取每日时间线（Feeds + 上传文件合并）' },
-                { intent: 'search', endpoint: '全文关键词搜索' },
+                { intent: 'daily_feed', endpoint: '获取每日时间线（Feed 订阅 + 上传文件合并）' },
+                { intent: 'search', endpoint: '在所有内容（标题、摘要、正文）中做全文关键词搜索' },
+                {
+                  intent: 'daily_item',
+                  endpoint: '按 id 取单条完整字段，用于追问原文、字幕、全文；id 来自上一轮 daily_feed / search 列表',
+                },
                 { intent: 'twitter_daily_latest', endpoint: '最新 Twitter 日报' },
-                { intent: 'twitter_daily_by_date', endpoint: '指定日期的 Twitter 日报' },
-                { intent: 'twitter_daily_list', endpoint: '列出所有 Twitter 日报' },
+                { intent: 'twitter_daily_by_date', endpoint: '指定日期的 Twitter 日报（date=YYYY-MM-DD）' },
+                { intent: 'twitter_daily_list', endpoint: '列出可查看的 Twitter 日报' },
                 { intent: 'youtube_daily_latest', endpoint: '最新 YouTube 日报' },
-                { intent: 'youtube_daily_by_date', endpoint: '指定日期的 YouTube 日报' },
+                { intent: 'youtube_daily_by_date', endpoint: '指定日期的 YouTube 日报（date=YYYY-MM-DD）' },
               ]}
             />
 
@@ -577,6 +643,8 @@ const AgentIntegrationPage: React.FC = () => {
             <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 12px', lineHeight: 1.65 }}>
               Skill 是运行在 MCP 之上的语义路由层——它告诉 Agent「用户说"今天有啥新闻"时应该调用哪个工具、传什么参数」。
               装完后你无需记忆工具名，直接用中文提问即可。
+              须已完成上文步骤 1–3，且 MCP 中 <code style={{ fontSize: 12, color: TEAL }}>guanhe</code> 可用；Skill 通过{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>guanhe-mcp</code> 执行实际数据请求。
             </p>
             <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 10px' }}>
               在 Agent 对话里发这句话，Agent 会自动下载并安装：
@@ -608,7 +676,57 @@ const AgentIntegrationPage: React.FC = () => {
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 12px' }}>
               Skill 根据用户语义自动选择工具和参数，用户无需知道工具名称。
             </p>
-            <IntentTable rows={intentRows} dark={dark} />
+            <IntentTable
+              rows={skillRoutingRows}
+              dark={dark}
+              col1="用户会这样说"
+              col2="应调用的工具"
+              col3="关键参数"
+            />
+
+            <div
+              style={{
+                marginTop: 16,
+                padding: '12px 14px',
+                borderRadius: 8,
+                borderLeft: `3px solid ${TEAL}`,
+                background: dark ? DARK_SURFACE : '#f0fdfa',
+                fontSize: 13.5,
+                color: dark ? '#94a3b8' : '#475569',
+                lineHeight: 1.65,
+              }}
+            >
+              <strong style={{ color: dark ? '#e2e8f0' : '#0f766e' }}>重要</strong>
+              ：用户不会说「调用 daily_feed」——只会用日常中文提问；由 AI 助手根据语义自动选工具与参数。
+            </div>
+
+            <div style={{ height: 28 }} />
+
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              列表 → 详情下钻（核心）
+            </h4>
+            <ol style={{ margin: '0 0 0 18px', padding: 0, fontSize: 14, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.75 }}>
+              <li style={{ marginBottom: 8 }}>
+                第一轮 <code style={{ fontSize: 12, color: TEAL }}>daily_feed</code> /{' '}
+                <code style={{ fontSize: 12, color: TEAL }}>search</code> 返回轻量列表（标题、摘要、链接、<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>id</strong>、tickers/tags）。
+              </li>
+              <li style={{ marginBottom: 8 }}>
+                Agent 把列表展示给你时，应记住每条对应的 <code style={{ fontSize: 12, color: TEAL }}>id</code>（用户不需要手填 id）。
+              </li>
+              <li style={{ marginBottom: 8 }}>
+                当你追问「这条具体讲了什么 / 全文 / 字幕」时，应用上一轮列表里的 <code style={{ fontSize: 12, color: TEAL }}>id</code> 调{' '}
+                <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>，而不是重复大范围检索。
+              </li>
+              <li>
+                若对话过长已丢失 id，先用 <code style={{ fontSize: 12, color: TEAL }}>search</code> 关键词重定位拿到 id，再{' '}
+                <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>。
+              </li>
+            </ol>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '12px 0 0', lineHeight: 1.6 }}>
+              <strong style={{ color: dark ? '#94a3b8' : '#64748b' }}>何时下钻</strong>
+              ：列表里的 <code style={{ fontSize: 12, color: TEAL }}>summary</code> 不足以回答（要原文、时间戳、数字细节、原话）时，应调用{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>。
+            </p>
 
             <div style={{ height: 32 }} />
 
@@ -618,13 +736,46 @@ const AgentIntegrationPage: React.FC = () => {
             </h4>
             <IntentTable
               dark={dark}
+              col1="参数"
+              col2="说明"
               rows={[
-                { intent: 'since', endpoint: '时间窗口：24h / 7d / 30d / ISO 日期。默认 7d' },
-                { intent: 'sources', endpoint: '来源过滤（逗号分隔），见下方来源类型表' },
-                { intent: 'q', endpoint: '关键词过滤，如 NVDA、英伟达' },
-                { intent: 'ticker', endpoint: '股票代码过滤，如 NVDA' },
+                { intent: 'since', endpoint: '时间窗口：24h / 7d / 30d / ISO 日期时间。默认 7d' },
+                { intent: 'sources', endpoint: '逗号分隔来源子类型；不填则使用网页端默认 preset。见下方来源类型表' },
+                {
+                  intent: 'q',
+                  endpoint:
+                    'search：必填，全文搜索关键词。daily_feed：可选，在已有时间线结果上再做关键词过滤（与 search 语义不同）',
+                },
+                { intent: 'ticker', endpoint: '按股票代码过滤，如 NVDA' },
                 { intent: 'limit', endpoint: '返回条数，默认 20，最大 100' },
                 { intent: 'cursor', endpoint: '翻页游标，从上次返回的 next_cursor 获取' },
+              ]}
+            />
+
+            <div style={{ height: 24 }} />
+
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              daily_item 要点
+            </h4>
+            <IntentTable
+              dark={dark}
+              col1="字段 / 参数"
+              col2="说明"
+              rows={[
+                { intent: 'id（必填）', endpoint: '来自 daily_feed / search，如 feed_88247、upload_123' },
+                {
+                  intent: 'content',
+                  endpoint: '主正文：上传类为解析/Markdown；推文/新闻为全文；YouTube 订阅为视频描述等',
+                },
+                {
+                  intent: 'transcript',
+                  endpoint: '字幕或转写文本；无字幕的类型为 null；上传音视频可能来自 ASR 等',
+                },
+                {
+                  intent: 'content_truncated / transcript_truncated',
+                  endpoint: '为 true 时表示已截断，应引导用户打开 url 查看完整内容，勿假装已见全文',
+                },
+                { intent: 'body_excerpt', endpoint: '向后兼容字段；新逻辑优先使用 content' },
               ]}
             />
 
@@ -636,6 +787,8 @@ const AgentIntegrationPage: React.FC = () => {
             </h4>
             <IntentTable
               dark={dark}
+              col1="source 值"
+              col2="含义"
               rows={[
                 { intent: 'twitter', endpoint: '订阅的 Twitter Feed' },
                 { intent: 'youtube / youtube_feed', endpoint: '订阅的 YouTube Feed' },
@@ -653,12 +806,19 @@ const AgentIntegrationPage: React.FC = () => {
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
               回答格式指引
             </h4>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 12px' }}>
+              列表概览与追问下钻的呈现方式（与文档「回答格式指引」一致）：
+            </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[
                 '用 3–8 条要点，每条格式：标题 — 一句话摘要（来源）[链接]',
                 '提到投资标的时，只引用返回数据中 tickers 字段的内容，不自行推断股票代码',
                 '内容较多时，先给整体概述，再分类展开（「上传文件」「Twitter」「YouTube」各自有什么）',
                 '没有查到内容时，如实告知并建议用户检查订阅设置或扩大时间范围',
+                '用户对某条追问「具体讲了什么 / 全文 / 字幕」时，先调 daily_item 读取 content / transcript',
+                '围绕 content / transcript 直接引用关键段落或原话，避免重复念一遍 summary',
+                '引用 transcript 时尽量标注时间戳与讲话人，并附 url 便于核对',
+                '若 content_truncated 或 transcript_truncated 为 true，明确说明「以上为节选，完整内容请打开链接」',
               ].map((tip, i) => (
                 <div key={i} style={{
                   display: 'flex', gap: 10, padding: '10px 14px',
@@ -701,13 +861,19 @@ const AgentIntegrationPage: React.FC = () => {
             </h3>
             <IntentTable
               dark={dark}
+              col1="请求"
+              col2="说明"
               rows={[
                 { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线，支持 since / sources / ticker / q / limit / cursor' },
-                { intent: 'GET /api/v1/agent/search?q=…', endpoint: '全文搜索，支持 since / sources / ticker' },
+                {
+                  intent: 'GET /api/v1/agent/daily/{item_id}',
+                  endpoint: '单条详情（正文 content、字幕 transcript、截断标记等），item_id 同列表中的 id',
+                },
+                { intent: 'GET /api/v1/agent/search?q=…', endpoint: '全文搜索（q 必填），支持 since / sources / ticker / limit / cursor' },
                 { intent: 'GET /api/v1/agent/reports/twitter-daily/latest', endpoint: '最新 Twitter 日报' },
                 { intent: 'GET /api/v1/agent/reports/twitter-daily/YYYY-MM-DD', endpoint: '指定日期 Twitter 日报' },
                 { intent: 'GET /api/v1/agent/reports/twitter-daily', endpoint: '日报列表（分页）' },
-                { intent: 'GET /api/v1/agent/reports/youtube-daily/…', endpoint: '同上，YouTube 版' },
+                { intent: 'GET /api/v1/agent/reports/youtube-daily/…', endpoint: '同上，YouTube 版（含 latest、按日期、列表）' },
               ]}
             />
 
@@ -716,7 +882,7 @@ const AgentIntegrationPage: React.FC = () => {
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
               返回结构示例
             </h3>
-            <CodeBlock dark={dark} label="单条 daily 对象">
+            <CodeBlock dark={dark} label="列表条目（daily / search）">
               {`{
   "id": "feed_12345",
   "title": "NVIDIA 发布新架构",
@@ -727,6 +893,27 @@ const AgentIntegrationPage: React.FC = () => {
   "published_at": "2026-05-13T04:00:00+00:00",
   "tickers": ["NVDA.US"],
   "tags": ["AI", "Chips"]
+}`}
+            </CodeBlock>
+
+            <div style={{ height: 16 }} />
+
+            <CodeBlock dark={dark} label="详情条目（GET /daily/{item_id}）">
+              {`{
+  "id": "feed_88247",
+  "title": "Horizons Middle East — Trump China Visit Special",
+  "summary": "…",
+  "url": "https://youtube.com/watch?v=…",
+  "source": "youtube",
+  "author": "Bloomberg Television",
+  "published_at": "2026-05-13T05:30:00+00:00",
+  "tickers": ["NVDA.US", "AAPL.US", "TSLA.US", "BLK.US"],
+  "tags": ["China", "Tariffs", "CEO"],
+  "content": "本期节目讨论特朗普访华代表团构成 …",
+  "content_truncated": false,
+  "transcript": "Welcome to Horizons Middle East …",
+  "transcript_truncated": true,
+  "body_excerpt": "本期节目讨论特朗普访华代表团构成 …"
 }`}
             </CodeBlock>
 

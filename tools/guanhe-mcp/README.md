@@ -13,7 +13,7 @@ Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent H
 MCP 以 stdio 子进程形式运行在 **Cursor / Claude Desktop 所在的本地机器**上，直接从 GuanHe 服务器下载安装，无需 GitHub 访问权限：
 
 ```bash
-pip install "https://guanhecapital.hk/downloads/guanhe-mcp.whl"
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.1.0-py3-none-any.whl"
 ```
 
 > `httpx` 作为依赖会自动安装，无需单独 `pip install httpx`。
