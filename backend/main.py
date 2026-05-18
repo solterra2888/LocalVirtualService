@@ -71,14 +71,17 @@ async def lifespan(app: FastAPI):
     # 注意：调度器服务已分离，由独立进程管理生命周期
     info("ℹ️ 主应用关闭完成，调度器服务独立运行", source="shutdown")
 
-# 创建FastAPI应用
+# 创建FastAPI应用（生产 ENV=production 时默认不暴露文档，见 config.settings.ENABLE_API_DOCS）
+_api_docs = config.ENABLE_API_DOCS
 app = FastAPI(
     title=f"{config.APP_NAME} API",
     description="文件处理和任务管理API",
     version=config.APP_VERSION,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    lifespan=lifespan
+    docs_url="/api/docs" if _api_docs else None,
+    redoc_url="/api/redoc" if _api_docs else None,
+    # 与 docs_url 同前缀：Nginx 仅代理 /api/ 时，默认根路径 /openapi.json 会落到前端 SPA。
+    openapi_url="/api/openapi.json" if _api_docs else None,
+    lifespan=lifespan,
 )
 
 # 配置CORS

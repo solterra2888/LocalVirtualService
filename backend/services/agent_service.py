@@ -130,6 +130,30 @@ def _parse_since(since: Optional[str]) -> Tuple[Optional[datetime], Optional[dat
     )
 
 
+# Mapping from user/agent-facing source names to internal ALL_SOURCE_SUBTYPES values.
+# _map_agent_source() surfaces "pdf" to callers for all document uploads, but the
+# internal subtype (and DB file_type group) is "document", which covers pdf/word/
+# excel/csv files.  Agents may also pass common file-type names directly, so we
+# map all reasonable variants to "document".
+_AGENT_SOURCE_ALIASES: Dict[str, str] = {
+    # PDF-specific filter (DB file_type in: pdf, document-legacy)
+    "pdf":   "pdf",
+    # Word-specific filter
+    "word":  "word",
+    "doc":   "word",
+    "docx":  "word",
+    # Excel/CSV-specific filter
+    "excel": "excel",
+    "xls":   "excel",
+    "xlsx":  "excel",
+    "csv":   "excel",
+    # image aliases
+    "img":   "image",
+    "photo": "image",
+    "pic":   "image",
+}
+
+
 def _expand_agent_sources(parts: List[str]) -> List[str]:
     out: List[str] = []
     seen = set()
@@ -137,8 +161,18 @@ def _expand_agent_sources(parts: List[str]) -> List[str]:
         p = p.strip()
         if not p:
             continue
+        # Resolve user-facing aliases before checking against ALL_SOURCE_SUBTYPES
+        p = _AGENT_SOURCE_ALIASES.get(p, p)
         if p == "youtube":
             for x in ("youtube", "youtube_feed"):
+                if x not in seen:
+                    seen.add(x)
+                    out.append(x)
+            continue
+        # "document" expands to cover both the document subtype AND image uploads,
+        # because users consider all uploaded files (docs + images) as one group.
+        if p == "document":
+            for x in ("document", "image"):
                 if x not in seen:
                     seen.add(x)
                     out.append(x)
@@ -151,12 +185,17 @@ def _expand_agent_sources(parts: List[str]) -> List[str]:
 
 def _parse_sources_param(sources: Optional[str]) -> Optional[List[str]]:
     if not sources:
-        return None
+        return None  # not provided → caller falls back to user preset
     parts = [x.strip() for x in sources.split(",") if x.strip()]
     if not parts:
-        return None
+        return None  # whitespace-only string → treat as not provided
     expanded = _expand_agent_sources(parts)
-    return daily_api._normalize_subtypes(expanded)
+    normalized = daily_api._normalize_subtypes(expanded)
+    # When the caller explicitly provided sources= but none matched a known type,
+    # return [] (not None). None would silently fall back to the user's preset;
+    # [] signals "explicit filter with zero valid types" to get_daily_feed so it
+    # can return 0 results or a clear diagnostic instead of unrelated content.
+    return normalized if normalized is not None else []
 
 
 def _parse_tickers_param(tickers: Optional[str]) -> Optional[List[str]]:
@@ -194,7 +233,29 @@ def _load_preset_subtypes(db: DatabaseManager, user_id: int) -> Optional[List[st
         conn.close()
 
 
-def _map_agent_source(source: str, source_subtype: str) -> str:
+# Maps raw DB file_type values (from file_processing_details.file_type) to the
+# specific AgentSource values exposed in API responses.
+# This lets agents distinguish Excel from PDF instead of seeing "pdf" for both.
+_RAW_FILE_TYPE_TO_AGENT_SOURCE: Dict[str, str] = {
+    "pdf":      "pdf",
+    "word":     "word",
+    "excel":    "excel",
+    "csv":      "excel",    # CSV is a spreadsheet; group with excel
+    "document": "pdf",      # legacy DB value → generic pdf
+    "image":    "image",
+    "audio":    "audio",
+    "youtube":  "youtube",
+    "web":      "web",
+    "text":     "text",
+    "podcast":  "podcast",
+}
+
+
+def _map_agent_source(
+    source: str,
+    source_subtype: str,
+    raw_file_type: Optional[str] = None,
+) -> str:
     if source == "feed":
         if source_subtype == "twitter":
             return "twitter"
@@ -203,6 +264,12 @@ def _map_agent_source(source: str, source_subtype: str) -> str:
         if source_subtype in ("news", "rss"):
             return "news"
         return "news"
+    # For uploads: use the raw DB file_type for a specific format label when available.
+    if raw_file_type:
+        mapped = _RAW_FILE_TYPE_TO_AGENT_SOURCE.get(raw_file_type)
+        if mapped:
+            return mapped
+    # Fallback: derive from normalised source_subtype
     st = source_subtype
     if st == "document":
         return "pdf"
@@ -236,7 +303,7 @@ def _daily_feed_item_to_agent(d: DailyFeedItem) -> AgentDailyItem:
         title=d.title or "Untitled",
         summary=summary or "",
         url=_item_url(d),
-        source=_map_agent_source(d.source, d.source_subtype),  # type: ignore[arg-type]
+        source=_map_agent_source(d.source, d.source_subtype, d.raw_file_type),  # type: ignore[arg-type]
         author=d.author_name or d.author_identifier,
         published_at=d.published_at,
         tickers=list(d.tickers or [])[:50],
@@ -486,7 +553,7 @@ class AgentService:
             has_more = (offset + len(items)) < total
             next_c = _encode_cursor(offset + len(items)) if has_more and items else None
 
-            # Build diagnostics block when 0 results and a q was provided
+            # Build diagnostics block when 0 results
             diagnostics: Optional[AgentSearchDiagnostics] = None
             if total == 0 and q:
                 diagnostics = self._build_diagnostics(
@@ -495,6 +562,22 @@ class AgentService:
                     date_from=date_from,
                     source_subtypes=source_subtypes,
                     base_params=base_params,
+                )
+            elif total == 0 and sources and explicit == []:
+                # sources= was explicitly provided but all values were unrecognised.
+                # Return a plain diagnostics block so the caller knows why they got 0 results.
+                since_used = date_from.isoformat() if date_from else None
+                diagnostics = AgentSearchDiagnostics(
+                    parsed_q_groups=[],
+                    terms_in_corpus={},
+                    since_used=since_used,
+                    sources_used=[],
+                    hint=(
+                        f"None of the requested source types {sources!r} matched known values. "
+                        "Valid values: twitter, youtube, document, image, audio, text, podcast, news. "
+                        "Tip: uploaded PDF/Word/Excel files are source type 'document' (or 'pdf'). "
+                        "Use list_sources to see which source types are active in your account."
+                    ),
                 )
 
             return AgentDailyFeedResponse(
@@ -774,20 +857,23 @@ class AgentService:
                 SELECT
                     sl.channel_type,
                     sl.channel_identifier,
-                    sl.channel_title,
+                    COALESCE(
+                        NULLIF(TRIM(sl.channel_name), ''),
+                        sl.channel_identifier
+                    ) AS channel_title,
                     COALESCE(
                         (
                             SELECT COUNT(*)
                             FROM subscription_content sc
                             WHERE sc.channel_type = sl.channel_type
-                              AND sc.channel_identifier = sl.channel_identifier
+                              AND sc.author_identifier = sl.channel_identifier
                               AND %(user_id)s = ANY(sc.user_ids)
                               AND sc.published_at >= NOW() - INTERVAL '30 days'
                         ), 0
                     ) AS item_count_30d
                 FROM subscription_list sl
                 WHERE sl.user_id = %(user_id)s
-                  AND sl.status = 'enabled'
+                  AND sl.enabled IS TRUE
                 ORDER BY sl.channel_type, sl.channel_identifier
                 """,
                 {"user_id": user.user_id},
@@ -856,15 +942,35 @@ class AgentService:
                 count = int(row[1] or 0)
                 raw_counts[subtype] = raw_counts.get(subtype, 0) + count
 
-            # Normalise counts to ALL_SOURCE_SUBTYPES aliases
+            # Normalise raw DB file_type / channel_type counts to AgentSource labels.
+            # For upload items, use _map_agent_source with raw_file_type to get specific
+            # labels (pdf / word / excel / image …) rather than the generic "pdf" fallback.
+            # For feed items, raw_subtype IS the channel_type, so pass it as source_subtype.
+            #
+            # We also accumulate counts into ALL_SOURCE_SUBTYPES entries so that both the
+            # specific (e.g. "excel") and the broad "document" entry show correct totals.
             normalised: Dict[str, int] = {}
+
+            # DB file_type values known to belong to uploads
+            _upload_raw_types = set(daily_api._UPLOAD_SUBTYPE_TO_DB_TYPES.keys()) | {
+                "pdf", "word", "excel", "csv", "document",
+                "image", "audio", "youtube", "web", "text", "podcast",
+            }
+
             for subtype, count in raw_counts.items():
-                mapped = _map_agent_source("upload", subtype)
-                normalised[mapped] = normalised.get(mapped, 0) + count
-                # Also track youtube_feed from channel_type 'youtube'
-                if subtype == "youtube":
-                    mapped_feed = _map_agent_source("feed", "youtube_feed")
-                    normalised[mapped_feed] = normalised.get(mapped_feed, 0) + count
+                if subtype in ("twitter", "youtube", "news", "rss"):
+                    # Feed channel_type — map via feed path
+                    mapped = _map_agent_source("feed", subtype)
+                    normalised[mapped] = normalised.get(mapped, 0) + count
+                    if subtype == "youtube":
+                        normalised["youtube_feed"] = normalised.get("youtube_feed", 0) + count
+                else:
+                    # Upload file_type — use raw_file_type for precise label
+                    specific = _map_agent_source("upload", "document", subtype)
+                    normalised[specific] = normalised.get(specific, 0) + count
+                    # Also roll up into the broad "document" group
+                    if specific in ("pdf", "word", "excel", "image"):
+                        normalised["document"] = normalised.get("document", 0) + count
 
             source_infos = [
                 AgentSourceInfo(
@@ -877,7 +983,7 @@ class AgentService:
                     item_count_30d=normalised.get(src, 0),
                 )
                 for src in daily_api.ALL_SOURCE_SUBTYPES
-                if src not in ("youtube_feed",)  # deduplicated to 'youtube' in output
+                if src not in ("youtube_feed",)  # deduped into 'youtube' in output
             ]
 
             return AgentSourcesInfoResponse(

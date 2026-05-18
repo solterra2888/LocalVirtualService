@@ -69,6 +69,14 @@ class DailyFeedItem(BaseModel):
     id: str = Field(..., description="复合 ID: upload_<id> 或 feed_<id>")
     source: SourceType = Field(..., description="来源大类")
     source_subtype: SourceSubtype = Field(..., description="来源子类型")
+    raw_file_type: Optional[str] = Field(
+        None,
+        description=(
+            "Upload 文件的 DB 原始 file_type（如 pdf / word / excel / csv）。"
+            "仅 source='upload' 时有值；Feed 条目为 None。"
+            "Agent 层用于细化 source 显示，前端无需关注此字段。"
+        ),
+    )
 
     title: str = Field(..., description="标题")
     summary: Optional[str] = Field(None, description="LLM 生成摘要 (50-200 字)")

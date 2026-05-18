@@ -159,7 +159,7 @@ if [ "$all_running" = true ]; then
     echo "================================"
     echo "🌐 访问地址 (通过Nginx):"
     echo "   - 前端应用: http://${SERVER_IP}"
-    echo "   - API文档:  http://${SERVER_IP}/api/docs"
+    echo "   - API文档:  http://${SERVER_IP}/api/docs  (ENV=production 时默认不暴露，需 ENABLE_API_DOCS=true)"
 else
     echo "⚠️  部分服务重启失败，请查看日志:"
     echo "   journalctl -u rc-webapp -f"

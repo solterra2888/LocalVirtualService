@@ -47,8 +47,13 @@ _SINCE_HINT = (
 )
 
 _SOURCES_HINT = (
-    "Comma-separated source types. "
-    "Values: twitter, youtube, youtube_feed, news, pdf, image, audio, text, podcast. "
+    "Comma-separated source types to filter by. "
+    "Feed types: twitter, youtube, news. "
+    "Upload types: document (PDF/Word/Excel/CSV + images), image, audio, text, podcast, web. "
+    "Aliases accepted for document: pdf, word, doc, docx, excel, xls, xlsx, csv, img, photo. "
+    "'document' expands to cover all uploaded files including images. "
+    "In daily_feed responses, uploaded files appear with their specific format as source: "
+    "'pdf', 'word', 'excel', or 'image' — NOT a generic 'pdf'. "
     "Omit to use your web-app Daily preset. "
     "Use list_sources to see which sources are active in your preset."
 )

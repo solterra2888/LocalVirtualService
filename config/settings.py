@@ -35,6 +35,15 @@ class AppConfig:
     @property
     def APP_VERSION(self):
         return os.getenv("APP_VERSION", "2.0.0")
+
+    @property
+    def ENABLE_API_DOCS(self):
+        """是否挂载 Swagger (/api/docs) 与 ReDoc。生产环境默认关闭以降低公网攻击面。"""
+        raw = self.get("ENABLE_API_DOCS")
+        if raw is not None and str(raw).strip() != "":
+            return str(raw).strip().lower() in ("1", "true", "yes")
+        env = (self.get("ENV", "development") or "development").strip().lower()
+        return env != "production"
     
     @property
     def USER_AGENT(self):

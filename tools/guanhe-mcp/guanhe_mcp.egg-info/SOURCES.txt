@@ -9,3 +9,4 @@ guanhe_mcp.egg-info/dependency_links.txt
 guanhe_mcp.egg-info/entry_points.txt
 guanhe_mcp.egg-info/requires.txt
 guanhe_mcp.egg-info/top_level.txt
+tests/test_server_smoke.py

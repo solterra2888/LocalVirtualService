@@ -365,14 +365,16 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致 */
+  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致（v0.2） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
-    { intent: '帮我找找关于 NVDA / 英伟达的内容', endpoint: 'search', params: 'q=NVDA' },
-    { intent: '我上传的文件里有没有关于 XX 的内容', endpoint: 'search', params: 'q=XX, sources=pdf' },
+    { intent: '帮我找找关于 NVDA / 英伟达的内容', endpoint: 'daily_feed', params: 'q=NVDA' },
+    { intent: '我上传的文件里有没有关于 XX 的内容', endpoint: 'daily_feed', params: 'q=XX, sources=pdf' },
     { intent: '只看 Twitter 上的内容', endpoint: 'daily_feed', params: 'sources=twitter' },
     { intent: '只看我上传的文件', endpoint: 'daily_feed', params: 'sources=pdf,image,text,audio' },
+    { intent: '帮我同时查 NVDA 和 AAPL 的内容', endpoint: 'daily_feed', params: 'tickers=NVDA.US,AAPL.US' },
+    { intent: '展示 AI 概念相关的内容', endpoint: 'daily_feed', params: 'tags=AI' },
     {
       intent: '这条具体讲了什么 / 展开第 N 条 / 给我看原文',
       endpoint: 'daily_item',
@@ -385,13 +387,23 @@ const AgentIntegrationPage: React.FC = () => {
     },
     {
       intent: '那份 PDF / 我上传的研报里关于 XX 怎么说',
-      endpoint: 'search → daily_item',
+      endpoint: 'daily_feed → daily_item',
       params: '先 q=XX 拿 id → daily_item',
     },
-    { intent: '帮我看看今天的 Twitter 日报', endpoint: 'twitter_daily_latest', params: '—' },
-    { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'twitter_daily_by_date', params: 'date=2026-05-10' },
-    { intent: '帮我看看最新的 YouTube 日报', endpoint: 'youtube_daily_latest', params: '—' },
-    { intent: '有哪些日报可以看？', endpoint: 'twitter_daily_list', params: '—' },
+    {
+      intent: '帮我同时拿这几条的详情',
+      endpoint: 'daily_items_batch',
+      params: 'ids=[...], include_content=true',
+    },
+    {
+      intent: '我有哪些订阅频道 / 有什么数据来源？',
+      endpoint: 'list_subscriptions / list_sources',
+      params: '—',
+    },
+    { intent: '帮我看看今天的 Twitter 日报', endpoint: 'report_latest', params: 'kind=twitter' },
+    { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'report_by_date', params: 'kind=twitter, date=2026-05-10' },
+    { intent: '帮我看看最新的 YouTube 日报', endpoint: 'report_latest', params: 'kind=youtube' },
+    { intent: '有哪些日报可以看？', endpoint: 'report_list', params: 'kind=twitter|youtube' },
   ];
 
   const bg = dark ? DARK_BG : '#ffffff';
@@ -533,7 +545,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.1.0-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.2.0-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -619,20 +631,18 @@ const AgentIntegrationPage: React.FC = () => {
             </h3>
             <IntentTable
               dark={dark}
-              col1="工具"
+              col1="工具（v0.2）"
               col2="说明"
               rows={[
-                { intent: 'daily_feed', endpoint: '获取每日时间线（Feed 订阅 + 上传文件合并）' },
-                { intent: 'search', endpoint: '在所有内容（标题、摘要、正文）中做全文关键词搜索' },
-                {
-                  intent: 'daily_item',
-                  endpoint: '按 id 取单条完整字段，用于追问原文、字幕、全文；id 来自上一轮 daily_feed / search 列表',
-                },
-                { intent: 'twitter_daily_latest', endpoint: '最新 Twitter 日报' },
-                { intent: 'twitter_daily_by_date', endpoint: '指定日期的 Twitter 日报（date=YYYY-MM-DD）' },
-                { intent: 'twitter_daily_list', endpoint: '列出可查看的 Twitter 日报' },
-                { intent: 'youtube_daily_latest', endpoint: '最新 YouTube 日报' },
-                { intent: 'youtube_daily_by_date', endpoint: '指定日期的 YouTube 日报（date=YYYY-MM-DD）' },
+                { intent: 'daily_feed', endpoint: '每日时间线浏览 + 全文搜索（q 可选），支持 tickers / tags / author / sources / since / dedup 等过滤' },
+                { intent: 'daily_item', endpoint: '按 id 取单条完整字段（content、transcript、截断标记等）；id 来自上一轮 daily_feed 列表' },
+                { intent: 'daily_items_batch', endpoint: '批量获取多条详情，单次最多 10 个 id，避免 N 次串行调用' },
+                { intent: 'daily_multi_search', endpoint: '多组条件并行搜索 + 跨组服务端去重，最多 5 组' },
+                { intent: 'list_subscriptions', endpoint: '查看当前账号已启用的订阅频道清单（供 LLM 了解"有什么数据"）' },
+                { intent: 'list_sources', endpoint: '查看全局数据来源类型及 30 天内容计数' },
+                { intent: 'report_latest', endpoint: '最新日报，kind=twitter 或 kind=youtube' },
+                { intent: 'report_by_date', endpoint: '指定日期日报（date=YYYY-MM-DD），kind=twitter|youtube' },
+                { intent: 'report_list', endpoint: '日报列表（可分页），kind=twitter|youtube' },
               ]}
             />
 
@@ -707,46 +717,46 @@ const AgentIntegrationPage: React.FC = () => {
             </h4>
             <ol style={{ margin: '0 0 0 18px', padding: 0, fontSize: 14, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.75 }}>
               <li style={{ marginBottom: 8 }}>
-                第一轮 <code style={{ fontSize: 12, color: TEAL }}>daily_feed</code> /{' '}
-                <code style={{ fontSize: 12, color: TEAL }}>search</code> 返回轻量列表（标题、摘要、链接、<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>id</strong>、tickers/tags）。
+                第一轮 <code style={{ fontSize: 12, color: TEAL }}>daily_feed</code>（可带 q 全文搜索）返回轻量列表（标题、摘要、链接、<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>id</strong>、tickers/tags）。
               </li>
               <li style={{ marginBottom: 8 }}>
                 Agent 把列表展示给你时，应记住每条对应的 <code style={{ fontSize: 12, color: TEAL }}>id</code>（用户不需要手填 id）。
               </li>
               <li style={{ marginBottom: 8 }}>
                 当你追问「这条具体讲了什么 / 全文 / 字幕」时，应用上一轮列表里的 <code style={{ fontSize: 12, color: TEAL }}>id</code> 调{' '}
-                <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>，而不是重复大范围检索。
+                <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>，而不是重复大范围检索；需要同时看多条可用{' '}
+                <code style={{ fontSize: 12, color: TEAL }}>daily_items_batch</code>。
               </li>
               <li>
-                若对话过长已丢失 id，先用 <code style={{ fontSize: 12, color: TEAL }}>search</code> 关键词重定位拿到 id，再{' '}
+                若对话过长已丢失 id，先用 <code style={{ fontSize: 12, color: TEAL }}>daily_feed?q=关键词</code> 重定位拿到 id，再调{' '}
                 <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>。
               </li>
             </ol>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '12px 0 0', lineHeight: 1.6 }}>
               <strong style={{ color: dark ? '#94a3b8' : '#64748b' }}>何时下钻</strong>
-              ：列表里的 <code style={{ fontSize: 12, color: TEAL }}>summary</code> 不足以回答（要原文、时间戳、数字细节、原话）时，应调用{' '}
-              <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>。
+              ：列表里的 <code style={{ fontSize: 12, color: TEAL }}>summary</code> 不足以回答（要原文、时间戳、数字细节、原话）时，调{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>daily_item</code>；需同时看多条时用{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>daily_items_batch</code>（最多 10 条，避免 N 次串行）。
             </p>
 
             <div style={{ height: 32 }} />
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed / search 常用参数
+              daily_feed 常用参数（v0.2）
             </h4>
             <IntentTable
               dark={dark}
               col1="参数"
               col2="说明"
               rows={[
-                { intent: 'since', endpoint: '时间窗口：24h / 7d / 30d / ISO 日期时间。默认 7d' },
+                { intent: 'since', endpoint: '时间窗口：24h / 7d / 2w / ISO 日期时间（v0.2 新增 w 格式）。默认 7d；非法值返回 400' },
+                { intent: 'q', endpoint: '全文搜索关键词（可选）；支持多词 AND、减号排除（AI -crypto）；零结果时返回 diagnostics' },
+                { intent: 'tickers', endpoint: '按股票代码过滤，逗号分隔多值，如 NVDA.US,AAPL.US（v0.1 的 ticker 单值已弃用）' },
+                { intent: 'tags', endpoint: '按概念标签过滤（匹配 concepts JSONB 数组），逗号分隔，如 AI,Chips' },
+                { intent: 'author', endpoint: '按作者名 / 账号模糊匹配（ILIKE）' },
                 { intent: 'sources', endpoint: '逗号分隔来源子类型；不填则使用网页端默认 preset。见下方来源类型表' },
-                {
-                  intent: 'q',
-                  endpoint:
-                    'search：必填，全文搜索关键词。daily_feed：可选，在已有时间线结果上再做关键词过滤（与 search 语义不同）',
-                },
-                { intent: 'ticker', endpoint: '按股票代码过滤，如 NVDA' },
+                { intent: 'dedup', endpoint: '服务端去重，默认 true；按 external_url 去重，NULL URL 不参与' },
                 { intent: 'limit', endpoint: '返回条数，默认 20，最大 100' },
                 { intent: 'cursor', endpoint: '翻页游标，从上次返回的 next_cursor 获取' },
               ]}

@@ -17,15 +17,20 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 AgentSource = Literal[
+    # Feed sources
     "twitter",
     "youtube",
+    "news",
+    # Upload sources — generic group
     "web",
-    "pdf",
-    "image",
     "audio",
     "text",
     "podcast",
-    "news",
+    "image",
+    # Upload document formats (was uniformly "pdf" in v0.2; now specific)
+    "pdf",    # uploaded PDF
+    "word",   # uploaded Word / .doc / .docx
+    "excel",  # uploaded Excel / CSV spreadsheet
 ]
 
 ReportKind = Literal["twitter", "youtube"]
@@ -36,7 +41,15 @@ class AgentDailyItem(BaseModel):
     title: str
     summary: str = Field("", description="AI summary or snippet, trimmed for agents")
     url: Optional[str] = None
-    source: AgentSource
+    source: AgentSource = Field(
+        ...,
+        description=(
+            "Source type. For uploaded files: 'pdf', 'word', 'excel', 'image', 'audio', 'text', 'podcast', 'web'. "
+            "For feeds: 'twitter', 'youtube', 'news'. "
+            "All uploaded document-type files (PDF/Word/Excel/CSV/image) now return their specific format "
+            "rather than the legacy 'pdf' catch-all."
+        ),
+    )
     author: Optional[str] = None
     published_at: datetime
     tickers: List[str] = Field(default_factory=list)

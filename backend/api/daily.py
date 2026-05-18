@@ -75,15 +75,19 @@ _UPLOAD_FILE_TYPE_MAP = {
     "podcast": "podcast",  # Apple Podcast Episode
 }
 
-# 反向映射：前端 source_subtype → DB file_type 集合（用于 WHERE IN 过滤）
+# 反向映射：source_subtype → DB file_type 集合（用于 WHERE IN 过滤）
+# "document" 是宽泛组（含全部文档类型）；pdf/word/excel 是精确子集过滤。
 _UPLOAD_SUBTYPE_TO_DB_TYPES: Dict[str, List[str]] = {
-    "document": ["pdf", "word", "excel", "csv", "document"],
-    "image": ["image"],
-    "audio": ["audio"],
-    "youtube": ["youtube"],
-    "web": ["web"],
-    "text": ["text"],
-    "podcast": ["podcast"],
+    "document": ["pdf", "word", "excel", "csv", "document"],  # 全部文档
+    "pdf":      ["pdf", "document"],  # PDF + legacy "document" file_type 记录
+    "word":     ["word"],
+    "excel":    ["excel", "csv"],     # Excel 与 CSV 归为同一组
+    "image":    ["image"],
+    "audio":    ["audio"],
+    "youtube":  ["youtube"],
+    "web":      ["web"],
+    "text":     ["text"],
+    "podcast":  ["podcast"],
 }
 
 # Feed 链路 channel_type 的标准化映射
@@ -99,13 +103,20 @@ _FEED_CHANNEL_TYPE_MAP = {
 
 # 所有合法 source_subtype
 ALL_SOURCE_SUBTYPES = [
+    # Upload — broad group (pdf/word/excel/csv/image 全包含)
     "document",
+    # Upload — format-specific subtypes (document 的精确子集)
+    "pdf",    # 仅 PDF 文件 (含 legacy file_type='document')
+    "word",   # 仅 Word 文件
+    "excel",  # 仅 Excel / CSV 文件
+    # Upload — 其他类型
     "image",
     "audio",
     "youtube",
     "web",
     "text",
     "podcast",
+    # Feed
     "twitter",
     "news",
     "youtube_feed",
@@ -408,31 +419,41 @@ def _build_filter_clauses(
         feed_parts.append("AND sc.published_at <= %(date_to)s")
 
     # source_subtypes 过滤：upload 一侧映射到 file_type, feed 一侧映射到 channel_type.
+    # None  → no filter (use caller's preset / return all)
+    # []    → explicit filter with no valid types → AND FALSE on both sides (return 0 rows)
+    # [...]  → filter by the listed subtypes
     upload_subtypes_pg: List[str] = []
     feed_subtypes_pg: List[str] = []
-    if source_subtypes:
-        for st in source_subtypes:
-            if st in _UPLOAD_SUBTYPE_TO_DB_TYPES:
-                upload_subtypes_pg.extend(_UPLOAD_SUBTYPE_TO_DB_TYPES[st])
-            elif st == "twitter":
-                feed_subtypes_pg.append("twitter")
-            elif st == "youtube_feed":
-                feed_subtypes_pg.append("youtube")
-            elif st == "news":
-                feed_subtypes_pg.extend(["news", "rss"])
-        # 任一边没匹配到对应类型 → 用恒假条件让该边返回 0 行（避免 IN ()
-        if not upload_subtypes_pg:
+    if source_subtypes is not None:
+        if not source_subtypes:
+            # Caller explicitly requested filtering but supplied no recognised source types.
+            # Apply a hard false-condition to both arms so the query returns 0 rows instead
+            # of silently falling back to returning everything.
             upload_parts.append("AND FALSE")
-        else:
-            params["upload_subtypes"] = tuple(upload_subtypes_pg)
-            upload_parts.append(
-                "AND lower(fpd.file_type::text) IN %(upload_subtypes)s"
-            )
-        if not feed_subtypes_pg:
             feed_parts.append("AND FALSE")
         else:
-            params["feed_subtypes"] = tuple(feed_subtypes_pg)
-            feed_parts.append("AND sc.channel_type IN %(feed_subtypes)s")
+            for st in source_subtypes:
+                if st in _UPLOAD_SUBTYPE_TO_DB_TYPES:
+                    upload_subtypes_pg.extend(_UPLOAD_SUBTYPE_TO_DB_TYPES[st])
+                elif st == "twitter":
+                    feed_subtypes_pg.append("twitter")
+                elif st == "youtube_feed":
+                    feed_subtypes_pg.append("youtube")
+                elif st == "news":
+                    feed_subtypes_pg.extend(["news", "rss"])
+            # 任一边没匹配到对应类型 → 用恒假条件让该边返回 0 行（避免 IN ()
+            if not upload_subtypes_pg:
+                upload_parts.append("AND FALSE")
+            else:
+                params["upload_subtypes"] = tuple(upload_subtypes_pg)
+                upload_parts.append(
+                    "AND lower(fpd.file_type::text) IN %(upload_subtypes)s"
+                )
+            if not feed_subtypes_pg:
+                feed_parts.append("AND FALSE")
+            else:
+                params["feed_subtypes"] = tuple(feed_subtypes_pg)
+                feed_parts.append("AND sc.channel_type IN %(feed_subtypes)s")
 
     if q:
         groups = _parse_q(q)
@@ -619,6 +640,7 @@ def _row_to_item(
         id=composite_id,
         source=source,
         source_subtype=subtype,
+        raw_file_type=raw_subtype if source == "upload" else None,
         title=title or "Untitled",
         summary=summary_text,
         snippet=snippet_text,

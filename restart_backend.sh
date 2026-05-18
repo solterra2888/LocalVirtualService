@@ -75,7 +75,7 @@ if [ "$all_running" = true ]; then
     echo "🎉 后端服务重启成功!"
     echo "================================"
     echo "🌐 访问地址: http://${SERVER_IP}"
-    echo "📄 API文档:  http://${SERVER_IP}/api/docs"
+    echo "📄 API文档:  http://${SERVER_IP}/api/docs  (ENV=production 时默认不暴露，需 ENABLE_API_DOCS=true)"
 else
     echo "⚠️  部分服务重启失败，请查看日志排查原因"
 fi
