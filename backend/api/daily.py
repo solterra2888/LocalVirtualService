@@ -386,6 +386,8 @@ def _build_filter_clauses(
     source_subtypes: Optional[List[str]],
     q: Optional[str],
     tickers: Optional[List[str]],
+    tags: Optional[List[str]] = None,
+    author: Optional[str] = None,
 ) -> tuple[str, str, Dict[str, Any]]:
     """构造 Upload / Feed 两侧的额外 WHERE 子句与参数。
 
@@ -467,6 +469,20 @@ def _build_filter_clauses(
         params["ticker_arr"] = tickers
         upload_parts.append("AND ft.ticker ?| %(ticker_arr)s")
         feed_parts.append("AND sct.ticker ?| %(ticker_arr)s")
+
+    if tags:
+        params["tag_arr"] = tags
+        upload_parts.append("AND ft.concepts ?| %(tag_arr)s")
+        feed_parts.append("AND sct.concepts ?| %(tag_arr)s")
+
+    if author:
+        params["author_like"] = f"%{author}%"
+        # Upload items have no author; exclude them when author filter is set
+        upload_parts.append("AND FALSE")
+        feed_parts.append(
+            "AND (COALESCE(sc.author_name, '') ILIKE %(author_like)s"
+            " OR COALESCE(sc.author_identifier, '') ILIKE %(author_like)s)"
+        )
 
     return " ".join(upload_parts), " ".join(feed_parts), params
 

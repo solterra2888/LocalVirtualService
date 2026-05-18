@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: guanhe-mcp
-Version: 0.1.0
-Summary: MCP server for GuanHe Agent API (Daily + reports)
+Version: 0.2.0
+Summary: MCP server for GuanHe Agent API v0.2 (Daily feed, multi-search, reports, introspection)
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: httpx>=0.27.0

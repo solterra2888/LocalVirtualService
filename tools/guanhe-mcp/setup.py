@@ -5,8 +5,8 @@ from setuptools import setup
 
 setup(
     name="guanhe-mcp",
-    version="0.1.0",
-    description="MCP stdio server for GuanHe Agent API",
+    version="0.2.0",
+    description="MCP stdio server for GuanHe Agent API v0.2",
     python_requires=">=3.9",
     packages=["guanhe_mcp"],
     install_requires=["httpx>=0.27.0"],

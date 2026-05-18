@@ -864,16 +864,15 @@ const AgentIntegrationPage: React.FC = () => {
               col1="请求"
               col2="说明"
               rows={[
-                { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线，支持 since / sources / ticker / q / limit / cursor' },
-                {
-                  intent: 'GET /api/v1/agent/daily/{item_id}',
-                  endpoint: '单条详情（正文 content、字幕 transcript、截断标记等），item_id 同列表中的 id',
-                },
-                { intent: 'GET /api/v1/agent/search?q=…', endpoint: '全文搜索（q 必填），支持 since / sources / ticker / limit / cursor' },
-                { intent: 'GET /api/v1/agent/reports/twitter-daily/latest', endpoint: '最新 Twitter 日报' },
-                { intent: 'GET /api/v1/agent/reports/twitter-daily/YYYY-MM-DD', endpoint: '指定日期 Twitter 日报' },
-                { intent: 'GET /api/v1/agent/reports/twitter-daily', endpoint: '日报列表（分页）' },
-                { intent: 'GET /api/v1/agent/reports/youtube-daily/…', endpoint: '同上，YouTube 版（含 latest、按日期、列表）' },
+                { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线 + 搜索（q 可选），支持 since / sources / tickers / tags / author / q / dedup / limit / cursor' },
+                { intent: 'GET /api/v1/agent/daily/{item_id}', endpoint: '单条详情（正文 content、字幕 transcript、截断标记等），item_id 同列表中的 id' },
+                { intent: 'POST /api/v1/agent/daily/batch', endpoint: '批量详情，body: { ids: [...] }，最多 10 条' },
+                { intent: 'POST /api/v1/agent/daily/multi', endpoint: '多组并行搜索 + 服务端去重，body: { groups: [...], dedup_by, limit_per_group }' },
+                { intent: 'GET /api/v1/agent/subscriptions', endpoint: '已启用订阅频道清单，含每频道 30 天条目数' },
+                { intent: 'GET /api/v1/agent/sources', endpoint: 'source 类型清单，含 preset 信息与 30 天条目数' },
+                { intent: 'GET /api/v1/agent/reports/latest?kind=twitter|youtube', endpoint: '最新日报（twitter 或 youtube）' },
+                { intent: 'GET /api/v1/agent/reports/{YYYY-MM-DD}?kind=twitter|youtube', endpoint: '指定日期日报' },
+                { intent: 'GET /api/v1/agent/reports?kind=twitter|youtube', endpoint: '日报列表（分页），limit / offset' },
               ]}
             />
 
@@ -882,7 +881,7 @@ const AgentIntegrationPage: React.FC = () => {
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
               返回结构示例
             </h3>
-            <CodeBlock dark={dark} label="列表条目（daily / search）">
+            <CodeBlock dark={dark} label="列表条目（daily_feed / daily_multi_search）">
               {`{
   "id": "feed_12345",
   "title": "NVIDIA 发布新架构",

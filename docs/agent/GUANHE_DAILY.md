@@ -1,27 +1,17 @@
-# GuanHe Daily — Agent Skill
+# GuanHe Daily — Agent Skill (v0.2)
 
 这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）和你自己上传的文件（PDF、文档、图片等）——并根据你的自然语言问题给出总结和洞察。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.2.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
 
 ---
 
 ## 数据范围
 
-MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
+MCP 工具只返回当前账号有权限访问的数据：
 - **自己上传的文件**：PDF、图片、音频、文档等，经平台处理后的内容
 - **他人分享给你的文件**：其他用户明确分享到你账号的上传内容
-- **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用（Disabled）的订阅不在结果中
-
----
-
-## 用户使用场景
-
-用户在 GuanHe 网页端做了两件事：
-1. **订阅 Feed**：关注了若干 Twitter 账号、YouTube 频道、新闻源等。
-2. **上传文件**：上传了 PDF 研报、文档、图片等供平台处理。
-
-这两部分内容会合并进入每日「Daily」时间线，用户可以直接用自然语言向 AI 提问，无需知道任何 API 或工具名称。
+- **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用的订阅不在结果中
 
 ---
 
@@ -29,114 +19,200 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 
 | 用户会这样说 | 应调用的工具 | 关键参数 |
 |---|---|---|
-| 今天有什么值得关注的？最近有什么新动态？ | `daily_feed` | `since=24h` |
-| 这周的信息帮我总结一下 | `daily_feed` | `since=7d`（默认，可省略） |
-| 帮我找找关于 NVDA / 英伟达的内容 | `search` | `q=NVDA` |
-| 我上传的文件里有没有关于 XX 的内容 | `search` | `q=XX, sources=pdf` |
-| 近期美国访华有什么消息 | `search` | `q="美国 OR 访华 OR Trump OR 中美"`, `since=14d` |
-| 只看 Twitter 上的内容 | `daily_feed` | `sources=twitter` |
+| 今天有什么值得关注的？ | `daily_feed` | `since=24h` |
+| 这周的信息帮我总结 | `daily_feed` | `since=7d`（默认） |
+| 帮我找关于 NVDA / 英伟达的内容 | `daily_feed` | `q=NVDA OR 英伟达` |
+| 只看 Twitter 内容 | `daily_feed` | `sources=twitter` |
 | 只看我上传的文件 | `daily_feed` | `sources=pdf,image,text,audio` |
-| **这条具体讲了什么 / 展开第 N 条 / 给我看原文** | **`daily_item`** | **`id`（取上一轮列表里的 id）** |
-| **那个 Bloomberg / YouTube 视频的 transcript 是什么** | **`daily_item`** | **`id`，读返回里的 `transcript` 字段** |
-| **那份 PDF / 我上传的研报里关于 XX 怎么说** | **先 `search` 拿 id → `daily_item`** | **`q=XX` → `id`** |
-| 帮我看看今天的 Twitter 日报 | `twitter_daily_latest` | — |
-| 帮我看看 5 月 10 号的 Twitter 日报 | `twitter_daily_by_date` | `date=2026-05-10` |
-| 帮我看看最新的 YouTube 日报 | `youtube_daily_latest` | — |
-| 有哪些日报可以看？ | `twitter_daily_list` | — |
+| 近期美国访华有什么消息（多角度） | `daily_multi_search` | 见「多组搜索」示例 |
+| 这条具体讲了什么 / 全文 / 字幕 | `daily_item` | `id`（上一轮列表的 id） |
+| 帮我看这几条的全文 | `daily_items_batch` | `ids=[...]` |
+| 帮我看今天的 Twitter 日报 | `report_latest` | `kind=twitter` |
+| 帮我看 5 月 10 号的 YouTube 日报 | `report_by_date` | `kind=youtube, date=2026-05-10` |
+| 有哪些日报可以看？ | `report_list` | `kind=twitter` |
+| 我订阅了哪些频道？ | `list_subscriptions` | — |
+| 哪些来源有内容 / 我的 preset 是什么？ | `list_sources` | — |
 
 > **重要**：用户不会说"调用 daily_feed"——他们只会说"帮我看看今天的内容"。AI 助手负责根据语义自动选择正确的工具和参数。
 
 ---
 
-## 列表 → 详情下钻模式（核心）
+## 五大搜索范式
 
-绝大多数追问都遵循这条路径：
+### ① 入口收敛
 
-1. 第一轮 `daily_feed` / `search` 返回**轻量列表**（标题 + 摘要 + 链接 + id + tickers/tags）；
-2. AI 助手把整段列表（**特别是每条的 `id`**）记在工作记忆里展示给用户；
-3. 用户对其中一条追问"具体讲了什么 / 全文 / 字幕 / 给我细节"时，**直接用上一轮列表里的 `id` 调 `daily_item`**，**不要**再调 `daily_feed` / `search` 兜圈子；
-4. 如果上下文里已经找不到 id（对话太长被压缩），先 `search` 用关键词重定位拿到 id，再 `daily_item`。
+先判断用户意图，选一个入口，不做防御性并行调用。
 
-> **何时主动下钻**：用户的问题用列表里的 `summary` 回答不了（要原文、要原话、要时间戳、要数字细节、要"具体怎么说"），就该调 `daily_item`。
+| 用户意图 | 入口 |
+|---|---|
+| 「最近 XX 有什么消息」 | `daily_feed q=XX` |
+| 「今天/这周有什么事」 | `daily_feed since=24h/7d` |
+| 「从多个角度分析一个话题」 | `daily_multi_search` |
+| 「帮我看日报」 | `report_latest / report_by_date` |
+
+0 条时才换入口或放宽参数。**不要**同时调用 `daily_feed` 和 `daily_multi_search` 搜同一话题。
+
+### ② 渐进式精度
+
+从最窄约束开始，逐步放宽直到信息量够用：
+
+```
+最窄: tickers=NVDA.US + since=7d + q=黄仁勋
+      ↓ 0 条或不够
+放宽: 去掉 tickers，只用 q=黄仁勋 OR Jensen
+      ↓ 还不够
+最宽: daily_multi_search，多组分维度覆盖
+```
+
+0 条时先查看 `diagnostics` 字段，它会告诉你哪个词的覆盖量是 0。
+
+### ③ 已知-未知边界
+
+每次输出明确区分：
+- **已知**：搜到的、可引用的、带 id 和 url 来源的
+- **未知**：搜了但没找到的、单一来源未验证的、超出订阅源覆盖范围的
+
+搜到 N 条≠这就是全部——主动声明缺口，特别是结果 < 5 条时。
+
+遇到 0 条时，先调用 `list_subscriptions` 确认该频道是否已启用，再调用 `list_sources` 确认该 source 在 preset 里，再考虑扩大时间窗口。
+
+### ④ 多组并行 → 用 `daily_multi_search`
+
+当话题有多个维度（人物、事件、议题），用 `daily_multi_search` 一次提交多组查询，服务端自动合并去重，并在 `per_group` 里告诉你每组命中多少条：
+
+```json
+{
+  "groups": [
+    {"q": "Greer OR USTR OR 贸易代表", "since": "14d"},
+    {"q": "黄仁勋 OR Jensen OR 库克 OR Cook OR 马斯克 OR Musk", "since": "14d"},
+    {"q": "访华 OR Beijing summit OR 北京峰会 OR 中美会晤", "since": "14d"}
+  ],
+  "dedup_by": "url"
+}
+```
+
+`per_group` 为空的组说明该维度在你的订阅源中没有覆盖——这本身就是有价值的信息。
+
+### ⑤ 源外补充
+
+GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extract 补充，并标注来源：
+
+- 0 条或有效信息 < 3 条，且用户问的是事实性问题
+- 核心消息仅 1 个来源 → 需要外部交叉验证
+- 时间线存在明显缺口，且该时间段应有公开信息
 
 ---
 
 ## 工具说明
 
-### `daily_feed` — 每日时间线
-获取用户的 Daily 时间线（Feed 订阅 + 上传文件合并）。
+### `daily_feed` — 每日时间线 + 关键词搜索
+
+获取用户的 Daily 时间线（Feed 订阅 + 上传文件合并）。`q` 可选；有 `q` 时相当于全文搜索。
 
 参数（全部可选）：
-- `since`：时间窗口，`24h` / `7d` / `30d` / ISO 日期时间。默认 7d。
-- `sources`：逗号分隔的来源子类型，如 `twitter,youtube_feed,pdf`。不填则使用用户在网页端设置的默认 preset。
-- `q`：关键词过滤（与 `search` 不同，这是在时间线基础上过滤）。语法同 `search`：空格=AND，`OR`=任一，`"短语"`=精确。
-- `ticker`：按股票代码过滤，如 `NVDA`。
-- `limit`：返回条数，默认 20，最大 100。
-- `cursor`：翻页游标，从上次返回的 `next_cursor` 获取。
+- `since`：时间窗口，`24h / 48h / 7d / 14d / 30d / 2w` 或 ISO 日期时间。默认 7d。非法值返回 400。
+- `q`：关键词过滤。**语法**：空格=AND，`OR`=任一，`"短语"`=精确。不要传整句话。
+- `sources`：逗号分隔，如 `twitter,youtube_feed,pdf`。不填则使用网页端 preset。
+- `tickers`：逗号分隔，**必须含交易所后缀**，如 `NVDA.US,9988.HK`。裸代码不会命中。
+- `tags`：逗号分隔概念标签（任一匹配），从上一轮结果的 `tags` 字段或 `list_subscriptions` 获取。
+- `author`：按作者名/账号过滤，子串匹配，如 `author=Bloomberg`。仅适用于 Feed 条目。
+- `limit`：1–100，默认 20。
+- `cursor`：翻页游标，来自上次返回的 `next_cursor`。
+- `dedup`：默认 true，自动去除重复 URL 的条目。
 
-### `search` — 关键词搜索
-在所有内容（标题、摘要、正文）中做全文搜索。
+**`q` 语法示例**：
 
-参数：`q`（必填）、`since`、`sources`、`ticker`、`limit`、`cursor`（同上）。
+| 输入 | 语义 |
+|---|---|
+| `NVDA` | 包含 NVDA |
+| `美国 访华` | 同时包含「美国」和「访华」 |
+| `美国 OR 访华 OR Trump` | 包含任一 |
+| `"Air Force One" China` | 包含精确短语 + 单词 |
 
-**`q` 语法（重要）**：
-
-| 输入格式 | 语义 | 示例 |
-|---|---|---|
-| 单词 | 子串匹配 | `Trump` |
-| 空格分隔 | AND（每个词都要命中） | `美国 访华` |
-| `OR`（大写）分隔 | OR（任一词命中即可） | `美国 OR 访华 OR Trump` |
-| 双引号短语 | 精确子串（空格视为一体） | `"Air Force One"` |
-
-> ⚠️ **不要把整句话当 `q` 传**：`q="帮我找近期美国访华的重要消息"` 会被当字面字符串匹配，永远 0 条。  
-> 正确做法：**提取 3–6 个核心关键词，用 `OR` 连接**，如 `q="美国 OR 访华 OR Trump OR 中美 OR 黄仁勋"`, `since=14d`。  
-> 如果 0 条，先放宽（减少 AND 词 或 改 OR），而非改写整句。
+> ⚠️ `q="帮我找近期美国访华的重要消息"` → 被当字面字符串匹配，永远 0 条。正确做法：提取 3–6 个核心词用 OR 连接。
 
 ### `daily_item` — 单条详情下钻
-按 `id` 取**一条** Daily 内容的完整字段，用于用户对某条追问细节、要原文 / 字幕 / 全文时。
+
+按 id 取一条 Daily 内容的完整字段。id 来自 `daily_feed` / `daily_multi_search` 返回的 `id` 字段（如 `feed_88247`、`upload_123`）。
+
+返回额外字段：
+- `content`：主正文（上传文件的 Markdown/OCR/笔记，Twitter/新闻的全文，YouTube 的视频描述）
+- `transcript`：纯文本字幕（YouTube 订阅 / 音频 / podcast 上传）；推文/PDF 为 null
+- `content_truncated` / `transcript_truncated`：true 时表示字段被截断，完整内容请用 `url` 跳转
+
+**何时下钻**：摘要 `summary` 回答不了问题时（要原文、原话、时间戳、数字细节）。
+
+### `daily_items_batch` — 批量详情
+
+一次请求获取最多 10 条完整详情。比 N 次串行 `daily_item` 更高效。
+
+参数：`ids`（字符串数组，最多 10 个）
+
+### `daily_multi_search` — 多组并行搜索
+
+同时提交 1–5 组搜索参数，服务端并行执行、合并结果、按 url 或 id 去重后按时间排序返回。
 
 参数：
-- `id`（必填）：来自 `daily_feed` / `search` 返回的 `id`，形如 `feed_88247` 或 `upload_123`。
+- `groups`：数组，每组支持 `q, since, sources, tickers, tags, author, limit`
+- `dedup_by`：`"url"`（默认）或 `"id"`
+- `limit_per_group`：每组最多返回多少条，默认 50
 
-返回（在列表条目字段之外，额外有）：
-- `content`：主正文。
-  - `upload` → `file_processing_details.content`（Markdown 正文 / OCR / 网页解析 / 笔记）；
-  - `twitter` / `news` → `subscription_content.content`（推文 / 新闻全文）；
-  - `youtube`（订阅）→ `subscription_content.content`（视频描述）。
-- `transcript`：纯文本字幕 / 转写。
-  - `youtube`（订阅）→ `subscription_content.transcript_cleaned`（回退 `transcript`）；
-  - `upload` 的 `youtube` / `audio` / `podcast` → `file_processing_details.asr_with_diarization` 拍平成行；
-  - 没有字幕的类型（推文 / PDF 等）= `null`。
-- `content_truncated` / `transcript_truncated`：`true` 表示字段被截断，需要全文请引导用户跳 `url`。
-- `body_excerpt`（向后兼容字段，旧客户端用，新客户端优先 `content`）。
+返回额外字段：`per_group`——每组原始命中数，用于判断哪个搜索角度贡献了有效信息。
 
-### `twitter_daily_latest` / `twitter_daily_by_date` / `twitter_daily_list`
-获取 Twitter 每日汇总报告。`by_date` 参数为 `date`（`YYYY-MM-DD`）。
+### `list_subscriptions` — 订阅频道清单
 
-### `youtube_daily_latest` / `youtube_daily_by_date`
-获取 YouTube 每日汇总报告，用法同上。
+返回所有已启用的订阅频道，附带每个频道最近 30 天的条目数。
+
+用途：
+- 确认某个 Twitter 账号 / YouTube 频道是否已订阅且处于启用状态
+- 在 0 命中时排查「没订阅」vs「真的没内容」
+
+### `list_sources` — 来源类型清单
+
+返回所有可用 source 类型，以及它们是否在用户当前 Daily preset 中、最近 30 天有多少条目。
+
+用途：
+- 在使用 `sources=` 参数前确认该来源有内容
+- 了解用户当前 preset 包含哪些来源
+
+### `report_latest` / `report_by_date` / `report_list`
+
+获取每日汇总报告。
+
+所有报告工具必须传 `kind` 参数：
+- `kind=twitter`：Twitter 日报
+- `kind=youtube`：YouTube 日报
+
+`report_by_date` 还需要 `date=YYYY-MM-DD`。
 
 ---
 
 ## 来源类型参考
 
-`sources=` 参数可用的值（逗号分隔多个）：
+| source 值 | 含义 | 适用于 sources= 参数 |
+|---|---|---|
+| `twitter` | 订阅的 Twitter Feed | ✓ |
+| `youtube` / `youtube_feed` | 订阅的 YouTube Feed | ✓ |
+| `news` / `web` / `podcast` | 订阅的网页 / 新闻 / 播客 | ✓ |
+| `pdf` | 用户上传的 PDF | ✓ |
+| `image` | 用户上传的图片 | ✓ |
+| `audio` | 用户上传的音频 | ✓ |
+| `text` | 用户上传的文本文件 | ✓ |
 
-| source 值 | 含义 |
-|---|---|
-| `twitter` | 订阅的 Twitter Feed |
-| `youtube` / `youtube_feed` | 订阅的 YouTube Feed |
-| `web` / `news` / `podcast` | 订阅的网页 / 新闻 / 播客 Feed |
-| `pdf` | 用户上传的 PDF |
-| `image` | 用户上传的图片 |
-| `audio` | 用户上传的音频 |
-| `text` | 用户上传的文本文件 |
+---
+
+## 列表 → 详情下钻模式（核心）
+
+1. 第一轮 `daily_feed` / `daily_multi_search` 返回**轻量列表**（标题 + 摘要 + id + tickers/tags）；
+2. 助手把每条的 **`id`** 记在工作记忆中；
+3. 用户追问「具体讲了什么 / 全文 / 字幕」时，**直接用上一轮的 `id` 调 `daily_item` 或 `daily_items_batch`**，不要再重新搜索；
+4. 如果上下文里找不到 id（对话太长被压缩），先用关键词 `daily_feed` 重定位，拿到 id 再下钻。
 
 ---
 
 ## 返回结构
 
-### 列表条目（`daily_feed` / `search`）
+### 列表条目（`daily_feed` / `daily_multi_search`）
 
 ```json
 {
@@ -152,58 +228,37 @@ MCP 工具只返回当前账号有权限访问的数据，包含以下三类：
 }
 ```
 
-### 详情条目（`daily_item`）
+### 详情条目（`daily_item` / `daily_items_batch`）
 
 在列表字段基础上额外包含 `content` / `transcript` / `*_truncated`：
 
 ```json
 {
   "id": "feed_88247",
-  "title": "Horizons Middle East — Trump China Visit Special",
-  "summary": "...",
-  "url": "https://youtube.com/watch?v=...",
-  "source": "youtube",
-  "author": "Bloomberg Television",
-  "published_at": "2026-05-13T05:30:00+00:00",
-  "tickers": ["NVDA.US", "AAPL.US", "TSLA.US", "BLK.US"],
-  "tags": ["China", "Tariffs", "CEO"],
   "content": "本期节目讨论特朗普访华代表团构成 ...",
   "content_truncated": false,
-  "transcript": "Welcome to Horizons Middle East ...\nJensen Huang said NVIDIA will ...",
-  "transcript_truncated": true,
-  "body_excerpt": "本期节目讨论特朗普访华代表团构成 ..."
+  "transcript": "Welcome to Horizons Middle East ...",
+  "transcript_truncated": true
 }
 ```
 
----
+### 0 命中诊断（`diagnostics`）
 
-## 回答格式指引
+当 `total == 0` 且有 `q` 时，响应包含：
 
-拿到数据后，向用户呈现时：
-1. 用 3–8 条要点，每条格式：**标题** — 一句话摘要（来源）[链接]
-2. 提到投资标的时，只引用 JSON 里 `tickers` 字段的内容，不自行推断股票代码
-3. 若内容较多，先给整体概述，再分类展开（如：「上传文件」「Twitter」「YouTube」各自有什么）
-4. 没有查到内容时，如实告知并建议用户检查订阅设置或扩大时间范围
+```json
+{
+  "diagnostics": {
+    "parsed_q_groups": [{"op": "and", "terms": ["美国", "访华", "重要"]}],
+    "terms_in_corpus": {"美国": 1280, "访华": 47, "重要": 9831},
+    "since_used": "2026-05-10T...",
+    "sources_used": ["twitter", "youtube_feed", "news"],
+    "hint": "Term(s) ['重要'] have 0 matches ... consider removing them."
+  }
+}
+```
 
-**追问 / 下钻场景的呈现方式**：
-
-5. 用户对某条追问"具体讲了什么 / 全文 / 字幕"时，先调 `daily_item` 拿 `content` / `transcript`；
-6. 围绕 `content` / `transcript` 字段**直接引用**关键段落或原话，避免再说一遍 `summary`；
-7. 引用 transcript 时优先标注时间戳（若可识别）和讲话人；同时附 `url`，方便用户跳去原视频核对；
-8. 看到 `content_truncated: true` 或 `transcript_truncated: true` 时，明确告知用户"以上为节选，完整内容请打开链接"，不要假装看到了全部。
-
----
-
-## 配置（管理员 / 开发者）
-
-使用 MCP（Cursor / Claude Code）接入时，需要在 `~/.cursor/mcp.json` 里配置：
-
-| 环境变量 | 说明 |
-|---|---|
-| `GUANHE_TOKEN` | 在网页端「用户菜单 → API Keys」创建，以 `ght_` 开头 |
-| `GUANHE_BASE_URL` | 服务地址，如 `https://your-host`（不含结尾斜杠） |
-
-PAT 默认限速：60 次/分钟。
+用 `terms_in_corpus` 判断哪个词过于限制——0 值的词是瓶颈，改 OR 或去掉。
 
 ---
 
@@ -211,9 +266,3 @@ PAT 默认限速：60 次/分钟。
 
 - PAT 是长期有效的密钥，等同于密码，不要分享或提交到代码仓库。
 - 可在「用户菜单 → API Keys」随时查看、创建或撤销 PAT。
-
----
-
-## MCP 接入文档
-
-详见仓库 `tools/guanhe-mcp/README.md`。

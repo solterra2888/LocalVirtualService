@@ -1,56 +1,46 @@
-# guanhe-mcp
+# guanhe-mcp v0.2.0
 
 Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API (`/api/v1/agent`).
+
+## Breaking changes from v0.1
+
+| v0.1 tool | v0.2 replacement |
+|---|---|
+| `search` | `daily_feed` with `q=` parameter |
+| `twitter_daily_latest` | `report_latest` with `kind=twitter` |
+| `twitter_daily_by_date` | `report_by_date` with `kind=twitter` |
+| `twitter_daily_list` | `report_list` with `kind=twitter` |
+| `youtube_daily_latest` | `report_latest` with `kind=youtube` |
+| `youtube_daily_by_date` | `report_by_date` with `kind=youtube` |
+| `ticker=NVDA` (single) | `tickers=NVDA.US,AAPL.US` (multi, with exchange suffix) |
+
+Old HTTP paths return **410 Gone** with an upgrade hint.
 
 ## Requirements
 
 - Python **>= 3.10**
-- `httpx` (installed automatically with this package)
+- `httpx` (installed automatically)
 - A **Personal Access Token** (`ght_...`) from the web app: **User menu → API Keys**
 
 ## Install
 
-MCP 以 stdio 子进程形式运行在 **Cursor / Claude Desktop 所在的本地机器**上，直接从 GuanHe 服务器下载安装，无需 GitHub 访问权限：
-
 ```bash
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.1.0-py3-none-any.whl"
-```
+# From the published wheel:
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.2.0-py3-none-any.whl"
 
-> `httpx` 作为依赖会自动安装，无需单独 `pip install httpx`。
-
-安装后查出 Python 绝对路径，配置 `mcp.json` 时使用：
-
-```bash
-which python   # 激活目标虚拟环境后执行
-```
-
-### 从本地源码安装（开发调试用）
-
-若已克隆仓库并需要修改代码：
-
-```bash
+# From local source (dev):
 cd tools/guanhe-mcp
 pip install -e .
 ```
 
-## Environment
+## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GUANHE_TOKEN` | Yes | PAT starting with `ght_` |
 | `GUANHE_BASE_URL` | Yes | API origin, e.g. `https://your-host` (no trailing slash) |
 
-## Run (stdio MCP)
-
-```bash
-export GUANHE_TOKEN='ght_...'
-export GUANHE_BASE_URL='https://your-host'
-guanhe-mcp
-```
-
 ## Cursor (`~/.cursor/mcp.json`)
-
-与本地 `development/dev.conf` 中的 **`rcTool`** 环境一致（路径按本机修改）：
 
 ```json
 {
@@ -60,7 +50,7 @@ guanhe-mcp
       "args": ["-m", "guanhe_mcp.server"],
       "env": {
         "GUANHE_TOKEN": "ght_xxxxxxxx",
-        "GUANHE_BASE_URL": "http://43.99.37.76",
+        "GUANHE_BASE_URL": "https://www.guanhecapital.hk",
         "PYTHONUNBUFFERED": "1"
       }
     }
@@ -68,13 +58,7 @@ guanhe-mcp
 }
 ```
 
-If `guanhe-mcp` is not on `PATH`, use the full path to the console script or:
-
-```json
-"command": "python3",
-"args": ["-m", "guanhe_mcp.server"],
-"env": { ... }
-```
+Replace `/path/to/your/python` with the output of `which python` (or `where python` on Windows) after activating your target virtual environment.
 
 ## Claude Desktop (`claude_desktop_config.json`)
 
@@ -86,34 +70,65 @@ If `guanhe-mcp` is not on `PATH`, use the full path to the console script or:
       "args": ["guanhe-mcp"],
       "env": {
         "GUANHE_TOKEN": "ght_xxxxxxxx",
-        "GUANHE_BASE_URL": "https://your-host"
+        "GUANHE_BASE_URL": "https://www.guanhecapital.hk"
       }
     }
   }
 }
 ```
 
-Adjust `command`/`args` to your Python environment (e.g. conda shim or `python3 -m guanhe_mcp.server`).
+## Tools (9)
 
-## OpenAI Codex CLI
+| Tool | Description | Maps to |
+|------|-------------|---------|
+| `daily_feed` | Time-ordered feed + optional keyword search | `GET /api/v1/agent/daily` |
+| `daily_item` | Full content + transcript for one item | `GET /api/v1/agent/daily/{id}` |
+| `daily_items_batch` | Full detail for up to 10 items at once | `POST /api/v1/agent/daily/batch` |
+| `daily_multi_search` | 1–5 parallel search groups, server-side dedup | `POST /api/v1/agent/daily/multi` |
+| `list_subscriptions` | Enabled feed channels with 30-day counts | `GET /api/v1/agent/subscriptions` |
+| `list_sources` | Source types, preset membership, 30-day counts | `GET /api/v1/agent/sources` |
+| `report_latest` | Latest daily report (kind=twitter\|youtube) | `GET /api/v1/agent/reports/latest?kind=` |
+| `report_by_date` | Daily report for YYYY-MM-DD | `GET /api/v1/agent/reports/{date}?kind=` |
+| `report_list` | Paginated list of available reports | `GET /api/v1/agent/reports?kind=` |
 
-Codex MCP configuration varies by version. Point it at the same `command` + `env` as Cursor, or run `guanhe-mcp` under `npx`-style wrappers if you add one.
+## Quick usage examples
 
-## Tools (8)
+```bash
+# Set env
+export GUANHE_TOKEN="ght_..."
+export GUANHE_BASE_URL="https://www.guanhecapital.hk"
 
-| Tool | Maps to |
-|------|---------|
-| `daily_feed` | `GET /api/v1/agent/daily` |
-| `daily_item` | `GET /api/v1/agent/daily/{id}` |
-| `search` | `GET /api/v1/agent/search` |
-| `twitter_daily_latest` | `GET /api/v1/agent/reports/twitter-daily/latest` |
-| `twitter_daily_by_date` | `GET /api/v1/agent/reports/twitter-daily/{date}` |
-| `youtube_daily_latest` | `GET /api/v1/agent/reports/youtube-daily/latest` |
-| `youtube_daily_by_date` | `GET /api/v1/agent/reports/youtube-daily/{date}` |
-| `twitter_daily_list` | `GET /api/v1/agent/reports/twitter-daily` |
+# Run the server (it reads JSON-RPC from stdin)
+python -m guanhe_mcp.server
+```
 
-Tool implementations return **JSON strings** (MCP content).
+For smoke testing via the fallback script:
 
-## Skill
+```bash
+python scripts/call_guanhe_mcp.py daily_feed '{"since": "24h", "limit": 5}'
+python scripts/call_guanhe_mcp.py daily_multi_search '{"groups": [{"q": "NVDA OR 英伟达", "since": "7d"}, {"q": "Greer OR USTR OR 贸易代表", "since": "7d"}]}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "twitter"}'
+python scripts/call_guanhe_mcp.py list_subscriptions '{}'
+```
 
-See repository `docs/agent/GUANHE_DAILY.md` (also served at `/agent/skill/GUANHE_DAILY.md` when the API is running).
+## Key parameter notes
+
+**`q` syntax** — space = AND (all terms must match), `OR` (uppercase) = any match, `"phrase"` = exact substring.
+- Good: `q=NVDA OR 英伟达`
+- Bad: `q=帮我找近期美国访华的重要消息` (treated as a literal string, will return 0 results)
+
+**`tickers`** — must include exchange suffix: `NVDA.US`, `9988.HK`, `600519.SS`, `0700.HK`.
+If unsure of the suffix, use `q=NVDA` first and read the `tickers` field in the response.
+
+**`since`** — `24h`, `48h`, `7d`, `14d`, `30d`, `2w`, or ISO 8601. Invalid values return 400.
+
+**`sources`** — comma-separated: `twitter`, `youtube`, `youtube_feed`, `news`, `pdf`, `image`, `audio`, `text`, `podcast`.
+Omit to use your web-app Daily preset.
+
+## Skill documentation
+
+Full usage guide with search strategies and worked examples:
+
+```
+https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
+```
