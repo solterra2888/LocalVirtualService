@@ -32,6 +32,9 @@ class FileTagsUpdate(BaseModel):
     industry_en: Optional[str] = Field(None, description="英文子行业分类")
     tickers: Optional[List[str]] = Field(None, description="股票代码列表")
     concepts: Optional[List[str]] = Field(None, description="投资概念/主题列表")
+    people: Optional[List[Dict[str, Any]]] = Field(None, description="关键人物列表")
+    countries: Optional[List[str]] = Field(None, description="国家英文全名列表")
+    tag_schema_version: Optional[str] = Field(None, description="打标 schema 版本")
     additional_tags: Optional[Dict[str, Any]] = Field(None, description="扩展标签")
     confidence: Optional[float] = Field(None, ge=0, le=1, description="置信度")
     reasoning: Optional[str] = Field(None, description="推理说明")
@@ -48,6 +51,9 @@ class FileTagsResponse(BaseModel):
     tickers: List[str]  # 前端使用数组
     ticker_raw: Optional[str] = Field(None, description="原始ticker字段值（JSON字符串）")
     concepts: List[str] = Field(default_factory=list, description="投资概念/主题列表")
+    people: List[Dict[str, Any]] = Field(default_factory=list, description="关键人物列表")
+    countries: List[str] = Field(default_factory=list, description="国家英文全名列表")
+    tag_schema_version: Optional[str] = Field(default="file_v1", description="打标 schema 版本")
     additional_tags: Dict[str, Any]
     confidence: Optional[float]
     reasoning: Optional[str]

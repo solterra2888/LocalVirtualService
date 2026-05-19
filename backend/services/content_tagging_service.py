@@ -196,6 +196,15 @@ class ContentTaggingService:
                 tag_data['industry_en'] = ''
             if 'concepts' not in tag_data:
                 tag_data['concepts'] = []
+            if 'people' not in tag_data:
+                tag_data['people'] = []
+            if 'countries' not in tag_data:
+                tag_data['countries'] = []
+            if not isinstance(tag_data.get('people'), list):
+                tag_data['people'] = []
+            if not isinstance(tag_data.get('countries'), list):
+                tag_data['countries'] = []
+            tag_data.setdefault('tag_schema_version', 'file_v1')
             # summary → reasoning 字段统一（模板已将 reasoning 改为 summary）
             if 'summary' in tag_data and 'reasoning' not in tag_data:
                 tag_data['reasoning'] = tag_data['summary']
@@ -226,6 +235,8 @@ class ContentTaggingService:
             f"industry={tag_data.get('industry')}({tag_data.get('industry_en', '')}), "
             f"tickers={len(tag_data.get('tickers', []))}, "
             f"concepts={tag_data.get('concepts', [])}, "
+            f"people={len(tag_data.get('people') or [])}, "
+            f"countries={tag_data.get('countries', [])}, "
             f"耗时={processing_time:.2f}秒"
         )
         
@@ -263,7 +274,8 @@ class ContentTaggingService:
             cursor.execute("""
                 SELECT id, sector, sector_en, industry, industry_en, ticker, 
                        concepts, additional_tags, confidence, reasoning, 
-                       tagged_by, tagged_at, updated_at
+                       tagged_by, tagged_at, updated_at,
+                       people, countries, tag_schema_version, summary
                 FROM file_tags
                 WHERE file_id = %s
             """, (file_id,))
@@ -275,6 +287,8 @@ class ContentTaggingService:
             tickers = row[5] if isinstance(row[5], list) else (row[5] or [])
             concepts = row[6] if isinstance(row[6], list) else (row[6] or [])
             additional_tags = row[7] if row[7] else {}
+            people = row[13] if isinstance(row[13], list) else (row[13] or [])
+            countries = row[14] if isinstance(row[14], list) else (row[14] or [])
             
             return {
                 'id': row[0],
@@ -289,7 +303,11 @@ class ContentTaggingService:
                 'reasoning': row[9],
                 'tagged_by': row[10],
                 'tagged_at': row[11],
-                'updated_at': row[12]
+                'updated_at': row[12],
+                'people': people,
+                'countries': countries,
+                'tag_schema_version': row[15] or 'file_v1',
+                'summary': row[16],
             }
         finally:
             conn.close()
@@ -327,11 +345,17 @@ class ContentTaggingService:
             industry_en = tag_data.get('industry_en', '')
             tickers = tag_data.get('tickers', [])
             concepts = tag_data.get('concepts', [])
+            people = tag_data.get('people') or []
+            countries = tag_data.get('countries') or []
+            tag_schema_version = tag_data.get('tag_schema_version') or 'file_v1'
             confidence = tag_data.get('confidence')
             reasoning = tag_data.get('reasoning')
+            summary = tag_data.get('summary') or reasoning
             
             ticker_jsonb = Json(tickers) if tickers else None
             concepts_json = json.dumps(concepts, ensure_ascii=False) if concepts else '[]'
+            people_jsonb = Json(people)
+            countries_jsonb = Json(countries)
             
             # 构建additional_tags（包含完整的tickers和AI元数据）
             additional_tags = {
@@ -352,8 +376,9 @@ class ContentTaggingService:
             cursor.execute("""
                 INSERT INTO file_tags 
                 (file_id, sector, sector_en, industry, industry_en, ticker, 
-                 concepts, additional_tags, confidence, reasoning, tagged_by, tagged_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                 concepts, people, countries, tag_schema_version,
+                 additional_tags, confidence, reasoning, summary, tagged_by, tagged_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (file_id) 
                 DO UPDATE SET 
                     sector = EXCLUDED.sector,
@@ -362,9 +387,13 @@ class ContentTaggingService:
                     industry_en = EXCLUDED.industry_en,
                     ticker = EXCLUDED.ticker,
                     concepts = EXCLUDED.concepts,
+                    people = EXCLUDED.people,
+                    countries = EXCLUDED.countries,
+                    tag_schema_version = EXCLUDED.tag_schema_version,
                     additional_tags = EXCLUDED.additional_tags,
                     confidence = EXCLUDED.confidence,
                     reasoning = EXCLUDED.reasoning,
+                    summary = EXCLUDED.summary,
                     tagged_by = EXCLUDED.tagged_by,
                     tagged_at = EXCLUDED.tagged_at,
                     updated_at = CURRENT_TIMESTAMP
@@ -377,9 +406,13 @@ class ContentTaggingService:
                 industry_en,
                 ticker_jsonb,
                 concepts_json,
+                people_jsonb,
+                countries_jsonb,
+                tag_schema_version,
                 json.dumps(additional_tags),
                 confidence,
                 reasoning,
+                summary,
                 tagged_by
             ))
             
@@ -455,6 +488,20 @@ class ContentTaggingService:
                 concepts = updates['concepts']
                 update_fields.append("concepts = %s::jsonb")
                 params.append(json.dumps(concepts, ensure_ascii=False) if concepts else '[]')
+
+            if 'people' in updates:
+                people = updates['people'] or []
+                update_fields.append("people = %s::jsonb")
+                params.append(json.dumps(people, ensure_ascii=False))
+
+            if 'countries' in updates:
+                countries = updates['countries'] or []
+                update_fields.append("countries = %s::jsonb")
+                params.append(json.dumps(countries, ensure_ascii=False))
+
+            if 'tag_schema_version' in updates:
+                update_fields.append("tag_schema_version = %s")
+                params.append(updates['tag_schema_version'])
             
             if 'confidence' in updates:
                 update_fields.append("confidence = %s")

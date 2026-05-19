@@ -1,5 +1,12 @@
 // 文件标签相关类型定义
 
+export interface FileTagPerson {
+  name: string;
+  name_en?: string;
+  role?: string;
+  affiliation?: string | null;
+}
+
 export interface FileTags {
   id: number;
   file_id: number;
@@ -10,6 +17,9 @@ export interface FileTags {
   tickers: string[];
   ticker_raw?: string;
   concepts?: string[];
+  people?: FileTagPerson[];
+  countries?: string[];
+  tag_schema_version?: string;
   additional_tags?: Record<string, any>;
   confidence?: number;
   reasoning?: string;
@@ -27,8 +37,14 @@ export interface FileTagsWithFileInfo extends FileTags {
 
 export interface FileTagsUpdate {
   sector?: string;
+  sector_en?: string;
   industry?: string;
+  industry_en?: string;
   tickers?: string[];
+  concepts?: string[];
+  people?: FileTagPerson[];
+  countries?: string[];
+  tag_schema_version?: string;
   confidence?: number;
   reasoning?: string;
   additional_tags?: Record<string, any>;

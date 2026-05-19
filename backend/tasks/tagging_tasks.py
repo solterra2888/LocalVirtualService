@@ -135,10 +135,13 @@ def tag_file_content_task(
                 LLMTemplateResolver, ResolveError,
             )
             resolver = LLMTemplateResolver()
+            # 自动打标 (无 runtime template_id) 始终用系统 content_tag_v1,
+            # 避免用户 My Templates 里的陈旧 clone 挡住 admin 系统模板更新.
             resolved = resolver.resolve(
                 module_code='file_tagging',
                 user_id=user_id,
                 runtime_template_id=template_id,
+                prefer_system_default=(template_id is None),
             )
             resolved_template_id = resolved.template_id
             resolved_template_code = resolved.template_code

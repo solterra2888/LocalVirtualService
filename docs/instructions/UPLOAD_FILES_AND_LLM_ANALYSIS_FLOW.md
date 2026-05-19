@@ -415,6 +415,20 @@ backend/api/files.py: upload_apple_podcast_link()
 | `task_id` | Celery 任务 ID |
 | `processing_time` | 处理耗时（秒） |
 
+### `file_tags`（每个文件一行，自动打标产物）
+
+| 字段 | 说明 |
+|------|------|
+| `file_id` | 关联 `file_processing_details.id`（唯一） |
+| `sector` / `sector_en` / `industry` / `industry_en` | GICS 中英文行业分类 |
+| `ticker` | JSONB 股票代码数组 |
+| `concepts` | JSONB 投资概念/主题 |
+| `people` | JSONB 关键人物 `[{name, name_en, role, affiliation?}]`，`name` 保留原文写法 |
+| `countries` | JSONB 国家英文全名数组，如 `["United States", "China"]` |
+| `tag_schema_version` | 打标 schema 版本，Upload 默认 `file_v1`（`content_tag_v1`） |
+| `confidence` / `reasoning` / `summary` | 置信度、推理说明、摘要 |
+| `additional_tags` | 扩展 JSONB（含 `tickers_full`、`ai_metadata` 等） |
+
 ---
 
 ## 4. Prompt Template 与 LLM 分析流程
@@ -555,7 +569,13 @@ tag_file_content_task(file_id, username, force=False, template_id=None, template
     │
     └─ 9. ContentTaggingService.save_tags(file_id, tags)
             └─ INSERT INTO file_tags ... ON CONFLICT (file_id) DO UPDATE
+                  (含 people / countries / tag_schema_version='file_v1')
 ```
+
+**`content_tag_v1` 输出字段（2026-05-19 扩展）：** 除原有 `sector/sector_en/industry/industry_en/tickers/concepts/confidence/summary` 外，新增：
+- **`people`**：文档中被讨论的关键人物，`name` 保留原文写法（如 Trump、Powell），`name_en` 为英文全名。
+- **`countries`**：国家英文全名数组（如 `United States`、`China`），不使用 ISO 缩写。
+- 无相关人物/国家时返回 `[]`。
 
 **触发链路接 template_id：** 5 个上传 API 入参均增加 `auto_tag_template_id` / `auto_tag_template_variables`：
 - `POST /api/files/upload-and-process-document`
@@ -875,6 +895,11 @@ POST /api/llm-prompt-templates/templates/test
     YouTube 对数据中心 IP 有严格封锁，故 `upload-youtube` 通过本地家庭 IP Worker 下载；Apple Podcasts 使用公开 iTunes API + 第三方 Podcast CDN，无此限制，`upload-apple-podcast` 直接在远程服务器由 Celery 任务调用 yt-dlp 下载，**不需要** `local_virtual_service` Worker 参与。
     - `file_type='podcast'` 在 `trigger_auto_analyze` 中被视为与 `audio` 同类（`is_audio_like`），缺省模板为 `audio_analysis_v1`。
     - FilesPage 通过常量 `AUDIO_LIKE_TYPES = ['audio', 'podcast']` 让 podcast 文件复用 ASR 转写视图、重分析面板、音频播放器。
+
+14. **`file_tags.people` / `file_tags.countries`（2026-05-19）**  
+    - 由 `content_tag_v1` 模板在自动打标时写入；`tag_schema_version` 默认为 `file_v1`。  
+    - FilesPage 右侧 **Tags** 面板与 Daily 抽屉（Upload 来源）展示 People / Countries 标签。  
+    - 历史记录无此字段时，可在 FilesPage 点 **Retag** 或调用 `POST /api/file-tags/retag-batch?force=true` 按需补打。
 
 ---
 

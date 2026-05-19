@@ -215,6 +215,14 @@ class DailyItemDetailUpload(BaseModel):
         None,
         description="processing_stats.final_report (执行级 AI 分析报告; 多文件任务为整组报告)",
     )
+    tags: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "AI 标签轻量结构 (file_tags LEFT JOIN): "
+            "sector, sector_en, industry, industry_en, tickers[], concepts[], "
+            "people[], countries[], tag_schema_version, summary, confidence"
+        ),
+    )
 
 
 class DailyItemDetailFeed(BaseModel):

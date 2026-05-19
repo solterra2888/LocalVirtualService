@@ -744,7 +744,7 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 模板 Code | 所属模块 | 输入变量 | 输出格式 | 调用服务 |
 |-----------|---------|----------|---------|---------|
-| `content_tag_v1` | `file_tagging`（系统默认种子；用户私有行由此克隆） | `{{file_content}}` | JSON: sector/industry/tickers/concepts | `ContentTaggingService` |
+| `content_tag_v1` | `file_tagging`（系统默认种子；用户私有行由此克隆） | `{{file_content}}` | JSON: sector/industry/tickers/concepts/people/countries | `ContentTaggingService` |
 | `auto_name_v1` | `file_naming`（SYSTEM_FIXED） | `{{file_content}}` `{{file_type}}` `{{original_filename}}` | text (≤80字) | `ContentNamingService` |
 | `auto_classify_v1` | `file_classify`（SYSTEM_FIXED） | `{{file_content}}` `{{folder_list}}` `{{file_type}}` | text (文件夹名) | `ContentClassifyService` |
 | `content_tag_feeds_v1` | `feed_tagging`（SYSTEM_FIXED） | `{{content}}` | JSON: sector/industry/tickers/summary | `FeedContentTaggingService` |

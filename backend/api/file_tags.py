@@ -22,6 +22,58 @@ logger = get_logger("file_tags_api")
 router = APIRouter(prefix="/api/file-tags", tags=["file_tags"])
 
 
+def _parse_jsonb_list(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
+
+
+_FILE_TAGS_SELECT = """
+    id, file_id, sector, sector_en, industry, industry_en,
+    ticker, concepts, additional_tags,
+    confidence, reasoning, tagged_by, tagged_at, created_at, updated_at,
+    people, countries, tag_schema_version
+"""
+
+
+def _row_to_file_tags_response(row) -> dict:
+    """将 file_tags SELECT 行映射为 API 响应 dict (列序见 _FILE_TAGS_SELECT)."""
+    tickers = _parse_jsonb_list(row[6])
+    concepts = _parse_jsonb_list(row[7])
+    people = _parse_jsonb_list(row[15])
+    countries = _parse_jsonb_list(row[16])
+    additional_tags = row[8] if row[8] else {}
+    return {
+        'id': row[0],
+        'file_id': row[1],
+        'sector': row[2],
+        'sector_en': row[3] or '',
+        'industry': row[4],
+        'industry_en': row[5] or '',
+        'tickers': tickers,
+        'ticker_raw': json.dumps(tickers) if tickers else None,
+        'concepts': concepts,
+        'additional_tags': additional_tags,
+        'confidence': row[9],
+        'reasoning': row[10],
+        'tagged_by': row[11],
+        'tagged_at': row[12],
+        'created_at': row[13],
+        'updated_at': row[14],
+        'people': people,
+        'countries': countries,
+        'tag_schema_version': row[17] or 'file_v1',
+    }
+
+
 def get_db():
     """获取数据库管理器"""
     db_config = get_database_config()
@@ -84,41 +136,20 @@ def get_file_tags(
     
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, file_id, sector, sector_en, industry, industry_en, 
-                   ticker, concepts, additional_tags,
-                   confidence, reasoning, tagged_by, tagged_at, created_at, updated_at
+        cursor.execute(
+            f"""
+            SELECT {_FILE_TAGS_SELECT}
             FROM file_tags
             WHERE file_id = %s
-        """, (file_id,))
+            """,
+            (file_id,),
+        )
         
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="File tags not found")
         
-        tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
-        ticker_raw = json.dumps(tickers) if tickers else None
-        concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
-        additional_tags = row[8] if row[8] else {}
-        
-        return {
-            'id': row[0],
-            'file_id': row[1],
-            'sector': row[2],
-            'sector_en': row[3] or '',
-            'industry': row[4],
-            'industry_en': row[5] or '',
-            'tickers': tickers,
-            'ticker_raw': ticker_raw,
-            'concepts': concepts,
-            'additional_tags': additional_tags,
-            'confidence': row[9],
-            'reasoning': row[10],
-            'tagged_by': row[11],
-            'tagged_at': row[12],
-            'created_at': row[13],
-            'updated_at': row[14]
-        }
+        return _row_to_file_tags_response(row)
     finally:
         conn.close()
 
@@ -169,6 +200,7 @@ def list_file_tags(
                 ft.id, ft.file_id, ft.sector, ft.sector_en, ft.industry, ft.industry_en,
                 ft.ticker, ft.concepts, ft.additional_tags, ft.confidence, ft.reasoning,
                 ft.tagged_by, ft.tagged_at, ft.created_at, ft.updated_at,
+                ft.people, ft.countries, ft.tag_schema_version,
                 fpd.filename, fpd.file_type, fpd.processing_stats_id
             FROM file_tags ft
             JOIN file_processing_details fpd ON ft.file_id = fpd.id
@@ -182,32 +214,11 @@ def list_file_tags(
         
         results = []
         for row in rows:
-            tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
-            ticker_raw = json.dumps(tickers) if tickers else None
-            concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
-            additional_tags = row[8] if row[8] else {}
-            
-            results.append({
-                'id': row[0],
-                'file_id': row[1],
-                'sector': row[2],
-                'sector_en': row[3] or '',
-                'industry': row[4],
-                'industry_en': row[5] or '',
-                'tickers': tickers,
-                'ticker_raw': ticker_raw,
-                'concepts': concepts,
-                'additional_tags': additional_tags,
-                'confidence': row[9],
-                'reasoning': row[10],
-                'tagged_by': row[11],
-                'tagged_at': row[12],
-                'created_at': row[13],
-                'updated_at': row[14],
-                'filename': row[15],
-                'file_type': row[16],
-                'processing_stats_id': row[17]
-            })
+            base = _row_to_file_tags_response(row[:18])
+            base['filename'] = row[18]
+            base['file_type'] = row[19]
+            base['processing_stats_id'] = row[20]
+            results.append(base)
         
         return results
     finally:
@@ -259,6 +270,12 @@ def update_file_tags(
             update_dict['tickers'] = updates.tickers
         if updates.concepts is not None:
             update_dict['concepts'] = updates.concepts
+        if updates.people is not None:
+            update_dict['people'] = updates.people
+        if updates.countries is not None:
+            update_dict['countries'] = updates.countries
+        if updates.tag_schema_version is not None:
+            update_dict['tag_schema_version'] = updates.tag_schema_version
         if updates.confidence is not None:
             update_dict['confidence'] = updates.confidence
         if updates.reasoning is not None:

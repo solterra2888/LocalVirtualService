@@ -121,6 +121,7 @@ class LLMTemplateResolver:
         module_code: str,
         user_id: Optional[int] = None,
         runtime_template_id: Optional[int] = None,
+        prefer_system_default: bool = False,
     ) -> ResolvedTemplate:
         """解析最终使用的 LLM 模板.
 
@@ -129,6 +130,8 @@ class LLMTemplateResolver:
             user_id: 当前用户 ID; 若为 None 则跳过偏好查询直走 default
             runtime_template_id: 调用方运行时显式指定的 template_id;
                 例如上传弹窗用户当场选的模板. 命中即返回.
+            prefer_system_default: 为 True 时跳过 user-owned 私有模板, 直接使用
+                系统默认 (用于自动打标等需跟随 admin 系统模板更新的场景).
 
         Returns:
             ResolvedTemplate

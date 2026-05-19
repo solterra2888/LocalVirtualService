@@ -208,6 +208,8 @@ export interface DailyItemDetailUpload {
   content: string | null;
   /** processing_stats.final_report (执行级 AI 分析报告) */
   final_report: string | null;
+  /** file_tags 轻量结构, 与 Feed tags 同形 */
+  tags?: DailyItemDetailFeedTags | null;
 }
 
 export interface DailyTagPerson {

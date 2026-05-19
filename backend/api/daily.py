@@ -1181,9 +1181,14 @@ def _fetch_upload_detail(
             ft.summary,
             ft.reasoning,
             ft.sector,
+            ft.sector_en,
             ft.industry,
+            ft.industry_en,
             ft.ticker,
             ft.concepts,
+            ft.people,
+            ft.countries,
+            ft.tag_schema_version,
             ft.confidence,
             ps."user"                               AS owner_username
         FROM file_processing_details fpd
@@ -1219,9 +1224,14 @@ def _fetch_upload_detail(
         summary,
         reasoning,
         sector,
+        sector_en,
         industry,
+        industry_en,
         ticker_raw,
         concepts_raw,
+        people_raw,
+        countries_raw,
+        tag_schema_version,
         confidence,
         owner_username,
     ) = row
@@ -1289,6 +1299,34 @@ def _fetch_upload_detail(
         execution_id=processing_stats_id,
     )
 
+    tickers = _ensure_list(ticker_raw)
+    concepts = _ensure_list(concepts_raw)
+    people = _ensure_people_list(people_raw)
+    countries = _ensure_list(countries_raw)
+
+    upload_tags = None
+    if (
+        sector is not None
+        or people
+        or countries
+        or tickers
+        or concepts
+        or summary_text is not None
+    ):
+        upload_tags = {
+            "sector": sector or "",
+            "sector_en": sector_en or "",
+            "industry": industry or "",
+            "industry_en": industry_en or "",
+            "tickers": tickers,
+            "concepts": concepts,
+            "people": people,
+            "countries": countries,
+            "tag_schema_version": tag_schema_version or "file_v1",
+            "summary": summary_text,
+            "confidence": float(confidence) if confidence is not None else None,
+        }
+
     upload_payload = DailyItemDetailUpload(
         file_id=item_id,
         file_type_raw=file_type,
@@ -1297,6 +1335,7 @@ def _fetch_upload_detail(
         original_file_path=original_file_path,
         content=content,
         final_report=final_report,
+        tags=upload_tags,
     )
 
     return DailyItemDetail(
@@ -1310,8 +1349,8 @@ def _fetch_upload_detail(
         author_identifier=None,
         sector=sector,
         industry=industry,
-        tickers=_ensure_list(ticker_raw),
-        concepts=_ensure_list(concepts_raw),
+        tickers=tickers,
+        concepts=concepts,
         confidence=float(confidence) if confidence is not None else None,
         published_at=pub,
         reading_time_min=_reading_time_min(content_length),

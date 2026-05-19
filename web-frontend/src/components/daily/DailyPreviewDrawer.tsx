@@ -319,9 +319,10 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     const sector = detail?.sector || item.sector;
     const industry = detail?.industry || item.industry;
     const authorName = detail?.author_name || item.author_name;
-    const people = detail?.feed?.tags?.people ?? null;
-    const countries = detail?.feed?.tags?.countries ?? null;
-    const tagSchemaVersion = detail?.feed?.tags?.tag_schema_version ?? null;
+    const people = detail?.feed?.tags?.people ?? detail?.upload?.tags?.people ?? null;
+    const countries = detail?.feed?.tags?.countries ?? detail?.upload?.tags?.countries ?? null;
+    const tagSchemaVersion =
+      detail?.feed?.tags?.tag_schema_version ?? detail?.upload?.tags?.tag_schema_version ?? null;
     const tweetSignal = detail?.feed?.tags?.additional_tags?.tweet_signal as
       | { stance?: string; signal_type?: string; importance?: string }
       | undefined;

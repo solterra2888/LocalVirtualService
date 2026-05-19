@@ -68,6 +68,7 @@ import {
   DownOutlined,
   UpOutlined,
   GlobalOutlined,
+  TeamOutlined,
   InfoCircleOutlined,
   PrinterOutlined,
   AppleOutlined,
@@ -4420,6 +4421,34 @@ export const ExecutionDetailsPanel: React.FC<{
                   {fileTags.concepts.map((concept: string) => (
                     <Tag key={concept} bordered={false} style={aiTagChipStyle('concept', tagThemeMode)}>
                       {concept}
+                    </Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {fileTags.people && fileTags.people.length > 0 && (
+              <Descriptions.Item label="Key People">
+                <Space size={[4, 4]} wrap>
+                  {fileTags.people.map((person: { name?: string; name_en?: string; role?: string; affiliation?: string }, i: number) => (
+                    <Tooltip
+                      key={`${person.name || person.name_en}-${i}`}
+                      title={[person.name_en, person.role, person.affiliation].filter(Boolean).join(' · ')}
+                      mouseEnterDelay={0.3}
+                    >
+                      <Tag bordered={false} style={aiTagChipStyle('person', tagThemeMode)}>
+                        {person.name || person.name_en}
+                      </Tag>
+                    </Tooltip>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {fileTags.countries && fileTags.countries.length > 0 && (
+              <Descriptions.Item label="Countries">
+                <Space size={[4, 4]} wrap>
+                  {fileTags.countries.map((country: string) => (
+                    <Tag key={country} bordered={false} style={aiTagChipStyle('country', tagThemeMode)}>
+                      {country}
                     </Tag>
                   ))}
                 </Space>
