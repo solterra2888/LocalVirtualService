@@ -22,6 +22,12 @@ class SubscriptionContentTagsUpdate(BaseModel):
     industry_en: Optional[str] = Field(None, description="子行业分类 (英文, GICS)")
     tickers: Optional[List[str]] = Field(None, description="股票代码列表")
     concepts: Optional[List[str]] = Field(None, description="投资概念列表")
+    people: Optional[List[Dict[str, Any]]] = Field(
+        None, description="关键人物 [{name, name_en, role, affiliation}]"
+    )
+    countries: Optional[List[str]] = Field(
+        None, description="相关国家 ISO 3166-1 alpha-2 代码"
+    )
     confidence: Optional[float] = Field(None, ge=0, le=1, description="置信度 (0-1)")
     reasoning: Optional[str] = Field(None, description="推理说明")
     summary: Optional[str] = Field(None, description="50-200 字短摘要")
@@ -39,6 +45,11 @@ class SubscriptionContentTagsResponse(BaseModel):
     industry_en: Optional[str] = None
     tickers: List[str] = Field(default_factory=list)
     concepts: List[str] = Field(default_factory=list)
+    people: List[Dict[str, Any]] = Field(default_factory=list)
+    countries: List[str] = Field(default_factory=list)
+    tag_schema_version: Optional[str] = Field(
+        default="feeds_v1", description="打标 schema: feeds_v1 | tweet_signal_v1"
+    )
     additional_tags: Dict[str, Any] = Field(default_factory=dict)
     confidence: Optional[float] = None
     reasoning: Optional[str] = None

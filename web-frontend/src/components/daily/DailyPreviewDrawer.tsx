@@ -43,7 +43,10 @@ import {
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  BulbOutlined,
   CloseOutlined,
+  GlobalOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import {
   DailyFeedItem,
@@ -316,6 +319,12 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     const sector = detail?.sector || item.sector;
     const industry = detail?.industry || item.industry;
     const authorName = detail?.author_name || item.author_name;
+    const people = detail?.feed?.tags?.people ?? null;
+    const countries = detail?.feed?.tags?.countries ?? null;
+    const tagSchemaVersion = detail?.feed?.tags?.tag_schema_version ?? null;
+    const tweetSignal = detail?.feed?.tags?.additional_tags?.tweet_signal as
+      | { stance?: string; signal_type?: string; importance?: string }
+      | undefined;
     const analysisContent =
       detail?.upload?.final_report || detail?.feed?.personalized_summary || null;
 
@@ -430,13 +439,100 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               }}
             >
               <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                Concepts:
+                <BulbOutlined /> Concepts:
               </Text>
               {concepts.slice(0, 8).map((c) => (
                 <Tag key={c} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
                   {c}
                 </Tag>
               ))}
+            </div>
+          )}
+
+          {people && people.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                <TeamOutlined /> People:
+              </Text>
+              {people.slice(0, 5).map((p, i) => (
+                <Tooltip
+                  key={i}
+                  title={[p.name_en, p.role, p.affiliation].filter(Boolean).join(' · ')}
+                  mouseEnterDelay={0.3}
+                >
+                  <Tag bordered={false} style={aiTagChipStyle('person', themeMode)}>
+                    {p.name || p.name_en}
+                  </Tag>
+                </Tooltip>
+              ))}
+              {people.length > 5 && (
+                <Tag bordered={false} style={aiTagChipStyle('overflow', themeMode)}>
+                  +{people.length - 5}
+                </Tag>
+              )}
+            </div>
+          )}
+
+          {countries && countries.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                <GlobalOutlined /> Countries:
+              </Text>
+              {countries.map((c) => (
+                <Tag key={c} bordered={false} style={aiTagChipStyle('country', themeMode)}>
+                  {c}
+                </Tag>
+              ))}
+            </div>
+          )}
+
+          {tagSchemaVersion === 'tweet_signal_v1' && tweetSignal && (
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {tweetSignal.signal_type && (
+                <Tag bordered={false} style={aiTagChipStyle('signal-meta', themeMode)}>
+                  {tweetSignal.signal_type}
+                </Tag>
+              )}
+              {tweetSignal.stance && tweetSignal.stance !== 'none' && (
+                <Tag
+                  bordered={false}
+                  style={aiTagChipStyle(
+                    tweetSignal.stance === 'bullish' ? 'signal-bullish' :
+                    tweetSignal.stance === 'bearish' ? 'signal-bearish' : 'signal-neutral',
+                    themeMode
+                  )}
+                >
+                  {tweetSignal.stance}
+                </Tag>
+              )}
+              {tweetSignal.importance && (
+                <Tag
+                  bordered={false}
+                  style={aiTagChipStyle(
+                    tweetSignal.importance === 'high' ? 'signal-bearish' :
+                    tweetSignal.importance === 'medium' ? 'signal-bullish' : 'signal-neutral',
+                    themeMode
+                  )}
+                >
+                  {tweetSignal.importance}
+                </Tag>
+              )}
             </div>
           )}
         </AISummarySection>

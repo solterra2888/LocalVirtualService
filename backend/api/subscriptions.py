@@ -1120,7 +1120,7 @@ async def get_subscription_contents(
                 (sc.transcript IS NOT NULL AND sc.transcript != '') AS has_transcript,
                 sct.sector, sct.sector_en, sct.industry, sct.industry_en,
                 sct.ticker, sct.concepts, sct.summary, sct.confidence,
-                sct.tagged_at,
+                sct.tagged_at, sct.people, sct.countries, sct.tag_schema_version,
                 scus.summary    AS personalized_summary,
                 scus.reasoning  AS personalized_reasoning,
                 CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source
@@ -1159,20 +1159,30 @@ async def get_subscription_contents(
             # AI 标签 (LEFT JOIN 结果, 未打标 → None)
             # 列序: [29]sector [30]sector_en [31]industry [32]industry_en
             #       [33]ticker [34]concepts [35]summary [36]confidence [37]tagged_at
-            #       [38]personalized_summary [39]personalized_reasoning [40]summary_source
+            #       [38]people [39]countries [40]tag_schema_version
+            #       [41]personalized_summary [42]personalized_reasoning [43]summary_source
             tags_payload = None
-            if row[29] is not None:
+            if row[29] is not None or row[40] == 'tweet_signal_v1':
                 tickers_raw = row[33]
                 tickers = tickers_raw if isinstance(tickers_raw, list) else (tickers_raw or [])
                 concepts_raw = row[34]
                 concepts = concepts_raw if isinstance(concepts_raw, list) else (concepts_raw or [])
+                people_raw = row[38]
+                people = people_raw if isinstance(people_raw, list) else (people_raw or [])
+                countries_raw = row[39]
+                countries = (
+                    countries_raw if isinstance(countries_raw, list) else (countries_raw or [])
+                )
                 tags_payload = {
-                    'sector': row[29],
+                    'sector': row[29] or '',
                     'sector_en': row[30] or '',
-                    'industry': row[31],
+                    'industry': row[31] or '',
                     'industry_en': row[32] or '',
                     'tickers': tickers,
                     'concepts': concepts,
+                    'people': people,
+                    'countries': countries,
+                    'tag_schema_version': row[40] or 'feeds_v1',
                     'summary': row[35],
                     'confidence': row[36],
                     'tagged_at': ensure_utc(row[37]).isoformat() if row[37] else None,
@@ -1216,9 +1226,9 @@ async def get_subscription_contents(
                 # Phase 3 新增: Feeds 自动打标 + 摘要 (LEFT JOIN 结果, 未打标为 null)
                 'tags': tags_payload,
                 # PR-7: per-user 个性化摘要 (LEFT JOIN subscription_content_user_summaries)
-                'personalized_summary': row[38] or None,
-                'personalized_reasoning': row[39] or None,
-                'summary_source': row[40],
+                'personalized_summary': row[41] or None,
+                'personalized_reasoning': row[42] or None,
+                'summary_source': row[43],
             })
         
         cursor.close()

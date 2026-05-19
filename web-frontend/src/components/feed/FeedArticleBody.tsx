@@ -15,6 +15,7 @@ import {
   AlignLeftOutlined,
   BulbOutlined,
   CommentOutlined,
+  GlobalOutlined,
   LikeOutlined,
   LinkOutlined,
   MessageOutlined,
@@ -22,6 +23,7 @@ import {
   RetweetOutlined,
   RobotOutlined,
   SyncOutlined,
+  TeamOutlined,
   TwitterOutlined,
   YoutubeOutlined,
   ClockCircleOutlined,
@@ -427,6 +429,10 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 summary: tagsRes.data.summary,
                 confidence: tagsRes.data.confidence,
                 tagged_at: tagsRes.data.tagged_at,
+                people: tagsRes.data.people ?? null,
+                countries: tagsRes.data.countries ?? null,
+                tag_schema_version: tagsRes.data.tag_schema_version ?? null,
+                additional_tags: tagsRes.data.additional_tags ?? null,
               };
               setLocalTags(lite);
               onTagsUpdated?.(contentId, lite);
@@ -766,6 +772,83 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                   ))}
                 </div>
               )}
+
+              {/* People (key persons) */}
+              {displayTags?.people && displayTags.people.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                    <TeamOutlined /> People:
+                  </Text>
+                  {displayTags.people.slice(0, 5).map((p, i) => (
+                    <Tooltip
+                      key={i}
+                      title={[p.name_en, p.role, p.affiliation].filter(Boolean).join(' · ')}
+                      mouseEnterDelay={0.3}
+                    >
+                      <Tag bordered={false} style={aiTagChipStyle('person', themeMode)}>
+                        {p.name || p.name_en}
+                      </Tag>
+                    </Tooltip>
+                  ))}
+                  {displayTags.people.length > 5 && (
+                    <Tag bordered={false} style={aiTagChipStyle('overflow', themeMode)}>
+                      +{displayTags.people.length - 5}
+                    </Tag>
+                  )}
+                </div>
+              )}
+
+              {/* Countries */}
+              {displayTags?.countries && displayTags.countries.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                    <GlobalOutlined /> Countries:
+                  </Text>
+                  {displayTags.countries.map((c) => (
+                    <Tag key={c} bordered={false} style={aiTagChipStyle('country', themeMode)}>
+                      {c}
+                    </Tag>
+                  ))}
+                </div>
+              )}
+
+              {/* Tweet signal fields (tweet_signal_v1 schema only) */}
+              {displayTags?.tag_schema_version === 'tweet_signal_v1' &&
+                displayTags.additional_tags?.tweet_signal && (() => {
+                  const sig = displayTags.additional_tags.tweet_signal as {
+                    stance?: string; signal_type?: string; importance?: string;
+                  };
+                  const stanceVariant =
+                    sig.stance === 'bullish' ? 'signal-bullish' :
+                    sig.stance === 'bearish' ? 'signal-bearish' : 'signal-neutral';
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {sig.signal_type && (
+                        <Tag bordered={false} style={aiTagChipStyle('signal-meta', themeMode)}>
+                          {sig.signal_type}
+                        </Tag>
+                      )}
+                      {sig.stance && sig.stance !== 'none' && (
+                        <Tag bordered={false} style={aiTagChipStyle(stanceVariant, themeMode)}>
+                          {sig.stance}
+                        </Tag>
+                      )}
+                      {sig.importance && (
+                        <Tag
+                          bordered={false}
+                          style={aiTagChipStyle(
+                            sig.importance === 'high' ? 'signal-bearish' :
+                            sig.importance === 'medium' ? 'signal-bullish' : 'signal-neutral',
+                            themeMode
+                          )}
+                        >
+                          {sig.importance}
+                        </Tag>
+                      )}
+                    </div>
+                  );
+                })()
+              }
             </Space>
           ) : (
             <Text type="secondary" style={{ fontSize: 12 }}>

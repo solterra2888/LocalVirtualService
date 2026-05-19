@@ -40,6 +40,7 @@ class TemplatePreferenceService:
         'youtube_analysis': 'youtube_analysis_v1',  # 2026-05: Upload YouTube Link 专用深度分析
         # —— Feed 模块 ——
         'feed_tagging':   'content_tag_feeds_v1',   # SYSTEM_ONLY (PR-A, hybrid: 全局 tag)
+        'tweet_signal':   'tweet_signal_v1',         # SYSTEM_ONLY: 短推信号提取路由目标
         'feed_summary':   'feed_summary_v1',        # PR-A 种子: per-user Twitter feed 摘要
         'youtube_summary': 'youtube_summary_v1',    # PR-A 新增: per-video per-user 摘要
         # —— News 模块 ——
@@ -61,6 +62,7 @@ class TemplatePreferenceService:
         'file_naming',          # PR-A: 文件自动命名为系统级
         'file_classify',        # PR-A: 文件自动归类为系统级
         'feed_tagging',         # PR-A: feed tag 全局共享 (hybrid 决策)
+        'tweet_signal',         # 短推信号提取，系统级路由目标
     })
 
     # 用户可拥有私有模板的模块 (Phase 2: USER_OWNED, 每用户每模块 1 行)
@@ -162,6 +164,14 @@ class TemplatePreferenceService:
             'description': 'Generates structured tags for individual Twitter/YouTube feed items (globally shared, admin-only).',
             'configurable': False,
             'default_template_code': 'content_tag_feeds_v1',
+        },
+        {
+            # tweet_signal_v1: lightweight routing target for short Twitter posts
+            'module_code': 'tweet_signal',
+            'module_name': 'Tweet Signal Extraction',
+            'description': 'Lightweight signal extraction for short Twitter posts (<250 chars, no cashtag) — stance, signal type, importance, people, countries (system-level, admin-only).',
+            'configurable': False,
+            'default_template_code': 'tweet_signal_v1',
         },
         {
             # PR-A: feed_summary_v1 system seed already created

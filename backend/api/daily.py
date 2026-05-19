@@ -186,6 +186,33 @@ def _ensure_list(value: Any) -> List[str]:
     return []
 
 
+def _ensure_people_list(value: Any) -> List[Dict[str, Any]]:
+    """JSONB people 字段: [{name, name_en, role, affiliation}, ...] — 勿用 _ensure_list (会把 dict 转成 str)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if not isinstance(value, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("name_en")
+        if not name:
+            continue
+        out.append({
+            "name": str(item.get("name") or item.get("name_en") or ""),
+            "name_en": item.get("name_en"),
+            "role": item.get("role"),
+            "affiliation": item.get("affiliation"),
+        })
+    return out
+
+
 def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
     """前端传入的 source_subtypes 过滤校验。"""
     if not raw:
@@ -1325,6 +1352,7 @@ def _fetch_feed_detail(
             COALESCE(LENGTH(sc.content), 0) + COALESCE(LENGTH(sc.transcript), 0) AS content_length,
             sct.sector, sct.sector_en, sct.industry, sct.industry_en,
             sct.ticker, sct.concepts, sct.summary, sct.confidence, sct.tagged_at,
+            sct.people, sct.countries, sct.tag_schema_version,
             scus.summary       AS personalized_summary,
             scus.template_id   AS personalized_template_id,
             scus.tagged_at     AS personalized_at
@@ -1364,6 +1392,7 @@ def _fetch_feed_detail(
         content_length,
         sector, sector_en, industry, industry_en,
         ticker_raw, concepts_raw, summary, confidence, tagged_at,
+        people_raw, countries_raw, tag_schema_version,
         personalized_summary, personalized_template_id, personalized_at,
     ) = row
 
@@ -1397,16 +1426,29 @@ def _fetch_feed_detail(
 
     tickers = _ensure_list(ticker_raw)
     concepts = _ensure_list(concepts_raw)
+    people = _ensure_people_list(people_raw)
+    countries = _ensure_list(countries_raw)
 
     tags_payload = None
-    if sector is not None:
+    if (
+        sector is not None
+        or tag_schema_version == "tweet_signal_v1"
+        or people
+        or countries
+        or tickers
+        or concepts
+        or summary is not None
+    ):
         tags_payload = {
-            "sector": sector,
+            "sector": sector or "",
             "sector_en": sector_en or "",
-            "industry": industry,
+            "industry": industry or "",
             "industry_en": industry_en or "",
             "tickers": tickers,
             "concepts": concepts,
+            "people": people,
+            "countries": countries,
+            "tag_schema_version": tag_schema_version or "feeds_v1",
             "summary": summary,
             "confidence": float(confidence) if confidence is not None else None,
             "tagged_at": tagged_at.isoformat() if tagged_at else None,

@@ -84,6 +84,13 @@ export interface ApiResponse<T = any> {
  *
  * 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
  */
+export interface TagPerson {
+  name: string;
+  name_en?: string;
+  role?: string;
+  affiliation?: string | null;
+}
+
 export interface SubscriptionContentTagsLite {
   sector: string;
   sector_en?: string;
@@ -94,6 +101,10 @@ export interface SubscriptionContentTagsLite {
   summary?: string | null;
   confidence?: number | null;
   tagged_at?: string | null;
+  people?: TagPerson[] | null;
+  countries?: string[] | null;
+  tag_schema_version?: string | null;
+  additional_tags?: Record<string, any> | null;
 }
 
 export interface SubscriptionContentTagsFull extends SubscriptionContentTagsLite {
@@ -101,7 +112,6 @@ export interface SubscriptionContentTagsFull extends SubscriptionContentTagsLite
   subscription_content_id: number;
   reasoning?: string | null;
   channel_type: string;
-  additional_tags?: Record<string, any>;
   tagged_by?: number | null;
   created_at?: string | null;
   updated_at?: string | null;

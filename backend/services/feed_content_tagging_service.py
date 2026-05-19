@@ -3,13 +3,18 @@
 Feeds 内容自动打标签 + 摘要服务
 
 对标 backend/services/content_tagging_service.py (ContentTaggingService),
-但绑定到 subscription_content (Twitter / YouTube feed 单条内容),
-使用 content_tag_feeds_v1 prompt 模板.
+但绑定到 subscription_content (Twitter / YouTube feed 单条内容).
+
+Twitter 智能路由:
+  - 长推 (>= TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS) 或含 $cashtag → content_tag_feeds_v1
+  - 其余短推/速报 (TWEET_SIGNAL_V1_ENABLED=true) → tweet_signal_v1
+  - YouTube → content_tag_feeds_v1
 
 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
 """
 import json
 import os
+import re
 import time
 from typing import Dict, Any, Optional, Callable, Tuple
 
@@ -24,11 +29,18 @@ logger = get_logger("feed_content_tagging_service")
 # 支持的渠道 (news/rss 本轮不做, 直接短路)
 _SUPPORTED_CHANNELS = {"twitter", "youtube"}
 
+FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
+TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
+TAG_SCHEMA_FEEDS_V1 = "feeds_v1"
+TAG_SCHEMA_TWEET_SIGNAL_V1 = "tweet_signal_v1"
+
+_CASHTAG_RE = re.compile(r"\$[A-Z]{1,5}\b")
+
 
 class FeedContentTaggingService:
     """Feeds (subscription_content) 内容自动打标 + 摘要服务"""
 
-    DEFAULT_TEMPLATE_CODE = "content_tag_feeds_v1"
+    DEFAULT_TEMPLATE_CODE = FEEDS_TEMPLATE_CODE
 
     def __init__(
         self,
@@ -178,6 +190,86 @@ class FeedContentTaggingService:
         return None
 
     # ------------------------------------------------------------------
+    # 模板路由 (Twitter 短推 → tweet_signal_v1)
+    # ------------------------------------------------------------------
+
+    def _pick_template_code(self, channel_type: str, text: str) -> str:
+        """按渠道与内容特征选择打标模板."""
+        if channel_type == "youtube":
+            return FEEDS_TEMPLATE_CODE
+        if channel_type != "twitter":
+            return self.template_code or FEEDS_TEMPLATE_CODE
+        if os.getenv("TWEET_SIGNAL_V1_ENABLED", "false").lower() != "true":
+            return FEEDS_TEMPLATE_CODE
+        threshold = int(os.getenv("TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS", "250"))
+        if len(text) >= threshold or _CASHTAG_RE.search(text):
+            return FEEDS_TEMPLATE_CODE
+        return TWEET_SIGNAL_TEMPLATE_CODE
+
+    @staticmethod
+    def _schema_version_for_template(template_code: str) -> str:
+        if template_code == TWEET_SIGNAL_TEMPLATE_CODE:
+            return TAG_SCHEMA_TWEET_SIGNAL_V1
+        return TAG_SCHEMA_FEEDS_V1
+
+    def _normalize_tag_data(
+        self, tag_data: Dict[str, Any], schema_version: str
+    ) -> Dict[str, Any]:
+        """校验并补全 LLM 输出字段."""
+        if schema_version == TAG_SCHEMA_TWEET_SIGNAL_V1:
+            required = [
+                "tickers",
+                "concepts",
+                "people",
+                "countries",
+                "stance",
+                "signal_type",
+                "importance",
+                "summary",
+                "confidence",
+            ]
+        else:
+            required = ["sector", "industry", "tickers", "people", "countries"]
+
+        missing = [k for k in required if k not in tag_data]
+        if missing:
+            raise ValueError(
+                f"Feeds 打标 LLM 输出缺少必需字段: {missing}, "
+                f"got_keys={list(tag_data.keys())}"
+            )
+
+        tag_data.setdefault("sector_en", tag_data.get("sector_en") or "")
+        tag_data.setdefault("industry_en", tag_data.get("industry_en") or "")
+        tag_data.setdefault("concepts", [])
+        tag_data.setdefault("people", [])
+        tag_data.setdefault("countries", [])
+        tag_data.setdefault("confidence", None)
+        tag_data.setdefault("reasoning", None)
+        tag_data.setdefault("stance", None)
+        tag_data.setdefault("signal_type", None)
+        tag_data.setdefault("importance", None)
+
+        if schema_version == TAG_SCHEMA_TWEET_SIGNAL_V1:
+            for key in ("sector", "industry", "sector_en", "industry_en"):
+                if tag_data.get(key) in (None, "null", "None"):
+                    tag_data[key] = None
+        else:
+            tag_data.setdefault("sector", "未分类")
+            tag_data.setdefault("industry", "未分类")
+
+        if not tag_data.get("summary"):
+            tag_data["summary"] = None
+
+        if not isinstance(tag_data.get("tickers"), list):
+            tag_data["tickers"] = []
+        if not isinstance(tag_data.get("people"), list):
+            tag_data["people"] = []
+        if not isinstance(tag_data.get("countries"), list):
+            tag_data["countries"] = []
+
+        return tag_data
+
+    # ------------------------------------------------------------------
     # 现有标签 (幂等保护)
     # ------------------------------------------------------------------
 
@@ -193,7 +285,8 @@ class FeedContentTaggingService:
                        industry, industry_en, ticker, concepts,
                        additional_tags, confidence, reasoning, summary,
                        channel_type, tagged_by, tagged_at,
-                       created_at, updated_at
+                       created_at, updated_at,
+                       people, countries, tag_schema_version
                 FROM subscription_content_tags
                 WHERE subscription_content_id = %s
                 """,
@@ -205,6 +298,8 @@ class FeedContentTaggingService:
             tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
             concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
             additional = row[8] if row[8] else {}
+            people = row[17] if isinstance(row[17], list) else (row[17] or [])
+            countries = row[18] if isinstance(row[18], list) else (row[18] or [])
             return {
                 "id": row[0],
                 "subscription_content_id": row[1],
@@ -223,6 +318,9 @@ class FeedContentTaggingService:
                 "tagged_at": row[14],
                 "created_at": row[15],
                 "updated_at": row[16],
+                "people": people,
+                "countries": countries,
+                "tag_schema_version": row[19] or TAG_SCHEMA_FEEDS_V1,
             }
         finally:
             conn.close()
@@ -279,6 +377,15 @@ class FeedContentTaggingService:
 
         text, resolved_channel = built
 
+        picked_template = self._pick_template_code(resolved_channel, text)
+        schema_version = self._schema_version_for_template(picked_template)
+
+        if picked_template != getattr(self.llm_service, "template_code", None):
+            self.llm_service = LocalLLMAnalysisService(
+                template_code=picked_template,
+                log_callback=self.log_callback,
+            )
+
         # 幂等: 已有标签且非强制 -> 跳过
         if not force:
             existing = self.get_existing_tags(content_id)
@@ -297,16 +404,15 @@ class FeedContentTaggingService:
 
         self.log(
             f"调用 LLM 打标: content_id={content_id} channel={resolved_channel} "
-            f"text_len={len(text)}"
+            f"template={picked_template} schema={schema_version} text_len={len(text)}"
         )
 
-        # 调用 LLM.
-        #
-        # LocalLLMAnalysisService.analyze_file_content 会把 file_content 参数
-        # 强制注入到 variables['file_content'] (覆盖 custom_variables 中的同名键),
-        # 所以此处把 channel_type / additional_context 放 custom_variables 即可.
-        # PR-4 修复: 把 tagged_by (= 触发用户的 user_id) 透传给 LLM 调用层,
-        #            让 llm_prompt_usage_logs.user_id 能正确归属.
+        llm_model = None
+        if picked_template == TWEET_SIGNAL_TEMPLATE_CODE:
+            override = os.getenv("TWEET_SIGNAL_MODEL_OVERRIDE", "").strip()
+            if override:
+                llm_model = override
+
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=text,
             file_name=f"feed:{resolved_channel}:{content_id}",
@@ -315,17 +421,16 @@ class FeedContentTaggingService:
                 "additional_context": additional_context or "",
             },
             user_id=tagged_by,
+            model=llm_model,
         )
 
         report_content = analysis_result.get("report_content", "") or ""
 
-        # 解析 JSON (与 ContentTaggingService 同样的剥壳策略)
         try:
             cleaned = report_content.strip()
             if "```json" in cleaned:
                 cleaned = cleaned.split("```json", 1)[1].split("```", 1)[0].strip()
             elif "```" in cleaned:
-                # 兼容没写语言的代码块
                 parts = cleaned.split("```")
                 if len(parts) >= 3:
                     cleaned = parts[1].strip()
@@ -336,33 +441,13 @@ class FeedContentTaggingService:
                 f"Feeds 打标 LLM 返回格式错误, 无法解析 JSON: {e}"
             )
 
-        # 校验必填字段
-        required = ["sector", "industry", "tickers"]
-        missing = [k for k in required if k not in tag_data]
-        if missing:
-            raise ValueError(
-                f"Feeds 打标 LLM 输出缺少必需字段: {missing}, got_keys={list(tag_data.keys())}"
-            )
-
-        # 补默认值 (容忍旧模板)
-        tag_data.setdefault("sector_en", "")
-        tag_data.setdefault("industry_en", "")
-        tag_data.setdefault("concepts", [])
-        tag_data.setdefault("confidence", None)
-        # summary 是 Feeds 模板的 required, 但防御性兜底
-        if "summary" not in tag_data or not tag_data.get("summary"):
-            self.log(
-                f"⚠ LLM 未返回 summary (content_id={content_id}), 置空",
-                level="warning",
-            )
-            tag_data["summary"] = None
-        # reasoning 可选, 老字段兼容
-        tag_data.setdefault("reasoning", None)
+        tag_data = self._normalize_tag_data(tag_data, schema_version)
 
         save_result = self.save_tags(
             content_id=content_id,
             channel_type=resolved_channel,
             tag_data=tag_data,
+            tag_schema_version=schema_version,
             ai_metadata={
                 "total_tokens": analysis_result.get("total_tokens", 0),
                 "total_price": analysis_result.get("total_price", 0),
@@ -377,9 +462,10 @@ class FeedContentTaggingService:
 
         self.log(
             f"Feeds 打标完成: content_id={content_id} channel={resolved_channel} "
-            f"sector={tag_data.get('sector')} "
+            f"schema={schema_version} sector={tag_data.get('sector')} "
             f"tickers={len(tag_data.get('tickers') or [])} "
-            f"concepts={len(tag_data.get('concepts') or [])} "
+            f"people={len(tag_data.get('people') or [])} "
+            f"countries={len(tag_data.get('countries') or [])} "
             f"summary_len={len(tag_data.get('summary') or '')} "
             f"耗时={processing_time:.2f}s"
         )
@@ -389,6 +475,8 @@ class FeedContentTaggingService:
             "skipped": False,
             "content_id": content_id,
             "channel_type": resolved_channel,
+            "tag_schema_version": schema_version,
+            "template_code": picked_template,
             "tag_id": save_result["tag_id"],
             "tags": tag_data,
             "processing_time": processing_time,
@@ -409,6 +497,7 @@ class FeedContentTaggingService:
         content_id: int,
         channel_type: str,
         tag_data: Dict[str, Any],
+        tag_schema_version: str = TAG_SCHEMA_FEEDS_V1,
         ai_metadata: Optional[Dict[str, Any]] = None,
         tagged_by: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -419,20 +508,35 @@ class FeedContentTaggingService:
         try:
             cursor = conn.cursor()
 
-            sector = tag_data.get("sector") or "未分类"
+            if tag_schema_version == TAG_SCHEMA_TWEET_SIGNAL_V1:
+                sector = tag_data.get("sector") or ""
+                industry = tag_data.get("industry") or ""
+            else:
+                sector = tag_data.get("sector") or "未分类"
+                industry = tag_data.get("industry") or "未分类"
+
             sector_en = tag_data.get("sector_en") or ""
-            industry = tag_data.get("industry") or "未分类"
             industry_en = tag_data.get("industry_en") or ""
             tickers = tag_data.get("tickers") or []
             concepts = tag_data.get("concepts") or []
+            people = tag_data.get("people") or []
+            countries = tag_data.get("countries") or []
             confidence = tag_data.get("confidence")
             reasoning = tag_data.get("reasoning")
             summary = tag_data.get("summary")
 
             ticker_jsonb = Json(tickers) if tickers else None
             concepts_jsonb = Json(concepts)
+            people_jsonb = Json(people)
+            countries_jsonb = Json(countries)
 
             additional_tags: Dict[str, Any] = {"tickers_full": tickers}
+            if tag_schema_version == TAG_SCHEMA_TWEET_SIGNAL_V1:
+                additional_tags["tweet_signal"] = {
+                    "stance": tag_data.get("stance"),
+                    "signal_type": tag_data.get("signal_type"),
+                    "importance": tag_data.get("importance"),
+                }
             if ai_metadata:
                 additional_tags["ai_metadata"] = {
                     "total_tokens": ai_metadata.get("total_tokens", 0),
@@ -447,15 +551,19 @@ class FeedContentTaggingService:
                 INSERT INTO subscription_content_tags (
                     subscription_content_id,
                     sector, sector_en, industry, industry_en,
-                    ticker, concepts, additional_tags,
+                    ticker, concepts, people, countries,
+                    additional_tags,
                     confidence, reasoning, summary,
-                    channel_type, tagged_by, tagged_at
+                    channel_type, tag_schema_version,
+                    tagged_by, tagged_at
                 ) VALUES (
                     %s,
                     %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s,
                     %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s, CURRENT_TIMESTAMP
+                    %s, %s,
+                    %s, CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (subscription_content_id) DO UPDATE SET
                     sector = EXCLUDED.sector,
@@ -464,11 +572,14 @@ class FeedContentTaggingService:
                     industry_en = EXCLUDED.industry_en,
                     ticker = EXCLUDED.ticker,
                     concepts = EXCLUDED.concepts,
+                    people = EXCLUDED.people,
+                    countries = EXCLUDED.countries,
                     additional_tags = EXCLUDED.additional_tags,
                     confidence = EXCLUDED.confidence,
                     reasoning = EXCLUDED.reasoning,
                     summary = EXCLUDED.summary,
                     channel_type = EXCLUDED.channel_type,
+                    tag_schema_version = EXCLUDED.tag_schema_version,
                     tagged_by = EXCLUDED.tagged_by,
                     tagged_at = EXCLUDED.tagged_at,
                     updated_at = CURRENT_TIMESTAMP
@@ -477,9 +588,11 @@ class FeedContentTaggingService:
                 (
                     content_id,
                     sector, sector_en, industry, industry_en,
-                    ticker_jsonb, concepts_jsonb, Json(additional_tags),
+                    ticker_jsonb, concepts_jsonb, people_jsonb, countries_jsonb,
+                    Json(additional_tags),
                     confidence, reasoning, summary,
-                    channel_type, tagged_by,
+                    channel_type, tag_schema_version,
+                    tagged_by,
                 ),
             )
 
@@ -509,7 +622,8 @@ class FeedContentTaggingService:
     ) -> Dict[str, Any]:
         """
         更新指定字段. 允许的字段: sector, sector_en, industry, industry_en,
-        tickers, concepts, confidence, reasoning, summary, additional_tags (merge).
+        tickers, concepts, people, countries, confidence, reasoning, summary,
+        additional_tags (merge).
         """
         conn = self.db_manager.get_connection()
         if not conn:
@@ -549,6 +663,16 @@ class FeedContentTaggingService:
                 concepts = updates["concepts"] or []
                 update_fields.append("concepts = %s::jsonb")
                 params.append(json.dumps(concepts, ensure_ascii=False))
+
+            if "people" in updates:
+                people = updates["people"] or []
+                update_fields.append("people = %s::jsonb")
+                params.append(json.dumps(people, ensure_ascii=False))
+
+            if "countries" in updates:
+                countries = updates["countries"] or []
+                update_fields.append("countries = %s::jsonb")
+                params.append(json.dumps(countries, ensure_ascii=False))
 
             if "additional_tags" in updates:
                 update_fields.append(

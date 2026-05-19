@@ -272,7 +272,8 @@ class DailyItemDetailFeed(BaseModel):
         None,
         description=(
             "AI 标签轻量结构: {sector, sector_en, industry, industry_en, "
-            "tickers[], concepts[], summary, confidence, tagged_at}"
+            "tickers[], concepts[], people[], countries[], tag_schema_version, "
+            "summary, confidence, tagged_at}"
         ),
     )
 

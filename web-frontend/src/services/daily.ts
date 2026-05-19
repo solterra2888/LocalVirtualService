@@ -210,6 +210,13 @@ export interface DailyItemDetailUpload {
   final_report: string | null;
 }
 
+export interface DailyTagPerson {
+  name: string;
+  name_en?: string;
+  role?: string;
+  affiliation?: string | null;
+}
+
 export interface DailyItemDetailFeedTags {
   sector: string | null;
   sector_en?: string | null;
@@ -220,6 +227,10 @@ export interface DailyItemDetailFeedTags {
   summary?: string | null;
   confidence?: number | null;
   tagged_at?: string | null;
+  people?: DailyTagPerson[] | null;
+  countries?: string[] | null;
+  tag_schema_version?: string | null;
+  additional_tags?: Record<string, any> | null;
 }
 
 export interface DailyItemDetailFeed {

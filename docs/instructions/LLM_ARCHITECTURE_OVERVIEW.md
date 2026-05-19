@@ -817,6 +817,9 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `AUTO_FEED_TAG_MAX_CHARS` | `6000` | 最大输入字符 |
 | `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 内容最小字符门槛 |
 | `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube 内容最小字符门槛 |
+| `TWEET_SIGNAL_V1_ENABLED` | `false` | Twitter 短推智能路由：开启后 &lt;250 字且无 `$cashtag` 走 `tweet_signal_v1`，否则仍走 `content_tag_feeds_v1` |
+| `TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS` | `250` | 重型模板字符阈值（与 cashtag 二选一触发重型） |
+| `TWEET_SIGNAL_MODEL_OVERRIDE` | _(空)_ | 覆盖 `tweet_signal_v1` 推荐模型 |
 | `FEED_SUMMARY_AUTO_FANOUT_ENABLED` | **`false`** | **(新增)** 全局打标成功后是否自动 fan-out per-user 个性化摘要。**默认关闭，节省 LLM 成本**。改为 `true` 恢复旧自动批量行为，无需重部署。**手动触发入口不受此开关影响**。 |
 | `FEED_SUMMARY_PERSONALIZATION_ENABLED` | `true` | 个性化摘要功能本身总闸；关则连手动入口也被拦截（仅紧急回滚用）。与 `FEED_SUMMARY_AUTO_FANOUT_ENABLED` 区别：本开关连手动都挡，后者仅挡自动 fan-out。 |
 

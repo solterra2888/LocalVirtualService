@@ -50,6 +50,8 @@ def _row_to_tags_dict(row) -> Dict[str, Any]:
     tickers = row[6] if isinstance(row[6], list) else (row[6] or [])
     concepts = row[7] if isinstance(row[7], list) else (row[7] or [])
     additional_tags = row[8] if row[8] else {}
+    people = row[17] if isinstance(row[17], list) else (row[17] or [])
+    countries = row[18] if isinstance(row[18], list) else (row[18] or [])
     return {
         "id": row[0],
         "subscription_content_id": row[1],
@@ -68,6 +70,9 @@ def _row_to_tags_dict(row) -> Dict[str, Any]:
         "tagged_at": row[14],
         "created_at": row[15],
         "updated_at": row[16],
+        "people": people,
+        "countries": countries,
+        "tag_schema_version": row[19] or "feeds_v1",
     }
 
 
@@ -76,7 +81,8 @@ _TAGS_SELECT = """
            industry, industry_en, ticker, concepts,
            additional_tags, confidence, reasoning, summary,
            channel_type, tagged_by, tagged_at,
-           created_at, updated_at
+           created_at, updated_at,
+           people, countries, tag_schema_version
     FROM subscription_content_tags
 """
 
