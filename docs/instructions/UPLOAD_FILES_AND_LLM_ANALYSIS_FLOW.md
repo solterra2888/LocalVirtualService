@@ -1,6 +1,6 @@
 # Upload Files 模块 & LLM 分析流程说明
 
-> 最后更新：2026-05-09（新增 `podcast` 文件类型，Apple Podcasts 单集上传链路；远程服务器直接 yt-dlp 下载，无需本地 Worker）
+> 最后更新：2026-05-19（Upload 自动打标新增 `people` / `countries`；`content_tag_v1` 与用户私有 `file_tagging` 模板同步升级）
 
 本文档梳理系统中 **Upload Files** 模块对各类文件（PDF、Word、Excel、CSV/交易报告、音频、YouTube、Apple Podcasts、网页链接）以及 **用户直接撰写的文本笔记（My Notes / Thoughts，`file_type='text'`）** 的完整处理流程，以及处理完成后通过 **Prompt Template** 调用 LLM 进行分析（包括用户主动触发的内容分析和系统自动触发的并行分析任务）的完整链路。
 
@@ -539,11 +539,11 @@ tag_file_content_task   name_file_content_task   classify_file_content_task   an
 
 ### 4.3 自动打标签（Auto Tagging）
 
-> ⭐ **PR-5 重构（2026-04-27）**：模板不再硬编码 `content_tag_v1`，改走 `LLMTemplateResolver` 三级 fallback。详见 [LLM_REFACTOR_PLAN.md §4](./LLM_REFACTOR_PLAN.md#4-阶段-2file-tag-用户自定义2-3-工作日)。
+> ⭐ **PR-5 重构（2026-04-27）**：模板不再硬编码 `content_tag_v1`，改走 `LLMTemplateResolver` 解析。详见 [LLM_ARCHITECTURE_OVERVIEW.md §4.1.4](./LLM_ARCHITECTURE_OVERVIEW.md#414-auto-tag-详细流程)。
 
 **Celery 任务：** `tag_file_content`（`tagging_tasks.py`，queue: `file_processing`）
-**module_code：** `file_tagging`（向 `MODULE_REGISTRY` 注册）
-**Prompt Template：** 优先级 `runtime > user_template_preferences[file_tagging] > content_tag_v1`
+**module_code：** `file_tagging`（`USER_OWNED` 模块，见 `MODULE_REGISTRY`）
+**Prompt Template 解析优先级（低 → 高）：** `system default (content_tag_v1)` → **用户私有模板** (`scope=user`, `module_code=file_tagging`) → **runtime**（上传弹窗 / Retag 显式传入的 `template_id`）
 **服务：** `ContentTaggingService`（`backend/services/content_tagging_service.py`）
 
 ```
@@ -555,7 +555,7 @@ tag_file_content_task(file_id, username, force=False, template_id=None, template
     │
     ├─ 4. 【PR-5 新增】username → user_id (user_resolver.py LRU)
     │     LLMTemplateResolver.resolve('file_tagging', user_id, runtime_template_id)
-    │       → ResolvedTemplate(template_id, source='runtime'|'preference'|'default')
+    │       → ResolvedTemplate(template_id, source='runtime'|'user_owned'|'default')
     │
     ├─ 5. 若非 force 且 file_tags 表已有记录 → 跳过（幂等保护）
     ├─ 6. 截断 content 至 AUTO_TAG_CONTENT_MAX_CHARS 字符
@@ -577,6 +577,35 @@ tag_file_content_task(file_id, username, force=False, template_id=None, template
 - **`countries`**：国家英文全名数组（如 `United States`、`China`），不使用 ISO 缩写。
 - 无相关人物/国家时返回 `[]`。
 
+**数据库迁移（2026-05-19）：**
+
+| 迁移文件 | 作用 |
+|----------|------|
+| `backend/database/migrations/add_people_countries_to_file_tags.sql` | `file_tags` 表新增 `people` / `countries` / `tag_schema_version` 列及 GIN 索引 |
+| `backend/database/migrations/add_people_countries_to_content_tag_v1.sql` | 就地升级系统模板 `content_tag_v1` 的 prompt 与 `output_format` |
+
+**用户私有模板同步：** `file_tagging` 为 USER_OWNED 模块，每用户有一条 `user_{id}_file_tagging`（`scope=user`），由种子从系统 `content_tag_v1` 克隆。系统模板升级后，**须将用户私有行的 `system_prompt` / `user_prompt_template` / `output_format` 与系统模板对齐**，否则用户打标仍走旧 prompt。运维一次性 SQL（保留用户自定义的 `temperature` / `max_tokens` 等）：
+
+```sql
+UPDATE llm_prompt_templates dst
+SET
+    system_prompt        = src.system_prompt,
+    user_prompt_template = src.user_prompt_template,
+    output_format        = src.output_format,
+    updated_at           = CURRENT_TIMESTAMP
+FROM llm_prompt_templates src
+WHERE src.template_code = 'content_tag_v1'
+  AND src.scope = 'system'
+  AND dst.module_code = 'file_tagging'
+  AND dst.scope = 'user';
+```
+
+**前端展示（2026-05-19）：**
+
+- **FilesPage** → `ExecutionDetailsPanel` 右侧 Tags 卡片：在 Concepts 后展示 **Key People**（Tooltip 含 `name_en` / `role` / `affiliation`）、**Countries**（英文全名 chip）。移动端 `MobileSourceFileDetail` 复用同一面板。
+- **Daily** → `DailyPreviewDrawer` 从 `detail.upload.tags` 读取（与 `detail.feed.tags` 同形），AI Summary 段展示 People / Countries。
+- **API**：`GET /api/file-tags/{file_id}` 响应含 `people` / `countries` / `tag_schema_version`；`GET /api/daily/items/upload_{id}` 的 `upload.tags` 子对象同形。
+
 **触发链路接 template_id：** 5 个上传 API 入参均增加 `auto_tag_template_id` / `auto_tag_template_variables`：
 - `POST /api/files/upload-and-process-document`
 - `POST /api/files/upload-audio`
@@ -590,11 +619,11 @@ tag_file_content_task(file_id, username, force=False, template_id=None, template
 - `POST /api/file-tags/retag` → 单文件重新打标签（**PR-5 增加 `template_id` 参数**）
 - `POST /api/file-tags/retag-batch` → 批量重新打标签（同上）
 
-**用户偏好层：** `user_template_preferences` 中 `module_code='file_tagging'` 的行作为该用户的默认模板。在 PromptTemplatesPage 设置后，所有该用户上传的文件（即使没在弹窗选模板）都用这个偏好。
+**用户模板层：** 用户在 **PromptTemplatesPage → 我的模板 → File Auto-Tagging** 编辑的是其私有 `user_*_file_tagging` 行；未传 runtime `template_id` 时，`LLMTemplateResolver` 自动解析该用户私有模板（`source=user_owned`）。新用户首次使用由 `UserTemplateSeederService` 从 `content_tag_v1` 懒克隆。
 
 **前端入口：**
 - 5 个上传弹窗增加第二个 `<UploadAnalysisTemplatePicker moduleCode="file_tagging" />`
-- FilesPage 右侧 Tags 面板增加 "Retag with template" 按钮 + Modal
+- FilesPage 右侧 Tags 面板：展示 People / Countries；**Retag** / **Re-tag with template** 可强制重打（`force=true`）
 
 ---
 
@@ -897,9 +926,15 @@ POST /api/llm-prompt-templates/templates/test
     - FilesPage 通过常量 `AUDIO_LIKE_TYPES = ['audio', 'podcast']` 让 podcast 文件复用 ASR 转写视图、重分析面板、音频播放器。
 
 14. **`file_tags.people` / `file_tags.countries`（2026-05-19）**  
-    - 由 `content_tag_v1` 模板在自动打标时写入；`tag_schema_version` 默认为 `file_v1`。  
+    - 由 `content_tag_v1`（或用户私有 `file_tagging` 模板，内容应与系统版同步）在自动打标时写入；`tag_schema_version` 默认为 `file_v1`。  
     - FilesPage 右侧 **Tags** 面板与 Daily 抽屉（Upload 来源）展示 People / Countries 标签。  
-    - 历史记录无此字段时，可在 FilesPage 点 **Retag** 或调用 `POST /api/file-tags/retag-batch?force=true` 按需补打。
+    - 历史 `file_tags` 行无 people/countries 时：FilesPage **Retag**，或 `POST /api/file-tags/retag`（`force: true`）。  
+    - 系统 `content_tag_v1` 再次升级后：先跑 prompt 迁移 SQL，再执行上文「用户私有模板同步」SQL。
+
+15. **测试要点（people / countries）**  
+    - 新上传：正文 ≥ `AUTO_TAG_MIN_CONTENT_LENGTH`（默认 100 字），处理完成后 Tags 面板应出现 People / Countries（可为 `[]`）。  
+    - 验证 DB：`SELECT file_id, people, countries, tag_schema_version FROM file_tags ORDER BY tagged_at DESC LIMIT 5;`  
+    - Daily：`GET /api/daily/items/upload_{file_id}` → `upload.tags.people` / `upload.tags.countries`。
 
 ---
 
@@ -926,7 +961,11 @@ POST /api/llm-prompt-templates/templates/test
 | `backend/services/youtube_service.py` | YouTube 字幕/音频下载服务 |
 | `backend/services/web_scraper_service.py` | 网页抓取服务 |
 | `backend/services/local_llm_analysis_service.py` | LLM 分析主服务（用户分析 + 自动打标签/命名共用） |
-| `backend/services/content_tagging_service.py` | 打标签业务逻辑，固定模板 `content_tag_v1` |
+| `backend/services/content_tagging_service.py` | 打标签业务逻辑；`save_tags` 写入 `people` / `countries` / `tag_schema_version` |
+| `backend/schemas/file_tags.py` | `FileTagsResponse` 含 `people` / `countries` / `tag_schema_version` |
+| `backend/database/migrations/add_people_countries_to_file_tags.sql` | `file_tags` 表结构扩展 |
+| `backend/database/migrations/add_people_countries_to_content_tag_v1.sql` | `content_tag_v1` prompt 升级 |
+| `web-frontend/src/types/fileTags.ts` | 前端 `FileTagPerson` / `FileTags` 类型 |
 | `backend/services/content_naming_service.py` | 自动命名业务逻辑，固定模板 `auto_name_v1` |
 | `backend/services/content_classify_service.py` | 自动归类业务逻辑，固定模板 `auto_classify_v1` |
 | `backend/core/prompt_renderer.py` | Prompt Template 渲染器（`{{变量}}` 替换） |
@@ -943,7 +982,8 @@ POST /api/llm-prompt-templates/templates/test
 | `web-frontend/src/components/TemplateSelector.tsx` | 通用模板选择器，新增 `autoSelectDefault` 控制是否自动选默认模板 |
 | `web-frontend/src/components/Layout.tsx` | 桌面浮动上传菜单（My Notes / Thoughts 置顶） |
 | `web-frontend/src/pages/MobileSourcesPage.tsx` | 移动端 Sources 与上传菜单 |
-| `web-frontend/src/pages/FilesPage.tsx` | PC Sources；`ExecutionDetailsPanel`（含 Folder Type）、`OriginalTextNotePanel`；右侧 AI Analysis 面板感知 `rc_agent_status='analyzing'` 中间态与 `failed` fallback 文案，仍保留 Re-analyze 入口 |
+| `web-frontend/src/pages/FilesPage.tsx` | PC Sources；`ExecutionDetailsPanel`（Tags 含 People/Countries、Folder Type）、`OriginalTextNotePanel`；右侧 AI Analysis 面板感知 `rc_agent_status='analyzing'` |
+| `web-frontend/src/components/daily/DailyPreviewDrawer.tsx` | Daily 抽屉；Upload/Feed 共用 People/Countries 标签渲染（`upload.tags` / `feed.tags`） |
 | `web-frontend/src/contexts/FileProcessingContext.tsx` | NavBar 任务轮询；处理 `rc_agent_status='analyzing'` 中间态（status → `'ai_processing'`），YouTube `rcFinalized` 排除 `analyzing` |
 | `web-frontend/src/components/TaskProgressPopover.tsx` | NavBar 顶部任务列表弹层；新增 `'ai_processing'` 状态文案（"AI analyzing…"）|
 | `web-frontend/src/pages/PromptTemplatesPage.tsx` | Prompt Template 管理与测试页面 |

@@ -1,6 +1,6 @@
 # LLM 模型使用整体架构文档
 
-> 最后更新：2026-05-02（新增 `youtube_analysis` USER_OWNED 模块，Upload YouTube Link 与 Feeds `youtube_summary` 完全解耦）
+> 最后更新：2026-05-19（Upload `file_tagging` / `content_tag_v1` 新增 people/countries；用户私有模板与系统模板同步说明）
 >
 > **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.9）。
 
@@ -414,12 +414,21 @@ tag_file_content_task(file_id, username, force=False, template_id=None, ...)
     │
     ├─ LLMTemplateResolver.resolve('file_tagging', user_id, runtime_template_id=template_id)
     ├─ ContentTaggingService → LocalLLMAnalysisService（解析得到的 template_id）
-    │       → LLM 返回 JSON：{ sector, industry, tickers, concepts, confidence, reasoning }
+    │       → LLM 返回 JSON：{
+    │             sector, sector_en, industry, industry_en,
+    │             tickers, concepts, people, countries,
+    │             confidence, summary
+    │           }
+    │         people: [{ name, name_en, role, affiliation? }]  // name 保留原文写法
+    │         countries: ["United States", "China", ...]         // 英文全名，非 ISO 缩写
     │
     └─ 写入 file_tags 表 (ON CONFLICT file_id DO UPDATE)
+          含 people / countries / tag_schema_version (默认 file_v1) / summary
 ```
 
-**说明**：上传 API 可将弹窗中 `file_tagging` 解析结果以 `template_id`（及变量）写入 Celery `task_info`，作为 Resolver 的 **runtime** 优先级；未传时则使用用户私有 `file_tagging` 模板或系统默认 `content_tag_v1`。
+**说明**：上传 API 可将弹窗中 `file_tagging` 解析结果以 `template_id`（及变量）写入 Celery `task_info`，作为 Resolver 的 **runtime** 优先级；未传时则使用用户私有 `user_*_file_tagging` 模板（`source=user_owned`）或系统默认 `content_tag_v1`。
+
+**系统模板升级后的用户私有模板同步（2026-05-19）：** `file_tagging` 为 USER_OWNED 模块，每用户私有行由 `content_tag_v1` 种子克隆。升级系统 `content_tag_v1` 后须同步所有 `scope=user` 且 `module_code=file_tagging` 的行的 prompt 字段，否则用户仍用旧版 people/countries 规则。见 [UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md §4.3](./UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md#43-自动打标签auto-tagging) 中的运维 SQL。
 
 ---
 
@@ -546,7 +555,7 @@ personalize_feed_summary_task (同上, 仅对当前用户 × 当前内容)
 
 | 数据 | 抽屉段位 | 字段来源 |
 |------|----------|----------|
-| 一段话摘要 + sector / industry / tickers / concepts | **AI Summary**（上段） | `subscription_content_tags.*` / `file_tags.*`（全局共享，打标产物） |
+| 一段话摘要 + sector / industry / tickers / concepts / **people / countries** | **AI Summary**（上段） | `subscription_content_tags.*` / `file_tags.*`（全局共享，打标产物）；Feed 详情 `feed.tags`，Upload 详情 `upload.tags`（2026-05-19） |
 | 长篇 LLM 报告 / per-user 个性化摘要 | **AI Analysis**（下段） | Upload: `processing_stats.final_report`；Feed: `subscription_content_user_summaries.summary`（带 "Personalized" 徽标） |
 | 原始内容（推文 / 视频字幕 / 文档正文 等） | **Original**（底段，可折叠） | `subscription_content.*` / `file_processing_details.*` |
 
@@ -744,7 +753,7 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 | 模板 Code | 所属模块 | 输入变量 | 输出格式 | 调用服务 |
 |-----------|---------|----------|---------|---------|
-| `content_tag_v1` | `file_tagging`（系统默认种子；用户私有行由此克隆） | `{{file_content}}` | JSON: sector/industry/tickers/concepts/people/countries | `ContentTaggingService` |
+| `content_tag_v1` | `file_tagging`（系统默认种子；每用户 `user_*_file_tagging` 由此克隆，升级后需 SQL 同步） | `{{file_content}}` `{{additional_context}}` | JSON: sector/sector_en/industry/industry_en/tickers/concepts/**people/countries**/confidence/summary | `ContentTaggingService` |
 | `auto_name_v1` | `file_naming`（SYSTEM_FIXED） | `{{file_content}}` `{{file_type}}` `{{original_filename}}` | text (≤80字) | `ContentNamingService` |
 | `auto_classify_v1` | `file_classify`（SYSTEM_FIXED） | `{{file_content}}` `{{folder_list}}` `{{file_type}}` | text (文件夹名) | `ContentClassifyService` |
 | `content_tag_feeds_v1` | `feed_tagging`（SYSTEM_FIXED） | `{{content}}` | JSON: sector/industry/tickers/summary | `FeedContentTaggingService` |

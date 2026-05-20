@@ -239,6 +239,9 @@ LLM 可利用该字段判断：是某个词本身无数据（可放宽），还�
 | `idx_sc_content_trgm` | `subscription_content` | GIN trgm | 141 MB | valid（新建）|
 | `idx_sc_title_trgm` | `subscription_content` | GIN trgm | 15 MB | valid（新建）|
 | `idx_ft_concepts_gin` | `file_tags` | GIN jsonb | 56 kB | valid（新建）|
+| `idx_ft_people_gin` | `file_tags` | GIN jsonb | — | 2026-05-19，`people` JSONB |
+| `idx_ft_countries_gin` | `file_tags` | GIN jsonb | — | 2026-05-19，`countries` JSONB |
+| `idx_ft_tag_schema_version` | `file_tags` | btree | — | 2026-05-19，`tag_schema_version` |
 | `idx_sct_concepts_gin` | `subscription_content_tags` | GIN jsonb | 544 kB | 已存在，跳过 |
 | `idx_sct_ticker_gin` | `subscription_content_tags` | GIN jsonb | 152 kB | 已存在，跳过 |
 | `idx_ft_ticker_gin` | `file_tags` | GIN jsonb | — | 与 `idx_file_tags_ticker_gin` 重复，跳过 |

@@ -15,7 +15,7 @@ Daily 模块（前端 `/daily`，是登录后的**默认落地页**）是一个*
 |------|----------------|--------------------------------------------|
 | 数据来源 | **聚合**（Upload + Feeds 两条链路）| 仅 Feeds 订阅 |
 | 写入数据 | **不写**任何业务数据，只读 SQL UNION | 写 `subscription_content`、`subscription_list` 等 |
-| LLM 调用 | **零** LLM 调用，仅复用 `file_tags.summary` / `subscription_content_tags.summary` | 三条独立 LLM 链路 |
+| LLM 调用 | **零** LLM 调用，仅复用 `file_tags` / `subscription_content_tags` 打标产物（含 summary、people、countries 等） | 三条独立 LLM 链路 |
 | 定时任务 | **零** 定时任务 | scheduler 驱动的多种抓取任务 |
 | 前端职责 | 跨源时间轴 + 卡片视图 + 来源筛选 + Preset | 订阅 CRUD、阅读器、未读管理 |
 | 跳转 | 卡片点击跳到对应详情页（Sources / Feeds）| 自身就是详情入口 |
@@ -63,7 +63,7 @@ Daily 模块（前端 `/daily`，是登录后的**默认落地页**）是一个*
     │
     ├─ Upload 链路：file_processing_details
     │                ⨯ JOIN processing_stats   (鉴权 ps."user")
-    │                ⨯ LEFT JOIN file_tags     (LLM 摘要 / tickers / concepts)
+    │                ⨯ LEFT JOIN file_tags     (LLM 摘要 / tickers / concepts / people / countries)
     │
     ├─ Feed   链路：subscription_content       (user_id = ANY(user_ids))
     │                ⨯ LEFT JOIN subscription_content_tags  (LLM 摘要 / tickers)
@@ -132,14 +132,26 @@ Daily 模块本身**只新增了一张 per-user 偏好表**，其它都是只读
 |----|------|-----------|
 | `file_processing_details` | Upload Files 链路 | 标题、内容片段、`file_type` → source_subtype 映射、外链 |
 | `processing_stats` | 同上 | 鉴权（`ps."user" = current_user.username`），并提供跳转用的 `execution_id` |
-| `file_tags` | 同上 | LLM 标签：`summary` / `reasoning` / `sector` / `industry` / `ticker` / `concepts` / `confidence` |
+| `file_tags` | 同上 | LLM 标签：`summary` / `reasoning` / `sector` / `industry` / `ticker` / `concepts` / **`people`** / **`countries`** / `tag_schema_version` / `confidence` |
 | `subscription_content` | Feeds 链路 | 标题、正文、`transcript` / **`transcript_cleaned`**（YouTube 清洗字幕）、`channel_type` → source_subtype 映射、`author_*`、`url` |
-| `subscription_content_tags` | 同上 | LLM 标签：`summary` / `sector` / `industry` / `ticker` / `concepts` / `confidence` |
+| `subscription_content_tags` | 同上 | LLM 标签：`summary` / `sector` / `industry` / `ticker` / `concepts` / **`people`** / **`countries`** / `tag_schema_version` / `confidence` |
 | `subscription_list` | 同上 | 单查询批量反查 `id`（为 Feed 卡片提供跳转目标）|
 
-### 2.3 `file_tags.summary` 字段补充（NEW）
+### 2.3 `file_tags` 打标字段与摘要回退
 
-为了让 Daily 同时显示 Upload 与 Feed 两侧的 AI 摘要，本模块附带一次轻量迁移给 `file_tags` 加了 `summary` 列（`backend/database/migrations/add_summary_to_file_tags.sql`），与 `subscription_content_tags.summary` 对齐。**当前 `content_tag_v1` 模板还未生成该字段**，因此前端会按以下回退链显示文本：
+**`summary` 列**（`add_summary_to_file_tags.sql`）：与 `subscription_content_tags.summary` 对齐；`content_tag_v1` 模板输出 `summary` 字段，`ContentTaggingService` 同时写入 `file_tags.summary` 与 `reasoning`。
+
+**`people` / `countries` / `tag_schema_version`（2026-05-19，Upload 与 Feeds 对齐）：**
+
+| 字段 | 说明 |
+|------|------|
+| `people` | JSONB `[{name, name_en, role, affiliation?}]`，`name` 为原文写法 |
+| `countries` | JSONB 国家英文全名数组 |
+| `tag_schema_version` | Upload 默认 `file_v1`；Feed 为 `feeds_v1` 或 `tweet_signal_v1` |
+
+列表接口仍只暴露顶层 `sector` / `tickers` / `concepts`；**People / Countries 在抽屉详情**中通过 `upload.tags` 或 `feed.tags` 展示（`DailyPreviewDrawer`）。
+
+**摘要显示回退链**（列表卡片与抽屉标题区）：
 
 ```
 file_tags.summary
@@ -332,7 +344,15 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
     "display_name": "...", "filename": "...",
     "original_file_path": "...",             // OSS key / 本地路径 / 外链兜底
     "content": "Markdown 正文 / OCR / 网页正文 / 笔记",
-    "final_report": "processing_stats.final_report (执行级 AI 报告)"
+    "final_report": "processing_stats.final_report (执行级 AI 报告)",
+    "tags": {
+      "sector": "...", "sector_en": "...", "industry": "...", "industry_en": "...",
+      "tickers": [...], "concepts": [...],
+      "people": [{ "name": "Powell", "name_en": "Jerome Powell", "role": "central_banker", ... }],
+      "countries": ["United States", "China"],
+      "tag_schema_version": "file_v1",
+      "summary": "...", "confidence": 0.85
+    }
   },
   "feed": {
     "content_db_id": 4567,
@@ -345,10 +365,17 @@ app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"
     "categories": [...],                     // News / RSS tags
     "is_retweet": false, "retweeted_author": null, ...,   // Twitter 特定
     "has_transcript": true,                  // YouTube 是否能懒加载 transcript
-    "tags": { "sector": "...", "tickers": [...], "concepts": [...], "summary": "...", ... }
+    "tags": {
+      "sector": "...", "tickers": [...], "concepts": [...],
+      "people": [...], "countries": [...],
+      "tag_schema_version": "feeds_v1",
+      "summary": "...", ...
+    }
   }
 }
 ```
+
+**抽屉标签展示（2026-05-19）：** `DailyPreviewDrawer` 在 AI Summary 段渲染 sector / tickers / concepts / **People** / **Countries**；Upload 读 `detail.upload.tags`，Feed 读 `detail.feed.tags`（与 Feeds 文章页 chip 规则一致：人名保留原文、国家为英文全名）。
 
 **注意（不返回的字段）：**
 
@@ -412,7 +439,9 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 | `backend/api/daily.py` | 所有 Daily API 实现：UNION SQL 拼接、动态 WHERE、N+1 反查、行 → `DailyFeedItem` 转换、Preset CRUD、`GET /items/{id}` 单条详情分发（`_fetch_upload_detail` / `_fetch_feed_detail`）|
 | `backend/schemas/daily.py` | Pydantic 模型：`DailyFeedItem` / `DailyNavigate` / `DailyFeedResponse` / `DailySourceCount` / `DailyStatsResponse` / `DailyPresetResponse` / `DailyPresetUpdate` / `DailyItemDetail` / `DailyItemDetailUpload` / `DailyItemDetailFeed`，以及枚举 `SourceType` / `SourceSubtype` |
 | `backend/database/migrations/create_user_daily_preferences.sql` | NEW：preset 表 |
-| `backend/database/migrations/add_summary_to_file_tags.sql` | NEW：补 `file_tags.summary` 字段，对齐 Feed 侧摘要 |
+| `backend/database/migrations/add_summary_to_file_tags.sql` | 补 `file_tags.summary` 字段 |
+| `backend/database/migrations/add_people_countries_to_file_tags.sql` | `file_tags` 新增 people / countries / tag_schema_version |
+| `backend/database/migrations/add_people_countries_to_content_tag_v1.sql` | 升级 Upload 打标系统模板 |
 | `backend/main.py` | 注册 `/api/daily` router |
 
 > Daily 模块**没有**自己的 service 层、没有 Celery 任务、没有 scheduler 任务。所有"业务"都是一段 SQL + 一层数据装配。
@@ -429,7 +458,7 @@ Feed 卡片点击需要跳转到 `/feeds/article/:sub_id/:content_id`，而 `sub
 | `web-frontend/src/components/daily/sourceBadgeConfig.ts` | 9 种 subtype 的配色（浅 / 深主题各一组）+ 短代号 + 完整名称 + 显示顺序 |
 | `web-frontend/src/components/daily/dailyTheme.ts` | Daily 模块独立调色板（与 Sources / Feeds 风格一致但卡片密度更紧凑）|
 | `web-frontend/src/components/daily/DailyPresetModal.tsx` | Preset 配置弹窗：分组（Upload sources / Subscriptions）+ 复用 `SourceBadge` 做整块勾选 + Clear / Select all / Save |
-| `web-frontend/src/components/daily/DailyPreviewDrawer.tsx` | **NEW** 卡片点击预览抽屉：桌面右侧 720px / 移动 bottom sheet (92vh)；顶栏 Prev/Next + Open in Sources/Feeds + Close；中段 AI Summary（缺失降级提示）+ tickers / concepts；下半 dispatch 到 `DailyOriginalView`；键盘快捷键 Esc / ↑↓ / J K |
+| `web-frontend/src/components/daily/DailyPreviewDrawer.tsx` | 卡片预览抽屉；AI Summary 含 tickers / concepts / **People / Countries**（`upload.tags` 与 `feed.tags`）；下半 `DailyOriginalView` |
 | `web-frontend/src/components/daily/DailyDateSidebar.tsx` | **NEW** 日期导航栏：调用 `getDailyCalendar` 拉取最近 N 天统计；每行含活跃度色块（0-4 级，仿 GitHub heatmap）+ 日期标签 + 总数 + per-subtype 迷你彩条（复用 `sourceBadgeConfig` 颜色）；点击日期触发 `onJumpToDate`；支持 "Show more" 渐进加载（30 → 180 天）；`variant="desktop"`（固定 220px 左侧栏）/ `variant="mobile"`（全宽，用于 bottom-sheet）|
 | `web-frontend/src/components/daily/DailyOriginalView.tsx` | **NEW** 原文区分发器：按 9 种 `source_subtype` 路由到内置子组件（`DocumentOriginalView` / `ImageOriginalView` / `AudioOriginalView` / `YoutubeUploadOriginalView` / `WebOriginalView` / `TextNoteOriginalView` / `TwitterOriginalView` / `NewsOriginalView` / `YoutubeFeedOriginalView`）；按需懒加载 `/files/original/{id}` 与 `/subscriptions/contents/{id}/transcript`；只读，不复用 FeedArticleBody 的写入操作 |
 | `web-frontend/src/components/daily/dailyPreviewUtils.ts` | **NEW** 抽屉用小工具：`extractYouTubeId` / `flattenAsr`（兼容 sentences / transcript 两种 ASR JSON 形态）/ `formatTimestampMs` |
@@ -611,7 +640,9 @@ Daily 模块**不引入任何新环境变量**，只复用现有的 DB 连接配
 - `docs/instructions/FEEDS_MODULE.md` — Feeds 订阅模块（数据来源 ②）
 - `docs/instructions/NEWS_ANALYSIS_FLOW.md` — News 独立分析管线（与 Daily 无直接耦合）
 - `backend/database/migrations/create_user_daily_preferences.sql` — Preset 表
-- `backend/database/migrations/add_summary_to_file_tags.sql` — Upload 摘要字段补齐
+- `backend/database/migrations/add_summary_to_file_tags.sql` — Upload 摘要字段
+- `backend/database/migrations/add_people_countries_to_file_tags.sql` — Upload people/countries
+- `backend/database/migrations/add_people_countries_to_content_tag_v1.sql` — content_tag_v1 prompt 升级
 - `backend/api/daily.py` — 所有 Daily API（含 SQL）
 - `backend/schemas/daily.py` — Pydantic 模型与 source_subtype 枚举
 - `backend/utils/datetime_utils.py` — 后端时区工具（utcnow / ensure_utc / yesterday_in_tz / day_window_utc）

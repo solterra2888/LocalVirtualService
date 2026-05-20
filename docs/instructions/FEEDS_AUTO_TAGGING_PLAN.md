@@ -104,7 +104,7 @@ CREATE TABLE subscription_content_tags (
     subscription_content_id INTEGER NOT NULL
         REFERENCES subscription_content(id) ON DELETE CASCADE,
 
-    -- 与 file_tags 对齐的字段
+    -- 与 file_tags 对齐的字段（2026-05-19 两侧均含 people / countries / tag_schema_version）
     sector          TEXT NOT NULL,
     sector_en       TEXT,
     industry        TEXT NOT NULL,
