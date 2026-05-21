@@ -1,6 +1,6 @@
 # LLM 模型使用整体架构文档
 
-> 最后更新：2026-05-19（Upload `file_tagging` / `content_tag_v1` 新增 people/countries；用户私有模板与系统模板同步说明）
+> 最后更新：2026-05-20（Agent API v1 / guanhe-mcp 0.2.1 贯通 people/countries 响应与 `people=` / `countries=` 过滤；见 [AGENT_API_V2_OPTIMIZATION.md](./AGENT_API_V2_OPTIMIZATION.md) §5.1）
 >
 > **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.9）。
 
@@ -746,6 +746,8 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | **幂等保护** | ✅ 有（各自字段检查）| ✅ 有（force 参数） | ✅ 有（模板变更检测） | ✅ 有（is_analyzed） |
 | **Celery 队列** | `file_processing` | `file_processing` | 由 scheduler 派发 | `ai_processing` |
 | **使用 Embedding** | ❌ | ❌ | ❌ | ✅ Qwen text-embedding-v3 |
+
+**Agent API v1（对外只读，MCP）**：`GET /api/v1/agent/daily` 等端点自 **v0.2.1** 起在 list 响应中返回 `people`（name 字符串数组）/ `countries`，detail 另含 `people_detail`；支持 `people=` / `countries=` 查询参数（与 `file_tags` / `subscription_content_tags` 打标字段对齐）。详见 [AGENT_API_V2_OPTIMIZATION.md](./AGENT_API_V2_OPTIMIZATION.md) §5.1。
 
 ---
 

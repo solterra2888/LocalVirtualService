@@ -934,7 +934,11 @@ POST /api/llm-prompt-templates/templates/test
 15. **测试要点（people / countries）**  
     - 新上传：正文 ≥ `AUTO_TAG_MIN_CONTENT_LENGTH`（默认 100 字），处理完成后 Tags 面板应出现 People / Countries（可为 `[]`）。  
     - 验证 DB：`SELECT file_id, people, countries, tag_schema_version FROM file_tags ORDER BY tagged_at DESC LIMIT 5;`  
-    - Daily：`GET /api/daily/items/upload_{file_id}` → `upload.tags.people` / `upload.tags.countries`。
+    - Daily：`GET /api/daily/items/upload_{file_id}` → `upload.tags.people` / `upload.tags.countries`。  
+    - **Agent API v1 / MCP（guanhe-mcp ≥ 0.2.1）**：  
+      - List：`GET /api/v1/agent/daily?people=Trump&since=7d` → 每条 `items[].people` / `items[].countries`。  
+      - Detail：`GET /api/v1/agent/daily/upload_{id}` → `people_detail` 为完整对象数组。  
+      - MCP：`python scripts/call_guanhe_mcp.py daily_feed '{"people":"Trump","since":"7d","limit":5}'`（见 [AGENT_API_V2_OPTIMIZATION.md](./AGENT_API_V2_OPTIMIZATION.md) §5.1）。
 
 ---
 

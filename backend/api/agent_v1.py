@@ -102,6 +102,23 @@ def agent_daily_feed(
             "Only applies to feed items (Twitter, YouTube, news); upload items have no author."
         ),
     ),
+    people: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated person names (OR logic — match ANY). "
+            "Matches the structured 'name' field in people tags, case-insensitive. "
+            "Use original-form names from content (e.g. people=Trump,Musk — NOT '特朗普'). "
+            "Far more precise than q= text search for person-centric queries."
+        ),
+    ),
+    countries: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated country full English names (OR logic). "
+            "Example: countries=United States,China. "
+            "NOT ISO codes — use 'United States' not 'US'."
+        ),
+    ),
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = Query(None, description="Pagination cursor from previous response next_cursor."),
     dedup: bool = Query(
@@ -122,6 +139,8 @@ def agent_daily_feed(
         tickers=tickers,
         tags=tags,
         author=author,
+        people=people,
+        countries=countries,
         limit=limit,
         cursor=cursor,
         dedup=dedup,

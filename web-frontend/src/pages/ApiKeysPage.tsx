@@ -177,6 +177,95 @@ const QUICK_TABS: { key: QuickTab; label: string; sub: string }[] = [
   { key: 'codex', label: 'Codex', sub: 'CLI 或兼容客户端' },
 ];
 
+/** 完整 PAT 明文仅存于本浏览器 session（服务端只存 hash，无法再次下发） */
+const PAT_SECRETS_STORAGE_KEY = 'guanhe_pat_secrets';
+
+function loadPatSecrets(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = sessionStorage.getItem(PAT_SECRETS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string' && v.startsWith('ght_')) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function savePatSecret(tokenId: number, plaintext: string): void {
+  if (typeof window === 'undefined' || !plaintext) return;
+  const all = loadPatSecrets();
+  all[String(tokenId)] = plaintext;
+  sessionStorage.setItem(PAT_SECRETS_STORAGE_KEY, JSON.stringify(all));
+}
+
+function removePatSecret(tokenId: number): void {
+  if (typeof window === 'undefined') return;
+  const all = loadPatSecrets();
+  delete all[String(tokenId)];
+  sessionStorage.setItem(PAT_SECRETS_STORAGE_KEY, JSON.stringify(all));
+}
+
+function prunePatSecrets(activeIds: Set<number>): Record<string, string> {
+  const all = loadPatSecrets();
+  let changed = false;
+  for (const key of Object.keys(all)) {
+    const id = Number(key);
+    if (!activeIds.has(id)) {
+      delete all[key];
+      changed = true;
+    }
+  }
+  if (changed && typeof window !== 'undefined') {
+    sessionStorage.setItem(PAT_SECRETS_STORAGE_KEY, JSON.stringify(all));
+  }
+  return all;
+}
+
+const CopyFullTokenButton: React.FC<{ token: string; dark: boolean }> = ({ token, dark }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      message.success('已复制完整令牌');
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      message.error('复制失败');
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title={copied ? '已复制' : '复制完整令牌（仅本浏览器创建后可用）'}
+      onClick={() => void handleCopy()}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: '2px 4px',
+        cursor: 'pointer',
+        color: copied ? TEAL : dark ? '#475569' : '#94a3b8',
+        fontSize: 12,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        transition: 'color .15s',
+        flexShrink: 0,
+      }}
+    >
+      <CopyOutlined />
+      <span style={{ fontSize: 11 }}>{copied ? '已复制' : '复制'}</span>
+    </button>
+  );
+};
+
 function formatTs(v: string | null): string {
   if (!v) return '—';
   const d = new Date(v);
@@ -193,10 +282,18 @@ const ApiKeysPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createdPlaintext, setCreatedPlaintext] = useState<string | null>(null);
+  const [patSecrets, setPatSecrets] = useState<Record<string, string>>(() => loadPatSecrets());
+  const [showRevoked, setShowRevoked] = useState(false);
   const [form] = Form.useForm();
   const [quickTab, setQuickTab] = useState<QuickTab>('claude');
 
   const apiBase = useMemo(() => process.env.REACT_APP_API_BASE_URL || '/api', []);
+
+  const revokedCount = useMemo(() => rows.filter((r) => r.revoked_at).length, [rows]);
+  const visibleRows = useMemo(
+    () => (showRevoked ? rows : rows.filter((r) => !r.revoked_at)),
+    [rows, showRevoked]
+  );
 
   const authHeaders = useCallback(() => {
     const t = token || localStorage.getItem('access_token');
@@ -212,7 +309,12 @@ const ApiKeysPage: React.FC = () => {
       const res = await fetch(`${apiBase}/users/me/tokens`, { headers: authHeaders() });
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
-      setRows(json.data || []);
+      const list: TokenRow[] = json.data || [];
+      setRows(list);
+      const activeIds = new Set(
+        list.filter((r) => !r.revoked_at).map((r) => r.id)
+      );
+      setPatSecrets(prunePatSecrets(activeIds));
     } catch (e) {
       message.error('加载令牌列表失败');
       console.error(e);
@@ -270,8 +372,13 @@ const ApiKeysPage: React.FC = () => {
       }
       const json = await res.json();
       const plain = json?.data?.token as string;
+      const metaId = json?.data?.meta?.id as number | undefined;
       setCreatedPlaintext(plain || null);
-      message.success('令牌已创建，请立即复制保存；完整明文只会显示一次。');
+      if (plain && metaId != null) {
+        savePatSecret(metaId, plain);
+        setPatSecrets(loadPatSecrets());
+      }
+      message.success('令牌已创建，请立即复制保存；关闭页面前可在列表再次复制。');
       await load();
     } catch (e) {
       message.error('创建失败');
@@ -294,6 +401,8 @@ const ApiKeysPage: React.FC = () => {
           message.error('撤销失败');
           return;
         }
+        removePatSecret(id);
+        setPatSecrets(loadPatSecrets());
         message.success('已撤销');
         await load();
       },
@@ -504,8 +613,29 @@ const ApiKeysPage: React.FC = () => {
         <SectionLabel>令牌列表</SectionLabel>
         <SectionTitle dark={dark}>您的令牌</SectionTitle>
         <SectionDesc dark={dark}>
-          列表仅显示前缀与元数据。新生成的完整令牌只在创建当次弹窗中出现一次。
+          默认只显示有效令牌。服务端不保存完整明文（只存哈希），无法从数据库再次取出。
+          在本页刚创建的令牌，完整密钥会暂存在当前浏览器会话中，可点击「复制」；换设备或关闭标签页后需重新生成。
         </SectionDesc>
+
+        {revokedCount > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={() => setShowRevoked((v) => !v)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                fontSize: 13,
+                color: TEAL,
+                textDecoration: 'underline',
+              }}
+            >
+              {showRevoked ? '隐藏已撤销' : `显示已撤销（${revokedCount}）`}
+            </button>
+          </div>
+        )}
 
         <div
           style={{
@@ -543,20 +673,22 @@ const ApiKeysPage: React.FC = () => {
                     加载中…
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : visibleRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: '28px 14px', textAlign: 'center', color: dark ? '#64748b' : '#94a3b8' }}>
-                    暂无令牌，点击上方「生成令牌」创建。
+                    {rows.length === 0
+                      ? '暂无令牌，点击上方「生成令牌」创建。'
+                      : '暂无有效令牌。可点击上方「显示已撤销」查看历史记录。'}
                   </td>
                 </tr>
               ) : (
-                rows.map((r, idx) => (
+                visibleRows.map((r, idx) => (
                   <tr
                     key={r.id}
                     style={{
                       opacity: r.revoked_at ? 0.55 : 1,
                       borderBottom:
-                        idx < rows.length - 1 ? `1px solid ${dark ? DARK_BORDER : '#f1f5f9'}` : 'none',
+                        idx < visibleRows.length - 1 ? `1px solid ${dark ? DARK_BORDER : '#f1f5f9'}` : 'none',
                     }}
                   >
                     <td
@@ -577,7 +709,12 @@ const ApiKeysPage: React.FC = () => {
                         color: TEAL,
                       }}
                     >
-                      {r.prefix}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {r.prefix}
+                        {!r.revoked_at && patSecrets[String(r.id)] && (
+                          <CopyFullTokenButton token={patSecrets[String(r.id)]} dark={dark} />
+                        )}
+                      </span>
                     </td>
                     <td style={{ padding: '10px 14px' }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -654,7 +791,7 @@ const ApiKeysPage: React.FC = () => {
           </div>
           <p style={{ margin: '0 0 6px' }}>
             <strong style={{ color: dark ? '#94a3b8' : '#475569' }}>安全</strong>
-            {' — PAT 等同于密码；泄露后请立即撤销并重新生成。'}
+            {' — PAT 等同于密码；泄露后请立即撤销并重新生成。完整密钥仅创建时由服务端返回一次，数据库只保存哈希，无法再次查询明文。'}
           </p>
           <p style={{ margin: 0 }}>
             <strong style={{ color: dark ? '#94a3b8' : '#475569' }}>MCP / REST</strong>
@@ -717,7 +854,7 @@ const ApiKeysPage: React.FC = () => {
                 lineHeight: 1.5,
               }}
             >
-              完整明文仅此一次展示，请复制到安全位置（如密码管理器）。
+              完整明文不会存入服务器数据库。请立即复制到密码管理器；关闭本标签页前也可在下方列表再次复制。
             </div>
             <Input.TextArea
               readOnly

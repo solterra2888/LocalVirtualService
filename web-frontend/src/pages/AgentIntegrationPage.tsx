@@ -365,7 +365,7 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致（v0.2） */
+  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致（v0.2.1） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
@@ -375,6 +375,8 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '只看我上传的文件', endpoint: 'daily_feed', params: 'sources=pdf,image,text,audio' },
     { intent: '帮我同时查 NVDA 和 AAPL 的内容', endpoint: 'daily_feed', params: 'tickers=NVDA.US,AAPL.US' },
     { intent: '展示 AI 概念相关的内容', endpoint: 'daily_feed', params: 'tags=AI' },
+    { intent: '最近有哪些关于 Trump / Musk 的内容', endpoint: 'daily_feed', params: 'people=Trump,Musk' },
+    { intent: '帮我找关于美国、中国的内容', endpoint: 'daily_feed', params: 'countries=United States,China' },
     {
       intent: '这条具体讲了什么 / 展开第 N 条 / 给我看原文',
       endpoint: 'daily_item',
@@ -545,7 +547,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.2.0-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.2.1-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -631,11 +633,11 @@ const AgentIntegrationPage: React.FC = () => {
             </h3>
             <IntentTable
               dark={dark}
-              col1="工具（v0.2）"
+              col1="工具（v0.2.1）"
               col2="说明"
               rows={[
-                { intent: 'daily_feed', endpoint: '每日时间线浏览 + 全文搜索（q 可选），支持 tickers / tags / author / sources / since / dedup 等过滤' },
-                { intent: 'daily_item', endpoint: '按 id 取单条完整字段（content、transcript、截断标记等）；id 来自上一轮 daily_feed 列表' },
+                { intent: 'daily_feed', endpoint: '每日时间线浏览 + 全文搜索（q 可选），支持 tickers / tags / people / countries / author / sources / since / dedup 等过滤' },
+                { intent: 'daily_item', endpoint: '按 id 取单条完整字段（content、transcript、people_detail、截断标记等）；id 来自上一轮 daily_feed 列表' },
                 { intent: 'daily_items_batch', endpoint: '批量获取多条详情，单次最多 10 个 id，避免 N 次串行调用' },
                 { intent: 'daily_multi_search', endpoint: '多组条件并行搜索 + 跨组服务端去重，最多 5 组' },
                 { intent: 'list_subscriptions', endpoint: '查看当前账号已启用的订阅频道清单（供 LLM 了解"有什么数据"）' },
@@ -743,7 +745,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed 常用参数（v0.2）
+              daily_feed 常用参数（v0.2.1）
             </h4>
             <IntentTable
               dark={dark}
@@ -754,6 +756,8 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'q', endpoint: '全文搜索关键词（可选）；支持多词 AND、减号排除（AI -crypto）；零结果时返回 diagnostics' },
                 { intent: 'tickers', endpoint: '按股票代码过滤，逗号分隔多值，如 NVDA.US,AAPL.US（v0.1 的 ticker 单值已弃用）' },
                 { intent: 'tags', endpoint: '按概念标签过滤（匹配 concepts JSONB 数组），逗号分隔，如 AI,Chips' },
+                { intent: 'people', endpoint: '按关键人物名过滤，逗号分隔，如 Trump,Musk；大小写不敏感，匹配原文写法（v0.2.1 新增）' },
+                { intent: 'countries', endpoint: '按国家/地区过滤，逗号分隔英文全名，如 United States,China；需完全匹配（v0.2.1 新增）' },
                 { intent: 'author', endpoint: '按作者名 / 账号模糊匹配（ILIKE）' },
                 { intent: 'sources', endpoint: '逗号分隔来源子类型；不填则使用网页端默认 preset。见下方来源类型表' },
                 { intent: 'dedup', endpoint: '服务端去重，默认 true；按 external_url 去重，NULL URL 不参与' },
@@ -784,6 +788,10 @@ const AgentIntegrationPage: React.FC = () => {
                 {
                   intent: 'content_truncated / transcript_truncated',
                   endpoint: '为 true 时表示已截断，应引导用户打开 url 查看完整内容，勿假装已见全文',
+                },
+                {
+                  intent: 'people_detail',
+                  endpoint: '详情级人物标签，完整对象数组 [{name, name_en, role, affiliation?}]；列表级 people 字段仅含姓名字符串',
                 },
                 { intent: 'body_excerpt', endpoint: '向后兼容字段；新逻辑优先使用 content' },
               ]}
@@ -874,7 +882,7 @@ const AgentIntegrationPage: React.FC = () => {
               col1="请求"
               col2="说明"
               rows={[
-                { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线 + 搜索（q 可选），支持 since / sources / tickers / tags / author / q / dedup / limit / cursor' },
+                { intent: 'GET /api/v1/agent/daily', endpoint: '每日时间线 + 搜索（q 可选），支持 since / sources / tickers / tags / people / countries / author / q / dedup / limit / cursor' },
                 { intent: 'GET /api/v1/agent/daily/{item_id}', endpoint: '单条详情（正文 content、字幕 transcript、截断标记等），item_id 同列表中的 id' },
                 { intent: 'POST /api/v1/agent/daily/batch', endpoint: '批量详情，body: { ids: [...] }，最多 10 条' },
                 { intent: 'POST /api/v1/agent/daily/multi', endpoint: '多组并行搜索 + 服务端去重，body: { groups: [...], dedup_by, limit_per_group }' },
@@ -901,7 +909,9 @@ const AgentIntegrationPage: React.FC = () => {
   "author": "@handle",
   "published_at": "2026-05-13T04:00:00+00:00",
   "tickers": ["NVDA.US"],
-  "tags": ["AI", "Chips"]
+  "tags": ["AI", "Chips"],
+  "people": ["Jensen Huang", "Elon Musk"],
+  "countries": ["United States"]
 }`}
             </CodeBlock>
 
@@ -918,6 +928,12 @@ const AgentIntegrationPage: React.FC = () => {
   "published_at": "2026-05-13T05:30:00+00:00",
   "tickers": ["NVDA.US", "AAPL.US", "TSLA.US", "BLK.US"],
   "tags": ["China", "Tariffs", "CEO"],
+  "people": ["Trump", "Xi Jinping"],
+  "countries": ["United States", "China"],
+  "people_detail": [
+    { "name": "Trump", "name_en": "Donald Trump", "role": "President", "affiliation": "US Government" },
+    { "name": "Xi Jinping", "name_en": "Xi Jinping", "role": "President", "affiliation": "PRC Government" }
+  ],
   "content": "本期节目讨论特朗普访华代表团构成 …",
   "content_truncated": false,
   "transcript": "Welcome to Horizons Middle East …",

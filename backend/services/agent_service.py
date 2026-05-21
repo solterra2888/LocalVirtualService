@@ -212,6 +212,32 @@ def _parse_tags_param(tags: Optional[str]) -> Optional[List[str]]:
     return result or None
 
 
+def _parse_people_param(people: Optional[str]) -> Optional[List[str]]:
+    if not people:
+        return None
+    result = [t.strip() for t in people.split(",") if t.strip()]
+    return result or None
+
+
+def _parse_countries_param(countries: Optional[str]) -> Optional[List[str]]:
+    if not countries:
+        return None
+    result = [t.strip() for t in countries.split(",") if t.strip()]
+    return result or None
+
+
+def _people_names_from_daily(d: DailyFeedItem) -> List[str]:
+    names: List[str] = []
+    for p in d.people or []:
+        if isinstance(p, dict):
+            name = (p.get("name") or "").strip()
+            if name:
+                names.append(name)
+        elif isinstance(p, str) and p.strip():
+            names.append(p.strip())
+    return names
+
+
 def _load_preset_subtypes(db: DatabaseManager, user_id: int) -> Optional[List[str]]:
     conn = db.get_connection()
     if not conn:
@@ -308,6 +334,8 @@ def _daily_feed_item_to_agent(d: DailyFeedItem) -> AgentDailyItem:
         published_at=d.published_at,
         tickers=list(d.tickers or [])[:50],
         tags=list(d.concepts or [])[:50],
+        people=_people_names_from_daily(d)[:30],
+        countries=list(d.countries or [])[:30],
     )
 
 
@@ -384,6 +412,20 @@ def _fetch_feed_transcript_text(cursor, content_db_id: int, user_id: int) -> Opt
     return text or None
 
 
+def _tags_people_detail(d: DailyItemDetail) -> List[Dict[str, Any]]:
+    tags = None
+    if d.upload and d.upload.tags:
+        tags = d.upload.tags
+    elif d.feed and d.feed.tags:
+        tags = d.feed.tags
+    if not tags:
+        return list(d.people or [])
+    people = tags.get("people")
+    if isinstance(people, list):
+        return [p for p in people if isinstance(p, dict)]
+    return list(d.people or [])
+
+
 def _detail_to_agent_detail(
     d: DailyItemDetail, transcript_text: Optional[str] = None
 ) -> AgentDailyItemDetail:
@@ -411,6 +453,7 @@ def _detail_to_agent_detail(
         content_truncated=content_truncated,
         transcript=transcript_field,
         transcript_truncated=transcript_truncated,
+        people_detail=_tags_people_detail(d)[:50],
     )
 
 
@@ -444,6 +487,8 @@ class AgentService:
         tickers: Optional[str] = None,
         tags: Optional[str] = None,
         author: Optional[str] = None,
+        people: Optional[str] = None,
+        countries: Optional[str] = None,
         limit: int = 20,
         cursor: Optional[str] = None,
         dedup: bool = True,
@@ -461,6 +506,8 @@ class AgentService:
 
         tickers_list = _parse_tickers_param(tickers)
         tags_list = _parse_tags_param(tags)
+        people_list = _parse_people_param(people)
+        countries_list = _parse_countries_param(countries)
 
         upload_extra, feed_extra, extra_params = daily_api._build_filter_clauses(
             date_from=date_from,
@@ -470,6 +517,8 @@ class AgentService:
             tickers=tickers_list,
             tags=tags_list,
             author=author or None,
+            people=people_list,
+            countries=countries_list,
         )
         base_params: Dict[str, Any] = {
             "username": user.username,
@@ -760,6 +809,8 @@ class AgentService:
                 tickers=group.tickers,
                 tags=group.tags,
                 author=group.author,
+                people=group.people,
+                countries=group.countries,
                 limit=req.limit_per_group,
                 dedup=False,  # dedup happens after merge
             )

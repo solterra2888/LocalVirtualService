@@ -54,6 +54,17 @@ class AgentDailyItem(BaseModel):
     published_at: datetime
     tickers: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list, description="themes / concepts")
+    people: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Key persons mentioned (name only). Original-form names from content "
+            "(e.g. 'Trump', not '特朗普')."
+        ),
+    )
+    countries: List[str] = Field(
+        default_factory=list,
+        description="Countries mentioned, full English names (e.g. 'United States').",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +150,13 @@ class AgentDailyItemDetail(AgentDailyItem):
     transcript_truncated: bool = Field(
         False,
         description="True when `transcript` was truncated; open `url` for the full original.",
+    )
+    people_detail: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Detail-level people tags: [{name, name_en, role, affiliation?}]. "
+            "List-level `people` on the parent item remains name-only strings."
+        ),
     )
 
 
@@ -251,6 +269,8 @@ class AgentMultiSearchGroup(BaseModel):
     tags: Optional[str] = None
     tickers: Optional[str] = None
     author: Optional[str] = None
+    people: Optional[str] = None
+    countries: Optional[str] = None
     limit: int = Field(50, ge=1, le=100)
 
 

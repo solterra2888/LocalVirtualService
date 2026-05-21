@@ -128,6 +128,8 @@ v0.2.0 允许破坏性变更，在彻底解决上述问题的同时，将工具�
 | `tickers` | `string`（逗号分隔） | 按股票代码过滤，如 `NVDA.US,AAPL.US` |
 | `tags` | `string`（逗号分隔） | 按概念标签过滤（匹配 `concepts` JSONB 数组） |
 | `author` | `string` | 按作者名 / 账号模糊匹配（ILIKE） |
+| `people` | `string`（逗号分隔） | 按关键人物 `name` 过滤（OR，大小写不敏感）；如 `Trump,Musk` |
+| `countries` | `string`（逗号分隔） | 按国家英文全名过滤（OR）；如 `United States,China` |
 | `sources` | `string`（逗号分隔） | 按来源类型过滤（`twitter`/`youtube`/`news` 等） |
 
 `since` 参数在 v0.2 中支持更丰富的格式：
@@ -247,6 +249,22 @@ LLM 可利用该字段判断：是某个词本身无数据（可放宽），还�
 | `idx_ft_ticker_gin` | `file_tags` | GIN jsonb | — | 与 `idx_file_tags_ticker_gin` 重复，跳过 |
 
 > **注意**：迁移已完成，**无需重新执行**。验证脚本：`scripts/verify_indexes.py`。
+
+### 5.1 v0.2.1：people / countries 贯通（2026-05-20）
+
+与 Feeds / Upload 自动打标新增的 `people`、`countries` 字段对齐，Agent API v1 与 `guanhe-mcp` **0.2.1** 起支持：
+
+| 能力 | List（`daily_feed` / `daily_multi_search`） | Detail（`daily_item` / `daily_items_batch`） |
+|------|---------------------------------------------|-----------------------------------------------|
+| 响应字段 | `people: string[]`（仅 name）、`countries: string[]` | 继承 list 字段 + `people_detail: object[]`（含 role / affiliation） |
+| 查询参数 | `people=`、`countries=`（逗号分隔，OR） | — |
+
+**过滤实现**（`backend/api/daily.py` → `_build_filter_clauses`）：
+
+- `countries=`：`ft.countries ?| %(countries_arr)s` / `sct.countries ?| ...`，可走已有 `idx_*_countries_gin`。
+- `people=`：`EXISTS (SELECT 1 FROM jsonb_array_elements(...) WHERE lower(p->>'name') = ANY(...))`，本期不加表达式索引。
+
+**涉及文件**：`backend/schemas/agent.py`、`backend/services/agent_service.py`、`backend/api/agent_v1.py`、`backend/api/daily.py`（SQL SELECT + filter）、`tools/guanhe-mcp` 0.2.1。
 
 ---
 
@@ -408,6 +426,15 @@ curl -H "Authorization: Bearer <your_pat>" \
 curl -H "Authorization: Bearer <your_pat>" \
   "https://<server>/api/v1/agent/daily?tickers=NVDA.US,AAPL.US&since=7d"
 ```
+
+**3b. 验证 people / countries（v0.2.1）**
+
+```bash
+curl -H "Authorization: Bearer <your_pat>" \
+  "https://<server>/api/v1/agent/daily?people=Trump&countries=United%20States&since=14d&limit=5"
+```
+
+预期：命中条目的 `people` 含 `Trump`（字符串数组）；`countries` 含 `United States`。详情接口另含 `people_detail` 对象数组。
 
 **4. 验证 410 Gone**
 

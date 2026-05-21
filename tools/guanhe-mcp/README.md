@@ -1,4 +1,4 @@
-# guanhe-mcp v0.2.0
+# guanhe-mcp v0.2.1
 
 Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API (`/api/v1/agent`).
 
@@ -26,7 +26,7 @@ Old HTTP paths return **410 Gone** with an upgrade hint.
 
 ```bash
 # From the published wheel:
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.2.0-py3-none-any.whl"
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.2.1-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp
@@ -119,6 +119,13 @@ python scripts/call_guanhe_mcp.py list_subscriptions '{}'
 
 **`tickers`** — must include exchange suffix: `NVDA.US`, `9988.HK`, `600519.SS`, `0700.HK`.
 If unsure of the suffix, use `q=NVDA` first and read the `tickers` field in the response.
+
+**`people`** — comma-separated person names (OR logic). Use original-form names from content:
+`people=Trump,Musk` (not `特朗普`). More precise than `q=Trump` full-text search.
+Read the `people` field in list responses to discover valid names.
+
+**`countries`** — comma-separated country **full English names** (OR logic):
+`countries=United States,China`. NOT ISO codes (`US` will not match).
 
 **`since`** — `24h`, `48h`, `7d`, `14d`, `30d`, `2w`, or ISO 8601. Invalid values return 400.
 

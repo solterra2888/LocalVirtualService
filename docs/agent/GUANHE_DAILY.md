@@ -1,8 +1,8 @@
-# GuanHe Daily — Agent Skill (v0.2)
+# GuanHe Daily — Agent Skill (v0.2.1)
 
 这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）和你自己上传的文件（PDF、文档、图片等）——并根据你的自然语言问题给出总结和洞察。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.2.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.2.1`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
 
 ---
 
@@ -24,6 +24,8 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 帮我找关于 NVDA / 英伟达的内容 | `daily_feed` | `q=NVDA OR 英伟达` |
 | 只看 Twitter 内容 | `daily_feed` | `sources=twitter` |
 | 只看我上传的文件 | `daily_feed` | `sources=pdf,image,text,audio` |
+| 最近有哪些关于 Trump / Musk 的内容 | `daily_feed` | `people=Trump,Musk` |
+| 帮我找关于美国、中国的内容 | `daily_feed` | `countries=United States,China` |
 | 近期美国访华有什么消息（多角度） | `daily_multi_search` | 见「多组搜索」示例 |
 | 这条具体讲了什么 / 全文 / 字幕 | `daily_item` | `id`（上一轮列表的 id） |
 | 帮我看这几条的全文 | `daily_items_batch` | `ids=[...]` |
@@ -115,6 +117,8 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 - `sources`：逗号分隔，如 `twitter,youtube_feed,pdf`。不填则使用网页端 preset。
 - `tickers`：逗号分隔，**必须含交易所后缀**，如 `NVDA.US,9988.HK`。裸代码不会命中。
 - `tags`：逗号分隔概念标签（任一匹配），从上一轮结果的 `tags` 字段或 `list_subscriptions` 获取。
+- `people`：逗号分隔关键人物姓名（任一匹配），大小写不敏感，使用原文写法，如 `Trump,Jensen Huang`。
+- `countries`：逗号分隔国家/地区英文全名（任一匹配），需完全匹配，如 `United States,China`。
 - `author`：按作者名/账号过滤，子串匹配，如 `author=Bloomberg`。仅适用于 Feed 条目。
 - `limit`：1–100，默认 20。
 - `cursor`：翻页游标，来自上次返回的 `next_cursor`。
@@ -131,6 +135,12 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 
 > ⚠️ `q="帮我找近期美国访华的重要消息"` → 被当字面字符串匹配，永远 0 条。正确做法：提取 3–6 个核心词用 OR 连接。
 
+**`people` / `countries` 使用提示**：
+
+- `people` 按人名精确过滤（任一匹配），名字用原文写法（如 `Trump` 不是 `特朗普`），大小写不敏感。与 `q` 配合使用可进一步收窄结果。
+- `countries` 按国家英文全名过滤（如 `United States`，不是 `US`）。多国用逗号分隔，任一命中即返回。
+- 人物/国家过滤依赖 LLM 标注，覆盖率不如 `q` 全文搜索；当 `people=` 返回 0 条时，改用 `q=` 兜底。
+
 ### `daily_item` — 单条详情下钻
 
 按 id 取一条 Daily 内容的完整字段。id 来自 `daily_feed` / `daily_multi_search` 返回的 `id` 字段（如 `feed_88247`、`upload_123`）。
@@ -139,8 +149,9 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 - `content`：主正文（上传文件的 Markdown/OCR/笔记，Twitter/新闻的全文，YouTube 的视频描述）
 - `transcript`：纯文本字幕（YouTube 订阅 / 音频 / podcast 上传）；推文/PDF 为 null
 - `content_truncated` / `transcript_truncated`：true 时表示字段被截断，完整内容请用 `url` 跳转
+- `people_detail`：完整人物标签对象数组，格式 `[{name, name_en, role, affiliation?}]`；列表级 `people` 字段仅含姓名字符串
 
-**何时下钻**：摘要 `summary` 回答不了问题时（要原文、原话、时间戳、数字细节）。
+**何时下钻**：摘要 `summary` 回答不了问题时（要原文、原话、时间戳、数字细节、完整人物角色信息）。
 
 ### `daily_items_batch` — 批量详情
 
@@ -153,7 +164,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 同时提交 1–5 组搜索参数，服务端并行执行、合并结果、按 url 或 id 去重后按时间排序返回。
 
 参数：
-- `groups`：数组，每组支持 `q, since, sources, tickers, tags, author, limit`
+- `groups`：数组，每组支持 `q, since, sources, tickers, tags, people, countries, author, limit`
 - `dedup_by`：`"url"`（默认）或 `"id"`
 - `limit_per_group`：每组最多返回多少条，默认 50
 
@@ -224,13 +235,15 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
   "author": "@handle",
   "published_at": "2026-05-13T04:00:00+00:00",
   "tickers": ["NVDA.US"],
-  "tags": ["AI", "Chips"]
+  "tags": ["AI", "Chips"],
+  "people": ["Trump", "Jensen Huang"],
+  "countries": ["United States"]
 }
 ```
 
 ### 详情条目（`daily_item` / `daily_items_batch`）
 
-在列表字段基础上额外包含 `content` / `transcript` / `*_truncated`：
+在列表字段基础上额外包含 `content` / `transcript` / `*_truncated` / `people_detail`：
 
 ```json
 {
@@ -238,7 +251,11 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
   "content": "本期节目讨论特朗普访华代表团构成 ...",
   "content_truncated": false,
   "transcript": "Welcome to Horizons Middle East ...",
-  "transcript_truncated": true
+  "transcript_truncated": true,
+  "people_detail": [
+    {"name": "Trump", "name_en": "Donald Trump", "role": "President", "affiliation": "US Government"},
+    {"name": "Jensen Huang", "name_en": "Jensen Huang", "role": "CEO", "affiliation": "NVIDIA"}
+  ]
 }
 ```
 

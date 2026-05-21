@@ -242,12 +242,14 @@ def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
 #  16  industry       text / null
 #  17  ticker         jsonb / null
 #  18  concepts       jsonb / null
-#  19  confidence     double precision / null
-#  20  published_at   timestamptz
-#  21  shared_by_username      text / null  (Upload 共享：分享者用户名; 无共享或 Feed 侧 = null)
-#  22  shared_by_user_id       int / null   (Upload 共享：分享者 user_id)
-#  23  shared_by_avatar_url_raw text / null  (Upload 共享：分享者头像原始值, Python 层再经 resolve_avatar_url 签名)
-#  24  shared_to_recipients_raw json / null   (Upload owner：分享给的用户 JSON 数组; 非 owner = null)
+#  19  people         jsonb / null
+#  20  countries      jsonb / null
+#  21  confidence     double precision / null
+#  22  published_at   timestamptz
+#  23  shared_by_username      text / null  (Upload 共享：分享者用户名; 无共享或 Feed 侧 = null)
+#  24  shared_by_user_id       int / null   (Upload 共享：分享者 user_id)
+#  25  shared_by_avatar_url_raw text / null  (Upload 共享：分享者头像原始值, Python 层再经 resolve_avatar_url 签名)
+#  26  shared_to_recipients_raw json / null   (Upload owner：分享给的用户 JSON 数组; 非 owner = null)
 
 _UPLOAD_SQL = """
     SELECT
@@ -279,6 +281,8 @@ _UPLOAD_SQL = """
         ft.industry                                   AS industry,
         ft.ticker                                     AS ticker,
         ft.concepts                                   AS concepts,
+        ft.people                                     AS people,
+        ft.countries                                  AS countries,
         ft.confidence                                 AS confidence,
         fpd.created_at                                AS published_at,
         (SELECT u.username
@@ -366,6 +370,8 @@ _FEED_SQL = """
         sct.industry                                  AS industry,
         sct.ticker                                    AS ticker,
         sct.concepts                                  AS concepts,
+        sct.people                                    AS people,
+        sct.countries                                 AS countries,
         sct.confidence                                AS confidence,
         sc.published_at                               AS published_at,
         NULL::text                                    AS shared_by_username,
@@ -426,6 +432,8 @@ def _build_filter_clauses(
     tickers: Optional[List[str]],
     tags: Optional[List[str]] = None,
     author: Optional[str] = None,
+    people: Optional[List[str]] = None,
+    countries: Optional[List[str]] = None,
 ) -> tuple[str, str, Dict[str, Any]]:
     """构造 Upload / Feed 两侧的额外 WHERE 子句与参数。
 
@@ -523,6 +531,22 @@ def _build_filter_clauses(
         upload_parts.append("AND ft.concepts ?| %(tag_arr)s")
         feed_parts.append("AND sct.concepts ?| %(tag_arr)s")
 
+    if people:
+        params["people_arr"] = [p.lower() for p in people]
+        upload_parts.append(
+            "AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ft.people, '[]'::jsonb)) p "
+            "WHERE lower(p->>'name') = ANY(%(people_arr)s))"
+        )
+        feed_parts.append(
+            "AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(sct.people, '[]'::jsonb)) p "
+            "WHERE lower(p->>'name') = ANY(%(people_arr)s))"
+        )
+
+    if countries:
+        params["countries_arr"] = countries
+        upload_parts.append("AND ft.countries ?| %(countries_arr)s")
+        feed_parts.append("AND sct.countries ?| %(countries_arr)s")
+
     if author:
         params["author_like"] = f"%{author}%"
         # Upload items have no author; exclude them when author filter is set
@@ -618,6 +642,8 @@ def _row_to_item(
         industry,
         ticker_raw,
         concepts_raw,
+        people_raw,
+        countries_raw,
         confidence,
         published_at,
         shared_by_username,
@@ -677,6 +703,8 @@ def _row_to_item(
         industry=industry,
         tickers=_ensure_list(ticker_raw),
         concepts=_ensure_list(concepts_raw),
+        people=_ensure_people_list(people_raw),
+        countries=_ensure_list(countries_raw),
         confidence=float(confidence) if confidence is not None else None,
         published_at=pub,
         reading_time_min=_reading_time_min(content_length),

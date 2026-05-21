@@ -80,6 +80,7 @@ class TestDailyFeed:
             "daily_feed",
             {"since": "14d", "q": "NVDA OR 英伟达", "sources": "twitter",
              "tickers": "NVDA.US", "tags": "AI", "author": "Bloomberg",
+             "people": "Trump,Musk", "countries": "United States,China",
              "limit": 50, "cursor": "abc", "dedup": False},
             client,
         )
@@ -90,6 +91,8 @@ class TestDailyFeed:
         assert p["tickers"] == "NVDA.US"
         assert p["tags"] == "AI"
         assert p["author"] == "Bloomberg"
+        assert p["people"] == "Trump,Musk"
+        assert p["countries"] == "United States,China"
         assert p["dedup"] is False
 
     def test_none_params_excluded(self):
@@ -308,5 +311,12 @@ class TestInitialize:
         assert result["serverInfo"].get("title"), "serverInfo.title must be set"
         assert result.get("instructions"), "instructions must be set"
 
-    def test_version_is_0_2(self):
-        assert srv.SERVER_VERSION == "0.2.0"
+    def test_version_is_0_2_1(self):
+        assert srv.SERVER_VERSION == "0.2.1"
+
+    def test_daily_feed_has_people_countries_hints(self):
+        tool = next(t for t in srv.TOOLS if t["name"] == "daily_feed")
+        props = tool["inputSchema"]["properties"]
+        assert "people" in props
+        assert "countries" in props
+        assert "Trump" in props["people"]["description"]

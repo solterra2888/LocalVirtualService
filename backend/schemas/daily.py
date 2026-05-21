@@ -89,6 +89,14 @@ class DailyFeedItem(BaseModel):
     industry: Optional[str] = Field(None, description="GICS 子行业 (中文)")
     tickers: List[str] = Field(default_factory=list, description="股票代码列表")
     concepts: List[str] = Field(default_factory=list, description="投资主题/概念")
+    people: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="关键人物 [{name, name_en, role, affiliation?}], name 保留原文写法",
+    )
+    countries: List[str] = Field(
+        default_factory=list,
+        description="国家/地区英文全名，如 United States, China",
+    )
     confidence: Optional[float] = Field(None, description="LLM 置信度 0-1")
 
     published_at: UtcDateTime = Field(..., description="发布/创建时间 (UTC), 序列化时带 +00:00")

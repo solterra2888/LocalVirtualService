@@ -23,7 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.2.1"
 
 _Q_SYNTAX_HINT = (
     "q syntax: space=AND (all terms match), OR (uppercase)=any match, "
@@ -69,6 +69,19 @@ _AUTHOR_HINT = (
     "Examples: author=Bloomberg, author=@elonmusk. "
     "Only applies to feed items (Twitter, YouTube, news). "
     "Upload items have no author and will be excluded when this filter is set."
+)
+
+_PEOPLE_HINT = (
+    "Comma-separated person names (OR logic — match ANY). "
+    "Use original-form names from content: people=Trump,Musk,Xi Jinping. "
+    "Matches structured people tags — more precise than q=Trump full-text search. "
+    "Read the people field in daily_feed responses to discover valid names."
+)
+
+_COUNTRIES_HINT = (
+    "Comma-separated country full English names (OR logic). "
+    "Example: countries=United States,China. NOT ISO codes — use 'United States' not 'US'. "
+    "Read the countries field in daily_feed responses to discover valid values."
 )
 
 
@@ -142,6 +155,8 @@ TOOLS: List[Dict[str, Any]] = [
                 "tickers": {"type": "string", "description": _TICKERS_HINT},
                 "tags": {"type": "string", "description": _TAGS_HINT},
                 "author": {"type": "string", "description": _AUTHOR_HINT},
+                "people": {"type": "string", "description": _PEOPLE_HINT},
+                "countries": {"type": "string", "description": _COUNTRIES_HINT},
                 "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
                 "cursor": {"type": "string", "description": "Pagination cursor from previous next_cursor."},
                 "dedup": {
@@ -220,6 +235,8 @@ TOOLS: List[Dict[str, Any]] = [
                             "tickers": {"type": "string", "description": _TICKERS_HINT},
                             "tags": {"type": "string", "description": _TAGS_HINT},
                             "author": {"type": "string", "description": _AUTHOR_HINT},
+                            "people": {"type": "string", "description": _PEOPLE_HINT},
+                            "countries": {"type": "string", "description": _COUNTRIES_HINT},
                             "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 100},
                         },
                     },
@@ -339,7 +356,19 @@ def _call_tool(name: str, arguments: Dict[str, Any], client: Any) -> str:
     if name == "daily_feed":
         r = client.get(
             "/api/v1/agent/daily",
-            params=_gp("since", "q", "sources", "tickers", "tags", "author", "limit", "cursor", "dedup"),
+            params=_gp(
+                "since",
+                "q",
+                "sources",
+                "tickers",
+                "tags",
+                "author",
+                "people",
+                "countries",
+                "limit",
+                "cursor",
+                "dedup",
+            ),
         )
         r.raise_for_status()
         return r.text
