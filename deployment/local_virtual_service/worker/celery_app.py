@@ -30,6 +30,20 @@ app.conf.update(
     broker_url=broker_url,
     result_backend=broker_url,
     broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=None,           # 断连后无限重试，直到恢复
+    # ── Broker keepalive（防止家用路由器 NAT 空闲超时切断 TCP 连接）──
+    # 空闲超过约 2-3h 后路由器会回收 NAT 表项，导致 "Connection reset by peer"。
+    # 开启 TCP keepalive 后操作系统会定期发探测包维持连接，避免被路由器静默断开。
+    broker_transport_options={
+        "socket_keepalive": True,
+        "socket_keepalive_options": {
+            "TCP_KEEPIDLE": 60,     # 连接空闲 60s 后开始发探测包
+            "TCP_KEEPINTVL": 10,    # 每隔 10s 发一次探测
+            "TCP_KEEPCNT": 6,       # 连续 6 次探测无响应才判定断连
+        },
+        "retry_on_timeout": True,
+    },
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
