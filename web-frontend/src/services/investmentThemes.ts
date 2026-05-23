@@ -512,13 +512,14 @@ export async function batchUploadThemes(
   success: boolean;
   message: string;
   task_id: string;
-  theme_name: string;
+  theme_names: string[];
   preview: {
-    theme_name: string;
+    theme_names: string[];
     total_themes: number;
     total_tickers: number;
-    categories: Record<string, number>;
-    categories_sample: string[];
+    themes: Record<string, { categories: Record<string, number>; total_tickers: number }>;
+    categories?: Record<string, number>;
+    categories_sample?: string[];
   };
   status_url: string;
 }> {

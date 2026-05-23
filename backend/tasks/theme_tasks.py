@@ -969,6 +969,11 @@ def batch_create_themes_task(
         
         logger.info(f"Task {task_id} completed: total={total}, created={created}, failed={failed}, skipped={skipped}, conflicts={len(conflicts)}")
         
+        created_theme_ids = [
+            d['theme_id'] for d in details
+            if d.get('status') == 'success' and d.get('theme_id')
+        ]
+        
         return {
             "success": True,
             "message": f"Batch creation completed",
@@ -980,7 +985,8 @@ def batch_create_themes_task(
                 "conflicts": len(conflicts)
             },
             "conflicts": conflicts,  # 返回冲突列表
-            "details": details
+            "details": details,
+            "theme_ids": created_theme_ids,
         }
         
     except Exception as e:

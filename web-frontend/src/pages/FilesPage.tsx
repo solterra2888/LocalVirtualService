@@ -77,6 +77,7 @@ import { filesAPI, SectorOption, TickerOption, FolderResponse } from '../service
 import { tasksAPI, TaskExecutionDetail } from '../services/tasks';
 import { fileTagsService } from '../services/fileTags';
 import { getErrorMessage } from '../utils/errorHandler';
+import { isUnauthorizedApiError } from '../utils/authSession';
 import { appendServeAuthToken } from '../utils/appendServeAuthToken';
 import { getModalStyles } from '../utils/modalStyles';
 import {
@@ -624,6 +625,11 @@ const FilesPageInner: React.FC = () => {
       setLastTaskHistoryError(0);
     } catch (error: any) {
       console.error('加载任务执行历史失败:', error);
+
+      // 401（含其它设备登录）已由 api 拦截器统一提示并跳转，避免重复 toast
+      if (isUnauthorizedApiError(error)) {
+        return;
+      }
       
       // 更新错误状态（只有在非自动刷新时）
       if (!isAutoRefresh) {
@@ -632,9 +638,7 @@ const FilesPageInner: React.FC = () => {
       }
       
       let errorMessage = '加载任务执行历史失败';
-      if (error.response?.status === 401) {
-        errorMessage += ' - 认证失败，请重新登录';
-      } else if (error.response?.status === 403) {
+      if (error.response?.status === 403) {
         errorMessage += ' - 权限不足';
       } else if (error.response?.status >= 500) {
         errorMessage += ' - 服务器内部错误';

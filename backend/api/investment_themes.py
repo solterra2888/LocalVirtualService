@@ -2604,9 +2604,10 @@ async def batch_upload_themes(
     权限：所有登录用户
     
     核心逻辑（重要）：
-    - theme 列必须只有一个唯一值（整个文件）
+    - 支持文件中包含多个 theme 值
     - 按 (theme, category) 组合分组，每个组合创建一个主题
-    - 例如：crypto.csv 中 theme='crypto'，8 个不同 category → 创建 8 个主题
+    - 例如：gs_themes.csv 含 theme='GS Data Driven' 与 theme='Quantum Computing'，
+      各自按 category 分组后分别创建多条 investment theme 记录
     
     Args:
         file: CSV或Excel文件
@@ -2615,27 +2616,25 @@ async def batch_upload_themes(
     文件格式要求：
     - 必需列：theme, category, ticker
     - 可选列：company
-    - theme 列必须只有一个唯一值
-    - category 可以有多个不同值
+    - theme 列可有多个不同值
+    - category 可有多个不同值
     
-    文件格式示例（crypto.csv）:
+    文件格式示例（multi_theme.csv）:
     ```csv
     theme,category,ticker,company
     crypto,ETF,ARKB,ARK 21Shares Bitcoin ETF
-    crypto,ETF,GBTC,Grayscale Bitcoin Trust (BTC)
     crypto,Treasury,MSTR,MicroStrategy Inc
-    crypto,Treasury,MARA,Marathon Holdings Inc
+    AI,Infrastructure,NVDA,NVIDIA Corp
+    AI,Application,MSFT,Microsoft Corp
     ```
     
-    说明：上述文件会创建 2 个主题：
-    1. Theme: crypto, Category: ETF, Tickers: ARKB,GBTC
-    2. Theme: crypto, Category: Treasury, Tickers: MSTR,MARA
+    说明：上述文件会创建 4 个主题（2 个 theme × 各 2 个 category）
     
     示例：
     ```bash
     curl -X POST "http://localhost:8000/api/investment-themes/batch-upload" \\
       -H "Authorization: Bearer YOUR_TOKEN" \\
-      -F "file=@crypto.csv" \\
+      -F "file=@multi_theme.csv" \\
       -F "market=US"
     ```
     
@@ -2643,15 +2642,16 @@ async def batch_upload_themes(
     ```json
     {
         "success": true,
-        "message": "批量上传任务已提交，共 8 个主题（8 个 category）",
+        "message": "Batch upload started: 2 themes, 4 (theme, category) groups",
         "task_id": "abc-123-def-456",
-        "theme_name": "crypto",
+        "theme_names": ["ai", "crypto"],
         "preview": {
-            "theme_name": "crypto",
-            "total_themes": 8,
-            "total_tickers": 30,
-            "categories": {"ETF": 4, "Treasury": 9, ...},
-            "categories_sample": ["ETF", "Treasury", "Exchange_Custody", ...]
+            "theme_names": ["ai", "crypto"],
+            "total_themes": 4,
+            "total_tickers": 4,
+            "themes": {"crypto": {"categories": {"etf": 1, "treasury": 1}, "total_tickers": 2}, ...},
+            "categories": {"etf": 1, "treasury": 1, ...},
+            "categories_sample": ["etf", "treasury", ...]
         },
         "status_url": "/api/investment-themes/task-status/abc-123-def-456"
     }
@@ -2699,13 +2699,13 @@ async def batch_upload_themes(
                 detail=f"File parsing failed: {error_msg}"
             )
         
-        theme_name = parse_result['theme_name']
+        theme_names = parse_result['theme_names']
         themes_data = parse_result['data']
         preview = parse_result['preview']
         
         logger.info(
-            f"File parsed successfully: group='{group}', theme='{theme_name}', "
-            f"{preview['total_themes']} categories (themes), "
+            f"File parsed successfully: group='{group}', themes={len(theme_names)}, "
+            f"{preview['total_themes']} (theme, category) groups, "
             f"{preview['total_tickers']} tickers"
         )
         
@@ -2724,9 +2724,12 @@ async def batch_upload_themes(
         # 7. 返回结果
         return {
             "success": True,
-            "message": f"Batch upload started: {preview['total_themes']} themes ({preview['total_themes']} categories)",
+            "message": (
+                f"Batch upload started: {len(theme_names)} theme(s), "
+                f"{preview['total_themes']} (theme, category) groups"
+            ),
             "task_id": task.id,
-            "theme_name": theme_name,
+            "theme_names": theme_names,
             "preview": preview,
             "status_url": f"/api/investment-themes/task-status/{task.id}"
         }

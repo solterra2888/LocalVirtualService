@@ -4,10 +4,11 @@
 支持 CSV 和 Excel 格式
 
 核心逻辑：
-1. theme 列必须只有一个唯一值（整个文件）
+1. 支持文件中包含多个 theme 值
 2. 按 (theme, category) 组合分组
 3. 每个组合创建一个主题
-例如：crypto.csv 中 theme='crypto'，8 个不同 category，创建 8 个主题
+例如：gs_themes.csv 中 theme='gs data driven' 与 theme='quantum computing'，
+     各自按 category 分组后分别创建多条 investment theme 记录
 """
 
 import pandas as pd
@@ -80,30 +81,25 @@ class ThemeFileParser:
         Returns:
             {
                 'success': True/False,
-                'theme_name': 'crypto',  # 主题名称（整个文件中唯一）
+                'theme_names': ['crypto', 'ai', ...],
                 'data': {
-                    'crypto_ETF': {
+                    'john_crypto_etf': {
                         'group': 'crypto',
                         'theme_name': 'crypto',
-                        'category': 'ETF',
-                        'tickers': ['ARKB', 'GBTC', 'ETHE', 'WT'],
-                        'companies': ['ARK 21Shares Bitcoin ETF', ...],
-                        'market': 'US'
-                    },
-                    'crypto_Treasury': {
-                        'theme_name': 'crypto',
-                        'category': 'Treasury',
-                        'tickers': ['MSTR', 'MARA', ...],
+                        'category': 'etf',
+                        'tickers': ['ARKB', 'GBTC', ...],
                         'companies': [...],
                         'market': 'US'
                     },
                     ...
                 },
                 'preview': {
-                    'total_themes': 8,  # 要创建的主题数量（category 数量）
+                    'theme_names': [...],
+                    'total_themes': 10,
                     'total_tickers': 30,
-                    'categories': {'ETF': 4, 'Treasury': 9, ...},
-                    'categories_sample': ['ETF', 'Treasury', 'Exchange_Custody', ...]
+                    'themes': { 'crypto': { 'categories': {...}, 'total_tickers': 8 }, ... },
+                    'categories': {...},
+                    'categories_sample': [...]
                 },
                 'error': 'error message if failed'
             }
@@ -129,22 +125,28 @@ class ThemeFileParser:
             if not validation_result['success']:
                 return validation_result
             
-            # 验证 theme 列只有一个唯一值
-            theme_validation = self._validate_single_theme(df)
+            # 验证 theme 列至少有一个有效值
+            theme_validation = self._validate_themes(df)
             if not theme_validation['success']:
                 return theme_validation
             
-            theme_name = theme_validation['theme_name']
-            
             # 数据清洗和分组（按 theme + category 组合）
-            grouped_data = self._group_by_theme_category(df, theme_name, market, group, creator_username)
+            grouped_data = self._group_by_theme_category(df, market, group, creator_username)
+            
+            if not grouped_data:
+                return {
+                    'success': False,
+                    'error': 'No valid rows found after filtering. Ensure theme, category, and ticker columns are filled.'
+                }
+            
+            theme_names = sorted(set(data['theme_name'] for data in grouped_data.values()))
             
             # 生成预览信息
-            preview = self._generate_preview(grouped_data, theme_name)
+            preview = self._generate_preview(grouped_data, theme_names)
             
             return {
                 'success': True,
-                'theme_name': theme_name,
+                'theme_names': theme_names,
                 'data': grouped_data,
                 'preview': preview
             }
@@ -213,14 +215,12 @@ class ThemeFileParser:
         # 确保返回的字典不包含DataFrame引用
         return {'success': True}
     
-    def _validate_single_theme(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def _validate_themes(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        验证 theme 列只有一个唯一值
+        验证 theme 列至少有一个有效值（支持多个不同 theme）
         """
-        # 去除空值和空格
         df['theme'] = df['theme'].astype(str).str.strip()
         
-        # 过滤掉 nan 和空字符串
         valid_themes = df[df['theme'].notna() & (df['theme'] != '') & (df['theme'] != 'nan')]
         
         if len(valid_themes) == 0:
@@ -229,44 +229,27 @@ class ThemeFileParser:
                 'error': 'No valid theme name found in the file. Theme column cannot be empty.'
             }
         
-        # 获取唯一值
         unique_themes = valid_themes['theme'].unique()
+        logger.info(f"Found {len(unique_themes)} unique theme(s) in file: {', '.join(unique_themes[:5])}{'...' if len(unique_themes) > 5 else ''}")
         
-        if len(unique_themes) > 1:
-            return {
-                'success': False,
-                'error': f'Multiple theme names found: {", ".join(unique_themes)}. The theme column must have only one unique value throughout the file.'
-            }
-        
-        # 🔥 标准化主题名称：将下划线转换为空格，并转换为小写
-        # 例如：'GS_Power_Up' -> 'gs power up'
-        theme_name_raw = unique_themes[0]
-        theme_name = self._normalize_text(theme_name_raw)
-        
-        logger.info(f"主题名称标准化: '{theme_name_raw}' -> '{theme_name}'")
-        
-        return {
-            'success': True,
-            'theme_name': theme_name
-        }
+        return {'success': True}
     
-    def _group_by_theme_category(self, df: pd.DataFrame, theme_name: str, market: str, group: str = None, creator_username: str = None) -> Dict[str, Dict]:
+    def _group_by_theme_category(self, df: pd.DataFrame, market: str, group: str = None, creator_username: str = None) -> Dict[str, Dict]:
         """
         按 (theme, category) 组合分组
         
         Args:
             df: DataFrame
-            theme_name: 主题名称
             market: 市场（US/HK/CN）
             group: 主题分组（如 AI、crypto 等）
             creator_username: 创建者用户名
         
         Returns:
             grouped_data: {
-                'crypto_ETF': {
+                'john_crypto_etf': {
                     'group': 'crypto',
                     'theme_name': 'crypto',
-                    'category': 'ETF',
+                    'category': 'etf',
                     'tickers': ['ARKB', 'GBTC', 'ETHE', 'WT'],
                     'companies': ['ARK 21Shares Bitcoin ETF', ...],
                     'market': 'US'
@@ -277,6 +260,7 @@ class ThemeFileParser:
         grouped_data = {}
         
         # 数据清洗：去除空值和空格
+        df['theme'] = df['theme'].astype(str).str.strip()
         df['category'] = df['category'].astype(str).str.strip()
         df['ticker'] = df['ticker'].astype(str).str.strip().str.upper()
         
@@ -285,6 +269,9 @@ class ThemeFileParser:
         
         # 过滤掉无效行
         df = df[
+            (df['theme'].notna()) &
+            (df['theme'] != '') &
+            (df['theme'] != 'nan') &
             (df['category'].notna()) & 
             (df['category'] != '') & 
             (df['category'] != 'nan') &
@@ -293,20 +280,21 @@ class ThemeFileParser:
             (df['ticker'] != 'NAN')
         ]
         
-        # 按 category 分组
-        grouped = df.groupby('category')
+        if df.empty:
+            return grouped_data
         
-        for category_raw, group_df in grouped:
-            # 🔥 标准化分类名称：将下划线转换为空格，并转换为小写
-            # 例如：'Electric_Utility' -> 'electric utility'
+        # 按 (theme, category) 分组
+        grouped = df.groupby(['theme', 'category'])
+        
+        username_part = creator_username.replace(' ', '_').lower() if creator_username else 'unknown'
+        
+        for (theme_raw, category_raw), group_df in grouped:
+            theme_name = self._normalize_text(theme_raw)
             category = self._normalize_text(category_raw)
             
-            logger.debug(f"分类标准化: '{category_raw}' -> '{category}'")
+            logger.debug(f"分组: theme '{theme_raw}' -> '{theme_name}', category '{category_raw}' -> '{category}'")
             
-            # 生成主题 ID（使用标准化后的名称，包含用户名以确保唯一性）
-            # 格式：username_theme_name_category
-            # 例如：'john_gs_power_up_electric_utility'
-            username_part = creator_username.replace(' ', '_').lower() if creator_username else 'unknown'
+            # 生成主题 ID（格式：username_theme_name_category）
             theme_id_part1 = theme_name.replace(' ', '_')
             theme_id_part2 = category.replace(' ', '_')
             theme_id = f"{username_part}_{theme_id_part1}_{theme_id_part2}"
@@ -317,7 +305,6 @@ class ThemeFileParser:
             # 获取 companies（如果有）
             companies = []
             if 'company' in group_df.columns:
-                # 创建 ticker -> company 映射
                 ticker_company_map = {}
                 for _, row in group_df.iterrows():
                     ticker = row['ticker']
@@ -325,11 +312,10 @@ class ThemeFileParser:
                     if ticker and company and company != 'nan':
                         ticker_company_map[ticker] = company
                 
-                # 按 ticker 顺序生成 company 列表
                 companies = [ticker_company_map.get(t, '') for t in tickers]
             
             grouped_data[theme_id] = {
-                'group': group,  # 这里是参数group（字符串），不是group_df
+                'group': group,
                 'theme_name': theme_name,
                 'category': category,
                 'tickers': tickers,
@@ -339,36 +325,55 @@ class ThemeFileParser:
         
         return grouped_data
     
-    def _generate_preview(self, grouped_data: Dict, theme_name: str) -> Dict[str, Any]:
+    def _generate_preview(self, grouped_data: Dict, theme_names: List[str]) -> Dict[str, Any]:
         """
         生成预览信息
         
         Returns:
             {
-                'total_themes': 8,  # 要创建的主题数量（= category 数量）
+                'theme_names': [...],
+                'total_themes': 10,
                 'total_tickers': 30,
-                'categories': {'ETF': 4, 'Treasury': 9, ...},  # category -> ticker count
-                'categories_sample': ['ETF', 'Treasury', 'Exchange_Custody', ...]  # 前5个category
+                'themes': {
+                    'crypto': { 'categories': {'etf': 4}, 'total_tickers': 8 },
+                    ...
+                },
+                'categories': {...},
+                'categories_sample': [...]
             }
         """
         total_themes = len(grouped_data)
         total_tickers = sum(len(data['tickers']) for data in grouped_data.values())
         
-        # 统计每个 category 的 ticker 数量
-        categories = {}
+        # 按 theme 分组统计
+        themes_breakdown: Dict[str, Dict] = {}
+        for name in theme_names:
+            themes_breakdown[name] = {'categories': {}, 'total_tickers': 0}
+        
+        # 聚合所有 category 计数（legacy 兼容）
+        categories: Dict[str, int] = {}
+        
         for data in grouped_data.values():
+            theme_name = data['theme_name']
             category = data['category']
             ticker_count = len(data['tickers'])
-            categories[category] = ticker_count
+            
+            if theme_name not in themes_breakdown:
+                themes_breakdown[theme_name] = {'categories': {}, 'total_tickers': 0}
+            
+            themes_breakdown[theme_name]['categories'][category] = ticker_count
+            themes_breakdown[theme_name]['total_tickers'] += ticker_count
+            
+            # legacy: 同名 category 跨 theme 时累加
+            categories[category] = categories.get(category, 0) + ticker_count
         
-        # 取前 5 个 category 作为示例
         categories_sample = list(categories.keys())[:5]
         
         return {
-            'theme_name': theme_name,
+            'theme_names': theme_names,
             'total_themes': total_themes,
             'total_tickers': total_tickers,
+            'themes': themes_breakdown,
             'categories': categories,
             'categories_sample': categories_sample
         }
-

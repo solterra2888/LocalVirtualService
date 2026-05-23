@@ -3,6 +3,14 @@ import { Modal } from 'antd';
 /** Must match backend `SESSION_REPLACED_CODE` in `backend/auth/jwt_utils.py` */
 export const SESSION_REPLACED_CODE = 'SESSION_REPLACED';
 
+/** Axios / fetch-style error with HTTP 401 — global api interceptor already handles auth UX */
+export function isUnauthorizedApiError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return false;
+  }
+  return (error as { response?: { status?: number } }).response?.status === 401;
+}
+
 export function isSessionReplaced401Detail(detail: unknown): boolean {
   return (
     typeof detail === 'object' &&

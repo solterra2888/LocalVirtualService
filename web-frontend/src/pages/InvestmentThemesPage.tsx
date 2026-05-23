@@ -28,6 +28,7 @@ import {
   Form,
   Upload,
   ConfigProvider,
+  Collapse,
   theme as antdTheme
 } from 'antd';
 import {
@@ -176,11 +177,12 @@ interface PageState {
   batchUploadTags: string[];  // Tags 标签（可选，多选）
   batchUploadMarket: string;  // market 选择
   uploadPreview: {
-    theme_name: string;  // 主题名称（整个文件中唯一）
-    total_themes: number;  // 要创建的主题数量（= category 数量）
+    theme_names: string[];
+    total_themes: number;  // 要创建的主题数量（= (theme, category) 组合数）
     total_tickers: number;
-    categories: Record<string, number>;  // category -> ticker count
-    categories_sample: string[];  // 前5个category
+    themes: Record<string, { categories: Record<string, number>; total_tickers: number }>;
+    categories?: Record<string, number>;
+    categories_sample?: string[];
   } | null;
   batchTaskId: string | null;
   batchTaskProgress: number;
@@ -2109,13 +2111,9 @@ const InvestmentThemesPageInner: React.FC = () => {
     const headers = ['theme', 'category', 'ticker', 'company'];
     const sampleRows = [
       ['crypto', 'ETF', 'ARKB', 'ARK 21Shares Bitcoin ETF'],
-      ['crypto', 'ETF', 'GBTC', 'Grayscale Bitcoin Trust (BTC)'],
-      ['crypto', 'Exchange_Custody', 'COIN', 'Coinbase Global Inc'],
-      ['crypto', 'Exchange_Custody', 'HOOD', 'Robinhood Markets Inc'],
-      ['crypto', 'Miner_AI_Transition', 'IREN', 'Iris Energy Ltd'],
-      ['crypto', 'Miner_AI_Transition', 'HIVE', 'HIVE Digital Technologies Ltd'],
-      ['crypto', 'Payment', 'PYPL', 'PayPal Holdings Inc'],
-      ['crypto', 'Treasury', 'MSTR', 'MicroStrategy Inc']
+      ['crypto', 'Treasury', 'MSTR', 'MicroStrategy Inc'],
+      ['AI', 'Infrastructure', 'NVDA', 'NVIDIA Corp'],
+      ['AI', 'Application', 'MSFT', 'Microsoft Corp'],
     ];
 
     // 将单元格值转义为CSV格式（处理包含逗号、引号或换行符的值）
@@ -3403,7 +3401,8 @@ const InvestmentThemesPageInner: React.FC = () => {
                 </p>
                 <p className="ant-upload-text">Click or drag file to this area to upload</p>
                 <p className="ant-upload-hint">
-                  Only CSV or Excel files are supported. The file will be validated before processing.
+                  CSV or Excel with columns: theme, category, ticker, company (optional).
+                  Multiple theme names per file are supported; each (theme, category) pair creates one investment theme.
                 </p>
               </Upload.Dragger>
 
@@ -3422,22 +3421,28 @@ const InvestmentThemesPageInner: React.FC = () => {
             <>
               <Divider>Upload Preview</Divider>
               
-              {/* Theme Name */}
+              {/* Theme Names */}
               <Card size="small" style={cardStyle}>
-                <Text strong>Theme Name:</Text> <Tag color="blue">{uploadPreview.theme_name}</Tag>
-                <br />
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  All themes will use this name with different categories
+                <Text strong>Theme Names ({uploadPreview.theme_names.length}):</Text>
+                <div style={{ marginTop: 8 }}>
+                  <Space wrap size={[4, 8]}>
+                    {uploadPreview.theme_names.map((name) => (
+                      <Tag key={name} color="blue">{name}</Tag>
+                    ))}
+                  </Space>
+                </div>
+                <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: 8 }}>
+                  Each (theme, category) pair will create one investment theme
                 </Text>
               </Card>
               
               <Row gutter={16}>
                 <Col span={12}>
                   <Card size="small" style={cardStyle}>
-                    <Text strong>Themes to Create:</Text> {uploadPreview.total_themes}
+                    <Text strong>Records to Create:</Text> {uploadPreview.total_themes}
                     <br />
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      (= Number of categories)
+                      (= Number of theme + category groups)
                     </Text>
                   </Card>
                 </Col>
@@ -3448,16 +3453,38 @@ const InvestmentThemesPageInner: React.FC = () => {
                 </Col>
               </Row>
 
-              {/* Categories Distribution */}
-              <Card size="small" style={cardStyle} title={`Categories Distribution (${uploadPreview.total_themes} categories → ${uploadPreview.total_themes} themes)`}>
-                <Space wrap>
-                  {Object.entries(uploadPreview.categories).map(([category, count]) => (
-                    <Tag key={category} color="green">
-                      {category}: {count} tickers
-                    </Tag>
-                  ))}
-                </Space>
-              </Card>
+              {/* Per-theme breakdown */}
+              {uploadPreview.themes && Object.keys(uploadPreview.themes).length > 0 && (
+                <Collapse
+                  size="small"
+                  items={Object.entries(uploadPreview.themes).map(([themeName, info]) => ({
+                    key: themeName,
+                    label: `${themeName} (${Object.keys(info.categories).length} categories, ${info.total_tickers} tickers)`,
+                    children: (
+                      <Space wrap>
+                        {Object.entries(info.categories).map(([category, count]) => (
+                          <Tag key={`${themeName}-${category}`} color="green">
+                            {category}: {count} tickers
+                          </Tag>
+                        ))}
+                      </Space>
+                    ),
+                  }))}
+                />
+              )}
+
+              {/* Categories Distribution (aggregated, legacy fallback) */}
+              {uploadPreview.categories && Object.keys(uploadPreview.categories).length > 0 && (
+                <Card size="small" style={cardStyle} title="All Categories (aggregated)">
+                  <Space wrap>
+                    {Object.entries(uploadPreview.categories).map(([category, count]) => (
+                      <Tag key={category} color="default">
+                        {category}: {count} tickers
+                      </Tag>
+                    ))}
+                  </Space>
+                </Card>
+              )}
 
             </>
           )}
