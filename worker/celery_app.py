@@ -6,6 +6,7 @@
 
 import logging
 import os
+import socket
 from pathlib import Path
 from dotenv import load_dotenv
 from celery import Celery
@@ -38,9 +39,9 @@ app.conf.update(
     broker_transport_options={
         "socket_keepalive": True,
         "socket_keepalive_options": {
-            "TCP_KEEPIDLE": 60,     # 连接空闲 60s 后开始发探测包
-            "TCP_KEEPINTVL": 10,    # 每隔 10s 发一次探测
-            "TCP_KEEPCNT": 6,       # 连续 6 次探测无响应才判定断连
+            socket.TCP_KEEPIDLE: 60,    # 连接空闲 60s 后开始发探测包
+            socket.TCP_KEEPINTVL: 10,   # 每隔 10s 发一次探测
+            socket.TCP_KEEPCNT: 6,      # 连续 6 次探测无响应才判定断连
         },
         "retry_on_timeout": True,
     },
