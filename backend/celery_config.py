@@ -87,6 +87,13 @@ task_routes = {
     'generate_youtube_daily_report': {'queue': 'ai_processing'},
     'generate_all_youtube_daily_reports': {'queue': 'ai_processing'},
     'cleanup_llm_usage_logs': {'queue': 'data_fetching'},
+    # 向量化任务 (OSS Vector Bucket / 语义检索)
+    'vectorize_file_content': {'queue': 'ai_processing'},
+    'vectorize_feed_content': {'queue': 'ai_processing'},
+    'delete_file_vectors': {'queue': 'ai_processing'},
+    'delete_feed_vectors': {'queue': 'ai_processing'},
+    'delete_vectors_by_keys': {'queue': 'ai_processing'},
+    'reconcile_vector_bucket': {'queue': 'ai_processing'},
 }
 
 # Worker配置
@@ -129,6 +136,13 @@ beat_schedule = {
         'task': 'cleanup_llm_usage_logs',
         'schedule': crontab(hour=3, minute=0),  # 每天凌晨 3:00 执行
         'kwargs': {'retain_days': 7},
+    },
+    # 每天 04:00 (UTC) reconcile OSS Vector Bucket 与 PG document_chunks:
+    # 删除孤儿向量, 重置 vector_status='done' 但实际 chunk 数为 0 的脏行.
+    # 即使日常链路工作正常, 这里兜底处理任何 PG/VB 状态偏差.
+    'reconcile-vector-bucket-daily': {
+        'task': 'reconcile_vector_bucket',
+        'schedule': crontab(hour=4, minute=0),
     },
 }
 

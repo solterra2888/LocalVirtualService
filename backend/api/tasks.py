@@ -441,10 +441,35 @@ async def delete_task_execution(
                 detail="权限不足，只能删除自己的任务执行记录"
             )
         
-        # 删除记录（级联删除会自动删除相关的 file_processing_details）
+        # PG 级联删除会自动清掉 file_processing_details + document_chunks 行;
+        # 但 OSS Vector Bucket 的向量数据需要应用层补充清理. 先把 chunk_ids 采集出来,
+        # CASCADE 之后再异步把这批 key 从 Vector Bucket 删除.
+        cursor.execute(
+            """
+            SELECT dc.id FROM document_chunks dc
+            JOIN file_processing_details fpd ON fpd.id = dc.file_id
+            WHERE fpd.processing_stats_id = %s
+            """,
+            (execution_id,),
+        )
+        vector_chunk_ids_to_drop = [int(r[0]) for r in cursor.fetchall()]
+
+        # 删除记录（级联删除会自动删除相关的 file_processing_details + document_chunks）
         cursor.execute("DELETE FROM processing_stats WHERE id = %s", (execution_id,))
         conn.commit()
-        
+
+        # 异步清理 Vector Bucket. 不阻塞 API 响应; 失败也只是会留下孤儿向量,
+        # reconcile_vector_bucket_task 每日扫描会兜底.
+        if vector_chunk_ids_to_drop:
+            try:
+                from backend.tasks.vectorize_tasks import delete_vectors_by_keys_task
+                delete_vectors_by_keys_task.apply_async(
+                    args=(vector_chunk_ids_to_drop,), countdown=2
+                )
+            except Exception as ve:
+                # 不阻断主流程
+                pass
+
         return {"message": "任务执行记录删除成功"}
         
     except Exception as e:

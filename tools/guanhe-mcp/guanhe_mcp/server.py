@@ -23,7 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.2.1"
+SERVER_VERSION = "0.3.0"
 
 _Q_SYNTAX_HINT = (
     "q syntax: space=AND (all terms match), OR (uppercase)=any match, "
@@ -337,6 +337,161 @@ TOOLS: List[Dict[str, Any]] = [
             "required": ["kind"],
         },
     },
+    # 10 ─── semantic_search (v0.3 NEW) ───────────────────────────────────
+    {
+        "name": "semantic_search",
+        "description": (
+            "Find content by MEANING / CONCEPT — uses OSS Vector Bucket cosine retrieval over chunks. "
+            "Use this when keywords cannot capture the user's intent — e.g. 'value investing methodology', "
+            "'market sentiment about AI bubble', 'supply chain risks'. "
+            "Returns chunk-level hits with content_id + chunk_text snippet. "
+            "Follow-up: pass content_ids to daily_items_batch for whole-item context, "
+            "OR use chunks_by_locator(file_id=..., chapter=...) to expand around a specific chunk. "
+            "DO NOT use for: precise tickers (use daily_feed tickers=), known author (use author=), "
+            "or 'latest in window' browsing (use daily_feed since=)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Natural language phrase or question (1-2000 chars). "
+                        "Unlike daily_feed q=, full sentences work fine here — the embedding model "
+                        "understands semantics. Example: 'how does the author justify margin of safety?'"
+                    ),
+                },
+                "top_k": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+                "source_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Filter to specific source types. Values: 'upload' (PDFs/Word/CSV), 'upload_text', "
+                        "'upload_web', 'upload_youtube', 'upload_audio', 'upload_podcast', "
+                        "'feed_twitter', 'feed_youtube', 'feed_news', 'feed_rss'. Omit for all."
+                    ),
+                },
+                "file_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Scope to specific upload file_processing_details.id values.",
+                },
+                "content_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Scope to specific subscription_content.id values (feed entries).",
+                },
+                "since": {"type": "string", "description": _SINCE_HINT},
+                "lang": {
+                    "type": "string",
+                    "enum": ["zh", "en"],
+                    "description": "Filter by detected chunk language. Omit for all.",
+                },
+                "min_score": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Discard hits below this cosine similarity (0-1). Default: no floor.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    # 11 ─── hybrid_search (v0.3 NEW) ─────────────────────────────────────
+    {
+        "name": "hybrid_search",
+        "description": (
+            "Combine KEYWORD (Daily ILIKE / pg_trgm) and SEMANTIC (vector) search, fused via "
+            "Reciprocal Rank Fusion. Use when the query has BOTH specific terms AND concepts — "
+            "e.g. 'What did Powell say about rate cuts?' (Powell=keyword, rate-cut-sentiment=concept). "
+            "Prefer this over manually calling daily_feed + semantic_search and merging. "
+            "Returns the same chunk-level structure as semantic_search, plus a found_via field "
+            "indicating which branch surfaced each hit."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query containing both terms and concepts.",
+                },
+                "top_k": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+                "keyword_weight": {
+                    "type": "number",
+                    "default": 0.5,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": (
+                        "RRF blend: 0.0 = pure vector, 1.0 = pure keyword. "
+                        "Tune toward 0.7+ when the query is mostly proper nouns; "
+                        "toward 0.3 when the query is abstract / conceptual."
+                    ),
+                },
+                "source_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Same as semantic_search.source_types.",
+                },
+                "since": {"type": "string", "description": _SINCE_HINT},
+                "min_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            },
+            "required": ["query"],
+        },
+    },
+    # 12 ─── chunks_by_locator (v0.3 NEW) ─────────────────────────────────
+    {
+        "name": "chunks_by_locator",
+        "description": (
+            "Pull CONTIGUOUS chunks from a specific document by chapter / page / chunk_idx range. "
+            "Use when you already know WHERE the relevant content lives — typically after "
+            "semantic_search surfaced a chunk in chapter '6.1' and you now need the full section. "
+            "Returns chunk_text concatenated in order, capped by max_chars. "
+            "For whole-item content of short uploads / feed articles / tweets, prefer daily_items_batch — "
+            "this tool is optimised for LONG documents (books, transcripts) where you only want one section."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "integer",
+                    "description": "Upload file_processing_details.id. Mutually exclusive with content_id.",
+                },
+                "content_id": {
+                    "type": "integer",
+                    "description": "Feed subscription_content.id. Mutually exclusive with file_id.",
+                },
+                "chapter": {
+                    "type": "string",
+                    "description": "Exact chapter / heading path from a prior search hit (e.g. '5.2').",
+                },
+                "chapter_prefix": {
+                    "type": "string",
+                    "description": "Match chapter starting with this prefix (e.g. 'Chapter 5').",
+                },
+                "page_range": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "[start, end] inclusive page range.",
+                },
+                "chunk_idx_range": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "[start, end] inclusive chunk_idx range.",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "default": 16000,
+                    "minimum": 200,
+                    "maximum": 64000,
+                    "description": "Cap total characters returned to avoid context overflow.",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -430,6 +585,25 @@ def _call_tool(name: str, arguments: Dict[str, Any], client: Any) -> str:
         r.raise_for_status()
         return r.text
 
+    # ── v0.3 search tools (POST JSON to /api/v2/agent/*) ────────────────
+    if name == "semantic_search":
+        payload = {k: v for k, v in args.items() if v is not None}
+        r = client.post("/api/v2/agent/semantic-search", json=payload)
+        r.raise_for_status()
+        return r.text
+
+    if name == "hybrid_search":
+        payload = {k: v for k, v in args.items() if v is not None}
+        r = client.post("/api/v2/agent/hybrid-search", json=payload)
+        r.raise_for_status()
+        return r.text
+
+    if name == "chunks_by_locator":
+        payload = {k: v for k, v in args.items() if v is not None}
+        r = client.post("/api/v2/agent/chunks-by-locator", json=payload)
+        r.raise_for_status()
+        return r.text
+
     raise ValueError(f"unknown tool {name!r}")
 
 
@@ -467,11 +641,20 @@ def run() -> None:
                         "title": "GuanHe Daily MCP",
                     },
                     "instructions": (
-                        "This server provides read-only access to your GuanHe Daily feed, "
-                        "feed subscriptions, uploaded files, and daily reports. "
-                        "All tools are prefixed with the context of what they return. "
-                        "Start with list_sources or list_subscriptions to understand your data coverage "
-                        "before searching. Use daily_multi_search for multi-angle research tasks."
+                        "This server provides read-only access to your GuanHe Daily feed, feed subscriptions, "
+                        "uploaded files (incl. long PDFs / e-books), daily reports, and semantic chunk index. "
+                        "\n\nTOOL SELECTION DECISION TREE:\n"
+                        "1. Browsing/filtering by time/source/ticker/author?  → daily_feed\n"
+                        "2. Multiple parallel angles for one story?           → daily_multi_search\n"
+                        "3. Looking up a CONCEPT (not exact words)?           → semantic_search\n"
+                        "4. Query mixes proper nouns AND concepts?            → hybrid_search\n"
+                        "5. Need full content of specific items?              → daily_items_batch (short items)\n"
+                        "                                                       chunks_by_locator (long PDFs/books)\n"
+                        "6. Discovery / diagnostics (0 results, what sources do I have?)\n"
+                        "                                                     → list_sources / list_subscriptions\n"
+                        "\nCITATION RULE: Search results are CHUNK-level snippets — ALWAYS cite the returned "
+                        "content_id (and chunk chapter/page when present) in your answer so the user can "
+                        "verify in the GuanHe UI. NEVER answer purely from chunk_text without referencing source."
                     ),
                 },
             }

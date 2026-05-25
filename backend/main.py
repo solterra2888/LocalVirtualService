@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1
+from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
@@ -168,6 +168,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"]
 app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
 # Agent / MCP readonly API (Bearer JWT or PAT ght_...)
 app.include_router(agent_v1.router)
+app.include_router(agent_v2_search.router)
 app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 
 # 图表事件API

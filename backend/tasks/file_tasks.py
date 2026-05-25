@@ -40,6 +40,25 @@ def get_feed_tagging_task():
     return tag_feed_content_task
 
 
+def _trigger_vectorize_files(file_detail_ids, upload_params=None):
+    """触发上传文件的自动向量化 (第 5 路并行任务, OSS Vector Bucket / 语义检索).
+
+    与 trigger_auto_tagging/naming/classify/analyze 并列, 互不阻塞.
+    判定逻辑在 vectorize_triggers.trigger_auto_vectorize_file 内部, 长度不够 / 类型黑名单
+    会自动跳过并写 vector_skip_reason. 失败完全静默, 不影响 4 路核心任务.
+    """
+    try:
+        from backend.tasks.vectorize_triggers import trigger_auto_vectorize_files
+        ids = file_detail_ids if isinstance(file_detail_ids, (list, tuple)) else [file_detail_ids]
+        trigger_auto_vectorize_files(
+            ids,
+            upload_params=upload_params,
+            delay=int(os.getenv('AUTO_VECTORIZE_DELAY', '2')),
+        )
+    except Exception as e:
+        error(f"触发自动向量化失败 (不阻断主链路): {str(e)}", source="auto_vectorize")
+
+
 def trigger_auto_tagging(
     file_detail_ids,
     username=None,
@@ -498,6 +517,17 @@ def trigger_auto_feed_tagging(content_ids, username=None, delay=2):
                 source="feed_auto_tagging",
             )
 
+    # 与 Feeds 打标并列的第 2 路: 自动向量化 (OSS Vector Bucket / 语义检索).
+    # 5 条判定 (类型白名单 / 长度门槛 / 幂等 / 全局开关) 在内部完成, 不阻塞主链路.
+    try:
+        from backend.tasks.vectorize_triggers import trigger_auto_vectorize_feeds
+        trigger_auto_vectorize_feeds(
+            content_ids,
+            delay=int(os.getenv('AUTO_VECTORIZE_DELAY', '2')),
+        )
+    except Exception as e:
+        error(f"触发 Feeds 自动向量化失败 (不阻断主链路): {e}", source="auto_vectorize")
+
 
 @app.task(bind=True, name='process_files_async', queue='file_processing')
 def process_files_task(self, file_paths, task_info, custom_inputs, params, username):
@@ -653,6 +683,7 @@ def process_files_task(self, file_paths, task_info, custom_inputs, params, usern
                     )
                     trigger_auto_naming(file_ids, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                     trigger_auto_classify(file_ids, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+                    _trigger_vectorize_files(file_ids, upload_params=task_info)
         except Exception as e:
             error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_task")
         
@@ -922,6 +953,7 @@ def analyze_audio_task(self, execution_id, file_detail_id, template_id, template
                 trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
                 trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                 trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+                _trigger_vectorize_files(file_detail_id)
             except Exception as e:
                 error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_audio_analysis")
 
@@ -1284,6 +1316,7 @@ def analyze_document_task(self, execution_id, file_detail_id, template_id, templ
                 trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
                 trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
                 trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+                _trigger_vectorize_files(file_detail_id)
             except Exception as e:
                 error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_doc_analysis")
 
@@ -1576,6 +1609,7 @@ def reparse_document_task(self, file_id, params, username):
             trigger_auto_tagging(file_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
             trigger_auto_naming(file_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
             trigger_auto_classify(file_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
+            _trigger_vectorize_files(file_id)
         except Exception as e:
             error(f"触发自动打标签/命名/归类失败: {str(e)}", source="celery_reparse")
         

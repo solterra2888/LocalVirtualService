@@ -95,6 +95,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入 Feeds 个性化 summary 任务模块失败: {e}")
 
+try:
+    from backend.tasks import vectorize_tasks
+    print(f"✅ 成功导入向量化任务模块: {vectorize_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入向量化任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

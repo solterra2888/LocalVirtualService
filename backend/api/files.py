@@ -1678,6 +1678,16 @@ async def update_file_detail_content(
                     username=username,
                     delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
                 )
+                # 第 5 路并行: 自动向量化 (OSS Vector Bucket / 语义检索)
+                try:
+                    from backend.tasks.vectorize_triggers import trigger_auto_vectorize_file
+                    trigger_auto_vectorize_file(
+                        int(file_id),
+                        delay=int(os.getenv('AUTO_VECTORIZE_DELAY', '2')),
+                    )
+                except Exception as ve:
+                    warning(f"trigger_auto_vectorize_file failed (non-blocking): {str(ve)}",
+                            source="api", file_id=file_id)
             except Exception as e:
                 warning(f"Failed to trigger auto LLM tasks after content update: {str(e)}",
                         source="api", file_id=file_id)
@@ -1795,6 +1805,16 @@ async def create_text_note(
                 delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
                 enabled=auto_analyze_enabled,
             )
+            # 第 5 路并行: 自动向量化 (OSS Vector Bucket / 语义检索)
+            try:
+                from backend.tasks.vectorize_triggers import trigger_auto_vectorize_file
+                trigger_auto_vectorize_file(
+                    file_detail_id,
+                    delay=int(os.getenv('AUTO_VECTORIZE_DELAY', '2')),
+                )
+            except Exception as ve:
+                warning(f"trigger_auto_vectorize_file failed for text note (non-blocking): {str(ve)}",
+                        source="api", user=username)
         except Exception as e:
             warning(f"Failed to trigger auto LLM tasks for text note: {str(e)}",
                     source="api", user=username)
