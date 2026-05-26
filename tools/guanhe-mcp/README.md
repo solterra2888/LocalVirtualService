@@ -1,6 +1,6 @@
-# guanhe-mcp v0.2.1
+# guanhe-mcp v0.3.0
 
-Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API (`/api/v1/agent`).
+Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API — both `/api/v1/agent` (keyword/timeline) and `/api/v2/agent` (semantic / vector RAG).
 
 ## Breaking changes from v0.1
 
@@ -25,8 +25,8 @@ Old HTTP paths return **410 Gone** with an upgrade hint.
 ## Install
 
 ```bash
-# From the published wheel:
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.2.1-py3-none-any.whl"
+# From the published wheel (recommended for end users):
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.3.0-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp
@@ -77,7 +77,9 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 }
 ```
 
-## Tools (9)
+## Tools (12)
+
+### v1 — Keyword / Timeline (9 tools)
 
 | Tool | Description | Maps to |
 |------|-------------|---------|
@@ -90,6 +92,25 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | `report_latest` | Latest daily report (kind=twitter\|youtube) | `GET /api/v1/agent/reports/latest?kind=` |
 | `report_by_date` | Daily report for YYYY-MM-DD | `GET /api/v1/agent/reports/{date}?kind=` |
 | `report_list` | Paginated list of available reports | `GET /api/v1/agent/reports?kind=` |
+
+### v2 — Semantic / Vector RAG (3 tools, NEW in v0.3.0)
+
+| Tool | Description | Maps to |
+|------|-------------|---------|
+| `semantic_search` | Concept-level vector search over uploaded docs & long feeds | `POST /api/v2/agent/semantic-search` |
+| `hybrid_search` | RRF-fused keyword + semantic search | `POST /api/v2/agent/hybrid-search` |
+| `chunks_by_locator` | Fetch contiguous chunks by chapter / page / chunk index | `POST /api/v2/agent/chunks-by-locator` |
+
+**When to use v2 tools:**
+
+| User intent | Tool |
+|---|---|
+| Concept query that keywords can't capture ("value investing methodology", "robot safety design") | `semantic_search` |
+| Query mixing a proper noun + concept ("1X Technologies funding strategy") | `hybrid_search` |
+| Already know which section of a doc to read (e.g. chapter "Timeline of Major Developments") | `chunks_by_locator` |
+| Short feed article / tweet full text | `daily_items_batch` (v1) — no need for v2 |
+
+> **Citation rule:** v2 results are chunk-level snippets. Always cite the returned `content_id` in your answer so the user can verify in the GuanHe UI.
 
 ## Quick usage examples
 
@@ -109,6 +130,11 @@ python scripts/call_guanhe_mcp.py daily_feed '{"since": "24h", "limit": 5}'
 python scripts/call_guanhe_mcp.py daily_multi_search '{"groups": [{"q": "NVDA OR 英伟达", "since": "7d"}, {"q": "Greer OR USTR OR 贸易代表", "since": "7d"}]}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "twitter"}'
 python scripts/call_guanhe_mcp.py list_subscriptions '{}'
+
+# v0.3 new tools
+python scripts/call_guanhe_mcp.py semantic_search '{"query": "humanoid robot home deployment", "top_k": 5}'
+python scripts/call_guanhe_mcp.py hybrid_search '{"query": "1X Technologies NEO funding", "top_k": 5}'
+python scripts/call_guanhe_mcp.py chunks_by_locator '{"file_id": 1439, "chapter": "**Timeline of Major Developments:**"}'
 ```
 
 ## Key parameter notes
@@ -134,8 +160,12 @@ Omit to use your web-app Daily preset.
 
 ## Skill documentation
 
-Full usage guide with search strategies and worked examples:
+Full usage guide with search strategies and worked examples (includes v0.3 vector RAG tools):
 
 ```
 https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
 ```
+
+## Breaking changes from v0.2
+
+No breaking changes. v1 tools are unchanged. Three new v2 tools added.

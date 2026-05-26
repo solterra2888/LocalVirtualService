@@ -2670,6 +2670,7 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                     )
                     trigger_auto_naming(file_ids, username=username, delay=2)
                     trigger_auto_classify(file_ids, username=username, delay=2)
+                    _trigger_vectorize_files(file_ids, upload_params=task_info)
 
                     # analyze 走 trigger_auto_analyze: 用户在上传弹窗选了模板才触发,
                     # 否则跳过 (文档分析强依赖 template_id, 没选就走 FilesPage 右侧 fallback)

@@ -1,8 +1,8 @@
-# GuanHe Daily — Agent Skill (v0.2.1)
+# GuanHe Daily — Agent Skill (v0.3.0)
 
-这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）和你自己上传的文件（PDF、文档、图片等）——并根据你的自然语言问题给出总结和洞察。
+这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）、你自己上传的文件（PDF、文档、图片等），以及通过 **Vector RAG** 对长文档进行语义级问答。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.2.1`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.3.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
 
 ---
 
@@ -14,6 +14,27 @@ MCP 工具只返回当前账号有权限访问的数据：
 - **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用的订阅不在结果中
 
 ---
+
+## 工具选择决策树
+
+```
+用户问题能用关键词精确描述？
+├── 是（股票代码、人名、精确词）→ daily_feed / daily_multi_search  (v1)
+└── 否（概念、主题、意图）
+    ├── 问题混合专有名词 + 概念？→ hybrid_search               (v2)
+    ├── 纯概念/语义问题？        → semantic_search              (v2)
+    ├── 已知章节/页码，需要原文？→ chunks_by_locator            (v2)
+    └── 短 Feed 文章全文？       → daily_items_batch            (v1)
+```
+
+**v1 vs v2 选择速查：**
+
+| 用户意图 | 正确工具 | 错误做法 |
+|---|---|---|
+| "帮我找 NVDA 近期消息" | `daily_feed q=NVDA` | ~~semantic_search~~ |
+| "这本书关于价值投资的观点" | `semantic_search` | ~~daily_feed q=价值投资~~ |
+| "Powell 对降息的最新表态" | `hybrid_search` | 分开调 daily_feed + semantic_search |
+| 已定位到某章节，需读原文 | `chunks_by_locator` | ~~daily_item~~ |
 
 ## 典型用户问法 → 工具映射
 
@@ -34,6 +55,9 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 有哪些日报可以看？ | `report_list` | `kind=twitter` |
 | 我订阅了哪些频道？ | `list_subscriptions` | — |
 | 哪些来源有内容 / 我的 preset 是什么？ | `list_sources` | — |
+| **这本书讲了什么投资方法论？** | **`semantic_search`** | **`query=...`** |
+| **Powell 对降息的看法是什么？** | **`hybrid_search`** | **`query=...`** |
+| **读这章节的完整内容** | **`chunks_by_locator`** | **`file_id, chapter`** |
 
 > **重要**：用户不会说"调用 daily_feed"——他们只会说"帮我看看今天的内容"。AI 助手负责根据语义自动选择正确的工具和参数。
 
@@ -276,6 +300,99 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 ```
 
 用 `terms_in_corpus` 判断哪个词过于限制——0 值的词是瓶颈，改 OR 或去掉。
+
+---
+
+## v0.3 新工具：Vector RAG 语义检索
+
+### `semantic_search` — 概念级语义搜索
+
+对上传文件和长文档进行向量检索，适合用概念而非关键词描述的问题。
+
+**适用场景：**
+- 用户上传了研报/书籍，想问其中的观点、方法论
+- 关键词搜不到但语义上相关的内容
+- 长文档中的特定主题（如"机器人安全设计原则"）
+
+**不适用场景：**
+- 精确股票代码 → 用 `daily_feed tickers=`
+- 已知作者 → 用 `daily_feed author=`
+- 时间线浏览 → 用 `daily_feed since=`
+
+参数：
+- `query`（必填）：自然语言问题，整句话都可以，不用提取关键词
+- `top_k`：返回块数，1–50，默认 10
+- `source_types`：过滤来源类型，如 `["upload", "youtube"]`
+- `file_ids`：只搜指定文件，如 `[1439]`
+- `since`：时间窗口，如 `30d`、`2026-01-01`
+- `min_score`：相似度下限（0–1），默认不过滤
+
+**示例：**
+```json
+{
+  "query": "1X Technologies NEO 机器人的家庭应用设计理念",
+  "top_k": 5,
+  "file_ids": [1439]
+}
+```
+
+返回结构（`results` 数组）：
+```json
+{
+  "content_id": 1439,
+  "chunk_id": 710,
+  "source_type": "upload",
+  "title": "1X Technologies humanoid robot profile",
+  "chapter": "**Humanoid Robot Details:**",
+  "chunk_text": "NEO is 1X's bipedal humanoid robot, designed specifically for the home...",
+  "score": 0.757,
+  "found_via": ["vector"]
+}
+```
+
+> **Citation Rule**：结果为 chunk 级片段。务必在回答中引用 `content_id`，用户可在 GuanHe UI 中核实原文。
+
+---
+
+### `hybrid_search` — 关键词 + 语义混合搜索（RRF 融合）
+
+同时执行关键词搜索（v1 ILIKE）和向量语义搜索，用 Reciprocal Rank Fusion 合并排序。
+
+**适用场景：**
+- 查询中同时有专有名词（人名、公司、股票代码）和概念描述
+- 例：`"Powell 降息预期"` = 专有名词 Powell + 概念「降息预期」
+
+参数与 `semantic_search` 相同，额外支持：
+- `keyword_weight`：关键词得分权重，默认 0.3
+- `semantic_weight`：语义得分权重，默认 0.7
+
+返回结构与 `semantic_search` 相同，`found_via` 可为 `["vector"]`、`["keyword"]` 或 `["vector", "keyword"]`。
+
+---
+
+### `chunks_by_locator` — 按定位取连续段落
+
+当 `semantic_search` 已找到某个 chunk，需要读取该章节完整上下文时使用。
+
+**适用场景：**
+- semantic_search 返回了 chapter="第三章 价值评估"，想读完整章节
+- 已知文件结构（如 PDF 目录），直接跳到某章
+
+参数：
+- `file_id`：文件 ID（来自 semantic_search 结果的 `content_id`，当 source_type=upload 时）
+- `content_id`：Feed 内容 ID（当 source_type 为 feed 类型时）
+- `chapter`：章节名（字符串精确匹配，来自 semantic_search 结果的 `chapter` 字段）
+- `page`：页码（PDF 类）
+- `chunk_idx_from` / `chunk_idx_to`：按块序号范围取（0-based）
+
+**典型用法（两步）：**
+```
+第一步：semantic_search(query="机器人安全设计", file_ids=[1439])
+        → 返回 chunk_id=710, chapter="**Humanoid Robot Details:**"
+
+第二步：chunks_by_locator(file_id=1439, chapter="**Humanoid Robot Details:**")
+        → 返回该章节所有连续 chunks
+```
 
 ---
 

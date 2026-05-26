@@ -328,7 +328,7 @@ const ApiKeysPage: React.FC = () => {
   }, [load]);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const skillUrl = `${origin}/agent/skill/SKILL.md`;
+  const skillUrl = `${origin}/agent/skill/GUANHE_DAILY.md`;
 
   const quickInstall = useMemo(
     () => ({
@@ -483,7 +483,7 @@ const ApiKeysPage: React.FC = () => {
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 8 }}>
           <a
-            href="/agent/skill/SKILL.md"
+            href="/agent/skill/GUANHE_DAILY.md"
             target="_blank"
             rel="noreferrer"
             style={{
@@ -495,7 +495,7 @@ const ApiKeysPage: React.FC = () => {
               textDecoration: 'none',
             }}
           >
-            <LinkOutlined /> 查看 SKILL.md
+            <LinkOutlined /> 查看 GUANHE_DAILY.md
           </a>
           <span style={{ color: dark ? '#475569' : '#cbd5e1' }}>|</span>
           <button

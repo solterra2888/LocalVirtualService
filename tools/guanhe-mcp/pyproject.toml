@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guanhe-mcp"
-version = "0.2.1"
-description = "MCP server for GuanHe Agent API v0.2.1 (people/countries tags + filters)"
+version = "0.3.0"
+description = "MCP server for GuanHe Agent API v0.3.0 (semantic search + vector RAG)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

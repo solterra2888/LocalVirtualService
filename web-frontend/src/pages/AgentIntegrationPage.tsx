@@ -365,7 +365,7 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md「典型用户问法 → 工具映射」一致（v0.2.1） */
+  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.3.0） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
@@ -406,6 +406,10 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'report_by_date', params: 'kind=twitter, date=2026-05-10' },
     { intent: '帮我看看最新的 YouTube 日报', endpoint: 'report_latest', params: 'kind=youtube' },
     { intent: '有哪些日报可以看？', endpoint: 'report_list', params: 'kind=twitter|youtube' },
+    { intent: '这本书 / 这份研报关于 XX 的观点是什么', endpoint: 'hybrid_search', params: 'q=XX（语义 + 关键词融合）' },
+    { intent: '帮我语义搜索一下关于价值投资方法论的内容', endpoint: 'semantic_search', params: 'q=价值投资方法论, top_k=5' },
+    { intent: '给我读一下第 3 章 / 第 12 段原文', endpoint: 'chunks_by_locator', params: 'file_id=…, chunk_seq=[12,13,14]' },
+    { intent: '这份上传的 PDF 里有没有提到某个数据 / 人名', endpoint: 'hybrid_search', params: 'q=数据/人名, file_id=…' },
   ];
 
   const bg = dark ? DARK_BG : '#ffffff';
@@ -450,7 +454,8 @@ const AgentIntegrationPage: React.FC = () => {
 
         <p style={{ fontSize: 16, lineHeight: 1.75, color: dark ? '#94a3b8' : '#475569', margin: 0 }}>
           让 Cursor、Claude Code、Codex 等任意 Agent 直接读取你在 GuanHe 订阅的 Feed 和上传的文件，
-          用最自然的一句话拿到当日动态、关键词搜索、Twitter / YouTube 日报。
+          用最自然的一句话拿到当日动态、关键词搜索、Twitter / YouTube 日报，
+          或对长篇电子书、研报进行语义检索（Vector RAG）。
           装好后无需记忆 API，直接问就行。
         </p>
       </div>
@@ -547,7 +552,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.2.1-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.3.0-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -628,12 +633,20 @@ const AgentIntegrationPage: React.FC = () => {
             <Divider dark={dark} />
 
             {/* 可用工具 */}
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              可用工具
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              可用工具（v0.3.0）
             </h3>
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 14px', lineHeight: 1.6 }}>
+              共 12 个工具，分为 v1 关键词 / 时间线 和 v2 语义 / Vector RAG 两类。
+            </p>
+
+            {/* v1 tools */}
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: dark ? '#64748b' : '#94a3b8', margin: '0 0 8px' }}>
+              v1 — 关键词 / 时间线
+            </div>
             <IntentTable
               dark={dark}
-              col1="工具（v0.2.1）"
+              col1="工具"
               col2="说明"
               rows={[
                 { intent: 'daily_feed', endpoint: '每日时间线浏览 + 全文搜索（q 可选），支持 tickers / tags / people / countries / author / sources / since / dedup 等过滤' },
@@ -647,6 +660,60 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'report_list', endpoint: '日报列表（可分页），kind=twitter|youtube' },
               ]}
             />
+
+            <div style={{ height: 20 }} />
+
+            {/* v2 tools */}
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEAL, margin: '0 0 8px' }}>
+              v2 — 语义 / Vector RAG（电子书 / 长文档）
+            </div>
+            <IntentTable
+              dark={dark}
+              col1="工具"
+              col2="说明"
+            rows={[
+              { intent: 'semantic_search', endpoint: '纯向量语义搜索，适合"这本书关于 XX 的观点是什么"类问题；返回最相关的分块片段（chunk），含来源文件标题和页码定位' },
+              { intent: 'hybrid_search', endpoint: '语义 + 关键词混合搜索（Reciprocal Rank Fusion），精确词 + 语义理解兼顾；推荐作为默认选项' },
+              { intent: 'chunks_by_locator', endpoint: '按文件 ID + 分块序号精确取回原始 chunk 文本，用于「我想读第 3 章完整内容」等定位式阅读' },
+            ]}
+            />
+
+            <div style={{ height: 24 }} />
+
+            {/* v1 vs v2 决策树 */}
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              工具选择速查：v1 还是 v2？
+            </h4>
+            <IntentTable
+              dark={dark}
+              col1="场景"
+              col2="推荐工具"
+            rows={[
+              { intent: '按时间浏览 / 筛选今日动态', endpoint: 'daily_feed（v1）' },
+              { intent: '关键词精确搜索 Feed 内容', endpoint: 'daily_feed q=…（v1）' },
+              { intent: '读取单条详情 / 字幕 / 原文', endpoint: 'daily_item / daily_items_batch（v1）' },
+              { intent: '看 Twitter / YouTube 日报', endpoint: 'report_latest / report_by_date（v1）' },
+              { intent: '对上传的长文档 / 电子书做语义提问', endpoint: 'hybrid_search（v2）首选' },
+              { intent: '只想用纯语义相似度检索', endpoint: 'semantic_search（v2）' },
+              { intent: '定位某章节 / 精确读取原始分块', endpoint: 'chunks_by_locator（v2）' },
+            ]}
+            />
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                borderLeft: `3px solid ${TEAL}`,
+                background: dark ? DARK_SURFACE : '#f0fdfa',
+                fontSize: 13,
+                color: dark ? '#94a3b8' : '#475569',
+                lineHeight: 1.65,
+              }}
+            >
+              <strong style={{ color: dark ? '#e2e8f0' : '#0f766e' }}>提示</strong>
+              ：v2 工具仅对已完成向量化的文件有效（上传后后台异步处理，通常数秒到数分钟完成）。
+              普通 Feed 订阅内容使用 v1 即可；只有长文档、电子书、大型研报才需要 v2。
+            </div>
 
             <Divider dark={dark} />
 
@@ -745,7 +812,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed 常用参数（v0.2.1）
+              daily_feed 常用参数（v0.3.0）
             </h4>
             <IntentTable
               dark={dark}
@@ -947,6 +1014,65 @@ const AgentIntegrationPage: React.FC = () => {
               <code style={{ color: TEAL, fontSize: 12 }}>source</code> 可能值：
               twitter · youtube · web · news · podcast · pdf · image · audio · text。
               默认限速 <strong style={{ color: dark ? '#cbd5e1' : '#475569' }}>60 次 / 分钟</strong> / PAT。
+            </p>
+
+            <Divider dark={dark} />
+
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px', color: dark ? '#e2e8f0' : '#1e293b' }}>
+              v2 语义检索 API
+            </h3>
+            <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 16px', lineHeight: 1.65 }}>
+              路径前缀{' '}
+              <code style={{ fontSize: 13, color: TEAL }}>/api/v2/agent</code>，POST 请求，JSON body，鉴权方式同 v1。
+              适用于已向量化的长文档 / 电子书的语义检索。
+            </p>
+            <IntentTable
+              dark={dark}
+              col1="请求"
+              col2="说明"
+              rows={[
+                { intent: 'POST /api/v2/agent/semantic_search', endpoint: '纯向量语义搜索；body: { q, top_k?, file_id? }；返回按相似度排序的 chunk 列表，含 chunk_text、score、file_title、chunk_seq' },
+                { intent: 'POST /api/v2/agent/hybrid_search', endpoint: '语义 + 关键词混合（RRF）；body: { q, top_k?, file_id? }；精确词与语义理解兼顾，推荐首选' },
+                { intent: 'POST /api/v2/agent/chunks_by_locator', endpoint: '按定位取原始 chunk；body: { file_id, chunk_seq: [n, …] }；可用于精确读取某章节完整文本' },
+              ]}
+            />
+
+            <div style={{ height: 20 }} />
+
+            <CodeBlock dark={dark} label="semantic_search / hybrid_search 请求示例">
+              {`POST /api/v2/agent/hybrid_search
+Authorization: Bearer ght_…
+Content-Type: application/json
+
+{
+  "q": "价值投资的核心方法论是什么",
+  "top_k": 5,
+  "file_id": 42
+}`}
+            </CodeBlock>
+
+            <div style={{ height: 16 }} />
+
+            <CodeBlock dark={dark} label="返回结构（chunk 列表）">
+              {`{
+  "hits": [
+    {
+      "chunk_key": "file_42_chunk_87",
+      "chunk_text": "格雷厄姆认为，安全边际是价值投资的基石……",
+      "score": 0.923,
+      "file_id": 42,
+      "file_title": "证券分析（第六版）.pdf",
+      "chunk_seq": 87,
+      "chunk_total": 312
+    }
+  ],
+  "total": 5
+}`}
+            </CodeBlock>
+
+            <div style={{ height: 12 }} />
+            <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', lineHeight: 1.6 }}>
+              v2 接口只返回已向量化的文档内容。文件上传后后台自动处理，通常数秒至数分钟完成向量化。
             </p>
           </div>
         )}
