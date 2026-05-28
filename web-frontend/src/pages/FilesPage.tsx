@@ -81,8 +81,10 @@ import { isUnauthorizedApiError } from '../utils/authSession';
 import { appendServeAuthToken } from '../utils/appendServeAuthToken';
 import { getModalStyles } from '../utils/modalStyles';
 import {
+  EBOOK_MIN_CONTENT_CHARS,
   getExecutionStatusDisplay,
   getRcAgentStatusTagColor,
+  isLikelyEbookByContentLength,
   normalizeRcAgentStatusForAnalyze,
 } from '../utils/rcAgentStatus';
 import { useSearchParams } from 'react-router-dom';
@@ -7127,8 +7129,8 @@ export const AIAnalysisView: React.FC<{
     }
   }, [execution.id, aiAnalysisData, onLoadAnalysis]);
 
-  // 自动并行 analyze（trigger_auto_analyze）完成后仅刷新左侧列表的 rc，不会重拉 details；
-  // 在 analyzing → success/failed 时强制拉取 final_report，避免右侧面板停在空状态或 Loading 占位。
+  // 自动并行 analyze / ebook map-reduce 完成后仅刷新左侧列表的 rc，不会重拉 details；
+  // 在 analyzing → success/failed 时强制拉取 final_report，避免右侧面板停在空状态。
   useEffect(() => {
     const prev = prevRcAgentForAnalysisRef.current;
     const cur = execution.rc_agent_status;
@@ -7137,6 +7139,27 @@ export const AIAnalysisView: React.FC<{
       onLoadAnalysis();
     }
   }, [execution.id, execution.rc_agent_status, onLoadAnalysis]);
+
+  const primaryFileContentLength = aiAnalysisData?.files?.[0]?.content_length;
+  const isLikelyEbook =
+    isLikelyEbookByContentLength(primaryFileContentLength) ||
+    isLikelyEbookByContentLength(execution.upload_params?.content_length);
+  const ebookOverviewPending =
+    isLikelyEbook &&
+    !aiAnalysisData?.execution?.final_report &&
+    (execution.rc_agent_status === 'analyzing' ||
+      normalizeRcAgentStatusForAnalyze(execution.rc_agent_status) === 'completed');
+
+  // 电子书：map-reduce 进行中轮询 final_report（无 analyzing 中间态时的兜底）
+  useEffect(() => {
+    if (!ebookOverviewPending || aiAnalysisData?.execution?.final_report) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      onLoadAnalysis();
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [ebookOverviewPending, aiAnalysisData?.execution?.final_report, onLoadAnalysis]);
 
   const emptyStateWrapperStyle: React.CSSProperties = {
     flex: 1,
@@ -7159,20 +7182,26 @@ export const AIAnalysisView: React.FC<{
     );
   }
 
-  // 正在分析中：显示分析进度（音频 / Podcast 或文档）
-  if (audioAnalyzing || docAnalyzing) {
+  // 正在分析中：显示分析进度（音频 / Podcast / 文档 / 电子书章节摘要）
+  if (audioAnalyzing || docAnalyzing || ebookOverviewPending) {
     const isAudio = AUDIO_LIKE_TYPES.includes(execution.first_file_type ?? '');
     return (
       <div style={emptyStateWrapperStyle}>
         <div style={{ textAlign: 'center', padding: '40px' }}>
           <LoadingOutlined style={{ fontSize: '48px', color: '#1890ff', marginBottom: '16px' }} />
           <div style={{ color: themeColors.text, fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>
-            {isAudio ? 'AI Analyzing Audio...' : 'AI Analyzing Document...'}
+            {ebookOverviewPending
+              ? 'Generating ebook overview…'
+              : isAudio
+                ? 'AI Analyzing Audio...'
+                : 'AI Analyzing Document...'}
           </div>
-          <div style={{ color: themeColors.textSecondary, fontSize: '13px' }}>
-            {isAudio
-              ? 'The AI is analyzing your audio transcription. This may take a moment.'
-              : 'The AI is processing and analyzing your document. This may take a few minutes.'}
+          <div style={{ color: themeColors.textSecondary, fontSize: '13px', maxWidth: 420, margin: '0 auto' }}>
+            {ebookOverviewPending
+              ? `Long document detected (≥${(EBOOK_MIN_CONTENT_CHARS / 10_000).toFixed(0)}万 characters). Vector indexing and chapter summaries are running in the background — typically 3–8 minutes. Semantic search via MCP will be available after indexing.`
+              : isAudio
+                ? 'The AI is analyzing your audio transcription. This may take a moment.'
+                : 'The AI is processing and analyzing your document. This may take a few minutes.'}
           </div>
         </div>
       </div>
@@ -7195,11 +7224,12 @@ export const AIAnalysisView: React.FC<{
                             execution.rc_agent_status === 'initializing' ||
                             (execution.first_task_id != null && execution.rc_agent_status === 'uploaded');
     const rcDoc = normalizeRcAgentStatusForAnalyze(execution.rc_agent_status);
-    const canAnalyzeDoc = !isAudioFile && onAnalyzeDocument && !isProcessingDoc && (
-      rcDoc === 'uploaded' ||
-      rcDoc === 'failed' ||
-      rcDoc === 'completed'
-    );
+    const canAnalyzeDoc =
+      !isLikelyEbook &&
+      !isAudioFile &&
+      onAnalyzeDocument &&
+      !isProcessingDoc &&
+      (rcDoc === 'uploaded' || rcDoc === 'failed' || rcDoc === 'completed');
 
     return (
       <div style={emptyStateWrapperStyle}>
@@ -7212,6 +7242,13 @@ export const AIAnalysisView: React.FC<{
           textAlign: 'center',
         }}>
           <ExclamationCircleOutlined style={{ fontSize: '48px', color: '#faad14', marginBottom: '16px' }} />
+
+          {isLikelyEbook && (
+            <div style={{ maxWidth: 460, marginBottom: 20, color: themeColors.textSecondary, fontSize: 13 }}>
+              This file is treated as a long ebook. Full-document AI analysis is disabled to avoid token overflow.
+              Use MCP semantic search after vector indexing completes, or wait for the chapter overview to appear here.
+            </div>
+          )}
 
           {canAnalyzeAudio && (
             <div style={{ maxWidth: '480px', textAlign: 'center' }}>

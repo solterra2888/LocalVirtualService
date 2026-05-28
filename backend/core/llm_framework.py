@@ -350,7 +350,7 @@ class QwenProvider(LLMProvider):
                 usage = result.get("usage", {})
                 total_tokens = usage.get("total_tokens", 0)
                 
-                self.logger.info(
+                self.logger.debug(
                     f"Generated embeddings for {len(texts)} texts, "
                     f"tokens: {total_tokens}, time: {response_time:.2f}s"
                 )

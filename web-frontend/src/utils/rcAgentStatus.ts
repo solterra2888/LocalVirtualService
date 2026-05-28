@@ -1,3 +1,10 @@
+/** 与后端 EBOOK_MIN_CHARS 默认一致：超过此长度走 Vector RAG + 章节摘要，非全量 analyze */
+export const EBOOK_MIN_CONTENT_CHARS = 100_000;
+
+export function isLikelyEbookByContentLength(contentLength: number | undefined | null): boolean {
+  return (contentLength ?? 0) >= EBOOK_MIN_CONTENT_CHARS;
+}
+
 /**
  * 旧版后端曾写入 rc_agent_status = skipped（已废弃）。
  * 用于「是否允许补做 AI 分析」等逻辑时，与 completed 同等对待。

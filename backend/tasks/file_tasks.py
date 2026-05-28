@@ -2670,15 +2670,109 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
                     )
                     trigger_auto_naming(file_ids, username=username, delay=2)
                     trigger_auto_classify(file_ids, username=username, delay=2)
+
+                    # ── Ebook 判定 ────────────────────────────────────────
+                    # 对超过阈值的长文档（电子书/研报）跳过全量 analyze，
+                    # 改走 Vector RAG 路径（vectorize → ebook_map_reduce）。
+                    # 阈值可通过环境变量调整:
+                    #   EBOOK_MIN_CHARS  (默认 100000)：唯一判定依据
+                    ebook_min_chars = int(os.getenv('EBOOK_MIN_CHARS', '100000'))
+
+                    # 查询内容长度 + 页数（file_processing_details.metadata 存储）
+                    ebook_file_ids: list = []
+                    normal_file_ids_stats: list = []  # [(fid, stats_id)]
+                    try:
+                        conn2 = db_manager.get_connection()
+                        if conn2:
+                            cur2 = conn2.cursor()
+                            cur2.execute(
+                                """
+                                SELECT id, processing_stats_id,
+                                       LENGTH(COALESCE(content, '')) AS content_len
+                                FROM file_processing_details
+                                WHERE id = ANY(%s)
+                                """,
+                                (file_ids,),
+                            )
+                            for fid, stats_id, content_len in cur2.fetchall():
+                                content_len = content_len or 0
+                                if content_len >= ebook_min_chars:
+                                    ebook_file_ids.append(fid)
+                                    info(
+                                        f"[ebook] file_id={fid} content_len={content_len} >= {ebook_min_chars} → ebook 路径",
+                                        source="celery_doc_upload",
+                                    )
+                                else:
+                                    normal_file_ids_stats.append((fid, stats_id))
+                            conn2.close()
+                    except Exception as ebook_err:
+                        warning(
+                            f"ebook 判定查询失败，全部走普通路径: {ebook_err}",
+                            source="celery_doc_upload",
+                        )
+                        normal_file_ids_stats = list(rows)
+                        ebook_file_ids = []
+
+                    # ── Vector RAG: 所有文件都向量化（ebook + 普通都进 Vector Bucket）
                     _trigger_vectorize_files(file_ids, upload_params=task_info)
 
+                    # ── Ebook 路径: 向量化完成后触发章节级 Map-Reduce 摘要 ──
+                    if ebook_file_ids:
+                        try:
+                            from backend.tasks.ebook_tasks import ebook_map_reduce_task
+                            # 向量化约需 30-120s，给 map-reduce 预留足够时间
+                            ebook_delay = int(os.getenv('EBOOK_MAP_REDUCE_DELAY', '150'))
+                            # 解析完成后即标记 analyzing，避免前端显示「Parsed」却误以为无 AI 任务
+                            ebook_stats_ids = {
+                                sid for fid, sid in rows if fid in ebook_file_ids and sid
+                            }
+                            if ebook_stats_ids:
+                                try:
+                                    conn_ebook = db_manager.get_connection()
+                                    if conn_ebook:
+                                        cur_ebook = conn_ebook.cursor()
+                                        cur_ebook.execute(
+                                            """
+                                            UPDATE processing_stats
+                                            SET rc_agent_status = 'analyzing'
+                                            WHERE id = ANY(%s)
+                                            """,
+                                            (list(ebook_stats_ids),),
+                                        )
+                                        conn_ebook.commit()
+                                        conn_ebook.close()
+                                except Exception as st_err:
+                                    warning(
+                                        f"[ebook] 写入 rc_agent_status=analyzing 失败: {st_err}",
+                                        source="celery_doc_upload",
+                                    )
+                            for ebook_fid in ebook_file_ids:
+                                # 找到对应 stats_id
+                                ebook_stats_id = next(
+                                    (sid for fid, sid in rows if fid == ebook_fid), None
+                                )
+                                ebook_map_reduce_task.apply_async(
+                                    args=(ebook_fid, ebook_stats_id, username),
+                                    countdown=ebook_delay,
+                                )
+                                info(
+                                    f"[ebook] 已投递 ebook_map_reduce_task: file_id={ebook_fid} delay={ebook_delay}s",
+                                    source="celery_doc_upload",
+                                )
+                        except Exception as mr_err:
+                            error(
+                                f"[ebook] 投递 map-reduce 任务失败（不阻断主链路）: {mr_err}",
+                                source="celery_doc_upload",
+                            )
+
+                    # ── 普通文档路径: 走原有 trigger_auto_analyze ──────────
                     # analyze 走 trigger_auto_analyze: 用户在上传弹窗选了模板才触发,
                     # 否则跳过 (文档分析强依赖 template_id, 没选就走 FilesPage 右侧 fallback)
                     auto_template_id = task_info.get('template_id') if task_info else None
                     auto_template_vars = task_info.get('template_variables') if task_info else None
                     # 方案 A: 上传弹窗 AI Analysis 开关; 旧记录无字段 = True 兼容
                     auto_analyze_enabled = bool(task_info.get('auto_analyze_enabled', True)) if task_info else True
-                    for fid, stats_id in rows:
+                    for fid, stats_id in normal_file_ids_stats:
                         trigger_auto_analyze(
                             file_detail_id=fid,
                             execution_id=stats_id,

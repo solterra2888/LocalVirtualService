@@ -5,14 +5,28 @@ Quick Parse Service - 轻量化本地文档解析
 无需发送到 LlamaParse 远程服务。
 
 接口与 LlamaService.process_file() 完全兼容，可作为 drop-in replacement。
+
+PDF 解析策略（2026-05）：
+  - 超过 MAX_PAGES_HARD_LIMIT（默认 2000）：拒绝解析，防止 OOM。
+  - 超过 PDF_STREAMING_THRESHOLD_PAGES（默认 50）：分批流式解析，
+    每批 PDF_STREAMING_BATCH_SIZE（默认 50）页，显著降低峰值内存。
+  - 普通文档：一次性全量解析（保留原有行为）。
 """
 
+import gc
 import os
 import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# ── PDF 分批解析阈值（可通过环境变量覆盖）──────────────────────────────────
+def _pdf_env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
 
 
 class QuickParseService:
@@ -34,16 +48,54 @@ class QuickParseService:
         import pymupdf4llm
         import pymupdf
 
-        kwargs: Dict[str, Any] = {}
-        max_pages = (params or {}).get("max_pages")
-        if max_pages:
-            doc = pymupdf.open(file_path)
-            actual_pages = doc.page_count
-            doc.close()
-            if max_pages < actual_pages:
-                kwargs["pages"] = list(range(max_pages))
+        params = params or {}
 
-        return pymupdf4llm.to_markdown(file_path, **kwargs)
+        # ── 1. 获取页数 ─────────────────────────────────────────────────
+        doc = pymupdf.open(file_path)
+        total_pages = doc.page_count
+        doc.close()
+
+        hard_limit = _pdf_env_int("PDF_MAX_PAGES_HARD_LIMIT", 2000)
+        if total_pages > hard_limit:
+            raise ValueError(
+                f"PDF 页数 ({total_pages}) 超过上限 {hard_limit}，"
+                f"请拆分文档后重试，或联系管理员调整 PDF_MAX_PAGES_HARD_LIMIT。"
+            )
+
+        # ── 2. 支持旧 max_pages 参数（截取前 N 页）───────────────────────
+        max_pages = params.get("max_pages")
+        if max_pages and int(max_pages) < total_pages:
+            total_pages = int(max_pages)
+
+        # ── 3. 决定是否分批流式解析 ─────────────────────────────────────
+        stream_threshold = _pdf_env_int("PDF_STREAMING_THRESHOLD_PAGES", 50)
+        batch_size = _pdf_env_int("PDF_STREAMING_BATCH_SIZE", 50)
+
+        page_range = list(range(total_pages))
+
+        if total_pages <= stream_threshold:
+            # 普通文档：一次性解析（保留原有行为）
+            kwargs: Dict[str, Any] = {}
+            if max_pages:
+                kwargs["pages"] = page_range
+            return pymupdf4llm.to_markdown(file_path, **kwargs)
+
+        # 超出阈值：分批流式解析，降低峰值内存
+        logger.info(
+            "QuickParse: PDF %d 页，超过 %d 阈值，启用分批流式解析（批次大小=%d）",
+            total_pages, stream_threshold, batch_size,
+        )
+        parts: List[str] = []
+        for start in range(0, total_pages, batch_size):
+            end = min(start + batch_size, total_pages)
+            batch_pages = page_range[start:end]
+            batch_md = pymupdf4llm.to_markdown(file_path, pages=batch_pages)
+            parts.append(batch_md)
+            del batch_md
+            gc.collect()
+            logger.debug("QuickParse: 批次 %d-%d / %d 完成", start + 1, end, total_pages)
+
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Word (.docx / .doc)

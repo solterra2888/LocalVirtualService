@@ -9,6 +9,7 @@
 1. [背景与设计目标](#1-背景与设计目标)
 2. [整体架构](#2-整体架构)
 3. [数据流详解](#3-数据流详解)
+   - [3.0 Ebook 专用路径（长文档 / 电子书）](#30-ebook-专用路径长文档--电子书)
    - [3.1 文件上传向量化](#31-文件上传向量化)
    - [3.2 Feed 内容向量化](#32-feed-内容向量化)
    - [3.3 语义搜索流程](#33-语义搜索流程)
@@ -104,6 +105,55 @@
 ---
 
 ## 3. 数据流详解
+
+### 3.0 Ebook 专用路径（长文档 / 电子书）
+
+当上传文件解析完成后，`file_tasks.py` 会判断内容是否超过 **EBOOK_MIN_CHARS（默认 10 万字符）**，满足则走独立的 Map-Reduce 路径，跳过普通全量 AI Analysis。
+
+```
+文件上传解析完成（Quick Parse，全页无截断）
+        │
+        ├── [所有文件] → trigger_auto_vectorize_file
+        │                   → Chunking → Qwen Embedding → OSS Vector Bucket
+        │
+        └── [判断 content_len >= EBOOK_MIN_CHARS？]
+                │
+        否（普通文档）       是（电子书 / 长研报）
+                │                   │
+    trigger_auto_analyze        rc_agent_status = 'analyzing'
+    （用户选模板才触发）              │
+                              延迟 EBOOK_MAP_REDUCE_DELAY 秒（默认 150s，等向量化先完成）
+                                    │
+                          ebook_map_reduce_task（Celery ai_processing）
+                                    │
+                      ┌─────────────┴──────────────┐
+                   MAP 阶段                     REDUCE 阶段
+          按 chapter 读 document_chunks    所有章节摘要拼接
+          每章调一次 LLM (qwen-turbo)      再调一次 LLM → 全书概览
+          生成 chapter_summary             写入 processing_stats.final_report
+                      └─────────────┬──────────────┘
+                              rc_agent_status = 'success'
+```
+
+**触发阈值（环境变量）**
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `EBOOK_MIN_CHARS` | `100000` | 内容字符数门槛 |
+| `EBOOK_MAP_REDUCE_DELAY` | `150` | 等向量化完成的延迟（秒） |
+| `EBOOK_MAP_MAX_CHARS` | `8000` | 单章 Map 输入上限 |
+| `EBOOK_REDUCE_MAX_CHARS` | `32000` | Reduce 输入上限 |
+
+**成本估算（The Nvidia Way, 246 页 / 1110 chunks / 46 章）**
+
+| 方案 | LLM | 费用 |
+|------|-----|------|
+| 传统全量 AI Analysis | Claude Sonnet | ~$0.07 USD，有上下文溢出风险 |
+| Ebook Map-Reduce | qwen-turbo × 47次 | ~0.085 RMB，无溢出 |
+
+> **Quick Parse 注意**：Quick Parse 模式下系统不限制页数（`max_pages=0`），确保电子书全文被解析入库。`Max Pages` 参数仅对 LlamaParse（云端按页计费）有效。
+
+---
 
 ### 3.1 文件上传向量化
 
@@ -581,6 +631,7 @@ print(f"indexes: {res.indexes}")    # 应包含 contentchunks
 | `backend/services/document_vectorize_service.py` | 向量化编排服务 |
 | `backend/tasks/vectorize_tasks.py` | Celery 向量化任务 |
 | `backend/tasks/vectorize_triggers.py` | 自动触发判定逻辑 |
+| `backend/tasks/ebook_tasks.py` | Ebook Map-Reduce 章节摘要 Celery 任务 |
 | `backend/schemas/agent_search.py` | v2 API Pydantic Schema |
 | `backend/services/vector_search_service.py` | 语义/混合/定位搜索服务 |
 | `backend/api/agent_v2_search.py` | FastAPI v2 路由 |
@@ -591,7 +642,7 @@ print(f"indexes: {res.indexes}")    # 应包含 contentchunks
 |------|----------|
 | `backend/celery_app.py` | 注册 `vectorize_tasks` 模块 |
 | `backend/celery_config.py` | 添加 task_routes 路由 + reconcile beat |
-| `backend/tasks/file_tasks.py` | 接入 `_trigger_vectorize_files` |
+| `backend/tasks/file_tasks.py` | 接入 `_trigger_vectorize_files` + ebook 判定 + Map-Reduce 投递 |
 | `backend/api/files.py` | PUT /content 和 POST /create-text-note 后触发 |
 | `backend/api/tasks.py` | DELETE 时队列清理 Vector Bucket |
 | `backend/main.py` | 注册 `agent_v2_search` 路由 |

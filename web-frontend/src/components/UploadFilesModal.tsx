@@ -156,7 +156,12 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
 
     // 先保存参数，再立即关闭窗口，上传与处理在 Celery 后台进行
     const file = selectedFile;
-    const params = { ...processingParams };
+    const params = {
+      ...processingParams,
+      // Quick Parse 本地解析、无页数成本，不限制页数（0 = 后端不截断）
+      // max_pages 仅对 LlamaParse 有意义（按页计费）
+      ...(processingParams.processing_mode === 'quick' ? { max_pages: 0 } : {}),
+    };
 
     resetAndClose();
 
@@ -471,7 +476,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
                   fontSize: '12px',
                   color: colors.textSecondary,
                 }}>
-                  By default only 20 pages are processed. You can change this and other options in Advanced Parameter Settings below.
+                  LlamaParse processes up to 20 pages by default (cloud service charges per page). Adjust Max Pages and other options in Advanced Parameter Settings below.
                 </div>
               )}
               <Collapse
@@ -509,7 +514,7 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
                               value={processingParams.max_pages}
                               onChange={(value) => setProcessingParams(prev => ({ ...prev, max_pages: value || 20 }))}
                               min={1}
-                              max={100}
+                              max={2000}
                               style={inputStyle}
                             />
                           </Form.Item>
@@ -647,8 +652,28 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({
           </Button>
         </div>
 
-        {/* AI 分析模板 (可选, 选中后上传完成自动并行触发 analyze_document_task) */}
+        {/* AI 分析模板 (可选; 超长文档走 Vector RAG + 章节摘要，不会全量 analyze) */}
         <Divider style={{ margin: '16px 0', borderColor: colors.cardBorder }} />
+        {selectedFile &&
+          selectedFile.name.toLowerCase().endsWith('.pdf') &&
+          selectedFile.size > 3 * 1024 * 1024 && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '10px 12px',
+                background: isDark ? 'rgba(24, 144, 255, 0.12)' : '#e6f7ff',
+                borderRadius: 8,
+                fontSize: 12,
+                color: colors.textSecondary,
+                border: `1px solid ${isDark ? 'rgba(24, 144, 255, 0.35)' : '#91d5ff'}`,
+              }}
+            >
+              Large PDF detected: Quick Process will parse <strong>all pages</strong> automatically.
+              Once parsed, content over ~100k characters will use{' '}
+              <strong>Vector RAG + chapter summaries</strong> instead of full-document AI analysis
+              (saves tokens, avoids context overflow). Use MCP semantic search once indexing completes.
+            </div>
+          )}
         <UploadAnalysisTemplatePicker
           value={analyzePicker}
           onChange={setAnalyzePicker}

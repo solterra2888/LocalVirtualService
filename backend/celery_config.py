@@ -94,6 +94,8 @@ task_routes = {
     'delete_feed_vectors': {'queue': 'ai_processing'},
     'delete_vectors_by_keys': {'queue': 'ai_processing'},
     'reconcile_vector_bucket': {'queue': 'ai_processing'},
+    # Ebook Map-Reduce 章节摘要任务
+    'ebook_map_reduce': {'queue': 'ai_processing'},
 }
 
 # Worker配置
