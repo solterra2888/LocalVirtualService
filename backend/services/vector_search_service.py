@@ -83,7 +83,8 @@ class VectorSearchService:
             return SemanticSearchResponse(results=[], diagnostics=diag)
         diag.embed_ms = int((time.time() - t0) * 1000)
 
-        filter_expr = self._build_vector_filter(user, req)
+        accessible_owners = self._resolve_accessible_owners(user.user_id or -1)
+        filter_expr = self._build_vector_filter(user, req, accessible_owners)
 
         t1 = time.time()
         try:
@@ -231,19 +232,22 @@ class VectorSearchService:
         finally:
             loop.close()
 
-    @staticmethod
     def _build_vector_filter(
-        user: TokenData, req: SemanticSearchRequest
+        self,
+        user: TokenData,
+        req: SemanticSearchRequest,
+        accessible_owners: Sequence[str],
     ) -> Dict[str, Any]:
         """Compose `$and` filter for Vector Bucket QueryVectors."""
         clauses: List[Dict[str, Any]] = []
 
         # Auth scope: upload owned by current user OR any feed (post-filter in PG)
         username = user.username or ""
+        owner_candidates = [u for u in [username, *accessible_owners] if u]
         clauses.append(
             {
                 "$or": [
-                    {"owner_id": {"$eq": username}},
+                    {"owner_id": {"$in": owner_candidates}},
                     {"owner_id": {"$eq": "__feed__"}},
                 ]
             }
@@ -286,6 +290,22 @@ class VectorSearchService:
             return clauses[0]
         return {"$and": clauses}
 
+    def _resolve_accessible_owners(self, user_id: int) -> List[str]:
+        """Return usernames who shared upload files to current user."""
+        if user_id < 0:
+            return []
+
+        sql = """
+        SELECT DISTINCT u.username
+        FROM file_shares fs
+        JOIN users u ON u.id = fs.shared_by_user_id
+        WHERE fs.shared_to_user_id = %s
+        """
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, (user_id,))
+            return [r[0] for r in cur.fetchall() if r[0]]
+
     def _fetch_authorized_chunks(
         self, user: TokenData, chunk_ids: Sequence[int]
     ) -> Dict[int, Dict[str, Any]]:
@@ -310,16 +330,18 @@ class VectorSearchService:
             sc.title         AS feed_title,
             sc.author_name   AS feed_author,
             sc.user_ids      AS feed_user_ids,
-            ps."user"        AS upload_owner
+            ps."user"        AS upload_owner,
+            (fs.id IS NOT NULL) AS shared_to_me
         FROM document_chunks dc
         LEFT JOIN file_processing_details fpd ON fpd.id = dc.file_id
         LEFT JOIN processing_stats         ps ON ps.id = fpd.processing_stats_id
         LEFT JOIN subscription_content     sc ON sc.id = dc.content_id
+        LEFT JOIN file_shares              fs ON fs.file_id = dc.file_id AND fs.shared_to_user_id = %s
         WHERE dc.id = ANY(%s)
         """
         with self.db.get_connection_context() as conn:
             cur = conn.cursor()
-            cur.execute(sql, (list(chunk_ids),))
+            cur.execute(sql, (user_id, list(chunk_ids)))
             for r in cur.fetchall():
                 (
                     cid,
@@ -335,11 +357,12 @@ class VectorSearchService:
                     feed_author,
                     feed_user_ids,
                     upload_owner,
+                    shared_to_me,
                 ) = r
 
                 # Auth check
                 if file_id is not None:
-                    if (upload_owner or "") != username:
+                    if (upload_owner or "") != username and not bool(shared_to_me):
                         continue
                     parent_id = int(file_id)
                     title = upload_title or upload_filename
@@ -428,11 +451,13 @@ class VectorSearchService:
         user_id = user.user_id or -1
         sql_upload = """
         SELECT dc.id, dc.source_type, dc.chapter, dc.page, dc.chunk_text,
-               fpd.display_name AS title, fpd.filename, ps."user" AS owner
+               fpd.display_name AS title, fpd.filename, ps."user" AS owner,
+               (fs.id IS NOT NULL) AS shared_to_me
         FROM document_chunks dc
         JOIN file_processing_details fpd ON fpd.id = dc.file_id
         LEFT JOIN processing_stats   ps  ON ps.id = fpd.processing_stats_id
-        WHERE dc.file_id = %s AND ps."user" = %s
+        LEFT JOIN file_shares        fs  ON fs.file_id = dc.file_id AND fs.shared_to_user_id = %s
+        WHERE dc.file_id = %s AND (ps."user" = %s OR fs.id IS NOT NULL)
         ORDER BY dc.chunk_idx ASC
         LIMIT 1
         """
@@ -448,7 +473,7 @@ class VectorSearchService:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor()
-                cur.execute(sql_upload, (content_id, username))
+                cur.execute(sql_upload, (user_id, content_id, username))
                 r = cur.fetchone()
                 if r:
                     return SearchHit(
@@ -485,8 +510,14 @@ class VectorSearchService:
         self, user: TokenData, req: ChunksByLocatorRequest
     ) -> ChunksByLocatorResponse:
         username = user.username or ""
+        user_id = user.user_id or -1
         sql_parent = """
-        SELECT fpd.id, fpd.display_name, fpd.filename, fpd.file_type, ps."user"
+        SELECT fpd.id, fpd.display_name, fpd.filename, fpd.file_type, ps."user",
+               EXISTS (
+                   SELECT 1
+                   FROM file_shares fs
+                   WHERE fs.file_id = fpd.id AND fs.shared_to_user_id = %s
+               ) AS shared_to_me
         FROM file_processing_details fpd
         LEFT JOIN processing_stats ps ON ps.id = fpd.processing_stats_id
         WHERE fpd.id = %s
@@ -496,11 +527,11 @@ class VectorSearchService:
 
         with self.db.get_connection_context() as conn:
             cur = conn.cursor()
-            cur.execute(sql_parent, (req.file_id,))
+            cur.execute(sql_parent, (user_id, req.file_id))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(404, "file not found")
-            if (row[4] or "") != username:
+            if (row[4] or "") != username and not bool(row[5]):
                 raise HTTPException(403, "not authorised")
             title = row[1] or row[2]
             source_type = self._source_type_for_upload(row[3])
