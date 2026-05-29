@@ -3,7 +3,7 @@
 
 import os
 
-_DEFAULT_MINUTES = 5.0
+_DEFAULT_MINUTES = 10.0
 
 
 def get_file_processing_timeout_seconds() -> int:

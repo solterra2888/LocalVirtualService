@@ -201,7 +201,7 @@ async def get_llm_config(current_user: TokenData = Depends(get_current_admin_use
         
         default_provider = get_setting_value('default_provider', 'qwen')
         fallback_enabled = get_setting_value('fallback_enabled', True)
-        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'wenxin', 'glm'])
+        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
         enable_logging = get_setting_value('enable_logging', True)
         enable_monitoring = get_setting_value('enable_monitoring', True)
         
@@ -562,7 +562,7 @@ async def test_global_settings(current_user: TokenData = Depends(get_current_adm
         
         # 测试2: 故障转移配置
         fallback_enabled = get_setting_value('fallback_enabled', True)
-        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm'])
+        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
         
         if fallback_enabled:
             valid_fallback_providers = [p for p in fallback_order if p in enabled_provider_ids]

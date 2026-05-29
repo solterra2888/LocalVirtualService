@@ -7,8 +7,18 @@ Global Settings 只负责策略（provider选择、fallback等），不负责参
 
 from typing import Dict, List, Optional, Any
 from backend.utils.logger import get_logger
+from backend.utils.processing_timeout import get_file_processing_timeout_seconds
 
 logger = get_logger("config_resolver")
+
+# 慢模型 / 大输出：至少等待此时长（仍受 FILE_PROCESSING_TIMEOUT_MINUTES 上限约束）
+# tier-1: 慢模型 or max_tokens ≥ 8000
+_SLOW_MODEL_TIMEOUT_FLOOR = 300
+# tier-2: max_tokens ≥ 16000（超长生成，如详细会议纪要总结）
+_HUGE_OUTPUT_TIMEOUT_FLOOR = 480
+_SLOW_MODEL_HINTS = ("max-preview", "max-longcontext", "qwen3-max", "qwen-max", "seed-1-6", "deepseek-r")
+_LARGE_OUTPUT_MAX_TOKENS = 8000
+_HUGE_OUTPUT_MAX_TOKENS = 16000
 
 
 class ConfigResolver:
@@ -37,6 +47,7 @@ class ConfigResolver:
         self._global_cache = None
         self._provider_cache = {}
         self._template_cache = {}
+        self._template_service = None  # 惰性初始化，复用实例避免重复构造
         
         logger.info("配置解析器初始化完成")
     
@@ -80,7 +91,7 @@ class ConfigResolver:
             config['temperature'] = float(provider_config.get('temperature', 0.7))
             config['max_tokens'] = int(provider_config.get('max_tokens', 2000))
             config['top_p'] = float(provider_config.get('top_p', 0.9))
-            config['timeout'] = int(provider_config.get('timeout', 90))
+            config['timeout'] = int(provider_config.get('timeout', 180))
             
             logger.debug(
                 f"Provider配置加载完成",
@@ -97,7 +108,7 @@ class ConfigResolver:
             config['temperature'] = 0.7
             config['max_tokens'] = 2000
             config['top_p'] = 0.9
-            config['timeout'] = 90
+            config['timeout'] = 180
         
         # 步骤3: 模板推荐值覆盖（如果提供了模板）
         if template_code:
@@ -145,6 +156,8 @@ class ConfigResolver:
             overridden = [k for k in runtime_params.keys() if k in config and runtime_params[k] != original_config.get(k)]
             if overridden:
                 logger.debug(f"运行时参数覆盖: {overridden}")
+
+        self._apply_timeout_policy(config)
         
         # 最终配置日志
         logger.info(
@@ -171,7 +184,7 @@ class ConfigResolver:
         
         return {
             'fallback_enabled': self._get_setting_value(global_settings, 'fallback_enabled', True),
-            'fallback_order': self._get_setting_value(global_settings, 'fallback_order', ['qwen', 'doubao', 'glm'])
+            'fallback_order': self._get_setting_value(global_settings, 'fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
         }
     
     def explain_config(
@@ -254,11 +267,43 @@ class ConfigResolver:
         
         return explanation
     
+    def _apply_timeout_policy(self, config: Dict[str, Any]) -> None:
+        """
+        按模型与 max_tokens 分两档抬升读超时，并限制在全局 FILE_PROCESSING 上限内。
+        - tier-2: max_tokens >= 16000 → floor=480s（超长生成，如详细会议总结）
+        - tier-1: 慢模型 hint 或 max_tokens >= 8000 → floor=300s
+        - 无匹配：保持原值，仅执行 cap 截断
+        """
+        cap = get_file_processing_timeout_seconds()
+        original_timeout = int(config.get("timeout") or 180)
+        model = (config.get("model") or "").lower()
+        max_tokens = int(config.get("max_tokens") or 0)
+        is_slow_model = any(hint in model for hint in _SLOW_MODEL_HINTS)
+
+        if max_tokens >= _HUGE_OUTPUT_MAX_TOKENS:
+            floor = min(_HUGE_OUTPUT_TIMEOUT_FLOOR, cap)
+        elif is_slow_model or max_tokens >= _LARGE_OUTPUT_MAX_TOKENS:
+            floor = min(_SLOW_MODEL_TIMEOUT_FLOOR, cap)
+        else:
+            floor = 0
+
+        timeout = max(original_timeout, floor) if floor else original_timeout
+        timeout = min(timeout, cap)
+
+        if timeout != original_timeout:
+            logger.info(
+                f"超时策略已抬升: {original_timeout}s → {timeout}s "
+                f"(model={model}, max_tokens={max_tokens}, floor={floor}, cap={cap})"
+            )
+
+        config["timeout"] = timeout
+
     def clear_cache(self):
         """清除缓存（配置更新后调用）"""
         self._global_cache = None
         self._provider_cache = {}
         self._template_cache = {}
+        self._template_service = None
         logger.info("配置缓存已清除")
     
     def _get_global_settings(self) -> Dict[str, Any]:
@@ -280,7 +325,7 @@ class ConfigResolver:
                     'temperature': float(row[10]) if row[10] else 0.7,
                     'max_tokens': row[9] if row[9] else 2000,
                     'top_p': float(row[11]) if row[11] else 0.9,
-                    'timeout': row[12] if row[12] else 90,
+                    'timeout': row[12] if row[12] else 180,
                     'enabled': row[6]
                 }
                 logger.debug(f"Provider配置已加载: {provider_id}")
@@ -291,12 +336,13 @@ class ConfigResolver:
         return self._provider_cache.get(provider_id)
     
     def _get_template_config(self, template_code: str) -> Optional[Dict[str, Any]]:
-        """获取Template配置（每次从DB读取，避免缓存导致模板更新不生效）"""
+        """获取Template配置（每次从DB读取，避免缓存导致模板更新不生效；复用 service 实例减少构造开销）"""
         try:
             from backend.services.llm_prompt_template_service import LLMPromptTemplateService
-            template_service = LLMPromptTemplateService()
-            template = template_service.get_template_by_code(template_code)
-            
+            if self._template_service is None:
+                self._template_service = LLMPromptTemplateService()
+            template = self._template_service.get_template_by_code(template_code)
+
             if template:
                 config = {
                     'recommended_provider': template.get('recommended_provider'),

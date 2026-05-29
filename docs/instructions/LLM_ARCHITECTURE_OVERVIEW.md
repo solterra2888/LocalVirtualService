@@ -1,8 +1,8 @@
 # LLM 模型使用整体架构文档
 
-> 最后更新：2026-05-20（Agent API v1 / guanhe-mcp 0.2.1 贯通 people/countries 响应与 `people=` / `countries=` 过滤；见 [AGENT_API_V2_OPTIMIZATION.md](./AGENT_API_V2_OPTIMIZATION.md) §5.1）
+> 最后更新：2026-05-30（Provider 可靠性全面优化：动态 timeout 链路打通、两档超时策略、fallback 错误分类 + 内容审查快速失败、claude 纳入降级链；见 §0.4）
 >
-> **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.9）。
+> **演进脉络**：2026-04-27 完成 LLM 调用统一、Resolver、MODULE_REGISTRY、`module_code` 等基础重构（见 [LLM_REFACTOR_PLAN.md](./LLM_REFACTOR_PLAN.md)）；随后在 **PR-A ~ PR-E** 中落地 **SYSTEM_FIXED（系统固定）/ USER_OWNED（用户私有）** 双态模型、按渠道路由的 Feed 摘要、以及 Upload 弹窗级开关；**PR-F** 引入可选的 per-user 限速（默认关闭，见 §0.10）；**2026-05-29** 完成 Provider 可靠性优化（见 §0.4）。
 
 本文档梳理系统中所有模块对 LLM 大语言模型的完整调用架构、数据流向及各业务链路，供开发者快速理解整体 AI 能力设计。
 
@@ -24,6 +24,7 @@
 6. [所有 Prompt 模板速查](#6-所有-prompt-模板速查)
 7. [配置与环境变量](#7-配置与环境变量)
 8. [相关源码索引](#8-相关源码索引)
+9. [Provider 可靠性优化详细流程](#9-provider-可靠性优化详细流程)
 
 ---
 
@@ -79,15 +80,84 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 
 约束与种子迁移：`pr_a_template_classification_refactor.sql`（partial unique、归档孤儿模板、`audio_analysis` 拆模块、`feed_summary_v1` / `youtube_summary_v1` 种子）、`pr_b_seed_user_owned_templates.sql`（为新模型批量克隆用户私有模板）。
 
+### 0.4 Provider 可靠性优化（2026-05-30）
+
+> 背景：`qwen3.6-max-preview` 总结「5 月份交易复盘会议记录」（`max_tokens=20000`）时，因模板设定 timeout=120s 不足，Qwen 两次重试超时后才静默切换豆包，整体耗时约 5 分钟。经排查发现三个根本问题并一并修复。
+
+#### 问题一：动态 timeout 是死代码（P0）
+
+`ConfigResolver._apply_timeout_policy` 虽已按模型/max_tokens 计算动态 timeout，但：
+- `chat_completion_with_template` 只取出 `provider/model/temperature/max_tokens`，**没有取 timeout**；
+- 四个 `_make_request` 均写死 `self.config.timeout`，即使 kwargs 里有 timeout 也被丢弃。
+
+**修复后的链路**：
+
+```
+ConfigResolver.resolve_config()
+  ├─ _apply_timeout_policy():
+  │   ├─ max_tokens ≥ 16000 ("超长输出")  → floor = 480s  ← tier-2 (新增)
+  │   ├─ 慢模型 hint 或 max_tokens ≥ 8000 → floor = 300s  ← tier-1
+  │   └─ 其它                             → 原值，仅做 cap 截断
+  └─ 返回 resolved_config（含 timeout）
+         │
+         ▼
+chat_completion_with_template()
+  取出 timeout → 写入 kwargs['timeout']
+         │
+         ▼
+QwenProvider / DoubaoProvider / GLMProvider / ClaudeProvider
+  .chat_completion(**kwargs)
+    └─ _resolve_read_timeout(kwargs)   # 优先 kwargs['timeout']，否则 config.timeout
+         │
+         ▼
+  _make_request(headers, data, read_timeout=...)
+    └─ session.post(timeout=(connect_timeout, effective_read_timeout))
+```
+
+慢模型 hints（`_SLOW_MODEL_HINTS`）：`max-preview`、`max-longcontext`、`qwen3-max`、`qwen-max`、`seed-1-6`、`deepseek-r`。
+
+#### 问题二：fallback_order 缺少 claude 且默认值含不存在的 wenxin（P1）
+
+| | 改前 | 改后 |
+|---|------|------|
+| DB `fallback_order` | `["qwen","doubao","glm"]` | **`["qwen","doubao","glm","claude"]`** |
+| claude `fallback_priority` | 999 | **4** |
+| 代码默认值（3 处） | 含 `wenxin`，不含 claude | 统一为 `['qwen','doubao','glm','claude']` |
+| qwen 默认 `max_tokens` | 65536 | **8000**（长输出由模板显式指定） |
+
+#### 问题三：全部错误类型都触发兜底（P2）
+
+内容审查（`data_inspection_failed`）换家后同生态 provider 也会被拒，之前每次都触发整链重试，浪费时间与费用。
+
+新增 `classify_llm_error()` 函数，按错误类型决定是否兜底：
+
+| 类别 | 触发条件 | 兜底行为 |
+|------|---------|----------|
+| `transient` | 超时 / 连接重置 / 429 / 5xx | ✅ 继续兜底 |
+| `content_filtered` | `data_inspection_failed` / inappropriate content | ❌ **快速失败**（可通过 `FALLBACK_ON_CONTENT_FILTER=True` 覆盖） |
+| `client_error` | 400 / 401 / 403 / 404 / model_not_found | ✅ 继续兜底 |
+| `unknown` | 其它异常 | ✅ 继续兜底 |
+
+兜底链中途遇到 `content_filtered` 也会 **提前 break**，不再继续试后续 provider。
+
+#### 问题四：global_timeout / global_retry_count 是僵尸配置（P2）
+
+之前这两个 DB 设置只在诊断展示接口中读取，运行时完全不生效。现已接入 `_load_from_database`：先于 provider 构建循环加载，`global_timeout` 作为 provider 未配置时的回退默认值，`global_retry_count` 直接传入每个 `LLMConfig.retry_count`。
+
+| key | 改前 | 改后 |
+|-----|------|------|
+| `global_timeout` | 30（僵尸） | **120**（与实际 provider 一致） |
+| `global_retry_count` | 3（僵尸） | **2**（对齐代码既定决策） |
+
 文件：`backend/services/template_preference_service.py`（`SYSTEM_ONLY_MODULES`, `USER_OWNED_MODULES`, `MODULE_REGISTRY`）
 
-### 0.4 `llm_prompt_templates.module_code`
+### 0.5 `llm_prompt_templates.module_code`
 
 `module_code` 与 `MODULE_REGISTRY` 对齐；列表 API 返回 `module_code` / `category_code`，前端 `UploadAnalysisTemplatePicker` 按模块加载 **当前用户的私有模板** 或展示系统模块说明。
 
 迁移：`add_module_code_to_llm_prompt_templates.sql`
 
-### 0.5 Feeds：Hybrid（全局 Tag + Per-user 摘要）
+### 0.6 Feeds：Hybrid（全局 Tag + Per-user 摘要）
 
 - **打标 `feed_tagging`**：走 **SYSTEM_FIXED** 模板（如 `content_tag_feeds_v1`），结果写入 **`subscription_content_tags`**，全站订阅者共用同一套客观标签/summary 基线。**抓取后自动派发**（`AUTO_FEED_TAG_ENABLED=true` 默认开启）。
 - **个性化摘要**：写入 **`subscription_content_user_summaries`**。按内容渠道选择 **USER_OWNED** 模块：
@@ -98,13 +168,13 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 
 读取侧仍可采用 `COALESCE(用户摘要, 全局 tags.summary)` 一类策略；路由逻辑见 `FeedSummaryPersonalizationService` 中 `_CHANNEL_TO_MODULE`。
 
-### 0.6 上传弹窗：`auto_analyze_enabled` / `auto_tag_enabled`
+### 0.7 上传弹窗：`auto_analyze_enabled` / `auto_tag_enabled`
 
 除环境变量总开关（`AUTO_ANALYZE_ENABLED` / `AUTO_TAG_ENABLED`）外，各上传 API 接受 **每次请求** 布尔字段（默认 `true`）。若为 `false`，`trigger_auto_analyze` / `trigger_auto_tagging` **直接跳过**，不解析模板、不调 LLM（与「开关关闭」语义一致）。详见 `backend/api/files.py`、`backend/tasks/file_tasks.py`。
 
 前端：`UploadAnalysisTemplatePicker` 的开关默认 **首次打开为 ON**；关闭弹窗时父组件应重置 picker state，避免 Ant Design Modal 子组件不卸载导致的状态残留。
 
-### 0.7 Prompt 管理 API 与 UI
+### 0.8 Prompt 管理 API 与 UI
 
 - **用户**：`GET/PUT /llm/prompts/my-templates`、`POST .../reset` — 仅 **USER_OWNED** 模块。
 - **管理员**：`GET/PUT /llm/prompts/system-templates/{template_id}` — **SYSTEM_FIXED** 系统行。
@@ -112,17 +182,17 @@ SYSTEM_ONLY_MODULES（SYSTEM_FIXED）：跳过第 2 步，只认系统 scope 模
 
 前端 **PromptTemplatesPage**：「我的模板」Tab 仅 7 张用户卡片；「系统模板 (Admin)」为管理员扁平列表（含「立即生效 / 仅作种子」标签说明）。**UploadAnalysisTemplatePicker** / **FilesPage** 侧栏：侧滑 **Drawer** 内编辑私有模板，**InsertVariablePopover** 支持向 prompt 插入 `{{变量}}`。
 
-### 0.8 4 路触发与用户标识
+### 0.9 4 路触发与用户标识
 
 文件 `content` 就绪后并行触发 tag / name / classify / analyze；其中 **analyze、tag** 在 USER_OWNED 模块上经 Resolver 取用户私有模板（**name/classify** 仍为 SYSTEM_FIXED）。`username → user_id`：`backend/utils/user_resolver.py`，保证 `llm_prompt_usage_logs.user_id` 可观测。
 
-### 0.9 LLMRateLimiter（PR-F，默认关闭）
+### 0.10 LLMRateLimiter（PR-F，默认关闭）
 
 `LLMService.chat_completion_with_template` 可在传入 `user_id` 时做 **per-user × per-provider** 每分钟窗口限速（Redis INCR）。**仅当** 环境变量 **`LLM_USER_RATE_LIMIT_PER_MIN` 显式设为大于 0 的整数** 时生效；未设置或为 0 → 完全跳过（便于上线后先看 `llm_prompt_usage_logs` 再定阈值）。超限 → `LLMRateLimitExceeded` → FastAPI 429 + `Retry-After`。
 
 文件：`backend/core/llm_rate_limiter.py`
 
-### 0.10 已清理的孤儿对象（历史）
+### 0.11 已清理的孤儿对象（历史）
 
 | 对象 | 原因 | 清理 migration |
 |------|------|---------------|
@@ -781,11 +851,15 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 ### 7.1 LLM Provider 核心配置
 
-| 变量 | Provider | 说明 |
-|------|---------|------|
-| `DEFAULT_LLM_PROVIDER` | 全局 | 默认 Provider（`qwen` / `doubao` / `glm` / `claude`） |
-| `LLM_FALLBACK_ENABLED` | 全局 | 是否启用 Provider 降级（默认 `true`） |
-| `LLM_FALLBACK_ORDER` | 全局 | 降级顺序（示例含 Claude：`qwen,doubao,glm,claude`；以 DB `llm_global_settings` 为准） |
+> ⚠️ **DB 配置（`llm_global_settings` + `llm_provider_configs`）优先于环境变量**，以下环境变量仅作 env-only 回退。
+
+| 变量 / DB Key | Provider | 当前值（DB） | 说明 |
+|------|---------|------|------|
+| `DEFAULT_LLM_PROVIDER` / `default_provider` | 全局 | `qwen` | 默认 Provider |
+| `LLM_FALLBACK_ENABLED` / `fallback_enabled` | 全局 | `true` | 是否启用 Provider 降级 |
+| `LLM_FALLBACK_ORDER` / `fallback_order` | 全局 | **`["qwen","doubao","glm","claude"]`** | 降级顺序；claude 已纳入链尾（§0.4） |
+| `global_timeout`（DB only） | 全局 | **120s** | provider 未单独配置 timeout 时的默认值（已接入请求层，§0.4） |
+| `global_retry_count`（DB only） | 全局 | **2** | 连接/5xx 重试次数，传入每个 `LLMConfig.retry_count`（§0.4） |
 | `QWEN_API_KEY` / `QWEN_ENABLED` | Qwen | DashScope API Key |
 | `QWEN_BASE_URL` | Qwen | API 基础 URL |
 | `QWEN_DEFAULT_MODEL` | Qwen | 默认模型名 |
@@ -937,7 +1011,7 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 
 ---
 
-## 附：完整 LLM 调用数据流
+## 附：完整 LLM 调用数据流（含 2026-05-30 可靠性优化）
 
 ```
                     ┌──────────────┐
@@ -951,48 +1025,169 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
     │  (file_processing   │      │  (create-text-note 等) │
     │   ai_processing 等) │      └────────────┬──────────┘
     └─────────┬──────────┘                   │
-              │                              │
               └──────────────┬───────────────┘
                              │
                 ┌────────────▼────────────────┐
-                │  业务服务层                  │
+                │       业务服务层             │
                 │  ContentTaggingService       │
                 │  FeedContentTaggingService   │
                 │  TwitterAuthorSummaryService │
-                │  YouTubeAuthorSummaryService │
-                │  FeedSummaryPersonalizationService    │
+                │  FeedSummaryPersonalizationS.│
                 │  NewsAnalysisService 等      │
                 └────────────┬────────────────┘
                              │
               ┌──────────────┴──────────────────┐
               │                                 │
-  ┌──────────────────────┐     ┌─────────────────────────────┐
-  │ LocalLLMAnalysis     │────►│ llm_service                 │
-  │ Service              │     │ .chat_completion_with_      │
-  │（内部委托）          │     │  template()                 │
-  └──────────────────────┘     └──────────────┬──────────────┘
-                                              │ 可选 LLMRateLimiter
-                                              ▼
-                ┌─────────────────────────────▼───┐
-                │  PromptRenderer              │
-                │  DB: llm_prompt_templates    │
-                │  （模板已由 LLMTemplateResolver 选中）│
-                │  → 渲染 system + user prompt │
-                └────────────┬────────────────┘
-                             │
-                ┌────────────▼────────────────┐
-                │  ConfigResolver              │
-                │  Provider→Template→Runtime  │
-                └────────────┬────────────────┘
-                             │
-                ┌────────────▼────────────────┐
-                │  LLMService.chat_completion  │
-                │  → 选择 Provider             │
-                │  → 失败自动降级              │
-                └────────────┬────────────────┘
-                             │
-              ┌──────────────┼──────────────────┐
-              ▼              ▼                  ▼
-       Qwen API          Doubao API          GLM API
-    (DashScope)       (Volcengine Ark)    (Zhipu PAAS)
+  ┌───────────▼──────────┐     ┌────────────────▼────────────┐
+  │ LocalLLMAnalysis     │────►│  llm_service                │
+  │ Service（内部委托）   │     │  .chat_completion_with_     │
+  └──────────────────────┘     │   template()                │
+                               └───────────────┬─────────────┘
+                                               │ ① 可选 LLMRateLimiter（per-user）
+                                               ▼
+                         ┌─────────────────────────────────┐
+                         │  LLMTemplateResolver             │
+                         │  runtime → user_owned → default  │
+                         │  → PromptRenderer 渲染 prompt    │
+                         └─────────────┬───────────────────┘
+                                       │
+                         ┌─────────────▼───────────────────┐
+                         │  ConfigResolver                  │
+                         │  Provider → Template → Runtime   │
+                         │                                  │
+                         │  _apply_timeout_policy()         │
+                         │  ┌──────────────────────────┐   │
+                         │  │ max_tokens ≥ 16000        │   │
+                         │  │   → floor = 480s (tier-2) │   │
+                         │  │ 慢模型 or max_tokens≥8000  │   │
+                         │  │   → floor = 300s (tier-1) │   │
+                         │  │ 其它 → 原值（cap 截断）    │   │
+                         │  └──────────────────────────┘   │
+                         │  返回: provider/model/temp/      │
+                         │        max_tokens/timeout ◄──── │
+                         └─────────────┬───────────────────┘
+                                       │ ② timeout 写入 kwargs 下传
+                                       ▼
+                         ┌─────────────────────────────────┐
+                         │  LLMService.chat_completion()    │
+                         │                                  │
+                         │  try: primary provider           │
+                         │  except:                         │
+                         │    classify_llm_error(e)         │
+                         │    ┌──────────────────────────┐  │
+                         │    │ content_filtered          │  │
+                         │    │  → 快速失败（不兜底）      │  │
+                         │    │ transient / client /      │  │
+                         │    │  unknown                  │  │
+                         │    │  → _try_fallback_         │  │
+                         │    │     providers()           │  │
+                         │    └──────────────────────────┘  │
+                         └──────┬──────────────────────────┘
+                                │
+           ┌────────────────────┼────────────────────┬──────────────┐
+           │ priority=1         │ priority=2          │ priority=3   │ priority=4
+           ▼                    ▼                     ▼              ▼
+    ┌──────────────┐   ┌──────────────────┐  ┌──────────────┐ ┌──────────────────────┐
+    │  Qwen API    │   │  Doubao API      │  │  GLM API     │ │  Claude API          │
+    │  (DashScope) │   │ (Volcengine Ark) │  │ (Zhipu PAAS) │ │ (via CherryIN 网关)  │
+    │              │   │                  │  │              │ │                      │
+    │  _make_      │   │  _make_request() │  │ _make_       │ │  _make_request()     │
+    │  request()   │   │  read_timeout=   │  │ request()    │ │  read_timeout=       │
+    │  read_timeout│   │  kwargs timeout  │  │ kwargs timeo │ │  kwargs timeout ③    │
+    └──────────────┘   └──────────────────┘  └──────────────┘ └──────────────────────┘
+
+③ 四个 provider 的 _make_request 均接受 read_timeout 参数，
+   优先使用 kwargs 动态值，回退到 config.timeout（DB 配置值）。
 ```
+
+---
+
+## §9. Provider 可靠性优化详细流程
+
+> 本节详细描述 2026-05-30 优化后的 timeout 下传与 fallback 错误分类逻辑，配合上方附图阅读。
+
+### 9.1 Timeout 完整传递路径
+
+```
+DB: llm_global_settings.global_timeout = 120    (provider 未配置时的默认)
+DB: llm_provider_configs[qwen].timeout = 120     (per-provider 配置)
+                │
+                ▼  _load_from_database()
+         LLMConfig.timeout = min(provider_timeout, FILE_PROCESSING_CAP)
+                │
+                │  运行时：ConfigResolver.resolve_config()
+                ▼
+         resolved_config['timeout']
+           = _apply_timeout_policy(config_from_template)
+           = max(template_timeout, floor) capped at FILE_PROCESSING_CAP
+                │
+                │  chat_completion_with_template()
+                ▼
+         kwargs['timeout'] = resolved_config['timeout']
+                │
+                │  QwenProvider.chat_completion(**kwargs)
+                ▼
+         _resolve_read_timeout(kwargs)
+           = kwargs.get('timeout') or config.timeout
+                │
+                ▼
+         session.post(timeout=(connect_timeout=15, effective_read_timeout))
+```
+
+**FILE_PROCESSING_CAP**：`FILE_PROCESSING_TIMEOUT_MINUTES × 60`（默认 600s），是所有超时的硬上限。
+
+### 9.2 Fallback 错误分类决策树
+
+```
+Provider 调用抛出异常
+        │
+        ▼
+ classify_llm_error(e)
+        │
+        ├─── "data_inspection_failed" / "inappropriate content"
+        │         → ERROR_CONTENT_FILTERED
+        │         │
+        │         └─ should_fallback() = FALLBACK_ON_CONTENT_FILTER (默认 False)
+        │                  │
+        │                  └─ False → 直接 raise，不触发兜底链
+        │                              (节省时间 & API 费用)
+        │
+        ├─── "timed out" / "timeout" / "connection reset" /
+        │    "max retries exceeded" / "429" / 5xx
+        │         → ERROR_TRANSIENT
+        │         └─ should_fallback() = True → 进入兜底链
+        │
+        ├─── "400" / "401" / "403" / "404" /
+        │    "model_not_found" / "invalid_request"
+        │         → ERROR_CLIENT
+        │         └─ should_fallback() = True → 进入兜底链
+        │
+        └─── 其它
+                  → ERROR_UNKNOWN
+                  └─ should_fallback() = True → 进入兜底链
+
+兜底链（_try_fallback_providers）：
+  for provider in ['qwen','doubao','glm','claude']:
+      skip if == failed_provider
+      try:
+          call provider (model=None, 用该 provider 自身默认模型)
+          return ✅ 成功
+      except e:
+          category = classify_llm_error(e)
+          if not should_fallback(category):
+              break  ← 内容审查：提前终止整链，不再尝试后续 provider
+          continue   ← 其它错误：继续下一 provider
+
+  raise Exception("All providers failed; last error: ...")
+```
+
+### 9.3 Provider 当前状态速查
+
+| Provider | enabled | fallback_priority | default_model | timeout | max_tokens |
+|----------|---------|-------------------|---------------|---------|------------|
+| qwen | ✅ | 1（主 provider） | qwen-turbo | 120s | 8000 |
+| doubao | ✅ | 2 | doubao-seed-1-6-250615 | 120s | 8000 |
+| glm | ✅ | 3 | glm-4 | 120s | 8000 |
+| claude | ✅ | 4（最终兜底） | anthropic/claude-sonnet-4.6 | 120s | 32000 |
+
+> 注意：provider 的 `timeout` 是**基准值**；模板/策略命中超长生成（`max_tokens≥16000` 或慢模型）时，`_apply_timeout_policy` 会将实际 HTTP 读超时动态抬升至 300～480s，不受此处 120s 限制。

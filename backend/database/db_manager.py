@@ -1452,9 +1452,9 @@ class DatabaseManager:
             VALUES 
                 ('default_provider', '"qwen"', '默认LLM提供商', 'system'),
                 ('fallback_enabled', 'true', '是否启用故障转移', 'system'),
-                ('fallback_order', '["qwen", "doubao", "glm"]', '故障转移顺序', 'system'),
-                ('global_timeout', '30', '全局请求超时时间（秒）', 'system'),
-                ('global_retry_count', '3', '全局重试次数', 'system'),
+                ('fallback_order', '["qwen", "doubao", "glm", "claude"]', '故障转移顺序', 'system'),
+                ('global_timeout', '120', 'provider 未单独配置时的默认请求超时（秒）', 'system'),
+                ('global_retry_count', '2', '全局重试次数（连接/5xx，不含读超时）', 'system'),
                 ('enable_logging', 'true', '是否启用详细日志', 'system'),
                 ('enable_monitoring', 'true', '是否启用性能监控', 'system')
             ON CONFLICT (setting_key) DO NOTHING

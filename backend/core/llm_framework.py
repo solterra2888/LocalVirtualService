@@ -77,6 +77,53 @@ class LLMConfig:
     enabled: bool = True
 
 
+# ===== Fallback 错误分类 =====
+# transient: 网络/超时/限流/5xx —— 换家大概率能成，值得整链兜底
+# content_filtered: 内容审查拦截 —— 同生态(qwen/doubao/glm)审查策略相近，换家通常仍被拒；默认快速失败，避免浪费时间与费用
+# client_error: 其它 4xx（鉴权、模型不存在、参数错误）—— 多为 provider 自身配置问题，换家可能有效，允许兜底
+# unknown: 兜底归类，按可兜底处理
+ERROR_TRANSIENT = "transient"
+ERROR_CONTENT_FILTERED = "content_filtered"
+ERROR_CLIENT = "client_error"
+ERROR_UNKNOWN = "unknown"
+
+# 内容审查命中后是否继续兜底其它 provider。默认 False（快速失败、缩短重试）。
+FALLBACK_ON_CONTENT_FILTER = False
+
+
+def classify_llm_error(exc: Exception) -> str:
+    """将 provider 调用异常归类，用于决定是否值得故障转移。"""
+    msg = str(exc).lower()
+
+    # 内容审查（阿里 data_inspection_failed / 通用 content moderation 关键词）
+    if "data_inspection_failed" in msg or "inappropriate content" in msg or "content_filter" in msg:
+        return ERROR_CONTENT_FILTERED
+
+    # 网络层 / 超时 / 连接重置
+    if any(k in msg for k in ("timed out", "timeout", "connection reset", "connection aborted",
+                              "max retries exceeded", "connection broken", "read timed out")):
+        return ERROR_TRANSIENT
+
+    # HTTP 状态码（异常文本形如 "API request failed: <code> - ..."）
+    if "429" in msg or "rate limit" in msg:
+        return ERROR_TRANSIENT
+    if any(code in msg for code in ("500", "502", "503", "504")):
+        return ERROR_TRANSIENT
+    if any(code in msg for code in ("400", "401", "403", "404", "model_not_found",
+                                    "invalid_request", "invalid_api_key")):
+        return ERROR_CLIENT
+
+    return ERROR_UNKNOWN
+
+
+def should_fallback(category: str) -> bool:
+    """根据错误类别判断是否应尝试其它 provider。"""
+    if category == ERROR_CONTENT_FILTERED:
+        return FALLBACK_ON_CONTENT_FILTER
+    # transient / client_error / unknown 均允许兜底
+    return True
+
+
 class LLMProvider(ABC):
     """LLM提供商抽象基类"""
     
@@ -141,6 +188,13 @@ class LLMProvider(ABC):
             "enabled": self.config.enabled
         }
 
+    def _resolve_read_timeout(self, kwargs: Dict[str, Any]) -> int:
+        """单次请求的读超时：kwargs['timeout'] 优先于 provider 配置。"""
+        raw = kwargs.get("timeout")
+        if raw is not None:
+            return int(raw)
+        return int(self.config.timeout)
+
 
 class QwenProvider(LLMProvider):
     """Qwen provider implementation"""
@@ -183,7 +237,9 @@ class QwenProvider(LLMProvider):
         }
         
         try:
-            response = await self._make_request(headers, data)
+            response = await self._make_request(
+                headers, data, read_timeout=self._resolve_read_timeout(kwargs)
+            )
             response_time = time.time() - start_time
             
             if response.status_code == 200:
@@ -255,17 +311,18 @@ class QwenProvider(LLMProvider):
             return False
     
     
-    async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
-        """发送异步请求"""
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
         loop = asyncio.get_event_loop()
         connect_timeout = getattr(self.config, 'connect_timeout', 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
+                timeout=(connect_timeout, effective_read_timeout)  # 连接超时固定，读取超时可被动态覆盖
             )
         )
     
@@ -418,7 +475,7 @@ class DoubaoProvider(LLMProvider):
         }
         
         try:
-            response = await self._make_request(headers, data)
+            response = await self._make_request(headers, data, read_timeout=self._resolve_read_timeout(kwargs))
             response_time = time.time() - start_time
             
             if response.status_code == 200:
@@ -487,17 +544,18 @@ class DoubaoProvider(LLMProvider):
             self.status = LLMModelStatus.ERROR
             return False
     
-    async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
-        """发送异步请求"""
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
         loop = asyncio.get_event_loop()
         connect_timeout = getattr(self.config, 'connect_timeout', 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
+                timeout=(connect_timeout, effective_read_timeout)  # 连接超时固定，读取超时可被动态覆盖
             )
         )
     
@@ -552,7 +610,7 @@ class GLMProvider(LLMProvider):
         }
         
         try:
-            response = await self._make_request(headers, data)
+            response = await self._make_request(headers, data, read_timeout=self._resolve_read_timeout(kwargs))
             response_time = time.time() - start_time
             
             if response.status_code == 200:
@@ -621,17 +679,18 @@ class GLMProvider(LLMProvider):
             self.status = LLMModelStatus.ERROR
             return False
     
-    async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
-        """发送异步请求"""
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
         loop = asyncio.get_event_loop()
         connect_timeout = getattr(self.config, 'connect_timeout', 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
         return await loop.run_in_executor(
             None, 
             lambda: self.session.post(
                 self.api_url, 
                 headers=headers, 
                 json=data,
-                timeout=(connect_timeout, self.config.timeout)  # 连接超时和读取超时使用配置值
+                timeout=(connect_timeout, effective_read_timeout)  # 连接超时固定，读取超时可被动态覆盖
             )
         )
     
@@ -690,7 +749,7 @@ class ClaudeProvider(LLMProvider):
         }
 
         try:
-            response = await self._make_request(headers, data)
+            response = await self._make_request(headers, data, read_timeout=self._resolve_read_timeout(kwargs))
             response_time = time.time() - start_time
 
             if response.status_code == 200:
@@ -757,17 +816,18 @@ class ClaudeProvider(LLMProvider):
             self.status = LLMModelStatus.ERROR
             return False
 
-    async def _make_request(self, headers: Dict, data: Dict) -> requests.Response:
-        """发送异步请求"""
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
         loop = asyncio.get_event_loop()
         connect_timeout = getattr(self.config, "connect_timeout", 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
         return await loop.run_in_executor(
             None,
             lambda: self.session.post(
                 self.api_url,
                 headers=headers,
                 json=data,
-                timeout=(connect_timeout, self.config.timeout),
+                timeout=(connect_timeout, effective_read_timeout),
             ),
         )
 
@@ -828,7 +888,29 @@ class LLMService:
             
             # 清空现有配置
             self.providers = {}
-            
+
+            # 先加载全局配置（供构建各 provider 时使用：超时默认、重试次数）
+            db_settings = db_manager.get_llm_global_settings()
+
+            def get_setting_value(key, default_value):
+                """安全获取设置值，处理JSON字符串"""
+                setting = db_settings.get(key, {})
+                if not setting:
+                    return default_value
+                value = setting.get('value')
+                if value is None:
+                    return default_value
+                # 如果是字符串，尝试解析JSON
+                if isinstance(value, str):
+                    try:
+                        return json.loads(value)
+                    except (json.JSONDecodeError, ValueError):
+                        return value
+                return value
+
+            global_timeout = int(get_setting_value('global_timeout', 180))
+            global_retry_count = int(get_setting_value('global_retry_count', 2))
+
             # 加载每个提供商配置
             for row in db_providers:
                 provider_id = row[1]
@@ -841,7 +923,7 @@ class LLMService:
                 max_tokens = row[9] if row[9] else 2000
                 temperature = float(row[10]) if row[10] else 0.7
                 top_p = float(row[11]) if row[11] else 0.8
-                timeout = row[12] if row[12] else 180  # 默认180秒，适应大文件分析
+                timeout = row[12] if row[12] else global_timeout  # provider 未配置时回退到 global_timeout
                 cap = get_file_processing_timeout_seconds()
                 timeout = min(int(timeout), cap)
                 
@@ -879,6 +961,7 @@ class LLMService:
                     temperature=temperature,
                     top_p=top_p,
                     timeout=timeout,
+                    retry_count=global_retry_count,
                     enabled=enabled
                 )
                 
@@ -886,29 +969,10 @@ class LLMService:
                 self.providers[provider_id] = provider_class(config)
                 self.logger.info(f"已加载提供商: {provider_id} ({provider_name})")
             
-            # 加载全局配置
-            db_settings = db_manager.get_llm_global_settings()
-            
-            # 安全解析设置值
-            def get_setting_value(key, default_value):
-                """安全获取设置值，处理JSON字符串"""
-                setting = db_settings.get(key, {})
-                if not setting:
-                    return default_value
-                value = setting.get('value')
-                if value is None:
-                    return default_value
-                # 如果是字符串，尝试解析JSON
-                if isinstance(value, str):
-                    try:
-                        return json.loads(value)
-                    except (json.JSONDecodeError, ValueError):
-                        return value
-                return value
-            
+            # 应用全局策略配置（settings 已在循环前加载）
             self.default_provider = get_setting_value('default_provider', 'qwen')
             self.fallback_enabled = get_setting_value('fallback_enabled', True)
-            self.fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'wenxin', 'glm'])
+            self.fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
             
             return True
             
@@ -927,7 +991,7 @@ class LLMService:
         # 设置默认提供商和故障转移
         self.default_provider = os.getenv('DEFAULT_LLM_PROVIDER', 'qwen')
         self.fallback_enabled = os.getenv('LLM_FALLBACK_ENABLED', 'true').lower() == 'true'
-        fallback_order_str = os.getenv('LLM_FALLBACK_ORDER', 'qwen,doubao,glm')
+        fallback_order_str = os.getenv('LLM_FALLBACK_ORDER', 'qwen,doubao,glm,claude')
         self.fallback_order = [p.strip() for p in fallback_order_str.split(',')]
     
     def reload_from_database(self):
@@ -1054,13 +1118,17 @@ class LLMService:
             try:
                 return await self.providers[provider_name].chat_completion(messages, model, **kwargs)
             except Exception as e:
-                self.logger.error(f"Provider {provider_name} failed: {str(e)}")
-                
-                # 如果启用故障转移，尝试其他提供商
-                if self.fallback_enabled:
-                    return await self._try_fallback_providers(messages, provider_name, model, **kwargs)
-                else:
+                category = classify_llm_error(e)
+                self.logger.error(f"Provider {provider_name} failed [{category}]: {str(e)}")
+
+                # 内容审查类错误默认不兜底（换家通常仍被拒），快速失败省时省钱
+                if not self.fallback_enabled or not should_fallback(category):
+                    if category == ERROR_CONTENT_FILTERED:
+                        self.logger.warning(
+                            f"内容审查拦截，跳过故障转移（FALLBACK_ON_CONTENT_FILTER={FALLBACK_ON_CONTENT_FILTER}）"
+                        )
                     raise
+                return await self._try_fallback_providers(messages, provider_name, model, **kwargs)
         else:
             raise ValueError(f"Provider {provider_name} not found or not enabled")
     
@@ -1072,6 +1140,7 @@ class LLMService:
         **kwargs
     ) -> LLMResponse:
         """尝试故障转移提供商"""
+        last_error: Optional[Exception] = None
         for provider_name in self.fallback_order:
             if provider_name != failed_provider and provider_name in self.providers:
                 try:
@@ -1080,10 +1149,16 @@ class LLMService:
                     # 因为不同provider支持的模型不同
                     return await self.providers[provider_name].chat_completion(messages, model=None, **kwargs)
                 except Exception as e:
-                    self.logger.error(f"Fallback provider {provider_name} also failed: {str(e)}")
+                    last_error = e
+                    category = classify_llm_error(e)
+                    self.logger.error(f"Fallback provider {provider_name} also failed [{category}]: {str(e)}")
+                    # 内容审查类错误对同生态后续 provider 同样无效，提前终止整链兜底
+                    if not should_fallback(category):
+                        self.logger.warning("故障转移链遇内容审查拦截，提前终止")
+                        break
                     continue
-        
-        raise Exception("All providers failed")
+
+        raise Exception(f"All providers failed; last error: {last_error}")
     
     async def test_provider(self, provider_name: str) -> bool:
         """测试指定提供商"""
@@ -1176,6 +1251,8 @@ class LLMService:
             runtime_params['temperature'] = kwargs.pop('temperature')
         if 'max_tokens' in kwargs:
             runtime_params['max_tokens'] = kwargs.pop('max_tokens')
+        if 'timeout' in kwargs:
+            runtime_params['timeout'] = kwargs.pop('timeout')
         
         # 使用ConfigResolver解析配置（优先级：Runtime > Template > Provider）
         if self.config_resolver:
@@ -1188,12 +1265,14 @@ class LLMService:
             model = resolved_config['model']
             temperature = resolved_config['temperature']
             max_tokens = resolved_config['max_tokens']
+            timeout = resolved_config.get('timeout')
         else:
             # 回退到旧逻辑（如果ConfigResolver初始化失败）
             provider = provider or rendered.recommended_config.get('provider')
             model = model or rendered.recommended_config.get('model')
             temperature = runtime_params.get('temperature', rendered.recommended_config.get('temperature'))
             max_tokens = runtime_params.get('max_tokens', rendered.recommended_config.get('max_tokens'))
+            timeout = runtime_params.get('timeout')
         
         # 4. 调用LLM
         import time
@@ -1232,6 +1311,8 @@ class LLMService:
                 raise
 
         try:
+            if timeout is not None:
+                kwargs['timeout'] = timeout
             response = await self.chat_completion(
                 messages, 
                 provider=provider,
