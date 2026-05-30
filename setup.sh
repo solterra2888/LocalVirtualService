@@ -34,6 +34,7 @@ mkdir -p "$DEPLOY_DIR/worker" "$DEPLOY_DIR/logs"
 cp "$SCRIPT_DIR/requirements.txt" "$DEPLOY_DIR/"
 cp "$SCRIPT_DIR/worker/"*.py "$DEPLOY_DIR/worker/"
 cp "$SCRIPT_DIR/start.sh" "$DEPLOY_DIR/"
+cp "$SCRIPT_DIR/yt-worker.service" "$DEPLOY_DIR/"
 chmod +x "$DEPLOY_DIR/start.sh"
 echo "  服务文件就绪 ✓"
 

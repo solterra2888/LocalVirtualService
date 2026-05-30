@@ -1,0 +1,18 @@
+[Unit]
+Description=YouTube Transcription Worker (HK local virtual service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/local_virtual_service
+ExecStart=/bin/bash /opt/local_virtual_service/start.sh
+Restart=always
+RestartSec=30
+# 降低被 OOM killer 选中的概率（长视频 ASR 下载时内存峰值较高）
+OOMScoreAdjust=-200
+StandardOutput=append:/opt/local_virtual_service/logs/worker.log
+StandardError=append:/opt/local_virtual_service/logs/worker.log
+
+[Install]
+WantedBy=multi-user.target
