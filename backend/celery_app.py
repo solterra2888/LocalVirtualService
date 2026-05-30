@@ -83,6 +83,12 @@ except ImportError as e:
     print(f"❌ 导入数据清理任务模块失败: {e}")
 
 try:
+    from backend.tasks import worker_health_tasks
+    print(f"✅ 成功导入 HK Worker 健康检查任务模块: {worker_health_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 HK Worker 健康检查任务模块失败: {e}")
+
+try:
     from backend.tasks import feed_tagging_tasks
     print(f"✅ 成功导入 Feeds 打标任务模块: {feed_tagging_tasks.__name__}")
 except ImportError as e:

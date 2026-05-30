@@ -87,6 +87,7 @@ task_routes = {
     'generate_youtube_daily_report': {'queue': 'ai_processing'},
     'generate_all_youtube_daily_reports': {'queue': 'ai_processing'},
     'cleanup_llm_usage_logs': {'queue': 'data_fetching'},
+    'check_hk_worker_health': {'queue': 'data_fetching'},  # HK YouTube Worker 心跳探测（主站消费）
     # 向量化任务 (OSS Vector Bucket / 语义检索)
     'vectorize_file_content': {'queue': 'ai_processing'},
     'vectorize_feed_content': {'queue': 'ai_processing'},
@@ -145,6 +146,11 @@ beat_schedule = {
     'reconcile-vector-bucket-daily': {
         'task': 'reconcile_vector_bucket',
         'schedule': crontab(hour=4, minute=0),
+    },
+    # 每 10 分钟探测 HK YouTube Worker 是否在线；连续 2 次未命中 (~20min) 发 Lark 告警
+    'check-hk-worker-health': {
+        'task': 'check_hk_worker_health',
+        'schedule': crontab(minute='*/10'),
     },
 }
 

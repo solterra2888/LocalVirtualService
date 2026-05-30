@@ -458,33 +458,42 @@ nano ~/local_virtual_service/.env
 
 pip 会自动卸载旧版装兼容版，不需要手动 uninstall。
 
-## 启动
+## 启动（推荐：systemd 守护）
+
+生产环境请用 systemd 管理 worker，覆盖 VM 重启 / 进程崩溃 / OOM kill 后自动拉起（30s 内）。
+
+```bash
+# 首次安装（HK VM 上执行，需 root）
+sudo cp /opt/local_virtual_service/yt-worker.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable yt-worker
+sudo systemctl start yt-worker
+
+# 查看状态
+systemctl status yt-worker
+
+# 查看日志（与 nohup 方式相同路径）
+tail -f /opt/local_virtual_service/logs/worker.log
+```
+
+### 日常重启
+
+```bash
+sudo systemctl restart yt-worker
+systemctl status yt-worker
+```
+
+### 调试备选（前台 / nohup，无自动重启）
 
 ```bash
 # 前台运行（直接查看日志，适合调试）
 bash /opt/local_virtual_service/start.sh
 
-# 后台运行（日志写入文件）
+# 后台运行（日志写入文件；进程退出后不会自动拉起）
 nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
-
-# 查看后台日志
-tail -f /opt/local_virtual_service/logs/worker.log
 ```
 
-## 重启
-
-```bash
-# 停止旧进程
-pkill -f "celery -A worker.celery_app"
-
-# 等待进程退出后重新后台启动
-sleep 2 && nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
-
-# 确认新进程已就绪
-ps aux | grep "celery -A worker.celery_app" | grep -v grep
-```
-
-> 📌 **改动 `worker/db.py` 或 `worker/services.py` 后必须在家用 VM 上重启 worker** — 仅在主仓库改代码、重启远程服务**不够**，因为这两个文件运行在家用 VM 进程里。完整部署：在 `guanhetech` 根目录推 subtree → 家用 VM `git pull` → 上面的 `pkill + start.sh`。
+> 📌 **改动 `worker/db.py` 或 `worker/services.py` 后必须在家用 VM 上重启 worker** — 仅在主仓库改代码、重启远程服务**不够**，因为这两个文件运行在家用 VM 进程里。完整部署：在 `guanhetech` 根目录推 subtree → 家用 VM `git pull` → `sudo systemctl restart yt-worker`（或调试时用 `pkill + start.sh`）。
 
 
 ## 查看日志
