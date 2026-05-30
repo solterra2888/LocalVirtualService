@@ -11,7 +11,7 @@ import { isIBReportContent, type IBReportData } from './IBTradingReportView';
 import { filesAPI } from '../services/files';
 import { tasksAPI, TaskExecution, TaskExecutionDetail } from '../services/tasks';
 import { getErrorMessage } from '../utils/errorHandler';
-import { downloadElementAsPDF } from '../utils/pdfDownload';
+import { buildAiAnalysisPdfFilename, downloadElementAsPDF } from '../utils/pdfDownload';
 import promptTemplateService, { PromptTemplate } from '../services/promptTemplateService';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 
@@ -158,12 +158,23 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
     try {
       setPdfDownloading(true);
       await new Promise(resolve => setTimeout(resolve, 500));
-      const filename = `AI_Analysis_Report_${aiAnalysisData.execution.task_name}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const documentName =
+        execution.first_display_name ||
+        execution.first_filename ||
+        aiAnalysisData.files?.[0]?.filename ||
+        'Document';
+      const filename = buildAiAnalysisPdfFilename({
+        documentName,
+        analyzedAt: aiAnalysisData.execution.created_at,
+        modelName: execution.llm_model,
+      });
       await downloadElementAsPDF('ai-analysis-content', {
         filename,
-        title: `AI Analysis Report - ${aiAnalysisData.execution.task_name}`,
+        title: documentName,
         author: process.env.REACT_APP_APP_NAME || 'Reverse Capital',
         subject: 'AI Analysis Report',
+        scale: 1.2,
+        imageQuality: 0.80,
       });
       message.success('PDF report downloaded successfully');
     } catch {

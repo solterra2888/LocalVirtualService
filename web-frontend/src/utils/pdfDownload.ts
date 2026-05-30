@@ -6,7 +6,38 @@ interface PDFDownloadOptions {
   title?: string;
   author?: string;
   subject?: string;
+  /** JPEG quality 0–1, defaults to 0.82 */
+  imageQuality?: number;
+  /**
+   * html2canvas render scale relative to CSS pixels.
+   * Lower = smaller file. 1.5 gives good readability; defaults to 1.5.
+   * On high-DPI (retina) screens the browser default would be 2–3×,
+   * which is the primary cause of 100 MB+ PDFs.
+   */
+  scale?: number;
 }
+
+/** Strip characters that are invalid in file names on common OSes. */
+const sanitizeFilenamePart = (name: string): string =>
+  name.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+
+/**
+ * Build export filename: `{Document Name} {YYYY-MM-DD} (Analyzed by {model}).pdf`
+ */
+export const buildAiAnalysisPdfFilename = (options: {
+  documentName?: string | null;
+  analyzedAt?: string | Date | null;
+  modelName?: string | null;
+}): string => {
+  const doc = sanitizeFilenamePart(options.documentName?.trim() || '') || 'Document';
+  const dateSource = options.analyzedAt ? new Date(options.analyzedAt) : new Date();
+  const date = Number.isNaN(dateSource.getTime())
+    ? new Date().toISOString().split('T')[0]
+    : dateSource.toISOString().split('T')[0];
+  const model = options.modelName?.trim();
+  const analyzedBy = model ? ` (Analyzed by ${model})` : '';
+  return `${doc} ${date}${analyzedBy}.pdf`;
+};
 
 /**
  * 将HTML元素转换为PDF并下载
@@ -21,8 +52,14 @@ export const downloadElementAsPDF = async (
     filename = 'ai-analysis-report.pdf',
     title = 'AI Analysis Report',
     author = process.env.REACT_APP_APP_NAME || 'Reverse Capital',
-    subject = 'AI Analysis Report'
+    subject = 'AI Analysis Report',
+    imageQuality = 0.82,
+    scale = 1.5,
   } = options;
+
+  const RENDER_WIDTH = 800; // CSS px — fixed width for consistent layout
+  const A4_MM_WIDTH = 210;
+  const A4_MM_HEIGHT = 297;
 
   try {
     const element = document.getElementById(elementId);
@@ -30,171 +67,98 @@ export const downloadElementAsPDF = async (
       throw new Error(`Element with id "${elementId}" not found`);
     }
 
-    // 创建临时容器来确保完整渲染
+    // Off-screen clone so we don't mutate the live DOM
     const tempContainer = document.createElement('div');
-    tempContainer.style.position = 'absolute';
-    tempContainer.style.left = '-9999px';
-    tempContainer.style.top = '0';
-    tempContainer.style.width = '800px'; // 固定宽度确保一致性
-    tempContainer.style.backgroundColor = '#ffffff';
-    tempContainer.style.padding = '20px';
-    tempContainer.style.fontFamily = 'Arial, sans-serif';
-    tempContainer.style.fontSize = '14px';
-    tempContainer.style.lineHeight = '1.6';
-    
-    // 克隆元素内容
+    tempContainer.style.cssText = [
+      'position:absolute',
+      'left:-9999px',
+      'top:0',
+      `width:${RENDER_WIDTH}px`,
+      'background-color:#ffffff',
+      'padding:20px',
+      'font-family:Arial,sans-serif',
+      'font-size:14px',
+      'line-height:1.6',
+    ].join(';');
+
     const clonedElement = element.cloneNode(true) as HTMLElement;
-    clonedElement.style.width = '100%';
-    clonedElement.style.height = 'auto';
-    clonedElement.style.backgroundColor = '#ffffff';
-    clonedElement.style.color = '#000000';
-    
-    // 移除可能影响PDF生成的样式
-    const styleElements = clonedElement.querySelectorAll('style');
-    styleElements.forEach(style => style.remove());
-    
-    // 添加PDF友好的样式
-    const style = document.createElement('style');
-    style.textContent = `
-      * {
-        box-sizing: border-box;
-      }
-      h1, h2, h3, h4, h5, h6 {
-        color: #000000 !important;
-        margin-top: 20px !important;
-        margin-bottom: 10px !important;
-        page-break-after: avoid;
-      }
-      h1 { font-size: 24px !important; }
-      h2 { font-size: 20px !important; }
-      h3 { font-size: 18px !important; }
-      h4 { font-size: 16px !important; }
-      p {
-        color: #000000 !important;
-        margin-bottom: 10px !important;
-        page-break-inside: avoid;
-      }
-      ul, ol {
-        color: #000000 !important;
-        margin-bottom: 10px !important;
-        padding-left: 20px !important;
-      }
-      li {
-        color: #000000 !important;
-        margin-bottom: 5px !important;
-      }
-      table {
-        width: 100% !important;
-        border-collapse: collapse !important;
-        margin: 10px 0 !important;
-        page-break-inside: avoid;
-      }
-      th, td {
-        border: 1px solid #000000 !important;
-        padding: 8px !important;
-        text-align: left !important;
-        color: #000000 !important;
-      }
-      th {
-        background-color: #f0f0f0 !important;
-        font-weight: bold !important;
-      }
-      blockquote {
-        border-left: 4px solid #000000 !important;
-        padding-left: 16px !important;
-        margin: 16px 0 !important;
-        background-color: #f9f9f9 !important;
-        color: #000000 !important;
-      }
-      code {
-        background-color: #f0f0f0 !important;
-        padding: 2px 4px !important;
-        border-radius: 3px !important;
-        font-family: 'Courier New', monospace !important;
-        color: #000000 !important;
-      }
-      pre {
-        background-color: #f0f0f0 !important;
-        padding: 10px !important;
-        border-radius: 5px !important;
-        overflow-x: auto !important;
-        margin: 10px 0 !important;
-        page-break-inside: avoid;
-      }
-      pre code {
-        background-color: transparent !important;
-        padding: 0 !important;
-      }
-      a {
-        color: #0000ff !important;
-        text-decoration: underline !important;
-      }
-      strong {
-        font-weight: bold !important;
-        color: #000000 !important;
-      }
-      em {
-        font-style: italic !important;
-        color: #000000 !important;
-      }
-      hr {
-        border: none !important;
-        border-top: 1px solid #000000 !important;
-        margin: 20px 0 !important;
-      }
+    clonedElement.style.cssText = 'width:100%;height:auto;background-color:#ffffff;color:#000000;';
+
+    // Drop any scoped <style> tags that carry dark-theme overrides
+    clonedElement.querySelectorAll('style').forEach(s => s.remove());
+
+    // Minimal PDF-friendly stylesheet — keep only what's needed
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      * { box-sizing: border-box; }
+      h1,h2,h3,h4,h5,h6 { color:#000 !important; margin:20px 0 10px; page-break-after:avoid; }
+      h1 { font-size:24px !important; }
+      h2 { font-size:20px !important; }
+      h3 { font-size:18px !important; }
+      h4 { font-size:16px !important; }
+      p  { color:#000 !important; margin-bottom:10px !important; }
+      ul,ol { color:#000 !important; margin-bottom:10px !important; padding-left:20px !important; }
+      li { color:#000 !important; margin-bottom:5px !important; }
+      table { width:100% !important; border-collapse:collapse !important; margin:10px 0 !important; }
+      th,td { border:1px solid #000 !important; padding:8px !important; color:#000 !important; }
+      th { background-color:#f0f0f0 !important; font-weight:bold !important; }
+      blockquote { border-left:4px solid #000 !important; padding-left:16px !important; margin:16px 0 !important; background:#f9f9f9 !important; color:#000 !important; }
+      code { background:#f0f0f0 !important; padding:2px 4px !important; border-radius:3px !important; font-family:'Courier New',monospace !important; color:#000 !important; }
+      pre  { background:#f0f0f0 !important; padding:10px !important; border-radius:5px !important; margin:10px 0 !important; }
+      pre code { background:transparent !important; padding:0 !important; }
+      a    { color:#00f !important; text-decoration:underline !important; }
+      strong { font-weight:bold !important; color:#000 !important; }
+      em { font-style:italic !important; color:#000 !important; }
+      hr { border:none !important; border-top:1px solid #000 !important; margin:20px 0 !important; }
     `;
-    
-    tempContainer.appendChild(style);
+
+    tempContainer.appendChild(styleEl);
     tempContainer.appendChild(clonedElement);
     document.body.appendChild(tempContainer);
 
-    // 等待内容渲染完成
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Allow the browser to paint the cloned DOM
+    await new Promise(resolve => setTimeout(resolve, 800));
 
-    // 使用html2canvas生成canvas
+    // Capture at controlled scale — the key lever for file size.
+    // Default window.devicePixelRatio (2–3 on retina) was the primary
+    // cause of 100 MB+ PDFs; 1.5 keeps text crisp at ~1/4 the area.
     const canvas = await html2canvas(tempContainer, {
       useCORS: true,
       allowTaint: true,
-      background: '#ffffff'
-    });
+      background: '#ffffff',
+      // html2canvas@1.4.1 types are incomplete; these options exist at runtime
+      ...({ scale, windowWidth: RENDER_WIDTH, logging: false } as object),
+    } as Parameters<typeof html2canvas>[1]);
 
-    // 清理临时元素
     document.body.removeChild(tempContainer);
 
-    // 计算PDF尺寸
-    const imgWidth = 210; // A4宽度 (mm)
-    const pageHeight = 297; // A4高度 (mm)
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    
-    // 创建PDF
+    // Convert to JPEG — dramatically smaller than PNG for text-on-white
+    const imgData = canvas.toDataURL('image/jpeg', imageQuality);
+
+    const A4_PX_HEIGHT_AT_SCALE = (A4_MM_HEIGHT / A4_MM_WIDTH) * canvas.width;
+    const totalHeightMm = (canvas.height * A4_MM_WIDTH) / canvas.width;
+
     const pdf = new jsPDF('p', 'mm', 'a4');
-    
-    // 设置PDF元数据
     pdf.setProperties({
       title,
       author,
       subject,
-      creator: `${process.env.REACT_APP_APP_NAME || 'Reverse Capital'} AI Analysis Tool`
+      creator: `${process.env.REACT_APP_APP_NAME || 'Reverse Capital'} AI Analysis Tool`,
     });
 
-    let heightLeft = imgHeight;
-    let position = 0;
+    // Slice the single canvas into A4 pages to avoid embedding one
+    // giant image repeated N times (which inflates the file).
+    const totalPages = Math.ceil(canvas.height / A4_PX_HEIGHT_AT_SCALE);
+    for (let page = 0; page < totalPages; page++) {
+      if (page > 0) pdf.addPage();
 
-    // 添加第一页
-    pdf.addImage(canvas, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-
-    // 如果内容超过一页，添加更多页面
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(canvas, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      // Y offset in mm so that each page shows the correct band
+      const yOffsetMm = -(page * A4_MM_HEIGHT);
+      pdf.addImage(imgData, 'JPEG', 0, yOffsetMm, A4_MM_WIDTH, totalHeightMm);
     }
 
-    // 下载PDF
     pdf.save(filename);
-    
+
   } catch (error) {
     console.error('Error generating PDF:', error);
     throw new Error('Failed to generate PDF. Please try again.');

@@ -94,7 +94,7 @@ import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import IBTradingReportView, { isIBReportContent, IBReportData } from '../components/IBTradingReportView';
 import TradeReviewView from '../components/TradeReviewView';
-import { downloadElementAsPDF } from '../utils/pdfDownload';
+import { buildAiAnalysisPdfFilename, downloadElementAsPDF } from '../utils/pdfDownload';
 import ReportTickerTags, { parseReportTickers } from '../components/ReportTickerTags';
 import { aiTagChipStyle, AI_TAG_CHIP_BASE } from '../components/shared/aiTagChipStyles';
 import TemplateSelector from '../components/TemplateSelector';
@@ -1121,15 +1121,24 @@ const FilesPageInner: React.FC = () => {
     try {
       setPdfDownloading(true);
       
-      const filename = `AI_Analysis_Report_${aiAnalysisData.execution.task_name}_${new Date().toISOString().split('T')[0]}.pdf`;
-      
-      
+      const executionMeta = selectedExecutionForView ?? aiAnalysisExecution;
+      const documentName =
+        executionMeta?.first_display_name ||
+        executionMeta?.first_filename ||
+        aiAnalysisData.files?.[0]?.filename ||
+        'Document';
+      const filename = buildAiAnalysisPdfFilename({
+        documentName,
+        analyzedAt: aiAnalysisData.execution.created_at,
+        modelName: executionMeta?.llm_model,
+      });
+
       // 等待一小段时间确保MarkdownRenderer完全渲染
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       await downloadElementAsPDF('ai-analysis-content', {
         filename,
-        title: `AI Analysis Report - ${aiAnalysisData.execution.task_name}`,
+        title: documentName,
         author: process.env.REACT_APP_APP_NAME || 'Reverse Capital',
         subject: 'AI Analysis Report'
       });

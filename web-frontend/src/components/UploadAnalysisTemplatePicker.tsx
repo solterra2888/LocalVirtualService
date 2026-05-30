@@ -46,6 +46,9 @@ import InsertVariablePopover from './InsertVariablePopover';
 const { Text } = Typography;
 const { TextArea } = Input;
 
+/** Above FilesPage custom overlays (1100) and default antd Modal mask (1000). */
+const TEMPLATE_EDIT_DRAWER_Z_INDEX = 1200;
+
 // ── Provider → Model 映射 ────────────────────────────────────────────────
 const PROVIDER_MODELS: Record<string, string[]> = {
   qwen: [
@@ -416,6 +419,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
           </Space>
         }
         width={680}
+        zIndex={TEMPLATE_EDIT_DRAWER_Z_INDEX}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         destroyOnClose

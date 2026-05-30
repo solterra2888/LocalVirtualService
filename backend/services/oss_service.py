@@ -21,7 +21,17 @@ load_project_env()
 
 class OSSService:
     """阿里云 OSS 服务类 - 支持多种文件类型上传"""
-    
+
+    _instance: Optional["OSSService"] = None
+    _startup_logged = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            inst = super().__new__(cls)
+            inst._initialized = False
+            cls._instance = inst
+        return cls._instance
+
     # 支持的音频格式（根据 Fun-ASR 要求）
     SUPPORTED_AUDIO_FORMATS = {
         '.aac', '.amr', '.avi', '.flac', '.flv', '.m4a', '.mkv', 
@@ -44,7 +54,11 @@ class OSSService:
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
     
     def __init__(self):
-        """初始化 OSS 服务"""
+        """初始化 OSS 服务（进程内单例，仅首次构造时连接并打日志）"""
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+
         # 从环境变量读取配置
         self.access_key_id = os.getenv('OSS_ACCESS_KEY_ID')
         self.access_key_secret = os.getenv('OSS_ACCESS_KEY_SECRET')
@@ -60,23 +74,27 @@ class OSSService:
         
         # 自定义域名（可选，用于在浏览器内预览 PDF）
         self.custom_domain = os.getenv('OSS_CUSTOM_DOMAIN', '').strip()
-        if self.custom_domain:
-            info(f"OSS 自定义域名已配置: {self.custom_domain}")
-        
+
         # 验证配置
         if not self.access_key_id or not self.access_key_secret:
-            warning("OSS 配置不完整，请在 .env 中设置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET")
             self.bucket = None
+            if not OSSService._startup_logged:
+                warning("OSS 配置不完整，请在 .env 中设置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET")
+                OSSService._startup_logged = True
         else:
             try:
-                # 创建 Auth 对象
                 auth = oss2.Auth(self.access_key_id, self.access_key_secret)
-                # 创建 Bucket 对象
                 self.bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
-                info(f"OSS 服务初始化成功: bucket={self.bucket_name}, endpoint={self.endpoint}")
+                if not OSSService._startup_logged:
+                    if self.custom_domain:
+                        info(f"OSS 自定义域名已配置: {self.custom_domain}")
+                    info(f"OSS 服务初始化成功: bucket={self.bucket_name}, endpoint={self.endpoint}")
+                    OSSService._startup_logged = True
             except Exception as e:
-                error(f"OSS 服务初始化失败: {str(e)}")
                 self.bucket = None
+                if not OSSService._startup_logged:
+                    error(f"OSS 服务初始化失败: {str(e)}")
+                    OSSService._startup_logged = True
     
     def is_configured(self) -> bool:
         """检查 OSS 是否已正确配置"""
