@@ -505,6 +505,12 @@ tail -f /opt/local_virtual_service/logs/worker.log
 tail -50 /opt/local_virtual_service/logs/worker.log
 ```
 
+若 systemd 启动失败（`status=1/FAILURE`），日志文件可能还没写入，改用 journalctl 看原始报错：
+
+```bash
+journalctl -u yt-worker -n 50 --no-pager
+```
+
 ---
 
 ### 五、验证 Worker 运行状态
