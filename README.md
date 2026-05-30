@@ -420,144 +420,146 @@ Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `Co
 - 必查 dateutil/feedparser/第三方解析返回值的 tzinfo 状态
 - 详细背景见主仓库 `docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.5.5
 
-## 快速部署
+## HK VM 运维手册
+
+> 以下所有命令均在**香港家用 VM**（`localhost001`）上以 root 身份执行，除非特别注明。
+
+---
+
+### 一、首次部署（全新机器）
 
 ```bash
-# 需要已安装 Miniconda/Anaconda
+# 1. 克隆独立仓库到目标路径
+git clone https://github.com/solterra2888/LocalVirtualService.git /opt/local_virtual_service
+
+# 2. 安装 conda 环境与依赖
+cd /opt/local_virtual_service
 bash setup.sh
 
-# 编辑配置
-nano ~/local_virtual_service/.env
-```
+# 3. 编辑配置（填入 Redis、DB、OSS、DashScope、Webshare 等密钥）
+cp .env.template .env
+nano .env
 
-完成配置后，安装 systemd 服务（一次性操作，需 root）：
-
-```bash
+# 4. 安装 systemd 服务（一次性，之后开机自启、崩溃自愈）
 sudo cp /opt/local_virtual_service/yt-worker.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable yt-worker
 sudo systemctl start yt-worker
 
-# 确认服务已启动
+# 5. 确认启动成功
 systemctl status yt-worker
+tail -20 /opt/local_virtual_service/logs/worker.log
 ```
 
-### 升级已部署的环境（增加 curl-cffi 依赖）
+---
 
-如果你是从旧版升级过来，需要额外安装 `curl-cffi` 以支持 yt-dlp 的 TLS 指纹伪装（绕过 YouTube 字幕 CDN 的 429）：
+### 二、日常代码更新（主站有新提交后）
 
-```bash
-# 路径按你实际的 conda 环境调整
-# 注意版本上限！yt-dlp 只兼容 curl-cffi 0.10.x ~ 0.14.x（以及 0.5.10），
-# 装了 0.15+ 会报 ImportError 导致 impersonation 不可用
-/root/miniconda3/envs/yt_service/bin/pip install "curl-cffi>=0.10,<0.15"
-
-# 验证 yt-dlp 真的识别到了 impersonate 后端（应输出一串非空列表）
-/root/miniconda3/envs/yt_service/bin/python -c \
-  "import yt_dlp; y=yt_dlp.YoutubeDL({'quiet':True}); \
-   print([str(t) for t in y._get_available_impersonate_targets()])"
-```
-
-安装后 `.env` 里 `YTDLP_IMPERSONATE=auto` 自动生效。如果不想启用，设置 `YTDLP_IMPERSONATE=false`。
-
-### 如果已装了太新版本（> 0.14）怎么办
-
-降级即可：
-
-```bash
-/root/miniconda3/envs/yt_service/bin/pip install "curl-cffi>=0.10,<0.15"
-```
-
-pip 会自动卸载旧版装兼容版，不需要手动 uninstall。
-
-## 启动（推荐：systemd 守护）
-
-生产环境请用 systemd 管理 worker，覆盖 VM 重启 / 进程崩溃 / OOM kill 后自动拉起（30s 内）。
-
-```bash
-# 首次安装（HK VM 上执行，需 root）
-sudo cp /opt/local_virtual_service/yt-worker.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable yt-worker
-sudo systemctl start yt-worker
-
-# 查看状态
-systemctl status yt-worker
-
-# 查看日志（与 nohup 方式相同路径）
-tail -f /opt/local_virtual_service/logs/worker.log
-```
-
-### 日常重启
-
-```bash
-sudo systemctl restart yt-worker
-systemctl status yt-worker
-```
-
-### 调试备选（前台 / nohup，无自动重启）
-
-```bash
-# 前台运行（直接查看日志，适合调试）
-bash /opt/local_virtual_service/start.sh
-
-# 后台运行（日志写入文件；进程退出后不会自动拉起）
-nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
-```
-
-> 📌 **改动 `worker/db.py` 或 `worker/services.py` 后必须在家用 VM 上重启 worker** — 仅在主仓库改代码、重启远程服务**不够**，因为这两个文件运行在家用 VM 进程里。完整部署：在 `guanhetech` 根目录推 subtree → 家用 VM `git pull` → `sudo systemctl restart yt-worker`（或调试时用 `pkill + start.sh`）。
-
-
-## 查看日志
-```bash
-tail -f /opt/local_virtual_service/logs/worker.log
-```
-
-## 日常代码更新
-
-每次主仓库 `deployment/local_virtual_service/` 有新提交后，按以下步骤同步到家用 VM：
-
-### 步骤一：推送到 LocalVirtualService 独立仓库（在主仓库服务器执行）
+**在主站服务器（`43.99.37.76`）执行** — 把改动推到 GitHub 独立仓库：
 
 ```bash
 # 在 guanhetech 根目录
 git -c http.version=HTTP/1.1 subtree push --prefix=deployment/local_virtual_service local-virtual-service main
 ```
 
-> 若出现 `Updates were rejected`（subtree 历史不兼容），改用强制推送：
->
+> 若出现 `Updates were rejected`，改用强制推送：
 > ```bash
 > git subtree split --prefix=deployment/local_virtual_service -b lvs-temp
 > git -c http.version=HTTP/1.1 push local-virtual-service lvs-temp:main --force
 > git branch -D lvs-temp
 > ```
 
-### 步骤二：在家用 VM 拉取代码并重启
+**在香港 VM 执行** — 拉取代码并重启：
 
 ```bash
 cd /opt/local_virtual_service
 git pull
-
-# 使用 systemd（推荐）
 sudo systemctl restart yt-worker
+
+# 确认重启成功
 systemctl status yt-worker
-
-# 或调试模式（停掉旧进程后前台运行）
-pkill -f "celery -A worker.celery_app"; sleep 2
-bash /opt/local_virtual_service/start.sh
-```
-
-> 📌 **只改了远程服务器（`backend/`）的代码，不需要动家用 VM**，直接在主站重启 Celery 即可。只有 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等）改动了才需要执行上述步骤。
-
-### 步骤三：确认 worker 正常运行
-
-```bash
-# 应看到 4 个 celery worker 进程
-ps aux | grep "celery -A worker.celery_app" | grep -v grep
-
-# 日志里应出现 "YouTube Transcription Worker 启动" 并看到 Webshare 自检通过
 tail -20 /opt/local_virtual_service/logs/worker.log
 ```
+
+> 📌 **只改了主站 `backend/` 的代码不需要动 HK VM**，只在主站重启 Celery 即可。
+> 只有修改了 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等）才需要在 HK VM 执行上面两步。
+
+---
+
+### 三、日常重启（不更新代码）
+
+```bash
+sudo systemctl restart yt-worker
+systemctl status yt-worker
+```
+
+---
+
+### 四、查看日志
+
+```bash
+# 实时追踪
+tail -f /opt/local_virtual_service/logs/worker.log
+
+# 查看最近 50 行
+tail -50 /opt/local_virtual_service/logs/worker.log
+```
+
+---
+
+### 五、验证 Worker 运行状态
+
+```bash
+# 应看到 4 个 celery worker 进程（main / long / priority-transcript / priority-asr）
+ps aux | grep "celery -A worker.celery_app" | grep -v grep
+
+# 日志里应出现以下两行说明启动正常：
+#   "YouTube Transcription Worker 启动"
+#   "✓ Webshare 自检通过: exit_ip=..."
+tail -30 /opt/local_virtual_service/logs/worker.log
+```
+
+---
+
+### 六、调试模式（临时，无自动重启）
+
+> ⚠️ 调试结束后记得切回 systemd，否则 VM 重启后 worker 不会自动启动。
+
+```bash
+# 先停掉 systemd 管理的服务
+sudo systemctl stop yt-worker
+
+# 前台运行（日志直接打到终端，Ctrl+C 退出）
+bash /opt/local_virtual_service/start.sh
+
+# 或后台运行（必须显式重定向，否则日志写到 nohup.out）
+nohup bash /opt/local_virtual_service/start.sh \
+  > /opt/local_virtual_service/logs/worker.log 2>&1 &
+
+# 调试结束后恢复 systemd 接管
+pkill -f "celery -A worker.celery_app"
+sleep 3
+sudo systemctl start yt-worker
+```
+
+---
+
+### 七、升级已部署的 conda 环境（新增依赖时）
+
+如果 `requirements.txt` 新增了依赖（如 `curl-cffi`），在 `git pull` 后额外执行：
+
+```bash
+/root/miniconda3/envs/yt_service/bin/pip install -r /opt/local_virtual_service/requirements.txt
+sudo systemctl restart yt-worker
+```
+
+> **curl-cffi 版本约束**：yt-dlp 只兼容 `curl-cffi>=0.10,<0.15`，装了 0.15+ 会报 ImportError。
+> 验证方法：
+> ```bash
+> /root/miniconda3/envs/yt_service/bin/python -c \
+>   "import yt_dlp; y=yt_dlp.YoutubeDL({'quiet':True}); \
+>    print([str(t) for t in y._get_available_impersonate_targets()])"
+> ```
 
 ## 字幕获取与 ASR 自动降级
 
