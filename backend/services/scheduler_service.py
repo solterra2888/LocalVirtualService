@@ -16,8 +16,6 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from backend.database.db_manager import DatabaseManager
 from backend.utils.datetime_utils import utcnow
 from backend.utils.logger import get_logger
-from backend.services.eodhd_news_service import EODHDNewsService
-from backend.services.watchlist_news_service import WatchlistNewsService
 from backend.config.exchange_config import ExchangeConfig
 from config.settings import config
 
@@ -48,27 +46,22 @@ class SchedulerService:
         
         # 注册任务类型和执行函数
         self.task_handlers = {
-            'eodhd_news': self._execute_eodhd_news_task,
-            'watchlist_news': self._execute_watchlist_news_task,
-            'twitter_subscription': self._execute_twitter_subscription_task,  # 🔥 Twitter订阅推文获取任务
-            'youtube_subscription': self._execute_youtube_subscription_task,  # 🔥 YouTube订阅视频获取任务
-            'cctv_news': self._execute_cctv_news_task,  # CCTV新闻爬取任务
+            'twitter_subscription': self._execute_twitter_subscription_task,
+            'youtube_subscription': self._execute_youtube_subscription_task,
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
-            'watchlist_fundamentals': self._execute_watchlist_fundamentals_task,  # 🔥 新增：Watchlist 基本面批量更新任务
+            'watchlist_fundamentals': self._execute_watchlist_fundamentals_task,
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
-            'news_analysis': self._execute_news_analysis_task,  # 新闻LLM分析任务
-            # 'futu_themes': 已删除 - 移除 futu 爬虫相关功能
-            'theme_sync': self._execute_theme_sync_task,  # 🔥 新增：主题同步任务
-            'market_data': self._execute_market_data_task,  # 市场数据获取任务（指数、外汇、大宗、债券、板块）
-            'earnings_calendar': self._execute_earnings_calendar_task,  # 财报日历数据获取任务
-            'ipo_calendar': self._execute_ipo_calendar_task,  # IPO 日历数据获取任务
-            'news_feed': self._execute_news_feed_task,  # EODHD 新闻 Feed 订阅任务
-            'twitter_author_summary': self._execute_twitter_author_summary_task,  # Twitter 作者摘要预生成（阶段A），完成后自动链式触发 Daily Report
-            'youtube_author_summary': self._execute_youtube_author_summary_task,  # YouTube 频道摘要预生成（阶段A），完成后自动链式触发 Daily Report
+            'theme_sync': self._execute_theme_sync_task,
+            'market_data': self._execute_market_data_task,
+            'earnings_calendar': self._execute_earnings_calendar_task,
+            'ipo_calendar': self._execute_ipo_calendar_task,
+            'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
+            'twitter_author_summary': self._execute_twitter_author_summary_task,
+            'youtube_author_summary': self._execute_youtube_author_summary_task,
         }
         
         # 添加事件监听器
@@ -893,478 +886,6 @@ class SchedulerService:
             # 下一 cron tick 会使用新的 period_key，自然进入新窗口。
             pass
     
-    async def _execute_eodhd_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EODHD新闻获取任务"""
-        try:
-            logger.info("执行EODHD新闻获取任务", params=params)
-            
-            # 处理recent_days参数，计算日期范围
-            start_date = params.get('start_date')
-            end_date = params.get('end_date')
-            
-            if params.get('recent_days') is not None:
-                # 用 utcnow() 而非 datetime.now()：服务器在 HK (UTC+8)，
-                # HK 午夜时 datetime.now() 给出"明天"日期，导致 EODHD 返回空结果。
-                current_date = utcnow()
-                recent_days = params.get('recent_days')
-                end_date = current_date.strftime('%Y-%m-%d')
-                start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
-                
-                logger.info("根据recent_days参数计算日期范围", 
-                           recent_days=recent_days,
-                           start_date=start_date, 
-                           end_date=end_date)
-            
-            # 创建EODHD新闻服务实例
-            eodhd_service = EODHDNewsService()
-            
-            # 在线程池中执行耗时的新闻获取操作，避免阻塞事件循环
-            import asyncio
-            import concurrent.futures
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    executor,
-                    eodhd_service.fetch_and_store_news,
-                    params.get('symbols'),
-                    params.get('topic'),
-                    start_date,
-                    end_date,
-                    params.get('max_results'),
-                    params.get('topic_filter'),
-                    params.get('keywords'),
-                    'eodhd_news'  # scheduler_source参数
-                )
-            
-            # 🔥 使用正确的new_count（从result中获取）
-            new_count = result.get('new_count', 0)
-            
-            # 详细的统计信息
-            stats_summary = {
-                'task_type': 'eodhd_news',
-                'fetched_count': result['fetched_count'],
-                'deduplicated_count': result['success_count'],
-                'new_count': new_count,
-                'existing_count': result['existing_count'],
-                'failed_count': result.get('failed_count', 0)
-            }
-            
-            if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，已存在 {result['existing_count']} 条"
-            else:
-                message = f"成功获取 {result['fetched_count']} 条新闻，去重后 {result['success_count']} 条，全部为新增"
-            
-            logger.info(f"📊 EODHD新闻获取统计: {stats_summary}")
-            
-            # ========== 新增：获取新闻后自动分析 ==========
-            auto_analyze = params.get('auto_analyze', False)
-            use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
-            analysis_result = None
-            
-            # 🔥 优化：使用新插入的新闻ID列表进行分析，避免时序问题
-            # 🔥 新功能：支持多模板并行分析
-            if auto_analyze:
-                logger.info(f"启用自动分析，新增 {new_count} 条新闻，use_celery={use_celery}")
-                
-                # 获取模板列表（向后兼容）
-                templates = params.get('analysis_templates')
-                if not templates:
-                    # 兼容旧的单模板配置
-                    single_template = params.get('analysis_template', 'news_summary_v1')
-                    templates = [single_template]
-                
-                logger.info(f"将使用 {len(templates)} 个模板进行分析: {templates}")
-                
-                try:
-                    if use_celery:
-                        # ========== 方案B：使用Celery（推荐多用户场景）==========
-                        logger.info("使用Celery异步处理分析任务")
-                        
-                        # 🔥 新方案：优先使用新插入的新闻ID列表
-                        new_news_ids = result.get('new_news_ids', [])
-                        
-                        if new_news_ids:
-                            # 🔥 使用新的任务：直接分析指定ID的新闻
-                            from backend.tasks.news_tasks import analyze_news_by_ids_task
-                            
-                            logger.info(f"使用新闻ID列表分析，共 {len(new_news_ids)} 条新闻")
-                            
-                            # 🔥 多模板并行：为每个模板提交独立的Celery任务
-                            celery_tasks = []
-                            enable_theme_matching = params.get('enable_theme_matching', True)
-                            for template_code in templates:
-                                task = analyze_news_by_ids_task.delay(
-                                    news_ids=new_news_ids,
-                                    template_code=template_code,
-                                    max_concurrent=params.get('max_concurrent', 8),
-                                    enable_theme_matching=enable_theme_matching
-                                )
-                                celery_tasks.append({
-                                    'template': template_code,
-                                    'task_id': task.id,
-                                    'news_count': len(new_news_ids)
-                                })
-                                logger.info(f"✓ 已提交 {template_code} 分析任务: {task.id}")
-                            
-                            analysis_result = {
-                                'status': 'submitted_to_celery',
-                                'tasks': celery_tasks,
-                                'total_templates': len(templates),
-                                'news_count': len(new_news_ids),
-                                'method': 'by_ids',
-                                'estimated_time': f'预计 {len(new_news_ids) * 3} 秒/模板'
-                            }
-                            
-                            task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
-                            message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
-                        else:
-                            # 🔥 降级方案：如果没有新闻ID列表，使用传统方式查询未分析新闻
-                            from backend.tasks.news_tasks import analyze_unanalyzed_news_task
-                            
-                            logger.warning("未获取到新闻ID列表，降级使用查询未分析新闻方式")
-                            
-                            # 准备symbols参数
-                            analysis_symbols = None
-                            if params.get('symbols'):
-                                if isinstance(params['symbols'], str):
-                                    analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
-                                else:
-                                    analysis_symbols = params['symbols']
-                            
-                            # 修复：使用analysis_batch_size作为limit，默认值应该合理（如1000）
-                            analysis_limit = params.get('analysis_batch_size', 1000)
-                            
-                            # 🔥 多模板并行：为每个模板提交独立的Celery任务
-                            celery_tasks = []
-                            enable_theme_matching = params.get('enable_theme_matching', True)
-                            for template_code in templates:
-                                task = analyze_unanalyzed_news_task.delay(
-                                    limit=analysis_limit,
-                                    template_code=template_code,
-                                    symbols=analysis_symbols,
-                                    start_date=start_date,
-                                    end_date=end_date,
-                                    max_concurrent=params.get('max_concurrent', 10),
-                                    enable_theme_matching=enable_theme_matching
-                                )
-                                celery_tasks.append({
-                                    'template': template_code,
-                                    'task_id': task.id,
-                                    'limit': analysis_limit
-                                })
-                                logger.info(f"✓ 已提交 {template_code} 分析任务（查询方式）: {task.id}")
-                            
-                            analysis_result = {
-                                'status': 'submitted_to_celery',
-                                'tasks': celery_tasks,
-                                'total_templates': len(templates),
-                                'news_count': analysis_limit,
-                                'method': 'by_query',
-                                'estimated_time': '根据未分析新闻数量而定'
-                            }
-                            
-                            task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
-                            message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
-                        
-                    else:
-                        # ========== 方案A：直接分析（仅适合小团队）==========
-                        logger.info("使用同步方式分析（适合小团队，多用户场景请启用use_celery）")
-                        
-                        # 导入新闻分析服务
-                        from backend.services.news_analysis_service import NewsAnalysisService
-                        from backend.utils.database_config import get_database_config
-                        
-                        # 创建分析服务
-                        db_config = get_database_config()
-                        news_analysis_service = NewsAnalysisService(db_config)
-                        
-                        # 获取分析参数
-                        analysis_template = params.get('analysis_template', 'news_summary_v1')
-                        # 修复：使用合理的默认值，而不是限制为new_count
-                        analysis_batch_size = params.get('analysis_batch_size', 1000)
-                        use_concurrent = params.get('use_concurrent', True)
-                        max_concurrent = params.get('max_concurrent', 10)
-                        
-                        # 准备筛选条件
-                        analysis_symbols = None
-                        if params.get('symbols'):
-                            if isinstance(params['symbols'], str):
-                                analysis_symbols = [s.strip() for s in params['symbols'].split(',') if s.strip()]
-                            else:
-                                analysis_symbols = params['symbols']
-                        
-                        # 执行批量分析
-                        logger.info(f"分析参数: template={analysis_template}, batch_size={analysis_batch_size}, "
-                                   f"concurrent={use_concurrent}, max_concurrent={max_concurrent}")
-                        
-                        analysis_result = await news_analysis_service.batch_analyze_news(
-                            limit=analysis_batch_size,  # 修复：不再限制为new_count
-                            template_code=analysis_template,
-                            symbols=analysis_symbols,
-                            start_date=start_date,
-                            end_date=end_date,
-                            use_concurrent=use_concurrent,
-                            max_concurrent=max_concurrent
-                        )
-                        
-                        # 更新消息
-                        if analysis_result['total'] > 0:
-                            analysis_msg = f"，已分析 {analysis_result['success']} 条新闻"
-                            if analysis_result['failed'] > 0:
-                                analysis_msg += f"（失败 {analysis_result['failed']} 条）"
-                            message += analysis_msg
-                            
-                            # 只记录统计信息，不包含详细的results
-                            analysis_summary = {
-                                'total': analysis_result['total'],
-                                'success': analysis_result['success'],
-                                'failed': analysis_result['failed'],
-                                'template_code': analysis_result.get('template_code', 'unknown')
-                            }
-                            logger.info(f"新闻分析完成: {analysis_summary}")
-                    
-                except Exception as e:
-                    logger.error(f"自动分析新闻失败: {str(e)}")
-                    analysis_result = {
-                        'error': str(e),
-                        'total': 0,
-                        'success': 0,
-                        'failed': 0,
-                        'status': 'failed'
-                    }
-            
-            # 返回结果（包含分析结果）
-            return_data = result.copy()
-            if analysis_result:
-                return_data['analysis'] = analysis_result
-            
-            return {
-                'success': True,
-                'message': message,
-                'data': return_data
-            }
-            
-        except Exception as e:
-            logger.error(f"EODHD新闻获取任务执行失败: {str(e)}")
-            return {
-                'success': False,
-                'message': f"EODHD新闻获取失败: {str(e)}",
-                'data': None
-            }
-    
-    async def _execute_watchlist_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行Watchlist新闻获取任务"""
-        try:
-            logger.info("执行Watchlist新闻获取任务", params=params)
-            
-            # 处理recent_days参数，计算日期范围
-            start_date = None
-            end_date = None
-            
-            if params.get('recent_days') is not None:
-                current_date = utcnow()
-                recent_days = params.get('recent_days')
-                end_date = current_date.strftime('%Y-%m-%d')
-                start_date = (current_date - timedelta(days=recent_days - 1)).strftime('%Y-%m-%d')
-                
-                logger.info("根据recent_days参数计算日期范围", 
-                           recent_days=recent_days,
-                           start_date=start_date, 
-                           end_date=end_date)
-            
-            # 创建Watchlist新闻服务实例
-            watchlist_service = WatchlistNewsService()
-            
-            # 在线程池中执行耗时的新闻获取操作，避免阻塞事件循环
-            import asyncio
-            import concurrent.futures
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    executor,
-                    watchlist_service.fetch_and_store_watchlist_news,
-                    params.get('max_results'),
-                    params.get('recent_days'),
-                    params.get('user_id')  # 可选：指定用户ID，为None时获取所有用户的watchlist
-                )
-            
-            # 获取实际新增的新闻数量（从result中直接获取）
-            new_count = result.get('new_count', 0)
-            
-            # 详细的统计信息
-            stats_summary = {
-                'task_type': 'watchlist_news',
-                'fetched_count': result['fetched_count'],
-                'deduplicated_count': result['success_count'],
-                'new_count': new_count,
-                'existing_count': result['existing_count'],
-                'failed_count': result.get('failed_count', 0),
-                'tickers_count': len(result.get('tickers', []))
-            }
-            
-            if result['existing_count'] > 0:
-                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，其中新增 {new_count} 条，已存在 {result['existing_count']} 条"
-            else:
-                message = f"成功获取 {result['fetched_count']} 条watchlist新闻，去重后 {result['success_count']} 条，全部为新增"
-            
-            logger.info(f"📊 Watchlist新闻获取统计: {stats_summary}")
-            
-            # ========== 新增：获取新闻后自动分析 ==========
-            auto_analyze = params.get('auto_analyze', False)
-            use_celery = params.get('use_celery', False)  # 新增：是否使用Celery
-            analysis_result = None
-            
-            # 修复：应该分析所有未分析的新闻，而不仅仅是新增的
-            # 之前的逻辑导致每次只分析1条新闻，造成大量新闻堆积
-            # 🔥 新功能：支持多模板并行分析
-            if auto_analyze:
-                logger.info(f"启用自动分析，新增 {new_count} 条watchlist新闻，use_celery={use_celery}")
-                
-                # 获取模板列表（向后兼容）
-                templates = params.get('analysis_templates')
-                if not templates:
-                    # 兼容旧的单模板配置
-                    single_template = params.get('analysis_template', 'news_summary_v1')
-                    templates = [single_template]
-                
-                logger.info(f"将使用 {len(templates)} 个模板进行分析: {templates}")
-                
-                try:
-                    if use_celery:
-                        # ========== 使用Celery（推荐多用户场景）==========
-                        logger.info("使用Celery异步处理分析任务")
-                        
-                        from backend.tasks.news_tasks import analyze_unanalyzed_news_task
-                        
-                        # 获取watchlist的股票列表作为筛选条件
-                        analysis_symbols = None
-                        if result.get('tickers'):
-                            analysis_symbols = result['tickers']
-                            logger.info(f"使用watchlist股票列表进行筛选，共 {len(analysis_symbols)} 个股票")
-                        
-                        # 修复：使用analysis_batch_size作为limit，默认值应该合理（如1000）
-                        # 而不是限制为new_count，这样可以分析所有未分析的历史新闻
-                        analysis_limit = params.get('analysis_batch_size', 1000)
-                        
-                        # 🔥 多模板并行：为每个模板提交独立的Celery任务
-                        celery_tasks = []
-                        enable_theme_matching = params.get('enable_theme_matching', True)
-                        for template_code in templates:
-                            task = analyze_unanalyzed_news_task.delay(
-                                limit=analysis_limit,
-                                template_code=template_code,
-                                symbols=analysis_symbols,  # 使用watchlist的股票列表
-                                start_date=start_date,     # 添加开始日期
-                                end_date=end_date,         # 添加结束日期
-                                max_concurrent=params.get('max_concurrent', 10),
-                                enable_theme_matching=enable_theme_matching
-                            )
-                            celery_tasks.append({
-                                'template': template_code,
-                                'task_id': task.id,
-                                'limit': analysis_limit
-                            })
-                            logger.info(f"✓ 已提交 {template_code} 分析任务: {task.id}")
-                        
-                        # 更新统计信息
-                        stats_summary['analysis_status'] = 'submitted_to_celery'
-                        stats_summary['celery_tasks'] = celery_tasks
-                        stats_summary['total_templates'] = len(templates)
-                        stats_summary['analysis_limit'] = analysis_limit
-                        stats_summary['estimated_analysis_count'] = min(analysis_limit, new_count)
-                        
-                        analysis_result = {
-                            'status': 'submitted_to_celery',
-                            'tasks': celery_tasks,
-                            'total_templates': len(templates),
-                            'news_count': analysis_limit,
-                            'estimated_time': '根据未分析新闻数量而定'
-                        }
-                        
-                        task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
-                        message += f"，已提交 {len(templates)} 个模板分析任务: {task_summary}"
-                        
-                    else:
-                        # ========== 直接分析（仅适合小团队）==========
-                        logger.info("使用同步方式分析（适合小团队，多用户场景请启用use_celery）")
-                        
-                        # 导入新闻分析服务
-                        from backend.services.news_analysis_service import NewsAnalysisService
-                        from backend.utils.database_config import get_database_config
-                        
-                        # 创建分析服务
-                        db_config = get_database_config()
-                        news_analysis_service = NewsAnalysisService(db_config)
-                        
-                        # 获取分析参数
-                        analysis_template = params.get('analysis_template', 'news_summary_v1')
-                        # 修复：使用合理的默认值，而不是限制为new_count
-                        analysis_batch_size = params.get('analysis_batch_size', 1000)
-                        use_concurrent = params.get('use_concurrent', True)
-                        max_concurrent = params.get('max_concurrent', 10)
-                        
-                        # 获取watchlist的股票列表作为筛选条件
-                        analysis_symbols = None
-                        if result.get('tickers'):
-                            analysis_symbols = result['tickers']
-                            logger.info(f"使用watchlist股票列表进行筛选，共 {len(analysis_symbols)} 个股票")
-                        
-                        # 执行批量分析（添加日期和股票参数）
-                        analysis_result = await news_analysis_service.batch_analyze_news(
-                            limit=analysis_batch_size,  # 修复：不再限制为new_count
-                            template_code=analysis_template,
-                            symbols=analysis_symbols,  # 添加股票列表
-                            start_date=start_date,     # 添加开始日期
-                            end_date=end_date,         # 添加结束日期
-                            use_concurrent=use_concurrent,
-                            max_concurrent=max_concurrent
-                        )
-                        
-                        # 更新消息
-                        if analysis_result['total'] > 0:
-                            analysis_msg = f"，已分析 {analysis_result['success']} 条新闻"
-                            if analysis_result['failed'] > 0:
-                                analysis_msg += f"（失败 {analysis_result['failed']} 条）"
-                            message += analysis_msg
-                            
-                            # 只记录统计信息，不包含详细的results
-                            analysis_summary = {
-                                'total': analysis_result['total'],
-                                'success': analysis_result['success'],
-                                'failed': analysis_result['failed'],
-                                'template_code': analysis_result.get('template_code', 'unknown')
-                            }
-                            logger.info(f"新闻分析完成: {analysis_summary}")
-                    
-                except Exception as e:
-                    logger.error(f"自动分析新闻失败: {str(e)}")
-                    analysis_result = {
-                        'error': str(e),
-                        'total': 0,
-                        'success': 0,
-                        'failed': 0,
-                        'status': 'failed'
-                    }
-            
-            # 返回结果（包含分析结果）
-            return_data = result.copy()
-            if analysis_result:
-                return_data['analysis'] = analysis_result
-            
-            return {
-                'success': True,
-                'message': message,
-                'data': return_data
-            }
-            
-        except Exception as e:
-            logger.error(f"Watchlist新闻获取任务执行失败: {str(e)}")
-            return {
-                'success': False,
-                'message': f"Watchlist新闻获取失败: {str(e)}",
-                'data': None
-            }
-    
     async def _execute_twitter_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行Twitter订阅推文获取任务 — 通过 Celery 异步分发给 data-worker。
@@ -1463,27 +984,33 @@ class SchedulerService:
     
     async def _execute_news_feed_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行 EODHD 新闻 Feed 订阅任务 —— 拉取新闻并写入 subscription_content
+        执行 News Feed 订阅任务 —— 包含 EODHD 新闻源和 CCTV 新闻联播。
 
         Args:
             params: 任务参数
-                - max_results: 每次拉取最大条数（默认 200）
-                - recent_days: 拉取最近 N 天的新闻（默认 1）
+                - max_results:    EODHD 每次拉取最大条数（默认 200）
+                - recent_days:    EODHD 拉取最近 N 天的新闻（默认 1）
+                - cctv_max:       CCTV 每次最多爬取文章数（默认 20）
+                - skip_cctv:      跳过 CCTV 抓取（默认 False）
         """
+        import asyncio
+        import concurrent.futures
+
         try:
-            logger.info("执行 News Feed 订阅任务", params=params)
+            logger.info("执行 News Feed 订阅任务（EODHD + CCTV）", params=params)
 
             max_results = params.get('max_results', 200)
             recent_days = params.get('recent_days', 1)
+            cctv_max = params.get('cctv_max', 20)
+            skip_cctv = params.get('skip_cctv', False)
 
             from backend.services.eodhd_news_feed_service import EODHDNewsFeedService
 
-            import asyncio
-            import concurrent.futures
-
             loop = asyncio.get_event_loop()
+
+            # -- EODHD --
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await loop.run_in_executor(
+                eodhd_result = await loop.run_in_executor(
                     executor,
                     lambda: EODHDNewsFeedService().fetch_and_distribute_news(
                         max_results=max_results,
@@ -1491,19 +1018,34 @@ class SchedulerService:
                     )
                 )
 
-            if result.get('success'):
-                message = (
-                    f"✅ 获取 {result.get('articles_fetched', 0)} 篇新闻，"
-                    f"新增 {result.get('articles_new', 0)} 篇，"
-                    f"匹配 {result.get('sources_matched', 0)} 个源"
-                )
-                return {'success': True, 'message': message, 'data': result}
-            else:
-                return {
-                    'success': False,
-                    'message': f"❌ {result.get('message', 'News Feed 任务执行失败')}",
-                    'data': result,
-                }
+            # -- CCTV --
+            cctv_result: Dict[str, Any] = {"success": True, "articles_fetched": 0, "articles_new": 0, "message": "skipped"}
+            if not skip_cctv:
+                try:
+                    from backend.services.cctv_news_feed_service import CCTVNewsFeedService
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        cctv_result = await loop.run_in_executor(
+                            executor,
+                            lambda: CCTVNewsFeedService().fetch_and_distribute(max_articles=cctv_max),
+                        )
+                except Exception as cctv_exc:
+                    logger.error(f"CCTV Feed 执行异常: {cctv_exc}")
+                    cctv_result = {"success": False, "message": str(cctv_exc), "articles_fetched": 0, "articles_new": 0}
+
+            # -- 汇总 --
+            eodhd_ok = eodhd_result.get('success', False)
+            message = (
+                f"✅ EODHD: 获取 {eodhd_result.get('articles_fetched', 0)} 篇，"
+                f"新增 {eodhd_result.get('articles_new', 0)} 篇，"
+                f"匹配 {eodhd_result.get('sources_matched', 0)} 个源 | "
+                f"CCTV: 爬取 {cctv_result.get('articles_fetched', 0)} 篇，"
+                f"新增 {cctv_result.get('articles_new', 0)} 篇"
+            )
+            return {
+                'success': eodhd_ok,
+                'message': message,
+                'data': {'eodhd': eodhd_result, 'cctv': cctv_result},
+            }
 
         except Exception as e:
             error_msg = f"News Feed 任务执行异常: {str(e)}"
@@ -1607,92 +1149,6 @@ class SchedulerService:
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
-    async def _execute_cctv_news_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """执行CCTV新闻爬取任务"""
-        try:
-            logger.info("开始执行CCTV新闻爬取任务", params=params)
-            
-            # 导入服务
-            from backend.services.cctv_news_service import create_cctv_news_service
-            cctv_service = create_cctv_news_service()
-            
-            # 提取参数
-            date = params.get('date')  # 可选：指定日期(YYYYMMDD格式)
-            max_news = params.get('max_news')  # 可选：限制爬取数量
-            auto_analyze = params.get('auto_analyze', True)  # 默认启用自动分析
-            
-            # 🔥 支持多模板（向后兼容）
-            analysis_templates = params.get('analysis_templates')
-            if not analysis_templates:
-                # 兼容旧的单模板配置
-                single_template = params.get('analysis_template', 'news_cctv_summary_v1')
-                analysis_templates = [single_template, 'news_classification']
-            
-            max_concurrent = params.get('max_concurrent', 5)  # 默认并发5
-            enable_theme_matching = params.get('enable_theme_matching', True)  # 默认启用主题匹配
-            
-            logger.info(f"将使用 {len(analysis_templates)} 个模板进行分析: {analysis_templates}")
-            
-            # 关键：在线程池中执行同步方法（爬虫是同步的，避免阻塞事件循环）
-            import asyncio
-            import concurrent.futures
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    executor,
-                    cctv_service.fetch_and_store_news,
-                    date,
-                    max_news,
-                    'cctv_news',
-                    auto_analyze,
-                    analysis_templates,
-                    max_concurrent,
-                    enable_theme_matching
-                )
-            
-            if result['success']:
-                data = result.get('data', {})
-                fetched_count = data.get('fetched_count', 0)
-                new_count = data.get('new_count', 0)
-                existing_count = data.get('existing_count', 0)
-                analysis_triggered = data.get('analysis_triggered', False)
-                celery_tasks = data.get('celery_tasks', [])
-                
-                message = f"✅ {result['message']}"
-                
-                if celery_tasks:
-                    task_summary = ', '.join([f"{t['template']}({t['task_id'][:8]})" for t in celery_tasks])
-                    message += f"，已提交 {len(celery_tasks)} 个模板分析任务: {task_summary}"
-                
-                logger.info("CCTV新闻爬取任务执行成功", 
-                          fetched=fetched_count,
-                          new=new_count,
-                          existing=existing_count,
-                          analysis_triggered=analysis_triggered,
-                          celery_tasks_count=len(celery_tasks))
-                
-                return {
-                    'success': True,
-                    'message': message,
-                    'data': data
-                }
-            else:
-                logger.error("CCTV新闻爬取任务执行失败", error=result['message'])
-                return {
-                    'success': False,
-                    'message': f"❌ {result['message']}",
-                    'data': result.get('data')
-                }
-                
-        except Exception as e:
-            error_msg = f"CCTV新闻爬取任务执行异常: {str(e)}"
-            logger.error(error_msg, exception=str(e))
-            return {
-                'success': False,
-                'message': f"❌ {error_msg}",
-                'data': None
-            }
-    
     async def _execute_economic_events_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行经济事件获取任务
@@ -2547,176 +2003,6 @@ class SchedulerService:
                 'success': False,
                 'message': error_msg,
                 'data': None
-            }
-    
-    async def _execute_news_analysis_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行新闻LLM分析任务
-        
-        Args:
-            params: 任务参数
-                - template_code: Prompt模板代码（默认: news_summary_v1）
-                - batch_size: 每次分析的新闻数量（默认: 10）
-                - symbols: 筛选特定股票代码的新闻（可选）
-                - start_date: 开始日期（可选）
-                - end_date: 结束日期（可选）
-                - use_concurrent: 是否使用并发（默认: False）
-                - max_concurrent: 最大并发数（默认: 3）
-        
-        Returns:
-            Dict包含任务执行结果
-        """
-        try:
-            logger.info("开始执行新闻LLM分析任务", params=params)
-            
-            # 导入新闻分析服务
-            from backend.services.news_analysis_service import NewsAnalysisService
-            from backend.utils.database_config import get_database_config
-            
-            # 创建服务实例
-            db_config = get_database_config()
-            news_analysis_service = NewsAnalysisService(db_config)
-            
-            # 获取参数
-            template_code = params.get('template_code', 'news_summary_v1')
-            batch_size = params.get('batch_size', 10)
-            symbols = params.get('symbols')  # 可以是逗号分隔的字符串或列表
-            start_date = params.get('start_date')
-            end_date = params.get('end_date')
-            use_concurrent = params.get('use_concurrent', False)
-            max_concurrent = params.get('max_concurrent', 3)
-            
-            # 处理symbols参数
-            if symbols and isinstance(symbols, str):
-                symbols = [s.strip() for s in symbols.split(',') if s.strip()]
-            
-            # 执行批量分析
-            result = await news_analysis_service.batch_analyze_news(
-                limit=batch_size,
-                template_code=template_code,
-                symbols=symbols,
-                start_date=start_date,
-                end_date=end_date,
-                use_concurrent=use_concurrent,
-                max_concurrent=max_concurrent
-            )
-            
-            if result['total'] == 0:
-                info_msg = "没有需要分析的新闻"
-                logger.info(info_msg)
-                return {
-                    'success': True,
-                    'message': info_msg,
-                    'data': result
-                }
-            elif result['failed'] > 0:
-                warning_msg = f"新闻分析部分成功: 成功{result['success']}条，失败{result['failed']}条"
-                logger.warning(warning_msg)
-                return {
-                    'success': True,
-                    'message': warning_msg,
-                    'data': result
-                }
-            else:
-                success_msg = f"新闻分析全部成功: 分析了{result['total']}条新闻"
-                logger.info(success_msg)
-                return {
-                    'success': True,
-                    'message': success_msg,
-                    'data': result
-                }
-                
-        except Exception as e:
-            error_msg = f"新闻分析任务执行失败: {str(e)}"
-            logger.error(error_msg)
-            return {
-                'success': False,
-                'message': error_msg,
-                'data': None
-            }
-    
-    # _execute_futu_themes_task 已删除
-    # 原因：移除 futu 爬虫相关功能，改为纯手动主题管理
-    
-    async def _execute_theme_sync_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行主题同步任务
-        将EODHD、Vector Retrieval、LLM分类的主题数据同步到统一表
-        
-        Args:
-            params: 任务参数
-                - days: 同步最近N天的新闻（默认: 7）
-                - force_resync: 是否强制重新同步（默认: False）
-                - sync_unsynced: 是否只同步未同步的新闻（默认: True）
-        
-        Returns:
-            Dict包含任务执行结果
-        """
-        try:
-            logger.info("开始执行主题同步任务", params=params)
-            
-            # 导入必要的模块
-            from backend.database.async_db_manager import AsyncDatabaseManager
-            from backend.services.theme_unification_service import ThemeUnificationService
-            from backend.utils.database_config import get_database_config
-            
-            # 创建服务实例
-            db_config = get_database_config()
-            async_db = AsyncDatabaseManager(db_config)
-            service = ThemeUnificationService(async_db)
-            
-            # 获取参数
-            days = params.get('days', 7)
-            force_resync = params.get('force_resync', False)
-            sync_unsynced = params.get('sync_unsynced', True)
-            
-            # 执行同步
-            if sync_unsynced:
-                logger.info("同步未同步的新闻主题")
-                result = await service.sync_unsynced_news()
-            else:
-                logger.info(f"同步最近 {days} 天的新闻主题")
-                result = await service.sync_recent_news(days=days, force_resync=force_resync)
-            
-            # 构建返回结果
-            if result.success:
-                total_themes = sum(result.details.values()) if result.details else 0
-                message = f"主题同步成功: {result.synced_count} 条新闻，共 {total_themes} 条主题"
-                
-                logger.info(message, details=result.details)
-                
-                return {
-                    'success': True,
-                    'message': message,
-                    'data': {
-                        'synced_count': result.synced_count,
-                        'failed_count': result.failed_count,
-                        'eodhd_tags': result.details.get('eodhd_auto_tag', 0),
-                        'vector_matches': result.details.get('vector_retrieval', 0),
-                        'llm_classifications': result.details.get('llm_classification', 0),
-                        'total_themes': total_themes
-                    }
-                }
-            else:
-                error_msg = f"主题同步部分失败: {result.failed_count} 条新闻失败"
-                logger.warning(error_msg, errors=result.errors[:5])
-                
-                return {
-                    'success': False,
-                    'message': error_msg,
-                    'data': {
-                        'synced_count': result.synced_count,
-                        'failed_count': result.failed_count,
-                        'errors': result.errors[:10]  # 最多返回10个错误
-                    }
-                }
-        
-        except Exception as e:
-            logger.error(f"主题同步任务执行失败: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'message': f"主题同步任务执行失败: {str(e)}"
             }
     
     async def _execute_market_data_task(self, params: Dict[str, Any]) -> Dict[str, Any]:

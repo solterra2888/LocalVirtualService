@@ -133,11 +133,6 @@ const Layout: React.FC = () => {
       label: 'Investment Tracking',
     },
     {
-      key: '/news',
-      icon: <NotificationOutlined />,
-      label: 'News',
-    },
-    {
       key: '/reports',
       icon: <ProfileOutlined />,
       label: 'Reports',
@@ -161,8 +156,8 @@ const Layout: React.FC = () => {
   ].filter(item => {
     // 暂时屏蔽 Investment Tracking，该模块仍未开发
     if (item.key === '/projects') return false;
-    // 暂时屏蔽 Watchlist、News、UG Data：功能未成熟；路由与页面代码保留
-    if (item.key === '/dashboard' || item.key === '/news' || item.key === 'ug-data') return false;
+    // 暂时屏蔽 UG Data：功能未成熟；路由与页面代码保留
+    if (item.key === 'ug-data') return false;
     if (item.children) return item.children.length > 0;
     return true;
   });

@@ -1,10 +1,15 @@
 # Feeds 订阅模块完整文档
 
+> **2026-05-31 更新**
+> - 旧 News 模块（`news` 表 + `NewsPage`）已移除，EODHD 新闻完全通过 Feeds 管线（`subscription_content`）提供。
+> - **CCTV 新闻联播**已接入 Feeds：用户可在 "Add Feed" 弹窗选择 `CCTV` 频道订阅，由 `news_feed` 调度任务（`CCTVNewsFeedService`）抓取并写入 `subscription_content`（`channel_type='news', channel_identifier='CCTV'`）。完整流程见 [§6.4](#64-cctv-新闻联播-feed-抓取)。
+> - **Dashboard 个股/行业新闻**（`/api/dashboard/companies/{ticker}/news`、`/sectors/{sector}/news`）数据源已从旧 `news` 表迁移到 `subscription_content`，通过 `metadata->'symbols'` 匹配 ticker。
+
 ## 概述
 
-Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订阅聚合系统**，统一管理用户在不同平台（Twitter、YouTube、News、RSS、知识星球）的订阅源，将异构内容归一化存储到同一张 `subscription_content` 表，并在前端以统一的阅读器形式呈现。
+Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订阅聚合系统**，统一管理用户在不同平台（Twitter、YouTube、News/CCTV、RSS、知识星球）的订阅源，将异构内容归一化存储到同一张 `subscription_content` 表，并在前端以统一的阅读器形式呈现。
 
-与 "文件上传 + LLM 分析"（见 `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md`）、"新闻分析"（见 `docs/instructions/NEWS_ANALYSIS_FLOW.md`）相比，Feeds 模块的核心职责是**持续、被动、按频道**地把外部内容同步进来并提供阅读体验，不自动触发 LLM 打标/分类/命名（区别见[第 7 节](#7-与其他模块的边界)）。
+与 "文件上传 + LLM 分析"（见 `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md`）、"新闻分析"（见 `docs/instructions/NEWS_ANALYSIS_FLOW.md`，已废弃）相比，Feeds 模块的核心职责是**持续、被动、按频道**地把外部内容同步进来并提供阅读体验，不自动触发 LLM 打标/分类/命名（区别见[第 7 节](#7-与其他模块的边界)）。
 
 ## 1. 模块全景
 
@@ -26,6 +31,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
         ├─ youtube_subscription    → fetch_all_youtube_subscriptions
         ├─ twitter_subscription    → fetch_twitter_subscription
         └─ news_feed               → EODHDNewsFeedService.fetch_and_distribute_news
+                                   + CCTVNewsFeedService.fetch_and_distribute（同一 tick）
     │
     ▼
 ┌──────────────────────────────────────────────────────────────────┐
@@ -40,8 +46,9 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
     │                └─ 字幕 fallback → 必要时派发 transcribe_youtube_feed_task
     │                   详见 deployment/local_virtual_service/README.md
     │
-    └─ News        → EODHDNewsFeedService
-                     (无 Celery，asyncio 线程池同步拉取 + 分发)
+    └─ News        → EODHDNewsFeedService（EODHD API）
+                 + CCTVNewsFeedService（tv.cctv.com 爬虫）
+                     (无 Celery；scheduler 内 run_in_executor 同步执行)
     │
     ▼
 ┌──────────────────────────────────────────────────────────────────┐
@@ -175,7 +182,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | Method | Path | 作用 |
 |--------|------|------|
 | `GET` | `/` | 当前用户订阅列表，可按 `channel_type` / `enabled` 过滤，返回含 `unread_count` |
-| `GET` | `/news-sources` | 列出 EODHD 支持的 News 源（供新建订阅时下拉选择）|
+| `GET` | `/news-sources` | 列出 EODHD 支持的 News 源（供新建订阅时下拉选择）；**CCTV 由前端 `feedChannelConfig.tsx` 静态提供**，不在此接口返回 |
 | `GET` | `/{subscription_id}` | 单条订阅详情（检查 owner）|
 | `POST` | `/` | **创建订阅**：校验渠道有效性、`UNIQUE` 去重、智能复用已有内容、必要时派发抓取任务（见 [§5](#5-新增订阅时的智能派发决策)）|
 | `PUT` | `/{subscription_id}` | 部分更新（改名、启用/停用、filter_config、metadata 等）|
@@ -208,9 +215,10 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `backend/services/youtube_subscription_service.py` | **服务器端** YouTube feed 实现：RSS → Data API v3 fallback、频道校验、`fetch_all_subscriptions()`（在远程家用 Worker 上执行，详见第 6 节）。 |
 | `backend/services/twitter_subscription_service.py` | **twitterapi.io** 拉取（`since_time`/`until_time` 时间切片，禁用 cursor 分页）、聚合多用户订阅、写入 `subscription_content`；回看窗口由 `TWITTER_*` 环境变量与 `last_fetched_at` 共同决定（见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区)）|
 | `backend/services/eodhd_news_feed_service.py` | 从 EODHD News API 拉取 → 经 `NewsAdapter` → 写入 `subscription_content`。暴露 `AVAILABLE_NEWS_SOURCES` 给前端 News 源下拉 |
+| `backend/services/cctv_news_feed_service.py` | **新增（2026-05-31）** 爬取 CCTV 新闻联播 → 经 `NewsAdapter` → 写入 `subscription_content`（`channel_identifier='CCTV'`）。由 `news_feed` 调度任务在同一 tick 中调用 |
 | `backend/services/content_adapters/*.py` | 各渠道的字段归一化器：`TwitterAdapter` / `YouTubeAdapter` / `NewsAdapter` |
 | `backend/services/youtube_service.py` | YouTube 字幕/元信息工具类（被 API 与批量任务共用）|
-| `backend/services/scheduler_service.py` | 将 `task_scheduling` 里的 `youtube_subscription` / `twitter_subscription` / `news_feed` 类型映射到对应的 Celery 派发函数 |
+| `backend/services/scheduler_service.py` | 将 `task_scheduling` 里的 `youtube_subscription` / `twitter_subscription` / `news_feed` 类型映射到对应的 Celery 派发函数；`news_feed` 任务同时调用 EODHD + CCTV |
 
 ## 5. 新增订阅时的智能派发决策
 
@@ -238,7 +246,8 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
         │
         ├─ twitter  → fetch_twitter_subscription_task            (queue: data_fetching)
         ├─ news     → add_user_to_existing_content_task
-        │             (News 通常早有内容；若无则依赖定时 news_feed 任务)
+        │             (EODHD 源 / CCTV：通常依赖定时 news_feed；无历史则等下一 tick)
+        │             CCTV 校验：channel_identifier 须为 `CCTV`（见 feedChannelConfig）
         └─ youtube  → 灰度：
                      YOUTUBE_SUBSCRIPTION_USE_LOCAL=true  (默认)
                         → celery send_task('fetch_youtube_subscription', ...)
@@ -260,9 +269,9 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 |-------------|----------|--------|------|
 | `youtube_subscription` | `0 * * * *`（每小时，种子数据见 `backend/database/migrations/insert_youtube_subscription_task.sql`）| `_execute_youtube_subscription_task` → `fetch_all_youtube_subscriptions_task.delay()` | 全量扫描所有启用的 YouTube 订阅，拉最新视频并做字幕 fallback |
 | `twitter_subscription` | **推荐** `0 */2 * * *`（每 2 小时）；由 `task_scheduling` / 前端 Scheduler 配置。勿将日级 cron（如 `50 0 * * *`）长期留在生产作「测试」，否则会出现「数小时～一天无更新」的假象 | `_execute_twitter_subscription_task` → `fetch_twitter_subscription_task.delay(sub_id, …)` | 按作者聚合拉取并入库；详见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
-| `news_feed` | 由用户配置 | `_execute_news_feed_task` → `EODHDNewsFeedService.fetch_and_distribute_news`（run_in_executor 同步调用）| News 批量入 `subscription_content` |
+| `news_feed` | 默认 `*/30 * * * *`（见 `insert_news_feed_task.sql`）| `_execute_news_feed_task`：先 EODHD，再 CCTV（同一 tick，各用 `run_in_executor`）| EODHD 源 + CCTV 新闻联播写入 `subscription_content`；详见 [§6.4](#64-cctv-新闻联播-feed-抓取) |
 
-前端 `SchedulerPage.tsx` + `DataSourceConfigModal.tsx` 可配置这些调度项。
+前端 `SchedulerPage.tsx` 卡片 **News Feed (My Feeds)** + `DataSourceConfigModal.tsx` 可配置 `max_results` / `recent_days`；CCTV 参数 `cctv_max` / `skip_cctv` 目前需在 `task_scheduling.params` JSON 中手动维护（Scheduler UI 未暴露）。
 
 ### 6.1 Celery 任务清单（`backend/tasks/subscription_tasks.py` + `file_tasks.py`）
 
@@ -328,6 +337,141 @@ twitterapi.io 返回的 `createdAt` 偶发将 **本地时间误标为 `+0000`（
 #### 6.3.5 部署注意（必读）
 
 修改 `twitter_subscription_service` / `twitter_adapter` 后，必须 **重启消费 `data_fetching` 队列的 Celery Worker**（例如服务名 `rc-celery-data`），否则进程内仍为旧代码，会出现「手动 curl API 有数据、任务侧 `tweets_new=0`」的错位现象。
+
+### 6.4 CCTV 新闻联播 Feed 抓取
+
+CCTV 已从旧 News 模块（`cctv_news` 任务类型 → `news` 表 → `news_cctv_summary_v1` LLM 分析）迁移到 Feeds 管线，与 EODHD 新闻共用 **`news_feed`** 调度类型，**不新增** `task_type`，也不走 Celery。
+
+#### 6.4.1 与旧管线的对比
+
+| 维度 | 旧管线（已移除）| 当前 Feeds 管线 |
+|------|----------------|----------------|
+| 调度类型 | `cctv_news`（独立 Scheduler 卡片）| 合并在 `news_feed` |
+| 存储 | `news` 表 | `subscription_content` |
+| 用户可见入口 | News 页 / 旧 preset | My Feeds → 订阅 `CCTV` |
+| LLM | `news_cctv_summary_v1` 等自动分析 | **不自动**（News 渠道不参与 Feed 自动打标，见 §10.1）|
+| 订阅标识 | — | `channel_type='news'`, `channel_identifier='CCTV'` |
+
+> 遗留 API：`POST /api/scheduler/tasks/cctv-news` 等端点可能仍存在，但 `valid_task_type` 已不再包含 `cctv_news`（见 `drop_legacy_news_module.sql`），**请勿再创建**旧类型任务。
+
+#### 6.4.2 前置条件
+
+1. **用户订阅**：在 `/feeds` → Add Feed → News 渠道选择 **CCTV 新闻联播**（`feedChannelConfig.tsx` 中 `identifier: 'CCTV'`）。
+2. **后端校验**：`POST /api/subscriptions/` 将 `CCTV` 与 `AVAILABLE_NEWS_SOURCES`（EODHD 源）合并校验（`subscriptions.py`）。
+3. **Python 依赖**：`beautifulsoup4`（`CCTVNewsFeedService` 启动时检查，缺失则 `ImportError`）。
+4. **调度启用**：`task_scheduling` 中存在 `type='news_feed'` 且 `enabled=true` 的记录。
+
+若无任何用户订阅 CCTV，`fetch_and_distribute` 会**直接跳过**（日志：`没有 CCTV 订阅用户，跳过抓取`），不访问 tv.cctv.com。
+
+#### 6.4.3 端到端流程
+
+```
+用户订阅 CCTV (subscription_list)
+    │
+    ▼
+task_scheduling: news_feed tick
+    │
+    ▼
+scheduler_service._execute_news_feed_task(params)
+    │
+    ├─ [1] run_in_executor → EODHDNewsFeedService.fetch_and_distribute_news(...)
+    │       （按 Yahoo/CNBC 等 EODHD 源分发，与 CCTV 无关）
+    │
+    └─ [2] 若 skip_cctv != true：
+            run_in_executor → CCTVNewsFeedService().fetch_and_distribute(max_articles=cctv_max)
+                │
+                ├─ _get_cctv_subscriber_ids()
+                │     SELECT user_id FROM subscription_list
+                │     WHERE channel_type='news' AND channel_identifier='CCTV' AND enabled=true
+                │
+                ├─ _scrape_article_list(date?, max_articles)
+                │     GET https://tv.cctv.com/lm/xwlb/index.shtml[?date=YYYYMMDD]
+                │     解析列表页 <a>：href 含 VIDE + tv.cctv.com，提取标题与 URL 日期
+                │
+                ├─ 逐篇 _extract_content(url)
+                │     优先 #content_area 内 <p>；失败则 fallback 含 "content" 的 div
+                │     篇间 sleep 1–2s（随机），单请求最多重试 3 次
+                │
+                ├─ _to_raw_data(article) → NewsAdapter.normalize → save_content
+                │     user_ids = 所有 CCTV 订阅者；ON CONFLICT 合并 user_ids[]
+                │
+                └─ _update_unread_counts(user_ids)
+                      对每个用户调用 update_subscription_unread_count(subscription_id, user_id)
+    │
+    ▼
+前端 GET /api/subscriptions/{id}/contents → Feeds 阅读器展示
+```
+
+实现文件：`backend/services/cctv_news_feed_service.py`；调度入口：`backend/services/scheduler_service.py::_execute_news_feed_task`。
+
+#### 6.4.4 入库字段约定
+
+经 `NewsAdapter` 归一化后，CCTV 文章在 `subscription_content` 中的关键字段：
+
+| 字段 | CCTV 取值 | 说明 |
+|------|-----------|------|
+| `channel_type` | `news` | 与 EODHD 新闻相同 |
+| `content_id` | 文章 URL（`link`）| 天然唯一，跨用户去重 |
+| `author_identifier` / `author_name` | `CCTV` | 来自 `raw_data.source`；Feeds 列表按此过滤 |
+| `title` / `content` | 爬取标题 + 正文段落（`\n` 拼接）| — |
+| `url` | `https://tv.cctv.com/...` | 原文链接 |
+| `published_at` | URL 路径 `/YYYY/MM/DD/` 或 fallback `utcnow()` | — |
+| `metadata.symbols` | `[]` | **无 ticker**；不会出现在 Dashboard 个股新闻（依赖 symbols 匹配）|
+| `metadata.api_tags` | `[]` | — |
+| `user_ids` | 所有启用 CCTV 订阅的用户 ID | 第二人订阅同一频道只 merge，不重复爬 |
+
+> 说明：`NewsAdapter` 写入的 `metadata.news_source` 固定为 `'eodhd'`（适配器未区分爬虫源），识别 CCTV 内容请以 **`author_identifier = 'CCTV'`** 为准。
+
+#### 6.4.5 调度参数（`task_scheduling.params`）
+
+| 参数 | 默认 | 作用 |
+|------|------|------|
+| `max_results` | `200` | EODHD 单次拉取上限 |
+| `recent_days` | `1` | EODHD 拉取最近 N 天 |
+| `cctv_max` | `20` | CCTV 单次最多爬取文章数（防 tick 超时）|
+| `skip_cctv` | `false` | `true` 时跳过 CCTV，仅跑 EODHD |
+
+示例（DB 直接更新 params）：
+
+```json
+{
+  "max_results": 200,
+  "recent_days": 1,
+  "cctv_max": 30,
+  "skip_cctv": false
+}
+```
+
+任务返回 `data.cctv` 子对象，汇总日志形如：`CCTV: 爬取 N 篇，新增 M 篇`。CCTV 单源失败**不会**导致整个 `news_feed` 失败（EODHD 结果仍按 `eodhd_ok` 判定整体 `success`）。
+
+#### 6.4.6 EODHD News 与 CCTV 对比
+
+| 维度 | EODHD（`EODHDNewsFeedService`）| CCTV（`CCTVNewsFeedService`）|
+|------|-------------------------------|------------------------------|
+| 数据源 | EODHD News API | tv.cctv.com HTML 爬虫 |
+| 订阅粒度 | 按媒体源（Yahoo Finance、CNBC…）| 单一频道 `CCTV` |
+| 分发逻辑 | 按 `source` 匹配订阅用户 | 所有 CCTV 订阅者收到同一批文章 |
+| `content_id` | 文章 `link` | 文章 `link` |
+| `symbols` | API 返回 ticker 列表 | 恒为空 |
+| 首抓 | 新建订阅通常 `add_user_to_existing_content_task` | 同上，实质等 `news_feed` |
+| 推荐 cron | `*/30 * * * *` | 与 EODHD 共用；联播晚间更新可酌情改为日级 + 提高 `cctv_max` |
+
+#### 6.4.7 前端与 API 触点
+
+| 位置 | 说明 |
+|------|------|
+| `web-frontend/src/components/feed/feedChannelConfig.tsx` | `NEWS_SOURCES` 含 `{ identifier: 'CCTV', label: 'CCTV 新闻联播', ... }` |
+| `FeedReaderPage` / `MobileFeedsPage` | 与其它 News 源相同的三栏阅读体验 |
+| `SchedulerPage` → **News Feed (My Feeds)** | 描述含 EODHD；CCTV 随同一任务执行，无独立卡片 |
+| `GET /api/subscriptions/news-sources` | 仅返回 EODHD 源列表；**CCTV 不在此接口**，由前端 `feedChannelConfig` 静态配置 |
+
+#### 6.4.8 运维注意
+
+- **无人订阅 = 零外呼**：无 CCTV 订阅用户时不爬站，适合多环境共用库。
+- **爬取耗时**：`cctv_max=20` 时约 20–40s（含篇间 sleep）；与 EODHD 串行执行，整 tick 时间 = 两者之和。
+- **无自动 LLM**：`AUTO_FEED_TAG_CHANNELS` 默认仅 `twitter,youtube`；CCTV 正文不会自动进入 `subscription_content_tags`。
+- **BeautifulSoup 缺失**：Web 进程 import 失败会导致 `news_feed` 中 CCTV 分支异常并被 catch，见 scheduler 日志 `CCTV Feed 执行异常`。
+- **历史数据**：旧 `news` 表中 CCTV 记录不会自动迁移；新内容仅来自 Feeds 抓取。
 
 ## 7. YouTube Feed 抓取 & 转录完整流程（涉及本地虚拟机 Worker）
 
@@ -439,7 +583,7 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 | `web-frontend/src/components/feed/feedUtils.ts` | 时间格式化、摘要截断等辅助 |
 | `web-frontend/src/components/feed/FeedTweetContent.tsx` | Twitter 富文本/媒体/引用树渲染 |
 | `web-frontend/src/components/feed/FeedSourceIconPicker.tsx` | 新建订阅时选择图标 |
-| `web-frontend/src/pages/SchedulerPage.tsx` + `DataSourceConfigModal.tsx` | 配置 `youtube_subscription` / `twitter_subscription` / `news_feed` 定时任务 |
+| `web-frontend/src/pages/SchedulerPage.tsx` + `DataSourceConfigModal.tsx` | 配置 `youtube_subscription` / `twitter_subscription` / `news_feed`（含 EODHD + CCTV）定时任务 |
 | `web-frontend/src/pages/SubscriptionsPage.tsx` | **已废弃**，功能合并进 `/feeds`。页面内有跳转提示 |
 
 **典型前端调用序列**（用户进入 `/feeds`）：
@@ -455,12 +599,12 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 
 | 比较维度 | Feeds 模块（本文档）| 文件上传（UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW）| 新闻分析（NEWS_ANALYSIS_FLOW）|
 |---------|--------------------|-----------------------------------------------|-------------------------------|
-| 数据源 | 外部平台被动订阅 | 用户主动上传 / 粘贴 YouTube 链接 | EODHD News API + 内置 `news` 表 |
+| 数据源 | 外部平台被动订阅（含 EODHD API + CCTV 爬虫）| 用户主动上传 / 粘贴 YouTube 链接 | 已废弃：`news` 表 + 旧分析管线 |
 | 主表 | `subscription_content` | `file_processing_details` + `processing_stats` | `news` |
 | YouTube 抓取 | 家用 Worker（`youtube_fetching` / `youtube_transcription`）| 家用 Worker（priority 队列 `youtube_priority` / `youtube_transcription_priority`）| — |
 | 自动 LLM 打标 / 分类 / 命名 | **否** | **是**（`finalize_youtube_file_task` → `content_tagging` / `content_classify`）| 独立的 `NewsAnalysisService` |
 | 个性化标签（`personalized_tags`）| 不自动调用，但可作为用户阅读后手动二次处理入口 | 自动调用（详见 `PERSONALIZED_TAGS_IMPLEMENTATION.md`）| 不参与 |
-| 定时触发 | scheduler_service（youtube/twitter/news 三类型）| 无（用户触发）| scheduler_service (news_analysis) |
+| 定时触发 | scheduler_service（youtube/twitter/**news_feed**=EODHD+CCTV）| 无（用户触发）| 已移除（原 `news_analysis` / `cctv_news`）|
 
 **如果将来要让 Feeds YouTube 字幕成功后自动打标/分类**，需要在 `subscription_content_service.update_transcript` 成功分支派发类似 `finalize_youtube_file_task` 的回调，并把 `subscription_content` 的 id 适配到 `content_tagging_service`/`content_classify_service`（当前两者只读 `file_processing_details`）。
 
@@ -684,6 +828,8 @@ personalize_feed_summary_task (per-user)
 | Feed 批量任务堵塞用户上传 | 本身不会，已由 `youtube_priority` / `youtube_transcription_priority` 独立 worker 隔离。若被打破，检查 local Worker 是否正确启动了 Priority Worker 进程（local README "上传插队队列" 一节）|
 | 未读数不对 | 检查 DB 里 `update_subscription_unread_count` 触发器是否存在；或手动 `UPDATE subscription_list SET unread_count = ...` 重算 |
 | News 订阅新增后无内容 | News 依赖定时 `news_feed` 任务，不走单订阅首抓；确认 `task_scheduling` 里 `news_feed` 是否启用并在正常 tick |
+| CCTV 订阅后 Feeds 无新闻联播 | 1) 是否有人订阅 `CCTV`（无订阅则服务跳过爬取）；2) `news_feed` 是否启用、`skip_cctv` 是否为 false；3) 日志 `cctv_news_feed_service` / scheduler 返回的 `data.cctv`；4) `beautifulsoup4` 是否安装；5) tv.cctv.com 是否可访问 |
+| CCTV 不出现在 Dashboard 个股新闻 | 预期行为：`metadata.symbols` 为空，Dashboard 按 ticker 匹配，CCTV 仅在 Feeds 阅读 |
 | Twitter 长时间无新推文 / `tweets_new=0` | 1) `task_scheduling` 中 `twitter_subscription` 的 **cron 是否过稀**（日级会看起来像「不更新」）；2) `celery_data_worker.log` / `app.log` 是否仍有 **旧版** `since:` 字符串或 cursor 相关日志；3) 改代码后是否已 **重启 `data_fetching` Worker**（见 [§6.3.5「部署注意（必读）」](#63-twitter-订阅抓取twitterapiio--调度--时区)）；4) API 429/5xx 与 `TWITTER_API_KEY`；5) 若频繁出现 `has_next=True` 的 warning，考虑缩小 `SLICE_HOURS`（需改代码）|
 | Twitter 前端时间与 X 官网不一致 | 查 `published_at` 是否曾被伪 UTC 污染；当前以 **Snowflake 校验** 为准，详见 **`docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.9** |
 
@@ -692,7 +838,9 @@ personalize_feed_summary_task (per-user)
 - **`docs/instructions/TIMEZONE_OPTIMIZATION.md`** — 全站时区契约；Feeds 侧请重点阅读 **§7.9**（twitterapi.io `createdAt` 误标 + Snowflake 修复）及 §7.5.5（YouTube 家用 Worker 写入路径）
 - **[`deployment/local_virtual_service/README.md`](../../deployment/local_virtual_service/README.md)** — YouTube Feed 与 Upload Link 的家用 Worker 权威文档（队列架构、字幕/ASR 降级、Webshare、长视频路由、全部 `.env`）
 - `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md` — 对比：用户上传链路
-- `docs/instructions/NEWS_ANALYSIS_FLOW.md` — 对比：新闻 LLM 分析管线（独立于 Feeds 的 `news` 订阅）
+- `docs/instructions/NEWS_ANALYSIS_FLOW.md` — 已废弃：旧 `news` 表 + CCTV/EODHD 分析管线（CCTV 现见本文 §6.4）
+- `backend/services/cctv_news_feed_service.py` — CCTV Feeds 抓取实现
+- `backend/database/migrations/drop_legacy_news_module.sql` — 删除旧 `news` 表与 `cctv_news` 等调度类型
 - `docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md` — Scheduler 任务类型扩展与 `task_scheduling` 表
 - `docs/instructions/PERSONALIZED_TAGS_IMPLEMENTATION.md` — 个性化标签（主要服务于 Upload 链路，可选对接 Feeds）
 - `docs/instructions/TWITTER_DAILY_REPORT_MANUAL.md` — 基于 Feeds `subscription_content` 的 Twitter 日报

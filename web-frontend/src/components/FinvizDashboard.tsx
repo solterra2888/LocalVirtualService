@@ -91,7 +91,6 @@ import {
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
-import { newsAPI } from '../services/news';
 import type { NewsTheme, NewsUnifiedTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
@@ -879,14 +878,8 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     return groupName;
   }, []);
 
-  // 加载主题数据（用于关键词高亮）
   const loadThemes = async () => {
-    try {
-      const themesResponse = await newsAPI.getThemes();
-      setThemes(themesResponse.data.filter(t => t.is_active)); // 只加载激活的主题
-    } catch (error) {
-      // 主题加载失败不阻塞页面，不显示错误消息
-    }
+    // 旧 news/themes 端点已移除，关键词高亮功能停用
   };
 
   const loadWatchlistPrices = async () => {

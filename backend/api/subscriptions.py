@@ -270,15 +270,18 @@ async def create_subscription(
         # 🔥 如果是 News 订阅，验证 source 是否在可选列表中
         if request.channel_type == 'news':
             from backend.services.eodhd_news_feed_service import AVAILABLE_NEWS_SOURCES
-            
-            available_lower = {s.lower(): s for s in AVAILABLE_NEWS_SOURCES}
+            from backend.services.cctv_news_feed_service import CCTV_CHANNEL_IDENTIFIER
+
+            # CCTV 由独立服务处理；EODHD 源由 AVAILABLE_NEWS_SOURCES 决定
+            all_available = list(AVAILABLE_NEWS_SOURCES) + [CCTV_CHANNEL_IDENTIFIER]
+            available_lower = {s.lower(): s for s in all_available}
             identifier_lower = request.channel_identifier.lower()
             
             if identifier_lower not in available_lower:
                 raise HTTPException(
                     status_code=400,
                     detail=f"News source '{request.channel_identifier}' is not available. "
-                           f"Available sources: {', '.join(AVAILABLE_NEWS_SOURCES)}"
+                           f"Available sources: {', '.join(all_available)}"
                 )
             
             # 标准化 channel_identifier（使用规范名称）

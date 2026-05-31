@@ -27,11 +27,6 @@ class TimingMiddleware(BaseHTTPMiddleware):
             logger.warning(
                 f"⚠️  慢请求: {request.method} {request.url.path} - {process_time_ms:.2f}ms"
             )
-        # 记录关键 API 的性能
-        elif '/api/news/' in str(request.url.path) or '/api/user/news-presets/' in str(request.url.path):
-            logger.info(
-                f"✅ {request.method} {request.url.path} - {process_time_ms:.2f}ms"
-            )
         
         response.headers["X-Process-Time"] = str(process_time_ms)
         

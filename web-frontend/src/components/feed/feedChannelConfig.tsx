@@ -41,6 +41,7 @@ export const NEWS_SOURCES: NewsSourceConfig[] = [
   { identifier: 'Fxstreet', label: 'FXStreet', color: '#1B5E20', iconDomain: 'fxstreet.com', iconLocalFile: 'fxstreet.ico' },
   { identifier: 'Globenewswire', label: 'GlobeNewsWire', color: '#2196F3', iconDomain: 'globenewswire.com', iconLocalFile: 'globenewswire.ico' },
   { identifier: 'U.Today', label: 'U.Today', color: '#FF5722', iconDomain: 'u.today', iconLocalFile: 'u-today.ico' },
+  { identifier: 'CCTV', label: 'CCTV 新闻联播', color: '#CC0000', iconDomain: 'tv.cctv.com', iconLocalFile: 'cctv.ico' },
   { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', iconLocalFile: 'actionforex.ico', disabled: true },
   { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', iconLocalFile: 'dailyhodl.ico', disabled: true },
   { identifier: 'Thecurrencyanalytics', label: 'Currency Analytics', color: '#7B1FA2', iconDomain: 'thecurrencyanalytics.com', iconLocalFile: 'thecurrencyanalytics.ico', disabled: true },

@@ -201,19 +201,6 @@ async def create_interval_task_proxy(request: Request, current_user=Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create interval task: {str(e)}")
 
-@router.post("/tasks/eodhd-news", summary="create eodhd news task")
-async def create_eodhd_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建EODHD新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        json_data = await request.json()
-        result = await scheduler_client.post("/scheduler/tasks/eodhd-news", json_data=json_data, headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建EODHD新闻任务代理失败: {str(e)}")
-
 @router.post("/tasks/eodhd-fundamentals", summary="创建EODHD基本面数据定时任务")
 async def create_eodhd_fundamentals_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建EODHD基本面数据定时任务"""
@@ -239,68 +226,6 @@ async def create_finviz_screener_task_proxy(request: Request, current_user=Depen
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create finviz screener task: {str(e)}")
-
-@router.post("/tasks/eodhd-news/default", summary="create default eodhd news task")
-async def create_default_eodhd_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建默认EODHD新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        result = await scheduler_client.post("/scheduler/tasks/eodhd-news/default", headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to proxy create default eodhd news task: {str(e)}")
-
-@router.post("/tasks/watchlist-news", summary="create watchlist news task")
-async def create_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建Watchlist新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        json_data = await request.json()
-        result = await scheduler_client.post("/scheduler/tasks/watchlist-news", json_data=json_data, headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to proxy create watchlist news task: {str(e)}")
-
-@router.post("/tasks/watchlist-news/default", summary="create default watchlist news task")
-async def create_default_watchlist_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建默认Watchlist新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        result = await scheduler_client.post("/scheduler/tasks/watchlist-news/default", headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to proxy create default watchlist news task: {str(e)}")
-
-@router.post("/tasks/cctv-news", summary="create cctv news task")
-async def create_cctv_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建CCTV新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        json_data = await request.json()
-        result = await scheduler_client.post("/scheduler/tasks/cctv-news", json_data=json_data, headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to proxy create cctv news task: {str(e)}")
-
-@router.post("/tasks/cctv-news/default", summary="create default cctv news task")
-async def create_default_cctv_news_task_proxy(request: Request, current_user=Depends(get_current_user)):
-    """代理创建默认CCTV新闻定时任务"""
-    try:
-        auth_headers = get_auth_headers(request)
-        result = await scheduler_client.post("/scheduler/tasks/cctv-news/default", headers=auth_headers)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to proxy create default cctv news task: {str(e)}")
 
 @router.post("/tasks/eodhd-stock-prices", summary="create eodhd stock prices task")
 async def create_eodhd_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):

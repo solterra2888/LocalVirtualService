@@ -1,4 +1,14 @@
-# 新闻分析整体流程文档 （当前暂时弃用）
+# 新闻分析整体流程文档（已移除 — 2026-05-31）
+
+> ⚠️ **本模块已于 2026-05-31 正式移除。**
+> EODHD 新闻已完全迁移至 Feeds 模块，保存于 `subscription_content` 表。
+> CCTV 新闻联播已重构为 Feeds 可订阅频道（`channel_type='news'`, `channel_identifier='CCTV'`）。
+> Dashboard 个股/行业新闻端点已改为查询 `subscription_content`。
+> 以下内容仅作历史参考，相关代码、服务、API 和数据库表均已删除。
+
+---
+
+# 原旧闻分析整体流程文档（历史参考）
 
 ## 概述
 
