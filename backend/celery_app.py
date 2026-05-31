@@ -29,12 +29,6 @@ except ImportError as e:
     print(f"❌ 导入任务模块失败: {e}")
 
 try:
-    from backend.tasks import news_tasks
-    print(f"✅ 成功导入新闻分析任务模块: {news_tasks.__name__}")
-except ImportError as e:
-    print(f"❌ 导入新闻分析任务模块失败: {e}")
-
-try:
     from backend.tasks import theme_tasks
     print(f"✅ 成功导入投资主题任务模块: {theme_tasks.__name__}")
 except ImportError as e:

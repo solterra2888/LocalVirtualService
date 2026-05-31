@@ -7,7 +7,6 @@ from . import auth
 from . import files
 from . import tasks
 from . import users
-from . import news
 from . import markets
 from . import scheduler
 from . import dashboard
@@ -20,7 +19,6 @@ __all__ = [
     'files', 
     'tasks',
     'users',
-    'news',
     'markets',
     'scheduler',
     'dashboard',

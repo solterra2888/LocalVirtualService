@@ -51,7 +51,6 @@ import {
 import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { getModalStyles } from '../utils/modalStyles';
-import { newsAPI } from '../services/news';
 import { schedulerAPI, ScheduledTask } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 
@@ -138,14 +137,7 @@ interface QuickAction {
 }
 
 // News theme interface
-interface NewsTheme {
-  id: number;
-  topic_name: string;
-  description?: string;
-  color?: string;
-  is_active: boolean;
-  keywords: string[];
-}
+
 
 
 
@@ -157,44 +149,6 @@ const SchedulerPage: React.FC = () => {
   const screens = useBreakpoint();
   const isLgUp = !!screens?.lg;
   const [dataSources, setDataSources] = useState<DataSource[]>([
-    {
-      id: 'eodhd_news',
-      name: 'EODHD News Data',
-      type: 'eodhd',
-      category: 'data_fetch',
-      description: 'Get latest stock news from EODHD API',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_cron_schedule',
-          name: 'Configure Data Fetch Strategy',
-          description: 'Set up Cron-based periodic data fetching with NY timezone every 15 minutes',
-          endpoint: '/scheduler/tasks/eodhd-news',
-          params: {},
-          icon: <ScheduleOutlined />
-        }
-      ]
-    },
-    {
-      id: 'watchlist_news',
-      name: 'My Watchlist News',
-      type: 'watchlist',
-      category: 'data_fetch',
-      description: 'Get news for stocks in your watchlist from EODHD API',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_watchlist_schedule',
-          name: 'Configure Watchlist News Fetch',
-          description: 'Set up Cron-based periodic news fetching for your watchlist stocks',
-          endpoint: '/scheduler/tasks/watchlist-news',
-          params: {},
-          icon: <ScheduleOutlined />
-        }
-      ]
-    },
     {
       id: 'twitter_subscription',
       name: 'Twitter Subscription Feed',
@@ -287,25 +241,6 @@ const SchedulerPage: React.FC = () => {
           endpoint: '/scheduler/tasks/youtube-author-summary',
           params: {},
           icon: <ScheduleOutlined />
-        }
-      ]
-    },
-    {
-      id: 'cctv_news',
-      name: 'CCTV News (新闻联播)',
-      type: 'cctv',
-      category: 'data_fetch',
-      description: 'Scrape daily news from CCTV News (央视新闻联播) website',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_cctv_news_schedule',
-          name: 'Configure CCTV News Fetch',
-          description: 'Set up periodic CCTV news fetching (daily at 8 PM Beijing time)',
-          endpoint: '/scheduler/tasks/cctv-news',
-          params: {},
-          icon: <GlobalOutlined />
         }
       ]
     },
@@ -511,13 +446,6 @@ const SchedulerPage: React.FC = () => {
     action: null,
     dataSource: null
   });
-  
-  // News related state
-  const [themes, setThemes] = useState<NewsTheme[]>([]);
-
-  const [themeModalVisible, setThemeModalVisible] = useState(false);
-  const [selectedTheme, setSelectedTheme] = useState<NewsTheme | null>(null);
-  const [themeForm] = Form.useForm();
   
   // Scheduled task related state
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
@@ -799,16 +727,6 @@ const SchedulerPage: React.FC = () => {
   };
 
   // Load theme data
-  const loadThemes = async () => {
-    try {
-      const response = await newsAPI.getThemes();
-      setThemes(response.data || []);
-    } catch (error) {
-      console.error('Failed to get themes:', error);
-      message.error('Failed to get themes');
-    }
-  };
-
   // Load scheduled tasks
   const loadScheduledTasks = async () => {
     try {
@@ -970,7 +888,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'eodhd_news' || dataSource.id === 'watchlist_news' || dataSource.id === 'cctv_news' || dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -993,16 +911,7 @@ const SchedulerPage: React.FC = () => {
       dataSource
     });
     
-    // If it's news fetching, set default values and load themes
-    if (action.id === 'fetch_latest_news') {
-      form.setFieldsValue({
-        ...action.params,
-        dateRange: [dayjs().subtract(7, 'day'), dayjs()]
-      });
-      loadThemes();
-    } else {
-      form.setFieldsValue(action.params || {});
-    }
+    form.setFieldsValue(action.params || {});
   };
 
   // Confirm execute quick action
@@ -1014,72 +923,6 @@ const SchedulerPage: React.FC = () => {
       form.resetFields();
     } catch (error) {
       console.error('Form validation error:', error);
-    }
-  };
-
-  // Theme management functions
-  const createTheme = async (values: any) => {
-    try {
-      const response = await newsAPI.createTheme(values);
-      if (response.success) {
-        message.success('Theme created successfully');
-        loadThemes();
-        setThemeModalVisible(false);
-        themeForm.resetFields();
-      } else {
-        message.error(response.message || 'Creation failed');
-      }
-    } catch (error) {
-      console.error('Failed to create theme:', error);
-      message.error('Failed to create theme');
-    }
-  };
-
-  const updateTheme = async (themeId: number, values: any) => {
-    try {
-      const response = await newsAPI.updateTheme(themeId, values);
-      if (response.success) {
-        message.success('Theme updated successfully');
-        loadThemes();
-        setThemeModalVisible(false);
-        setSelectedTheme(null);
-        themeForm.resetFields();
-      } else {
-        message.error(response.message || 'Update failed');
-      }
-    } catch (error) {
-      console.error('Failed to update theme:', error);
-      message.error('Failed to update theme');
-    }
-  };
-
-  const deleteTheme = async (themeId: number) => {
-    try {
-      const response = await newsAPI.deleteTheme(themeId);
-      if (response.success) {
-        message.success('Theme deleted successfully');
-        loadThemes();
-      } else {
-        message.error(response.message || 'Deletion failed');
-      }
-    } catch (error) {
-      console.error('Failed to delete theme:', error);
-      message.error('Failed to delete theme');
-    }
-  };
-
-  const initializeDefaultThemes = async () => {
-    try {
-      const response = await newsAPI.initializeDefaultThemes();
-      if (response.success) {
-        message.success(`Initialization successful, created ${response.data.created_count} default themes`);
-        loadThemes();
-      } else {
-        message.error(response.message || 'Initialization failed');
-      }
-    } catch (error) {
-      console.error('Failed to initialize themes:', error);
-      message.error('Failed to initialize themes');
     }
   };
 
@@ -1611,15 +1454,9 @@ const SchedulerPage: React.FC = () => {
                         <Form.Item
                           name="topic_filter"
                           label="Topic Filter"
-                          tooltip="Filter using themes from database"
+                          tooltip="Custom topic filter keyword"
                         >
-                          <Select placeholder="Select theme" allowClear>
-                            {themes.filter(theme => theme.is_active).map(theme => (
-                              <Option key={theme.id} value={theme.topic_name}>
-                                <span style={{ color: theme.color || '#1890ff' }}>●</span> {theme.topic_name}
-                              </Option>
-                            ))}
-                          </Select>
+                          <Input placeholder="e.g.: technology" />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
@@ -1647,169 +1484,6 @@ const SchedulerPage: React.FC = () => {
                         />
                       </Col>
                     </Row>
-                  </Tabs.TabPane>
-                  
-                  <Tabs.TabPane
-                    tab={<span><TagOutlined />Highlight Setting</span>}
-                    key="themes"
-                  >
-                    <div style={{ marginBottom: 16 }}>
-                      <Space wrap>
-                        <Button
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          onClick={() => {
-                            setSelectedTheme(null);
-                            setThemeModalVisible(true);
-                            themeForm.resetFields();
-                          }}
-                          size="small"
-                          style={{
-                            borderRadius: 16,
-                            fontWeight: 500,
-                            height: 32,
-                            paddingLeft: 14,
-                            paddingRight: 14,
-                            background: isDark ? '#2196F3' : '#1890ff',
-                            borderColor: isDark ? '#2196F3' : '#1890ff',
-                            boxShadow: isDark 
-                              ? '0 2px 8px rgba(33, 150, 243, 0.3)' 
-                              : '0 2px 8px rgba(24, 144, 255, 0.25)',
-                          }}
-                        >
-                          New Theme
-                        </Button>
-                        <Button
-                          icon={<BulbOutlined />}
-                          onClick={initializeDefaultThemes}
-                          size="small"
-                          style={{
-                            borderRadius: 16,
-                            height: 32,
-                            paddingLeft: 14,
-                            paddingRight: 14,
-                            border: `1.5px solid ${colors.cardBorder}`,
-                            color: colors.textSecondary,
-                            background: 'transparent',
-                          }}
-                        >
-                          Initialize Default Themes
-                        </Button>
-                        <Button
-                          icon={<ReloadOutlined />}
-                          onClick={loadThemes}
-                          size="small"
-                          style={{
-                            borderRadius: 16,
-                            height: 32,
-                            paddingLeft: 14,
-                            paddingRight: 14,
-                            border: `1.5px solid ${colors.cardBorder}`,
-                            color: colors.textSecondary,
-                            background: 'transparent',
-                          }}
-                        >
-                          Refresh
-                        </Button>
-                      </Space>
-                    </div>
-
-                    <Alert
-                      message="Keyword Highlight Instructions"
-                      description="Create themes with keywords to automatically highlight matching words in news content. Each theme can have a custom color, and keywords will be highlighted with that color when found in the original news text."
-                      type="info"
-                      showIcon
-                      style={{ marginBottom: 16 }}
-                    />
-
-                    <Table
-                      size="small"
-                      pagination={false}
-                      dataSource={themes}
-                      rowKey="id"
-                      scroll={{ y: 300 }}
-                      columns={[
-                        {
-                          title: 'Theme Name',
-                          dataIndex: 'topic_name',
-                          key: 'topic_name',
-                          render: (text: string, record: NewsTheme) => (
-                            <Space>
-                              <Badge color={record.color || '#1890ff'} />
-                              <Text strong style={{ fontSize: '12px' }}>{text}</Text>
-                            </Space>
-                          )
-                        },
-                        {
-                          title: 'Keywords',
-                          dataIndex: 'keywords',
-                          key: 'keywords',
-                          render: (keywords: string[]) => (
-                            <div>
-                              {keywords.slice(0, 3).map((keyword, index) => (
-                                <Tag key={index} style={{ fontSize: '10px' }}>
-                                  {keyword}
-                                </Tag>
-                              ))}
-                              {keywords.length > 3 && (
-                                <Text type="secondary" style={{ fontSize: '10px' }}>
-                                  +{keywords.length - 3}
-                                </Text>
-                              )}
-                            </div>
-                          )
-                        },
-                        {
-                          title: 'Status',
-                          dataIndex: 'is_active',
-                          key: 'is_active',
-                          render: (active: boolean) => (
-                            <Tag color={active ? 'green' : 'default'} style={{ fontSize: '10px' }}>
-                              {active ? 'Active' : 'Disabled'}
-                            </Tag>
-                          )
-                        },
-                        {
-                          title: 'Actions',
-                          key: 'actions',
-                          render: (record: NewsTheme) => (
-                            <Space size="small">
-                              <Button
-                                type="link"
-                                size="small"
-                                icon={<EditOutlined />}
-                                onClick={() => {
-                                  setSelectedTheme(record);
-                                  setThemeModalVisible(true);
-                                  themeForm.setFieldsValue({
-                                    topic_name: record.topic_name,
-                                    description: record.description,
-                                    color: record.color,
-                                    is_active: record.is_active,
-                                    keywords: record.keywords.join(', ')
-                                  });
-                                }}
-                                style={{ fontSize: '10px', padding: '2px 4px' }}
-                              />
-                                                              <Popconfirm
-                                  title="Are you sure you want to delete this theme?"
-                                  onConfirm={() => deleteTheme(record.id)}
-                                  okText="Confirm"
-                                  cancelText="Cancel"
-                                >
-                                <Button
-                                  type="link"
-                                  size="small"
-                                  icon={<DeleteOutlined />}
-                                  danger
-                                  style={{ fontSize: '10px', padding: '2px 4px' }}
-                                />
-                              </Popconfirm>
-                            </Space>
-                          )
-                        }
-                      ]}
-                    />
                   </Tabs.TabPane>
                 </Tabs>
               </Form>
@@ -1850,108 +1524,6 @@ const SchedulerPage: React.FC = () => {
             )}
           </div>
         )}
-      </Modal>
-
-      {/* Theme editing modal - Behance */}
-      <Modal
-        title={<span style={{ color: colors.text }}>{selectedTheme ? 'Edit Theme' : 'New Theme'}</span>}
-        open={themeModalVisible}
-        onOk={() => themeForm.submit()}
-        onCancel={() => {
-          setThemeModalVisible(false);
-          setSelectedTheme(null);
-          themeForm.resetFields();
-        }}
-        okText="Save"
-        cancelText="Cancel"
-        styles={getModalStyles(themeMode)}
-        okButtonProps={{
-          style: {
-            borderRadius: 10,
-            fontWeight: 500,
-            height: 38,
-            paddingLeft: 24,
-            paddingRight: 24,
-            background: isDark ? '#2196F3' : '#1890ff',
-            borderColor: isDark ? '#2196F3' : '#1890ff',
-            boxShadow: isDark
-              ? '0 4px 12px rgba(33, 150, 243, 0.3)'
-              : '0 4px 12px rgba(24, 144, 255, 0.25)',
-            transition: 'all 0.3s ease',
-          },
-        }}
-        cancelButtonProps={{
-          style: {
-            borderRadius: 8,
-            height: 38,
-            paddingLeft: 20,
-            paddingRight: 20,
-            border: `1px solid ${colors.cardBorder}`,
-            color: colors.textSecondary,
-            background: 'transparent',
-            transition: 'all 0.3s ease',
-          },
-        }}
-      >
-        <Form
-          form={themeForm}
-          layout="vertical"
-          onFinish={(values) => {
-            const formattedValues = {
-              ...values,
-              keywords: values.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k)
-            };
-            
-            if (selectedTheme) {
-              updateTheme(selectedTheme.id, formattedValues);
-            } else {
-              createTheme(formattedValues);
-            }
-          }}
-        >
-          <Form.Item
-            label="Theme Name"
-            name="topic_name"
-            rules={[{ required: true, message: 'Please enter theme name' }]}
-          >
-            <Input placeholder="Enter theme name" />
-          </Form.Item>
-          
-          <Form.Item
-            label="Description"
-            name="description"
-          >
-            <Input.TextArea placeholder="Enter theme description" rows={3} />
-          </Form.Item>
-          
-          <Form.Item
-            label="Color"
-            name="color"
-          >
-            <Input placeholder="#1890ff" />
-          </Form.Item>
-          
-          <Form.Item
-            label="Keywords"
-            name="keywords"
-            rules={[{ required: true, message: 'Please enter keywords' }]}
-            tooltip="Multiple keywords separated by commas"
-          >
-            <Input.TextArea 
-              placeholder="Enter keywords separated by commas, e.g.: technology,AI,machine learning" 
-              rows={3}
-            />
-          </Form.Item>
-          
-          <Form.Item
-            label="Status"
-            name="is_active"
-            valuePropName="checked"
-            initialValue={true}
-          >
-            <Switch checkedChildren="Enabled" unCheckedChildren="Disabled" />
-          </Form.Item>
-        </Form>
       </Modal>
 
       {/* Task status monitoring modal */}

@@ -686,38 +686,6 @@ class InvestmentThemeEmbeddingService:
                     f"建议：检查主题向量是否使用 theme_name + description 生成"
                 )
             
-            # 3. 保存匹配结果到数据库（可选）
-            if save_to_db and news_id and len(results) > 0:
-                try:
-                    for match in results:
-                        cursor.execute("""
-                            INSERT INTO news_theme_matches 
-                            (news_id, theme_id, theme_name, category, similarity_score, match_rank, match_method)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (news_id, theme_id) 
-                            DO UPDATE SET 
-                                theme_name = EXCLUDED.theme_name,
-                                category = EXCLUDED.category,
-                                similarity_score = EXCLUDED.similarity_score,
-                                match_rank = EXCLUDED.match_rank,
-                                matched_at = NOW()
-                        """, (
-                            news_id,
-                            match['theme_id'],
-                            match['theme_name'],
-                            match.get('category'),  # 使用 get 以防万一 category 不存在
-                            match['similarity'],
-                            match['rank'],
-                            'vector_search'
-                        ))
-                    
-                    conn.commit()
-                    logger.info(f"已保存 {len(results)} 个主题匹配结果到数据库")
-                    
-                except Exception as e:
-                    logger.error(f"保存匹配结果失败: {str(e)}")
-                    conn.rollback()
-            
             cursor.close()
             conn.close()
             
@@ -1178,23 +1146,14 @@ class InvestmentThemeEmbeddingService:
         operator_username: str
     ) -> Dict[str, Any]:
         """
-        硬删除投资主题及其关联数据（物理删除，不可恢复）
-        
-        删除操作包括：
-        1. 删除 investment_theme_embeddings 记录（物理删除）
-        2. 删除 news_theme_matches 的匹配记录
+        硬删除投资主题及其关联数据（物理删除，不可恢复）。
         
         Args:
             theme_id: 主题ID
             operator_username: 操作者用户名
             
         Returns:
-            {
-                "success": bool,
-                "message": str,
-                "deleted_matches_count": int,
-                "deleted_embeddings": bool
-            }
+            {"success": bool, "message": str, "deleted_embeddings": bool}
         """
         logger.info(f"开始硬删除主题: {theme_id} by {operator_username}")
         
@@ -1220,15 +1179,7 @@ class InvestmentThemeEmbeddingService:
             
             theme_name = row[0]
             
-            # 2. 删除新闻匹配记录
-            cursor.execute("""
-                DELETE FROM news_theme_matches
-                WHERE theme_id = %s
-            """, (theme_id,))
-            
-            deleted_matches_count = cursor.rowcount
-            
-            # 3. 硬删除主题（物理删除）
+            # 硬删除主题（物理删除）
             cursor.execute("""
                 DELETE FROM investment_theme_embeddings
                 WHERE theme_id = %s
@@ -1240,16 +1191,11 @@ class InvestmentThemeEmbeddingService:
             cursor.close()
             conn.close()
             
-            logger.info(
-                f"主题硬删除成功: {theme_id} - {theme_name}, "
-                f"删除主题记录: {deleted_embeddings}, "
-                f"删除匹配记录: {deleted_matches_count}条"
-            )
+            logger.info(f"主题硬删除成功: {theme_id} - {theme_name}, 删除记录: {deleted_embeddings}")
             
             return {
                 "success": True,
                 "message": f"主题 '{theme_name}' 已永久删除",
-                "deleted_matches_count": deleted_matches_count,
                 "deleted_embeddings": deleted_embeddings
             }
             
@@ -1281,7 +1227,6 @@ class InvestmentThemeEmbeddingService:
                 "message": str,
                 "deleted_count": int,
                 "failed_count": int,
-                "total_matches_deleted": int,
                 "details": List[dict]
             }
         """
@@ -1294,7 +1239,6 @@ class InvestmentThemeEmbeddingService:
                 "message": "数据库连接失败",
                 "deleted_count": 0,
                 "failed_count": len(theme_keys),
-                "total_matches_deleted": 0
             }
         
         try:
@@ -1302,7 +1246,6 @@ class InvestmentThemeEmbeddingService:
             
             deleted_count = 0
             failed_count = 0
-            total_matches_deleted = 0
             details = []
             
             for theme_id in theme_keys:
@@ -1326,16 +1269,7 @@ class InvestmentThemeEmbeddingService:
                     
                     theme_name = row[0]
                     
-                    # 2. 删除新闻匹配记录
-                    cursor.execute("""
-                        DELETE FROM news_theme_matches
-                        WHERE theme_id = %s
-                    """, (theme_id,))
-                    
-                    matches_deleted = cursor.rowcount
-                    total_matches_deleted += matches_deleted
-                    
-                    # 3. 硬删除主题（物理删除）
+                    # 硬删除主题（物理删除）
                     cursor.execute("""
                         DELETE FROM investment_theme_embeddings
                         WHERE theme_id = %s
@@ -1345,12 +1279,11 @@ class InvestmentThemeEmbeddingService:
                         "theme_id": theme_id,
                         "theme_name": theme_name,
                         "success": True,
-                        "matches_deleted": matches_deleted,
                         "message": "永久删除成功"
                     })
                     deleted_count += 1
                     
-                    logger.info(f"✅ 硬删除成功: {theme_id} - {theme_name}, 删除匹配记录: {matches_deleted}条")
+                    logger.info(f"✅ 硬删除成功: {theme_id} - {theme_name}")
                     
                 except Exception as e:
                     details.append({
@@ -1368,21 +1301,17 @@ class InvestmentThemeEmbeddingService:
             success = failed_count == 0
             
             if success:
-                message = f"成功批量永久删除 {deleted_count} 个主题，删除 {total_matches_deleted} 条匹配记录"
+                message = f"成功批量永久删除 {deleted_count} 个主题"
             else:
                 message = f"批量删除完成: 成功 {deleted_count} 个，失败 {failed_count} 个"
             
-            logger.info(
-                f"批量硬删除完成: 成功 {deleted_count}/{len(theme_keys)} 个主题, "
-                f"删除 {total_matches_deleted} 条匹配记录"
-            )
+            logger.info(f"批量硬删除完成: 成功 {deleted_count}/{len(theme_keys)} 个主题")
             
             return {
                 "success": success,
                 "message": message,
                 "deleted_count": deleted_count,
                 "failed_count": failed_count,
-                "total_matches_deleted": total_matches_deleted,
                 "details": details
             }
             
@@ -1396,7 +1325,6 @@ class InvestmentThemeEmbeddingService:
                 "message": f"批量删除失败: {str(e)}",
                 "deleted_count": 0,
                 "failed_count": len(theme_keys),
-                "total_matches_deleted": 0,
                 "details": []
             }
     

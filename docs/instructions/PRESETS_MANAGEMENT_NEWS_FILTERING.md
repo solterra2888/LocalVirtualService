@@ -1,6 +1,15 @@
-# Presets Management 新闻筛选逻辑说明
+# Presets Management 新闻筛选逻辑说明（已移除 — 2026-05-31）
 
-## 概述
+> ⚠️ **本功能已于 2026-05-31 随旧 News 模块一同移除。**
+> - `user_news_filter_presets` 表已 DROP
+> - `/api/user/news-presets` API 已删除
+> - `NewsPage.tsx` 及相关 preset 组件已删除
+> - 新闻内容已迁移至 Feeds 模块（`subscription_content` 表）
+> 以下内容仅作历史参考。
+
+---
+
+## 原始说明（历史参考）
 
 Presets Management 允许用户保存和管理个性化的新闻筛选条件，通过预设快速筛选新闻。本文档说明通过预设筛选新闻的完整流程、调用的服务和数据库表关系。
 

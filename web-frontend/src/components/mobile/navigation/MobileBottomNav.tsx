@@ -12,7 +12,7 @@ import './MobileBottomNav.css';
 
 /**
  * 移动端底部导航栏：Daily（登录默认页, 聚合视图）、Sources、Feeds、Reports
- * Watchlist 入口与 PC 一致暂时隐藏
+ * Watchlist 与 PC 顶栏一致，指向 /dashboard
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
@@ -49,7 +49,7 @@ const MobileBottomNav: React.FC = () => {
       icon: <StockOutlined />,
       label: 'Watchlist',
     },
-  ].filter(item => item.key !== '/dashboard'); // 与 PC NavBar 一致暂时隐藏（未成熟）
+  ];
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`);

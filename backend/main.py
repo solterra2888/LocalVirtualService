@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, news, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, themes_unified, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search
+from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning
@@ -146,7 +146,6 @@ app.include_router(file_folders.router, prefix="/api/files", tags=["文件夹"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(users.router, prefix="/api/users", tags=["用户管理"])
 app.include_router(personal_tokens.router, prefix="/api/users", tags=["Personal API Tokens"])
-app.include_router(news.router, prefix="/api/news", tags=["新闻管理"])
 app.include_router(markets.router, prefix="/api/markets", tags=["市场数据"])
 # Market Weekly Report API
 app.include_router(market_weekly.router, prefix="/api", tags=["Market Weekly"])
@@ -175,9 +174,6 @@ app.include_router(screener.router, prefix="/api", tags=["股票筛选器"])
 from backend.api import chart_events
 app.include_router(chart_events.router, prefix="/api/chart-events", tags=["图表事件"])
 
-# 统一主题管理API（支持 Primary Theme）
-app.include_router(themes_unified.router, prefix="/api", tags=["统一主题管理"])
-
 # EOD Fetch API
 from backend.api import eod_fetch
 app.include_router(eod_fetch.router, prefix="/api", tags=["EOD数据获取"])
@@ -188,17 +184,9 @@ app.include_router(llm_config.router, prefix="/api", tags=["LLM配置"])
 # LLM Prompt模板API
 app.include_router(llm_prompt_templates.router, prefix="/api", tags=["Prompt模板"])
 
-# 新闻LLM分析API
-from backend.api import news_analysis
-app.include_router(news_analysis.router, prefix="/api", tags=["新闻分析"])
-
 # 投资主题向量化API
 from backend.api import investment_themes
 app.include_router(investment_themes.router, prefix="/api", tags=["投资主题"])
-
-# 用户新闻筛选预设API
-from backend.api import user_news_presets
-app.include_router(user_news_presets.router, prefix="/api", tags=["用户新闻筛选预设"])
 
 # 投资项目管理API
 from backend.api import projects

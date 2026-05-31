@@ -17,7 +17,6 @@ import MobileSourcesPage from './pages/MobileSourcesPage';
 import DailyPage from './pages/DailyPage';
 import MobileDailyPage from './pages/MobileDailyPage';
 import UsersPage from './pages/UsersPage';
-import NewsPage from './pages/NewsPage';
 import SchedulerPage from './pages/SchedulerPage';
 import MonitoringPage from './pages/MonitoringPage';
 import FeedReaderPage from './pages/FeedReaderPage';
@@ -131,7 +130,6 @@ const AppContent: React.FC = () => {
           <Route path="markets/economic-events" element={<EconomicEventsPage />} />
           <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
           <Route path="files" element={<FilesComponent />} />
-          <Route path="news" element={<NewsPage />} />
           <Route path="fundamentals" element={<FundamentalsPage />} />
           <Route path="eod-fetch" element={<EODFetchPage />} />
           <Route

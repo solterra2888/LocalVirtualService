@@ -301,77 +301,63 @@ async def get_company_news(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取与特定公司相关的新闻（支持多种ticker格式匹配）
-    优化版本：使用单次查询获取所有数据，避免N+1查询问题
+    获取与特定公司相关的新闻。
+    数据源：subscription_content（channel_type='news'），按 metadata->'symbols' 匹配 ticker。
     """
     try:
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
-        
-        # 优化后的单次查询，一次性获取新闻及其标签和符号
-        query = """
-        WITH news_data AS (
-            SELECT DISTINCT
-                n.id, n.title, n.content, n.date, n.source, n.link,
-                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu,
-                n.analysis_result, n.scheduler_source, n.updated_at
-            FROM news n
-            JOIN news_symbols ns ON n.id = ns.news_id
-            JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-            WHERE nsd.symbol_code = ANY(%s)
-            ORDER BY n.date DESC
-            LIMIT %s OFFSET %s
-        )
-        SELECT 
-            nd.id, nd.title, nd.content, nd.date, nd.source, nd.link,
-            nd.sentiment_polarity, nd.sentiment_pos, nd.sentiment_neg, nd.sentiment_neu,
-            nd.analysis_result, nd.scheduler_source, nd.updated_at,
-            COALESCE(
-                ARRAY_AGG(DISTINCT ntd.tag_name) FILTER (WHERE ntd.tag_name IS NOT NULL),
-                ARRAY[]::text[]
-            ) as tags,
-            COALESCE(
-                ARRAY_AGG(DISTINCT nsd2.symbol_code) FILTER (WHERE nsd2.symbol_code IS NOT NULL),
-                ARRAY[]::text[]
-            ) as symbols
-        FROM news_data nd
-        LEFT JOIN news_tags nt ON nd.id = nt.news_id
-        LEFT JOIN news_tags_dict ntd ON nt.tag_id = ntd.id
-        LEFT JOIN news_symbols ns2 ON nd.id = ns2.news_id
-        LEFT JOIN news_symbols_dict nsd2 ON ns2.symbol_id = nsd2.id
-        GROUP BY nd.id, nd.title, nd.content, nd.date, nd.source, nd.link,
-                 nd.sentiment_polarity, nd.sentiment_pos, nd.sentiment_neg, nd.sentiment_neu,
-                 nd.analysis_result, nd.scheduler_source, nd.updated_at
-        ORDER BY nd.date DESC
-        """
-        
-        # 使用智能ticker格式匹配
+
         ticker_formats = get_smart_ticker_formats(ticker)
-        
+
+        # 在 subscription_content.metadata['symbols'] JSONB 数组中匹配任意 ticker 格式
+        query = """
+        SELECT DISTINCT ON (sc.published_at, sc.id)
+            sc.id,
+            sc.title,
+            sc.content,
+            sc.published_at AS date,
+            sc.author_name   AS source,
+            sc.url           AS link,
+            sc.metadata
+        FROM subscription_content sc
+        WHERE sc.channel_type = 'news'
+          AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(
+                  COALESCE(sc.metadata->'symbols', '[]'::jsonb)
+              ) AS sym
+              WHERE sym = ANY(%s)
+          )
+        ORDER BY sc.published_at DESC, sc.id DESC
+        LIMIT %s OFFSET %s
+        """
+
         results = db_manager.fetch_all(query, [ticker_formats, limit, offset])
-        
+
         news_items = []
         for row in results:
-            news_item = {
+            metadata = row[6] or {}
+            sentiment = metadata.get("sentiment") or {}
+            symbols = metadata.get("symbols") or []
+            news_items.append({
                 "id": row[0],
                 "title": row[1],
                 "content": row[2],
                 "date": row[3].isoformat() if row[3] else None,
                 "source": row[4],
                 "link": row[5],
-                "sentiment_polarity": float(row[6]) if row[6] is not None else None,
-                "sentiment_pos": float(row[7]) if row[7] is not None else None,
-                "sentiment_neg": float(row[8]) if row[8] is not None else None,
-                "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "analysis_result": row[10] if row[10] else None,  # 分析结果（JSON格式）
-                "scheduler_source": row[11],  # 调度器来源
-                "updated_at": row[12].isoformat() if row[12] else None,  # 更新时间
-                "tags": row[13] if row[13] else [],  # 直接从查询结果获取
-                "symbols": row[14] if row[14] else [],  # 直接从查询结果获取
-                "auto_tags": []  # 添加 auto_tags 字段以保持一致性
-            }
-            news_items.append(news_item)
-        
+                "sentiment_polarity": sentiment.get("polarity"),
+                "sentiment_pos": sentiment.get("pos"),
+                "sentiment_neg": sentiment.get("neg"),
+                "sentiment_neu": sentiment.get("neu"),
+                "analysis_result": None,
+                "scheduler_source": metadata.get("news_source"),
+                "updated_at": row[3].isoformat() if row[3] else None,
+                "tags": metadata.get("api_tags") or [],
+                "symbols": symbols,
+                "auto_tags": [],
+            })
+
         return news_items
     except Exception as e:
         raise HTTPException(
@@ -387,79 +373,76 @@ async def get_sector_news(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
-    获取与特定行业相关的新闻（基于finviz_screener的sector分类）
-    优化版本：使用单次查询获取所有数据，避免N+1查询问题
+    获取与特定行业相关的新闻（基于 finviz_screener 的 sector 分类）。
+    数据源：subscription_content，通过 finviz_screener tickers 与 metadata->'symbols' 关联。
     """
     try:
         db_conn_params = get_database_config()
         db_manager = DatabaseManager(db_conn_params)
-        
-        # 优化后的单次查询，一次性获取新闻及其标签和符号
-        query = """
-        WITH sector_news AS (
-            SELECT DISTINCT
-                n.id, n.title, n.content, n.date, n.source, n.link,
-                n.sentiment_polarity, n.sentiment_pos, n.sentiment_neg, n.sentiment_neu,
-                n.analysis_result, n.updated_at
-            FROM news n
-            JOIN news_symbols ns ON n.id = ns.news_id
-            JOIN news_symbols_dict nsd ON ns.symbol_id = nsd.id
-            JOIN finviz_screener f ON (
-                f.ticker = REPLACE(nsd.symbol_code, '.US', '') OR
-                f.ticker = nsd.symbol_code OR
-                nsd.symbol_code LIKE '%' || f.ticker || '%'
-            )
-            WHERE f.sector = %s
-            AND f.snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
-            ORDER BY n.date DESC
-            LIMIT %s OFFSET %s
-        )
-        SELECT 
-            sn.id, sn.title, sn.content, sn.date, sn.source, sn.link,
-            sn.sentiment_polarity, sn.sentiment_pos, sn.sentiment_neg, sn.sentiment_neu,
-            sn.analysis_result, sn.updated_at,
-            COALESCE(
-                ARRAY_AGG(DISTINCT ntd.tag_name) FILTER (WHERE ntd.tag_name IS NOT NULL),
-                ARRAY[]::text[]
-            ) as tags,
-            COALESCE(
-                ARRAY_AGG(DISTINCT nsd2.symbol_code) FILTER (WHERE nsd2.symbol_code IS NOT NULL),
-                ARRAY[]::text[]
-            ) as symbols
-        FROM sector_news sn
-        LEFT JOIN news_tags nt ON sn.id = nt.news_id
-        LEFT JOIN news_tags_dict ntd ON nt.tag_id = ntd.id
-        LEFT JOIN news_symbols ns2 ON sn.id = ns2.news_id
-        LEFT JOIN news_symbols_dict nsd2 ON ns2.symbol_id = nsd2.id
-        GROUP BY sn.id, sn.title, sn.content, sn.date, sn.source, sn.link,
-                 sn.sentiment_polarity, sn.sentiment_pos, sn.sentiment_neg, sn.sentiment_neu,
-                 sn.analysis_result, sn.updated_at
-        ORDER BY sn.date DESC
+
+        # 先查出该行业的 ticker 列表
+        tickers_query = """
+        SELECT DISTINCT ticker
+        FROM finviz_screener
+        WHERE sector = %s
+          AND snapshot_date = (SELECT MAX(snapshot_date) FROM finviz_screener)
         """
-        
-        results = db_manager.fetch_all(query, [sector, limit, offset])
-        
+        ticker_rows = db_manager.fetch_all(tickers_query, [sector])
+        if not ticker_rows:
+            return []
+
+        # 生成 ticker 格式变体（含 .US 后缀）
+        ticker_formats = []
+        for (t,) in ticker_rows:
+            ticker_formats.append(t)
+            ticker_formats.append(f"{t}.US")
+
+        query = """
+        SELECT DISTINCT ON (sc.published_at, sc.id)
+            sc.id,
+            sc.title,
+            sc.content,
+            sc.published_at AS date,
+            sc.author_name   AS source,
+            sc.url           AS link,
+            sc.metadata
+        FROM subscription_content sc
+        WHERE sc.channel_type = 'news'
+          AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(
+                  COALESCE(sc.metadata->'symbols', '[]'::jsonb)
+              ) AS sym
+              WHERE sym = ANY(%s)
+          )
+        ORDER BY sc.published_at DESC, sc.id DESC
+        LIMIT %s OFFSET %s
+        """
+
+        results = db_manager.fetch_all(query, [ticker_formats, limit, offset])
+
         news_items = []
         for row in results:
-            news_item = {
+            metadata = row[6] or {}
+            sentiment = metadata.get("sentiment") or {}
+            symbols = metadata.get("symbols") or []
+            news_items.append({
                 "id": row[0],
                 "title": row[1],
                 "content": row[2],
                 "date": row[3].isoformat() if row[3] else None,
                 "source": row[4],
                 "link": row[5],
-                "sentiment_polarity": float(row[6]) if row[6] is not None else None,
-                "sentiment_pos": float(row[7]) if row[7] is not None else None,
-                "sentiment_neg": float(row[8]) if row[8] is not None else None,
-                "sentiment_neu": float(row[9]) if row[9] is not None else None,
-                "analysis_result": row[10] if row[10] else None,  # 分析结果（JSON格式）
-                "updated_at": row[11].isoformat() if row[11] else None,  # 更新时间
-                "tags": row[12] if row[12] else [],  # 直接从查询结果获取
-                "symbols": row[13] if row[13] else [],  # 直接从查询结果获取
-                "auto_tags": []  # 添加 auto_tags 字段以保持一致性
-            }
-            news_items.append(news_item)
-        
+                "sentiment_polarity": sentiment.get("polarity"),
+                "sentiment_pos": sentiment.get("pos"),
+                "sentiment_neg": sentiment.get("neg"),
+                "sentiment_neu": sentiment.get("neu"),
+                "analysis_result": None,
+                "updated_at": row[3].isoformat() if row[3] else None,
+                "tags": metadata.get("api_tags") or [],
+                "symbols": symbols,
+                "auto_tags": [],
+            })
+
         return news_items
     except Exception as e:
         raise HTTPException(
