@@ -55,7 +55,6 @@ class SchedulerService:
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
-            'theme_sync': self._execute_theme_sync_task,
             'market_data': self._execute_market_data_task,
             'earnings_calendar': self._execute_earnings_calendar_task,
             'ipo_calendar': self._execute_ipo_calendar_task,
