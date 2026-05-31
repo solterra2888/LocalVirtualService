@@ -3,7 +3,12 @@
 Feeds 内容自动打标 + 摘要 的 Celery 任务
 
 对标 backend/tasks/tagging_tasks.py (tag_file_content_task / batch_tag_files_task),
-但绑定到 subscription_content (Twitter / YouTube feed 单条内容).
+但绑定到 subscription_content (Twitter / YouTube / News feed 单条内容).
+
+任务列表:
+  tag_feed_content        — LLM 打标 (twitter/youtube/cctv news)
+  batch_tag_feed_content  — 批量派发 tag_feed_content
+  map_news_tags           — 轻量映射 (EODHD news: 零 LLM, API tags → subscription_content_tags)
 
 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
 """
@@ -320,3 +325,58 @@ def batch_tag_feed_content_task(
         source="celery_feed_tagging",
     )
     return results
+
+
+@app.task(
+    bind=True,
+    name="map_news_tags",
+    queue="file_processing",
+    autoretry_for=(Exception,),
+    retry_kwargs={"max_retries": 2, "countdown": 10},
+    retry_backoff=True,
+)
+def map_news_tags_task(
+    self,
+    content_id: int,
+) -> Dict[str, Any]:
+    """
+    轻量映射任务: 把 EODHD news 的 metadata.symbols / categories 直接写入
+    subscription_content_tags, 不调用 LLM.
+
+    幂等: 已有 tag 行时直接跳过.
+
+    Args:
+        content_id: subscription_content.id
+
+    Returns:
+        {'status': 'completed'|'skipped'|'failed', 'content_id': int, ...}
+    """
+    info(
+        f"map_news_tags 开始: content_id={content_id}",
+        source="celery_feed_tagging",
+    )
+    try:
+        db_manager = DatabaseManager(get_database_config())
+        service = FeedContentTaggingService(db_manager=db_manager)
+        result = service.map_api_tags(content_id)
+
+        status = "skipped" if result.get("skipped") else "completed"
+        info(
+            f"map_news_tags {status}: content_id={content_id} "
+            f"tickers={len(result.get('tickers') or [])} "
+            f"concepts={len(result.get('concepts') or [])}",
+            source="celery_feed_tagging",
+        )
+        return {
+            "status": status,
+            "content_id": content_id,
+            "tag_id": result.get("tag_id"),
+            "message": result.get("message", ""),
+        }
+
+    except Exception as e:
+        error(
+            f"map_news_tags 失败: content_id={content_id} error={e}",
+            source="celery_feed_tagging",
+        )
+        raise

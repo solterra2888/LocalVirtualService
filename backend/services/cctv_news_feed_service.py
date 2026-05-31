@@ -125,11 +125,12 @@ class CCTVNewsFeedService:
         total_saved = 0
         total_new = 0
         failed = 0
+        new_content_ids: list = []
 
         for article in articles:
             raw = self._to_raw_data(article)
             try:
-                _, is_new = self.content_service.save_content(
+                content_id, is_new = self.content_service.save_content(
                     channel_type="news",
                     raw_data=raw,
                     user_ids=user_ids,
@@ -137,11 +138,20 @@ class CCTVNewsFeedService:
                 total_saved += 1
                 if is_new:
                     total_new += 1
+                    new_content_ids.append(content_id)
             except Exception as exc:
                 failed += 1
                 logger.warning(f"保存 CCTV 文章失败: {str(exc)[:100]}", title=article.get("title", "")[:60])
 
-        # 5. 更新未读计数
+        # 5. 触发新内容的自动打标 (LLM) + 向量化
+        if new_content_ids:
+            try:
+                from backend.tasks.file_tasks import trigger_auto_news_processing
+                trigger_auto_news_processing(new_content_ids, delay=3)
+            except Exception as exc:
+                logger.warning(f"触发 CCTV News 自动处理失败 (不阻断主链路): {exc}")
+
+        # 6. 更新未读计数
         self._update_unread_counts(user_ids)
 
         elapsed_ms = int((time.time() - start_time) * 1000)

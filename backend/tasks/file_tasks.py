@@ -529,6 +529,105 @@ def trigger_auto_feed_tagging(content_ids, username=None, delay=2):
         error(f"触发 Feeds 自动向量化失败 (不阻断主链路): {e}", source="auto_vectorize")
 
 
+def trigger_auto_news_processing(content_ids, username=None, delay=2):
+    """
+    News 内容入库后的自动处理触发器 (打标 + 向量化).
+
+    路由规则 (读 author_identifier / metadata / categories):
+      ① author_identifier ∈ NEWS_LLM_TAG_SOURCES → tag_feed_content_task (LLM 真打标)
+      ② 否则有 metadata.symbols 或 categories  → map_news_tags_task (轻量映射, 零 LLM)
+      ③ 否则                                   → 跳过打标
+
+    向量化对所有 content_id 统一触发 (trigger_auto_vectorize_feeds 内部按长度门槛幂等判定).
+
+    环境变量:
+      NEWS_AUTO_TAG_ENABLED   (默认 true)  — news 打标总开关
+      NEWS_LLM_TAG_SOURCES    (默认 CCTV) — 逗号分隔, 匹配 author_identifier (不区分大小写)
+
+    Args:
+        content_ids: subscription_content.id 列表或单个 ID
+        username: 触发用户 (仅日志)
+        delay: countdown 秒, 确保 DB 事务已提交
+    """
+    news_tag_enabled = os.getenv('NEWS_AUTO_TAG_ENABLED', 'true').lower() == 'true'
+    if not news_tag_enabled:
+        info("News 自动打标功能已禁用 (NEWS_AUTO_TAG_ENABLED=false)", source="news_auto_tagging")
+        # 向量化仍继续
+    else:
+        if not isinstance(content_ids, list):
+            content_ids = [content_ids]
+        if not content_ids:
+            return
+
+        llm_sources = {
+            s.strip().lower()
+            for s in os.getenv('NEWS_LLM_TAG_SOURCES', 'CCTV').split(',')
+            if s.strip()
+        }
+
+        # 批量查询 author_identifier / metadata / categories
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db = DatabaseManager(get_database_config())
+        rows_meta = {}
+        try:
+            with db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, author_identifier,
+                           COALESCE(metadata->'symbols', '[]'::jsonb),
+                           COALESCE(categories, ARRAY[]::text[])
+                    FROM subscription_content
+                    WHERE id = ANY(%s) AND channel_type = 'news'
+                    """,
+                    (list(content_ids),),
+                )
+                for row in cur.fetchall():
+                    rows_meta[row[0]] = {
+                        "author_identifier": row[1],
+                        "symbols": row[2] if isinstance(row[2], list) else [],
+                        "categories": list(row[3]) if row[3] else [],
+                    }
+        except Exception as e:
+            error(f"trigger_auto_news_processing: 查询 metadata 失败: {e}", source="news_auto_tagging")
+
+        try:
+            from backend.tasks.feed_tagging_tasks import tag_feed_content_task, map_news_tags_task
+        except Exception as e:
+            error(f"trigger_auto_news_processing: 导入任务失败: {e}", source="news_auto_tagging")
+            return
+
+        for cid in content_ids:
+            meta = rows_meta.get(cid)
+            if not meta:
+                continue
+            author = (meta.get("author_identifier") or "").strip().lower()
+            try:
+                if author in llm_sources:
+                    tag_feed_content_task.apply_async(args=(cid, username), countdown=delay)
+                    info(f"News LLM 打标已派发: content_id={cid} author={author}", source="news_auto_tagging")
+                elif meta.get("symbols") or meta.get("categories"):
+                    map_news_tags_task.apply_async(args=(cid,), countdown=delay)
+                    info(f"News 轻量映射已派发: content_id={cid} author={author}", source="news_auto_tagging")
+                else:
+                    info(f"News 跳过打标 (无 tags): content_id={cid} author={author}", source="news_auto_tagging")
+            except Exception as e:
+                error(f"触发 News 打标任务失败: content_id={cid} error={e}", source="news_auto_tagging")
+
+    # 向量化: news 已在 _FEED_VECTORIZABLE 白名单, 内部按长度门槛幂等判定
+    if not isinstance(content_ids, list):
+        content_ids = [content_ids]
+    try:
+        from backend.tasks.vectorize_triggers import trigger_auto_vectorize_feeds
+        trigger_auto_vectorize_feeds(
+            content_ids,
+            delay=int(os.getenv('AUTO_VECTORIZE_DELAY', '2')),
+        )
+    except Exception as e:
+        error(f"触发 News 自动向量化失败 (不阻断主链路): {e}", source="auto_vectorize")
+
+
 @app.task(bind=True, name='process_files_async', queue='file_processing')
 def process_files_task(self, file_paths, task_info, custom_inputs, params, username):
     """

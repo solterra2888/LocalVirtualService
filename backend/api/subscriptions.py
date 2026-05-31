@@ -1126,7 +1126,8 @@ async def get_subscription_contents(
                 sct.tagged_at, sct.people, sct.countries, sct.tag_schema_version,
                 scus.summary    AS personalized_summary,
                 scus.reasoning  AS personalized_reasoning,
-                CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source
+                CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source,
+                sc.categories
             FROM subscription_content sc
             LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
             LEFT JOIN subscription_content_user_summaries scus
@@ -1164,6 +1165,7 @@ async def get_subscription_contents(
             #       [33]ticker [34]concepts [35]summary [36]confidence [37]tagged_at
             #       [38]people [39]countries [40]tag_schema_version
             #       [41]personalized_summary [42]personalized_reasoning [43]summary_source
+            #       [44]categories
             tags_payload = None
             if row[29] is not None or row[40] == 'tweet_signal_v1':
                 tickers_raw = row[33]
@@ -1232,6 +1234,8 @@ async def get_subscription_contents(
                 'personalized_summary': row[41] or None,
                 'personalized_reasoning': row[42] or None,
                 'summary_source': row[43],
+                # News: EODHD 原始分类标签 (TEXT[])，供前端 NewsOriginalView 展示
+                'categories': list(row[44]) if row[44] else [],
             })
         
         cursor.close()

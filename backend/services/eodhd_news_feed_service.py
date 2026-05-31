@@ -124,6 +124,7 @@ class EODHDNewsFeedService:
         total_new = 0
         sources_matched: Set[str] = set()
         failed = 0
+        new_content_ids: List[int] = []
 
         for article in articles:
             source = determine_source(article)
@@ -143,7 +144,7 @@ class EODHDNewsFeedService:
             matched_user_ids = list(set(matched_user_ids))
 
             try:
-                _, is_new = self.content_service.save_content(
+                content_id, is_new = self.content_service.save_content(
                     channel_type='news',
                     raw_data=article,
                     user_ids=matched_user_ids,
@@ -151,12 +152,21 @@ class EODHDNewsFeedService:
                 total_saved += 1
                 if is_new:
                     total_new += 1
+                    new_content_ids.append(content_id)
             except Exception as e:
                 failed += 1
                 logger.warning(f"保存新闻失败: {str(e)[:100]}",
                                title=article.get('title', '')[:60])
 
-        # Step 4: 更新订阅未读计数
+        # Step 4: 触发新内容的自动打标 + 向量化
+        if new_content_ids:
+            try:
+                from backend.tasks.file_tasks import trigger_auto_news_processing
+                trigger_auto_news_processing(new_content_ids, delay=3)
+            except Exception as e:
+                logger.warning(f"触发 News 自动处理失败 (不阻断主链路): {e}")
+
+        # Step 5: 更新订阅未读计数
         self._update_unread_counts(source_to_users)
 
         elapsed_ms = int((time.time() - start_time) * 1000)

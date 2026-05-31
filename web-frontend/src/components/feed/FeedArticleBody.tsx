@@ -1079,7 +1079,9 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </Space>
           )}
 
-          {selectedContent.url && selectedContent.channel_type !== 'youtube' && (
+          {selectedContent.url &&
+            selectedContent.channel_type !== 'youtube' &&
+            selectedContent.channel_type !== 'news' && (
             <a
               href={selectedContent.url}
               target="_blank"
@@ -1088,9 +1090,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             >
               <Space>
                 <LinkOutlined />
-                {selectedContent.channel_type === 'news'
-                  ? 'Read Original Article'
-                  : 'View on Twitter'}
+                View on Twitter
               </Space>
             </a>
           )}

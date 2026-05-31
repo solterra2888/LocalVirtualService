@@ -3,12 +3,14 @@
 Feeds 内容自动打标签 + 摘要服务
 
 对标 backend/services/content_tagging_service.py (ContentTaggingService),
-但绑定到 subscription_content (Twitter / YouTube feed 单条内容).
+但绑定到 subscription_content (Twitter / YouTube / News feed 单条内容).
 
 Twitter 智能路由:
   - 长推 (>= TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS) 或含 $cashtag → content_tag_feeds_v1
   - 其余短推/速报 (TWEET_SIGNAL_V1_ENABLED=true) → tweet_signal_v1
   - YouTube → content_tag_feeds_v1
+  - News (白名单来源, 如 CCTV) → content_tag_feeds_v1 (LLM 打标)
+  - News (EODHD 等有 API tags 来源) → 轻量映射 map_api_tags() (零 LLM)
 
 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
 """
@@ -26,13 +28,14 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("feed_content_tagging_service")
 
-# 支持的渠道 (news/rss 本轮不做, 直接短路)
-_SUPPORTED_CHANNELS = {"twitter", "youtube"}
+# LLM 打标支持的渠道 (rss 暂不做)
+_SUPPORTED_CHANNELS = {"twitter", "youtube", "news"}
 
 FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
 TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
 TAG_SCHEMA_FEEDS_V1 = "feeds_v1"
 TAG_SCHEMA_TWEET_SIGNAL_V1 = "tweet_signal_v1"
+TAG_SCHEMA_NEWS_EODHD_V1 = "news_eodhd_v1"
 
 _CASHTAG_RE = re.compile(r"\$[A-Z]{1,5}\b")
 
@@ -96,7 +99,7 @@ class FeedContentTaggingService:
                        author_identifier, author_name,
                        is_retweet, retweeted_author, retweeted_content,
                        is_quote, quoted_author, quoted_content,
-                       transcript
+                       transcript, metadata, categories
                 FROM subscription_content
                 WHERE id = %s
                 """,
@@ -120,6 +123,8 @@ class FeedContentTaggingService:
                 "quoted_author": row[11],
                 "quoted_content": row[12],
                 "transcript": row[13],
+                "metadata": row[14] or {},
+                "categories": row[15] or [],
             }
         finally:
             conn.close()
@@ -144,7 +149,7 @@ class FeedContentTaggingService:
         allowed = {
             c.strip()
             for c in os.getenv(
-                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube"
+                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,news"
             ).split(",")
             if c.strip()
         }
@@ -152,6 +157,17 @@ class FeedContentTaggingService:
             return None
 
         max_chars = int(os.getenv("AUTO_FEED_TAG_MAX_CHARS", "6000"))
+
+        if channel_type == "news":
+            min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_NEWS", "200"))
+            title = (row.get("title") or "").strip()
+            content = (row.get("content") or "").strip()
+            text = f"{title}\n\n{content}" if (title and content) else (title or content)
+            if len(text) < min_len:
+                return None
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            return text, "news"
 
         if channel_type == "twitter":
             min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_TWITTER", "50"))
@@ -195,7 +211,7 @@ class FeedContentTaggingService:
 
     def _pick_template_code(self, channel_type: str, text: str) -> str:
         """按渠道与内容特征选择打标模板."""
-        if channel_type == "youtube":
+        if channel_type in ("youtube", "news"):
             return FEEDS_TEMPLATE_CODE
         if channel_type != "twitter":
             return self.template_code or FEEDS_TEMPLATE_CODE
@@ -324,6 +340,98 @@ class FeedContentTaggingService:
             }
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------
+    # 轻量映射 (EODHD News: 直接把 API tags 写入 subscription_content_tags, 零 LLM)
+    # ------------------------------------------------------------------
+
+    def map_api_tags(self, content_id: int) -> Dict[str, Any]:
+        """
+        把 subscription_content.metadata.symbols / categories 直接映射到
+        subscription_content_tags, 无需调用 LLM.
+
+        适用场景: EODHD 等已有 API tags 的 news 来源.
+        tag_schema_version = 'news_eodhd_v1' 便于下游区分映射产物与 LLM 产物.
+
+        Returns:
+            {'success': bool, 'skipped': bool, 'tag_id': int, ...}
+        """
+        row = self.get_content(content_id)
+        if not row:
+            raise ValueError(f"subscription_content 不存在: id={content_id}")
+
+        # 幂等: 已有标签则跳过
+        existing = self.get_existing_tags(content_id)
+        if existing:
+            self.log(
+                f"map_api_tags 跳过 (已有标签): content_id={content_id}",
+                level="info",
+            )
+            return {
+                "success": True,
+                "skipped": True,
+                "content_id": content_id,
+                "message": "已有标签",
+                "existing_tags": existing,
+            }
+
+        metadata = row.get("metadata") or {}
+        symbols = metadata.get("symbols") or []
+        categories = row.get("categories") or []
+
+        if not symbols and not categories:
+            self.log(
+                f"map_api_tags 跳过 (无 symbols/categories): content_id={content_id}",
+                level="info",
+            )
+            return {
+                "success": True,
+                "skipped": True,
+                "content_id": content_id,
+                "message": "无 API tags 可映射",
+            }
+
+        # 标准化 tickers: EODHD 格式 "NVDA.US" → 保留原样 (与 file_tags 一致)
+        tickers = [str(s) for s in symbols if s] if symbols else []
+
+        tag_data = {
+            "sector": "未分类",
+            "sector_en": "Uncategorized",
+            "industry": "未分类",
+            "industry_en": "Uncategorized",
+            "tickers": tickers,
+            "concepts": [str(c) for c in categories if c],
+            "people": [],
+            "countries": [],
+            "summary": None,
+            "confidence": None,
+            "reasoning": None,
+        }
+
+        save_result = self.save_tags(
+            content_id=content_id,
+            channel_type="news",
+            tag_data=tag_data,
+            tag_schema_version=TAG_SCHEMA_NEWS_EODHD_V1,
+            ai_metadata=None,
+            tagged_by=None,
+        )
+
+        self.log(
+            f"map_api_tags 完成: content_id={content_id} "
+            f"tickers={len(tickers)} concepts={len(tag_data['concepts'])}",
+            level="info",
+        )
+
+        return {
+            "success": True,
+            "skipped": False,
+            "content_id": content_id,
+            "tag_id": save_result["tag_id"],
+            "tag_schema_version": TAG_SCHEMA_NEWS_EODHD_V1,
+            "tickers": tickers,
+            "concepts": tag_data["concepts"],
+        }
 
     # ------------------------------------------------------------------
     # 主入口
