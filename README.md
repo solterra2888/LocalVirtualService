@@ -859,12 +859,15 @@ Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消�
 |------|------|------|
 | `YOUTUBE_UPLOAD_USE_LOCAL` | `true` | `/api/files/upload-youtube` 是否走新本地路径。`false` 走远程遗留 `upload_and_process_youtube_task`（紧急回滚用）|
 | `YOUTUBE_SUBSCRIPTION_USE_LOCAL` | `true` | 新订阅首抓是否走本地队列。`false` 走远程遗留派发器（自动再派到本地）|
-| `AUTO_FEED_TAG_ENABLED` | `true` | Feed 字幕落库后是否触发 AI 打标。`false` 时 `trigger_auto_feed_tagging` 直接 return，家用 VM 发来的 `finalize_youtube_feed_task` 仍会被消费但不派 `tag_feed_content`。**不影响字幕入库**。|
-| `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube` | 白名单，只对指定渠道打标。灰度时可设为仅 `youtube` 或仅 `twitter`。|
+| `AUTO_FEED_TAG_ENABLED` | `true` | Feed 字幕落库后是否触发 AI 打标（twitter/youtube）。`false` 时 `trigger_auto_feed_tagging` 直接 return，家用 VM 发来的 `finalize_youtube_feed_task` 仍会被消费但不派 `tag_feed_content`。**不影响字幕入库**。|
+| `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube,news` | 白名单，只对指定渠道允许打标 task 运行。news 打标由 `NEWS_AUTO_TAG_ENABLED` 独立控制入口，这里保留 news 使 task 不被短路。|
 | `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 组装后文本最短字符数；低于此值 skip（过短纯表情/链接等）|
 | `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube transcript 最短字符数；低于此值 skip（字幕残缺）|
+| `AUTO_FEED_TAG_MIN_LENGTH_NEWS` | `200` | News 标题+正文最短字符数；低于此值 LLM 路径跳过（CCTV 极短摘要）|
 | `AUTO_FEED_TAG_MAX_CHARS` | `6000` | 喂给 LLM 的最大字符数；超过则截断（与 Upload auto-tag 对齐）|
 | `AUTO_FEED_TAG_TEMPLATE_CODE` | `content_tag_feeds_v1` | 打标 prompt 模板代码；便于灰度切换 v2 模板|
+| `NEWS_AUTO_TAG_ENABLED` | `true` | News 混合打标总开关：CCTV 走 LLM，EODHD 走轻量映射，同时触发向量化。|
+| `NEWS_LLM_TAG_SOURCES` | `CCTV` | 逗号分隔的 author_identifier 白名单（不区分大小写）；白名单内走 LLM 真打标，其余 EODHD 源走零 LLM 的 API tag 映射。|
 | `TWEET_SIGNAL_V1_ENABLED` | `false` | 开启后 Twitter 短推走 `tweet_signal_v1` 轻量模板（长推/cashtag 仍走 `content_tag_feeds_v1`）|
 | `TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS` | `250` | 超过此字符数或含 `$TICKER` 的 Twitter 走重型模板|
 | `TWEET_SIGNAL_MODEL_OVERRIDE` | _(空)_ | 覆盖 `tweet_signal_v1` 推荐模型，如 `qwen3-plus` |
