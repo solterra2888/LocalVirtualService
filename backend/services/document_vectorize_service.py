@@ -247,7 +247,7 @@ class DocumentVectorizeService:
         sql = """
         SELECT sc.id, sc.channel_type, sc.content, sc.content_hash,
                sc.vector_status, sc.vector_chunk_count,
-               EXTRACT(EPOCH FROM sc.created_at)::BIGINT AS created_at_epoch
+               EXTRACT(EPOCH FROM sc.published_at)::BIGINT AS created_at_epoch
         FROM subscription_content sc
         WHERE sc.id = %s
         """
