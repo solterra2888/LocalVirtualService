@@ -1,5 +1,8 @@
 # Feeds 订阅模块完整文档
 
+> **2026-06-01 更新**
+> - **News 混合打标**：EODHD 新入库走轻量映射（`map_news_tags` → `subscription_content_tags`，`tag_schema_version=news_eodhd_v1`，零 LLM）；CCTV 及 `NEWS_LLM_TAG_SOURCES` 白名单来源走 LLM 真打标（`content_tag_feeds_v1`）。入库后统一 `trigger_auto_news_processing`（打标 + 向量化）。详见 [§6.5](#65-news-混合打标与向量化)。
+>
 > **2026-05-31 更新**
 > - 旧 News 模块（`news` 表 + `NewsPage`）已移除，EODHD 新闻完全通过 Feeds 管线（`subscription_content`）提供。
 > - **CCTV 新闻联播**已接入 Feeds：用户可在 "Add Feed" 弹窗选择 `CCTV` 频道订阅，由 `news_feed` 调度任务（`CCTVNewsFeedService`）抓取并写入 `subscription_content`（`channel_type='news', channel_identifier='CCTV'`）。完整流程见 [§6.4](#64-cctv-新闻联播-feed-抓取)。
@@ -9,7 +12,7 @@
 
 Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订阅聚合系统**，统一管理用户在不同平台（Twitter、YouTube、News/CCTV、RSS、知识星球）的订阅源，将异构内容归一化存储到同一张 `subscription_content` 表，并在前端以统一的阅读器形式呈现。
 
-与 "文件上传 + LLM 分析"（见 `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md`）、"新闻分析"（见 `docs/instructions/NEWS_ANALYSIS_FLOW.md`，已废弃）相比，Feeds 模块的核心职责是**持续、被动、按频道**地把外部内容同步进来并提供阅读体验，不自动触发 LLM 打标/分类/命名（区别见[第 7 节](#7-与其他模块的边界)）。
+与 "文件上传 + LLM 分析"（见 `docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md`）、"新闻分析"（见 `docs/instructions/NEWS_ANALYSIS_FLOW.md`，已废弃）相比，Feeds 模块的核心职责是**持续、被动、按频道**地把外部内容同步进来并提供阅读体验。Twitter / YouTube / News（混合策略）在入库后可自动写入 `subscription_content_tags` 并参与跨渠道筛选与向量化；与 Upload 的自动命名/分类边界见[第 7 节](#7-与其他模块的边界)。
 
 ## 1. 模块全景
 
@@ -70,12 +73,11 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 └──────────────────────────────────────────────────────────────────┘
     │
     ├─ ① Feed 内容打标 & 摘要（FeedContentTaggingService）
-    │   触发：用户手动 / 批量重打标 API（不自动触发）
-    │   输入：subscription_content.content / transcript（Twitter / YouTube）
-    │   模型：LocalLLMAnalysisService → prompt template: content_tag_feeds_v1
-    │   输出：subscription_content_tags
-    │         (sector / industry / tickers / concepts / summary / confidence)
-    │   Celery：tag_feed_content / batch_tag_feed_content  (queue: file_processing)
+    │   触发：twitter/youtube 抓取后 trigger_auto_feed_tagging；
+    │         news 新入库后 trigger_auto_news_processing（见 §6.5）
+    │   输入：Twitter/YouTube → LLM；EODHD news → API tags 轻量映射；CCTV → LLM
+    │   输出：subscription_content_tags（全局共享，跨渠道 concepts=/tickers= 筛选）
+    │   Celery：tag_feed_content / map_news_tags / batch_tag_feed_content (file_processing)
     │   API：/api/subscriptions/contents/{id}/tags 系列
     │
     ├─ ② Twitter Daily Report（两阶段）
@@ -349,7 +351,7 @@ CCTV 已从旧 News 模块（`cctv_news` 任务类型 → `news` 表 → `news_c
 | 调度类型 | `cctv_news`（独立 Scheduler 卡片）| 合并在 `news_feed` |
 | 存储 | `news` 表 | `subscription_content` |
 | 用户可见入口 | News 页 / 旧 preset | My Feeds → 订阅 `CCTV` |
-| LLM | `news_cctv_summary_v1` 等自动分析 | **不自动**（News 渠道不参与 Feed 自动打标，见 §10.1）|
+| LLM | `news_cctv_summary_v1` 等自动分析 | **LLM 真打标**（`NEWS_LLM_TAG_SOURCES` 含 `CCTV`，见 §6.5）|
 | 订阅标识 | — | `channel_type='news'`, `channel_identifier='CCTV'` |
 
 > 遗留 API：`POST /api/scheduler/tasks/cctv-news` 等端点可能仍存在，但 `valid_task_type` 已不再包含 `cctv_news`（见 `drop_legacy_news_module.sql`），**请勿再创建**旧类型任务。
@@ -397,6 +399,9 @@ scheduler_service._execute_news_feed_task(params)
                 │
                 └─ _update_unread_counts(user_ids)
                       对每个用户调用 update_subscription_unread_count(subscription_id, user_id)
+    │
+    ▼
+（EODHD / CCTV 各自 save_content 后，对新入库 id 调用 trigger_auto_news_processing，见 §6.5）
     │
     ▼
 前端 GET /api/subscriptions/{id}/contents → Feeds 阅读器展示
@@ -453,6 +458,7 @@ scheduler_service._execute_news_feed_task(params)
 | 分发逻辑 | 按 `source` 匹配订阅用户 | 所有 CCTV 订阅者收到同一批文章 |
 | `content_id` | 文章 `link` | 文章 `link` |
 | `symbols` | API 返回 ticker 列表 | 恒为空 |
+| 打标 | 轻量映射 `news_eodhd_v1`（symbols→ticker，categories→concepts）| LLM `feeds_v1`（`tag_feed_content`）|
 | 首抓 | 新建订阅通常 `add_user_to_existing_content_task` | 同上，实质等 `news_feed` |
 | 推荐 cron | `*/30 * * * *` | 与 EODHD 共用；联播晚间更新可酌情改为日级 + 提高 `cctv_max` |
 
@@ -469,9 +475,59 @@ scheduler_service._execute_news_feed_task(params)
 
 - **无人订阅 = 零外呼**：无 CCTV 订阅用户时不爬站，适合多环境共用库。
 - **爬取耗时**：`cctv_max=20` 时约 20–40s（含篇间 sleep）；与 EODHD 串行执行，整 tick 时间 = 两者之和。
-- **无自动 LLM**：`AUTO_FEED_TAG_CHANNELS` 默认仅 `twitter,youtube`；CCTV 正文不会自动进入 `subscription_content_tags`。
+- **打标**：新入库由 `trigger_auto_news_processing` 派发；CCTV 走 LLM，EODHD 走零成本映射（见 §6.5）。历史约 5.5 万条 news **不会**自动回填。
 - **BeautifulSoup 缺失**：Web 进程 import 失败会导致 `news_feed` 中 CCTV 分支异常并被 catch，见 scheduler 日志 `CCTV Feed 执行异常`。
 - **历史数据**：旧 `news` 表中 CCTV 记录不会自动迁移；新内容仅来自 Feeds 抓取。
+
+### 6.5 News 混合打标与向量化
+
+News 渠道（`channel_type='news'`）在 **新入库** 后由 `trigger_auto_news_processing`（`backend/tasks/file_tasks.py`）统一处理，与 twitter/youtube 的 `trigger_auto_feed_tagging` 并列、互不替代。
+
+#### 6.5.1 路由规则
+
+| 条件 | 动作 | Celery 任务 | `tag_schema_version` |
+|------|------|-------------|----------------------|
+| `author_identifier` ∈ `NEWS_LLM_TAG_SOURCES`（默认 `CCTV`）| LLM 真打标 | `tag_feed_content` | `feeds_v1` |
+| 否则且 `metadata.symbols` 或 `categories` 非空 | 轻量映射（零 LLM）| `map_news_tags` | `news_eodhd_v1` |
+| 否则 | 跳过打标 | — | — |
+| 所有传入 `content_id` | 向量化（长度门槛内）| `vectorize_feed_content` | — |
+
+识别 CCTV：**务必用 `author_identifier = 'CCTV'`**（`metadata.news_source` 在 `NewsAdapter` 中固定为 `eodhd`，不可用于区分来源）。
+
+#### 6.5.2 原始标签存储 vs 统一打标表
+
+| 数据 | 存储位置 | 用途 |
+|------|----------|------|
+| EODHD `symbols` | `subscription_content.metadata.symbols` | 原始 API；映射后亦写入 `subscription_content_tags.ticker` |
+| EODHD `tags` | `subscription_content.categories` + `metadata.api_tags` | 原始 API；映射后亦写入 `subscription_content_tags.concepts` |
+| 跨渠道筛选 / Agent `tickers=` / `concepts=` | **`subscription_content_tags`** | 与 twitter/youtube 共用 |
+
+列表 API `GET /api/subscriptions/{id}/contents` 返回 `categories`（EODHD Tags）与 LEFT JOIN 的 `tags`（打标产物）。
+
+#### 6.5.3 环境变量
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `NEWS_AUTO_TAG_ENABLED` | `true` | News 打标总开关（关则仅跳过打标，向量化仍可按 `AUTO_VECTORIZE_ENABLED` 执行）|
+| `NEWS_LLM_TAG_SOURCES` | `CCTV` | 逗号分隔，匹配 `author_identifier`（不区分大小写）|
+| `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube,news` | 允许 `tag_feed_content` 对 news 渠道运行（实际 news 入口由上一开关 + 白名单控制）|
+| `AUTO_FEED_TAG_MIN_LENGTH_NEWS` | `200` | News LLM 路径：`title + content` 最短字符数 |
+
+配置见 `deployment/config.defaults.env`。
+
+#### 6.5.4 实现文件
+
+| 文件 | 职责 |
+|------|------|
+| `backend/services/feed_content_tagging_service.py` | `_build_tagging_text`（news LLM）、`map_api_tags`（EODHD 映射）|
+| `backend/tasks/feed_tagging_tasks.py` | `map_news_tags_task` |
+| `backend/tasks/file_tasks.py` | `trigger_auto_news_processing` |
+| `backend/services/eodhd_news_feed_service.py` | 抓取后收集 `new_content_ids` 并触发 |
+| `backend/services/cctv_news_feed_service.py` | 同上 |
+
+#### 6.5.5 向量化注意
+
+`trigger_auto_news_processing` 末尾调用 `trigger_auto_vectorize_feeds`。默认 `AUTO_VECTORIZE_MIN_CONTENT_LENGTH=3000`，多数 CCTV 短稿会被 `too_short` 跳过；长文 EODHD 可正常进入语义检索。详见 [VECTOR_RAG_SYSTEM.md](./VECTOR_RAG_SYSTEM.md)。
 
 ## 7. YouTube Feed 抓取 & 转录完整流程（涉及本地虚拟机 Worker）
 
@@ -602,7 +658,7 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 | 数据源 | 外部平台被动订阅（含 EODHD API + CCTV 爬虫）| 用户主动上传 / 粘贴 YouTube 链接 | 已废弃：`news` 表 + 旧分析管线 |
 | 主表 | `subscription_content` | `file_processing_details` + `processing_stats` | `news` |
 | YouTube 抓取 | 家用 Worker（`youtube_fetching` / `youtube_transcription`）| 家用 Worker（priority 队列 `youtube_priority` / `youtube_transcription_priority`）| — |
-| 自动 LLM 打标 / 分类 / 命名 | **否** | **是**（`finalize_youtube_file_task` → `content_tagging` / `content_classify`）| 独立的 `NewsAnalysisService` |
+| 自动 LLM 打标 / 分类 / 命名 | **部分**：twitter/youtube 全量 LLM 打标；news 为 EODHD 映射 + CCTV/白名单 LLM（§6.5）| **是**（`finalize_youtube_file_task` → `content_tagging` / `content_classify`）| 独立的 `NewsAnalysisService`（已废弃）|
 | 个性化标签（`personalized_tags`）| 不自动调用，但可作为用户阅读后手动二次处理入口 | 自动调用（详见 `PERSONALIZED_TAGS_IMPLEMENTATION.md`）| 不参与 |
 | 定时触发 | scheduler_service（youtube/twitter/**news_feed**=EODHD+CCTV）| 无（用户触发）| 已移除（原 `news_analysis` / `cctv_news`）|
 
@@ -622,8 +678,9 @@ Feeds 模块涉及 **四条** 独立的 LLM 链路，相互解耦：
 | 服务 | `backend/services/feed_content_tagging_service.py` → `FeedContentTaggingService` |
 | LLM 底层 | `LocalLLMAnalysisService`（重构后内部委托 `chat_completion_with_template`，自动写 usage_log）|
 | Prompt 模板 | `content_tag_feeds_v1`；module_code = `feed_tagging`，用户可在 Settings 设默认偏好 |
-| 支持渠道 | `twitter` / `youtube`（news/rss 本轮不做，直接短路）|
-| 输入拼装 | Twitter：`content` + 引用/转推树；YouTube：`title + transcript`，两者均有最小长度门槛与最大字符截断 |
+| 支持渠道 | `twitter` / `youtube` / `news`（rss 暂不做）|
+| 输入拼装 | Twitter：`content` + 引用/转推树；YouTube：`title + transcript`；News（LLM 路径）：`title + content`。EODHD 有 API tags 时走 `map_api_tags`，不调 LLM |
+| News 路由 | `trigger_auto_news_processing`：`NEWS_LLM_TAG_SOURCES` → `tag_feed_content`；否则有 symbols/categories → `map_news_tags` |
 | 输出字段 | `sector` / `sector_en` / `industry` / `industry_en` / `tickers[]` / `concepts[]` / `summary` / `confidence` / `reasoning` |
 | 存储表 | `subscription_content_tags`（UPSERT on `subscription_content_id`，**全局共享，跨用户复用**）|
 | Celery 任务 | `tag_feed_content`（单条）/ `batch_tag_feed_content`（批量梯度派发）均在 `file_processing` 队列 |
