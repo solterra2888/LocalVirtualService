@@ -13,6 +13,7 @@ from . import dashboard
 from . import screener
 from . import twitter_daily_reports
 from . import youtube_daily_reports
+from . import chat_group_messages
 
 __all__ = [
     'auth',
@@ -25,4 +26,5 @@ __all__ = [
     'screener',
     'twitter_daily_reports',
     'youtube_daily_reports',
+    'chat_group_messages',
 ] 
