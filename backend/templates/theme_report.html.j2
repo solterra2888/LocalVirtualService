@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en" data-color-mode="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Theme Performance Report</title>
+<script>
+/* Theme: manual Light/Dark toggle (localStorage), default light. */
+(function() {
+  var STORAGE_KEY = 'theme-report-color-mode';
+  function readStored() {
+    try {
+      var s = localStorage.getItem(STORAGE_KEY);
+      if (s === 'light' || s === 'dark') return s;
+    } catch (e) {}
+    return 'light';
+  }
+  window.__updateThemeToggleUI = function() {
+    var mode = document.documentElement.getAttribute('data-color-mode') || 'light';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) {
+      var on = btn.getAttribute('data-theme-toggle') === mode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+  window.__setReportColorMode = function(mode) {
+    if (mode !== 'light' && mode !== 'dark') return;
+    document.documentElement.setAttribute('data-color-mode', mode);
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch (e) {}
+    if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+    window.dispatchEvent(new CustomEvent('report-colormode-change', { detail: mode }));
+  };
+  document.documentElement.setAttribute('data-color-mode', readStored());
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  /* Layout tokens always on html; colors default light, dark overrides below */
+  html {
+    --sidebar-width: 248px;
+    --radius: 8px;
+    --font: 'Inter', 'SF Pro Text', system-ui, -apple-system, sans-serif;
+    color-scheme: light;
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface2: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --accent: #2563eb;
+    --pos: #059669;
+    --neg: #dc2626;
+    --na: #94a3b8;
+    --bar-pos: #3b82f6;
+    --bar-neg: #ef4444;
+    --bar-value-pos: #2563eb;
+    --bar-value-neg: #dc2626;
+    --chart-text: #64748b;
+    --chart-grid: #e2e8f0;
+    --chart-tooltip-bg: #ffffff;
+    --chart-tooltip-border: #e2e8f0;
+    --chart-tooltip-title: #0f172a;
+    --chart-tooltip-body: #64748b;
+    --stock-card-bg: #ffffff;
+    --stock-card-title: #111827;
+    --stock-modal-overlay: rgba(15, 23, 42, 0.55);
+    --stock-modal-panel: #ffffff;
+    --stock-modal-title: #111827;
+    --stock-modal-btn-border: #cbd5e1;
+    --stock-modal-btn-text: #64748b;
+    --stock-modal-btn-hover: #0f172a;
+    scroll-behavior: smooth;
+  }
+  html[data-color-mode="dark"] {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222638;
+    --border: #2e3347;
+    --text: #e2e5f0;
+    --text-muted: #7b84a3;
+    --accent: #4f8ef7;
+    --pos: #3ecf8e;
+    --neg: #f75e5e;
+    --na: #555b7a;
+    --bar-pos: #3b82f6;
+    --bar-neg: #ef4444;
+    --bar-value-pos: #60a5fa;
+    --bar-value-neg: #f87171;
+    --chart-text: #7b84a3;
+    --chart-grid: #2e3347;
+    --chart-tooltip-bg: #1a1d27;
+    --chart-tooltip-border: #2e3347;
+    --chart-tooltip-title: #e2e5f0;
+    --chart-tooltip-body: #7b84a3;
+    --stock-card-bg: #1a1d27;
+    --stock-card-title: #e2e5f0;
+    --stock-modal-overlay: rgba(15, 23, 42, 0.86);
+    --stock-modal-panel: #1a1d27;
+    --stock-modal-title: #e2e5f0;
+    --stock-modal-btn-border: #2e3347;
+    --stock-modal-btn-text: #7b84a3;
+    --stock-modal-btn-hover: #e2e5f0;
+  }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* ── App shell (grid avoids fixed sidebar overlapping content) ── */
+  .app-shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    min-height: 100vh;
+    background: var(--bg);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    width: var(--sidebar-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 18px 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    z-index: 1;
+  }
+  .sidebar-brand {
+    padding: 4px 8px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .eyebrow {
+    color: var(--text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+  .brand-title {
+    margin-top: 4px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .theme-toggle {
+    display: flex;
+    margin: 12px 4px 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
+  .theme-toggle button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .theme-toggle button:hover { color: var(--text); }
+  .theme-toggle button.active {
+    background: var(--accent);
+    color: #ffffff;
+  }
+  .sidebar-search {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+    margin: 14px 0;
+    flex-shrink: 0;
+  }
+  .sidebar-search::placeholder { color: var(--text-muted); }
+  .sidebar-search:focus { border-color: var(--accent); }
+
+  /* ── Sidebar TOC ── */
+  .sidebar .toc {
+    overflow-y: auto;
+    padding-right: 4px;
+    flex: 1;
+  }
+  .toc-group { padding: 8px 0; }
+  .toc-group-title {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+  }
+  .sidebar .toc ul { list-style: none; margin: 4px 0 0; padding: 0; }
+  .sidebar .toc li { margin: 1px 0; }
+  .sidebar .toc a {
+    display: block;
+    padding: 6px 8px 6px 10px;
+    border-left: 3px solid transparent;
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.3;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .sidebar .toc a:hover,
+  .sidebar .toc a.active {
+    background: var(--surface2);
+    border-left-color: var(--accent);
+    color: var(--text);
+  }
+
+  /* ── Main content ── */
+  .content {
+    min-width: 0;
+    padding: 24px 32px 48px;
+    max-width: 1200px;
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px 16px;
+    margin-bottom: 24px;
+  }
+  .page-header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .page-header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.3px;
+  }
+  .page-header .theme-toggle { margin: 0; min-width: 148px; flex-shrink: 0; }
+  .page-header .meta {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .page-header .stats-row {
+    display: flex;
+    gap: 24px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .stat-pill {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .stat-pill strong { color: var(--text); }
+
+  /* ── Theme section ── */
+  .theme-section {
+    margin-bottom: 48px;
+    scroll-margin-top: 24px;
+  }
+  .theme-section + .theme-section {
+    border-top: 1px solid var(--border);
+    padding-top: 40px;
+  }
+  .theme-title-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .theme-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .theme-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* ── Insight bullets ── */
+  .insights {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+  }
+  .insights .sub-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .insights ul { list-style: none; }
+  .insights li {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 3px 0 3px 16px;
+    position: relative;
+  }
+  .insights li::before {
+    content: '›';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* ── Sub-section header ── */
+  .sub-heading {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin: 20px 0 8px;
+  }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  thead { background: var(--surface2); }
+  thead th {
+    padding: 9px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  thead th.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody td {
+    padding: 8px 12px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td.rank { color: var(--text-muted); text-align: right; width: 36px; }
+  tbody td.name { font-weight: 500; }
+  tbody td.ticker { font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
+  tbody td.company { color: var(--text-muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  tbody td.cat-cell { color: var(--text-muted); font-size: 11.5px; }
+
+  .val-pos { color: var(--pos); }
+  .val-neg { color: var(--neg); }
+  .val-na  { color: var(--na); }
+
+  /* ── Top tickers chips ── */
+  .ticker-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ticker-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text);
+  }
+
+  /* ── Pagination ── */
+  .paginated-table .table-wrap { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 0 4px;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: var(--surface);
+  }
+  .pagination-controls button {
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .pagination-controls button:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--surface);
+  }
+  .pagination-controls button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .page-info { font-size: 12px; color: var(--text-muted); }
+
+  /* ── Performance section ── */
+  .perf-section { margin-bottom: 32px; }
+  .perf-tabs {
+    display: flex; gap: 4px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--border); padding-bottom: 0;
+  }
+  .perf-tab {
+    padding: 7px 16px; border: none; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 13px; border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s;
+  }
+  .perf-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .perf-tab:hover:not(.active) { color: var(--text); }
+  .perf-panel { display: none; }
+  .perf-panel.active { display: block; }
+
+  /* Performance Table */
+  .perf-table th.sortable { cursor: pointer; user-select: none; }
+  .perf-table th.sortable:hover { color: var(--accent); }
+
+  /* Cumulative chart container */
+  .cum-chart-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; min-height: 380px;
+  }
+  #cum-chart { width: 100%; height: 360px; }
+
+  /* Multi-period bar charts */
+  .mp-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .mp-chart-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .mp-chart-title {
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
+  }
+  .bar-row {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    font-size: 11.5px;
+  }
+  .bar-label { width: 130px; text-align: right; color: var(--text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; height: 18px; position: relative; }
+  .bar-fill {
+    height: 100%; border-radius: 3px; min-width: 2px;
+    position: absolute; top: 0;
+  }
+  .bar-fill.pos { background: var(--bar-pos); left: 50%; }
+  .bar-fill.neg { background: var(--bar-neg); right: 50%; }
+  .bar-value { width: 52px; font-variant-numeric: tabular-nums; font-size: 11px; flex-shrink: 0; text-align: left; }
+  .bar-value.pos { color: var(--bar-value-pos); }
+  .bar-value.neg { color: var(--bar-value-neg); }
+
+  /* ── Executive Summary ── */
+  .section-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 24px;
+    padding: 16px 20px;
+  }
+  .card-header { margin-bottom: 12px; }
+  .card-header h2 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .card-header p {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .kpi-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin: 12px 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .kpi-card {
+    flex: 1 1 0;
+    min-width: 108px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 10px;
+    min-height: 76px;
+  }
+  .kpi-label {
+    color: var(--text-muted);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .kpi-value {
+    margin-top: 6px;
+    font-size: 16px;
+    line-height: 1.1;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .kpi-sublabel {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .kpi-card.positive .kpi-value { color: var(--pos); }
+  .kpi-card.negative .kpi-value { color: var(--neg); }
+  .exec-pm-read {
+    border-left: 4px solid var(--accent);
+    background: var(--surface2);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 12px 16px;
+    margin-top: 12px;
+  }
+  .exec-pm-read-title {
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .exec-pm-read ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .exec-pm-read li { margin: 4px 0; }
+
+  /* ── Footer ── */
+  .page-footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  @media (max-width: 1100px) {
+    .app-shell { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .content { padding: 16px; max-width: none; }
+    .theme-title-row { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+<!-- ═══════════════════════════════════════════════════
+     LEFT SIDEBAR
+═══════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="eyebrow">Theme Research</div>
+    <div class="brand-title">Performance Dashboard</div>
+    <div class="theme-toggle" role="group" aria-label="Color theme">
+      <button type="button" data-theme-toggle="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+  <input class="sidebar-search" id="sidebar-search" type="search" placeholder="Search sections" />
+  <nav class="toc">
+    <div class="toc-group">
+      <div class="toc-group-title">Overview</div>
+      <ul>
+        <li><a href="#executive-summary">Executive Summary</a></li>
+      </ul>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Theme Performance</div>
+      <ul>
+        <li><a href="#perf-section">Performance Table</a></li>
+        <li><a href="#perf-section">Cumulative Chart</a></li>
+        <li><a href="#perf-section">Multi-Period Returns</a></li>
+      </ul>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Theme Details</div>
+      <ul>
+        {% for theme in themes %}
+        <li>
+          <a href="#theme-{{ loop.index }}">{{ theme.theme_name }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if stock_charts %}
+    <div class="toc-group">
+      <div class="toc-group-title">Stock Charts</div>
+      <ul>
+        <li><a href="#stock-charts-section">Individual Stock Charts</a></li>
+        {% for theme in stock_charts %}
+        <li><a href="#stocks-{{ theme.theme_key }}">{{ theme.theme_name }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </nav>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════
+     MAIN CONTENT
+═══════════════════════════════════════════════════ -->
+<main class="content">
+
+  <div class="page-header" id="overview">
+    <div class="page-header-top">
+      <h1>Theme Performance Report</h1>
+      <div class="theme-toggle theme-toggle-main" role="group" aria-label="Color theme">
+        <button type="button" data-theme-toggle="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <div class="meta">As of {{ report_date }} &nbsp;·&nbsp; Prices as of {{ price_as_of }} &nbsp;·&nbsp; Generated {{ generated_at }}</div>
+    <div class="stats-row">
+      <span class="stat-pill"><strong>{{ total_themes }}</strong> themes</span>
+      <span class="stat-pill"><strong>{{ total_categories }}</strong> categories</span>
+      <span class="stat-pill"><strong>{{ total_constituents }}</strong> constituents</span>
+    </div>
+  </div>
+
+  {% if executive_summary and executive_summary.kpis %}
+  <section class="section-card" id="executive-summary">
+    <div class="card-header">
+      <div>
+        <h2>Executive Summary</h2>
+        <p>Multi-horizon equal-weighted theme performance and category/ticker drilldowns.</p>
+      </div>
+    </div>
+    <div class="kpi-grid">
+      {% for kpi in executive_summary.kpis %}
+      <div class="kpi-card {{ kpi.tone }}">
+        <div class="kpi-label">{{ kpi.label }}</div>
+        <div class="kpi-value">{{ kpi.theme_name }}</div>
+        <div class="kpi-sublabel">{{ kpi.sublabel }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if executive_summary.insights %}
+    <div class="exec-pm-read">
+      <div class="exec-pm-read-title">PM Read</div>
+      <ul>
+        {% for line in executive_summary.insights %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════
+       THEME PERFORMANCE SECTION
+  ═══════════════════════════════════════════════════ -->
+  <section class="theme-section perf-section" id="perf-section">
+    <div class="theme-title-row">
+      <div>
+        <div class="eyebrow">Overview</div>
+        <div class="theme-title">Theme Performance</div>
+      </div>
+      <div class="theme-meta">{{ total_themes }} themes ranked by 3M return</div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="perf-tabs">
+      <button class="perf-tab active" onclick="showPerfTab('tbl',this)">Performance Table</button>
+      <button class="perf-tab" onclick="showPerfTab('cum',this)">Cumulative Chart</button>
+      <button class="perf-tab" onclick="showPerfTab('mp',this)">Multi-Period Returns</button>
+    </div>
+
+    <!-- ── Panel 1: Performance Table ── -->
+    <div id="perf-tbl" class="perf-panel active">
+      <div class="table-wrap">
+        <table class="perf-table" style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th class="th-rank" style="width:44px">Rank</th>
+              <th>Theme</th>
+              <th class="num">1D</th>
+              <th class="num">1W</th>
+              <th class="num">1M</th>
+              <th class="num">3M</th>
+              <th class="num">1Y</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for tp in theme_performance %}
+            {% set r3 = tp['3M'] %}
+            <tr>
+              <td class="rank">{{ tp.rank }}</td>
+              <td class="name">{{ tp.theme_name }}</td>
+              <td class="num {% if tp['1D'] is not none %}{% if tp['1D'] >= 0 %}val-pos{% else %}val-neg{% endif %}{% else %}val-na{% endif %}">
+                {{ tp['1D'] | fmt_ret }}
+              </td>
+              <td class="num {% if tp['1W'] is not none %}{% if tp['1W'] >= 0 %}val-pos{% else %}val-neg{% endif %}{% else %}val-na{% endif %}">
+                {{ tp['1W'] | fmt_ret }}
+              </td>
+              <td class="num {% if tp['1M'] is not none %}{% if tp['1M'] >= 0 %}val-pos{% else %}val-neg{% endif %}{% else %}val-na{% endif %}">
+                {{ tp['1M'] | fmt_ret }}
+              </td>
+              <td class="num {% if r3 is not none %}{% if r3 >= 0 %}val-pos{% else %}val-neg{% endif %}{% else %}val-na{% endif %}">
+                {{ r3 | fmt_ret }}
+              </td>
+              <td class="num {% if tp['1Y'] is not none %}{% if tp['1Y'] >= 0 %}val-pos{% else %}val-neg{% endif %}{% else %}val-na{% endif %}">
+                {{ tp['1Y'] | fmt_ret }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Panel 2: Cumulative Chart ── -->
+    <div id="perf-cum" class="perf-panel">
+      <div class="cum-chart-wrap">
+        <canvas id="cum-chart"></canvas>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-muted);">
+        Equal-weighted theme return, indexed to 0% at the start of the 180-day window. As of {{ price_as_of }}.
+      </div>
+    </div>
+
+    <!-- ── Panel 3: Multi-Period Returns ── -->
+    <div id="perf-mp" class="perf-panel">
+      <div class="mp-grid">
+        {% for period in ['1D','1W','1M','3M'] %}
+        {% set sorted_tp = theme_performance | sort(attribute=period, reverse=true) %}
+        {% set max_abs = namespace(v=0.01) %}
+        {% for tp in sorted_tp %}{% if tp[period] is not none and (tp[period]|abs) > max_abs.v %}{% set max_abs.v = tp[period]|abs %}{% endif %}{% endfor %}
+        <div class="mp-chart-wrap">
+          <div class="mp-chart-title">{{ period }} Return</div>
+          {% for tp in sorted_tp %}
+          {% set v = tp[period] %}
+          {% if v is not none %}
+          {% set pct = (v|abs / max_abs.v * 50) %}
+          <div class="bar-row">
+            <div class="bar-label" title="{{ tp.theme_name }}">{{ tp.theme_name }}</div>
+            <div class="bar-track">
+              <div class="bar-fill {% if v >= 0 %}pos{% else %}neg{% endif %}"
+                   style="width:{{ pct }}%"></div>
+            </div>
+            <div class="bar-value {% if v >= 0 %}pos{% else %}neg{% endif %}">
+              {% if v >= 0 %}+{% endif %}{{ "%.1f"|format(v) }}%
+            </div>
+          </div>
+          {% else %}
+          <div class="bar-row">
+            <div class="bar-label" title="{{ tp.theme_name }}">{{ tp.theme_name }}</div>
+            <div class="bar-track"></div>
+            <div class="bar-value val-na">n/a</div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       THEME DETAILS
+  ═══════════════════════════════════════════════════ -->
+  {% for theme in themes %}
+  <section class="theme-section" id="theme-{{ loop.index }}">
+
+    <div class="theme-title-row">
+      <div>
+        <div class="eyebrow">Theme Detail</div>
+        <div class="theme-title">{{ theme.theme_name }}</div>
+      </div>
+      <div class="theme-meta">
+        {{ theme.constituents|length }} constituents &nbsp;|&nbsp; {{ theme.categories|length }} categories
+      </div>
+    </div>
+
+    <!-- PM Read -->
+    {% if theme.insights %}
+    <div class="insights">
+      <div class="sub-label">PM Read</div>
+      <ul>
+        {% for insight in theme.insights %}
+        <li>{{ insight }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <!-- ── Categories table ── -->
+    <div class="sub-heading">Categories</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">Rank</th>
+            <th>Category</th>
+            {% for h in horizons %}
+            <th class="num">{{ h }}</th>
+            {% endfor %}
+            <th>Top Constituents</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat in theme.categories %}
+          <tr>
+            <td class="rank">{{ cat.rank }}</td>
+            <td class="name">{{ cat.category }}</td>
+            {% for h in horizons %}
+            {% set v = cat[h] %}
+            {% if v is none %}
+            <td class="num val-na">n/a</td>
+            {% elif v >= 0 %}
+            <td class="num val-pos">+{{ "%.1f"|format(v) }}%</td>
+            {% else %}
+            <td class="num val-neg">{{ "%.1f"|format(v) }}%</td>
+            {% endif %}
+            {% endfor %}
+            <td>
+              <div class="ticker-chips">
+                {% for t in cat.top_tickers %}
+                <span class="ticker-chip">{{ t }}</span>
+                {% endfor %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Constituents table ── -->
+    <div class="sub-heading">Constituents</div>
+    <div class="paginated-table" data-page-size="10" id="constituents-theme-{{ loop.index }}">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Company</th>
+              <th>Category</th>
+              {% for h in horizons %}
+              <th class="num">{{ h }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in theme.constituents %}
+            <tr>
+              <td class="ticker">{{ c.ticker }}</td>
+              <td class="company" title="{{ c.company_name }}">{{ c.company_name }}</td>
+              <td class="cat-cell">{{ c.category }}</td>
+              {% for h in horizons %}
+              {% set v = c[h] %}
+              {% if v is none %}
+              <td class="num val-na">n/a</td>
+              {% elif v >= 0 %}
+              <td class="num val-pos">+{{ "%.1f"|format(v) }}%</td>
+              {% else %}
+              <td class="num val-neg">{{ "%.1f"|format(v) }}%</td>
+              {% endif %}
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination-controls">
+        <button class="prev-btn" onclick="prevPage('constituents-theme-{{ loop.index }}')">← Prev</button>
+        <span class="page-info">Page 1 of 1</span>
+        <button class="next-btn" onclick="nextPage('constituents-theme-{{ loop.index }}')">Next →</button>
+      </div>
+    </div>
+
+  </section>
+  {% endfor %}
+
+  {% if stock_charts %}
+  {% include 'includes/theme_report_stock_charts.j2' %}
+  {% endif %}
+
+  <div class="page-footer">
+    Theme Performance Report &nbsp;·&nbsp; {{ report_date }} &nbsp;·&nbsp; Returns are simple price returns (unadjusted close), equal-weighted within categories.
+  </div>
+
+</main>
+</div><!-- /app-shell -->
+
+<script>
+function initPagination() {
+  document.querySelectorAll('.paginated-table').forEach(container => {
+    const pageSize = parseInt(container.dataset.pageSize) || 10;
+    const rows = Array.from(container.querySelectorAll('tbody tr'));
+    container._pageSize = pageSize;
+    container._currentPage = 0;
+    container._totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    showPage(container, 0);
+  });
+}
+
+function showPage(container, page) {
+  const rows = Array.from(container.querySelectorAll('tbody tr'));
+  const pageSize = container._pageSize;
+  const start = page * pageSize;
+  const end = start + pageSize;
+  rows.forEach((row, i) => {
+    row.style.display = (i >= start && i < end) ? '' : 'none';
+  });
+  container._currentPage = page;
+  const info = container.querySelector('.page-info');
+  if (info) info.textContent = 'Page ' + (page + 1) + ' of ' + container._totalPages;
+  const prevBtn = container.querySelector('.prev-btn');
+  const nextBtn = container.querySelector('.next-btn');
+  if (prevBtn) prevBtn.disabled = page === 0;
+  if (nextBtn) nextBtn.disabled = page >= container._totalPages - 1;
+}
+
+function prevPage(id) {
+  const c = document.getElementById(id);
+  if (c && c._currentPage > 0) showPage(c, c._currentPage - 1);
+}
+
+function nextPage(id) {
+  const c = document.getElementById(id);
+  if (c && c._currentPage < c._totalPages - 1) showPage(c, c._currentPage + 1);
+}
+
+function initSearch() {
+  const input = document.getElementById('sidebar-search');
+  if (!input) return;
+  input.addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll('.sidebar .toc li').forEach(item => {
+      item.style.display = !query || item.textContent.toLowerCase().includes(query) ? '' : 'none';
+    });
+  });
+}
+
+function initActiveNav() {
+  const links = Array.from(document.querySelectorAll('.sidebar .toc a[href^="#"]'));
+  const sections = links
+    .map(link => document.querySelector(link.getAttribute('href')))
+    .filter(Boolean);
+  if (!sections.length) return;
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      links.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+      });
+    });
+  }, { rootMargin: '-10% 0px -70% 0px', threshold: 0.01 });
+  sections.forEach(section => observer.observe(section));
+}
+
+function initThemeToggle() {
+  document.querySelectorAll('[data-theme-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (typeof window.__setReportColorMode === 'function') {
+        window.__setReportColorMode(btn.getAttribute('data-theme-toggle'));
+      }
+    });
+  });
+  if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+  window.addEventListener('report-colormode-change', () => {
+    if (cumChartInstance) initPerfCharts();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initThemeToggle();
+  initPagination();
+  initSearch();
+  initActiveNav();
+  initPerfCharts();
+  if (typeof initJsStockCharts === 'function') initJsStockCharts();
+  const stockModal = document.getElementById('js-chart-modal');
+  if (stockModal) {
+    stockModal.addEventListener('click', e => {
+      if (e.target === stockModal) closeJsStockChart();
+    });
+  }
+});
+
+// ── Performance section tab switching ──
+function showPerfTab(id, btn) {
+  document.querySelectorAll('.perf-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.perf-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('perf-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Performance Charts (Chart.js) — colors follow prefers-color-scheme ──
+let cumChartInstance = null;
+
+function getChartThemeColors() {
+  const s = getComputedStyle(document.documentElement);
+  const v = name => s.getPropertyValue(name).trim();
+  return {
+    text: v('--chart-text') || '#64748b',
+    grid: v('--chart-grid') || '#e2e8f0',
+    tooltipBg: v('--chart-tooltip-bg') || '#ffffff',
+    tooltipBorder: v('--chart-tooltip-border') || '#e2e8f0',
+    tooltipTitle: v('--chart-tooltip-title') || '#0f172a',
+    tooltipBody: v('--chart-tooltip-body') || '#64748b',
+  };
+}
+
+function initPerfCharts() {
+  const raw = {{ theme_performance_json | safe }};
+  const cumCtx = document.getElementById('cum-chart');
+  if (!cumCtx) return;
+
+  if (cumChartInstance) {
+    cumChartInstance.destroy();
+    cumChartInstance = null;
+  }
+  if (!raw || !raw.length) return;
+
+  const PALETTE = [
+    '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+    '#06b6d4','#f97316','#ec4899','#14b8a6','#84cc16',
+    '#6366f1','#a78bfa','#fb7185','#34d399','#fbbf24',
+    '#60a5fa','#4ade80','#f472b6','#38bdf8','#a3e635',
+  ];
+  const theme = getChartThemeColors();
+
+  const dateSet = new Set();
+  raw.forEach(tp => (tp.cum_series || []).forEach(pt => dateSet.add(pt.date)));
+  const dateLabels = Array.from(dateSet).sort();
+
+  const datasets = raw.map((tp, i) => {
+    const map = {};
+    (tp.cum_series || []).forEach(pt => { map[pt.date] = pt.value; });
+    return {
+      label: tp.theme_name,
+      data: dateLabels.map(d => map[d] !== undefined ? map[d] : null),
+      borderColor: PALETTE[i % PALETTE.length],
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0.3,
+      spanGaps: true,
+    };
+  });
+
+  cumChartInstance = new Chart(cumCtx, {
+    type: 'line',
+    data: { labels: dateLabels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'bottom',
+          labels: {
+            color: theme.text, font: { size: 10 }, boxWidth: 12, padding: 8,
+            filter: (item) => item.text,
+          },
+        },
+        tooltip: {
+          backgroundColor: theme.tooltipBg,
+          borderColor: theme.tooltipBorder,
+          borderWidth: 1,
+          titleColor: theme.tooltipTitle,
+          bodyColor: theme.tooltipBody,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v === null || v === undefined) return null;
+              const sign = v >= 0 ? '+' : '';
+              return ` ${ctx.dataset.label}: ${sign}${v.toFixed(1)}%`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: theme.text, maxTicksLimit: 8, font: { size: 10 } },
+          grid: { color: theme.grid },
+        },
+        y: {
+          ticks: {
+            color: theme.text, font: { size: 10 },
+            callback: v => (v >= 0 ? '+' : '') + v.toFixed(0) + '%',
+          },
+          grid: { color: theme.grid },
+        },
+      },
+    },
+  });
+}
+
+</script>
+
+</body>
+</html>

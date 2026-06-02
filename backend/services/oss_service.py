@@ -669,6 +669,21 @@ class OSSService:
         """
         return self.get_file_info(object_name)
     
+    def get_object_bytes(self, object_name: str) -> Optional[bytes]:
+        """
+        Read an OSS object directly into memory and return its raw bytes.
+        Returns None on error (object not found, OSS not configured, etc.).
+        """
+        try:
+            if not self.is_configured():
+                warning("OSS 未配置，无法读取对象")
+                return None
+            result = self.bucket.get_object(object_name)
+            return result.read()
+        except Exception as e:
+            error(f"OSS 读取对象失败 ({object_name}): {str(e)}")
+            return None
+
     def download_to_file(self, object_name: str, local_path: str) -> bool:
         """
         从 OSS 下载文件到本地（用于 LlamaParse 等需要本地文件的场景）

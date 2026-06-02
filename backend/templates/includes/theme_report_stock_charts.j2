@@ -1,0 +1,456 @@
+{# Individual Stock Charts — matches reference dashboard.cntlabs.io #}
+<style>
+  .stock-charts-section { margin-top: 48px; padding-top: 40px; border-top: 1px solid var(--border); scroll-margin-top: 24px; }
+  .stock-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stock-category-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .stock-category-group { scroll-margin-top: 92px; }
+  .stock-category-group.multi { grid-column: 1 / -1; }
+  .stock-category-group.single .stock-grid { grid-template-columns: 1fr; }
+  .stock-category-title { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+  .stock-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: var(--stock-card-bg);
+  }
+  .stock-item-title { margin-bottom: 8px; font-weight: 700; letter-spacing: 0.03em; color: var(--stock-card-title); }
+  .js-stock-chart {
+    width: 100%;
+    height: 360px;
+    border: 1px solid #1F2937;
+    border-radius: 8px;
+    background: #000000;
+    box-sizing: border-box;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .js-stock-chart svg { display: block; width: 100%; height: 100%; }
+  .js-stock-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 360px; color: #CCCCCC; font-size: 12px;
+    border: 1px dashed #374151; border-radius: 8px; background: #000000;
+  }
+  .js-chart-modal {
+    display: none; position: fixed; inset: 0; z-index: 9998;
+    background: var(--stock-modal-overlay); padding: 42px;
+  }
+  .js-chart-modal.active { display: flex; align-items: center; justify-content: center; }
+  .js-chart-modal-panel {
+    width: min(1200px, 96vw); height: min(720px, 88vh);
+    background: var(--stock-modal-panel); border-radius: 12px; padding: 16px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  }
+  .js-chart-modal-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .js-chart-modal-title { font-weight: 700; letter-spacing: 0.03em; color: var(--stock-modal-title); }
+  .js-chart-modal-actions { display: inline-flex; gap: 6px; align-items: center; }
+  .js-chart-modal-actions button {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border: 1px solid var(--stock-modal-btn-border);
+    background: var(--stock-modal-panel); border-radius: 6px; padding: 0;
+    color: var(--stock-modal-btn-text); cursor: pointer;
+  }
+  .js-chart-modal-actions button:hover { color: var(--stock-modal-btn-hover); border-color: var(--accent); }
+  .js-chart-modal-actions svg { width: 15px; height: 15px; stroke: currentColor; }
+  #js-chart-modal-body { height: calc(100% - 38px); }
+  #js-chart-modal-body .js-stock-chart { height: 100%; cursor: default; }
+  @media (max-width: 1100px) {
+    .stock-category-layout { grid-template-columns: 1fr; }
+    .stock-category-group.multi { grid-column: auto; }
+    .stock-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<section class="theme-section stock-charts-section" id="stock-charts-section">
+  <div class="theme-title-row">
+    <div>
+      <div class="eyebrow">Charts</div>
+      <div class="theme-title">Individual Stock Charts</div>
+    </div>
+    <div class="theme-meta">{{ stock_charts|length }} themes · candlestick + volume</div>
+  </div>
+
+  {% for theme in stock_charts %}
+  <section class="theme-section section-card" data-stock-section="{{ theme.theme_key }}" id="stocks-{{ theme.theme_key }}">
+    <div class="theme-title-row">
+      <div class="theme-title">{{ theme.theme_name }}</div>
+    </div>
+    <div class="stock-category-layout">
+      {% for cat in theme.categories %}
+      <div class="stock-category-group {% if cat.is_multi %}multi{% else %}single{% endif %}" id="stock-cat-{{ theme.theme_key }}-{{ cat.slug }}">
+        <div class="stock-category-title">{{ cat.category }}</div>
+        <div class="stock-grid js-stock-grid">
+          {% for t in cat.tickers %}
+          <div class="stock-item js-stock-item" id="stock-{{ theme.theme_key }}-{{ t.slug }}" data-ticker="{{ t.ticker }}" data-theme="{{ theme.theme_key }}">
+            <div class="stock-item-title">{{ t.ticker }}</div>
+            <div class="js-stock-chart" data-ticker="{{ t.ticker }}" data-theme="{{ theme.theme_key }}" role="button" tabindex="0" aria-label="{{ t.ticker }} price chart"></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</section>
+
+<div class="js-chart-modal" id="js-chart-modal">
+  <div class="js-chart-modal-panel">
+    <div class="js-chart-modal-header">
+      <div class="js-chart-modal-title" id="js-chart-modal-title"></div>
+      <div class="js-chart-modal-actions">
+        <button type="button" onclick="copyJsStockChart()" title="Copy image" aria-label="Copy image">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        </button>
+        <button type="button" onclick="downloadJsStockChart()" title="Download image" aria-label="Download image">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+        </button>
+        <button type="button" onclick="prevJsStockChart()" title="Previous chart" aria-label="Previous chart">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+        </button>
+        <button type="button" onclick="nextJsStockChart()" title="Next chart" aria-label="Next chart">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+        </button>
+        <button type="button" onclick="closeJsStockChart()" title="Close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18"></path><path d="M6 6l12 12"></path></svg>
+        </button>
+      </div>
+    </div>
+    <div id="js-chart-modal-body"></div>
+  </div>
+</div>
+
+<script>
+window.STOCK_CHART_DATA = {{ stock_chart_data_json | safe }};
+let jsStockGallery = [];
+let jsStockIndex = 0;
+
+function movingAverage(values, windowSize) {
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= windowSize) sum -= values[i - windowSize];
+    if (i >= windowSize - 1) out[i] = sum / windowSize;
+  }
+  return out;
+}
+
+function exponentialMovingAverage(values, span) {
+  const out = new Array(values.length).fill(null);
+  const alpha = 2 / (span + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    prev = prev == null ? value : alpha * value + (1 - alpha) * prev;
+    if (i >= span - 1) out[i] = prev;
+  }
+  return out;
+}
+
+function formatVolume(value) {
+  const abs = Math.abs(value);
+  if (abs >= 1000000000) return (value / 1000000000).toFixed(1) + 'B';
+  if (abs >= 1000000) return (value / 1000000).toFixed(2) + 'M';
+  if (abs >= 1000) return (value / 1000).toFixed(0) + 'K';
+  return String(Math.round(value));
+}
+
+function formatVolumeAxis(value) {
+  const abs = Math.abs(value);
+  if (abs >= 1000000000) return (value / 1000000000).toFixed(1) + 'B';
+  if (abs >= 1000000) return (value / 1000000).toFixed(0) + 'M';
+  if (abs >= 1000) return (value / 1000).toFixed(0) + 'K';
+  return String(Math.round(value));
+}
+
+function formatPrice(value) {
+  if (value >= 1000) return Math.round(value).toLocaleString('en-US');
+  if (value >= 100) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function escapeSvgText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function renderJsStockChart(el, ticker, options) {
+  const rawData = (window.STOCK_CHART_DATA || {})[ticker];
+  if (!rawData || rawData.length < 2) {
+    el.innerHTML = '<div class="js-stock-empty">No price history available</div>';
+    return;
+  }
+
+  const width = options && options.width ? options.width : Math.max(el.clientWidth, 420);
+  const height = options && options.height ? options.height : Math.max(el.clientHeight, 300);
+  const visibleBars = options && options.visibleBars ? options.visibleBars : 126;
+  const data = rawData.slice(-visibleBars);
+  const margin = {top: 8, right: 52, bottom: 30, left: 8};
+  const plotW = width - margin.left - margin.right;
+  const usableH = height - margin.top - margin.bottom;
+  const priceH = Math.round(usableH * 0.80);
+  const volTop = margin.top + priceH;
+  const volH = usableH - priceH;
+  const rightMarginBars = 3;
+  const step = plotW / (data.length + rightMarginBars);
+  const axisX = margin.left + data.length * step;
+  const opens = data.map(d => Number(d[1]));
+  const highs = data.map(d => Number(d[2]));
+  const lows = data.map(d => Number(d[3]));
+  const closes = data.map(d => Number(d[4]));
+  const volumes = data.map(d => d[5] == null ? 0 : Number(d[5]));
+  const dates = data.map(d => d[0]);
+  const rawCloses = rawData.map(d => Number(d[4]));
+  const rawVolumes = rawData.map(d => d[5] == null ? 0 : Number(d[5]));
+  const minPrice = Math.min(...lows);
+  const maxPrice = Math.max(...highs);
+  const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.01);
+  const pad = priceRange * 0.06;
+  const yMin = minPrice - pad;
+  const yMax = maxPrice + pad;
+  const maxVol = Math.max(...volumes, 1);
+  const x = i => margin.left + i * step;
+  const y = v => margin.top + (yMax - v) * priceH / (yMax - yMin || 1);
+  const vy = v => volTop + volH - (v * volH / (maxVol * 1.15 || 1));
+  const linePath = values => values.map((v, i) => v == null ? '' : `${i === 0 || values[i - 1] == null ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const volLinePath = values => values.map((v, i) => v == null ? '' : `${i === 0 || values[i - 1] == null ? 'M' : 'L'}${x(i).toFixed(1)},${vy(v).toFixed(1)}`).join(' ');
+  const ema21 = exponentialMovingAverage(rawCloses, 21).slice(-visibleBars);
+  const ema50 = exponentialMovingAverage(rawCloses, 50).slice(-visibleBars);
+  const ema200 = exponentialMovingAverage(rawCloses, 200).slice(-visibleBars);
+  const volMa20 = movingAverage(rawVolumes, 20).slice(-visibleBars);
+  const priceTicks = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const priceGrid = priceTicks.map(t => {
+    const gy = margin.top + t * priceH;
+    const val = yMax - t * (yMax - yMin);
+    return `<line x1="${margin.left}" y1="${gy.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#2A2A2A" stroke-width="0.6" vector-effect="non-scaling-stroke"/><text x="${(axisX + 7).toFixed(1)}" y="${(gy + 4).toFixed(1)}" fill="#CCCCCC" font-family="monospace" font-size="12">${formatPrice(val)}</text>`;
+  }).join('');
+  const volTicks = [0.5, 1].map(t => {
+    const gy = vy(maxVol * t);
+    return `<line x1="${margin.left}" y1="${gy.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#2A2A2A" stroke-width="0.5" vector-effect="non-scaling-stroke"/><text x="${(axisX + 7).toFixed(1)}" y="${(gy + 4).toFixed(1)}" fill="#CCCCCC" font-family="monospace" font-size="11">${formatVolumeAxis(maxVol * t)}</text>`;
+  }).join('');
+  const gridStep = data.length <= 60 ? 5 : data.length <= 130 ? 10 : 15;
+  const xGrid = Array.from({length: Math.ceil(data.length / gridStep)}, (_, idx) => idx * gridStep)
+    .filter(i => i < data.length)
+    .map(i => `<line x1="${x(i).toFixed(1)}" y1="${margin.top}" x2="${x(i).toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#2A2A2A" stroke-width="0.45" vector-effect="non-scaling-stroke"/>`)
+    .join('');
+  const volBars = volumes.map((v, i) => {
+    const barW = Math.max(1, Math.min(7, step * 0.60));
+    const bx = x(i) - barW / 2;
+    const by = vy(v);
+    return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, volTop + volH - by).toFixed(1)}" fill="#334455"/>`;
+  }).join('');
+  const candleW = Math.max(2, Math.min(8, step * 0.60));
+  const candles = closes.map((close, i) => {
+    const open = opens[i];
+    const high = highs[i];
+    const low = lows[i];
+    const cx = x(i);
+    const up = close >= open;
+    const top = y(Math.max(open, close));
+    const bottom = y(Math.min(open, close));
+    const bodyH = bottom - top;
+    const doji = Math.abs(close - open) < priceRange * 0.0008;
+    const wick = `<line x1="${cx.toFixed(1)}" y1="${y(high).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(low).toFixed(1)}" stroke="#BBBBBB" stroke-width="0.8" vector-effect="non-scaling-stroke"/>`;
+    if (doji) {
+      const color = up ? '#BBBBBB' : '#4499EE';
+      return wick + `<line x1="${(cx - candleW / 2).toFixed(1)}" y1="${y(open).toFixed(1)}" x2="${(cx + candleW / 2).toFixed(1)}" y2="${y(open).toFixed(1)}" stroke="${color}" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    }
+    if (up) {
+      return wick + `<rect x="${(cx - candleW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${candleW.toFixed(1)}" height="${Math.max(1, bodyH).toFixed(1)}" fill="#000000" stroke="#BBBBBB" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    }
+    return wick + `<rect x="${(cx - candleW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${candleW.toFixed(1)}" height="${Math.max(1, bodyH).toFixed(1)}" fill="#4499EE" stroke="none"/>`;
+  }).join('');
+  const last = closes[closes.length - 1];
+  const previous = rawCloses.length >= 2 ? rawCloses[rawCloses.length - 2] : closes[closes.length - 2];
+  const chg = previous ? (last - previous) / previous * 100 : 0;
+  const lastVol = volumes[volumes.length - 1] || 0;
+  const lastVolMa = volMa20[volMa20.length - 1];
+  const cleanTicker = escapeSvgText(ticker.replace(/\.US$/i, '').toUpperCase());
+  const lastDateLabel = new Date(dates[dates.length - 1] + 'T00:00:00')
+    .toLocaleDateString('en-US', {month: 'short', day: '2-digit', year: 'numeric'});
+  const priceLabelY = Math.max(margin.top + 10, Math.min(volTop - 10, y(last)));
+  const lastVolY = Math.max(volTop + 10, Math.min(volTop + volH - 10, vy(lastVol)));
+  const lastVolMaY = lastVolMa == null ? null : Math.max(volTop + 10, Math.min(volTop + volH - 10, vy(lastVolMa)));
+  const tag = (x0, y0, text, arrow) => {
+    const h = 18;
+    const w = Math.max(44, text.length * 7 + 10);
+    if (arrow) {
+      return `<path d="M${x0},${y0.toFixed(1)} L${x0 + 8},${(y0 - h / 2).toFixed(1)} H${x0 + w} V${(y0 + h / 2).toFixed(1)} H${x0 + 8} Z" fill="#DD8800"/><text x="${x0 + 12}" y="${(y0 + 4).toFixed(1)}" fill="#FFFFFF" font-family="monospace" font-size="11" font-weight="700">${escapeSvgText(text)}</text>`;
+    }
+    return `<rect x="${x0}" y="${(y0 - h / 2).toFixed(1)}" width="${w}" height="${h}" fill="#DD8800"/><text x="${x0 + 5}" y="${(y0 + 4).toFixed(1)}" fill="#FFFFFF" font-family="monospace" font-size="10" font-weight="700">${escapeSvgText(text)}</text>`;
+  };
+  const monthTicks = [];
+  let prevMonth = null;
+  for (let i = 0; i < dates.length; i++) {
+    const dt = new Date(dates[i] + 'T00:00:00');
+    const key = `${dt.getFullYear()}-${dt.getMonth()}`;
+    if (key !== prevMonth) {
+      if (dt.getDate() <= 7 || monthTicks.length === 0) {
+        monthTicks.push({i, label: dt.toLocaleDateString('en-US', {month: 'short', day: '2-digit'})});
+      }
+      prevMonth = key;
+    }
+  }
+  const fallbackStep = Math.max(1, Math.floor(data.length / 8));
+  const dateTicks = monthTicks.length >= 5 ? monthTicks : Array.from({length: Math.ceil(data.length / fallbackStep)}, (_, idx) => idx * fallbackStep)
+    .filter(i => i < data.length)
+    .map(i => ({i, label: new Date(dates[i] + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: '2-digit'})}));
+  const dateLabels = dateTicks.map(t => `<text x="${x(t.i).toFixed(1)}" y="${height - 9}" fill="#CCCCCC" font-family="monospace" font-size="11" text-anchor="middle">${escapeSvgText(t.label)}</text>`).join('');
+
+  el.innerHTML = `
+<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${ticker} price chart">
+  <rect width="${width}" height="${height}" fill="#000000"/>
+  ${xGrid}
+  ${priceGrid}
+  ${volTicks}
+  ${candles}
+  <path d="${linePath(ema21)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  <path d="${linePath(ema50)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  <path d="${linePath(ema200)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  ${volBars}
+  <path d="${volLinePath(volMa20)}" fill="none" stroke="#AAAAAA" stroke-width="0.8" opacity="0.85" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${margin.top}" x2="${axisX.toFixed(1)}" y2="${margin.top}" stroke="#444444" stroke-width="0.6" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${volTop.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${volTop.toFixed(1)}" stroke="#555555" stroke-width="0.7" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${(volTop + volH).toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#777777" stroke-width="0.7" vector-effect="non-scaling-stroke"/>
+  <line x1="${axisX.toFixed(1)}" y1="${margin.top}" x2="${axisX.toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#777777" stroke-width="0.8" vector-effect="non-scaling-stroke"/>
+  <text x="${margin.left + 3}" y="${margin.top + 13}" fill="#DDDDDD" font-family="monospace" font-size="11.5">■ ${cleanTicker} Equity | Last ${formatPrice(last)} | ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% | ${escapeSvgText(lastDateLabel)}</text>
+  <text x="${margin.left + 3}" y="${volTop + 13}" fill="#DDDDDD" font-family="monospace" font-size="11.5">■ ${cleanTicker} Equity | Vol ${formatVolume(lastVol)} | ${escapeSvgText(lastDateLabel)}</text>
+  ${tag(axisX + 5, priceLabelY, formatPrice(last), true)}
+  ${tag(axisX + 5, lastVolY, formatVolume(lastVol), false)}
+  ${lastVolMaY == null ? '' : tag(axisX + 5, lastVolMaY, formatVolume(lastVolMa), false)}
+  ${dateLabels}
+</svg>`;
+}
+
+function initJsStockCharts() {
+  const charts = Array.from(document.querySelectorAll('.js-stock-chart[data-ticker]'));
+  if (!charts.length) return;
+  const render = el => renderJsStockChart(el, el.dataset.ticker);
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting || entry.target.dataset.rendered) return;
+        render(entry.target);
+        entry.target.dataset.rendered = '1';
+        observer.unobserve(entry.target);
+      });
+    }, {rootMargin: '400px'});
+    charts.forEach(el => observer.observe(el));
+  } else {
+    charts.forEach(render);
+  }
+  charts.forEach(el => {
+    el.addEventListener('click', () => openJsStockChart(el.dataset.ticker, el.dataset.theme));
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openJsStockChart(el.dataset.ticker, el.dataset.theme);
+      }
+    });
+  });
+}
+
+function openJsStockChart(ticker, themeKey) {
+  const section = themeKey ? document.querySelector('[data-stock-section="' + themeKey + '"]') : null;
+  const scope = section || document;
+  jsStockGallery = Array.from(scope.querySelectorAll('.js-stock-chart[data-ticker]')).map(el => ({
+    ticker: el.dataset.ticker,
+    theme: el.dataset.theme
+  }));
+  jsStockIndex = Math.max(0, jsStockGallery.findIndex(item => item.ticker === ticker));
+  setJsStockModal();
+  document.getElementById('js-chart-modal').classList.add('active');
+}
+
+function setJsStockModal() {
+  if (!jsStockGallery.length) return;
+  const item = jsStockGallery[jsStockIndex];
+  const body = document.getElementById('js-chart-modal-body');
+  document.getElementById('js-chart-modal-title').textContent = item.ticker;
+  body.innerHTML = '<div class="js-stock-chart" data-ticker="' + item.ticker + '"></div>';
+  const chart = body.querySelector('.js-stock-chart');
+  renderJsStockChart(chart, item.ticker, {width: 1120, height: 620});
+}
+
+function getJsStockModalPngBlob() {
+  const svg = document.querySelector('#js-chart-modal-body svg');
+  if (!svg) return Promise.reject(new Error('No chart available'));
+  const viewBox = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+  const width = viewBox[2] || Math.round(svg.getBoundingClientRect().width) || 1120;
+  const height = viewBox[3] || Math.round(svg.getBoundingClientRect().height) || 620;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', String(width));
+  clone.setAttribute('height', String(height));
+  const svgText = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(svgBlob);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG export failed')), 'image/png');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Chart image export failed'));
+    };
+    img.src = url;
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 250);
+}
+
+async function downloadJsStockChart() {
+  const ticker = (document.getElementById('js-chart-modal-title')?.textContent || 'chart').trim();
+  const blob = await getJsStockModalPngBlob();
+  downloadBlob(blob, ticker + '_candlestick.png');
+}
+
+async function copyJsStockChart() {
+  const blob = await getJsStockModalPngBlob();
+  try {
+    if (!navigator.clipboard || !window.ClipboardItem) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+  } catch (error) {
+    const ticker = (document.getElementById('js-chart-modal-title')?.textContent || 'chart').trim();
+    downloadBlob(blob, ticker + '_candlestick.png');
+  }
+}
+
+function closeJsStockChart() {
+  const modal = document.getElementById('js-chart-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+function prevJsStockChart() {
+  if (!jsStockGallery.length) return;
+  jsStockIndex = (jsStockIndex - 1 + jsStockGallery.length) % jsStockGallery.length;
+  setJsStockModal();
+}
+
+function nextJsStockChart() {
+  if (!jsStockGallery.length) return;
+  jsStockIndex = (jsStockIndex + 1) % jsStockGallery.length;
+  setJsStockModal();
+}
+</script>

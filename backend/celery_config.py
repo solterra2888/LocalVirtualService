@@ -91,6 +91,8 @@ task_routes = {
     'delete_feed_vectors': {'queue': 'ai_processing'},
     'delete_vectors_by_keys': {'queue': 'ai_processing'},
     'reconcile_vector_bucket': {'queue': 'ai_processing'},
+    'generate_all_theme_reports': {'queue': 'data_fetching'},        # Theme Report 静态 HTML 生成
+    'backfill_theme_report_eod_history': {'queue': 'data_fetching'}, # Theme Report EOD 历史回填
     # Ebook Map-Reduce 章节摘要任务
     'ebook_map_reduce': {'queue': 'ai_processing'},
 }
@@ -147,6 +149,11 @@ beat_schedule = {
     'check-hk-worker-health': {
         'task': 'check_hk_worker_health',
         'schedule': crontab(minute='*/10'),
+    },
+    # 每周一 06:00 (UTC, 即北京时间 14:00) 为所有打了 'Theme Report' 标签的用户生成静态 HTML
+    'generate-theme-reports-weekly': {
+        'task': 'generate_all_theme_reports',
+        'schedule': crontab(hour=6, minute=0, day_of_week=1),  # Monday
     },
 }
 

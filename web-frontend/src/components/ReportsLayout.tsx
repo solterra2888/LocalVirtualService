@@ -8,6 +8,7 @@ const reportTabs = [
   { key: '/reports/twitter', label: 'Twitter Report', icon: <ProfileOutlined /> },
   { key: '/reports/youtube', label: 'YouTube Report', icon: <VideoCameraOutlined /> },
   { key: '/reports/market-weekly', label: 'Market Weekly', icon: <BarChartOutlined /> },
+  { key: '/reports/theme', label: 'Theme Report', icon: <BarChartOutlined /> },
 ];
 
 const ReportsLayout: React.FC = () => {
