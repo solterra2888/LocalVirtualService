@@ -33,14 +33,18 @@ if ! command -v ffmpeg &>/dev/null; then
 fi
 echo "  系统依赖就绪 ✓"
 
-# 2. 复制服务文件
+# 2. 复制服务文件（从其他目录部署到 DEPLOY_DIR 时才复制；已在部署目录则跳过）
 echo "[2/5] 部署服务文件..."
 mkdir -p "$DEPLOY_DIR/worker" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/scripts"
-cp "$SCRIPT_DIR/requirements.txt" "$DEPLOY_DIR/"
-cp "$SCRIPT_DIR/worker/"*.py "$DEPLOY_DIR/worker/"
-cp "$SCRIPT_DIR/start.sh" "$DEPLOY_DIR/"
-cp "$SCRIPT_DIR/run_worker.sh" "$DEPLOY_DIR/"
-cp "$SCRIPT_DIR/scripts/health_check.sh" "$DEPLOY_DIR/scripts/"
+if [ "$(cd "$SCRIPT_DIR" && pwd -P)" = "$(cd "$DEPLOY_DIR" && pwd -P)" ]; then
+    echo "  已在部署目录 ($DEPLOY_DIR)，跳过文件复制 ✓"
+else
+    cp "$SCRIPT_DIR/requirements.txt" "$DEPLOY_DIR/"
+    cp "$SCRIPT_DIR/worker/"*.py "$DEPLOY_DIR/worker/"
+    cp "$SCRIPT_DIR/start.sh" "$DEPLOY_DIR/"
+    cp "$SCRIPT_DIR/run_worker.sh" "$DEPLOY_DIR/"
+    cp "$SCRIPT_DIR/scripts/health_check.sh" "$DEPLOY_DIR/scripts/"
+fi
 chmod +x "$DEPLOY_DIR/start.sh" "$DEPLOY_DIR/run_worker.sh" "$DEPLOY_DIR/scripts/health_check.sh"
 echo "  服务文件就绪 ✓"
 
