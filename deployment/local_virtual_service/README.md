@@ -318,14 +318,22 @@ flowchart TD
 
 **长视频例外**：`transcribe_youtube_file_asr_task` 探测到时长 > 30min 时，会通过 `apply_async(queue=_LONG_QUEUE)` 转发到 `youtube_transcription_long`，由 Long Worker 处理。**长视频不会有独立的 priority 长队列**，因为 30min+ 的视频本来就要跑 30–60 min ASR，用户对"长视频要等"有合理预期。
 
-**带宽考量**：当 Priority ASR 和 Main Worker 的 ASR 同时下载音频 + 上传 OSS 时，会短暂挤占家用上行。如果观察到上行被打满（OSS upload ReadTimeout 频率上升），可以通过环境变量临时关掉 priority ASR：
+**带宽考量**：`OSSService.upload_audio` 内部已通过**跨进程文件锁**（`/tmp/yt_worker_oss_upload.lock`）在代码层解决了多 worker 同时上传的问题。同一时刻只有一个 worker 进程执行 OSS 上传，其余进程在锁上等待，不会互相抢占上行带宽。
+
+行为细节：
+- 等锁上限 `OSS_UPLOAD_LOCK_TIMEOUT_SECONDS`（默认 60s）：短视频上传通常 5–20s，60s 排队足以覆盖绝大多数场景；
+- 若前一个 worker 在上传超大文件（长视频 400–600 MB），后续 worker 等待 60s 后放弃排队直接上传（打印 warning），接受短暂带宽竞争，但不会永久卡死；
+- **priority-asr（用户上传）和 main worker（Feed 批量）在同一把锁上公平排队，先到先得，不存在一方饿死另一方的问题**。
+
+如果仍频繁观察到 OSS `ReadTimeout`（说明 60s 内锁无法释放，即有超大文件长期占锁），可适当调大：
 
 ```bash
-# 关掉 priority ASR worker（字幕抓取插队仍然保留）
-WORKER_PRIORITY_ASR_CONCURRENCY=0 bash start.sh
+# 在 .env 里调大等锁超时（秒），然后重启所有 worker
+OSS_UPLOAD_LOCK_TIMEOUT_SECONDS=120
+sudo systemctl restart yt-worker.target
 ```
 
-关掉后用户上传的 ASR 会派发到 `youtube_transcription_priority` 但**没有 worker 消费**，会在队列里堆积。所以这个关闭只是临时止血手段，正确做法是要么扩容上行带宽，要么把 priority ASR 直接合并到 main worker（改 `start.sh` 让 main worker 同时订阅这个队列）。
+根治方案：家用上行带宽 ≥ 50 Mbps 基本无问题；若频繁出现，优先升级宽带或将 Worker 迁移到云 VPS。
 
 ### 远程回调任务
 
@@ -432,24 +440,21 @@ Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `Co
 # 1. 克隆独立仓库到目标路径
 git clone https://github.com/solterra2888/LocalVirtualService.git /opt/local_virtual_service
 
-# 2. 安装 conda 环境与依赖
+# 2. 编辑配置（填入 Redis、DB、OSS、DashScope、Webshare、Lark 等密钥）
 cd /opt/local_virtual_service
-bash setup.sh
-
-# 3. 编辑配置（填入 Redis、DB、OSS、DashScope、Webshare 等密钥）
 cp .env.template .env
 nano .env
 
-# 4. 安装 systemd 服务（一次性，之后开机自启、崩溃自愈）
-sudo cp /opt/local_virtual_service/yt-worker.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable yt-worker
-sudo systemctl start yt-worker
+# 3. 一键部署（安装 conda 环境、复制文件、注册并启动 4 个独立 systemd unit + health timer）
+bash setup.sh
 
-# 5. 确认启动成功
-systemctl status yt-worker
-tail -20 /opt/local_virtual_service/logs/worker.log
+# 4. 确认启动成功（4 个 worker unit 均应 active）
+systemctl status 'yt-worker-*.service'
+systemctl list-timers yt-worker-health
+tail -30 /opt/local_virtual_service/logs/worker.log
 ```
+
+> `setup.sh` 会自动完成 systemd unit 注册（含迁移旧的单体 `yt-worker.service`），无需手动 `cp` 和 `daemon-reload`。
 
 ---
 
@@ -474,23 +479,30 @@ git -c http.version=HTTP/1.1 subtree push --prefix=deployment/local_virtual_serv
 ```bash
 cd /opt/local_virtual_service
 git pull
-sudo systemctl restart yt-worker
+sudo systemctl restart yt-worker.target
 
-# 确认重启成功
-systemctl status yt-worker
+# 确认重启成功（4 个 unit 均应 active）
+systemctl status 'yt-worker-*.service'
 tail -20 /opt/local_virtual_service/logs/worker.log
 ```
 
 > 📌 **只改了主站 `backend/` 的代码不需要动 HK VM**，只在主站重启 Celery 即可。
-> 只有修改了 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等）才需要在 HK VM 执行上面两步。
+> 只有修改了 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等），或修改了 `run_worker.sh` / `systemd/` / `scripts/` 下的部署文件时，才需要在 HK VM 执行上面两步。
 
 ---
 
 ### 三、日常重启（不更新代码）
 
 ```bash
-sudo systemctl restart yt-worker
-systemctl status yt-worker
+# 重启全部 worker（一键）
+sudo systemctl restart yt-worker.target
+
+# 或单独重启某个 worker（不影响其他）
+sudo systemctl restart yt-worker-long.service
+sudo systemctl restart yt-worker-priority-asr.service
+
+# 确认状态
+systemctl status 'yt-worker-*.service'
 ```
 
 ---
@@ -505,10 +517,13 @@ tail -f /opt/local_virtual_service/logs/worker.log
 tail -50 /opt/local_virtual_service/logs/worker.log
 ```
 
-若 systemd 启动失败（`status=1/FAILURE`），日志文件可能还没写入，改用 journalctl 看原始报错：
+若某个 unit 启动失败（`status=1/FAILURE`），日志文件可能还没写入，改用 journalctl 看原始报错：
 
 ```bash
-journalctl -u yt-worker -n 50 --no-pager
+# 查看具体 unit 的 systemd 日志（以 long 为例）
+journalctl -u yt-worker-long -n 50 --no-pager
+# 或查看所有 yt-worker-* 的 journal
+journalctl -u 'yt-worker-*' -n 100 --no-pager
 ```
 
 ---
@@ -516,13 +531,22 @@ journalctl -u yt-worker -n 50 --no-pager
 ### 五、验证 Worker 运行状态
 
 ```bash
-# 应看到 4 个 celery worker 进程（main / long / priority-transcript / priority-asr）
-ps aux | grep "celery -A worker.celery_app" | grep -v grep
+# 1. 确认 4 个 unit 均 active（每个均应显示 active (running)）
+systemctl status 'yt-worker-*.service'
 
-# 日志里应出现以下两行说明启动正常：
-#   "YouTube Transcription Worker 启动"
-#   "✓ Webshare 自检通过: exit_ip=..."
-tail -30 /opt/local_virtual_service/logs/worker.log
+# 2. 逐一 ping（4 个 hostname 均应返回 pong）
+CELERY=/root/miniconda3/envs/yt_service/bin/celery
+HOST=$(hostname)
+for w in youtube-transcription-worker youtube-long-worker youtube-priority-worker youtube-priority-asr-worker; do
+    echo -n "  ping $w@$HOST: "
+    $CELERY -A worker.celery_app inspect ping -d "$w@$HOST" --timeout 10 2>/dev/null | grep -o pong || echo "FAIL"
+done
+
+# 3. 查看日志（应出现 4 个 worker 的 ready 行）
+tail -50 /opt/local_virtual_service/logs/worker.log
+
+# 4. 健康检查 timer 状态
+systemctl list-timers yt-worker-health
 ```
 
 ---
@@ -532,8 +556,8 @@ tail -30 /opt/local_virtual_service/logs/worker.log
 > ⚠️ 调试结束后记得切回 systemd，否则 VM 重启后 worker 不会自动启动。
 
 ```bash
-# 先停掉 systemd 管理的服务
-sudo systemctl stop yt-worker
+# 先停掉 systemd 管理的服务（全部）
+sudo systemctl stop yt-worker.target
 
 # 前台运行（日志直接打到终端，Ctrl+C 退出）
 bash /opt/local_virtual_service/start.sh
@@ -542,10 +566,13 @@ bash /opt/local_virtual_service/start.sh
 nohup bash /opt/local_virtual_service/start.sh \
   > /opt/local_virtual_service/logs/worker.log 2>&1 &
 
+# 也可以只启动单个 role 调试（更精准）
+bash /opt/local_virtual_service/run_worker.sh long
+
 # 调试结束后恢复 systemd 接管
 pkill -f "celery -A worker.celery_app"
 sleep 3
-sudo systemctl start yt-worker
+sudo systemctl start yt-worker.target
 ```
 
 ---
@@ -556,7 +583,7 @@ sudo systemctl start yt-worker
 
 ```bash
 /root/miniconda3/envs/yt_service/bin/pip install -r /opt/local_virtual_service/requirements.txt
-sudo systemctl restart yt-worker
+sudo systemctl restart yt-worker.target
 ```
 
 > **curl-cffi 版本约束**：yt-dlp 只兼容 `curl-cffi>=0.10,<0.15`，装了 0.15+ 会报 ImportError。
@@ -566,6 +593,60 @@ sudo systemctl restart yt-worker
 >   "import yt_dlp; y=yt_dlp.YoutubeDL({'quiet':True}); \
 >    print([str(t) for t in y._get_available_impersonate_targets()])"
 > ```
+
+### 八、健康检查与 Lark 告警
+
+`yt-worker-health.timer` 每 10 分钟自动触发 `scripts/health_check.sh`，执行以下检查：
+
+| 检查项 | 触发条件 | 动作 |
+|--------|----------|------|
+| Redis/Broker 可达性 | TCP 连接 `BROKER_HOST:PORT` 失败 | 发告警，跳过 worker 重启（等 Broker 自愈） |
+| 4 个 worker `inspect ping` | 任一 worker ping 超时 | 重启对应 unit + 发告警 |
+| `youtube_transcription_long` 积压 | 连续 ≥2 次超 `HEALTH_LONG_BACKLOG_THRESHOLD`（默认 3 条） | 发告警（`HEALTH_RESTART_ON_BACKLOG=true` 时额外重启） |
+| `youtube_transcription_priority` 积压 | 连续 ≥2 次超 `HEALTH_PRIORITY_BACKLOG_THRESHOLD`（默认 5 条） | 同上 |
+| 故障消失 | 上述任一告警项恢复正常 | 发「✓ 已恢复」通知 |
+
+**相关 `.env` 变量**（详见 `.env.template` §九）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LARK_WEBHOOK_URL` | 空（禁用外发） | 飞书自定义机器人 URL；空 = 只本地自愈，不发消息 |
+| `HEALTH_PING_TIMEOUT_SECONDS` | `10` | inspect ping 单次超时（秒） |
+| `HEALTH_LONG_BACKLOG_THRESHOLD` | `3` | 长队列积压告警阈值（条数） |
+| `HEALTH_PRIORITY_BACKLOG_THRESHOLD` | `5` | 优先 ASR 队列积压告警阈值（条数） |
+| `HEALTH_RESTART_ON_BACKLOG` | `false` | 积压持续时是否自动重启对应 worker |
+| `HEALTH_ALERT_REPEAT_MINUTES` | `60` | 同一告警最短重发间隔（分钟） |
+| `HEALTH_ALERT_PREFIX` | `[HK-YT-Worker]` | 飞书消息前缀 |
+
+**常用运维命令**：
+
+```bash
+# 查看 timer 下次触发时间
+systemctl list-timers yt-worker-health
+
+# 立即手动执行一次健康检查
+bash /opt/local_virtual_service/scripts/health_check.sh
+
+# 查看健康检查状态文件（告警去重 / 积压计数）
+cat /opt/local_virtual_service/logs/.health_state
+
+# 重置所有告警状态（如测试完成后）
+rm /opt/local_virtual_service/logs/.health_state
+```
+
+**从旧单体 `yt-worker.service` 迁移（已部署但尚未跑 setup.sh 的机器）**：
+
+```bash
+# 停用旧 unit
+sudo systemctl disable --now yt-worker
+sudo rm -f /etc/systemd/system/yt-worker.service
+
+# 在部署目录跑 setup.sh 完成新 unit 注册
+cd /opt/local_virtual_service
+bash setup.sh
+```
+
+---
 
 ## 字幕获取与 ASR 自动降级
 
@@ -814,7 +895,7 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 | 网络经常抖动 | `YTDLP_SOCKET_TIMEOUT_SECONDS` 60+，`YOUTUBE_FEED_TIMEOUT_SECONDS` 10+ |
 | YouTube 风控严重 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` 60，配合 `YOUTUBE_COOKIES_FILE` |
 | transcript-api 出口 IP 被批量封 | 配置 `WEBSHARE_PROXY_USERNAME` / `WEBSHARE_PROXY_PASSWORD`（详见上文 [Webshare 一节](#启用-webshare-住宅代理给-transcript-api-ip-被封时的根治方案)）|
-| 家用宽带上行 < 50 Mbps，OSS 频繁 ReadTimeout | `WORKER_MAIN_CONCURRENCY=1` 串行处理，避免两个 OSS 上传互抢带宽 |
+| 家用宽带上行 < 50 Mbps，OSS 频繁 ReadTimeout | 上传已由跨进程锁串行化，仍超时说明有超大文件长期占锁；调大 `OSS_UPLOAD_LOCK_TIMEOUT_SECONDS=120` 后重启所有 worker |
 | RSS 持续 404 / Data API v3 配额告急 | 配置 `YOUTUBE_DATA_API_KEY_BACKUP`；或降低批量抓取频率（每个 Key 约可查 100 频道/天）|
 | 长视频 Fun-ASR 排队严重（>1h）| `ASR_POLL_TIMEOUT_MINUTES_LONG` 调到 90-120 |
 | 短视频 Fun-ASR 超时 | `ASR_POLL_TIMEOUT_MINUTES` 调到 10-15 |

@@ -1,0 +1,15 @@
+[Unit]
+Description=YT Worker Health Check Timer (every 10 minutes)
+After=yt-worker.target
+
+[Timer]
+# 开机 5 分钟后首次触发（等 worker 完成启动）
+OnBootSec=5min
+# 之后每 10 分钟触发一次
+OnUnitActiveSec=10min
+# 若上次触发被错过（机器关机期间），下次开机时补跑一次
+Persistent=true
+Unit=yt-worker-health.service
+
+[Install]
+WantedBy=timers.target

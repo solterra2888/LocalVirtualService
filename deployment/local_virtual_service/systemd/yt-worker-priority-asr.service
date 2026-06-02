@@ -1,22 +1,21 @@
 [Unit]
-Description=YouTube Transcription Worker (HK local virtual service)
+Description=YT Worker - priority ASR (youtube_transcription_priority, Upload Link ASR)
 After=network-online.target
 Wants=network-online.target
+PartOf=yt-worker.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/local_virtual_service
-# 显式设置 PATH：systemd 启动时不继承 shell 环境，conda 不在默认 PATH 里
-# 若 conda 安装在其他路径，把 /root/miniconda3 替换为实际路径
 Environment="HOME=/root"
 Environment="PATH=/root/miniconda3/envs/yt_service/bin:/root/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/bin/bash /opt/local_virtual_service/start.sh
+ExecStart=/bin/bash /opt/local_virtual_service/run_worker.sh priority-asr
 Restart=always
 RestartSec=30
-# 降低被 OOM killer 选中的概率（长视频 ASR 下载时内存峰值较高）
+# priority-asr 和 main worker 并发跑 OSS 上传，内存/带宽峰值较高
 OOMScoreAdjust=-200
 StandardOutput=append:/opt/local_virtual_service/logs/worker.log
 StandardError=append:/opt/local_virtual_service/logs/worker.log
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=yt-worker.target
