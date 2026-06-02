@@ -1,0 +1,14 @@
+[Unit]
+Description=YT Worker Health Check (oneshot)
+After=network-online.target yt-worker.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/local_virtual_service
+Environment="HOME=/root"
+Environment="PATH=/root/miniconda3/envs/yt_service/bin:/root/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/bin/bash /opt/local_virtual_service/scripts/health_check.sh
+# 健康检查脚本自身的超时，防止 inspect ping 挂住整个 timer
+TimeoutStartSec=120
+StandardOutput=append:/opt/local_virtual_service/logs/worker.log
+StandardError=append:/opt/local_virtual_service/logs/worker.log
