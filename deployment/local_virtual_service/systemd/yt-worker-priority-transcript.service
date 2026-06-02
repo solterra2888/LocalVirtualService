@@ -1,0 +1,20 @@
+[Unit]
+Description=YT Worker - priority transcript (youtube_priority, Upload Link 字幕)
+After=network-online.target
+Wants=network-online.target
+PartOf=yt-worker.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/local_virtual_service
+Environment="HOME=/root"
+Environment="PATH=/root/miniconda3/envs/yt_service/bin:/root/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/bin/bash /opt/local_virtual_service/run_worker.sh priority-transcript
+Restart=always
+RestartSec=30
+OOMScoreAdjust=-200
+StandardOutput=append:/opt/local_virtual_service/logs/worker.log
+StandardError=append:/opt/local_virtual_service/logs/worker.log
+
+[Install]
+WantedBy=yt-worker.target

@@ -8,6 +8,7 @@
   - ContentStore            : 读写 subscription_content / file_processing_details
 """
 
+import fcntl
 import json
 import logging
 import os
@@ -859,6 +860,36 @@ class OSSService:
     def is_configured(self) -> bool:
         return self.bucket is not None
 
+    # 跨进程 OSS 上传排队锁：防止多个 worker 同时上传音频打满家用上行带宽。
+    # 所有 worker 进程（main / long / priority-asr）共享同一把文件锁，同一时刻
+    # 只有一个进程在做 OSS 上传，其余进程等待。
+    # 等待超过 OSS_UPLOAD_LOCK_TIMEOUT_SECONDS（默认 60s）后放弃排队直接上传，
+    # 避免长视频上传长期占锁导致其他 worker 永远等待。
+    _UPLOAD_LOCK_FILE = os.getenv("OSS_UPLOAD_LOCK_FILE", "/tmp/yt_worker_oss_upload.lock")
+    _UPLOAD_LOCK_TIMEOUT = int(os.getenv("OSS_UPLOAD_LOCK_TIMEOUT_SECONDS", "60"))
+
+    def _acquire_upload_lock(self):
+        """
+        尝试在 _UPLOAD_LOCK_TIMEOUT 秒内获取跨进程排队锁。
+        获取成功返回打开的 lock fd（调用方负责 flock UNLOCK + close）。
+        超时后打印警告并返回 None（调用方直接上传，接受潜在带宽竞争）。
+        """
+        lock_fd = open(self._UPLOAD_LOCK_FILE, "w")
+        deadline = time.monotonic() + self._UPLOAD_LOCK_TIMEOUT
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return lock_fd  # 成功拿到锁
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    lock_fd.close()
+                    log.warning(
+                        "OSS 上传锁等待超时 (%ds)，直接上传（可能短暂带宽竞争）",
+                        self._UPLOAD_LOCK_TIMEOUT,
+                    )
+                    return None
+                time.sleep(0.5)
+
     def upload_audio(self, file_path: str, filename: str, username: str = "system") -> Dict[str, Any]:
         import oss2
         if not self.is_configured():
@@ -868,8 +899,16 @@ class OSSService:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = uuid.uuid4().hex[:8]
         obj_name = f"{self.audio_prefix}{username}/{date_str}/{uid}_{ts}_{safe_name}"
-        with open(file_path, "rb") as f:
-            self.bucket.put_object(obj_name, f, headers={"Content-Type": "audio/mpeg"})
+
+        # 排队锁：最多等 OSS_UPLOAD_LOCK_TIMEOUT_SECONDS 秒，拿到锁后独占上传带宽
+        lock_fd = self._acquire_upload_lock()
+        try:
+            with open(file_path, "rb") as f:
+                self.bucket.put_object(obj_name, f, headers={"Content-Type": "audio/mpeg"})
+        finally:
+            if lock_fd is not None:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                lock_fd.close()
 
         asr_public = os.getenv("OSS_ASR_PUBLIC_READ", "").strip().lower() in ("1", "true", "yes")
         if asr_public:
