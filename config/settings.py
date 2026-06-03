@@ -229,7 +229,8 @@ class AppConfig:
             'log_to_file': self.get('LOG_TO_FILE', 'true').lower() == 'true',
             'log_to_console': self.get('LOG_TO_CONSOLE', 'true').lower() == 'true',
             'log_file_days': int(self.get('LOG_FILE_DAYS', '30')),
-            'log_dir': self.get('LOG_DIR', 'logs')
+            'log_dir': self.get('LOG_DIR', 'logs'),
+            'log_async': self.get('LOG_ASYNC', 'true').lower() in ('1', 'true', 'yes'),
         }
     
     def save_logging_config(self, level='INFO', log_to_file=True, log_to_console=True, 

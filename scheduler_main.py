@@ -19,7 +19,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from backend.services.scheduler_service import get_scheduler_service, shutdown_scheduler_service
-from backend.utils.logger import init_logging, get_logger, info, error, warning
+from backend.utils.logger import init_logging, get_logger, info, error, warning, shutdown_logging
 from backend.database.db_manager import DatabaseManager
 from config.settings import config
 
@@ -73,6 +73,7 @@ async def scheduler_lifespan(app: FastAPI):
         info("✅ 调度器服务已关闭", source="scheduler_shutdown")
     except Exception as e:
         error(f"⚠️ 调度器服务关闭失败: {str(e)}", source="scheduler_shutdown")
+    shutdown_logging()
 
 # 创建独立的调度器FastAPI应用
 scheduler_app = FastAPI(

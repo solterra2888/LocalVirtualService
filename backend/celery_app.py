@@ -119,11 +119,12 @@ def setup_worker_logging(sender=None, **kwargs):
     """Worker初始化时设置日志"""
     try:
         from backend.utils.celery_logger import setup_celery_logging
+        from config.settings import config
+
+        logging_config = config.get_logging_config()
         setup_celery_logging(
-            log_dir='logs',
-            worker_log_file='celery_worker.log',
-            task_log_file='celery_tasks.log',
-            log_level='INFO'
+            log_dir=logging_config["log_dir"],
+            log_level=logging_config["level"],
         )
         print("✅ Celery日志系统初始化完成")
     except Exception as e:

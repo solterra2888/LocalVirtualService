@@ -25,6 +25,8 @@ from pydantic import BaseModel
 
 from backend.auth.jwt_utils import get_current_admin_user
 from backend.schemas.user import TokenData
+from backend.utils.logger import reset_file_handler_after_clear
+from backend.utils.celery_logger import reset_celery_file_handler
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,6 +40,14 @@ LOG_FILES: dict[str, str] = {
     "celery_data":  "logs/celery_data_worker.log",
     "celery_tasks": "logs/celery_tasks.log",
     # 兼容旧部署：如文件存在则展示，不存在也不报错
+    "celery_worker": "logs/celery_worker.log",
+    "celery_data_fetching": "logs/celery_worker_data_fetching.log",
+}
+
+# 清空后需重置 WatchedFileHandler 的文件名映射
+_HANDLER_RESET_MAP: dict[str, str] = {
+    "app": "logs/app.log",
+    "celery_tasks": "logs/celery_tasks.log",
     "celery_worker": "logs/celery_worker.log",
 }
 
@@ -263,6 +273,10 @@ async def clear_log(
     try:
         with open(log_path, "w", encoding="utf-8") as f:
             f.write("")
+        if log_type == "app":
+            reset_file_handler_after_clear()
+        elif log_type in _HANDLER_RESET_MAP and log_type != "app":
+            reset_celery_file_handler(os.path.basename(_HANDLER_RESET_MAP[log_type]))
         user = (
             getattr(current_user, "username", None)
             or getattr(current_user, "user_id", None)

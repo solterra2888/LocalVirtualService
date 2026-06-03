@@ -112,6 +112,9 @@ WEBAPP_URL="http://localhost:${WEBAPP_PORT}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
 PUBLIC_WEB_URL="${PUBLIC_WEB_URL:-http://${SERVER_HOST}}"
 LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
+LOG_FILE_DAYS="$(grep '^LOG_FILE_DAYS=' "$DEFAULTS_FILE" 2>/dev/null | cut -d= -f2)"
+LOG_FILE_DAYS="${LOG_FILE_DAYS:-30}"
+export LOG_FILE_DAYS
 API_KEY="$( (grep '^EODHD_API_TOKEN=' "$SECRETS_FILE" 2>/dev/null || echo '=') | cut -d= -f2)"
 
 echo "   ✅ REDIS_URL=redis://...@${REDIS_HOST}:${REDIS_PORT}/0"
@@ -235,6 +238,7 @@ render_template() {
     content="${content//\{\{CELERY_DATA_CONCURRENCY\}\}/$CELERY_DATA_CONCURRENCY}"
     content="${content//\{\{UVICORN_WORKERS\}\}/$UVICORN_WORKERS}"
     content="${content//\{\{RC_AGENT_BASE_URL\}\}/$RC_AGENT_BASE_URL}"
+    content="${content//\{\{LOG_FILE_DAYS\}\}/$LOG_FILE_DAYS}"
 
     printf '%s\n' "$content" > "$output"
 }
@@ -258,6 +262,13 @@ for svc in rc-webapp rc-celery-ai rc-celery-data rc-scheduler; do
         echo "   ✅ ${svc}.service → /etc/systemd/system/"
     fi
 done
+
+# logrotate（多进程安全轮转 app.log / celery_*.log）
+LOGROTATE_SRC="$GENERATED_DIR/guanhe-logrotate"
+if [ -f "$LOGROTATE_SRC" ]; then
+    cp "$LOGROTATE_SRC" "/etc/logrotate.d/guanhe"
+    echo "   ✅ guanhe-logrotate → /etc/logrotate.d/guanhe"
+fi
 
 # Docker Nginx: 同步 web.conf 到 Docker 卷
 WEBCONF_SRC="$PROJECT_DIR/web.conf"

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
-from backend.utils.logger import init_logging, info, error, warning
+from backend.utils.logger import init_logging, info, error, warning, shutdown_logging
 from backend.utils.database_config import get_database_config
 from backend.utils.datetime_utils import install_psycopg2_utc_adapter
 from config.settings import config
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
     
     # 注意：调度器服务已分离，由独立进程管理生命周期
     info("ℹ️ 主应用关闭完成，调度器服务独立运行", source="shutdown")
+    shutdown_logging()
 
 # 创建FastAPI应用（生产 ENV=production 时默认不暴露文档，见 config.settings.ENABLE_API_DOCS）
 _api_docs = config.ENABLE_API_DOCS
