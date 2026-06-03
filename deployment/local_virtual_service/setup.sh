@@ -18,7 +18,7 @@ echo "  Conda 环境: $CONDA_ENV_NAME"
 echo "=========================================="
 
 # 1. 基础依赖
-echo "[1/5] 检查系统依赖..."
+echo "[1/6] 检查系统依赖..."
 if ! command -v conda &>/dev/null; then
     echo "  ❌ 未找到 conda，请先安装 Miniconda: https://docs.conda.io/en/latest/miniconda.html"
     exit 1
@@ -31,10 +31,14 @@ if ! command -v ffmpeg &>/dev/null; then
     echo "  安装 ffmpeg..."
     sudo apt update && sudo apt install -y ffmpeg
 fi
+if ! command -v logrotate &>/dev/null; then
+    echo "  安装 logrotate..."
+    sudo apt update && sudo apt install -y logrotate
+fi
 echo "  系统依赖就绪 ✓"
 
 # 2. 复制服务文件（从其他目录部署到 DEPLOY_DIR 时才复制；已在部署目录则跳过）
-echo "[2/5] 部署服务文件..."
+echo "[2/6] 部署服务文件..."
 mkdir -p "$DEPLOY_DIR/worker" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/scripts"
 if [ "$(cd "$SCRIPT_DIR" && pwd -P)" = "$(cd "$DEPLOY_DIR" && pwd -P)" ]; then
     echo "  已在部署目录 ($DEPLOY_DIR)，跳过文件复制 ✓"
@@ -44,12 +48,13 @@ else
     cp "$SCRIPT_DIR/start.sh" "$DEPLOY_DIR/"
     cp "$SCRIPT_DIR/run_worker.sh" "$DEPLOY_DIR/"
     cp "$SCRIPT_DIR/scripts/health_check.sh" "$DEPLOY_DIR/scripts/"
+    cp "$SCRIPT_DIR/logrotate.conf" "$DEPLOY_DIR/"
 fi
 chmod +x "$DEPLOY_DIR/start.sh" "$DEPLOY_DIR/run_worker.sh" "$DEPLOY_DIR/scripts/health_check.sh"
 echo "  服务文件就绪 ✓"
 
 # 3. Conda 环境
-echo "[3/5] 配置 Conda 环境 ($CONDA_ENV_NAME)..."
+echo "[3/6] 配置 Conda 环境 ($CONDA_ENV_NAME)..."
 if conda env list | grep -q "^$CONDA_ENV_NAME "; then
     echo "  环境已存在，跳过创建 ✓"
 else
@@ -63,16 +68,33 @@ echo "  Python 依赖就绪 ✓"
 
 # 4. 环境配置
 if [ ! -f "$DEPLOY_DIR/.env" ]; then
-    echo "[4/5] 生成 .env 模板..."
+    echo "[4/6] 生成 .env 模板..."
     cp "$SCRIPT_DIR/.env.template" "$DEPLOY_DIR/.env"
     chmod 600 "$DEPLOY_DIR/.env"
     echo "  ⚠️  请编辑 $DEPLOY_DIR/.env 填入实际密码和配置"
 else
-    echo "[4/5] .env 已存在 ✓"
+    echo "[4/6] .env 已存在 ✓"
 fi
 
-# 5. systemd unit 安装与迁移
-echo "[5/5] 安装 systemd unit..."
+# 5. logrotate 配置（保留近 7 天每日日志）
+echo "[5/6] 安装 logrotate 配置..."
+LOGROTATE_CONF="$DEPLOY_DIR/logrotate.conf"
+if [ ! -f "$LOGROTATE_CONF" ]; then
+    # 如果是从其他目录部署，需要先复制过去
+    cp "$SCRIPT_DIR/logrotate.conf" "$LOGROTATE_CONF"
+fi
+# 替换路径（非默认 DEPLOY_DIR 时替换占位符）
+if [ "$DEPLOY_DIR" != "/opt/local_virtual_service" ]; then
+    sed "s|/opt/local_virtual_service|$DEPLOY_DIR|g" "$LOGROTATE_CONF" \
+        > /etc/logrotate.d/yt-worker
+else
+    cp "$LOGROTATE_CONF" /etc/logrotate.d/yt-worker
+fi
+chmod 644 /etc/logrotate.d/yt-worker
+echo "  已安装 /etc/logrotate.d/yt-worker ✓（daily，保留 7 天）"
+
+# 6. systemd unit 安装与迁移
+echo "[6/6] 安装 systemd unit..."
 
 # 5a. 迁移旧的 yt-worker.service（单进程模式）
 if systemctl is-active --quiet yt-worker 2>/dev/null; then

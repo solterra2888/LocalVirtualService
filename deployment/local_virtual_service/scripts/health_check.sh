@@ -7,7 +7,8 @@
 #
 # 检查逻辑（按顺序）：
 #   1. Redis/Broker 可达性预检（不可达则只告警，跳过 worker 重启）
-#   2. 4 个 worker 逐一 inspect ping（失败则重启对应 unit + 告警）
+#   2. 4 个 worker 逐一 systemctl is-active 检查（服务非活跃则重启 + 告警）
+#      注意：曾用 celery inspect ping 但会立即失败（import/环境问题）导致误杀。
 #   3. 关键队列积压检测（持续超阈值则告警，按配置决定是否重启）
 #   4. 状态去重：同一故障每 HEALTH_ALERT_REPEAT_MINUTES 最多重发一次
 #   5. 故障消失时发送「✓ 已恢复」通知
@@ -32,7 +33,6 @@ fi
 
 # ── 配置变量（可在 .env 里覆盖） ──────────────────────────────
 : "${LARK_WEBHOOK_URL:=}"
-: "${HEALTH_PING_TIMEOUT_SECONDS:=10}"
 : "${HEALTH_LONG_BACKLOG_THRESHOLD:=3}"
 : "${HEALTH_PRIORITY_BACKLOG_THRESHOLD:=5}"
 : "${HEALTH_RESTART_ON_BACKLOG:=false}"
@@ -42,11 +42,9 @@ fi
 # ── 路径 ──────────────────────────────────────────────────
 CONDA_BASE=$(conda info --base 2>/dev/null || echo "$HOME/miniconda3")
 CONDA_ENV_NAME="yt_service"
-CELERY="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin/celery"
 PYTHON="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin/python"
 LOGS_DIR="$BASE_DIR/logs"
 STATE_FILE="$LOGS_DIR/.health_state"
-HOSTNAME_SUFFIX="@$(hostname)"
 
 mkdir -p "$LOGS_DIR"
 touch "$STATE_FILE"
@@ -56,7 +54,9 @@ NOW_EPOCH=$(date +%s)
 # ── 工具函数 ──────────────────────────────────────────────
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [health_check] $*" | tee -a "$LOGS_DIR/worker.log"
+    # 直接输出到 stdout；systemd StandardOutput=append:worker.log 负责落盘。
+    # 不再用 tee，避免 systemd 重定向 + tee 双写造成每行出现两次。
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [health_check] $*"
 }
 
 # 发送飞书/Lark 告警（LARK_WEBHOOK_URL 为空则静默）
@@ -150,14 +150,10 @@ fi
 
 export PYTHONPATH="$BASE_DIR"
 
-# ── 2. Per-worker inspect ping ─────────────────────────────
-declare -A WORKER_ROLES=(
-    ["youtube-transcription-worker${HOSTNAME_SUFFIX}"]="main"
-    ["youtube-long-worker${HOSTNAME_SUFFIX}"]="long"
-    ["youtube-priority-worker${HOSTNAME_SUFFIX}"]="priority-transcript"
-    ["youtube-priority-asr-worker${HOSTNAME_SUFFIX}"]="priority-asr"
-)
-
+# ── 2. Per-worker 存活检查（systemctl is-active） ──────────
+# 注意：曾用 celery inspect ping 做检查，但 ping 命令在 systemd-timer
+# 上下文中会立即失败（import 或网络问题），导致每轮都误杀所有 worker。
+# 现改用 systemctl is-active：它直接查询 systemd cgroup 状态，可靠、快速。
 declare -A UNIT_NAMES=(
     ["main"]="yt-worker-main"
     ["long"]="yt-worker-long"
@@ -167,30 +163,24 @@ declare -A UNIT_NAMES=(
 
 PING_FAILED=()
 
-for WORKER_HOST in "${!WORKER_ROLES[@]}"; do
-    ROLE="${WORKER_ROLES[$WORKER_HOST]}"
+for ROLE in main long priority-transcript priority-asr; do
     UNIT="${UNIT_NAMES[$ROLE]}"
-    log "  ping ${WORKER_HOST} (role=${ROLE})..."
-    if "$CELERY" -A worker.celery_app inspect ping \
-            -d "$WORKER_HOST" \
-            --timeout "${HEALTH_PING_TIMEOUT_SECONDS}" \
-            2>/dev/null | grep -q "pong"; then
-        log "  ✅ ${ROLE} 响应正常"
-        # 若曾记录该 worker ping 失败，现已恢复
+    log "  检查 ${ROLE} (${UNIT}.service)..."
+    if systemctl is-active --quiet "${UNIT}.service"; then
+        log "  ✅ ${ROLE} 服务运行中"
         ALERT_KEY="ping_fail_${ROLE//[-.]/_}"
         if [[ -n "$(state_get "LAST_ALERT_${ALERT_KEY}")" ]]; then
-            lark_notify "✅ Worker [${ROLE}] (${WORKER_HOST}) 已恢复正常。"
+            lark_notify "✅ Worker [${ROLE}] (${UNIT}.service) 已恢复正常。"
             clear_alert "$ALERT_KEY"
         fi
     else
-        log "  ❌ ${ROLE} ping 超时/失败 → 重启 ${UNIT}.service"
+        STATUS=$(systemctl is-active "${UNIT}.service" 2>/dev/null || echo "unknown")
+        log "  ❌ ${ROLE} 服务不活跃 (${STATUS}) → 重启 ${UNIT}.service"
         PING_FAILED+=("$ROLE")
-        # 重启对应 unit
-        systemctl restart "${UNIT}.service" 2>&1 | tee -a "$LOGS_DIR/worker.log" || true
-        # 告警（去重）
+        systemctl restart "${UNIT}.service" 2>&1 || true
         ALERT_KEY="ping_fail_${ROLE//[-.]/_}"
         if should_alert "$ALERT_KEY"; then
-            lark_notify "❌ Worker [${ROLE}] (${WORKER_HOST}) ping 超时/失败，已自动重启 ${UNIT}.service。队列可能有积压，请关注。"
+            lark_notify "❌ Worker [${ROLE}] (${UNIT}.service) 状态异常 (${STATUS})，已自动重启。队列可能有积压，请关注。"
             mark_alerted "$ALERT_KEY"
         fi
     fi
@@ -244,7 +234,7 @@ check_queue_backlog() {
                 if [[ "$HEALTH_RESTART_ON_BACKLOG" == "true" ]]; then
                     msg="${msg}，已自动重启 ${unit}.service。"
                     log "  → HEALTH_RESTART_ON_BACKLOG=true，重启 ${unit}.service"
-                    systemctl restart "${unit}.service" 2>&1 | tee -a "$LOGS_DIR/worker.log" || true
+                    systemctl restart "${unit}.service" 2>&1 || true
                 fi
                 lark_notify "$msg"
                 mark_alerted "$ALERT_KEY"
