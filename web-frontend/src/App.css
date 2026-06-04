@@ -1,3 +1,5 @@
+@import './styles/subtleScrollbar.css';
+
 .App {
   min-height: 100vh;
   background-color: #f5f5f5;
@@ -82,7 +84,22 @@
   background: #fff;
   border-radius: 8px;
   min-height: calc(100vh - 112px);
-  margin-top: 88px; /* 为固定 header 留出空间 */
+  margin-top: 88px; /* 旧顶栏布局；侧栏布局由 LayoutSidebar.css 覆盖 */
+}
+
+.main-layout-with-sider .layout-content {
+  background: #fff;
+  border-radius: 8px;
+}
+
+/* 非全屏模块页保留卡片边距（Reports 等） */
+.main-layout-with-sider .layout-content:not(:has(.files-page-layout)):not(:has(.feed-page-layout)):not(:has(.watchlist-page-layout)):not(:has(.daily-page-scroll-root)) {
+  margin: var(--layout-content-gap, 12px) var(--layout-content-gap, 12px) var(--layout-content-gap, 12px) 0;
+  min-height: calc(100vh - 2 * var(--layout-sidebar-inset, 12px));
+}
+
+.main-layout-dark.main-layout-with-sider .layout-content {
+  background: #1a202c !important;
 }
 
 /* Daily：页面自建侧栏 + 内容两栏滚动，禁止 layout-content 再滚一层（避免出现 triple-scroll） */
@@ -90,12 +107,6 @@
   overflow: hidden;
 }
 
-@media (max-width: 768px) {
-  /* 与上方 .layout-content 移动端 margin 对齐（margin-top 80 + bottom 16） */
-  .layout-content:has(.daily-page-scroll-root) > .daily-page-scroll-root {
-    height: calc(100vh - 96px) !important;
-  }
-}
 
 /* 页面内容样式 */
 .page-header {
@@ -584,24 +595,24 @@
 /* ========== Files 页：完美适配视口 + Behance 风格列表 ========== */
 /* 负边距“吃进”父级 layout-content 的 margin，缩小与屏幕周边的空隙 */
 .files-page-layout {
-  height: calc(100vh - 72px);   /* 顶部吃进 24px + 底部 16px，仅留 header 64px + 8px */
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
-  margin-top: -24px;           /* 缩小顶部空隙，紧贴 header 下方 */
-  margin-left: -16px;
-  margin-right: -16px;
-  margin-bottom: -16px;
-  width: calc(100% + 32px);
+  margin: 0;
+  width: 100%;
   background: transparent;
   border-radius: 0;
+  overflow: hidden;
 }
 
 .files-page-layout .files-page-inner {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   padding: 10px;
   overflow: hidden;
@@ -609,8 +620,11 @@
 
 /* 左侧：Behance 风格文件列表栏 */
 .files-page-layout .files-list-panel {
-  width: 300px;
-  min-width: 300px;
+  grid-column: 1;
+  grid-row: 1;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--files-panel-bg, #fff);
@@ -628,6 +642,7 @@
 
 .files-page-layout .files-list-header {
   /* 与 Folders / Search 的 files-folder-panel-header 同高同左右内边距，左侧图标纵向对齐 */
+  flex-shrink: 0;
   padding: 8px 12px;
   border-bottom: 1px solid var(--files-panel-border, #e5e7eb);
   font-weight: 600;
@@ -732,6 +747,9 @@
 }
 
 .files-page-layout .files-search-panel-body {
+  max-height: min(36vh, 240px);
+  overflow-y: auto;
+  overflow-x: hidden;
   border-top: 1px solid var(--files-panel-border, #f0f0f0);
 }
 
@@ -978,6 +996,7 @@
 
 /* ── Folders：折叠块 + 内部滚动 ───────────────────────────── */
 .files-page-layout .files-folder-panel {
+  flex-shrink: 0;
   background: var(--files-panel-bg, #fff);
 }
 
@@ -1032,24 +1051,10 @@
   overflow-x: hidden;
   padding: 4px 10px 10px;
   border-top: 1px solid var(--files-panel-border, #f0f0f0);
-  scrollbar-gutter: stable;
 }
 
 .app-dark .files-page-layout .files-folder-panel-body {
   border-top-color: rgba(255, 255, 255, 0.06);
-}
-
-.files-page-layout .files-folder-panel-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.files-page-layout .files-folder-panel-body::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
-}
-
-.app-dark .files-page-layout .files-folder-panel-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
 }
 
 .files-page-layout .files-folder-strip-scroll {
@@ -1061,6 +1066,7 @@
 
 /* Sources 文件类型筛选横条：单行横向滚动；竖滚→横移由 FilesPage wheel 监听实现（与 FeedReader 一致）；隐藏原生滚动条 */
 .files-page-layout .files-file-type-strip-scroll {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
@@ -1129,6 +1135,7 @@
 /* ── end Folder strip ──────────────────────────────────────── */
 
 .files-page-layout .files-list-batch-bar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1181,10 +1188,12 @@
 }
 
 .files-page-layout .files-list-scroll {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1398,10 +1407,21 @@
   color: #c084fc;
 }
 
+/* 右侧：容器高度与 sidebar 一致 */
+.files-page-layout .files-detail-panel-container {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
 /* 右侧：内容展示区（Behance 风格与左侧一致） */
 .files-page-layout .files-detail-panel {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--files-panel-bg, #fff);
@@ -1506,17 +1526,19 @@
 
 /* 分屏：左侧 Original+Content，右侧 AI Analysis */
 .files-page-layout .files-detail-split {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
 .files-page-layout .files-detail-left {
-  flex: 1;
-  min-width: 280px;
-  max-width: 50%;
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--files-panel-border, #e5e7eb);
@@ -1543,36 +1565,59 @@
 }
 
 .files-page-layout .files-detail-left-content {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 12px 16px;
   background: var(--files-content-bg, #f8fafc);
-  display: flex;
-  flex-direction: column;
 }
 
 .app-dark .files-page-layout .files-detail-left-content {
   --files-content-bg: #1E202B;
 }
 
+/* Original / Markdown 等由左右 content 区统一纵向滚动，避免 Tab 栏下出现双层滚动 */
+.files-page-layout .files-detail-left-content .files-detail-content-markdown,
+.files-page-layout .files-detail-right-content .files-detail-content-markdown,
+.files-page-layout .files-detail-left-content .files-original-body {
+  overflow: visible;
+}
+
+/* 左/右滚动区内：正文块级排布，不把 flex 子项撑破父级高度 */
+.files-page-layout .files-detail-left-content > *,
+.files-page-layout .files-detail-right-content > * {
+  min-width: 0;
+}
+
+/* PDF / Office 嵌入：在滚动区内占满可视高度 */
+.files-page-layout .files-original-media-fill {
+  min-height: min(720px, calc(100vh - 200px));
+  display: flex;
+  flex-direction: column;
+}
+
 /* 右侧 panel 收缩时，左侧占满剩余空间 */
-.files-page-layout .files-detail-split.files-detail-split--right-collapsed .files-detail-left {
-  max-width: none;
+.files-page-layout .files-detail-split.files-detail-split--right-collapsed {
+  grid-template-columns: minmax(0, 1fr) 48px;
 }
 
 .files-page-layout .files-detail-right {
-  flex: 1;
-  min-width: 280px;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .files-page-layout .files-detail-right.files-detail-right--collapsed {
-  flex: 0 0 48px;
-  min-width: 48px;
+  grid-column: 2;
   width: 48px;
+  min-width: 48px;
   border-left: 1px solid var(--files-panel-border, #e5e7eb);
 }
 
@@ -1641,13 +1686,14 @@
 }
 
 .files-page-layout .files-detail-right-content {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 12px 16px;
   background: var(--files-content-bg, #f8fafc);
-  display: flex;
-  flex-direction: column;
   font-size: 12px;
 }
 
@@ -1687,13 +1733,14 @@
 }
 
 .files-page-layout .files-detail-content {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 12px 16px;
   background: var(--files-content-bg, #f8fafc);
-  display: flex;
-  flex-direction: column;
 }
 
 .app-dark .files-page-layout .files-detail-content {
@@ -1720,7 +1767,7 @@
 
 /* 右侧空状态：与左侧空状态同一风格 */
 .files-page-layout .files-detail-empty {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -1758,37 +1805,6 @@
   color: #A0A3AD;
 }
 
-.files-page-layout .files-list-scroll::-webkit-scrollbar,
-.files-page-layout .files-detail-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.files-page-layout .files-list-scroll::-webkit-scrollbar-track,
-.files-page-layout .files-detail-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.files-page-layout .files-list-scroll::-webkit-scrollbar-thumb,
-.files-page-layout .files-detail-content::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
-
-.files-page-layout .files-list-scroll::-webkit-scrollbar-thumb:hover,
-.files-page-layout .files-detail-content::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-.app-dark .files-page-layout .files-list-scroll::-webkit-scrollbar-thumb,
-.app-dark .files-page-layout .files-detail-content::-webkit-scrollbar-thumb {
-  background: #4a5568;
-}
-
-.app-dark .files-page-layout .files-list-scroll::-webkit-scrollbar-thumb:hover,
-.app-dark .files-page-layout .files-detail-content::-webkit-scrollbar-thumb:hover {
-  background: #5a6678;
-}
-
 /* Upload Files 页 - 导出 PDF 按钮：Behance 风格 dark mode */
 .files-export-pdf-btn {
   font-weight: 500;
@@ -1810,16 +1826,13 @@
 
 /* ========== Feed Reader 页：与 Files Page 一致的 Behance 风格（参考 FILES_PAGE_STYLE_REFERENCE.md） ========== */
 .feed-page-layout {
-  height: calc(100vh - 72px);
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
-  margin-top: -24px;
-  margin-left: -16px;
-  margin-right: -16px;
-  margin-bottom: -16px;
-  width: calc(100% + 32px);
+  margin: 0;
+  width: 100%;
   border-radius: 0;
 }
 
@@ -1834,25 +1847,60 @@
 .feed-page-layout .ant-layout {
   min-height: 0;
   flex: 1;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
-.feed-page-layout__sider,
-.feed-page-layout__content-list,
-.feed-page-layout__detail {
-  /* 与 files 页一致的滚动条样式 */
-}
-
-/* My Feeds 左栏：顶部标题 + 添加/刷新 + 类型筛选固定，仅下方列表滚动 */
+/* 与 Files / Watchlist 一致：固定栏宽，避免三栏 flex 时 My Feeds / 文章列表被压扁 */
 .feed-page-layout__sider-my-feeds.ant-layout-sider {
+  flex: 0 0 280px !important;
+  width: 280px !important;
+  max-width: 280px !important;
+  min-width: 280px !important;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
+.feed-page-layout__content-list.ant-layout-sider {
+  flex: 0 0 380px !important;
+  width: 380px !important;
+  max-width: 380px !important;
+  min-width: 380px !important;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.feed-page-layout__content-list .ant-layout-sider-children {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.feed-page-layout__content-list-scroll {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.feed-page-layout__detail.ant-layout-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
 .feed-page-layout__sider-my-feeds .ant-layout-sider-children {
   flex: 1;
   min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1865,6 +1913,7 @@
 .feed-page-layout__sider-scroll {
   flex: 1;
   min-height: 0;
+  width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
@@ -1872,49 +1921,43 @@
 }
 
 /* 避免 flex 子项把 List 压扁，保证仅外层区域滚动 */
+.feed-page-layout__sider-scroll > .ant-list,
+.feed-page-layout__sider-scroll > .ant-list .ant-list-items {
+  width: 100%;
+}
+
 .feed-page-layout__sider-scroll > .ant-list {
   flex-shrink: 0;
 }
 
-.feed-page-layout__sider::-webkit-scrollbar,
-.feed-page-layout__sider-scroll::-webkit-scrollbar,
-.feed-page-layout__content-list::-webkit-scrollbar,
+/* 未使用 subtle-scrollbar 的侧栏（中间列表已改用 subtle-scrollbar） */
+.feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar,
 .feed-page-layout__detail::-webkit-scrollbar {
   width: 8px;
 }
 
-.feed-page-layout__sider::-webkit-scrollbar-track,
-.feed-page-layout__sider-scroll::-webkit-scrollbar-track,
-.feed-page-layout__content-list::-webkit-scrollbar-track,
+.feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar-track,
 .feed-page-layout__detail::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.feed-page-layout__sider::-webkit-scrollbar-thumb,
-.feed-page-layout__sider-scroll::-webkit-scrollbar-thumb,
-.feed-page-layout__content-list::-webkit-scrollbar-thumb,
+.feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar-thumb,
 .feed-page-layout__detail::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 4px;
 }
 
-.feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
-.feed-page-layout__sider-scroll::-webkit-scrollbar-thumb:hover,
-.feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
+.feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar-thumb:hover,
 .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
-.app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb,
-.app-dark .feed-page-layout__sider-scroll::-webkit-scrollbar-thumb,
-.app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb,
+.app-dark .feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar-thumb,
 .app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb {
   background: #4a5568;
 }
 
-.app-dark .feed-page-layout__sider::-webkit-scrollbar-thumb:hover,
-.app-dark .feed-page-layout__sider-scroll::-webkit-scrollbar-thumb:hover,
-.app-dark .feed-page-layout__content-list::-webkit-scrollbar-thumb:hover,
+.app-dark .feed-page-layout__sider:not(.subtle-scrollbar)::-webkit-scrollbar-thumb:hover,
 .app-dark .feed-page-layout__detail::-webkit-scrollbar-thumb:hover {
   background: #5a6678;
 }
@@ -1922,6 +1965,8 @@
 /* My Feeds 左栏：长名称省略（flex 子项默认可收缩 + Meta 区域占满剩余宽度） */
 .feed-page-layout__sider .ant-list-item {
   align-items: center;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .feed-page-layout__sider .ant-list-item-meta {
@@ -2142,16 +2187,13 @@
 
 /* ========== Watchlist 页：与 Files 一致的固定左右栏（仅内部滚动） ========== */
 .watchlist-page-layout {
-  height: calc(100vh - 72px);
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
-  margin-top: -24px;
-  margin-left: -16px;
-  margin-right: -16px;
-  margin-bottom: -16px;
-  width: calc(100% + 32px);
+  margin: 0;
+  width: 100%;
   border-radius: 0;
 }
 
@@ -2228,38 +2270,44 @@
   height: 100%;
 }
 
-.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane {
+/* Overview / Sources：Tab 面板自身滚动（勿套 height:100% 内层，否则会塌陷且链接不可点） */
+.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane.watchlist-tab-pane-scroll {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
-.watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar,
-.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar {
+/* Live Headlines（News Tab 内层列表） */
+.watchlist-page-layout .watchlist-tab-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 左侧 Watchlist 列表（未使用 subtle-scrollbar） */
+.watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar {
   width: 8px;
 }
 
-.watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar-track,
-.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar-track {
+.watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar-thumb,
-.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar-thumb {
+.watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar-thumb {
   background: #cbd5e1;
 }
 
-.watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar-thumb:hover,
-.watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar-thumb:hover {
+.watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
-.app-dark .watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar-thumb,
-.app-dark .watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar-thumb {
+.app-dark .watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar-thumb {
   background: #4a5568;
 }
 
-.app-dark .watchlist-page-layout .watchlist-list-scroll::-webkit-scrollbar-thumb:hover,
-.app-dark .watchlist-page-layout .watchlist-detail-panel .ant-tabs-tabpane::-webkit-scrollbar-thumb:hover {
+.app-dark .watchlist-page-layout .watchlist-list-scroll:not(.subtle-scrollbar)::-webkit-scrollbar-thumb:hover {
   background: #5a6678;
 }
 

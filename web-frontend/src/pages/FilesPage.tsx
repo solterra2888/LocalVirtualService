@@ -91,6 +91,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useFileProcessing } from '../contexts/FileProcessingContext';
 import { useDeviceDetection } from '../hooks/useDeviceDetection';
+import { useScrollingClass } from '../hooks/useScrollingClass';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import IBTradingReportView, { isIBReportContent, IBReportData } from '../components/IBTradingReportView';
 import TradeReviewView from '../components/TradeReviewView';
@@ -568,6 +569,9 @@ const FilesPageInner: React.FC = () => {
   const [hasMoreExecutions, setHasMoreExecutions] = useState(true);
   const [loadingMoreExecutions, setLoadingMoreExecutions] = useState(false);
   const filesListScrollRef = useRef<HTMLDivElement>(null);
+  const filesListScrollIdleRef = useRef<number | undefined>(undefined);
+  const detailLeftScrollRef = useScrollingClass<HTMLDivElement>();
+  const detailRightScrollRef = useScrollingClass<HTMLDivElement>();
   /** 文件类型筛选横条：与 FeedReader 节目条一致，竖滚轮映射为横向滚动 */
   const fileTypeStripRef = useRef<HTMLDivElement>(null);
   /** Watchlist `/files?execution=` 进入后：左侧列表需滚动到已定位的条目 */
@@ -683,7 +687,15 @@ const FilesPageInner: React.FC = () => {
 
   const handleFilesListScroll = useCallback(() => {
     const el = filesListScrollRef.current;
-    if (!el || !hasMoreExecutionsRef.current || loadingMoreExecutionsRef.current) return;
+    if (!el) return;
+    el.classList.add('is-scrolling');
+    if (filesListScrollIdleRef.current !== undefined) {
+      window.clearTimeout(filesListScrollIdleRef.current);
+    }
+    filesListScrollIdleRef.current = window.setTimeout(() => {
+      el.classList.remove('is-scrolling');
+    }, 700);
+    if (!hasMoreExecutionsRef.current || loadingMoreExecutionsRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = el;
     const threshold = 80;
     if (scrollTop + clientHeight >= scrollHeight - threshold) {
@@ -2775,6 +2787,10 @@ const FilesPageInner: React.FC = () => {
     return { tooltip: label, icon: <FileTextOutlined />, color: '#8c8c8c' };
   };
 
+  const panelScrollbarClass = isDark
+    ? 'subtle-scrollbar subtle-scrollbar--panel-dark'
+    : 'subtle-scrollbar subtle-scrollbar--panel';
+
   return (
       <div className="files-page-layout" style={{ backgroundColor: themeColors.pageBg }}>
         <div className="files-page-inner">
@@ -2853,7 +2869,7 @@ const FilesPageInner: React.FC = () => {
                 )}
               </button>
               {folderPanelExpanded && (
-                <div className="files-folder-panel-body">
+                <div className={`files-folder-panel-body ${panelScrollbarClass}`}>
                   <div className="files-folder-strip-scroll">
                     <button
                       type="button"
@@ -3015,7 +3031,7 @@ const FilesPageInner: React.FC = () => {
                 )}
               </div>
               {searchPanelExpanded && (
-            <div className="files-search-panel-body">
+            <div className={`files-search-panel-body ${panelScrollbarClass}`}>
             <div
               className={`files-list-search-bar files-list-search-bar--expandable${isDark ? ' files-list-search-bar--dark' : ''}`}
               style={
@@ -3215,7 +3231,7 @@ const FilesPageInner: React.FC = () => {
             )}
             <div
               ref={filesListScrollRef}
-              className="files-list-scroll"
+              className={`files-list-scroll ${panelScrollbarClass}`}
             >
               {filteredExecutions.map(execution => {
                 const isSelected = selectedExecutionForView?.id === execution.id;
@@ -3414,17 +3430,21 @@ const FilesPageInner: React.FC = () => {
           </div>
 
           {/* 右侧：内容展示区 */}
-          <div className="files-detail-panel">
-            {selectedExecutionForView ? (
-              <>
-                <div className={`files-detail-split ${rightPanelCollapsed ? 'files-detail-split--right-collapsed' : ''}`}>
+          <div className="files-detail-panel-container">
+            <div className="files-detail-panel">
+              {selectedExecutionForView ? (
+                <>
+                  <div className={`files-detail-split ${rightPanelCollapsed ? 'files-detail-split--right-collapsed' : ''}`}>
                   {/* 左侧：Original + Content */}
                   <div className="files-detail-left">
                     <div className="files-detail-left-tabs">
                       <div className="files-detail-tab is-active">Original</div>
                       <div style={{ flex: 1 }} />
                     </div>
-                    <div className="files-detail-left-content">
+                    <div
+                      ref={detailLeftScrollRef}
+                      className={`files-detail-left-content ${panelScrollbarClass}`}
+                    >
                       <OriginalContentView
                         execution={selectedExecutionForView}
                         themeColors={themeColors}
@@ -3529,7 +3549,10 @@ const FilesPageInner: React.FC = () => {
                             </span>
                           </Tooltip>
                         </div>
-                        <div className="files-detail-right-content">
+                        <div
+                          ref={detailRightScrollRef}
+                          className={`files-detail-right-content ${panelScrollbarClass}`}
+                        >
                           {rightPanelView === 'info' && selectedExecutionForView && (
                             <ExecutionDetailsPanel
                               execution={selectedExecutionForView}
@@ -3625,16 +3648,17 @@ const FilesPageInner: React.FC = () => {
                       </>
                     )}
                   </div>
+                  </div>
+                </>
+              ) : (
+                <div className="files-detail-empty">
+                  <div className="files-detail-empty-inner">
+                    <EyeOutlined />
+                    <div>Please select a file from the left to view content</div>
+                  </div>
                 </div>
-              </>
-            ) : (
-              <div className="files-detail-empty">
-                <div className="files-detail-empty-inner">
-                  <EyeOutlined />
-                  <div>Please select a file from the left to view content</div>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -5193,7 +5217,6 @@ const ContentMarkdownView: React.FC<{
       style={{
         flex: 1,
         minHeight: 0,
-        overflow: 'auto',
         padding: '16px 20px',
         color: themeColors.text,
       }}
@@ -5322,7 +5345,6 @@ const OriginalTextNotePanel: React.FC<{
       style={{
         flex: 1,
         minHeight: 0,
-        overflow: 'auto',
         padding: '16px 20px',
         color: themeColors.text,
       }}
@@ -5559,7 +5581,7 @@ export const OriginalContentView: React.FC<{
 
   if (ibReportData) {
     return (
-      <div style={{ width: '100%', flex: 1, minHeight: 0, overflow: 'auto', color: themeColors.text }}>
+      <div style={{ width: '100%', color: themeColors.text }}>
         <IBTradingReportView data={ibReportData} isDark={isDark} />
       </div>
     );
@@ -5585,7 +5607,7 @@ export const OriginalContentView: React.FC<{
   }
 
   return (
-    <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', color: themeColors.text }}>
+    <div style={{ width: '100%', color: themeColors.text }}>
       {(() => {
         const fileType = (fileContent.file_type || '').toLowerCase();
 
@@ -5644,14 +5666,7 @@ export const OriginalContentView: React.FC<{
             // 桌面：iframe 内嵌。手机：多数 Android WebView/自带浏览器无法在 iframe/embed 内嵌 PDF（Chrome 常只给 Open 外链），
             // 使用 PDF.js 画布渲染，与浏览器内核无关、可滚动预览整份 PDF。
             return (
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
+              <div className="files-original-media-fill">
                 <div
                   className={isMobile ? 'original-pdf-frame-host' : undefined}
                   style={{
@@ -6364,15 +6379,15 @@ const AudioDiarizationView: React.FC<{
       : 0;
     
     return (
-      <div style={{ 
-        flex: 1, 
-        minHeight: 0, 
-        overflow: 'auto',
-        padding: '20px',
-        border: `1px solid ${themeColors.cardBorder}`,
-        borderRadius: '8px',
-        backgroundColor: isDark ? '#1a1d2e' : '#fafafa'
-      }}>
+      <div
+        className="files-original-body"
+        style={{
+          padding: '20px',
+          border: `1px solid ${themeColors.cardBorder}`,
+          borderRadius: '8px',
+          backgroundColor: isDark ? '#1a1d2e' : '#fafafa',
+        }}
+      >
         {/* 头部信息 - YouTube */}
         <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
           <div>
@@ -6626,26 +6641,14 @@ const AudioDiarizationView: React.FC<{
   // 渲染 Audio 格式（原有逻辑）
   return (
     <div
+      className="files-original-body"
       style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
+        padding: '20px',
+        border: `1px solid ${themeColors.cardBorder}`,
+        borderRadius: '8px',
+        backgroundColor: isDark ? '#1a1d2e' : '#fafafa',
       }}
     >
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          WebkitOverflowScrolling: 'touch',
-          padding: '20px',
-          border: `1px solid ${themeColors.cardBorder}`,
-          borderRadius: '8px',
-          backgroundColor: isDark ? '#1a1d2e' : '#fafafa',
-        }}
-      >
         {inlineAudioPlayer && fileContent.file_url && (
           <div
             className="original-inline-audio-player"
@@ -6949,8 +6952,6 @@ const AudioDiarizationView: React.FC<{
             </div>
           );
         })}
-      </div>
-
       </div>
 
       {/* 编辑说话人名称的 Modal */}
@@ -7358,9 +7359,8 @@ export const AIAnalysisView: React.FC<{
   const canReAnalyzeAudio = isAudioFile && onAnalyzeAudio && !audioAnalyzing;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <div style={{ width: '100%' }}>
       <div style={{ 
-        flexShrink: 0,
         marginBottom: '16px', 
         padding: '12px',
         backgroundColor: themeColors.boxMuted,

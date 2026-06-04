@@ -46,6 +46,8 @@ import {
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useScrollingClass } from '../hooks/useScrollingClass';
+import '../styles/subtleScrollbar.css';
 import { getModalStyles } from '../utils/modalStyles';
 import {
   subscriptionsAPI,
@@ -96,6 +98,11 @@ const FeedReaderPageInner: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const themeColors = THEME_COLORS[themeMode];
+  const myFeedsScrollRef = useScrollingClass<HTMLDivElement>();
+  const contentListScrollRef = useScrollingClass<HTMLDivElement>();
+  const panelScrollbarClass = isDark
+    ? 'subtle-scrollbar subtle-scrollbar--panel-dark'
+    : 'subtle-scrollbar subtle-scrollbar--panel';
 
   const kbdKeyStyle = useMemo(
     () =>
@@ -875,7 +882,6 @@ const FeedReaderPageInner: React.FC = () => {
     <Layout
       className="feed-page-layout"
       style={{
-        height: 'calc(100vh - 72px)',
         minHeight: 0,
         backgroundColor: themeColors.pageBg,
       }}
@@ -983,7 +989,10 @@ const FeedReaderPageInner: React.FC = () => {
             </div>
           </div>
 
-          <div className="feed-page-layout__sider-scroll">
+          <div
+            ref={myFeedsScrollRef}
+            className={`feed-page-layout__sider-scroll ${panelScrollbarClass}`}
+          >
           {loading ? (
             <div
               style={{
@@ -1317,9 +1326,12 @@ const FeedReaderPageInner: React.FC = () => {
           style={{
             backgroundColor: themeColors.cardBg,
             borderRight: `1px solid ${themeColors.cardBorder}`,
-            overflowY: 'auto',
           }}
         >
+          <div
+            ref={contentListScrollRef}
+            className={`feed-page-layout__content-list-scroll ${panelScrollbarClass}`}
+          >
           {selectedSubscription ? (
             <>
               <div
@@ -1770,6 +1782,7 @@ const FeedReaderPageInner: React.FC = () => {
               <Empty description="Select a feed to view contents" />
             </div>
           )}
+          </div>
         </Sider>
 
         {/* 右侧内容详情 */}

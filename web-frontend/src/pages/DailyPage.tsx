@@ -380,8 +380,8 @@ const DailyPageInner: React.FC = () => {
       className="daily-page-scroll-root"
       style={{
         background: colors.pageBg,
-        // 对齐 App.css .layout-content：margin-top 88px + margin-bottom 24px，避免整块超高触发 window 滚动
-        height: 'calc(100vh - 112px)',
+        height: '100%',
+        minHeight: 0,
         overflow: 'hidden',
       }}
     >

@@ -1,0 +1,104 @@
+/**
+ * 弱化滚动条：默认隐藏滑块，悬停或正在滚动时显示。
+ * 用于侧栏导航、Sources 列表与详情区等 overflow:auto 容器。
+ */
+
+.subtle-scrollbar {
+  scrollbar-width: none;
+}
+
+.subtle-scrollbar:hover,
+.subtle-scrollbar:focus-within,
+.subtle-scrollbar.is-scrolling {
+  scrollbar-width: thin;
+}
+
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+}
+
+.subtle-scrollbar:hover::-webkit-scrollbar-thumb,
+.subtle-scrollbar:focus-within::-webkit-scrollbar-thumb,
+.subtle-scrollbar.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.subtle-scrollbar:hover::-webkit-scrollbar-thumb:hover,
+.subtle-scrollbar.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.32);
+}
+
+/* 侧栏深蓝底 */
+.subtle-scrollbar--sidebar {
+  scrollbar-color: transparent transparent;
+}
+
+.subtle-scrollbar--sidebar:hover,
+.subtle-scrollbar--sidebar:focus-within,
+.subtle-scrollbar--sidebar.is-scrolling {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.subtle-scrollbar--sidebar:hover::-webkit-scrollbar-thumb,
+.subtle-scrollbar--sidebar:focus-within::-webkit-scrollbar-thumb,
+.subtle-scrollbar--sidebar.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.subtle-scrollbar--sidebar:hover::-webkit-scrollbar-thumb:hover,
+.subtle-scrollbar--sidebar.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.38);
+}
+
+/* Sources 面板（浅/深） */
+.subtle-scrollbar--panel {
+  scrollbar-color: transparent transparent;
+}
+
+.subtle-scrollbar--panel:hover,
+.subtle-scrollbar--panel:focus-within,
+.subtle-scrollbar--panel.is-scrolling {
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.subtle-scrollbar--panel:hover::-webkit-scrollbar-thumb,
+.subtle-scrollbar--panel:focus-within::-webkit-scrollbar-thumb,
+.subtle-scrollbar--panel.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+}
+
+.subtle-scrollbar--panel:hover::-webkit-scrollbar-thumb:hover,
+.subtle-scrollbar--panel.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+.subtle-scrollbar--panel-dark {
+  scrollbar-color: transparent transparent;
+}
+
+.subtle-scrollbar--panel-dark:hover,
+.subtle-scrollbar--panel-dark:focus-within,
+.subtle-scrollbar--panel-dark.is-scrolling {
+  scrollbar-color: #4a5568 transparent;
+}
+
+.subtle-scrollbar--panel-dark:hover::-webkit-scrollbar-thumb,
+.subtle-scrollbar--panel-dark:focus-within::-webkit-scrollbar-thumb,
+.subtle-scrollbar--panel-dark.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: #4a5568;
+}
+
+.subtle-scrollbar--panel-dark:hover::-webkit-scrollbar-thumb:hover,
+.subtle-scrollbar--panel-dark.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: #5a6678;
+}

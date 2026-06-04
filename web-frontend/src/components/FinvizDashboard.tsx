@@ -89,6 +89,8 @@ import {
   UnorderedListOutlined
 } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useScrollingClass, useScrollingClassOnElement } from '../hooks/useScrollingClass';
+import '../styles/subtleScrollbar.css';
 import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
 import type { NewsTheme, NewsUnifiedTheme } from '../types/news';
@@ -423,7 +425,12 @@ const restrictToVerticalAxis: Modifier = ({ transform }) => {
 
 const FinvizDashboard: React.FC = () => {
   const { themeMode } = useDashboardSettings();
-  
+  const liveHeadlinesScrollRef = useScrollingClass<HTMLDivElement>();
+  const panelScrollbarClass =
+    themeMode === 'dark'
+      ? 'subtle-scrollbar subtle-scrollbar--panel-dark'
+      : 'subtle-scrollbar subtle-scrollbar--panel';
+
   // 状态管理
   const [selectedStock, setSelectedStock] = useState<WatchlistStockInfo | null>(null);
   const [searchValue, setSearchValue] = useState<string>('');
@@ -710,6 +717,43 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     return () => clearInterval(cleanupInterval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Overview / Sources Tab 面板滚动时显示弱化滚动条 */
+  useEffect(() => {
+    const root = document.querySelector(
+      '.watchlist-page-layout .watchlist-detail-panel'
+    );
+    if (!root) return;
+
+    const panes = root.querySelectorAll<HTMLElement>(
+      '.ant-tabs-tabpane.watchlist-tab-pane-scroll'
+    );
+    const SCROLL_IDLE_MS = 700;
+    const cleanups: Array<() => void> = [];
+
+    panes.forEach((el) => {
+      let idleTimer: number | undefined;
+      const onScroll = () => {
+        el.classList.add('is-scrolling');
+        if (idleTimer !== undefined) {
+          window.clearTimeout(idleTimer);
+        }
+        idleTimer = window.setTimeout(() => {
+          el.classList.remove('is-scrolling');
+        }, SCROLL_IDLE_MS);
+      };
+      el.addEventListener('scroll', onScroll, { passive: true });
+      cleanups.push(() => {
+        el.removeEventListener('scroll', onScroll);
+        if (idleTimer !== undefined) {
+          window.clearTimeout(idleTimer);
+        }
+        el.classList.remove('is-scrolling');
+      });
+    });
+
+    return () => cleanups.forEach((fn) => fn());
+  }, [selectedStock]);
 
   // 加载自定义组
   const loadCustomGroups = async () => {
@@ -1794,7 +1838,11 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
               Updated {updateTimeStr}
             </Text>
           </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+          <div
+            ref={liveHeadlinesScrollRef}
+            className={`watchlist-tab-scroll ${panelScrollbarClass}`}
+            style={{ flex: 1, minHeight: 0, padding: '12px' }}
+          >
             {newsData.length === 0 ? (
               <Empty description="No related news" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ marginTop: 24 }} />
             ) : (
@@ -3051,6 +3099,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                     </span>
                   }
                   key="overview"
+                  className={`watchlist-tab-pane-scroll ${panelScrollbarClass}`}
                 >
                   {renderOverviewTab()}
                 </TabPane>
@@ -3062,6 +3111,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                     </span>
                   } 
                   key="reports"
+                  className={`watchlist-tab-pane-scroll ${panelScrollbarClass}`}
                 >
                   {renderResearchReportsTab()}
                 </TabPane>
