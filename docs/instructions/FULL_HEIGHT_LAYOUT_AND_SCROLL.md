@@ -236,7 +236,7 @@
 |------|------|
 | 正文容器 `width: 100%` | 由父级 `.xxx-content` 负责滚动 |
 | 避免 `flex: 1; minHeight: 0` 包住长文本 | 会把 flex 子项撑到内容高度，滚动失效 |
-| PDF/iframe 需要占满可视区 | 单独 class，如 `.files-original-media-fill { min-height: min(720px, calc(100vh - 200px)); }` |
+| PDF/iframe 需要占满可视区 | `.files-detail-left-content:has(.files-original-media-fill)` 改为 flex 列 + `overflow:hidden`；`.files-original-media-fill { flex:1; min-height:0 }` 与左侧列表栏同高（勿用固定 `min-height:720px`） |
 
 **参考：** `FilesPage.tsx` 中 `OriginalContentView`、`files-original-body` 已去掉多余 `flex: 1`。
 

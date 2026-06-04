@@ -5375,6 +5375,22 @@ const OriginalTextNotePanel: React.FC<{
   );
 };
 
+/** Word / Excel / Office Online 等 iframe：与 PDF 一致，在滚动区内占满可视高度 */
+const OriginalMediaEmbedFrame: React.FC<{
+  src: string;
+  title: string;
+  themeColors: { cardBorder: string };
+}> = ({ src, title, themeColors }) => (
+  <div className="files-original-media-fill">
+    <div
+      className="files-original-media-frame"
+      style={{ border: `1px solid ${themeColors.cardBorder}` }}
+    >
+      <iframe src={src} title={title} />
+    </div>
+  </div>
+);
+
 /** Web Link 快照：iframe 预览 + 仅此类可用的「打印」 */
 const WebOriginalPreviewWithPrint: React.FC<{
   webEmbedSrc: string;
@@ -5426,7 +5442,7 @@ const WebOriginalPreviewWithPrint: React.FC<{
   }, [webEmbedSrc, snapshotReady]);
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="files-original-media-fill" style={{ gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
         <Tooltip title="Print the snapshot shown below">
           <Button
@@ -5442,14 +5458,9 @@ const WebOriginalPreviewWithPrint: React.FC<{
         </Tooltip>
       </div>
       <div
-        className="original-web-frame-host"
+        className="files-original-media-frame original-web-frame-host"
         style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
           border: `1px solid ${themeColors.cardBorder}`,
-          borderRadius: '8px',
-          overflow: 'hidden',
           backgroundColor: themeColors.cardBg,
         }}
       >
@@ -5460,11 +5471,6 @@ const WebOriginalPreviewWithPrint: React.FC<{
           onLoad={() => setSnapshotReady(true)}
           sandbox="allow-same-origin allow-modals"
           style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            border: 'none',
             colorScheme: isDark ? 'dark' : 'light',
             backgroundColor: isDark ? '#141414' : '#fff',
           }}
@@ -5607,7 +5613,7 @@ export const OriginalContentView: React.FC<{
   }
 
   return (
-    <div style={{ width: '100%', color: themeColors.text }}>
+    <div className="files-original-view-root" style={{ width: '100%', color: themeColors.text }}>
       {(() => {
         const fileType = (fileContent.file_type || '').toLowerCase();
 
@@ -5668,16 +5674,12 @@ export const OriginalContentView: React.FC<{
             return (
               <div className="files-original-media-fill">
                 <div
-                  className={isMobile ? 'original-pdf-frame-host' : undefined}
+                  className={`files-original-media-frame${isMobile ? ' original-pdf-frame-host' : ''}`}
                   style={{
-                    position: 'relative',
-                    flex: 1,
-                    minHeight: isMobile ? undefined : 0,
                     border: `1px solid ${themeColors.cardBorder}`,
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    display: isMobile ? 'flex' : undefined,
-                    flexDirection: isMobile ? 'column' : undefined,
+                    ...(isMobile
+                      ? { display: 'flex', flexDirection: 'column', minHeight: 0 }
+                      : {}),
                   }}
                 >
                   {isMobile ? (
@@ -5688,17 +5690,7 @@ export const OriginalContentView: React.FC<{
                       textMuted={themeColors.textSecondary}
                     />
                   ) : (
-                    <iframe
-                      src={pdfEmbedSrc}
-                      title={fileContent.filename}
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        width: '100%',
-                        height: '100%',
-                        border: 'none',
-                      }}
-                    />
+                    <iframe src={pdfEmbedSrc} title={fileContent.filename} />
                   )}
                 </div>
               </div>
@@ -5756,21 +5748,11 @@ export const OriginalContentView: React.FC<{
             const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
             
             return (
-              <div style={{ 
-                border: `1px solid ${themeColors.cardBorder}`,
-                borderRadius: '8px',
-                overflow: 'hidden',
-                flex: 1,
-                minHeight: 0
-              }}>
-                <iframe
-                  src={officeViewerUrl}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title={fileContent.filename}
-                  onLoad={() => console.log('✅ [DEBUG] Word viewer loaded successfully')}
-                  onError={(e) => console.error('❌ [DEBUG] Word viewer load error:', e)}
-                />
-              </div>
+              <OriginalMediaEmbedFrame
+                src={officeViewerUrl}
+                title={fileContent.filename}
+                themeColors={themeColors}
+              />
             );
           }
         } else if (fileType === 'csv') {
@@ -5863,21 +5845,11 @@ export const OriginalContentView: React.FC<{
             const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
             
             return (
-              <div style={{ 
-                border: `1px solid ${themeColors.cardBorder}`,
-                borderRadius: '8px',
-                overflow: 'hidden',
-                flex: 1,
-                minHeight: 0
-              }}>
-                <iframe
-                  src={officeViewerUrl}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title={fileContent.filename}
-                  onLoad={() => console.log('✅ [DEBUG] Excel viewer loaded successfully')}
-                  onError={(e) => console.error('❌ [DEBUG] Excel viewer load error:', e)}
-                />
-              </div>
+              <OriginalMediaEmbedFrame
+                src={officeViewerUrl}
+                title={fileContent.filename}
+                themeColors={themeColors}
+              />
             );
           }
         } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'image'].includes(fileType)) {

@@ -1592,11 +1592,41 @@
   min-width: 0;
 }
 
-/* PDF / Office 嵌入：在滚动区内占满可视高度 */
-.files-page-layout .files-original-media-fill {
-  min-height: min(720px, calc(100vh - 200px));
+/* PDF / Office / Web 嵌入：占满 Original 列剩余高度（与左侧列表栏底齐平） */
+.files-page-layout .files-detail-left-content:has(.files-original-media-fill) {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.files-page-layout .files-detail-left-content:has(.files-original-media-fill) > .files-original-view-root {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-page-layout .files-original-media-fill {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-page-layout .files-original-media-fill .files-original-media-frame {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.files-page-layout .files-original-media-fill .files-original-media-frame > iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 /* 右侧 panel 收缩时，左侧占满剩余空间 */
