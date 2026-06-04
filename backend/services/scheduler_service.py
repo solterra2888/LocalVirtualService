@@ -61,6 +61,7 @@ class SchedulerService:
             'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
             'twitter_author_summary': self._execute_twitter_author_summary_task,
             'youtube_author_summary': self._execute_youtube_author_summary_task,
+            'theme_report': self._execute_theme_report_task,
         }
         
         # 添加事件监听器
@@ -831,7 +832,10 @@ class SchedulerService:
                     'data': None
                 }
 
-            result = await handler(task_params)
+            merged_params = dict(task_params or {})
+            if task_config and task_config.get('timezone'):
+                merged_params['scheduler_timezone'] = task_config['timezone']
+            result = await handler(merged_params)
 
             # 计算执行时间
             finished_at = datetime.now(tz=timezone.utc)
@@ -1145,6 +1149,48 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"YouTube 频道摘要任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_theme_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        为所有打了 'Theme Report' 标签的用户生成 Theme Report 静态 HTML。
+
+        Args:
+            params:
+                - report_date: 报告日期 (YYYY-MM-DD)，默认今天 (UTC)
+                - user_id: 可选，仅生成指定用户
+        """
+        try:
+            logger.info("分发 Theme Report Celery 任务", params=params)
+
+            from datetime import datetime
+            from backend.tasks.theme_report_tasks import generate_all_theme_reports_task
+            from backend.utils.datetime_utils import utc_today
+
+            report_date_str = params.get('report_date')
+            if report_date_str:
+                report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                report_date = utc_today()
+
+            user_id = params.get('user_id')
+
+            task = generate_all_theme_reports_task.delay(
+                user_id=user_id,
+                report_date=str(report_date),
+                scheduler_timezone=params.get('scheduler_timezone'),
+            )
+
+            user_info = f", user={user_id}" if user_id else ", all tagged users"
+            message = (
+                f"✅ Theme Report ({report_date}): "
+                f"已提交 Celery 异步任务 {task.id}{user_info}"
+            )
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Theme Report 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

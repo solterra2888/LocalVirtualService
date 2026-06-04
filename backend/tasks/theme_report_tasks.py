@@ -30,7 +30,12 @@ def backfill_theme_report_eod_history_task(self, days_back: int = 400):
 
 
 @app.task(bind=True, name='generate_all_theme_reports', queue='data_fetching')
-def generate_all_theme_reports_task(self, user_id: str = None, report_date: str = None):
+def generate_all_theme_reports_task(
+    self,
+    user_id: str = None,
+    report_date: str = None,
+    scheduler_timezone: str = None,
+):
     """
     为所有（或指定）打了 'Theme Report' 标签的用户生成 Theme Report。
 
@@ -70,7 +75,11 @@ def generate_all_theme_reports_task(self, user_id: str = None, report_date: str 
 
         for uid in target_users:
             try:
-                result = svc.generate_and_upload(user_id=uid, report_date=as_of)
+                result = svc.generate_and_upload(
+                    user_id=uid,
+                    report_date=as_of,
+                    scheduler_timezone=scheduler_timezone,
+                )
                 results.append({"user_id": uid, **result})
                 if result.get("success"):
                     succeeded += 1

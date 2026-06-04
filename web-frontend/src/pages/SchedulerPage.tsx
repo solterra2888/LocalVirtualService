@@ -117,7 +117,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -239,6 +239,25 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure Summary Schedule',
           description: 'Set up periodic YouTube Channel Summary generation (default: daily at 6 AM CST, auto-chains Daily Report)',
           endpoint: '/scheduler/tasks/youtube-author-summary',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'theme_report',
+      name: 'Theme Report',
+      type: 'theme_report',
+      category: 'report_generation',
+      description: 'Pre-generate Theme Report static HTML for all users with Theme Report tagged themes (saved to OSS).',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_theme_report_schedule',
+          name: 'Configure Theme Report Schedule',
+          description: 'Set up periodic Theme Report generation (default: weekly Monday 2 PM CST)',
+          endpoint: '/scheduler/tasks/theme-report',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -500,6 +519,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
+          (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -565,6 +585,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
+        (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -772,6 +793,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
+          (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -888,7 +910,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1126,6 +1148,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
                         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
                         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
+                        (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1339,7 +1362,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report'}
           dataSourceName={selectedDataSource.name}
         />
       )}

@@ -477,6 +477,35 @@ async def create_default_youtube_author_summary_task_proxy(request: Request, cur
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认 YouTube 频道摘要任务代理失败: {str(e)}")
 
+@router.post("/tasks/theme-report", summary="create theme report task")
+async def create_theme_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 Theme Report 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post(
+            "/scheduler/tasks/theme-report", json_data=json_data, headers=auth_headers
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建 Theme Report 任务代理失败: {str(e)}")
+
+@router.post("/tasks/theme-report/default", summary="create default theme report task")
+async def create_default_theme_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 Theme Report 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post(
+            "/scheduler/tasks/theme-report/default", headers=auth_headers
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认 Theme Report 任务代理失败: {str(e)}")
+
 @router.post("/tasks/{task_id}/enable", summary="enable task")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""

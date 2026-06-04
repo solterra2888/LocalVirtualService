@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button,
   Tooltip,
@@ -8,6 +8,7 @@ import {
   Typography,
   Space,
   DatePicker,
+  Tag,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -30,19 +31,37 @@ const ThemeReportPage: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
+  const staleRefreshTriggered = useRef(false);
+
+  const maybeTriggerStaleRefresh = useCallback((report: ThemeReportRecord | null) => {
+    if (
+      !report ||
+      report.status !== 'completed' ||
+      !report.is_stale ||
+      staleRefreshTriggered.current
+    ) {
+      return;
+    }
+    staleRefreshTriggered.current = true;
+    themeReportAPI.generate().catch((err) => {
+      console.error('Failed to queue stale report refresh:', err);
+      staleRefreshTriggered.current = false;
+    });
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const lat = await themeReportAPI.getLatest();
       setLatest(lat);
+      maybeTriggerStaleRefresh(lat);
     } catch (err) {
       console.error('Failed to load Theme Report:', err);
       message.error('Failed to load report');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [maybeTriggerStaleRefresh]);
 
   useEffect(() => {
     loadData();
@@ -148,11 +167,40 @@ const ThemeReportPage: React.FC = () => {
           alignItems: 'center',
         }}>
           <div>
-            <Text strong>Latest Report</Text>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <Text strong>Latest Report</Text>
+              {latest?.is_stale && (
+                <Tag color="processing">数据更新中…</Tag>
+              )}
+            </div>
             {latest && (
-              <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                {latest.report_date} · {latest.theme_count} themes · {latest.category_count} categories · {latest.constituent_count} constituents
-              </Text>
+              <>
+                <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                  {latest.report_date} · {latest.theme_count} themes · {latest.category_count} categories · {latest.constituent_count} constituents
+                </Text>
+                {(latest.price_as_of_date ||
+                  latest.generated_at_new_york ||
+                  latest.generated_at_beijing ||
+                  latest.scheduler_timezone_label) && (
+                  <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                    {latest.price_as_of_date && `Data as of ${latest.price_as_of_date}`}
+                  </Text>
+                )}
+                {(latest.generated_at_new_york || latest.generated_at_beijing) && (
+                  <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                    {latest.generated_at_new_york && `Generated ${latest.generated_at_new_york}`}
+                    {latest.generated_at_new_york && latest.generated_at_beijing && ' · '}
+                    {latest.generated_at_beijing && latest.generated_at_beijing}
+                  </Text>
+                )}
+                {latest.scheduler_timezone_label && (
+                  <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                    Schedule timezone: {latest.scheduler_timezone_label}
+                    {latest.generated_at_scheduler_tz &&
+                      ` · ${latest.generated_at_scheduler_tz}`}
+                  </Text>
+                )}
+              </>
             )}
           </div>
           <Space>

@@ -17,6 +17,17 @@ export interface ThemeReportRecord {
   status: 'pending' | 'generating' | 'completed' | 'failed';
   error_message: string | null;
   created_at: string | null;
+  /** Latest trading day used in report return calculations (from metadata). */
+  price_as_of_date: string | null;
+  /** Max EOD date across tagged tickers in stock_prices_eod. */
+  latest_eod_date: string | null;
+  /** True when latest_eod_date is newer than price_as_of_date. */
+  is_stale: boolean;
+  generated_at_new_york?: string | null;
+  generated_at_beijing?: string | null;
+  scheduler_timezone?: string | null;
+  scheduler_timezone_label?: string | null;
+  generated_at_scheduler_tz?: string | null;
 }
 
 export interface ThemeReportSingleResponse {

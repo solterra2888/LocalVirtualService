@@ -28,7 +28,7 @@
 
 | 方式 | 行为 |
 |------|------|
-| **Celery Beat** | 每周一 06:00 UTC（北京时间 14:00）为所有打标用户生成 |
+| **Scheduler Management** | 报告生成类 → Theme Report → Configure Schedule（默认每周一 14:00 CST） |
 | **前端手动触发** | Reports → Theme Report → Generate Report |
 | **API** | `POST /api/theme-report/generate` |
 | **Celery 任务** | `generate_all_theme_reports`（可指定 `user_id` / `report_date`） |

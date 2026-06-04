@@ -261,6 +261,10 @@
     margin-top: 4px;
     color: var(--text-muted);
     font-size: 12px;
+    line-height: 1.55;
+  }
+  .page-header .meta > div + div {
+    margin-top: 2px;
   }
   .page-header .stats-row {
     display: flex;
@@ -655,7 +659,17 @@
         <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
       </div>
     </div>
-    <div class="meta">As of {{ report_date }} &nbsp;·&nbsp; Prices as of {{ price_as_of }} &nbsp;·&nbsp; Generated {{ generated_at }}</div>
+    <div class="meta">
+      <div>As of {{ report_date }} &nbsp;·&nbsp; Prices as of {{ price_as_of }}</div>
+      {% if generated_at_new_york and generated_at_beijing %}
+      <div>Generated {{ generated_at_new_york }} &nbsp;·&nbsp; {{ generated_at_beijing }}</div>
+      {% elif generated_at %}
+      <div>Generated {{ generated_at }}</div>
+      {% endif %}
+      {% if scheduler_timezone_label %}
+      <div>Schedule timezone: {{ scheduler_timezone_label }}{% if generated_at_scheduler_tz %} &nbsp;·&nbsp; {{ generated_at_scheduler_tz }}{% endif %}</div>
+      {% endif %}
+    </div>
     <div class="stats-row">
       <span class="stat-pill"><strong>{{ total_themes }}</strong> themes</span>
       <span class="stat-pill"><strong>{{ total_categories }}</strong> categories</span>
@@ -923,7 +937,14 @@
   {% endif %}
 
   <div class="page-footer">
-    Theme Performance Report &nbsp;·&nbsp; {{ report_date }} &nbsp;·&nbsp; Returns are simple price returns (unadjusted close), equal-weighted within categories.
+    Theme Performance Report &nbsp;·&nbsp; {{ report_date }}
+    {% if generated_at_new_york and generated_at_beijing %}
+    &nbsp;·&nbsp; Generated {{ generated_at_new_york }} &nbsp;·&nbsp; {{ generated_at_beijing }}
+    {% endif %}
+    {% if scheduler_timezone_label %}
+    &nbsp;·&nbsp; Schedule TZ: {{ scheduler_timezone_label }}{% if generated_at_scheduler_tz %} ({{ generated_at_scheduler_tz }}){% endif %}
+    {% endif %}
+    &nbsp;·&nbsp; Returns are simple price returns (unadjusted close), equal-weighted within categories.
   </div>
 
 </main>

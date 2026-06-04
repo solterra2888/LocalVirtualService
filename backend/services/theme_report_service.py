@@ -13,8 +13,9 @@ import os
 import re
 import json
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import pandas as pd
@@ -49,6 +50,50 @@ RETURN_HORIZONS: Dict[str, int] = {
 TAG_NAME = "Theme Report"
 STOCK_CHART_CALENDAR_DAYS = 380  # lookback to collect ~260 trading bars
 STOCK_CHART_MAX_BARS = 260
+
+_TZ_DISPLAY_LABELS: Dict[str, str] = {
+    "America/New_York": "US Eastern (New York)",
+    "Asia/Shanghai": "China (Beijing)",
+}
+
+
+def _build_generation_time_display(
+    generated_at_utc: datetime,
+    scheduler_timezone: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Format report generation instant in NY, Beijing, and optional scheduler TZ."""
+    if generated_at_utc.tzinfo is None:
+        generated_at_utc = generated_at_utc.replace(tzinfo=timezone.utc)
+
+    def _fmt_in_zone(dt: datetime, tz_name: str, place_label: str) -> str:
+        local = dt.astimezone(ZoneInfo(tz_name))
+        return f"{local.strftime('%b %d, %Y %H:%M %Z')} ({place_label})"
+
+    out: Dict[str, Optional[str]] = {
+        "generated_at_utc": generated_at_utc.strftime("%Y-%m-%d %H:%M UTC"),
+        "generated_at_new_york": _fmt_in_zone(
+            generated_at_utc, "America/New_York", "New York"
+        ),
+        "generated_at_beijing": _fmt_in_zone(
+            generated_at_utc, "Asia/Shanghai", "Beijing"
+        ),
+        "scheduler_timezone": scheduler_timezone,
+        "scheduler_timezone_label": None,
+        "generated_at_scheduler_tz": None,
+    }
+
+    if scheduler_timezone:
+        try:
+            local = generated_at_utc.astimezone(ZoneInfo(scheduler_timezone))
+            out["scheduler_timezone_label"] = _TZ_DISPLAY_LABELS.get(
+                scheduler_timezone,
+                scheduler_timezone.replace("_", " "),
+            )
+            out["generated_at_scheduler_tz"] = local.strftime("%b %d, %Y %H:%M %Z")
+        except Exception:
+            out["scheduler_timezone_label"] = scheduler_timezone
+
+    return out
 
 
 def _title_words(text: str) -> str:
@@ -94,6 +139,7 @@ class ThemeReportService:
         self,
         user_id: str,
         report_date: Optional[date] = None,
+        scheduler_timezone: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         为指定用户生成 Theme Report，上传 OSS，写入 theme_reports 表。
@@ -103,6 +149,11 @@ class ThemeReportService:
         """
         if report_date is None:
             report_date = utc_today()
+
+        generated_at_utc = utcnow()
+        generation_times = _build_generation_time_display(
+            generated_at_utc, scheduler_timezone
+        )
 
         start_ts = time.time()
         date_str = report_date.strftime("%Y%m%d")
@@ -170,6 +221,7 @@ class ThemeReportService:
                 report_date=report_date,
                 price_as_of=price_as_of,
                 user_id=user_id,
+                generation_times=generation_times,
             )
 
             # 5. 上传至 OSS
@@ -195,6 +247,7 @@ class ThemeReportService:
                 "price_as_of_date": str(price_as_of) if price_as_of else None,
                 "generation_time_seconds": elapsed,
                 "theme_names": [td["theme_name"] for td in themes_details],
+                **generation_times,
             }
 
             share_token = uuid4().hex
@@ -980,6 +1033,7 @@ class ThemeReportService:
         report_date: date,
         price_as_of: Optional[date],
         user_id: str,
+        generation_times: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         """Render a self-contained HTML string via Jinja2."""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -1004,12 +1058,19 @@ class ThemeReportService:
         total_categories = sum(len(td["categories"]) for td in themes_details)
         total_constituents = sum(len(td["constituents"]) for td in themes_details)
 
+        gen = generation_times or _build_generation_time_display(utcnow(), None)
+
         html = template.render(
             report_date=report_date.strftime("%B %d, %Y"),
             price_as_of=(
                 price_as_of.strftime("%B %d, %Y") if price_as_of else str(report_date)
             ),
-            generated_at=utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            generated_at=gen.get("generated_at_utc"),
+            generated_at_new_york=gen.get("generated_at_new_york"),
+            generated_at_beijing=gen.get("generated_at_beijing"),
+            scheduler_timezone=gen.get("scheduler_timezone"),
+            scheduler_timezone_label=gen.get("scheduler_timezone_label"),
+            generated_at_scheduler_tz=gen.get("generated_at_scheduler_tz"),
             user_id=user_id,
             themes=themes_details,
             theme_performance=theme_performance,
@@ -1095,6 +1156,38 @@ class ThemeReportService:
             cursor.close()
             conn.close()
 
+    def get_latest_eod_date(self, user_id: str) -> Optional[date]:
+        """
+        Return the latest trade date in stock_prices_eod for all tickers
+        associated with the user's 'Theme Report' tagged themes.
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            themes_data = self._get_tagged_themes(user_id, cursor)
+            if not themes_data:
+                return None
+
+            all_tickers = list(
+                {t for td in themes_data.values() for t in td["tickers"]}
+            )
+            if not all_tickers:
+                return None
+
+            cursor.execute(
+                """
+                SELECT MAX(date::date)
+                FROM stock_prices_eod
+                WHERE code = ANY(%s) AND period = 'd'
+                """,
+                (all_tickers,),
+            )
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        finally:
+            cursor.close()
+            conn.close()
+
     def get_latest_report(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Return the most recent completed report for a user."""
         conn = self.db_manager.get_connection()
@@ -1138,6 +1231,22 @@ class ThemeReportService:
                 except Exception:
                     share_token = None
 
+            metadata = meta or {}
+            price_as_of_str = metadata.get("price_as_of_date")
+            price_as_of_date: Optional[date] = None
+            if price_as_of_str:
+                try:
+                    price_as_of_date = date.fromisoformat(str(price_as_of_str))
+                except (ValueError, TypeError):
+                    price_as_of_date = None
+
+            latest_eod_date = self.get_latest_eod_date(user_id)
+            is_stale = bool(
+                price_as_of_date
+                and latest_eod_date
+                and latest_eod_date > price_as_of_date
+            )
+
             return {
                 "id": rid,
                 "report_date": str(rdate),
@@ -1147,10 +1256,20 @@ class ThemeReportService:
                 "theme_count": tc,
                 "category_count": cc,
                 "constituent_count": constit_c,
-                "metadata": meta or {},
+                "metadata": metadata,
                 "status": status,
                 "error_message": err_msg,
                 "created_at": created_at.isoformat() if created_at else None,
+                "price_as_of_date": price_as_of_str,
+                "latest_eod_date": (
+                    str(latest_eod_date) if latest_eod_date else None
+                ),
+                "is_stale": is_stale,
+                "generated_at_new_york": metadata.get("generated_at_new_york"),
+                "generated_at_beijing": metadata.get("generated_at_beijing"),
+                "scheduler_timezone": metadata.get("scheduler_timezone"),
+                "scheduler_timezone_label": metadata.get("scheduler_timezone_label"),
+                "generated_at_scheduler_tz": metadata.get("generated_at_scheduler_tz"),
             }
         finally:
             cursor.close()

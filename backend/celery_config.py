@@ -150,11 +150,7 @@ beat_schedule = {
         'task': 'check_hk_worker_health',
         'schedule': crontab(minute='*/10'),
     },
-    # 每周一 06:00 (UTC, 即北京时间 14:00) 为所有打了 'Theme Report' 标签的用户生成静态 HTML
-    'generate-theme-reports-weekly': {
-        'task': 'generate_all_theme_reports',
-        'schedule': crontab(hour=6, minute=0, day_of_week=1),  # Monday
-    },
+    # Theme Report 改由 Scheduler Management「报告生成类」配置（默认每周一 14:00 CST）
 }
 
 

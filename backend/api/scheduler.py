@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary|theme_report)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary|theme_report)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -1787,6 +1787,130 @@ async def create_default_youtube_author_summary_task(
         logger.error("创建默认 YouTube 频道摘要定时任务失败",
                      exception=str(e),
                      user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ── Theme Report 定时任务 ──────────────────────────────────────────────────
+
+
+class CreateThemeReportTaskRequest(BaseModel):
+    """创建 Theme Report 定时任务请求模型"""
+    name: str = Field(default="Theme Report", description="任务名称")
+    cron_expression: str = Field(
+        default="0 14 * * 1",
+        description="Cron表达式（默认每周一 14:00）",
+    )
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    report_date: Optional[str] = Field(
+        default=None,
+        description="报告日期 (YYYY-MM-DD)，为空则每次执行使用当天",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        description="仅生成指定用户；为空则为所有打了 Theme Report 标签的用户",
+    )
+
+
+@router.post("/tasks/theme-report", summary="创建 Theme Report 定时任务")
+async def create_theme_report_task(
+    request: CreateThemeReportTaskRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    定时为所有打了 'Theme Report' 标签的用户生成静态 HTML 报告。
+    """
+    try:
+        logger.info(
+            "创建 Theme Report 定时任务请求",
+            user=current_user.username,
+            task_name=request.name,
+            cron_expression=request.cron_expression,
+        )
+
+        scheduler_service = await get_scheduler_service()
+
+        task_params: Dict[str, Any] = {}
+        if request.report_date:
+            task_params["report_date"] = request.report_date
+        if request.user_id:
+            task_params["user_id"] = request.user_id
+
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="theme_report",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建 Theme Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/theme-report/default", summary="创建默认 Theme Report 定时任务")
+async def create_default_theme_report_task(
+    current_user=Depends(get_current_user),
+):
+    """创建默认 Theme Report 定时任务（每周一 14:00 CST，覆盖所有打标用户）"""
+    try:
+        logger.info("创建默认 Theme Report 定时任务请求", user=current_user.username)
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="Theme Report",
+            task_type="theme_report",
+            cron_expression="0 14 * * 1",
+            timezone="Asia/Shanghai",
+            enabled=True,
+            task_params={},
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建默认 Theme Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
