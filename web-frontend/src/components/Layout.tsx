@@ -95,7 +95,7 @@ const Layout: React.FC = () => {
   const [showUploadWebLinkModal, setShowUploadWebLinkModal] = useState(false);
   const [showCreateTextNoteModal, setShowCreateTextNoteModal] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const sidebarNavRef = useScrollingClass<HTMLElement>();
   const openProfileModal = () => setProfileModalOpen(true);
 

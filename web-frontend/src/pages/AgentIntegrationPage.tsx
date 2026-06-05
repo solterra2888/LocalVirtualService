@@ -21,7 +21,7 @@ function suggestedApiOrigin(): string {
 
 // ─── Small primitives ────────────────────────────────────────────────────────
 
-const TEAL = '#0d9488';
+const TEAL = '#1e5997';
 const DARK_BG = '#0f172a';
 const DARK_SURFACE = '#1e293b';
 const DARK_BORDER = '#334155';

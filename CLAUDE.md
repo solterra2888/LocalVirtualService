@@ -85,6 +85,10 @@ Task routing is defined in `backend/celery_config.py`:
 | `data_fetching` | External API fetch | EODHD fundamentals, earnings calendar, Twitter feeds |
 | `youtube_fetching` | YouTube metadata | Subscription fetch, transcript pull (remote worker) |
 | `youtube_transcription` | ASR transcription | Local Fun-ASR for videos without subtitles |
+| `youtube_priority` | Upload-link subtitle fetch | `fetch_youtube_file_transcript_task` |
+| `youtube_transcription_priority` | Upload-link ASR | `transcribe_youtube_file_asr_task` |
+
+Note: most tasks are routed by explicit task name in `task_routes`, not just module glob. See `backend/celery_config.py` for the authoritative mapping.
 
 ### Frontend Structure
 
@@ -129,7 +133,7 @@ OSS Vector Bucket for semantic search over uploaded documents and long feed cont
 
 ### Database Migrations
 
-Located in `backend/database/migrations/`. Schema changes tracked via SQL files with naming convention `pr_x_description.sql`.
+Located in `backend/database/migrations/`. Schema changes tracked via standalone SQL files named by action verb (e.g. `add_*.sql`, `create_*.sql`, `insert_*.sql`, `fix_*.sql`); a few PR-scoped changes use a `pr_*.sql` prefix. There is no sequential numbering or migration runner framework — files are applied manually.
 
 ## Environment Configuration
 
