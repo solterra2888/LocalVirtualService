@@ -79,8 +79,14 @@ const FeedTweetContent: React.FC<FeedTweetContentProps> = ({
                     >
                       <Space direction="vertical" size={8} style={{ width: '100%' }}>
                         <Space>
-                          <Avatar size="small" style={{ backgroundColor: '#1DA1F2' }}>
-                            {originalTweet.author_name?.[0] || 'T'}
+                          <Avatar
+                            size="small"
+                            src={originalTweet.author_avatar}
+                            style={{
+                              backgroundColor: originalTweet.author_avatar ? 'transparent' : '#1DA1F2',
+                            }}
+                          >
+                            {!originalTweet.author_avatar && (originalTweet.author_name?.[0] || 'T')}
                           </Avatar>
                           <Text strong style={{ color: themeColors.text }}>
                             {originalTweet.author_name}

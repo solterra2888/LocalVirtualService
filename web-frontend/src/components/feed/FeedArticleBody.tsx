@@ -603,20 +603,29 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
       <div>
         <Space>
           <Avatar
+            src={
+              selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+                ? selectedContent.author_avatar
+                : undefined
+            }
             icon={
               selectedContent.channel_type === 'youtube'
                 ? <YoutubeOutlined />
                 : selectedContent.channel_type === 'news'
                 ? <ReadOutlined />
-                : <TwitterOutlined />
+                : selectedContent.author_avatar
+                  ? undefined // 有头像时不显示图标
+                  : <TwitterOutlined />
             }
             style={{
               backgroundColor:
-                selectedContent.channel_type === 'youtube'
-                  ? '#FF0000'
-                  : selectedContent.channel_type === 'news'
-                  ? getNewsSourceColor(selectedContent.author_identifier)
-                  : '#1DA1F2',
+                selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+                  ? 'transparent' // 有头像时透明背景
+                  : selectedContent.channel_type === 'youtube'
+                    ? '#FF0000'
+                    : selectedContent.channel_type === 'news'
+                      ? getNewsSourceColor(selectedContent.author_identifier)
+                      : '#1DA1F2',
             }}
           />
           <div>

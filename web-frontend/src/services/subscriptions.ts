@@ -12,6 +12,7 @@ export interface Subscription {
   channel_identifier: string;
   channel_name?: string;
   channel_description?: string;
+  channel_avatar?: string; // 频道头像 URL
   enabled: boolean;
   priority: number;
   fetch_interval_minutes: number;
@@ -125,6 +126,7 @@ export interface SubscriptionContent {
   content: string;
   author_name?: string;
   author_identifier: string;
+  author_avatar?: string; // 作者头像 URL (Twitter profilePicture)
   url?: string;
   media_urls?: string[];
   published_at?: string;

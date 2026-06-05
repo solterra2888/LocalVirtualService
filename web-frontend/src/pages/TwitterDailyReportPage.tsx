@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout, Typography, Spin, Empty, Space,
-  List, App, Tooltip, ConfigProvider, theme as antdTheme, Switch, DatePicker, Button,
+  List, App, Tooltip, ConfigProvider, theme as antdTheme, DatePicker, Button, Switch,
 } from 'antd';
 import {
   FileTextOutlined,
   CalendarOutlined,
-  LoadingOutlined,
-  PlayCircleOutlined,
+  ThunderboltOutlined,
   RobotOutlined,
   ShareAltOutlined,
   ReloadOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { DailyReportStatusTag } from '../components/reports/DailyReportStatusTag';
@@ -111,12 +111,12 @@ const TwitterDailyReportPageInner: React.FC = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Generate ───────────────────────────────────────────────────────────
-  const handleGenerate = useCallback(async (force: boolean = false) => {
+  const handleGenerate = useCallback(async () => {
     const dateStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
     clearPoll();
     setGenerating(true);
     try {
-      const res = await twitterDailyReportsAPI.generateReport(dateStr, force);
+      const res = await twitterDailyReportsAPI.generateReport(dateStr, true);
       if (!res.success) {
         message.error(res.error || 'Failed to trigger report generation');
         setGenerating(false);
@@ -140,7 +140,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
 
   const handleSelectReport = (report: TwitterDailyReport) => {
     setSelectedDate(dayjs(report.report_date));
-    if (report.report_content) {
+    if (report.report_content || report.share_token) {
       setSelectedReport(report);
     } else {
       loadReportDetail(report.report_date);
@@ -157,6 +157,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
   const panelBg = themeColors.pageBg;
   const borderColor = themeColors.cardBorder;
   const sidebarBg = themeColors.cardBg;
+  const cardBg = themeColors.cardBg;
 
   // ── Share Handler ───────────────────────────────────────────────────────
   const handleShare = useCallback(async () => {
@@ -169,7 +170,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
       await navigator.clipboard.writeText(shareUrl);
       message.success('Share link copied to clipboard');
     } catch {
-      message.error('Failed to copy share link');
+      message.info(`Share link: ${shareUrl}`);
     }
   }, [selectedReport, message]);
 
@@ -178,9 +179,9 @@ const TwitterDailyReportPageInner: React.FC = () => {
 
   return (
     <Layout style={{ height: '100%', background: 'transparent' }}>
-      {/* Sidebar */}
+      {/* Sidebar - 报告列表选择器 */}
       <Layout.Sider
-        width={280}
+        width={240}
         style={{
           background: sidebarBg,
           borderRight: `1px solid ${borderColor}`,
@@ -189,53 +190,9 @@ const TwitterDailyReportPageInner: React.FC = () => {
         }}
       >
         <div style={{ padding: '16px 12px 8px' }}>
-          {/* Header row: title + Generate */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <Title level={5} style={{ margin: 0, flex: 1, whiteSpace: 'nowrap' }}>
-              <FileTextOutlined style={{ marginRight: 6 }} />Daily Reports
-            </Title>
-            <Tooltip title="Generate yesterday's report">
-              <button
-                type="button"
-                className="feed-toolbar-icon-btn"
-                onClick={() => handleGenerate(true)}
-                disabled={generating}
-                aria-label="Generate yesterday's report"
-              >
-                <span className="feed-toolbar-icon-btn__icon">
-                  {generating ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
-                </span>
-              </button>
-            </Tooltip>
-          </div>
-
-          {/* Auto-generate toggle */}
-          <Tooltip title={autoEnabled ? 'Auto-generation ON — click to disable' : 'Auto-generation OFF — click to enable'}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                marginBottom: 10,
-                padding: '6px 8px',
-                borderRadius: 6,
-                background: autoEnabled
-                  ? (isDark ? 'rgba(33,150,243,0.12)' : 'rgba(33,150,243,0.08)')
-                  : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
-              }}
-            >
-              <RobotOutlined style={{ color: autoEnabled ? '#2196F3' : themeColors.textSecondary, fontSize: 13 }} />
-              <Text style={{ fontSize: 12, flex: 1, color: autoEnabled ? '#2196F3' : themeColors.textSecondary }}>
-                Auto-generate
-              </Text>
-              <Switch
-                size="small"
-                checked={autoEnabled}
-                loading={autoToggling}
-                onChange={handleAutoToggle}
-              />
-            </div>
-          </Tooltip>
+          <Title level={5} style={{ margin: 0, marginBottom: 10 }}>
+            <FileTextOutlined style={{ marginRight: 6 }} />Reports
+          </Title>
 
           <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 12, color: themeColors.text }}>
             <CalendarOutlined style={{ marginRight: 6 }} />
@@ -293,52 +250,115 @@ const TwitterDailyReportPageInner: React.FC = () => {
         />
       </Layout.Sider>
 
-      {/* Main content */}
-      <Content style={{ overflow: 'hidden', padding: 0, background: panelBg }}>
-        {detailLoading ? (
-          <div style={{ textAlign: 'center', paddingTop: 120 }}>
-            <Spin size="large" tip="Loading report..." />
-          </div>
-        ) : selectedReport?.share_token ? (
-          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-            {/* Header with status and share button */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '12px 16px',
-              background: themeColors.cardBg,
-              borderBottom: `1px solid ${borderColor}`,
-            }}>
-              <Space align="center" size="middle">
-                <Text strong style={{ fontSize: 13 }}>{selectedReport.report_date}</Text>
-                <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
-                {selectedReport.metadata?.tweet_count != null && (
+      {/* Main content - 参考 Theme Report 布局 */}
+      <Content style={{ overflow: 'hidden', padding: 24, background: panelBg }}>
+        <div style={{
+          background: cardBg,
+          border: `1px solid ${borderColor}`,
+          borderRadius: 8,
+          overflow: 'hidden',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* Toolbar - 参考 Theme Report */}
+          <div style={{
+            padding: '14px 16px',
+            borderBottom: `1px solid ${borderColor}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text strong style={{ fontSize: 14 }}>
+                  {selectedReport?.report_date || 'Twitter Daily Report'}
+                </Text>
+                {selectedReport && (
+                  <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
+                )}
+                {selectedReport?.metadata?.tweet_count != null && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {selectedReport.metadata.tweet_count} tweets &middot;{' '}
-                    {selectedReport.metadata.author_count} authors
+                    {selectedReport.metadata.tweet_count} tweets &middot; {selectedReport.metadata.author_count} authors
                   </Text>
                 )}
-              </Space>
-              <Space>
-                <Tooltip title="Refresh report">
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => setIframeKey(prev => prev + 1)}
-                  />
-                </Tooltip>
-                <Tooltip title="Copy share link">
-                  <Button
-                    size="small"
-                    icon={<ShareAltOutlined />}
-                    onClick={handleShare}
-                  />
-                </Tooltip>
-              </Space>
+              </div>
             </div>
-            {/* iframe for HTML report */}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <Space size="small">
+              {/* Auto-generate Switch */}
+              <Tooltip title={autoEnabled ? 'Auto-generation ON — click to disable' : 'Auto-generation OFF — click to enable'}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  background: autoEnabled
+                    ? (isDark ? 'rgba(33,150,243,0.12)' : 'rgba(33,150,243,0.08)')
+                    : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                }}>
+                  <RobotOutlined style={{ color: autoEnabled ? '#2196F3' : themeColors.textSecondary, fontSize: 12 }} />
+                  <Switch
+                    size="small"
+                    checked={autoEnabled}
+                    loading={autoToggling}
+                    onChange={handleAutoToggle}
+                  />
+                </div>
+              </Tooltip>
+
+              {/* Generate */}
+              <Tooltip title="Generate yesterday's report">
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<ThunderboltOutlined />}
+                  loading={generating}
+                  onClick={handleGenerate}
+                />
+              </Tooltip>
+
+              {/* Refresh */}
+              <Tooltip title="Refresh report">
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => setIframeKey(prev => prev + 1)}
+                />
+              </Tooltip>
+
+              {/* Open in new tab */}
+              {selectedReport?.share_token && (
+                <Tooltip title="Open in new tab">
+                  <Button
+                    size="small"
+                    icon={<LinkOutlined />}
+                    href={`/api/reports/twitter-daily/shared/${selectedReport.share_token}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                </Tooltip>
+              )}
+
+              {/* Share */}
+              <Tooltip title={selectedReport?.share_token ? 'Copy share link' : 'No report to share'}>
+                <Button
+                  size="small"
+                  icon={<ShareAltOutlined />}
+                  disabled={!selectedReport?.share_token}
+                  onClick={handleShare}
+                />
+              </Tooltip>
+            </Space>
+          </div>
+
+          {/* Content */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {detailLoading ? (
+              <div style={{ textAlign: 'center', paddingTop: 120 }}>
+                <Spin size="large" tip="Loading report..." />
+              </div>
+            ) : selectedReport?.share_token ? (
               <iframe
                 key={iframeKey}
                 src={`/api/reports/twitter-daily/shared/${selectedReport.share_token}`}
@@ -350,17 +370,17 @@ const TwitterDailyReportPageInner: React.FC = () => {
                   display: 'block',
                 }}
               />
-            </div>
+            ) : selectedReport?.status === 'failed' ? (
+              <div style={{ textAlign: 'center', paddingTop: 120 }}>
+                <Empty description={selectedReport.error_message || 'Report generation failed'} />
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', paddingTop: 120 }}>
+                <Empty description="Select a report from the list, or click Generate to create yesterday's report." />
+              </div>
+            )}
           </div>
-        ) : selectedReport?.status === 'failed' ? (
-          <div style={{ textAlign: 'center', paddingTop: 120 }}>
-            <Empty description={selectedReport.error_message || 'Report generation failed'} />
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', paddingTop: 120 }}>
-            <Empty description="Select a report from the list, or use the play button next to the title to generate." />
-          </div>
-        )}
+        </div>
       </Content>
     </Layout>
   );

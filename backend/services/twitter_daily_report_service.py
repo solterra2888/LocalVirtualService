@@ -189,11 +189,9 @@ class TwitterDailyReportService:
                 report_date, total_tweet_count,
                 template_code=phase2_template,
             )
-            report_content = self._append_author_summaries_appendix(
-                report_content, renumbered_summaries, author_display_map
-            )
+            # 不再拼接作者摘要附录
             phase2_elapsed = round(time.time() - phase2_start, 2)
-            logger.info(f"[Step 5/6] Phase 2 完成: 报告（含附录）{len(report_content)} 字符, "
+            logger.info(f"[Step 5/6] Phase 2 完成: 报告 {len(report_content)} 字符, "
                         f"耗时 {phase2_elapsed}s", user_id=user_id)
 
             # 6) 保存
@@ -656,31 +654,52 @@ class TwitterDailyReportService:
         # 按标题分割
         lines = markdown_content.split('\n')
         for line in lines:
-            # 主标题 - 通常是报告标题
-            if line.startswith('# ') and not line.startswith('# Twitter'):
+            # 主标题 - 通常是报告标题（跳过）
+            if line.startswith('# ') and 'Twitter' in line:
+                continue
+            elif line.startswith('# '):
                 if current_section:
                     sections[current_section] = '\n'.join(current_content).strip()
                 current_section = 'executive_summary'
                 current_content = []
             elif line.startswith('## '):
+                # 保存之前的内容
                 if current_section:
-                    sections[current_section] = '\n'.join(current_content).strip()
-                section_title = line[3:].lower().replace(' ', '_')
-                # 识别 key_highlights 或附录
-                if 'highlight' in section_title or 'key' in section_title:
-                    current_section = 'key_highlights'
-                elif 'appendix' in section_title or '附录' in section_title or 'author' in section_title:
+                    existing = sections.get(current_section, '')
+                    new_content = '\n'.join(current_content).strip()
+                    if existing and new_content:
+                        sections[current_section] = existing + '\n\n' + new_content
+                    elif new_content:
+                        sections[current_section] = new_content
+                elif current_content:
+                    sections['executive_summary'] = '\n'.join(current_content).strip()
+
+                section_title = line[3:].lower()
+                # 识别附录
+                if 'appendix' in section_title or '附录' in section_title:
                     current_section = 'appendix_header'
+                # 识别 Thematic Deep Dives
+                elif 'deep' in section_title or 'dives' in section_title or '深度' in section_title or '分析' in section_title:
+                    current_section = 'thematic_deep_dives'
                 else:
-                    current_section = section_title
+                    # 其他 ## 标题当作 key_highlights（合并内容）
+                    current_section = 'key_highlights'
                 current_content = []
             elif line.startswith('### '):
-                if current_section:
-                    sections[current_section] = '\n'.join(current_content).strip()
-                # 作者摘要 S1, S2, ... 格式: ### S1 — @author_name
-                author_title = line[4:]
-                current_section = f'author_{author_title}'
-                current_content = []
+                # 在 thematic_deep_dives 中，### 标题作为子标题保留
+                if current_section and current_section != 'thematic_deep_dives':
+                    existing = sections.get(current_section, '')
+                    new_content = '\n'.join(current_content).strip()
+                    if existing and new_content:
+                        sections[current_section] = existing + '\n\n' + new_content
+                    elif new_content:
+                        sections[current_section] = new_content
+                    author_title = line[4:]
+                    current_section = f'author_{author_title}'
+                    current_content = []
+                else:
+                    # 在 thematic_deep_dives 中，保留 ### 标题作为内容
+                    current_content.append(line)
             else:
                 current_content.append(line)
 
@@ -745,25 +764,28 @@ class TwitterDailyReportService:
         return {
             'executive_summary': self._markdown_to_html(sections.get('executive_summary', '')),
             'key_highlights': self._markdown_to_html(sections.get('key_highlights', '')),
+            'thematic_deep_dives': self._markdown_to_html(sections.get('thematic_deep_dives', '')),
             'author_summaries': author_summaries,
             'tweet_references': tweet_references,
         }
 
     def _markdown_to_html(self, markdown_text: str) -> str:
-        """简单 Markdown 转 HTML（处理列表、段落、加粗等）。"""
+        """简单 Markdown 转 HTML（处理列表、段落、加粗、标题等）。"""
         import re
         if not markdown_text:
             return ''
 
+        # 处理 ### 标题
+        text = re.sub(r'^### (.+)$', r'<h4>\1</h4>', markdown_text, flags=re.MULTILINE)
         # 处理加粗
-        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', markdown_text)
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
         # 处理斜体
         text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
         # 处理列表项
         text = re.sub(r'^\s*[-*]\s+(.+)$', r'<li>\1</li>', text, flags=re.MULTILINE)
         # 包裹连续的 li 为 ul
         text = re.sub(r'(<li>.+?</li>\n)+', r'<ul>\g<0></ul>\n', text)
-        # 处理段落（非空行包裹为 p）
+        # 处理段落（非空行、非标题、非列表）
         lines = text.split('\n')
         html_lines = []
         in_list = False
@@ -773,6 +795,8 @@ class TwitterDailyReportService:
                 html_lines.append(line)
             elif line.startswith('</ul>'):
                 in_list = False
+                html_lines.append(line)
+            elif line.startswith('<h4>'):
                 html_lines.append(line)
             elif line.strip() and not in_list:
                 html_lines.append(f'<p>{line}</p>')
@@ -837,8 +861,12 @@ class TwitterDailyReportService:
             parsed_data.get('key_highlights', ''),
             parsed_data.get('tweet_references', [])
         )
+        thematic_deep_dives = self._inject_tweet_links(
+            parsed_data.get('thematic_deep_dives', ''),
+            parsed_data.get('tweet_references', [])
+        )
 
-        # 处理作者摘要中的引用链接
+        # 处理作者摘要中的引用链接（不显示）
         author_summaries = []
         for author in parsed_data.get('author_summaries', []):
             author_summaries.append({
@@ -857,6 +885,7 @@ class TwitterDailyReportService:
             tweet_count=metadata.get('tweet_count', 0),
             executive_summary=executive_summary,
             key_highlights=key_highlights,
+            thematic_deep_dives=thematic_deep_dives,
             author_summaries=author_summaries,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
         )

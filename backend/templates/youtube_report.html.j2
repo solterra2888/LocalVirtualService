@@ -259,32 +259,12 @@
     border-color: var(--primary);
   }
   .channel-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-  .channel-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    color: #fff;
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(255,0,0,0.2);
-  }
-  .channel-info {
-    flex: 1;
-    min-width: 0;
-  }
-  .channel-name {
     font-weight: 600;
     font-size: 14px;
-    color: var(--text);
+    color: var(--primary);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
   }
   .channel-content {
     font-size: 13px;
@@ -342,14 +322,6 @@
     }
     .channel-card {
       padding: 14px;
-    }
-    .channel-avatar {
-      width: 32px;
-      height: 32px;
-      font-size: 12px;
-    }
-    .channel-name {
-      font-size: 13px;
     }
   }
 
@@ -417,12 +389,7 @@
     </div>
     {% for channel in channel_summaries %}
     <div class="channel-card" id="channel-{{ loop.index }}">
-      <div class="channel-header">
-        <div class="channel-avatar">▶</div>
-        <div class="channel-info">
-          <div class="channel-name">{{ channel.channel_name }}</div>
-        </div>
-      </div>
+      <div class="channel-header">{{ channel.channel_name }}</div>
       <div class="channel-content">
         {{ channel.content | safe }}
       </div>

@@ -51,6 +51,7 @@ class SubscriptionResponse(BaseModel):
     channel_identifier: str
     channel_name: Optional[str]
     channel_description: Optional[str]
+    channel_avatar: Optional[str] = None  # 频道头像 URL
     enabled: bool
     priority: int
     fetch_interval_minutes: int
@@ -140,9 +141,9 @@ async def get_user_subscriptions(
             params.append(enabled)
         
         query = f"""
-            SELECT 
+            SELECT
                 id, user_id, channel_type, channel_identifier,
-                channel_name, channel_description, enabled, priority,
+                channel_name, channel_description, channel_avatar, enabled, priority,
                 fetch_interval_minutes, max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
                 next_fetch_at, total_items_fetched, last_fetch_items_count,
@@ -151,10 +152,10 @@ async def get_user_subscriptions(
             WHERE {' AND '.join(conditions)}
             ORDER BY priority DESC, created_at DESC
         """
-        
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        
+
         subscriptions = []
         for row in rows:
             subscriptions.append(SubscriptionResponse(
@@ -164,20 +165,21 @@ async def get_user_subscriptions(
                 channel_identifier=row[3],
                 channel_name=row[4],
                 channel_description=row[5],
-                enabled=row[6],
-                priority=row[7],
-                fetch_interval_minutes=row[8],
-                max_items_per_fetch=row[9],
-                filter_config=row[10] or {},
-                metadata=row[11] or {},
-                created_at=row[12],
-                updated_at=row[13],
-                last_fetched_at=row[14],
-                next_fetch_at=row[15],
-                total_items_fetched=row[16],
-                last_fetch_items_count=row[17],
-                consecutive_failures=row[18],
-                unread_count=row[19] or 0  # 🔥 新增：未读计数
+                channel_avatar=row[6],
+                enabled=row[7],
+                priority=row[8],
+                fetch_interval_minutes=row[9],
+                max_items_per_fetch=row[10],
+                filter_config=row[11] or {},
+                metadata=row[12] or {},
+                created_at=row[13],
+                updated_at=row[14],
+                last_fetched_at=row[15],
+                next_fetch_at=row[16],
+                total_items_fetched=row[17],
+                last_fetch_items_count=row[18],
+                consecutive_failures=row[19],
+                unread_count=row[20] or 0  # 🔥 新增：未读计数
             ))
         
         cursor.close()
@@ -205,9 +207,9 @@ async def get_subscription(
         cursor = conn.cursor()
         
         query = """
-            SELECT 
+            SELECT
                 id, user_id, channel_type, channel_identifier,
-                channel_name, channel_description, enabled, priority,
+                channel_name, channel_description, channel_avatar, enabled, priority,
                 fetch_interval_minutes, max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
                 next_fetch_at, total_items_fetched, last_fetch_items_count,
@@ -215,13 +217,13 @@ async def get_subscription(
             FROM subscription_list
             WHERE id = %s AND user_id = %s
         """
-        
+
         cursor.execute(query, (subscription_id, user_id))
         row = cursor.fetchone()
-        
+
         if not row:
             raise HTTPException(status_code=404, detail="Subscription not found")
-        
+
         subscription = SubscriptionResponse(
             id=row[0],
             user_id=row[1],
@@ -229,20 +231,21 @@ async def get_subscription(
             channel_identifier=row[3],
             channel_name=row[4],
             channel_description=row[5],
-            enabled=row[6],
-            priority=row[7],
-            fetch_interval_minutes=row[8],
-            max_items_per_fetch=row[9],
-            filter_config=row[10] or {},
-            metadata=row[11] or {},
-            created_at=row[12],
-            updated_at=row[13],
-            last_fetched_at=row[14],
-            next_fetch_at=row[15],
-            total_items_fetched=row[16],
-            last_fetch_items_count=row[17],
-            consecutive_failures=row[18],
-            unread_count=row[19] or 0
+            channel_avatar=row[6],
+            enabled=row[7],
+            priority=row[8],
+            fetch_interval_minutes=row[9],
+            max_items_per_fetch=row[10],
+            filter_config=row[11] or {},
+            metadata=row[12] or {},
+            created_at=row[13],
+            updated_at=row[14],
+            last_fetched_at=row[15],
+            next_fetch_at=row[16],
+            total_items_fetched=row[17],
+            last_fetch_items_count=row[18],
+            consecutive_failures=row[19],
+            unread_count=row[20] or 0
         )
         
         cursor.close()
@@ -265,7 +268,8 @@ async def create_subscription(
     """创建新订阅并自动触发首次内容获取"""
     user_id = current_user.user_id
     db_manager = get_db_manager()
-    
+    channel_avatar = None  # 初始化头像变量
+
     try:
         # 🔥 如果是 News 订阅，验证 source 是否在可选列表中
         if request.channel_type == 'news':
@@ -276,29 +280,29 @@ async def create_subscription(
             all_available = list(AVAILABLE_NEWS_SOURCES) + [CCTV_CHANNEL_IDENTIFIER]
             available_lower = {s.lower(): s for s in all_available}
             identifier_lower = request.channel_identifier.lower()
-            
+
             if identifier_lower not in available_lower:
                 raise HTTPException(
                     status_code=400,
                     detail=f"News source '{request.channel_identifier}' is not available. "
                            f"Available sources: {', '.join(all_available)}"
                 )
-            
+
             # 标准化 channel_identifier（使用规范名称）
             request.channel_identifier = available_lower[identifier_lower]
             if not request.channel_name:
                 request.channel_name = request.channel_identifier
-            
+
             logger.info(f"News source 验证成功 | source={request.channel_identifier}")
         
         # 🔥 如果是 Twitter 订阅，先验证用户是否存在
         elif request.channel_type == 'twitter':
             from backend.services.twitter_subscription_service import TwitterSubscriptionService
-            
+
             logger.info(f"验证Twitter用户 | username={request.channel_identifier}")
             twitter_service = TwitterSubscriptionService()
             validation_result = twitter_service.validate_twitter_user(request.channel_identifier)
-            
+
             if not validation_result['exists']:
                 error_msg = validation_result.get('error', 'User not found')
                 logger.warning(f"Twitter用户验证失败 | username={request.channel_identifier} | error={error_msg}")
@@ -306,13 +310,16 @@ async def create_subscription(
                     status_code=400,
                     detail=f"Twitter user '{request.channel_identifier}' does not exist or cannot be accessed. Please check the username."
                 )
-            
-            # 如果验证成功，可以从 user_info 中获取用户的显示名称等信息
+
+            # 如果验证成功，可以从 user_info 中获取用户的显示名称和头像等信息
             user_info = validation_result.get('user_info', {})
             if not request.channel_name and user_info.get('name'):
                 request.channel_name = user_info['name']
-            
-            logger.info(f"Twitter用户验证成功 | username={request.channel_identifier} | name={request.channel_name}")
+
+            # 获取用户头像 URL
+            channel_avatar = user_info.get('profilePicture')
+
+            logger.info(f"Twitter用户验证成功 | username={request.channel_identifier} | name={request.channel_name} | avatar={channel_avatar}")
         
         # 🔥 如果是 YouTube 订阅，先验证频道是否存在
         elif request.channel_type == 'youtube':
@@ -320,17 +327,18 @@ async def create_subscription(
                 YouTubeSubscriptionService,
                 normalize_youtube_channel_id,
             )
-            
+
             # ⚠️ 注意：把原始输入（带 @ 与否）原样传给 service，
             # service 会按 had_at_prefix 决定走 @handle 页面解析还是 ?user= RSS。
             # 见 youtube_subscription_service.validate_youtube_channel 文档。
             raw_identifier = request.channel_identifier.strip()
             clean_identifier = raw_identifier.lstrip('@')
+            channel_avatar = None  # YouTube 暂不获取头像
 
             logger.info(f"验证YouTube频道 | identifier={raw_identifier}")
             youtube_service = YouTubeSubscriptionService()
             validation_result = youtube_service.validate_youtube_channel(raw_identifier)
-            
+
             if not validation_result['exists']:
                 error_msg = validation_result.get('error', 'Channel not found')
                 logger.warning(f"YouTube频道验证失败 | identifier={clean_identifier} | error={error_msg}")
@@ -348,11 +356,11 @@ async def create_subscription(
                     status_code=400,
                     detail=f"YouTube channel '{clean_identifier}' not found or RSS feed unavailable. Please check the username or channel ID."
                 )
-            
+
             # 如果验证成功，自动填充频道名称
             if not request.channel_name and validation_result.get('channel_name'):
                 request.channel_name = validation_result['channel_name']
-            
+
             # ⚠️ 重要：使用 channel_id 作为 channel_identifier（保持与 author_identifier 一致）
             channel_id = validation_result.get('channel_id')
             if channel_id:
@@ -363,9 +371,9 @@ async def create_subscription(
                     request.metadata = {}
                 request.metadata['original_username'] = clean_identifier  # 保存原始用户名
                 request.metadata['channel_url'] = validation_result.get('channel_url', '')
-            
+
             logger.info(f"YouTube频道验证成功 | identifier={clean_identifier} | name={request.channel_name} | channel_id={channel_id}")
-        
+
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
@@ -382,17 +390,18 @@ async def create_subscription(
         query = """
             INSERT INTO subscription_list (
                 user_id, channel_type, channel_identifier,
-                channel_name, channel_description, enabled, filter_config, metadata
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
+                channel_name, channel_description, channel_avatar, enabled, filter_config, metadata
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
             RETURNING id, created_at, updated_at
         """
-        
+
         cursor.execute(query, (
             user_id,
             request.channel_type,
             request.channel_identifier,
             request.channel_name,
             request.channel_description,
+            channel_avatar,
             request.enabled,
             json.dumps(request.filter_config or {}),
             json.dumps(request.metadata or {})

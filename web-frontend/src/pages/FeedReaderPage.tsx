@@ -1138,23 +1138,31 @@ const FeedReaderPageInner: React.FC = () => {
                       avatar={
                         <Avatar
                           size={24}
-                          src={newsFavicon}
+                          src={
+                            subscription.channel_type === 'twitter' && subscription.channel_avatar
+                              ? subscription.channel_avatar
+                              : newsFavicon
+                          }
                           icon={
-                            subscription.channel_type === 'news' && newsFavicon
-                              ? undefined
-                              : getChannelIcon(subscription.channel_type)
+                            subscription.channel_type === 'twitter' && subscription.channel_avatar
+                              ? undefined // 有头像时不显示图标
+                              : subscription.channel_type === 'news' && newsFavicon
+                                ? undefined
+                                : getChannelIcon(subscription.channel_type)
                           }
                           style={{
                             backgroundColor:
-                              subscription.channel_type === 'twitter'
-                                ? '#1DA1F2'
-                                : subscription.channel_type === 'youtube'
-                                  ? '#FF0000'
-                                  : subscription.channel_type === 'news'
-                                    ? newsFavicon
-                                      ? '#fff'
-                                      : getNewsSourceColor(subscription.channel_identifier)
-                                    : '#ccc',
+                              subscription.channel_type === 'twitter' && subscription.channel_avatar
+                                ? 'transparent' // 有头像时透明背景
+                                : subscription.channel_type === 'twitter'
+                                  ? '#1DA1F2'
+                                  : subscription.channel_type === 'youtube'
+                                    ? '#FF0000'
+                                    : subscription.channel_type === 'news'
+                                      ? newsFavicon
+                                        ? '#fff'
+                                        : getNewsSourceColor(subscription.channel_identifier)
+                                      : '#ccc',
                           }}
                         />
                       }
@@ -1621,7 +1629,7 @@ const FeedReaderPageInner: React.FC = () => {
                             )}
                           </div>
 
-                          {/* 末行：类型图标 + 作者名 · 时间 · 热度，始终可见，在限高区域外 */}
+                          {/* 末行：类型图标 + 作者头像 + 作者名 · 时间 · 热度，始终可见，在限高区域外 */}
                           <Space size={6}>
                             {content.is_retweet && (
                               <Tooltip title="Retweet">
@@ -1637,6 +1645,14 @@ const FeedReaderPageInner: React.FC = () => {
                               <Tooltip title={`reply to @${content.in_reply_to_username || 'someone'}`}>
                                 <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />
                               </Tooltip>
+                            )}
+                            {/* Twitter 作者头像 */}
+                            {content.channel_type === 'twitter' && content.author_avatar && (
+                              <Avatar
+                                size={16}
+                                src={content.author_avatar}
+                                style={{ flexShrink: 0 }}
+                              />
                             )}
                             <Tooltip
                               title={
